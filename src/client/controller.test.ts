@@ -181,6 +181,39 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
 	});
 
+	it("refreshes the new workspace while startup listing is in flight without applying its stale result", async () => {
+		const api = new FakeApi();
+		const allSessions = deferred<SessionSummary[]>();
+		const workspaceSessions = deferred<SessionSummary[]>();
+		const scopedRef: SessionRef = { backend: "codex", id: "workspace-session" };
+		api.listSessions.mockImplementationOnce(() => allSessions.promise).mockImplementationOnce(() => workspaceSessions.promise);
+		const controller = createController(api);
+
+		const starting = controller.start();
+		const selectingWorkspace = controller.setWorkspace("/work/project");
+
+		expect(api.listSessions).toHaveBeenNthCalledWith(1, undefined);
+		expect(api.listSessions).toHaveBeenNthCalledWith(2, "/work/project");
+		workspaceSessions.resolve([summary(scopedRef, "/work/project")]);
+		await selectingWorkspace;
+		allSessions.resolve([summary(ref)]);
+		await starting;
+
+		expect(controller.getView().state.summaries).toEqual([summary(scopedRef, "/work/project")]);
+	});
+
+	it("rejects relative workspace input before listing or creating a session", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+
+		await controller.setWorkspace("work/project");
+		await controller.create("work/project", "pi");
+
+		expect(api.listSessions).not.toHaveBeenCalled();
+		expect(api.createSession).not.toHaveBeenCalled();
+		expect(controller.getView().error).toBe("Workspace must be an absolute path.");
+	});
+
 	it("closes SSE and ignores later events after disposal", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

@@ -40,7 +40,7 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 	let connection: EventConnection | undefined;
 	let disposed = false;
 	let started = false;
-	let refreshPromise: Promise<void> | undefined;
+	const refreshes = new Map<string | undefined, Promise<void>>();
 	const recoveries = new Map<string, Promise<void>>();
 	const listeners = new Set<(next: ControllerView) => void>();
 
@@ -77,21 +77,27 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 	}
 
 	async function refreshSessions(): Promise<void> {
-		if (refreshPromise) return refreshPromise;
+		const requestedWorkspace = workspace;
+		const inFlight = refreshes.get(requestedWorkspace);
+		if (inFlight) return inFlight;
 		const request = (async () => {
 			publish({ busy: "listing", error: null });
 			try {
-				const summaries = await api.listSessions(workspace);
-				if (!disposed) publish({ state: { ...view.state, summaries }, error: null });
+				const summaries = await api.listSessions(requestedWorkspace);
+				if (!disposed && workspace === requestedWorkspace) {
+					publish({ state: { ...view.state, summaries }, error: null });
+				}
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed && workspace === requestedWorkspace) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && view.busy === "listing") publish({ busy: "idle" });
+				if (!disposed && workspace === requestedWorkspace && view.busy === "listing") {
+					publish({ busy: "idle" });
+				}
 			}
 		})();
-		refreshPromise = request;
+		refreshes.set(requestedWorkspace, request);
 		void request.finally(() => {
-			if (refreshPromise === request) refreshPromise = undefined;
+			if (refreshes.get(requestedWorkspace) === request) refreshes.delete(requestedWorkspace);
 		});
 		return request;
 	}
