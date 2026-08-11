@@ -22,6 +22,45 @@ export function argNumber(args: Record<string, unknown> | undefined, key: string
 	return typeof value === "number" ? value : undefined;
 }
 
+/** One replacement inside an edit-shaped tool call. */
+export interface EditHunk {
+	oldText: string;
+	newText: string;
+}
+
+const OLD_KEYS = ["oldText", "old_string", "old_str", "search", "old"];
+const NEW_KEYS = ["newText", "new_string", "new_str", "replace", "new"];
+
+function hunkFrom(value: unknown): EditHunk | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const record = value as Record<string, unknown>;
+	const oldText = argString(record, ...OLD_KEYS);
+	const newText = argString(record, ...NEW_KEYS);
+	return oldText || newText ? { oldText, newText } : undefined;
+}
+
+/**
+ * The replacements an edit-shaped tool call describes.
+ *
+ * **Pi's `edit` tool nests them.** Verified against its schema in
+ * `pi-coding-agent/dist/core/tools/edit.js`: the arguments are
+ * `{ path, edits: [{ oldText, newText }, ...] }` -- an array, because one call
+ * may carry several disjoint replacements. Reading `oldText`/`newText` off the
+ * top level (as this renderer originally did) finds nothing for every real Pi
+ * edit, and the tool result is no help either: it is the sentence
+ * "Successfully replaced N block(s) in <path>", with the diff tucked away in
+ * `details`. The flat shape is still accepted because other backends use it.
+ */
+export function editHunks(args: Record<string, unknown> | undefined): EditHunk[] {
+	if (!args) return [];
+	const nested = args.edits ?? args.replacements ?? args.changes;
+	if (Array.isArray(nested)) {
+		return nested.map(hunkFrom).filter((h): h is EditHunk => h !== undefined);
+	}
+	const flat = hunkFrom(args);
+	return flat ? [flat] : [];
+}
+
 export function prettyArgs(args: Record<string, unknown> | undefined): string {
 	if (!args || Object.keys(args).length === 0) return "";
 	try {

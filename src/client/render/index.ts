@@ -16,6 +16,7 @@ export { default as Transcript } from "./Transcript.svelte";
 
 export { default as ToolCard } from "./tools/ToolCard.svelte";
 export { default as Output } from "./tools/Output.svelte";
+export { default as ResultBody } from "./tools/ResultBody.svelte";
 
 export {
 	defaultToolRenderer,
@@ -28,4 +29,14 @@ export {
 export { buildDiff, diffStats, type DiffLine, type DiffLineType } from "./tools/diff.ts";
 export { highlightCode, languageFromPath, renderCode, renderMarkdown, sanitize } from "./markdown.ts";
 export { buildTranscript, type TranscriptEntry, type TranscriptView } from "./transcript.ts";
-export { isPending, oneLine, resultText, toolState, type ContentBlock, type ToolRenderProps, type ToolState } from "./types.ts";
+export { editHunks, prettyArgs, summarizeArgs, type EditHunk } from "./tools/args.ts";
+export {
+	isPending,
+	oneLine,
+	resultImages,
+	resultText,
+	toolState,
+	type ContentBlock,
+	type ToolRenderProps,
+	type ToolState,
+} from "./types.ts";

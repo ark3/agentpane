@@ -10,9 +10,10 @@
 	 * of its arguments, the full arguments, and the result.
 	 */
 	import type { ToolRenderProps } from "../types.ts";
-	import { oneLine, resultText, toolState } from "../types.ts";
+	import { oneLine, toolState } from "../types.ts";
 	import { prettyArgs, summarizeArgs } from "./args.ts";
 	import Output from "./Output.svelte";
+	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
@@ -20,14 +21,11 @@
 	const state = $derived(toolState({ call, result, streaming }));
 	const summary = $derived(oneLine(summarizeArgs(call.arguments)));
 	const args = $derived(prettyArgs(call.arguments));
-	const output = $derived(resultText(result));
 </script>
 
 <ToolCard name={call.name} {summary} {state}>
 	{#if args}
 		<Output text={args} language="json" />
 	{/if}
-	{#if output}
-		<Output text={output} error={result?.isError ?? false} />
-	{/if}
+	<ResultBody {result} />
 </ToolCard>

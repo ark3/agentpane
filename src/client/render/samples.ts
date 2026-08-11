@@ -23,6 +23,10 @@ import type {
 let clock = 1786419855000;
 const stamp = () => (clock += 1000);
 
+/** A 1x1 transparent PNG, so the image paths have a real payload. */
+const PIXEL_PNG =
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
 function usage(input = 12, output = 40): Usage {
 	return {
 		input,
@@ -145,9 +149,17 @@ export const toolBashEdit: AgentMessage[] = [
 	assistant([{ type: "text", text: "Done. Appended 'goodbye' to greeting.txt." }]),
 ];
 
-/** A structured edit, so the diff path has something to render. */
+/**
+ * A structured edit, in Pi's real argument shape.
+ *
+ * `{ path, edits: [{ oldText, newText }] }` -- an array, verified against the
+ * tool's schema in `pi-coding-agent/dist/core/tools/edit.js`, because one call
+ * may carry several disjoint replacements. The result text is Pi's real
+ * wording too: the diff is not in the result at all (it is in `details`), so
+ * the renderer has to build it from the arguments.
+ */
 export const toolEditDiff: AgentMessage[] = [
-	user("Rename the greeting."),
+	user("Rename the greeting and its caller."),
 	assistant(
 		[
 			{
@@ -156,14 +168,69 @@ export const toolEditDiff: AgentMessage[] = [
 				name: "edit",
 				arguments: {
 					path: "src/greet.ts",
-					oldText: "export function greet() {\n\treturn \"hello\";\n}\n",
-					newText: "export function greet(name: string) {\n\treturn `hello ${name}`;\n}\n",
+					edits: [
+						{
+							oldText: 'export function greet() {\n\treturn "hello";\n}\n',
+							newText: "export function greet(name: string) {\n\treturn `hello ${name}`;\n}\n",
+						},
+						{ oldText: "greet();", newText: 'greet("world");' },
+					],
 				},
 			},
 		],
 		"toolUse",
 	),
-	toolResult("call_edit_1", "edit", "src/greet.ts updated"),
+	toolResult("call_edit_1", "edit", "Successfully replaced 2 block(s) in src/greet.ts."),
+];
+
+/**
+ * The same edit in the flat `old_string`/`new_string` shape other backends
+ * use. Both have to render, which is why `editHunks` accepts either.
+ */
+export const toolEditFlat: AgentMessage[] = [
+	user("Rename the greeting."),
+	assistant(
+		[
+			{
+				type: "toolCall",
+				id: "call_edit_2",
+				name: "edit",
+				arguments: {
+					file_path: "src/greet.ts",
+					old_string: 'return "hello";',
+					new_string: "return `hello ${name}`;",
+				},
+			},
+		],
+		"toolUse",
+	),
+	toolResult("call_edit_2", "edit", "src/greet.ts updated"),
+];
+
+/**
+ * A tool result carrying an image. Pi's `read` returns exactly this shape for
+ * an image path -- a short text note plus an `image` block (verified in
+ * `pi-coding-agent/dist/core/tools/read.js`) -- and it is the case that a
+ * text-only tool card renders as blank.
+ */
+export const toolReadImage: AgentMessage[] = [
+	user("What is in shot.png?"),
+	assistant(
+		[{ type: "toolCall", id: "call_read_2", name: "read", arguments: { path: "shot.png" } }],
+		"toolUse",
+	),
+	{
+		role: "toolResult",
+		toolCallId: "call_read_2",
+		toolName: "read",
+		content: [
+			{ type: "text", text: "Read image file [image/png]" },
+			{ type: "image", mimeType: "image/png", data: PIXEL_PNG },
+		],
+		isError: false,
+		timestamp: stamp(),
+	},
+	assistant([{ type: "text", text: "A single transparent pixel." }]),
 ];
 
 /**
@@ -215,17 +282,13 @@ export const orphanResult: AgentMessage[] = [
 	assistant([{ type: "text", text: "Picking up where we left off." }]),
 ];
 
-/** A 1x1 transparent PNG, so the image path has a real payload. */
+/** A user message with an attached image. */
 export const withImage: AgentMessage[] = [
 	{
 		role: "user",
 		content: [
 			{ type: "text", text: "What is in this screenshot?" },
-			{
-				type: "image",
-				mimeType: "image/png",
-				data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-			},
+			{ type: "image", mimeType: "image/png", data: PIXEL_PNG },
 		],
 		timestamp: stamp(),
 	},
@@ -238,6 +301,7 @@ export const everything: AgentMessage[] = [
 	...richMarkdown,
 	...toolRead,
 	...toolEditDiff,
+	...toolReadImage,
 	...unknownTool,
 	...errors,
 ];

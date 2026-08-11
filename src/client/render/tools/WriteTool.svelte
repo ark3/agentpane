@@ -5,9 +5,10 @@
 	 */
 	import { languageFromPath } from "../markdown.ts";
 	import type { ToolRenderProps } from "../types.ts";
-	import { basename, resultText, toolState } from "../types.ts";
+	import { basename, toolState } from "../types.ts";
 	import { argString } from "./args.ts";
 	import Output from "./Output.svelte";
+	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
@@ -15,7 +16,6 @@
 	const path = $derived(argString(call.arguments, "path", "file", "filePath", "file_path"));
 	const content = $derived(argString(call.arguments, "content", "text", "newText"));
 	const state = $derived(toolState({ call, result, streaming }));
-	const output = $derived(resultText(result));
 
 	const summary = $derived(
 		[basename(path), content ? `${content.split("\n").length} lines` : ""]
@@ -29,8 +29,10 @@
 		<p class="path" title={path}>{path}</p>
 	{/if}
 	<Output text={content} language={languageFromPath(path)} />
+	<!-- Only the failure is worth repeating: a successful write's result is
+	     "Successfully wrote N bytes to <path>", which the card already says. -->
 	{#if result?.isError}
-		<Output text={output} error={true} />
+		<ResultBody {result} />
 	{/if}
 </ToolCard>
 

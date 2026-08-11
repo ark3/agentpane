@@ -4,26 +4,22 @@
 	 * the size of a change is legible without expanding it.
 	 */
 	import type { ToolRenderProps } from "../types.ts";
-	import { basename, resultText, toolState } from "../types.ts";
-	import { argString } from "./args.ts";
+	import { basename, toolState } from "../types.ts";
+	import { argString, editHunks } from "./args.ts";
 	import { buildDiff, diffStats } from "./diff.ts";
-	import Output from "./Output.svelte";
+	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
 	const path = $derived(argString(call.arguments, "path", "file", "filePath", "file_path"));
-	const oldText = $derived(argString(call.arguments, "oldText", "old_string", "old_str", "search"));
-	const newText = $derived(
-		argString(call.arguments, "newText", "new_string", "new_str", "replace"),
-	);
 	const state = $derived(toolState({ call, result, streaming }));
-	const output = $derived(resultText(result));
 
-	const lines = $derived(oldText || newText ? buildDiff(oldText, newText) : []);
-	const stats = $derived(diffStats(lines));
+	/** One diff per replacement -- Pi's `edit` carries an array of them. */
+	const diffs = $derived(editHunks(call.arguments).map((h) => buildDiff(h.oldText, h.newText)));
+	const stats = $derived(diffStats(diffs.flat()));
 	const summary = $derived(
-		[basename(path), lines.length ? `+${stats.added} −${stats.removed}` : ""]
+		[basename(path), diffs.length ? `+${stats.added} −${stats.removed}` : ""]
 			.filter(Boolean)
 			.join(" · "),
 	);
@@ -34,7 +30,7 @@
 		<p class="path" title={path}>{path}</p>
 	{/if}
 
-	{#if lines.length}
+	{#each diffs as lines, hunk (hunk)}
 		<div class="diff">
 			{#each lines as line, i (i)}
 				<div class="line {line.type}">
@@ -44,11 +40,9 @@
 				</div>
 			{/each}
 		</div>
-	{/if}
+	{/each}
 
-	{#if output}
-		<Output text={output} error={result?.isError ?? false} />
-	{/if}
+	<ResultBody {result} />
 </ToolCard>
 
 <style>

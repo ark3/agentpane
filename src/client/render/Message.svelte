@@ -15,6 +15,7 @@
 	import type { ContentBlock } from "./types.ts";
 	import { oneLine, resultText } from "./types.ts";
 	import Output from "./tools/Output.svelte";
+	import ResultBody from "./tools/ResultBody.svelte";
 	import ToolCard from "./tools/ToolCard.svelte";
 
 	let {
@@ -82,7 +83,7 @@
 			summary={oneLine(resultText(message)) || "result"}
 			state={message.isError ? "error" : "ok"}
 		>
-			<Output text={resultText(message)} error={message.isError} />
+			<ResultBody result={message} />
 		</ToolCard>
 	</article>
 {:else}

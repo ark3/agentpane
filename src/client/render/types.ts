@@ -43,13 +43,23 @@ export function toolState(props: ToolRenderProps): ToolState {
 	return props.streaming ? "running" : "ok";
 }
 
-/** Concatenated text of a tool result, ignoring image parts. */
+/** Concatenated text of a tool result. Its image parts are `resultImages`. */
 export function resultText(result: ToolResultMessage | undefined): string {
 	if (!result) return "";
 	return result.content
 		.filter((c): c is TextContent => c.type === "text")
 		.map((c) => c.text)
 		.join("\n");
+}
+
+/**
+ * The image parts of a tool result. Pi's `read` tool returns one whenever the
+ * path is an image, alongside a short text note -- so a card that renders only
+ * `resultText` silently drops the actual answer.
+ */
+export function resultImages(result: ToolResultMessage | undefined): ImageContent[] {
+	if (!result) return [];
+	return result.content.filter((c): c is ImageContent => c.type === "image");
 }
 
 /** `AssistantMessage.stopReason === "pending"` is how Pi marks a live turn. */
