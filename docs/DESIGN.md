@@ -316,9 +316,15 @@ D6 keeps `AgentMessage` as the internal contract, which means depending on
 the runtime from.
 
 Take them as **devDependencies** and import with `import type` only. TypeScript
-erases type-only imports, so nothing reaches the bundle. Set
-`verbatimModuleSyntax: true` in tsconfig so an accidental value import is a
-compile error rather than a runtime surprise. Pin the versions.
+erases type-only imports, so nothing reaches the bundle. Pin the versions.
+
+`verbatimModuleSyntax: true` is set, but be clear about what it does: it makes
+type-only imports *explicit*, so their erasure is predictable. It does **not**
+stop a value import from a devDependency — verified against tsc, which accepts
+`import { Agent } from "@earendil-works/pi-agent-core"` without complaint and
+would happily ship the runtime into the browser bundle. The enforcement is a
+test, `src/import-boundaries.test.ts`, which fails with the offending file and
+import line. Add a package to `TYPE_ONLY_PACKAGES` there if this list grows.
 
 The alternative — vendoring the `.d.ts` files into `src/` — trades drift
 surprise for manual sync, and loses the property that makes D6 worth having:

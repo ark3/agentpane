@@ -1,0 +1,38 @@
+{
+  "name": "agentpane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local web UI for coding agents, with pluggable sandboxed backends (Pi, Codex)",
+  "scripts": {
+    "dev": "bun run --hot src/server/index.ts",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "bun run src/server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json",
+    "check": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "dompurify": "^3.2.7",
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.1",
+    "svelte": "^5.42.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.2.8",
+    "@types/bun": "^1.3.5",
+    "@types/diff": "^8.0.0",
+    "jsdom": "^28.0.0",
+    "svelte-check": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vitest": "^3.2.4"
+  }
+}

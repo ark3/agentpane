@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun", "vitest/globals"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // D10: this makes type-only imports explicit so their erasure is
+    // predictable. It does NOT stop a value import from a devDependency --
+    // verified, tsc accepts one silently. The actual guard is the test in
+    // src/import-boundaries.test.ts.
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    // Bun and Vite both resolve `./foo.ts` directly, so imports carry the real
+    // extension rather than a lie about a .js file that never exists.
+    "allowImportingTsExtensions": true,
+
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "$shared/*": ["src/shared/*"],
+      "$server/*": ["src/server/*"],
+      "$client/*": ["src/client/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts", "vitest.setup.ts"],
+  "exclude": ["node_modules", "dist", "resources"]
+}
