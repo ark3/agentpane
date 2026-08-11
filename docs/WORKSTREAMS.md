@@ -14,7 +14,7 @@ evidence; this only says what is built, what is left, and in what order.
 | Slice | State | Where |
 |---|---|---|
 | session-index | **done, verified** — 32 tests | merged to `main` |
-| pi-adapter | **done, verified** — `bun run check` green, 107 tests; two gaps below | branch `pi-adapter` |
+| pi-adapter | **done, verified** — 112 tests, cold start and session identity closed | merged to `main` |
 | transport | unverified — `check` green, 90 tests, never reviewed | branch `wip/transport` |
 | renderer | unverified — 2 failing tests, typecheck clean | branch `wip/renderer` |
 | codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
@@ -32,7 +32,7 @@ partial work looks more confusing than helpful — say so rather than forcing it
 
 ## Pickup order
 
-1. **pi-adapter** — close the two gaps below, merge to `main`.
+1. ~~**pi-adapter**~~ — done, merged.
 2. **transport** — review it; green but unreviewed is exactly the state
    pi-adapter was in.
 3. **renderer** — fix the two failures, review.
@@ -49,18 +49,18 @@ interrupted branches all forked from one commit and rotted against `main` while
 nothing merged. That, rather than the parallelism itself, is what made them
 expensive to pick up.
 
-### Open work on pi-adapter
+### What the Pi adapter expects of its caller
 
-Both confirmed against `rpc.md` and the code; neither is implemented.
+Two contracts the server has to honour, both documented at their definitions:
 
-- **Resuming a session shows an empty transcript.** `start()` passes
-  `--session <path>` but never fetches the existing messages — `get_messages`
-  is only called from `fork()`. D3 names re-querying as *the* cold-start path,
-  so attaching to any existing Pi session renders blank until a new turn.
-- **A new session's real id is never learned.** `get_state` returns
-  `sessionFile`; it is already typed in `protocol.ts` and discarded in
-  `process.ts`. That is exactly what D9's `virtual` → materialised transition
-  needs, since Pi's session id *is* its JSONL path.
+- **Re-read `adapter.ref` after `start()` and after the first `submit()`.**
+  Pi's session id *is* its JSONL path (D9), and a `virtual` session has no path
+  until its first prompt materialises it. The adapter adopts the real
+  `sessionFile` as soon as Pi reports one, so a session keyed by the
+  pre-materialisation id will not be findable on disk afterwards.
+- **`start({ resumeId })` hydrates the transcript itself**, via `get_messages`.
+  The caller does not need to re-query; a resumed adapter already holds the
+  conversation by the time `start()` resolves.
 
 ## File ownership
 
