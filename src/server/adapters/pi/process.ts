@@ -3,12 +3,14 @@
  * lifecycle. Delegates all message assembly to `reducer.ts` and all framing
  * to `framing.ts` -- this file should never need to parse a delta itself.
  *
- * Not exercised by fixture-driven tests (no live subprocess in the test
- * suite, per WORKSTREAMS.md); `reducer.ts` and `spawn.ts` carry the tested
- * logic, this file wires it to a real child process.
+ * Spawning goes through the injectable `PiSpawn` seam rather than calling
+ * `node:child_process.spawn` directly, so `process.test.ts` can drive the
+ * whole shell -- correlation, framing, lifecycle, teardown -- over a scripted
+ * fake child with no subprocess and no live model. The default is the real
+ * `spawn`, so production callers pass nothing.
  */
 
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import type { Model } from "@earendil-works/pi-ai";
 import type {
 	AdapterState,
@@ -43,13 +45,65 @@ interface PendingCommand {
 	reject: (error: Error) => void;
 }
 
+// ---------------------------------------------------------------------------
+// The spawn seam
+//
+// Structural subsets of the Node types, covering only what this adapter
+// touches. A real `ChildProcessWithoutNullStreams` satisfies them, so the
+// default spawn needs no cast; a test fake needs no `node:child_process`.
+// `any[]` in the listener signature is deliberate -- `unknown[]` would make
+// concretely-typed handlers like `(chunk: string) => void` unassignable.
+// ---------------------------------------------------------------------------
+
+// biome-ignore lint/suspicious/noExplicitAny: see note above
+type Listener = (...args: any[]) => void;
+
+export interface PiReadable {
+	setEncoding(encoding: "utf8"): unknown;
+	on(event: string, listener: Listener): unknown;
+}
+
+export interface PiWritable {
+	readonly destroyed: boolean;
+	write(chunk: string): unknown;
+	end(): unknown;
+}
+
+export interface PiChild {
+	readonly stdout: PiReadable;
+	readonly stderr: PiReadable;
+	readonly stdin: PiWritable;
+	on(event: string, listener: Listener): unknown;
+	kill(): unknown;
+}
+
+export type PiSpawn = (command: string, args: string[], options: { cwd: string }) => PiChild;
+
+export interface PiAdapterDeps {
+	/** Defaults to `node:child_process.spawn`. Injected by tests. */
+	spawn?: PiSpawn;
+}
+
+/**
+ * How much of Pi's stderr to retain for the death report. Bounded because a
+ * chatty extension could otherwise grow this without limit over a long
+ * session.
+ */
+const STDERR_TAIL_LIMIT = 8_192;
+
 export class PiAdapter implements BackendAdapter {
 	readonly ref: SessionRef;
 
-	private child?: ChildProcessWithoutNullStreams;
+	private readonly spawn: PiSpawn;
+	private child?: PiChild;
 	private readonly splitter = new LfLineSplitter();
 	private state: PiReducerState = createInitialPiState();
 	private disposed = false;
+	/** Set once the child is gone; makes teardown idempotent and writes fail loudly. */
+	private closed = false;
+	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
+	private spawnError?: string;
+	private stderrTail = "";
 
 	private readonly updateListeners = new Set<UpdateListener>();
 	private readonly requestListeners = new Set<RequestListener>();
@@ -58,8 +112,9 @@ export class PiAdapter implements BackendAdapter {
 	private readonly pendingCommands = new Map<string, PendingCommand>();
 	private nextCommandId = 0;
 
-	constructor(ref: SessionRef) {
+	constructor(ref: SessionRef, deps: PiAdapterDeps = {}) {
 		this.ref = ref;
+		this.spawn = deps.spawn ?? nodeSpawn;
 	}
 
 	// -- lifecycle ------------------------------------------------------------
@@ -71,24 +126,36 @@ export class PiAdapter implements BackendAdapter {
 			model: opts.model,
 		});
 
-		const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+		const child = this.spawn(command, args, { cwd });
 		this.child = child;
 
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => this.handleChunk(chunk));
 		child.stdout.on("end", () => this.handleStreamEnd());
 
-		// Pi's own stderr is diagnostic noise (extension load errors, etc.), not
-		// part of the RPC protocol -- surface it as an adapter error rather than
-		// silently dropping it, but don't try to parse it.
+		// stderr is diagnostics, not protocol, and not per-chunk errors. Both
+		// wrappers in the spawn chain write routine chatter here -- direnv
+		// announces every `.envrc` it loads on stderr (verified), and sbox/bwrap
+		// add their own -- so raising each chunk through `onError` would put a
+		// red banner in the UI on a perfectly healthy start. `onError`'s frozen
+		// contract is "a turn failed in a way the transcript does not convey",
+		// which this is not. Retain a bounded tail instead and spend it on the
+		// death report, where it is the only clue to why the process died.
 		child.stderr.setEncoding("utf8");
 		child.stderr.on("data", (chunk: string) => {
-			const text = chunk.trim();
-			if (text) this.emitError(`Pi stderr: ${text}`);
+			this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
 		});
 
-		child.on("error", (err) => this.emitError(`Failed to spawn Pi: ${err.message}`));
-		child.on("exit", (code, signal) => this.handleExit(code, signal));
+		child.on("error", (err: Error) => {
+			this.spawnError = `Failed to spawn Pi (${command}): ${err.message}`;
+		});
+		// `close`, not `exit`: on a spawn failure (ENOENT -- `direnv` or `sbox`
+		// missing from PATH) Node emits `error` and `close` but NEVER `exit`,
+		// verified on this machine. Binding only `exit` meant a failed spawn
+		// left the `get_state` probe below pending forever, so `start()` hung
+		// rather than rejecting. `close` also fires strictly after stdio drains,
+		// so it cannot reject a command whose response is still in the pipe.
+		child.on("close", (code: number | null, signal: NodeJS.Signals | null) => this.handleClose(code, signal));
 
 		// Readiness probe: pipane's process pool found spawning alone isn't
 		// enough to know the process can accept commands (it used to poll with
@@ -139,7 +206,15 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	async fork(entryId: string): Promise<SessionRef> {
-		await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
+		const forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
+		// A `session_before_fork` extension handler can veto the fork, and Pi
+		// reports that as `success: true` with `data.cancelled: true` (rpc.md,
+		// "fork") -- not as an error response. Taken at face value that reads as
+		// a successful fork, and we would refetch an unchanged transcript and
+		// tell the caller the rewind happened. Surface the veto instead.
+		if (forked.data.cancelled) {
+			throw new Error(`Pi fork from entry "${entryId}" was cancelled by an extension`);
+		}
 		// Pi's `fork` rewinds the active branch of the SAME session file in
 		// place (unlike Codex's `thread/fork`, which mints a new thread id --
 		// see rpc.md's `fork` vs `clone`, and this workstream's report). It
@@ -244,18 +319,27 @@ export class PiAdapter implements BackendAdapter {
 		}
 	}
 
-	private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+	private handleClose(code: number | null, signal: NodeJS.Signals | null): void {
+		if (this.closed) return;
+		this.closed = true;
+
+		// On a failed spawn the exit code is meaningless (-2 for ENOENT), so the
+		// `error` event's account wins when we have one.
+		const reason = this.spawnError ?? `Pi process exited (code=${code}, signal=${signal})`;
+		const detail = this.stderrTail.trim();
+		const message = detail ? `${reason}\n${detail}` : reason;
+
 		for (const pending of this.pendingCommands.values()) {
-			pending.reject(new Error(`Pi process exited (code=${code}, signal=${signal}) before responding`));
+			pending.reject(new Error(`${message} before responding`));
 		}
 		this.pendingCommands.clear();
+
 		if (this.state.isStreaming) {
 			this.state = { ...this.state, isStreaming: false };
 			this.emitUpdate(undefined);
 		}
-		if (!this.disposed) {
-			this.emitError(`Pi process exited unexpectedly (code=${code}, signal=${signal})`);
-		}
+		// A disposed adapter closing is the expected end of its life, not news.
+		if (!this.disposed) this.emitError(message);
 	}
 
 	private sendCommand<R>(cmd: PiCommand): Promise<R> {
@@ -272,7 +356,11 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	private writeLine(obj: unknown): void {
-		if (!this.child || this.child.stdin.destroyed) {
+		// `stdin.destroyed` alone is not enough: `end()` only flips it once the
+		// stream finishes, so a command issued right after `dispose()` would
+		// otherwise be written into a pipe nobody is reading and then hang
+		// waiting for a response that cannot come.
+		if (!this.child || this.disposed || this.closed || this.child.stdin.destroyed) {
 			throw new Error("Pi process is not running");
 		}
 		this.child.stdin.write(`${JSON.stringify(obj)}\n`);
