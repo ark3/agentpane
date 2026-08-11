@@ -97,6 +97,30 @@ not stable — say where it changes, and the server will follow.
   the two entry points (`renderMarkdown`, `renderCode`) both end in DOMPurify.
   Anything else reaching `{@html}` is a new hole; there is no second net.
 
+## Known deferrals
+
+Things review found and judged not worth blocking a task on. None is a defect
+in a path the milestone exercises; each is a decision left open, or an edge
+nobody has needed yet. They are here because a finding that lives only in a
+session transcript dies with it — this list is the surviving copy.
+
+Each was recorded by the review that found it, not re-verified since. Confirm
+against the source before acting on one.
+
+| Where | Deferral |
+|---|---|
+| client workspace input | `setWorkspace` fires per keystroke, so typing an absolute path can enumerate every prefix of it. Decide between debouncing and committing on blur. |
+| Codex reducer | A multi-file edit flattens its hunks under the first path. The raw per-file data is retained, so this is fixable without recapturing fixtures. |
+| Codex reducer | Reset leaves `tokenUsage`, `threadId`, `turnId` and `unmappedItemTypes` in place. Whether those should survive a reset is unsettled. |
+| Codex reducer | `contextCompaction` is dropped, because the generated item carries no summary. DESIGN's wording says otherwise; one of the two has to change. |
+| Codex reducer | Only the last transcript entry is marked streaming, so an earlier concurrent pending tool call can look complete while it is still running. |
+| Codex adapter | The `thread/resume` response is asserted as `ThreadStartResponse` rather than the generated `ThreadResumeResponse`. |
+| Codex adapter | `setModel` changes outgoing turns, but the reducer's identity may still report the previous model. |
+| Pi process shell | Wrapping a spawn error loses the original stack, `code` and `cause`. The message survives; the identity does not. |
+| transport tests | The offline vertical test does not seed summaries, so it never integrates summary re-keying on `renamed`. |
+| live smoke harness | The abort case fires before the long turn has emitted assistant text, so its "transcript stopped growing" guard has little to bite on. A longer pre-abort wait would strengthen it. |
+| `session-manager.ts` | `disposeAll()` can reach one adapter through both the session table and its startup record, inside a one-microtask window. Correct only because `dispose()` is required to be idempotent (stated on the `BackendAdapter` contract), and not pinned by a test — the interleaving is not reachable deterministically. |
+
 ## File ownership
 
 Disjoint ownership was the defence against parallel agents colliding in the
