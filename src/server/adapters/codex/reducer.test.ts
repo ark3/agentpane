@@ -56,6 +56,23 @@ function unsafeMessage(value: unknown): CodexServerMessage {
 	return value as CodexServerMessage;
 }
 
+function startedItem(item: ThreadItem, startedAtMs: number): Extract<CodexServerMessage, { method: "item/started" }> {
+	return {
+		method: "item/started",
+		params: { threadId: "t", turnId: "u", item, startedAtMs },
+	};
+}
+
+function completedItem(
+	item: ThreadItem,
+	completedAtMs: number,
+): Extract<CodexServerMessage, { method: "item/completed" }> {
+	return {
+		method: "item/completed",
+		params: { threadId: "t", turnId: "u", item, completedAtMs },
+	};
+}
+
 function replay(name: FixtureName, stopBefore?: (line: CodexServerMessage) => boolean) {
 	const reducer = new CodexReducer({ now: () => 1_000 });
 	const effects: CodexEffect[] = [];
@@ -290,6 +307,195 @@ describe("streaming assembly (text fixture)", () => {
 	});
 });
 
+describe("item lifecycle regressions", () => {
+	it("authoritative empty completion removes streamed reasoning without disturbing adjacent items", () => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.handle(
+			startedItem(
+				{
+					type: "userMessage",
+					id: "before",
+					clientId: null,
+					content: [{ type: "text", text: "before", text_elements: [] }],
+				},
+				10,
+			),
+		);
+		reducer.handle(startedItem({ type: "reasoning", id: "reasoning", summary: [], content: [] }, 20));
+		reducer.handle({
+			method: "item/reasoning/summaryTextDelta",
+			params: {
+				threadId: "t",
+				turnId: "u",
+				itemId: "reasoning",
+				delta: "temporary reasoning",
+				summaryIndex: 0,
+			},
+		});
+		reducer.handle(
+			startedItem(
+				{ type: "agentMessage", id: "after", text: "after", phase: null, memoryCitation: null },
+				30,
+			),
+		);
+
+		const effects = reducer.handle(
+			completedItem({ type: "reasoning", id: "reasoning", summary: [], content: [] }, 40),
+		);
+
+		expect(effects).toEqual([{ type: "reset" }]);
+		expect(reducer.getState().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		expect((reducer.getState().messages[1] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "after" },
+		]);
+	});
+
+	it("keeps the start timestamp through deltas and authoritative completion", () => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.handle(
+			startedItem(
+				{ type: "agentMessage", id: "a", text: "", phase: null, memoryCitation: null },
+				100,
+			),
+		);
+		const started = reducer.getState().messages[0]?.timestamp;
+		reducer.handle({
+			method: "item/agentMessage/delta",
+			params: { threadId: "t", turnId: "u", itemId: "a", delta: "draft" },
+		});
+		const streamed = reducer.getState().messages[0]?.timestamp;
+		reducer.handle(
+			completedItem(
+				{
+					type: "agentMessage",
+					id: "a",
+					text: "final",
+					phase: "final_answer",
+					memoryCitation: null,
+				},
+				900,
+			),
+		);
+		const completed = reducer.getState().messages[0]?.timestamp;
+
+		expect([started, streamed, completed]).toEqual([100, 100, 100]);
+	});
+
+	it("inserts reasoning at its original item position when it becomes visible late", () => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.handle(startedItem({ type: "reasoning", id: "first", summary: [], content: [] }, 10));
+		reducer.handle(
+			startedItem(
+				{ type: "agentMessage", id: "second", text: "later", phase: null, memoryCitation: null },
+				20,
+			),
+		);
+
+		const effects = reducer.handle({
+			method: "item/reasoning/summaryTextDelta",
+			params: {
+				threadId: "t",
+				turnId: "u",
+				itemId: "first",
+				delta: "earlier",
+				summaryIndex: 0,
+			},
+		});
+
+		expect(effects).toEqual([{ type: "reset" }]);
+		const messages = reducer.getState().messages as AssistantMessage[];
+		expect(messages.map((message) => message.content[0]?.type)).toEqual(["thinking", "text"]);
+		expect(messages[0]?.content).toEqual([{ type: "thinking", thinking: "earlier" }]);
+		expect(messages[1]?.content).toEqual([{ type: "text", text: "later" }]);
+	});
+
+	it.each([
+		{
+			name: "agent message",
+			started: startedItem(
+				{ type: "agentMessage", id: "agent", text: "", phase: null, memoryCitation: null },
+				10,
+			),
+			delta: {
+				method: "item/agentMessage/delta",
+				params: { threadId: "t", turnId: "u", itemId: "agent", delta: "live" },
+			} satisfies CodexServerMessage,
+			completed: completedItem(
+				{ type: "agentMessage", id: "agent", text: "done", phase: null, memoryCitation: null },
+				20,
+			),
+		},
+		{
+			name: "reasoning",
+			started: startedItem({ type: "reasoning", id: "reasoning", summary: [], content: [] }, 10),
+			delta: {
+				method: "item/reasoning/summaryTextDelta",
+				params: {
+					threadId: "t",
+					turnId: "u",
+					itemId: "reasoning",
+					delta: "live",
+					summaryIndex: 0,
+				},
+			} satisfies CodexServerMessage,
+			completed: completedItem(
+				{ type: "reasoning", id: "reasoning", summary: ["done"], content: [] },
+				20,
+			),
+		},
+		{
+			name: "plan",
+			started: startedItem({ type: "plan", id: "plan", text: "" }, 10),
+			delta: {
+				method: "item/plan/delta",
+				params: { threadId: "t", turnId: "u", itemId: "plan", delta: "live" },
+			} satisfies CodexServerMessage,
+			completed: completedItem({ type: "plan", id: "plan", text: "done" }, 20),
+		},
+	])("keeps a streaming $name pending until completion", ({ started, delta, completed }) => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.handle(started);
+		const startedMessage = reducer.getState().messages.at(-1);
+		if (started.params.item.type !== "reasoning") {
+			expect(startedMessage?.role).toBe("assistant");
+			expect((startedMessage as AssistantMessage).stopReason).toBe("pending");
+		}
+
+		reducer.handle(delta);
+		const streamedMessage = reducer.getState().messages.at(-1) as AssistantMessage;
+		expect(streamedMessage.stopReason).toBe("pending");
+
+		reducer.handle(completed);
+		const completedMessage = reducer.getState().messages.at(-1) as AssistantMessage;
+		expect(completedMessage.stopReason).toBe("stop");
+	});
+
+	it.each([
+		{ fixture: "tool-read" as const, type: "commandExecution" as const },
+		{ fixture: "tool-edit" as const, type: "fileChange" as const },
+	])("withholds the $type result until authoritative completion", ({ fixture, type }) => {
+		const lines = readFixture(fixture);
+		const started = byMethod(lines, "item/started").find((line) => itemOf(line).type === type);
+		if (!started) throw new Error(`${fixture} has no started ${type}`);
+		const itemId = itemOf(started).id;
+		const completed = byMethod(lines, "item/completed").find((line) => itemOf(line).id === itemId);
+		if (!completed) throw new Error(`${fixture} has no completed ${type}`);
+
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.handle(started);
+		const pending = reducer.getState().messages;
+		expect(pending.map((message) => message.role)).toEqual(["assistant"]);
+		expect((pending[0] as AssistantMessage).stopReason).toBe("pending");
+
+		reducer.handle(completed);
+		const done = reducer.getState().messages;
+		expect(done.map((message) => message.role)).toEqual(["assistant", "toolResult"]);
+		expect((done[0] as AssistantMessage).stopReason).toBe("toolUse");
+		const result = done[1] as ToolResultMessage;
+		expect(result.toolCallId).toBe(itemId);
+	});
+});
+
 describe("commandExecution (tool-read fixture)", () => {
 	const lines = readFixture("tool-read");
 	const item = itemOfType(byMethod(lines, "item/completed").map(itemOf), "commandExecution");
@@ -318,7 +524,7 @@ describe("commandExecution (tool-read fixture)", () => {
 		expect((result.details as { exitCode: number }).exitCode).toBe(item.exitCode);
 	});
 
-	it("streams command output into the tool result", () => {
+	it("does not expose streamed command output as a result before completion", () => {
 		const reducer = new CodexReducer({ now: () => 1 });
 		const started = byMethod(lines, "item/started").find(
 			(line) => itemOf(line).type === "commandExecution",
@@ -332,9 +538,14 @@ describe("commandExecution (tool-read fixture)", () => {
 				params: { threadId: "t", turnId: "u", itemId: id, delta: chunk },
 			});
 		}
+		expect(reducer.getState().messages.map((message) => message.role)).toEqual(["assistant"]);
+
+		const completed = byMethod(lines, "item/completed").find((line) => itemOf(line).id === id);
+		if (!completed) throw new Error("fixture has no completed commandExecution");
+		reducer.handle(completed);
 		const result = reducer.getState().messages.at(-1) as ToolResultMessage;
 		expect(result.role).toBe("toolResult");
-		expect(result.content).toEqual([{ type: "text", text: "one\ntwo\n" }]);
+		expect(result.content).toEqual([{ type: "text", text: item.aggregatedOutput }]);
 	});
 });
 

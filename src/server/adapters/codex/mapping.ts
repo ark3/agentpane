@@ -55,7 +55,7 @@ export const CODEX_TOOL_NAMES = {
 /** What a Codex `ThreadItem` becomes. Tool-ish items become a *pair*, like Pi's. */
 export type MappedItem =
 	| { kind: "single"; message: AgentMessage }
-	| { kind: "tool"; call: AssistantMessage; result: ToolResultMessage }
+	| { kind: "tool"; call: AssistantMessage; result: ToolResultMessage | null }
 	/** Nothing to show yet (or ever). `reason` is for diagnostics only. */
 	| { kind: "none"; reason: string };
 
@@ -67,6 +67,8 @@ export interface MapContext {
 	api: string;
 	provider: string;
 	model: string;
+	/** False for `item/started` and deltas; true for authoritative completion/hydration. */
+	completed: boolean;
 }
 
 export const ZERO_USAGE: Usage = {
@@ -251,14 +253,16 @@ function toolPair(
 ): MappedItem {
 	return {
 		kind: "tool",
-		call: assistant(ctx, [call], "toolUse"),
-		result: {
-			role: "toolResult",
-			toolCallId: call.id,
-			toolName: call.name,
-			timestamp: ctx.timestamp,
-			...result,
-		},
+		call: assistant(ctx, [call], ctx.completed ? "toolUse" : "pending"),
+		result: ctx.completed
+			? {
+					role: "toolResult",
+					toolCallId: call.id,
+					toolName: call.name,
+					timestamp: ctx.timestamp,
+					...result,
+				}
+			: null,
 	};
 }
 
@@ -304,7 +308,10 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			// reliable stop reason -- providers do not emit it consistently
 			// (see MessagePhase's own doc comment) -- so it does not drive
 			// stopReason; it is preserved as-is for a renderer that wants it.
-			return { kind: "single", message: assistant(ctx, textBlocks(item.text), "stop") };
+			return {
+				kind: "single",
+				message: assistant(ctx, textBlocks(item.text), ctx.completed ? "stop" : "pending"),
+			};
 		}
 
 		case "reasoning": {
@@ -316,14 +323,21 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			if (!thinking) return { kind: "none", reason: "empty reasoning" };
 			return {
 				kind: "single",
-				message: assistant(ctx, [{ type: "thinking", thinking }], "stop"),
+				message: assistant(
+					ctx,
+					[{ type: "thinking", thinking }],
+					ctx.completed ? "stop" : "pending",
+				),
 			};
 		}
 
 		case "plan": {
 			// DESIGN leaves plan rendering open ("assistant text or a custom
 			// block"). Text is the honest minimum: it is literally a text field.
-			return { kind: "single", message: assistant(ctx, textBlocks(item.text), "stop") };
+			return {
+				kind: "single",
+				message: assistant(ctx, textBlocks(item.text), ctx.completed ? "stop" : "pending"),
+			};
 		}
 
 		case "commandExecution": {
@@ -435,11 +449,21 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 		case "imageGeneration": {
 			// `result` is the generated image (a data URL or a path).
 			const block = imageFromUrl(item.result);
-			return { kind: "single", message: assistant(ctx, [blockAsAssistant(block)], "stop") };
+			return {
+				kind: "single",
+				message: assistant(ctx, [blockAsAssistant(block)], ctx.completed ? "stop" : "pending"),
+			};
 		}
 
 		case "imageView": {
-			return { kind: "single", message: assistant(ctx, textBlocks(`[image: ${item.path}]`), "stop") };
+			return {
+				kind: "single",
+				message: assistant(
+					ctx,
+					textBlocks(`[image: ${item.path}]`),
+					ctx.completed ? "stop" : "pending",
+				),
+			};
 		}
 
 		default: {

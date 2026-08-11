@@ -62,10 +62,10 @@ export interface CodexReducerOptions {
 
 interface Slot {
 	item: ThreadItem;
-	/** -1 until the item actually produces a message (hidden reasoning never does). */
-	messageIndex: number;
-	resultIndex: number;
+	/** Current visible contribution, flattened with other slots in item event order. */
+	messages: AgentMessage[];
 	timestamp: number;
+	completed: boolean;
 }
 
 const DEFAULT_API = "codex-app-server";
@@ -137,7 +137,7 @@ export class CodexReducer {
 		for (const turn of thread.turns) {
 			this.turnId = turn.id;
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
-			for (const item of turn.items) this.applyItem(item, timestamp);
+			for (const item of turn.items) this.applyItem(item, timestamp, true);
 		}
 		return [{ type: "reset" }];
 	}
@@ -191,11 +191,12 @@ export class CodexReducer {
 
 			case "item/started":
 			case "item/completed": {
+				const completed = message.method === "item/completed";
 				const at =
-					message.method === "item/completed"
+					completed
 						? message.params.completedAtMs
 						: message.params.startedAtMs;
-				return this.applyItem(message.params.item, at);
+				return this.applyItem(message.params.item, at, completed);
 			}
 
 			case "item/agentMessage/delta":
@@ -256,49 +257,65 @@ export class CodexReducer {
 
 	// -- item assembly ------------------------------------------------------
 
-	private applyItem(item: ThreadItem, timestamp: number): CodexEffect[] {
+	private applyItem(item: ThreadItem, timestamp: number, completed: boolean): CodexEffect[] {
 		const id = item.id;
 		const existing = this.slots.get(id);
 		// Clone: deltas mutate the stored item in place, and the caller's
 		// parsed payload (or a `Thread` we are hydrating from) is not ours.
 		const owned = structuredClone(item);
 		const slot: Slot = existing
-			? { ...existing, item: owned, timestamp }
-			: { item: owned, timestamp, messageIndex: -1, resultIndex: -1 };
+			? { ...existing, item: owned, completed }
+			: { item: owned, messages: [], timestamp, completed };
 		this.slots.set(id, slot);
 		return this.remap(slot);
 	}
 
 	private remap(slot: Slot): CodexEffect[] {
-		const ctx: MapContext = { timestamp: slot.timestamp, ...this.identity };
+		const previousCount = slot.messages.length;
+		const previousLength = this.messages.length;
+		const startIndex = this.startIndex(slot);
+		const ctx: MapContext = {
+			timestamp: slot.timestamp,
+			completed: slot.completed,
+			...this.identity,
+		};
 		const mapped = mapItem(slot.item, ctx);
+		let next: AgentMessage[];
 		if (mapped.kind === "none") {
-			if (slot.messageIndex < 0) this.unmappedItemTypes.add(slot.item.type);
-			return [];
+			this.unmappedItemTypes.add(slot.item.type);
+			next = [];
+		} else if (mapped.kind === "single") {
+			next = [mapped.message];
+		} else {
+			next = mapped.result ? [mapped.call, mapped.result] : [mapped.call];
 		}
-		if (mapped.kind === "single") {
-			const index = this.put(slot.messageIndex, mapped.message);
-			slot.messageIndex = index;
-			return [{ type: "message", index }];
+
+		slot.messages = next;
+		this.messages = this.flattenMessages();
+		if (previousCount === 0 && next.length === 0) return [];
+
+		// Upserts cannot express deletion or insertion before an existing
+		// message. Those structural changes require an authoritative snapshot.
+		if (
+			next.length < previousCount ||
+			(next.length > previousCount && startIndex + previousCount < previousLength)
+		) {
+			return [{ type: "reset" }];
 		}
-		const callIndex = this.put(slot.messageIndex, mapped.call);
-		slot.messageIndex = callIndex;
-		const resultIndex = this.put(slot.resultIndex, mapped.result);
-		slot.resultIndex = resultIndex;
-		return [
-			{ type: "message", index: callIndex },
-			{ type: "message", index: resultIndex },
-		];
+		return next.map((_, offset) => ({ type: "message", index: startIndex + offset }));
 	}
 
-	/** Replace at `index`, or append when the slot has no message yet. */
-	private put(index: number, message: AgentMessage): number {
-		if (index >= 0 && index < this.messages.length) {
-			this.messages[index] = message;
-			return index;
+	private startIndex(target: Slot): number {
+		let index = 0;
+		for (const slot of this.slots.values()) {
+			if (slot === target) return index;
+			index += slot.messages.length;
 		}
-		this.messages.push(message);
-		return this.messages.length - 1;
+		return index;
+	}
+
+	private flattenMessages(): AgentMessage[] {
+		return [...this.slots.values()].flatMap((slot) => slot.messages);
 	}
 
 	private applyDelta(
@@ -336,6 +353,13 @@ export class CodexReducer {
 			if (!message || message.role !== "assistant") continue;
 			const updated: AssistantMessage = { ...message, usage: usageFromBreakdown(usage.last) };
 			this.messages[i] = updated;
+			for (const slot of this.slots.values()) {
+				const localIndex = slot.messages.indexOf(message);
+				if (localIndex >= 0) {
+					slot.messages[localIndex] = updated;
+					break;
+				}
+			}
 			return [{ type: "message", index: i }];
 		}
 		return [];
