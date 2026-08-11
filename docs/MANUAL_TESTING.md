@@ -17,12 +17,24 @@ listed below and remain unverified.
 
 ## Reproducible Codex setup
 
-The successful run used these setup commands. They copy credential files by
-name without printing their contents and leave the real `~/.codex` untouched.
-Do not enable shell tracing while running them.
+The durable smoke harness asserts every criterion, exits nonzero on failure,
+captures its run-scoped PIDs automatically, and cleans up temporary state:
 
 ```bash
-APP_ROOT=/home/asa0717/src/agentpane/.worktrees/minimal-live-vertical-slice
+cd "$(git rev-parse --show-toplevel)"
+python3 resources/probes/agentpane_codex_smoke.py \
+  --workspace /home/asa0717/src/agentpane
+```
+
+It copies credential files by name without printing their contents and leaves
+the real `~/.codex` untouched. Do not enable shell tracing while running it.
+Run `python3 resources/probes/agentpane_codex_smoke.py --help` for checkout,
+workspace, port, credential-source, and build options.
+
+The equivalent manual setup is below for interactive inspection:
+
+```bash
+APP_ROOT="$(git rev-parse --show-toplevel)"
 WORKSPACE=/home/asa0717/src/agentpane
 SMOKE_PORT=44173
 CODEX_SMOKE_HOME="$(mktemp -d /var/tmp/agentpane-live-codexhome-XXXXXX)"
@@ -119,18 +131,15 @@ curl --fail --silent --show-error -X POST "$SESSION_URL/abort"
 
 Finally, send `SIGTERM` only to the server started for this run, wait for it,
 and confirm the native Codex PID previously found beneath it no longer exists.
-The automated run walked `/proc` recursively from its own server PID so it
-never inspected or killed unrelated Codex processes.
+Use the durable harness above when a machine-checked process assertion is
+required: it walks `/proc` recursively from its own server PID and never
+inspects or kills unrelated Codex processes.
 
 ```bash
 kill "$SSE_PID_2"
 wait "$SSE_PID_2" 2>/dev/null || true
-
-# Record the native Codex PID shown by pstree before stopping the server.
-CODEX_WORKER_PID=replace_with_the_run_scoped_native_codex_pid
 kill -TERM "$SERVER_PID"
 wait "$SERVER_PID"
-test ! -e "/proc/$CODEX_WORKER_PID"
 ```
 
 After the server and SSE curl have stopped, remove only this run's temporary
@@ -146,29 +155,30 @@ test -z "${SSE_LOG_2:-}" || rm -f -- "$SSE_LOG_2"
 
 ## Observed Codex results
 
-The final successful run began at `2026-08-11T14:50:48.908-04:00` and ended at
-`2026-08-11T14:51:04.685-04:00`.
+The final successful run used the checked-in harness after review hardening. It
+began at `2026-08-11T15:14:49.067-04:00` and ended at
+`2026-08-11T15:15:06.182-04:00`.
 
 | Check | Observed result |
 |---|---|
-| 1. Create a Codex session for `/home/asa0717/src/agentpane` | Passed at `14:50:49.522-04:00`. Create returned HTTP 201, attach returned HTTP 200, and the virtual id was replaced by a real Codex thread id. |
-| 2. Submit text only and observe incremental transcript updates | Passed. Prompt returned HTTP 202. The assistant message at index 1 produced 21 observed upserts with 21 distinct increasing text lengths; the completed assistant text was 844 characters. No model wording was asserted or recorded. |
-| 3. Observe streaming return to idle | Passed. `isStreaming:true` arrived at `14:50:49.546-04:00`; an authoritative snapshot carried `isStreaming:false` at `14:50:54.169-04:00`. |
-| 4. Refresh/reconnect repaint without a duplicate child | Passed at `14:51:04.056-04:00`. A new SSE connection immediately received a two-message snapshot containing the completed 844-character assistant message. Native Codex PID `122009` was the only worker before and after reconnect. |
-| 5. Abort a deliberately long prompt | Passed. The second prompt returned HTTP 202 and streamed at `14:51:04.129-04:00`; abort was requested at `14:51:04.510-04:00`, returned HTTP 204, and a snapshot returned to idle at `14:51:04.527-04:00`. |
-| 6. Stop the server without an orphaned app server | Passed. SIGTERM was sent at `14:51:04.577-04:00`; the server exited 0 at `14:51:04.585-04:00`. At `14:51:04.685-04:00`, run-scoped native Codex PID `122009` no longer existed. |
+| 1. Create a Codex session for `/home/asa0717/src/agentpane` | Passed at `15:14:51.083-04:00`. Create returned HTTP 201, attach returned HTTP 200, and the virtual id was replaced by a real Codex thread id. |
+| 2. Submit text only and observe incremental transcript updates | Passed. Prompt returned HTTP 202. The assistant message at index 1 produced 14 observed upserts with 14 distinct increasing text lengths; the completed assistant text was 938 characters. No model wording was asserted or recorded. |
+| 3. Observe streaming return to idle | Passed. `isStreaming:true` arrived at `15:14:51.107-04:00`; an authoritative snapshot carried `isStreaming:false` at `15:14:57.162-04:00`. |
+| 4. Refresh/reconnect repaint without a duplicate child | Passed at `15:15:05.594-04:00`. A new SSE connection immediately received a two-message snapshot containing the completed 938-character assistant message. Native Codex PID `129832` was the only worker before and after reconnect. |
+| 5. Abort a deliberately long prompt | Passed. The second prompt returned HTTP 202 and streamed at `15:15:05.658-04:00`; abort was requested at `15:15:06.052-04:00`, returned HTTP 204, and a snapshot returned to idle at `15:15:06.067-04:00`. |
+| 6. Stop the server without an orphaned app server | Passed. SIGTERM was sent at `15:15:06.117-04:00`; the server exited 0 at `15:15:06.182-04:00`, after run-scoped native Codex PID `129832` had exited. |
 
 Built-client reachability also passed: `/` returned HTTP 200 with the expected
-application mount at `14:50:49.046-04:00`.
+application mount at `15:14:50.583-04:00`.
 
 The stable long-lived process chain observed before and after reconnect was:
 
 ```text
-bun (server) 121976
-└─ bwrap 121995
-   └─ bwrap 122001
-      └─ node codex launcher 122002
-         └─ native codex app-server 122009
+bun (server) 129801
+└─ bwrap 129818
+   └─ bwrap 129824
+      └─ node codex launcher 129825
+         └─ native codex app-server 129832
 ```
 
 Production constructs the spawn as `direnv exec <workspace> sbox -- codex
@@ -181,7 +191,14 @@ The temporary Codex home was absent after cleanup, and no process from the
 recorded run-scoped PID set remained. Two earlier harness-only observations
 were corrected before accepting evidence: static navigation requires
 `Accept: text/html`, and lifecycle state may arrive in a `snapshot` rather than
-only a `status` event. Neither required an application source change.
+only a `status` event. Those observer corrections required no application
+source change.
+
+The final review did produce application hardening before the accepted run:
+the prompt route now acknowledges only after backend admission succeeds,
+selection ignores stale attach completions, and Codex disposal awaits process
+close with bounded SIGTERM-to-SIGKILL escalation. Four regression tests cover
+those behaviors; each was observed failing before its fix.
 
 ## Deferred Pi verification — unperformed
 

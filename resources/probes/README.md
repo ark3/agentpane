@@ -1,6 +1,6 @@
 # Probes — reproducible validation evidence
 
-These two scripts are the *executable proof* behind the claims in
+These scripts are the *executable proof* behind the claims in
 `docs/HANDOFF.md`. They were run during design validation and can be re-run
 any time to re-confirm the agent protocols on the current CLI versions.
 
@@ -32,6 +32,25 @@ your real `~/.codex/{auth.json,config.toml}` into a temp home because the
 sandbox makes `~/.codex` read-only. It cleans up the temp copy on exit.
 
 Verified with: `codex-cli` 0.147.0.
+
+## `agentpane_codex_smoke.py`
+
+Proves the assembled application path with a real Codex process: build and
+serve the production client, create/attach through REST, observe incremental
+SSE transcript updates and idle completion, reconnect and verify a repaint
+without another native worker, abort a long turn, then shut the server down and
+verify the run-scoped worker exited.
+
+```bash
+python3 agentpane_codex_smoke.py \
+  --workspace /home/asa0717/src/agentpane
+```
+
+This makes live model calls. It derives the application checkout from its own
+location, creates and removes a temporary writable `CODEX_HOME`, copies only
+`auth.json`/`config.toml` without printing them, and inspects only descendants
+of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
+`"result": "pass"` is the acceptance signal.
 
 ## `capture_fixtures.py`
 
