@@ -26,3 +26,18 @@
 
 - Successful response envelopes are trusted via the frozen protocol types rather than runtime schema validation; malformed successful JSON would surface as a normal decoding error.
 - The default SSE adapter reports every native `error` callback as a disconnect and intentionally does not add reconnect/backoff policy, which is outside this task's boundary.
+
+## Fix Round 1
+
+Addressed review findings:
+
+- `api.ts` now imports and consumes `ListSessionsResponse`, `CreateSessionResponse`, and `AttachSessionResponse` from `$shared/protocol.ts` instead of recreating envelope types.
+- SSE parsing now catches only `JSON.parse`; exceptions from `onEvent` propagate to the caller and are not reported as malformed JSON.
+- Native `EventSource` tests now emit `open` and `error`, verify `onOpen`/`onDisconnect`, and verify close delegation. Added `does not report an onEvent exception as malformed JSON` regression coverage.
+- Replaced literal API route strings in client tests with shared `ROUTES` values.
+
+TDD evidence:
+
+1. RED: `bunx vitest run --project client src/client/api.test.ts` produced 1 failure in `does not report an onEvent exception as malformed JSON`: `expected function to throw an error, but it didn't`.
+2. GREEN focused: `bunx vitest run --project client src/client/api.test.ts` — `1 passed` test file, `11 passed` tests.
+3. Full verification: `bun run check` — `svelte-check found 0 errors and 0 warnings`; `27 passed` test files and `401 passed` tests.

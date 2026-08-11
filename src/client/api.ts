@@ -1,7 +1,10 @@
 import {
 	ROUTES,
 	type ApiError,
+	type AttachSessionResponse,
 	type CreateSessionRequest,
+	type CreateSessionResponse,
+	type ListSessionsResponse,
 	type PromptRequest,
 	type ServerEvent,
 	type SessionRef,
@@ -66,19 +69,19 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		listSessions(cwd) {
 			const query = cwd === undefined ? "" : `?cwd=${encodeURIComponent(cwd)}`;
 			return request(`${ROUTES.sessions}${query}`, { method: "GET" }, (body) => {
-				return (body as { sessions: SessionSummary[] }).sessions;
+				return (body as ListSessionsResponse).sessions;
 			});
 		},
 		createSession(body) {
 			return request(
 				ROUTES.sessions,
 				jsonRequest(body),
-				(response) => (response as { ref: SessionRef }).ref,
+				(response) => (response as CreateSessionResponse).ref,
 			);
 		},
 		attach(ref) {
 			return request(ROUTES.session(ref), { method: "GET" }, (body) => {
-				return (body as { session: SessionSummary }).session;
+				return (body as AttachSessionResponse).session;
 			});
 		},
 		prompt(ref, body) {
@@ -128,11 +131,14 @@ function isApiError(body: unknown): body is ApiError {
 function defaultOpenEvents(url: string, handlers: EventHandlers): EventConnection {
 	const source = new EventSource(url);
 	source.onmessage = (event) => {
+		let parsed: ServerEvent;
 		try {
-			handlers.onEvent(JSON.parse(event.data) as ServerEvent);
+			parsed = JSON.parse(event.data) as ServerEvent;
 		} catch (error: unknown) {
 			handlers.onMalformed(error instanceof Error ? error : new Error(String(error)));
+			return;
 		}
+		handlers.onEvent(parsed);
 	};
 	source.onopen = () => handlers.onOpen();
 	source.onerror = () => handlers.onDisconnect();

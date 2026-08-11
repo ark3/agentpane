@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ROUTES } from "$shared/protocol.ts";
 import type {
 	ServerEvent,
 	SessionRef,
@@ -43,7 +44,7 @@ describe("agentpane API", () => {
 		const api = createAgentpaneApi({ fetch });
 
 		expect(await api.listSessions("/work/a b")).toEqual([summary]);
-		expect(fetch).toHaveBeenCalledWith("/api/sessions?cwd=%2Fwork%2Fa%20b", { method: "GET" });
+		expect(fetch).toHaveBeenCalledWith(`${ROUTES.sessions}?cwd=%2Fwork%2Fa%20b`, { method: "GET" });
 	});
 
 	it("lists all sessions without adding a query when cwd is omitted", async () => {
@@ -51,7 +52,7 @@ describe("agentpane API", () => {
 		const api = createAgentpaneApi({ fetch });
 
 		expect(await api.listSessions()).toEqual([]);
-		expect(fetch).toHaveBeenCalledWith("/api/sessions", { method: "GET" });
+		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, { method: "GET" });
 	});
 
 	it("creates a session with a JSON body and unwraps its ref", async () => {
@@ -60,11 +61,11 @@ describe("agentpane API", () => {
 		const body = { cwd: "/work", backend: "pi" as const };
 
 		expect(await api.createSession(body)).toEqual(ref);
-		expect(fetch).toHaveBeenCalledWith("/api/sessions", {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	});
+		expect(fetch).toHaveBeenCalledWith(ROUTES.sessions, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
 	});
 
 	it("attaches a session and unwraps its summary", async () => {
@@ -72,9 +73,9 @@ describe("agentpane API", () => {
 		const api = createAgentpaneApi({ fetch });
 
 		expect(await api.attach(ref)).toEqual(summary);
-		expect(fetch).toHaveBeenCalledWith("/api/sessions/pi/%2Ftmp%2Fa%20session.jsonl", {
-		method: "GET",
-	});
+		expect(fetch).toHaveBeenCalledWith(ROUTES.session(ref), {
+			method: "GET",
+		});
 	});
 
 	it("prompts a session with a JSON body", async () => {
@@ -83,7 +84,7 @@ describe("agentpane API", () => {
 		const body = { text: "hello" };
 
 		await expect(api.prompt(ref, body)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith("/api/sessions/pi/%2Ftmp%2Fa%20session.jsonl/prompt", {
+		expect(fetch).toHaveBeenCalledWith(ROUTES.prompt(ref), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(body),
@@ -95,7 +96,7 @@ describe("agentpane API", () => {
 		const api = createAgentpaneApi({ fetch });
 
 		await expect(api.abort(ref)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith("/api/sessions/pi/%2Ftmp%2Fa%20session.jsonl/abort", {
+		expect(fetch).toHaveBeenCalledWith(ROUTES.abort(ref), {
 			method: "POST",
 		});
 	});
@@ -143,29 +144,57 @@ describe("agentpane API", () => {
 		connection?.emitOpen();
 		connection?.emitError();
 
-		expect(openEvents).toHaveBeenCalledWith("/api/events", handlers);
+		expect(openEvents).toHaveBeenCalledWith(ROUTES.events, handlers);
 		expect(handlers.onEvent).toHaveBeenCalledWith(event);
 		expect(handlers.onOpen).toHaveBeenCalledOnce();
 		expect(handlers.onDisconnect).toHaveBeenCalledOnce();
 		expect(returned).toBe(connection);
 	});
 
-	it("reports malformed SSE JSON and close delegates to the native connection", () => {
+	it("maps native EventSource lifecycle callbacks and closes the source", () => {
 		vi.stubGlobal("EventSource", FakeNativeEventSource);
 		const api = createAgentpaneApi({ fetch: fetchRecorder() });
+		const onOpen = vi.fn();
+		const onDisconnect = vi.fn();
 		const onMalformed = vi.fn();
 		const connection = api.connect({
 			onEvent: vi.fn(),
+			onOpen,
+			onDisconnect,
+			onMalformed,
+		});
+
+		FakeNativeEventSource.instance?.emitOpen();
+		FakeNativeEventSource.instance?.emitError();
+		FakeNativeEventSource.instance?.emitMessage("{oops");
+		connection.close();
+
+		expect(onOpen).toHaveBeenCalledOnce();
+		expect(onDisconnect).toHaveBeenCalledOnce();
+		expect(onMalformed).toHaveBeenCalledWith(expect.any(Error));
+		expect(FakeNativeEventSource.instance?.closed).toBe(true);
+		vi.unstubAllGlobals();
+	});
+
+	it("does not report an onEvent exception as malformed JSON", () => {
+		vi.stubGlobal("EventSource", FakeNativeEventSource);
+		const api = createAgentpaneApi({ fetch: fetchRecorder() });
+		const consumerError = new Error("render failed");
+		const onEvent = vi.fn(() => {
+			throw consumerError;
+		});
+		const onMalformed = vi.fn();
+		api.connect({
+			onEvent,
 			onOpen: vi.fn(),
 			onDisconnect: vi.fn(),
 			onMalformed,
 		});
 
-		FakeNativeEventSource.instance?.emitMessage("{oops");
-		connection.close();
-
-		expect(onMalformed).toHaveBeenCalledWith(expect.any(Error));
-		expect(FakeNativeEventSource.instance?.closed).toBe(true);
+		expect(() => FakeNativeEventSource.instance?.emitMessage('{"type":"sessions-changed"}')).toThrow(
+			consumerError,
+		);
+		expect(onMalformed).not.toHaveBeenCalled();
 		vi.unstubAllGlobals();
 	});
 });
@@ -208,6 +237,14 @@ class FakeNativeEventSource {
 
 	emitMessage(data: string): void {
 		this.onmessage?.({ data });
+	}
+
+	emitOpen(): void {
+		this.onopen?.();
+	}
+
+	emitError(): void {
+		this.onerror?.();
 	}
 
 	close(): void {
