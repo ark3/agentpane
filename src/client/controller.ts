@@ -198,7 +198,7 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			publish({ busy: "attaching", error: null });
 			try {
 				const created = await api.createSession({ cwd, backend });
-				if (!disposed) await attachAndSelect(created, intent);
+				if (!disposed && intent === selectionIntent) await attachAndSelect(created, intent);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 			} finally {

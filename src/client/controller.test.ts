@@ -111,6 +111,28 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(secondRef), summary(firstRef)]);
 	});
 
+	it("ignores a stale create response after a newer selection completes", async () => {
+		const api = new FakeApi();
+		const createdRef: SessionRef = { backend: "pi", id: "virtual-created" };
+		const selectedRef: SessionRef = { backend: "codex", id: "thread-selected" };
+		const created = deferred<SessionRef>();
+		api.createSession.mockReturnValue(created.promise);
+		const controller = createController(api);
+
+		const creating = controller.create("/work", "pi");
+		await controller.select(selectedRef);
+		expect(controller.getView().state.selected).toEqual(selectedRef);
+		expect(controller.getView().busy).toBe("idle");
+
+		created.resolve(createdRef);
+		await creating;
+
+		expect(api.attach).toHaveBeenCalledTimes(1);
+		expect(api.attach).toHaveBeenCalledWith(selectedRef);
+		expect(controller.getView().state.selected).toEqual(selectedRef);
+		expect(controller.getView().busy).toBe("idle");
+	});
+
 	it("keeps the draft when prompt submission fails", async () => {
 		const api = new FakeApi();
 		api.prompt.mockRejectedValue(new Error("offline"));
