@@ -15,7 +15,7 @@ evidence; this only says what is built, what is left, and in what order.
 |---|---|---|
 | session-index | **done, verified** — 32 tests | merged to `main` |
 | pi-adapter | **done, verified** — 112 tests, cold start and session identity closed | merged to `main` |
-| transport | **done, verified** — 194 tests; session renaming, teardown, static serving and cross-origin closed | branch `transport` |
+| transport | **done, verified** — 194 tests; session renaming, teardown, static serving and cross-origin closed | merged to `main` |
 | renderer | unverified — 2 failing tests, typecheck clean | branch `wip/renderer` |
 | codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
 | client-shell | not started | — |
