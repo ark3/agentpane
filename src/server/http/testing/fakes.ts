@@ -71,6 +71,23 @@ export interface FakeAdapterOptions {
 	forkPoints?: ForkPoint[];
 	/** Make start() fail, to exercise the attach error path. */
 	failStart?: string;
+	/** Make dispose() fail, to exercise teardown that must not stop at the first casualty. */
+	failDispose?: string;
+	/** Make listModels() fail, as a real adapter does when asked before it is started. */
+	failListModels?: string;
+	/**
+	 * Adopt this id when `start()` resolves. Mirrors `PiAdapter`, whose `ref` is
+	 * not stable at construction: Pi's session id *is* its JSONL path (D9), so a
+	 * resumed session learns its own id from `get_state` during start.
+	 */
+	materialiseOnStart?: string;
+	/**
+	 * Adopt this id when the first `submit()` resolves -- the `virtual` case,
+	 * where the path does not exist until the first prompt creates it.
+	 */
+	materialiseOnSubmit?: string;
+	/** Emit this state change from inside `start()`, before it resolves. */
+	onStart?: (adapter: FakeAdapter) => void;
 }
 
 export class FakeAdapter implements BackendAdapter {
@@ -93,15 +110,25 @@ export class FakeAdapter implements BackendAdapter {
 	#errors = new Set<(message: string) => void>();
 	#nextRequestId = 1;
 
+	/** Not stable at construction -- see `materialiseOnStart`/`materialiseOnSubmit`. */
+	get ref(): SessionRef {
+		return this.#ref;
+	}
+	#ref: SessionRef;
+
 	constructor(
-		readonly ref: SessionRef,
+		ref: SessionRef,
 		private readonly options: FakeAdapterOptions = {},
-	) {}
+	) {
+		this.#ref = ref;
+	}
 
 	async start(opts: StartOptions): Promise<void> {
 		if (this.options.failStart) throw new Error(this.options.failStart);
 		this.startOptions = opts;
 		this.started = true;
+		this.options.onStart?.(this);
+		if (this.options.materialiseOnStart) this.materialiseAs(this.options.materialiseOnStart);
 	}
 
 	async dispose(): Promise<void> {
@@ -109,11 +136,20 @@ export class FakeAdapter implements BackendAdapter {
 		this.#updates.clear();
 		this.#requests.clear();
 		this.#errors.clear();
+		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
 
 	async submit(text: string, images?: ImageInput[]): Promise<void> {
 		this.prompts.push({ text, images });
 		await this.options.onSubmit?.(this, text, images);
+		if (this.prompts.length === 1 && this.options.materialiseOnSubmit) {
+			this.materialiseAs(this.options.materialiseOnSubmit);
+		}
+	}
+
+	/** Adopt a real backend id, as Pi does once it names the file it just wrote. */
+	materialiseAs(id: string): void {
+		this.#ref = { ...this.#ref, id };
 	}
 
 	async abort(): Promise<void> {
@@ -154,6 +190,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
+		if (this.options.failListModels) throw new Error(this.options.failListModels);
 		return this.options.models ?? [];
 	}
 
@@ -221,18 +258,31 @@ export class FakeAdapter implements BackendAdapter {
 
 export class FakeAdapterFactory implements AdapterFactory {
 	readonly created: FakeAdapter[] = [];
+	/** The ref each adapter was constructed with, which its own `ref` may outgrow. */
+	readonly createdFor: SessionRef[] = [];
 
 	constructor(private readonly options: FakeAdapterOptions = {}) {}
 
 	create(ref: SessionRef): FakeAdapter {
 		const adapter = new FakeAdapter(ref, this.options);
 		this.created.push(adapter);
+		this.createdFor.push(ref);
 		return adapter;
 	}
 
-	/** The most recently created adapter for a session. */
+	/**
+	 * The most recently created adapter for a session, found by either the id it
+	 * was created with or the one it has since adopted -- so a test written
+	 * against the pre-materialisation ref keeps working across the rename.
+	 */
 	forRef(ref: SessionRef): FakeAdapter | undefined {
-		return [...this.created].reverse().find((a) => sessionKey(a.ref) === sessionKey(ref));
+		const key = sessionKey(ref);
+		for (let i = this.created.length - 1; i >= 0; i--) {
+			const adapter = this.created[i] as FakeAdapter;
+			if (sessionKey(adapter.ref) === key) return adapter;
+			if (sessionKey(this.createdFor[i] as SessionRef) === key) return adapter;
+		}
+		return undefined;
 	}
 }
 
