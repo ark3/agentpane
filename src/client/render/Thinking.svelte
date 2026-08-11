@@ -20,6 +20,20 @@
 	let manual: boolean | null = $state(null);
 	const open = $derived(manual ?? streaming);
 
+	/**
+	 * `toggle` fires for *programmatic* changes too -- the spec queues it
+	 * whenever the `open` attribute changes state, no matter who changed it,
+	 * and jsdom implements that faithfully (verified: setting `open` on a
+	 * detached <details> delivers a toggle event). So auto-opening on
+	 * `streaming` immediately echoed back as "the reader opened it", latching
+	 * `manual` to true and leaving every thinking block on screen expanded
+	 * forever. Ignore the echo: only a state that disagrees with what we asked
+	 * for can have come from the reader.
+	 */
+	function readerToggled(event: Event): boolean {
+		return (event.currentTarget as HTMLDetailsElement).open !== open;
+	}
+
 	const preview = $derived(oneLine(text, 80));
 
 	/**
@@ -32,6 +46,7 @@
 	const hidden = $derived(!text && !streaming && !redacted);
 
 	function ontoggle(event: Event): void {
+		if (!readerToggled(event)) return;
 		manual = (event.currentTarget as HTMLDetailsElement).open;
 	}
 </script>
