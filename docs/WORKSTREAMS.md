@@ -1,98 +1,122 @@
 # Workstreams
 
-Five workstreams are built **in parallel**, each in its own git worktree. This
-document is the coordination contract. Read `HANDOFF.md` and `DESIGN.md` first
-— they carry the decisions and the evidence; this only says who builds what.
+The build is split into slices. They were originally built **in parallel**,
+each in its own git worktree; that phase is over — the parallel agents were
+killed by an account session limit, and the work now continues **one slice at a
+time**.
+
+This document is the current state of each slice and the order to pick them up.
+Read `HANDOFF.md` and `DESIGN.md` first — they carry the decisions and the
+evidence; this only says what is built, what is left, and in what order.
 
 ## Status (2026-08-11)
 
-| Workstream | State | Where |
+| Slice | State | Where |
 |---|---|---|
-| session-index | **done, verified** — 32 tests, `bun run check` green | merged to `main` |
-| pi-adapter | WIP, unverified | branch `wip/pi-adapter` |
-| codex-adapter | WIP, unverified | branch `wip/codex-adapter` |
-| transport | WIP, unverified | branch `wip/transport` |
-| renderer | WIP, unverified | branch `wip/renderer` |
+| session-index | **done, verified** — 32 tests | merged to `main` |
+| pi-adapter | **done, verified** — `bun run check` green, 107 tests; two gaps below | branch `pi-adapter` |
+| transport | unverified — `check` green, 90 tests, never reviewed | branch `wip/transport` |
+| renderer | unverified — 2 failing tests, typecheck clean | branch `wip/renderer` |
+| codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
+| client-shell | not started | — |
 
-The four WIP branches are agents that were killed mid-task by an account
-session limit and could not be resumed. Each holds real, substantial work that
-**never reached a passing `bun run check`** — tests may be missing or failing.
+**A green `bun run check` is not verification.** `wip/pi-adapter` passed on
+merge — and its largest file, the 293-line process shell, had no tests at all
+and held four real defects, including one that hung `start()` forever on a
+failed spawn. Read a branch before trusting its exit code.
 
-Two things to know before building on them:
+The three remaining `wip/*` branches forked from `da6d06ca` and `main` has
+moved since. Branch from `main`, merge the `wip/*` branch, then review it as
+unverified code. Restarting a slice from scratch is a legitimate choice if the
+partial work looks more confusing than helpful — say so rather than forcing it.
 
-1. They were written against a **broken import guard** (fixed in `7b4eb0c`,
-   which also gave it tests). It falsely flagged legal files and named the
-   wrong import, so their import ordering may be contorted around a bug that
-   no longer exists. Undo those workarounds.
-2. `main` has moved since they branched — the guard fix, the D9 corrections
-   (findings 26–27), and merged session-index.
+## Pickup order
 
-Picking one up: branch from `main`, merge or cherry-pick the WIP, then review
-it as unverified code rather than trusting it. Restarting from scratch is a
-legitimate choice if the partial work looks more confusing than helpful — say
-so rather than forcing it.
+1. **pi-adapter** — close the two gaps below, merge to `main`.
+2. **transport** — review it; green but unreviewed is exactly the state
+   pi-adapter was in.
+3. **renderer** — fix the two failures, review.
+4. **client-shell** — wire the three together. `src/client/App.svelte` and
+   `src/client/main.ts` are still placeholders. This is DESIGN's build-order
+   step 1, the Pi-only vertical slice, and the first point at which the app
+   actually runs.
+5. **codex-adapter** — last, per DESIGN's build order: the `ThreadItem` →
+   `AgentMessage` mapping is the only genuine engineering in the project and
+   deserves to land against a UI that already works.
 
-## The rule that makes parallelism safe
+**Merge each slice into `main` as soon as it is green and reviewed.** The four
+interrupted branches all forked from one commit and rotted against `main` while
+nothing merged. That, rather than the parallelism itself, is what made them
+expensive to pick up.
 
-**Own your directory. Do not edit anyone else's.** Merge conflicts between
-parallel agents are the main failure mode, and disjoint file ownership is the
-only reliable defence.
+### Open work on pi-adapter
 
-| Workstream | Owns | Verify against |
+Both confirmed against `rpc.md` and the code; neither is implemented.
+
+- **Resuming a session shows an empty transcript.** `start()` passes
+  `--session <path>` but never fetches the existing messages — `get_messages`
+  is only called from `fork()`. D3 names re-querying as *the* cold-start path,
+  so attaching to any existing Pi session renders blank until a new turn.
+- **A new session's real id is never learned.** `get_state` returns
+  `sessionFile`; it is already typed in `protocol.ts` and discarded in
+  `process.ts`. That is exactly what D9's `virtual` → materialised transition
+  needs, since Pi's session id *is* its JSONL path.
+
+## File ownership
+
+Disjoint ownership was the defence against parallel agents colliding in the
+same files. It still describes where code belongs, but it is no longer a
+prohibition: **integration is now the job.**
+
+| Slice | Owns | Verify against |
 |---|---|---|
 | **pi-adapter** | `src/server/adapters/pi/` | `resources/fixtures/pi/*.jsonl` |
 | **codex-adapter** | `src/server/adapters/codex/` | `resources/fixtures/codex/*.jsonl` |
 | **session-index** | `src/server/sessions/` | the real `~/.pi/agent/sessions` and `~/.codex/sessions` |
 | **transport** | `src/server/http/`, `src/server/index.ts` | the wire contract, with a fake adapter |
 | **renderer** | `src/client/render/` | hand-built `AgentMessage[]` samples |
+| **client-shell** | `src/client/App.svelte`, `src/client/main.ts` | the running app |
 
-Everything else — `src/shared/`, `src/server/adapters/types.ts`,
-`package.json`, `tsconfig.json`, `vite.config.ts` — is **frozen**. If you need
-a change there, stop and raise it; do not edit it and hope.
-
-`src/client/App.svelte` and `src/client/main.ts` are placeholders belonging to
-a later client-shell workstream. Leave them alone.
-
-## Frozen interfaces
+## The shared interfaces
 
 - `src/shared/protocol.ts` — the wire contract (D11). SSE event union, REST
   request/response types, `ROUTES`, `SessionRef`, `SessionSummary`.
 - `src/server/adapters/types.ts` — `BackendAdapter`, which both adapters
   implement identically.
 
-These were written to be built against by people who cannot talk to each
-other. If something in them is ambiguous, that is a defect worth reporting.
+These were frozen so that agents who could not talk to each other could build
+against them without drift. Serially that constraint is lifted: change them
+when the design calls for it, but deliberately — a change ripples into every
+unmerged `wip/*` branch, and `git diff main...wip/<slice>` is how you find out
+how far.
 
 ## Conventions
 
-- **Runtime is Bun**; tests are vitest. `bun install` first — a fresh worktree
-  has no `node_modules`.
+- **Runtime is Bun**; tests are vitest. `bun install` first.
 - **`bun run check` must pass** before you are done (typecheck + svelte-check +
   all tests). Not just your own tests.
 - **Two test projects.** Server-side tests (`src/server/**`, `src/shared/**`)
-  run in `node`; client tests (`src/client/**`) run in `jsdom`. You do not need
-  per-file environment docblocks — just put the file in the right place.
+  run in `node`; client tests (`src/client/**`) run in `jsdom`. Put the file in
+  the right place rather than writing a per-file environment docblock.
 - **Path aliases**: `$shared/*`, `$server/*`, `$client/*`. Imports carry real
   `.ts` extensions.
 - **The pi packages are types-only** (D10). `import type` only —
   `src/import-boundaries.test.ts` fails the build otherwise, naming your file.
 - Assert on **structure**, never on model wording — fixture text varies per
   capture.
+- **Verify at the source**, which is HANDOFF's one rule. Where a claim about a
+  CLI, a protocol, or a runtime is load-bearing, reproduce it and record how.
+  The most expensive defect found so far was an unexamined assumption about
+  which events `node:child_process` emits when a spawn fails.
+- **A test that has never failed has not been shown to test anything.** For a
+  fix, break it again and watch the test go red before you trust it.
 
-## What "done" looks like
+## Recording what you find
 
-Your directory implements its slice, with tests that run offline and with no
-live model calls. `bun run check` is green. You have committed on your
-worktree branch.
+A finding that lives only in a chat transcript dies with the session — which is
+how the first round's reports were lost. Put them where they survive:
 
-**Report anything the docs got wrong or left ambiguous.** Guessing silently is
-the one outcome that makes parallel work worse than serial. A gap you flag gets
-fixed once, centrally; a gap you paper over surfaces at integration, five times
-over, in five different shapes.
-
-## Integration
-
-Merging and reconciling is deliberate serial work, done after the parallel
-phase. Do not attempt to integrate with another workstream's code — if you need
-something that does not exist yet, define the seam against the frozen
-interfaces and note the assumption in your report.
+- A defect in these documents: **fix the document**, in the same change.
+- A fact you had to verify: the commit message, or `DESIGN.md` when it changes
+  a decision rather than confirming one.
+- Something you could not resolve: DESIGN's "Remaining open questions".
