@@ -7,7 +7,7 @@
  * the reducer -- which keeps the id bookkeeping in one small, boring place.
  */
 
-import { isCodexResponse, type CodexResponse, type CodexServerMessage, type RequestId } from "./protocol.ts";
+import { isRecord, type CodexResponse, type CodexServerMessage, type RequestId } from "./protocol.ts";
 import type { CodexProcess } from "./process.ts";
 
 export class CodexRpcError extends Error {
@@ -50,13 +50,19 @@ export class CodexClient {
 				handlers.onMalformed?.(line);
 				return;
 			}
-			if (typeof parsed !== "object" || parsed === null) return;
-			const msg = parsed as CodexServerMessage;
-			if (isCodexResponse(msg)) {
-				this.settle(msg);
+			if (!isRecord(parsed)) {
+				handlers.onMalformed?.(line);
 				return;
 			}
-			handlers.onMessage(msg);
+			if (isValidResponse(parsed)) {
+				this.settle(parsed as CodexResponse);
+				return;
+			}
+			if (isValidPushedEnvelope(parsed)) {
+				handlers.onMessage(parsed as CodexServerMessage);
+				return;
+			}
+			handlers.onMalformed?.(line);
 		});
 
 		proc.onExit((code, signal, cause) => {
@@ -123,4 +129,23 @@ export class CodexClient {
 		this.pending.clear();
 		for (const entry of pending) entry.reject(error);
 	}
+}
+
+function isValidResponse(envelope: Record<string, unknown>): boolean {
+	if (!isRequestId(envelope["id"]) || "method" in envelope) return false;
+	const hasResult = Object.hasOwn(envelope, "result");
+	const hasError = Object.hasOwn(envelope, "error");
+	if (hasResult === hasError) return false;
+	if (!hasError) return true;
+	const error = envelope["error"];
+	return isRecord(error) && typeof error["code"] === "number" && typeof error["message"] === "string";
+}
+
+function isValidPushedEnvelope(envelope: Record<string, unknown>): boolean {
+	if (typeof envelope["method"] !== "string" || "result" in envelope || "error" in envelope) return false;
+	return !("id" in envelope) || isRequestId(envelope["id"]);
+}
+
+function isRequestId(value: unknown): value is RequestId {
+	return typeof value === "string" || typeof value === "number";
 }

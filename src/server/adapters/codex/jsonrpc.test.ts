@@ -135,6 +135,58 @@ describe("CodexClient inbound messages", () => {
 		expect(onMalformed).toHaveBeenCalledWith("not-json");
 		expect(onMessage).toHaveBeenCalledWith(notification);
 	});
+
+	it("reports parsed primitives and whitespace-only records as malformed", () => {
+		const { proc, onMessage, onMalformed } = makeClient();
+
+		proc.emitRaw("42");
+		proc.emitRaw(" \t");
+
+		expect(onMalformed.mock.calls).toEqual([["42"], [" \t"]]);
+		expect(onMessage).not.toHaveBeenCalled();
+	});
+
+	it("reports an incomplete response without consuming its pending request", async () => {
+		const { client, proc, onMalformed } = makeClient();
+		const pending = client.request("initialize");
+
+		proc.emit({ id: 1 });
+		proc.emit({ id: 1, result: { userAgent: "codex" } });
+
+		expect(onMalformed).toHaveBeenCalledWith('{"id":1}');
+		expect(await pending).toEqual({ userAgent: "codex" });
+	});
+
+	it("rejects invalid response variants without disturbing correlation", async () => {
+		const { client, proc, onMalformed } = makeClient();
+		const pending = client.request("initialize");
+		const malformed = [
+			{ id: 1, result: null, error: { code: -1, message: "both" } },
+			{ id: 1, error: { code: "-1", message: "wrong code" } },
+			{ id: 1, error: { code: -1, message: 7 } },
+		];
+
+		for (const envelope of malformed) proc.emit(envelope);
+		proc.emit({ id: 1, result: "ready" });
+
+		expect(onMalformed.mock.calls.map(([line]) => JSON.parse(line as string))).toEqual(malformed);
+		expect(await pending).toBe("ready");
+	});
+
+	it("reports invalid pushed envelopes instead of dispatching them", () => {
+		const { proc, onMessage, onMalformed } = makeClient();
+		const malformed = [
+			[],
+			{ method: 7, params: {} },
+			{ id: null, method: "approval", params: {} },
+			{ method: "thread/started", params: {}, result: null },
+		];
+
+		for (const envelope of malformed) proc.emit(envelope);
+
+		expect(onMalformed).toHaveBeenCalledTimes(malformed.length);
+		expect(onMessage).not.toHaveBeenCalled();
+	});
 });
 
 describe("CodexClient termination", () => {

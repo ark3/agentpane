@@ -16,7 +16,7 @@ class FakeReadable extends EventEmitter {
 	}
 }
 
-class FakeWritable {
+class FakeWritable extends EventEmitter {
 	readonly chunks: string[] = [];
 	endCalls = 0;
 	destroyed = false;
@@ -92,6 +92,15 @@ describe("LineSplitter", () => {
 
 		expect(lines).toEqual(['{"id":1,"result":true}', '{"id":2,"result":false}']);
 	});
+
+	it("preserves a whitespace-only LF frame for protocol validation", () => {
+		const splitter = new LineSplitter();
+		const lines: string[] = [];
+
+		splitter.push(" \t\n", (line) => lines.push(line));
+
+		expect(lines).toEqual([" \t"]);
+	});
 });
 
 describe("spawnCodex", () => {
@@ -153,6 +162,32 @@ describe("Codex process lifecycle", () => {
 
 		child.emit("close", -2, null);
 		await expect(initialized).rejects.toThrow(/Failed to spawn Codex \(direnv\): spawn direnv ENOENT/);
+		expect(onExit).toHaveBeenCalledOnce();
+	});
+
+	it("captures an asynchronous stdin EPIPE and rejects on close with its cause", async () => {
+		const { child, proc } = spawnHarness();
+		const onExit = vi.fn();
+		proc.onExit(onExit);
+		const client = new CodexClient(proc, { onMessage: vi.fn() });
+		const pending = client.request("initialize");
+		let rejection: unknown;
+		let rejectionCount = 0;
+		void pending.catch((error: unknown) => {
+			rejection = error;
+			rejectionCount++;
+		});
+
+		expect(() => child.stdin.emit("error", new Error("write EPIPE"))).not.toThrow();
+		await Promise.resolve();
+		expect(rejection).toBeUndefined();
+		expect(onExit).not.toHaveBeenCalled();
+
+		child.emit("close", 1, null);
+		await expect(pending).rejects.toThrow("Codex app-server stdin failed: write EPIPE");
+		child.emit("close", 1, null);
+		await Promise.resolve();
+		expect(rejectionCount).toBe(1);
 		expect(onExit).toHaveBeenCalledOnce();
 	});
 

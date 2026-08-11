@@ -59,19 +59,24 @@ export class LineSplitter {
 		this.buffer += chunk;
 		let newline = this.buffer.indexOf("\n");
 		while (newline >= 0) {
-			const line = this.buffer.slice(0, newline).trim();
+			const line = stripTrailingCr(this.buffer.slice(0, newline));
 			this.buffer = this.buffer.slice(newline + 1);
-			if (line) emit(line);
+			emit(line);
 			newline = this.buffer.indexOf("\n");
 		}
 	}
 
 	/** Whatever is left after the stream closed, if it is a complete-looking line. */
 	flush(emit: (line: string) => void): void {
-		const rest = this.buffer.trim();
+		if (this.buffer.length === 0) return;
+		const rest = stripTrailingCr(this.buffer);
 		this.buffer = "";
-		if (rest) emit(rest);
+		emit(rest);
 	}
+}
+
+function stripTrailingCr(line: string): string {
+	return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
 export type CodexSpawner = (options: CodexSpawnOptions) => CodexProcess;
@@ -93,6 +98,7 @@ class ChildCodexProcess implements CodexProcess {
 	private exitHandlers: ((code: number | null, signal: string | null, error?: Error) => void)[] = [];
 	private stderrTail = "";
 	private spawnError: string | undefined;
+	private stdinError: string | undefined;
 	private closed = false;
 	private killed = false;
 
@@ -109,6 +115,9 @@ class ChildCodexProcess implements CodexProcess {
 		child.stderr.setEncoding("utf8");
 		child.stderr.on("data", (chunk: string) => {
 			this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
+		});
+		child.stdin.on("error", (error: Error) => {
+			this.stdinError = `Codex app-server stdin failed: ${error.message}`;
 		});
 
 		child.on("error", (error: Error) => {
@@ -147,7 +156,10 @@ class ChildCodexProcess implements CodexProcess {
 		if (this.closed) return;
 		this.closed = true;
 
-		const reason = this.spawnError ?? `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
+		const reason =
+			this.spawnError ??
+			this.stdinError ??
+			`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
 		const detail = this.stderrTail.trim();
 		const error = new Error(detail ? `${reason}\n${detail}` : reason);
 		for (const handler of this.exitHandlers) handler(code, signal, error);
