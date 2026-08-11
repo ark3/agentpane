@@ -287,6 +287,8 @@ describe("teardown racing a startup", () => {
 		// disposeAll() resolving is the server's licence to exit. An adapter that
 		// is only disposed after it resolves is an orphaned agent.
 		expect(slow.created[0]?.disposed).toBe(true);
+		// Shutdown and the startup's own unwinding both hold this adapter.
+		expect(slow.created[0]?.disposals).toBe(1);
 	});
 
 	it("does not spawn at all when teardown beats the adapter into existence", async () => {

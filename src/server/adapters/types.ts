@@ -44,6 +44,18 @@ export interface BackendAdapter {
 	// -- lifecycle ----------------------------------------------------------
 	/** Spawn via `direnv exec <cwd> sbox -- <agent>` (D7). */
 	start(opts: StartOptions): Promise<void>;
+	/**
+	 * Kill the subprocess. MUST be idempotent and MUST resolve only once the
+	 * child is actually gone -- the server's shutdown resolving is its licence
+	 * to exit, and it reaches one adapter from more than one direction: an
+	 * explicit close and a failing `start()` can hold the same adapter, and
+	 * shutdown walks both the process table and the startups still in flight.
+	 * Repeat callers must await the first teardown rather than run a second,
+	 * which would re-signal a pid the OS may have already reused.
+	 *
+	 * Safe to call *during* `start()`, which is where a teardown most often
+	 * lands: both implementations own their child before `start()` resolves.
+	 */
 	dispose(): Promise<void>;
 
 	// -- driving a turn -----------------------------------------------------
