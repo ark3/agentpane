@@ -37,6 +37,26 @@ class AdapterProcess extends FakeCodexProcess implements CodexProcess {
 	}
 }
 
+class SynchronousRegistrationProcess extends AdapterProcess {
+	override onLine(cb: (line: string) => void): void {
+		super.onLine(cb);
+		cb(
+			JSON.stringify({
+				id: 91,
+				method: "item/fileChange/requestApproval",
+				params: { itemId: "too-early" },
+			}),
+		);
+	}
+
+	override onExit(
+		cb: (code: number | null, signal: string | null, error?: Error) => void,
+	): void {
+		super.onExit(cb);
+		cb(null, null, new Error("registration-time exit"));
+	}
+}
+
 interface HappyServerOptions {
 	threadId?: string;
 	turns?: unknown[];
@@ -323,6 +343,85 @@ describe("CodexAdapter lifecycle", () => {
 
 		expect(requests).not.toHaveBeenCalled();
 	});
+
+	it("ignores synchronous process callbacks until client ownership is installed", async () => {
+		const proc = new SynchronousRegistrationProcess();
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		const requests = vi.fn();
+		adapter.onRequest(requests);
+
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
+
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false });
+		expect(requests).not.toHaveBeenCalled();
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("rejects resume when a hydration update listener disposes the adapter", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, {
+			threadId: STORED_REF.id,
+			turns: [
+				{
+					id: "turn-stored",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-stored",
+							clientId: null,
+							content: [{ type: "text", text: "saved", text_elements: [] }],
+						},
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			],
+		});
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		let disposal: Promise<void> | undefined;
+		adapter.onUpdate(() => {
+			disposal = adapter.dispose();
+		});
+
+		await expect(
+			adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id }),
+		).rejects.toThrow("codex adapter start aborted: disposed during startup");
+		await disposal;
+
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("drops requests received before a failed start before a later retry", async () => {
+		const failed = new AdapterProcess();
+		failed.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			if (message["method"] === "initialize") failed.emit({ id, result: {} });
+			if (message["method"] === "thread/start") {
+				failed.emit({ id: 4, method: "item/fileChange/requestApproval", params: {} });
+				failed.emit({ id, error: { code: -32000, message: "startup rejected" } });
+			}
+		});
+		const replacement = new AdapterProcess();
+		configureHappyServer(replacement, { threadId: "thread-replacement" });
+		const processes = [failed, replacement];
+		const adapter = new CodexAdapter(VIRTUAL_REF, {
+			spawn: () => processes.shift() ?? replacement,
+		});
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
+
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("startup rejected");
+		const staleExternalId = requests[0]?.requestId ?? "";
+		await adapter.start({ cwd: "/workspace" });
+		await adapter.reply(staleExternalId, { decision: "accept" });
+
+		expect(responses(replacement)).toEqual([]);
+	});
 });
 
 describe("CodexAdapter turns", () => {
@@ -441,6 +540,70 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
+	it("does not revive a turn completed in the same chunk as turn/start response", async () => {
+		const proc = new AdapterProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			switch (message["method"]) {
+				case "initialize":
+					proc.emit({ id, result: {} });
+					break;
+				case "thread/start":
+					proc.emit({
+						id,
+						result: {
+							thread: { id: "thread-same-chunk", turns: [] },
+							model: "gpt",
+							modelProvider: "openai",
+						},
+					});
+					break;
+				case "turn/start": {
+					const turn = {
+						id: "turn-same-chunk",
+						items: [],
+						itemsView: "notLoaded",
+						status: "inProgress",
+						error: null,
+						startedAt: 1,
+						completedAt: null,
+						durationMs: null,
+					};
+					proc.emit({ id, result: { turn } });
+					proc.emit({
+						method: "turn/started",
+						params: { threadId: "thread-same-chunk", turn },
+					});
+					proc.emit({
+						method: "turn/completed",
+						params: {
+							threadId: "thread-same-chunk",
+							turn: {
+								...turn,
+								itemsView: "summary",
+								status: "completed",
+								completedAt: 2,
+								durationMs: 1000,
+							},
+						},
+					});
+					break;
+				}
+				case "turn/interrupt":
+					proc.emit({ id, result: {} });
+					break;
+			}
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+
+		await adapter.submit("finish synchronously");
+		await adapter.abort();
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
 	it("applies a selected model to subsequent turns", async () => {
 		const { adapter, proc } = await startedAdapter();
 
@@ -528,6 +691,49 @@ describe("CodexAdapter reducer effects", () => {
 });
 
 describe("CodexAdapter request replies", () => {
+	it("uses a distinct request namespace for a later adapter lifetime of the same thread", async () => {
+		const first = await startedAdapter({ threadId: "thread-reopened" });
+		const second = await startedAdapter({ threadId: "thread-reopened" });
+		const firstRequests: AgentRequest[] = [];
+		const secondRequests: AgentRequest[] = [];
+		first.adapter.onRequest((request) => firstRequests.push(request));
+		second.adapter.onRequest((request) => secondRequests.push(request));
+
+		first.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+		second.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+
+		expect(firstRequests[0]?.requestId).not.toBe(secondRequests[0]?.requestId);
+	});
+
+	it("resolves a pre-adoption request through its typed reverse mapping", async () => {
+		const proc = new AdapterProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			if (message["method"] === "initialize") proc.emit({ id, result: {} });
+			if (message["method"] === "thread/start") {
+				proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+				proc.emit({
+					id,
+					result: {
+						thread: { id: "thread-adopted-after-request", turns: [] },
+						model: "gpt",
+						modelProvider: "openai",
+					},
+				});
+			}
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
+
+		await adapter.start({ cwd: "/workspace" });
+		proc.emit({ method: "serverRequest/resolved", params: { requestId: 0 } });
+		await adapter.reply(requests[0]?.requestId ?? "", { decision: "accept" });
+
+		expect(responses(proc)).toEqual([]);
+	});
+
 	it("scopes equal wire request ids to their adapter sessions", async () => {
 		const first = await startedAdapter({ threadId: "thread-first" });
 		const second = await startedAdapter({ threadId: "thread-second" });

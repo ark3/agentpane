@@ -7,6 +7,7 @@
  * half be tested against recorded fixtures with no subprocess at all.
  */
 
+import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import type {
@@ -22,7 +23,7 @@ import { spawnCodex, type CodexProcess, type CodexSpawner } from "./process.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import {
 	DECLINE_RESPONSES,
-	requestKey,
+	wireRequestKey,
 	type ClientInfo,
 	type CodexServerMessage,
 	type ModelListResponse,
@@ -53,9 +54,16 @@ export interface CodexAdapterOptions {
 }
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
+const START_ABORTED_ERROR = "codex adapter start aborted: disposed during startup";
 
 /** JSON-RPC "request cancelled"; used when a blocking request is declined. */
 const DECLINED_CODE = -32800;
+
+interface ClientOwnership {
+	proc: CodexProcess;
+	client: CodexClient | null;
+	ready: boolean;
+}
 
 export class CodexAdapter implements BackendAdapter {
 	private currentRef: SessionRef;
@@ -64,14 +72,24 @@ export class CodexAdapter implements BackendAdapter {
 
 	private proc: CodexProcess | null = null;
 	private client: CodexClient | null = null;
+	private ownership: ClientOwnership | null = null;
 	private threadId: string | null = null;
 	private turnId: string | null = null;
+	private completedTurnIds = new Set<string>();
 	private model: string | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
 
-	/** Blocking `ServerRequest`s awaiting a human, keyed as the wire keys them. */
-	private pendingRequests = new Map<string, { id: RequestId; kind: string }>();
+	/** Unique to this adapter lifetime, even when a stored thread is reopened. */
+	private readonly requestNamespace = randomUUID();
+	private nextExternalRequestId = 0;
+	/** Opaque browser id -> the original typed app-server request. */
+	private pendingRequests = new Map<
+		string,
+		{ id: RequestId; kind: string; wireKey: string }
+	>();
+	/** Typed app-server request key -> opaque browser id. */
+	private externalRequestIds = new Map<string, string>();
 	/** Turn ids in transcript order; `fork` needs the *previous* turn (see `fork`). */
 	private turnOrder: string[] = [];
 
@@ -104,25 +122,26 @@ export class CodexAdapter implements BackendAdapter {
 		const spawner = this.options.spawn ?? spawnCodex;
 		const proc = spawner({ cwd: opts.cwd, env: this.options.env });
 		this.proc = proc;
-		let client: CodexClient;
-		client = new CodexClient(proc, {
+		const ownership: ClientOwnership = { proc, client: null, ready: false };
+		this.ownership = ownership;
+		const client = new CodexClient(proc, {
 			onMessage: (msg) => {
-				if (this.disposed || this.proc !== proc || this.client !== client) return;
+				if (!this.owns(ownership)) return;
 				this.onServerMessage(msg);
 			},
 			onExit: (code, signal, error) => {
-				if (this.disposed || this.proc !== proc || this.client !== client) return;
+				if (!this.owns(ownership)) return;
 				this.emitError(
 					error?.message ??
 						`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
 				);
 			},
 		});
+		ownership.client = client;
 		this.client = client;
+		ownership.ready = true;
 		const assertOwned = (): void => {
-			if (this.disposed || this.proc !== proc || this.client !== client) {
-				throw new Error("codex adapter disposed during start");
-			}
+			if (!this.owns(ownership)) throw new Error(START_ABORTED_ERROR);
 		};
 
 		try {
@@ -145,8 +164,6 @@ export class CodexAdapter implements BackendAdapter {
 					});
 			assertOwned();
 
-			this.threadId = started.thread.id;
-			this.currentRef = { backend: "codex", id: started.thread.id };
 			this.model = started.model ?? this.model;
 			this.reducer.setIdentity({ model: started.model, modelProvider: started.modelProvider });
 
@@ -154,10 +171,20 @@ export class CodexAdapter implements BackendAdapter {
 			// without a second round trip (D3's cold-start path).
 			if (opts.resumeId && started.thread.turns?.length) {
 				this.applyEffects(this.reducer.hydrate(started.thread));
+				assertOwned();
 				this.rememberTurns(started.thread);
 			}
+
+			assertOwned();
+			this.threadId = started.thread.id;
+			this.currentRef = { backend: "codex", id: started.thread.id };
 		} catch (error) {
 			client.dispose("codex adapter start failed");
+			this.clearPendingRequests();
+			if (this.ownership === ownership) {
+				ownership.ready = false;
+				this.ownership = null;
+			}
 			if (this.client === client) this.client = null;
 			if (this.proc === proc) {
 				this.proc = null;
@@ -172,6 +199,8 @@ export class CodexAdapter implements BackendAdapter {
 		this.disposed = true;
 		const client = this.client;
 		const proc = this.proc;
+		if (this.ownership) this.ownership.ready = false;
+		this.ownership = null;
 		this.client = null;
 		this.proc = null;
 		client?.dispose();
@@ -179,7 +208,8 @@ export class CodexAdapter implements BackendAdapter {
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
-		this.pendingRequests.clear();
+		this.clearPendingRequests();
+		this.completedTurnIds.clear();
 	}
 
 	// -- driving a turn -----------------------------------------------------
@@ -195,6 +225,7 @@ export class CodexAdapter implements BackendAdapter {
 		// Once a new turn is requested, the previous turn is no longer an abort
 		// target. A response or `turn/started` notification installs the new id.
 		this.turnId = null;
+		this.completedTurnIds.clear();
 		const response = await client.request<TurnStartResponse>("turn/start", {
 			threadId,
 			input,
@@ -203,7 +234,10 @@ export class CodexAdapter implements BackendAdapter {
 			// where `setModel` takes effect.
 			...(this.model ? { model: this.model } : {}),
 		});
-		this.turnId = response.turn?.id ?? null;
+		const responseTurnId = response.turn?.id;
+		this.turnId =
+			responseTurnId && !this.completedTurnIds.has(responseTurnId) ? responseTurnId : null;
+		this.completedTurnIds.clear();
 	}
 
 	async abort(): Promise<void> {
@@ -293,6 +327,9 @@ export class CodexAdapter implements BackendAdapter {
 		const pending = this.pendingRequests.get(requestId);
 		if (!pending) return; // already resolved, or never ours
 		this.pendingRequests.delete(requestId);
+		if (this.externalRequestIds.get(pending.wireKey) === requestId) {
+			this.externalRequestIds.delete(pending.wireKey);
+		}
 		if (response === null || response === undefined) {
 			const decline = DECLINE_RESPONSES[pending.kind];
 			if (decline !== undefined) client.respond(pending.id, decline);
@@ -337,6 +374,7 @@ export class CodexAdapter implements BackendAdapter {
 					this.turnId = msg.params.turn.id;
 					break;
 				case "turn/completed":
+					this.completedTurnIds.add(msg.params.turn.id);
 					if (this.turnId === msg.params.turn.id) this.turnId = null;
 					break;
 			}
@@ -355,8 +393,12 @@ export class CodexAdapter implements BackendAdapter {
 					this.emitUpdate(undefined);
 					break;
 				case "request": {
-					const key = requestKey(this.threadId ?? this.currentRef.id, effect.requestId);
-					this.pendingRequests.set(key, { id: effect.requestId, kind: effect.kind });
+					const wireKey = wireRequestKey(effect.requestId);
+					const previousExternalId = this.externalRequestIds.get(wireKey);
+					if (previousExternalId) this.pendingRequests.delete(previousExternalId);
+					const key = `codex:${this.requestNamespace}:${this.nextExternalRequestId++}`;
+					this.pendingRequests.set(key, { id: effect.requestId, kind: effect.kind, wireKey });
+					this.externalRequestIds.set(wireKey, key);
 					const request: AgentRequest = {
 						requestId: key,
 						session: this.currentRef,
@@ -369,9 +411,12 @@ export class CodexAdapter implements BackendAdapter {
 				case "request-resolved":
 					// Codex resolved it without us (auto-approval, or another
 					// client). Drop it so a late `reply` is a no-op.
-					this.pendingRequests.delete(
-						requestKey(this.threadId ?? this.currentRef.id, effect.requestId),
-					);
+					{
+						const wireKey = wireRequestKey(effect.requestId);
+						const externalId = this.externalRequestIds.get(wireKey);
+						if (externalId) this.pendingRequests.delete(externalId);
+						this.externalRequestIds.delete(wireKey);
+					}
 					break;
 				case "error":
 					this.emitError(effect.message);
@@ -387,6 +432,21 @@ export class CodexAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const listener of [...this.errorListeners]) listener(message);
+	}
+
+	private owns(ownership: ClientOwnership): boolean {
+		return (
+			!this.disposed &&
+			ownership.ready &&
+			this.ownership === ownership &&
+			this.proc === ownership.proc &&
+			this.client === ownership.client
+		);
+	}
+
+	private clearPendingRequests(): void {
+		this.pendingRequests.clear();
+		this.externalRequestIds.clear();
 	}
 
 	private rememberTurns(thread: Pick<Thread, "turns">): void {

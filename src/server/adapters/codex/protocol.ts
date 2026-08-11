@@ -99,14 +99,9 @@ export function isCodexNotification(msg: CodexServerMessage): msg is CodexNotifi
 	return !("id" in msg) && "method" in msg;
 }
 
-/**
- * Browser-facing request ids share one app-wide namespace. Scope the backend's
- * per-process id to its thread and retain its JSON type (`0` and `"0"` are
- * distinct RequestIds). The value is opaque to clients; only the adapter maps
- * it back to the original wire id.
- */
-export function requestKey(threadId: string, id: RequestId): string {
-	return JSON.stringify(["codex", threadId, typeof id, id]);
+/** A typed lookup key for one app-server's wire namespace (`0` !== `"0"`). */
+export function wireRequestKey(id: RequestId): string {
+	return JSON.stringify([typeof id, id]);
 }
 
 /**
