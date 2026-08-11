@@ -58,6 +58,10 @@ export function createApp(deps: AppDeps): App {
 			return served ?? notFound(url.pathname);
 		}
 
+		if (!isLoopbackOrigin(request.headers.get("origin"))) {
+			return error(403, "forbidden_origin", "this API is reachable only from a local page");
+		}
+
 		// /api/events
 		if (segments.length === 2 && segments[1] === "events") {
 			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
@@ -369,6 +373,46 @@ function decodeSegment(segment: string): string {
 
 function isBackendId(value: unknown): value is BackendId {
 	return value === "pi" || value === "codex";
+}
+
+/**
+ * D8 binds 127.0.0.1 so nothing off this machine can reach us. That closes the
+ * network, not the browser: any page in any tab can issue cross-origin requests
+ * to a loopback port, and a `POST` with a simple content type is not preflighted
+ * — so `evil.com` cannot *read* our replies, but it can drive them. Every route
+ * behind here spawns sandboxed agents with write access to the user's
+ * repositories, which makes a blind write plenty.
+ *
+ * D8's reasoning ("no auth needs to exist once remote access is off the table")
+ * is about remote *network* access and does not extend to this, so it is not
+ * being overturned here. pipane has no origin check either (HANDOFF finding
+ * 17), which is where the gap was inherited from.
+ *
+ * The rule is loopback-*origin*, not same-origin: in dev the page is served by
+ * Vite on another port and proxied here, so an exact match would reject the
+ * only client we have. A request with no `Origin` at all is curl, or a typed
+ * URL — not something a page can forge, since browsers always attach it
+ * cross-origin.
+ */
+function isLoopbackOrigin(origin: string | null): boolean {
+	if (origin === null) return true;
+	let hostname: string;
+	try {
+		({ hostname } = new URL(origin));
+	} catch {
+		// Includes the literal `"null"` an opaque origin sends -- a sandboxed
+		// iframe or a `data:` document. Not a URL, and never ours.
+		return false;
+	}
+	// Anchored, because `127.0.0.0/8` is all loopback but `startsWith("127.")`
+	// also accepts `127.0.0.1.evil.example`, which is a name someone else owns.
+	// Caught by the test above, not by reading this back.
+	return (
+		hostname === "localhost" ||
+		hostname === "[::1]" ||
+		hostname === "::1" ||
+		/^127(\.\d{1,3}){3}$/.test(hostname)
+	);
 }
 
 function json(body: unknown, status = 200): Response {

@@ -705,3 +705,55 @@ describe("routing and errors", () => {
 		expect((await get("/index.html")).status).toBe(404);
 	});
 });
+
+describe("origin", () => {
+	// D8 binds loopback, which closes the network but not the browser: any page
+	// in any tab can POST to 127.0.0.1 without a preflight. It cannot read the
+	// reply, but every route here spawns an agent with write access to a
+	// repository, so a blind write is enough.
+	function withOrigin(path: string, origin: string, method = "GET"): Promise<Response> {
+		return app.fetch(
+			new Request(`http://127.0.0.1${path}`, {
+				method,
+				headers: { origin, "content-type": "application/json" },
+				...(method === "POST" ? { body: "{}" } : {}),
+			}),
+		);
+	}
+
+	it("refuses a request a page on the web made on the user's behalf", async () => {
+		for (const origin of ["https://evil.example", "http://127.0.0.1.evil.example", "null"]) {
+			const response = await withOrigin(ROUTES.prompt(PI_SESSION), origin, "POST");
+			expect(response.status, origin).toBe(403);
+			expect(((await response.json()) as ApiError).error).toBe("forbidden_origin");
+		}
+		// And nothing was spawned on the way to saying no.
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("refuses a cross-origin read too, because opening a session spawns one", async () => {
+		expect((await withOrigin(ROUTES.session(PI_SESSION), "https://evil.example")).status).toBe(403);
+		expect((await withOrigin(ROUTES.events, "https://evil.example")).status).toBe(403);
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("allows the dev server's origin, which is loopback on another port", async () => {
+		// vite.config.ts serves the client from 127.0.0.1:5173 and proxies /api
+		// here with changeOrigin: false, so same-origin would reject dev.
+		expect((await withOrigin(ROUTES.sessions, "http://127.0.0.1:5173")).status).toBe(200);
+		expect((await withOrigin(ROUTES.sessions, "http://localhost:5173")).status).toBe(200);
+	});
+
+	it("allows a request with no Origin, which no page can produce", async () => {
+		expect((await get(ROUTES.sessions)).status).toBe(200);
+	});
+
+	it("leaves the static bundle alone", async () => {
+		app = createApp({
+			index,
+			adapters: { pi },
+			staticHandler: () => new Response("<!doctype html>", { status: 200 }),
+		});
+		expect((await withOrigin("/", "https://evil.example")).status).toBe(200);
+	});
+});
