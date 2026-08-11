@@ -1,56 +1,36 @@
 # Workstreams
 
-The build is split into slices. They were originally built **in parallel**,
-each in its own git worktree; that phase is over — the parallel agents were
-killed by an account session limit, and the work now continues **one slice at a
-time**.
+The build was split into slices. They were originally built **in parallel**,
+each in its own git worktree; all six slices are now integrated on
+`feature/minimal-live-vertical-slice`.
 
-This document is the current state of each slice and the order to pick them up.
+This document is the current state of each slice and the contracts they expose.
 Read `HANDOFF.md` and `DESIGN.md` first — they carry the decisions and the
-evidence; this only says what is built, what is left, and in what order.
+evidence. Live verification details and its exact scope are in
+`MANUAL_TESTING.md`.
 
 ## Status (2026-08-11)
 
 | Slice | State | Where |
 |---|---|---|
-| session-index | **done, verified** — 32 tests | merged to `main` |
-| pi-adapter | **done, verified** — 112 tests, cold start and session identity closed | merged to `main` |
-| transport | **done, verified** — 194 tests; session renaming, teardown, static serving and cross-origin closed | merged to `main` |
-| renderer | **done, verified** — 379 tests; the edit card, tool-result images and the thinking disclosure closed | merged to `main` |
-| codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
-| client-shell | not started | — |
+| session-index | **done, offline verified** | this branch |
+| pi-adapter | **done, offline verified** through fixtures, process tests, and contracts; live Pi remains deferred | this branch |
+| transport | **done, verified** offline and through the live Codex REST/SSE path | this branch |
+| renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | this branch |
+| codex-adapter | **done, verified** against fixtures and a live `codex-cli 0.147.0` turn | this branch |
+| client-shell | **done, offline verified**; the production-built client returned HTTP 200, but no browser automation was run | this branch |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
 merge — and its largest file, the 293-line process shell, had no tests at all
 and held four real defects, including one that hung `start()` forever on a
 failed spawn. Read a branch before trusting its exit code.
 
-The three remaining `wip/*` branches forked from `da6d06ca` and `main` has
-moved since. Branch from `main`, merge the `wip/*` branch, then review it as
-unverified code. Restarting a slice from scratch is a legitimate choice if the
-partial work looks more confusing than helpful — say so rather than forcing it.
-
-## Pickup order
-
-1. ~~**pi-adapter**~~ — done, merged.
-2. ~~**transport**~~ — done, reviewed. The pattern held: `check` was green on
-   `wip/transport` and the largest gap was the *documented* caller contract
-   below, unimplemented, which broke the whole new-session flow.
-3. ~~**renderer**~~ — done, reviewed. The pattern held again: `typecheck` was
-   clean and both failures were shallow, while the real defect was a tool card
-   verified against a hand-written sample that no backend actually produces.
-4. **client-shell** — wire the three together. `src/client/App.svelte` and
-   `src/client/main.ts` are still placeholders. This is DESIGN's build-order
-   step 1, the Pi-only vertical slice, and the first point at which the app
-   actually runs.
-5. **codex-adapter** — last, per DESIGN's build order: the `ThreadItem` →
-   `AgentMessage` mapping is the only genuine engineering in the project and
-   deserves to land against a UI that already works.
-
-**Merge each slice into `main` as soon as it is green and reviewed.** The four
-interrupted branches all forked from one commit and rotted against `main` while
-nothing merged. That, rather than the parallelism itself, is what made them
-expensive to pick up.
+The assembled milestone has 551 offline tests. On 2026-08-11, the production
+server also completed the six Codex smoke checks: create/attach, incremental
+text updates, idle completion, reconnect repaint without another native Codex
+worker, abort, and shutdown without an orphan. That run served the built client
+and drove REST/SSE with a local harness; it did **not** automate browser UI
+interaction. Pi was **not** live-tested in this environment.
 
 ### What the Pi adapter expects of its caller
 

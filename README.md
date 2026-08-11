@@ -20,4 +20,41 @@ view), but multi-backend and with its own client stack.
 3. **`resources/`** — validated Codex protocol bindings, reproducible probe
    scripts, and captured protocol fixtures for offline adapter tests.
 
-No source exists yet. This repo currently holds the design and its evidence.
+## Development
+
+Install dependencies once:
+
+```bash
+bun install
+```
+
+For local development, run the API server and Vite client in separate
+terminals. Vite proxies `/api` to the server on `127.0.0.1:4173`.
+
+```bash
+bun run dev
+```
+
+```bash
+bun run dev:client
+```
+
+For a production-style local run, build the client and let the Bun server
+serve both the static application and API:
+
+```bash
+bun run build
+bun run start
+```
+
+Run the complete offline verification suite with:
+
+```bash
+bun run check
+```
+
+The first production-composed Codex smoke run is recorded in
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md). It exercised the built
+client's reachability and the REST/SSE path with a real Codex process. Pi was
+not live-tested in that environment; its deferred checklist is explicit in the
+same document.
