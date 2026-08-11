@@ -31,12 +31,16 @@ class FakeStream extends EventEmitter {
 
 class FakeStdin {
 	destroyed = false;
+	endCalls = 0;
 	chunks: string[] = [];
 	write(chunk: string): boolean {
 		this.chunks.push(chunk);
 		return true;
 	}
 	end(): void {
+		// Node raises ERR_STREAM_ALREADY_FINISHED on a second end(); a teardown
+		// that can happen twice must not reach this twice.
+		this.endCalls++;
 		this.destroyed = true;
 	}
 }
@@ -46,8 +50,10 @@ class FakeChild extends EventEmitter {
 	readonly stderr = new FakeStream();
 	readonly stdin = new FakeStdin();
 	killed = false;
+	killCalls = 0;
 	kill(): boolean {
 		this.killed = true;
+		this.killCalls++;
 		return true;
 	}
 
@@ -556,6 +562,23 @@ describe("PiAdapter teardown", () => {
 
 		expect(h.child.killed).toBe(true);
 		expect(h.errors).toEqual([]);
+	});
+
+	it("tears down once however many times it is disposed", async () => {
+		// The manager can reach one adapter from two directions -- an explicit
+		// close and the startup's own failure path, or a shutdown that walks both
+		// the process table and the in-flight startups. `stdin.end()` on an
+		// already-finished stream raises ERR_STREAM_ALREADY_FINISHED, and nothing
+		// listens for `error` on the child's stdin, so the second teardown would
+		// take the server down with it.
+		const h = makeHarness();
+		await startAdapter(h);
+
+		await Promise.all([h.adapter.dispose(), h.adapter.dispose()]);
+		await h.adapter.dispose();
+
+		expect(h.child.stdin.endCalls).toBe(1);
+		expect(h.child.killCalls).toBe(1);
 	});
 
 	it("refuses commands issued after dispose, before the stream has finished tearing down", async () => {

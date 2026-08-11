@@ -119,6 +119,8 @@ export class PiAdapter implements BackendAdapter {
 	private readonly splitter = new LfLineSplitter();
 	private state: PiReducerState = createInitialPiState();
 	private disposed = false;
+	/** The one teardown, so repeat callers await it instead of running a second. */
+	private disposal?: Promise<void>;
 	/** Set once the child is gone; makes teardown idempotent and writes fail loudly. */
 	private closed = false;
 	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
@@ -218,14 +220,28 @@ export class PiAdapter implements BackendAdapter {
 		this.emitUpdate(undefined);
 	}
 
-	async dispose(): Promise<void> {
+	/**
+	 * Idempotent, because the server reaches one adapter from more than one
+	 * direction: an explicit close and the startup's own failure path can hold
+	 * the same adapter, and shutdown walks both the process table and the
+	 * startups still in flight. A second `stdin.end()` raises
+	 * ERR_STREAM_ALREADY_FINISHED on a stream nobody is listening to for
+	 * `error`, which takes the server down; a second `kill()` re-signals a pid
+	 * the OS may have already handed to something else.
+	 */
+	dispose(): Promise<void> {
+		this.disposal ??= this.finishDisposal();
+		return this.disposal;
+	}
+
+	private async finishDisposal(): Promise<void> {
 		this.disposed = true;
 		for (const pending of this.pendingCommands.values()) {
 			pending.reject(new Error("Pi adapter disposed"));
 		}
 		this.pendingCommands.clear();
 		if (this.child) {
-			this.child.stdin.end();
+			if (!this.child.stdin.destroyed) this.child.stdin.end();
 			this.child.kill();
 		}
 	}
