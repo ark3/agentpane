@@ -16,7 +16,7 @@ evidence; this only says what is built, what is left, and in what order.
 | session-index | **done, verified** — 32 tests | merged to `main` |
 | pi-adapter | **done, verified** — 112 tests, cold start and session identity closed | merged to `main` |
 | transport | **done, verified** — 194 tests; session renaming, teardown, static serving and cross-origin closed | merged to `main` |
-| renderer | unverified — 2 failing tests, typecheck clean | branch `wip/renderer` |
+| renderer | **done, verified** — 376 tests; the edit card, tool-result images and the thinking disclosure closed | branch `renderer` |
 | codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
 | client-shell | not started | — |
 
@@ -36,7 +36,9 @@ partial work looks more confusing than helpful — say so rather than forcing it
 2. ~~**transport**~~ — done, reviewed. The pattern held: `check` was green on
    `wip/transport` and the largest gap was the *documented* caller contract
    below, unimplemented, which broke the whole new-session flow.
-3. **renderer** — fix the two failures, review.
+3. ~~**renderer**~~ — done, reviewed. The pattern held again: `typecheck` was
+   clean and both failures were shallow, while the real defect was a tool card
+   verified against a hand-written sample that no backend actually produces.
 4. **client-shell** — wire the three together. `src/client/App.svelte` and
    `src/client/main.ts` are still placeholders. This is DESIGN's build-order
    step 1, the Pi-only vertical slice, and the first point at which the app
@@ -82,6 +84,31 @@ not stable — say where it changes, and the server will follow.
   but no *event* will ever carry it again.
 - **`/api` rejects a non-loopback `Origin`** (D8). Nothing to do from the app;
   it matters if you ever test the API from a page served from somewhere else.
+
+### What the renderer expects of its callers
+
+- **Mount `Transcript` and nothing else.** `src/client/render/index.ts` is the
+  whole surface: `Transcript` takes `{ messages, isStreaming }`, and
+  `registerToolRenderer(name, component)` teaches it a backend-specific tool.
+- **The design tokens live in `Transcript.svelte`'s `:global(:root)` block.**
+  That keeps the package importable with nothing to wire up, but it also means
+  the palette only exists while a transcript is mounted. A shell that wants the
+  same tokens for its own chrome should lift that block into
+  `src/client/app.css` and import it once — the note is in the component.
+- **An edit-shaped tool call must carry its replacements as either an `edits[]`
+  array or a flat `oldText`/`newText` (or `old_string`/`new_string`) pair**, or
+  the card renders no diff. Pi's own shape is the array (HANDOFF 31). This is
+  the one place the renderer cares what an adapter puts in `ToolCall.arguments`;
+  everything else degrades to the default card.
+- **Upsert the tail message in place.** The `{#each}` key is
+  `index:role:timestamp`, so replacing the tail `AgentMessage` object mid-turn
+  updates the existing DOM rather than rebuilding it — which is what keeps
+  disclosure state and the markdown throttle alive. Pi keeps `timestamp` stable
+  from `message_start` to `message_end`; an adapter that renumbers it per token
+  would repaint the whole message on every token.
+- **Everything the renderer puts on the page is sanitized**, but only because
+  the two entry points (`renderMarkdown`, `renderCode`) both end in DOMPurify.
+  Anything else reaching `{@html}` is a new hole; there is no second net.
 
 ## File ownership
 

@@ -108,6 +108,24 @@ unfixed code.
 | 29 | **`direnv` writes routine diagnostics to stderr**, so a healthy start produces stderr output. Treating stderr as an error channel reports errors on working sessions; the useful signal is the retained tail at process death | `direnv exec` observed writing to fd 2 |
 | 30 | **Pi's `fork` veto is reported as `success: true`** with `data.cancelled: true`, not as an error response — a `session_before_fork` extension handler cancelling reads as a successful rewind unless the flag is checked | `pi-coding-agent/docs/rpc.md`, "fork" |
 
+## Fourth round: what building the renderer established
+
+Findings 31–33 came out of checking the render layer against the *tools'* own
+schemas rather than against hand-written samples. Each is pinned by a test that
+was confirmed to fail against the unfixed code.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 31 | **Pi's `edit` tool nests its replacements**: the arguments are `{ path, edits: [{ oldText, newText }, …] }`, an array, because one call may carry several disjoint edits. The result content is only the sentence `Successfully replaced N block(s) in <path>` — the diff and the unified patch are in `details`, which no renderer sees by default | `pi-coding-agent/dist/core/tools/edit.js`, `editSchema` and the result construction |
+| 32 | **A Pi tool result can carry an image.** `read` returns `[{type:"text"},{type:"image",data,mimeType}]` for any path it detects as an image, so a card that renders `resultText()` alone shows a blank body for `read shot.png` | `pi-coding-agent/dist/core/tools/read.js`, the `mimeType` branch |
+| 33 | **`toggle` fires for programmatic `<details>` changes too.** The spec queues it whenever the `open` attribute changes state, whoever changed it — so a component that auto-opens a disclosure and also listens for `toggle` reads its own change as a user action | direct probe in jsdom: setting `open` on a detached `<details>` delivers a `toggle` event |
+
+Finding 31 is the one with reach beyond its slice: it is why the renderer
+accepts *both* an `edits[]` array and a flat `oldText`/`newText` (or
+`old_string`/`new_string`) pair. An adapter that maps an edit-shaped call into
+`AgentMessage` should emit one of those two shapes, or register its own
+renderer.
+
 Still unverified, and the reason it matters is in DESIGN's open questions:
 whether a signal to the spawned `direnv` reaches the agent two execs down
 inside `bwrap`. It needs a live spawn, which the sandbox below prevents.

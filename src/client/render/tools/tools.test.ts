@@ -10,7 +10,12 @@ import { render } from "@testing-library/svelte";
 import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import ToolCallBlock from "../ToolCallBlock.svelte";
-import { defaultToolRenderer, registeredToolNames, resolveToolRenderer } from "./registry.ts";
+import {
+	defaultToolRenderer,
+	registeredToolNames,
+	registerToolRenderer,
+	resolveToolRenderer,
+} from "./registry.ts";
 import DefaultTool from "./DefaultTool.svelte";
 import BashTool from "./BashTool.svelte";
 
@@ -50,11 +55,25 @@ describe("the registry", () => {
 	});
 
 	it("falls back to the default entry for a name nobody registered", () => {
-		// Codex's mcpToolCall / dynamicToolCall carry names like this. There is
-		// no list to add them to, which is why the default is not optional.
+		// Codex's mcpToolCall carries `server` + `tool` and dynamicToolCall a
+		// nullable `namespace` + `tool` (resources/codex-protocol/v2/ThreadItem.ts),
+		// so the name is composed at runtime and there is no list to add it to.
+		// That is why the default is not optional.
 		expect(resolveToolRenderer("weather__forecast")).toBe(defaultToolRenderer);
 		expect(resolveToolRenderer("")).toBe(defaultToolRenderer);
 		expect(defaultToolRenderer).toBe(DefaultTool);
+	});
+
+	it("lets a caller teach it a tool, or override one it knows", () => {
+		registerToolRenderer("Fancy_Tool", BashTool);
+		expect(resolveToolRenderer("fancy_tool")).toBe(BashTool);
+		expect(registeredToolNames()).toContain("fancy_tool");
+
+		const original = resolveToolRenderer("read");
+		registerToolRenderer("read", DefaultTool);
+		expect(resolveToolRenderer("read")).toBe(DefaultTool);
+		registerToolRenderer("read", original);
+		expect(resolveToolRenderer("read")).toBe(original);
 	});
 });
 
@@ -147,6 +166,18 @@ describe("tool cards", () => {
 		expect(summaryLine(container)).toContain("notes.md");
 		expect(summaryLine(container)).toContain("3 lines");
 		expect(container.textContent).toContain("one\ntwo\nthree");
+	});
+});
+
+describe("tool output", () => {
+	it("clips output an agent could produce megabytes of, and says so", () => {
+		const huge = "x".repeat(30_000);
+		const { container } = render(ToolCallBlock, {
+			props: { call: call("bash", { command: "cat big" }), result: result(huge) },
+		});
+		const shown = container.querySelector("pre.output:last-of-type")?.textContent ?? "";
+		expect(shown.length).toBeLessThan(huge.length);
+		expect(container.querySelector(".clipped")?.textContent).toContain("30,000");
 	});
 });
 
