@@ -276,24 +276,37 @@ export function createApp(deps: AppDeps): App {
 			const factory = deps.adapters[id];
 			if (!factory) continue;
 			// Prefer a live adapter -- a running agent can answer authoritatively.
-			// Otherwise ask an unstarted one, which is the only option when no
-			// session for this backend is open: model lists are a property of the
-			// backend, not of a session, but `listModels` only exists on an
-			// adapter instance. Construction is contractually side-effect-free,
-			// so this spawns nothing.
+			// Otherwise ask an unstarted one: model lists are a property of the
+			// backend, not of a session, but `listModels` only exists on an adapter
+			// instance. Construction is contractually side-effect-free, so this
+			// spawns nothing.
+			//
+			// Known limitation, verified against the real `PiAdapter`: asking one
+			// that has not been started rejects with "Pi process is not running",
+			// so with no Pi session open this route reports zero Pi models rather
+			// than the real list. It degrades quietly and it is not a crash, but a
+			// model picker cannot be built on it alone -- see DESIGN's open
+			// questions. Spawning to answer a *listing* question is exactly what
+			// D9 rules out.
 			const live = sessions
 				.liveRefs()
 				.filter((ref) => ref.backend === id)
 				.map((ref) => sessions.adapterFor(ref))
 				.find((adapter) => adapter !== undefined);
-			const adapter = live ?? factory.create({ backend: id, id: "" });
+			let adapter: BackendAdapter;
+			try {
+				adapter = live ?? factory.create({ backend: id, id: "" });
+			} catch {
+				// A factory that will not construct without a real id is still not
+				// grounds for failing the other backend's list.
+				continue;
+			}
 			try {
 				models.push(...(await adapter.listModels()));
 			} catch {
-				// A backend that cannot enumerate models without a subprocess must
-				// not take out the other backend's list.
+				// Ditto for a backend that cannot enumerate without a subprocess.
 			} finally {
-				if (!live) await adapter.dispose().catch(() => {});
+				if (!live) await Promise.resolve(adapter.dispose()).catch(() => {});
 			}
 		}
 		const body: ModelsResponse = { models };

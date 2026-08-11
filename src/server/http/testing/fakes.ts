@@ -73,8 +73,12 @@ export interface FakeAdapterOptions {
 	failStart?: string;
 	/** Make dispose() fail, to exercise teardown that must not stop at the first casualty. */
 	failDispose?: string;
-	/** Make listModels() fail, as a real adapter does when asked before it is started. */
-	failListModels?: string;
+	/**
+	 * Make `listModels()` reject until `start()` has run. This is the real
+	 * `PiAdapter`, verified: asked before it is started it rejects with "Pi
+	 * process is not running", because the answer comes from the subprocess.
+	 */
+	modelsNeedStart?: boolean;
 	/**
 	 * Adopt this id when `start()` resolves. Mirrors `PiAdapter`, whose `ref` is
 	 * not stable at construction: Pi's session id *is* its JSONL path (D9), so a
@@ -190,7 +194,9 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
-		if (this.options.failListModels) throw new Error(this.options.failListModels);
+		if (this.options.modelsNeedStart && !this.started) {
+			throw new Error("Pi process is not running");
+		}
 		return this.options.models ?? [];
 	}
 

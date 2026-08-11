@@ -12,41 +12,33 @@
  * else here changes.
  */
 
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import { createApp } from "./http/app.ts";
 import { emptySessionIndex } from "./http/deps.ts";
+import { createStaticHandler } from "./http/static.ts";
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/client");
 
 const app = createApp({
-	// TODO(integration): `new FsSessionIndex()` from src/server/sessions/.
+	// TODO(integration): the `SessionIndex` binding over src/server/sessions/.
+	// That module exports `listSessions(opts)` only -- it has no `get(ref)`, and
+	// `deps.ts` needs one (attach reads `cwd` from it). See the report.
 	index: emptySessionIndex,
-	// TODO(integration): { pi: piAdapterFactory, codex: codexAdapterFactory }.
+	// TODO(integration): { pi: new PiAdapterFactory(), codex: ... }.
 	adapters: {},
 	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
 	// stream without generating noticeable traffic.
 	heartbeatMs: 15_000,
-	staticHandler: serveClient,
+	// `Bun.file` is the only runtime-specific piece; the handler itself is
+	// tested in `http/static.test.ts` against an injected filesystem.
+	staticHandler: createStaticHandler(clientDir, (path) => {
+		const file = Bun.file(path);
+		return { exists: () => file.exists(), toResponse: () => new Response(file) };
+	}),
 });
-
-/** The built SPA, with the usual single-page fallback. Absent in dev -- Vite serves it. */
-async function serveClient(request: Request): Promise<Response | null> {
-	const { pathname } = new URL(request.url);
-	if (request.method !== "GET" && request.method !== "HEAD") return null;
-
-	// normalize() collapses `..`; join()ing the result keeps a crafted path
-	// inside the bundle directory.
-	const rel = normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, "");
-	const candidate = Bun.file(join(clientDir, rel));
-	if (await candidate.exists()) return new Response(candidate);
-
-	const index = Bun.file(join(clientDir, "index.html"));
-	if (await index.exists()) return new Response(index);
-	return null;
-}
 
 // Loopback only (D8). No auth token, no cookie, no localhost bypass -- none of
 // it needs to exist once remote access is off the table.
@@ -59,14 +51,26 @@ const server = Bun.serve({
 	fetch: app.fetch,
 });
 
+let shuttingDown = false;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
 	process.on(signal, () => {
+		// A second Ctrl-C means the user is done waiting. Without this, a
+		// shutdown that stalls on an adapter is a terminal you have to kill from
+		// another one.
+		if (shuttingDown) process.exit(130);
+		shuttingDown = true;
 		void (async () => {
-			// Explicit shutdown is one of exactly two things that kills an agent
-			// subprocess; a dropped browser connection is not the other.
-			await app.close();
-			await server.stop(true);
-			process.exit(0);
+			try {
+				// Explicit shutdown is one of exactly two things that kills an agent
+				// subprocess; a dropped browser connection is not the other.
+				await app.close();
+				await server.stop(true);
+			} catch (err) {
+				console.error("shutdown did not complete cleanly:", err);
+			} finally {
+				process.exit(0);
+			}
 		})();
 	});
 }

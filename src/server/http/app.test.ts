@@ -608,6 +608,52 @@ describe("fork, model, and enumeration routes", () => {
 		const all = (await (await get(ROUTES.models)).json()) as ModelsResponse;
 		expect(all.models.map((m) => m.id).sort()).toEqual(["cx-1", "pi-1"]);
 	});
+
+	it("prefers a running agent's answer over an unstarted adapter's", async () => {
+		// Verified against the real PiAdapter: `listModels()` before `start()`
+		// rejects with "Pi process is not running". So the offline answer is
+		// nothing, and this route lives or dies on using the live session.
+		const offline = new FakeAdapterFactory({
+			models: [{ id: "pi-1", label: "Pi One" }],
+			modelsNeedStart: true,
+		});
+		app = createApp({ index, adapters: { pi: offline } });
+
+		const before = (await (await get(`${ROUTES.models}?backend=pi`)).json()) as ModelsResponse;
+		expect(before.models).toEqual([]);
+
+		await get(ROUTES.session(PI_SESSION));
+
+		const after = (await (await get(`${ROUTES.models}?backend=pi`)).json()) as ModelsResponse;
+		expect(after.models).toEqual([{ id: "pi-1", label: "Pi One" }]);
+	});
+
+	it("a backend that cannot answer does not take out the other's list", async () => {
+		const mute = new FakeAdapterFactory({ modelsNeedStart: true });
+		app = createApp({ index, adapters: { pi: mute, codex } });
+
+		const response = await get(ROUTES.models);
+		expect(response.status).toBe(200);
+		expect(((await response.json()) as ModelsResponse).models).toEqual([
+			{ id: "cx-1", label: "Codex One" },
+		]);
+	});
+
+	it("a factory that refuses to construct does not take out the other's list", async () => {
+		const hostile: typeof pi = {
+			created: [],
+			createdFor: [],
+			create() {
+				throw new Error("cannot create an adapter without a real thread id");
+			},
+			forRef: () => undefined,
+		} as unknown as typeof pi;
+		app = createApp({ index, adapters: { pi: hostile, codex } });
+
+		const response = await get(ROUTES.models);
+		expect(response.status).toBe(200);
+		expect(((await response.json()) as ModelsResponse).models).toHaveLength(1);
+	});
 });
 
 describe("routing and errors", () => {
