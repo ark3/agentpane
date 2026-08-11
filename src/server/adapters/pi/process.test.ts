@@ -114,9 +114,9 @@ function makeHarness(): Harness {
  * the wire before this awaits anything; answering it is what lets `start()`
  * resolve.
  */
-async function startAdapter(h: Harness): Promise<void> {
+async function startAdapter(h: Harness, extraState: Record<string, unknown> = {}): Promise<void> {
 	const started = h.adapter.start({ cwd: WORKSPACE });
-	h.child.respondTo("get_state", { model: null, isStreaming: false });
+	h.child.respondTo("get_state", { model: null, isStreaming: false, ...extraState });
 	await started;
 }
 
@@ -178,6 +178,87 @@ describe("PiAdapter.start", () => {
 		expect(h.errors).toHaveLength(1);
 		expect(h.errors[0]).toContain("ENOENT");
 		expect(h.errors[0]).not.toContain("code=-2");
+	});
+});
+
+describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
+	it("adopts the real session file Pi reports, replacing the placeholder id", async () => {
+		const h = makeHarness();
+		const virtualRef: SessionRef = { backend: "pi", id: "__new__" };
+		const adapter = new PiAdapter(virtualRef, { spawn: () => h.child as unknown as PiChild });
+
+		const started = adapter.start({ cwd: WORKSPACE });
+		h.child.respondTo("get_state", {
+			model: null,
+			isStreaming: false,
+			sessionFile: "/home/u/.pi/agent/sessions/real.jsonl",
+		});
+		await started;
+
+		expect(adapter.ref.id).toBe("/home/u/.pi/agent/sessions/real.jsonl");
+		expect(adapter.ref.backend).toBe("pi");
+	});
+
+	it("resolves the id after the first prompt when the session had not materialised at start", async () => {
+		const h = makeHarness();
+		const adapter = new PiAdapter({ backend: "pi", id: "__new__" }, { spawn: () => h.child as unknown as PiChild });
+
+		// A virtual session has no file yet, so Pi reports none (D9).
+		const started = adapter.start({ cwd: WORKSPACE });
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		await started;
+		expect(adapter.ref.id).toBe("__new__");
+
+		const submitted = adapter.submit("first prompt");
+		h.child.respondTo("prompt");
+		await Promise.resolve();
+		h.child.respondTo("get_state", {
+			model: null,
+			isStreaming: false,
+			sessionFile: "/home/u/.pi/agent/sessions/materialised.jsonl",
+		});
+		await submitted;
+
+		expect(adapter.ref.id).toBe("/home/u/.pi/agent/sessions/materialised.jsonl");
+	});
+
+	it("stops re-probing once the id is known, so later prompts cost one round trip", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const submitted = h.adapter.submit("hello");
+		h.child.respondTo("prompt");
+		await submitted;
+
+		// One at start, and no follow-up probe after the prompt.
+		expect(h.child.sent().filter((c) => c.type === "get_state")).toHaveLength(1);
+	});
+});
+
+describe("PiAdapter cold start (D3)", () => {
+	it("re-queries the transcript when resuming, so a resumed session is not blank", async () => {
+		const h = makeHarness();
+		const resumeId = "/home/u/.pi/agent/sessions/old.jsonl";
+
+		const started = h.adapter.start({ cwd: WORKSPACE, resumeId });
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: resumeId });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", {
+			messages: [assistantMessage("from a previous session"), assistantMessage("and another")],
+		});
+		await started;
+
+		// Nothing replays the events that built this transcript, so without the
+		// refetch the session renders empty until the next turn.
+		expect(h.adapter.getState().messages).toHaveLength(2);
+	});
+
+	it("does not refetch for a fresh session, which has nothing to fetch", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		expect(h.child.sent().some((c) => c.type === "get_messages")).toBe(false);
+		expect(h.adapter.getState().messages).toEqual([]);
 	});
 });
 

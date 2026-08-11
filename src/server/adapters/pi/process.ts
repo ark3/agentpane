@@ -92,7 +92,27 @@ export interface PiAdapterDeps {
 const STDERR_TAIL_LIMIT = 8_192;
 
 export class PiAdapter implements BackendAdapter {
-	readonly ref: SessionRef;
+	/**
+	 * Pi's session id *is* its JSONL path (D9), and for a `virtual` session that
+	 * path does not exist until Pi writes it. So `ref` is not stable at
+	 * construction: it holds whatever the caller named the session until Pi
+	 * reports the real `sessionFile`, at which point it is adopted.
+	 *
+	 * For the server: **re-read `adapter.ref` after `start()` and after the
+	 * first `submit()` resolves.** Those are the two points at which it can
+	 * change, both are awaited, and a session keyed by the pre-materialisation
+	 * id will not be findable on disk afterwards.
+	 */
+	get ref(): SessionRef {
+		return this.sessionRef;
+	}
+	private sessionRef: SessionRef;
+	/**
+	 * False until Pi has told us the session's real file. A fresh session
+	 * materialises on its first prompt (D9), so this can stay false across
+	 * `start()` and only resolve after the first turn.
+	 */
+	private idResolved = false;
 
 	private readonly spawn: PiSpawn;
 	private child?: PiChild;
@@ -113,7 +133,7 @@ export class PiAdapter implements BackendAdapter {
 	private nextCommandId = 0;
 
 	constructor(ref: SessionRef, deps: PiAdapterDeps = {}) {
-		this.ref = ref;
+		this.sessionRef = ref;
 		this.spawn = deps.spawn ?? nodeSpawn;
 	}
 
@@ -162,7 +182,40 @@ export class PiAdapter implements BackendAdapter {
 		// a raw setTimeout before switching to a get_state round trip -- see
 		// HANDOFF's pipane references). Round-tripping get_state here is the
 		// same fix: `start()` doesn't resolve until Pi has actually answered.
-		await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		this.adoptSessionFile(state.data.sessionFile);
+
+		// Cold start (D3): the transcript of a session that predates this
+		// adapter has to be re-queried, because nothing replays the events that
+		// built it. Without this, resuming renders a blank transcript until the
+		// user takes another turn -- and then shows a conversation missing
+		// everything before it.
+		//
+		// `get_messages`, not `get_entries`: we want the active branch as
+		// `AgentMessage[]`, which is the contract. `get_entries` additionally
+		// carries pre-compaction history and abandoned branches (rpc.md), none
+		// of which belongs in a transcript view. Skipped for a fresh session,
+		// which by definition has nothing to fetch.
+		if (opts.resumeId) await this.hydrateMessages();
+	}
+
+	/**
+	 * Adopt the real session file as our id once Pi reports one. Idempotent, and
+	 * a no-op when Pi has not created the session yet.
+	 */
+	private adoptSessionFile(sessionFile: string | undefined): void {
+		if (this.idResolved || !sessionFile) return;
+		this.idResolved = true;
+		if (sessionFile !== this.sessionRef.id) {
+			this.sessionRef = { ...this.sessionRef, id: sessionFile };
+		}
+	}
+
+	/** Replace the held transcript with Pi's own. Emits a snapshot, not an upsert. */
+	private async hydrateMessages(): Promise<void> {
+		const resp = await this.sendCommand<PiResponseFor<"get_messages">>({ type: "get_messages" });
+		this.state = { ...this.state, messages: resp.data.messages };
+		this.emitUpdate(undefined);
 	}
 
 	async dispose(): Promise<void> {
@@ -192,6 +245,14 @@ export class PiAdapter implements BackendAdapter {
 			...(this.state.isStreaming ? { streamingBehavior: "steer" as const } : {}),
 		};
 		await this.sendCommand<PiResponseFor<"prompt">>(cmd);
+
+		// A `virtual` session materialises on its first prompt (D9), so this is
+		// the earliest Pi can name the file it just created. One extra round
+		// trip, only until the id resolves -- after that this is skipped.
+		if (!this.idResolved) {
+			const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+			this.adoptSessionFile(state.data.sessionFile);
+		}
 	}
 
 	async abort(): Promise<void> {
@@ -219,11 +280,10 @@ export class PiAdapter implements BackendAdapter {
 		// place (unlike Codex's `thread/fork`, which mints a new thread id --
 		// see rpc.md's `fork` vs `clone`, and this workstream's report). It
 		// emits no message events of its own, so our held transcript is now
-		// stale; re-fetch it wholesale. `changedIndex` omitted on purpose --
-		// this touches the whole transcript, not one tail message (D3).
-		const resp = await this.sendCommand<PiResponseFor<"get_messages">>({ type: "get_messages" });
-		this.state = { ...this.state, messages: resp.data.messages, isStreaming: false };
-		this.emitUpdate(undefined);
+		// stale; re-fetch it wholesale -- the same cold-start path `start()`
+		// uses when resuming.
+		this.state = { ...this.state, isStreaming: false };
+		await this.hydrateMessages();
 		return this.ref;
 	}
 
