@@ -6,3 +6,7 @@ build/
 test-results/
 .vite/
 .claude/worktrees/
+
+# SDD process ledger: task briefs, reports, and review diffs. Working notes,
+# not project documentation -- findings worth keeping go into docs/.
+.superpowers/
