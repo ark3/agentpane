@@ -75,6 +75,7 @@ export class CodexAdapter implements BackendAdapter {
 	private ownership: ClientOwnership | null = null;
 	private threadId: string | null = null;
 	private turnId: string | null = null;
+	private pendingTurnStarts = 0;
 	private completedTurnIds = new Set<string>();
 	private model: string | null = null;
 	private cwd: string | null = null;
@@ -225,19 +226,25 @@ export class CodexAdapter implements BackendAdapter {
 		// Once a new turn is requested, the previous turn is no longer an abort
 		// target. A response or `turn/started` notification installs the new id.
 		this.turnId = null;
-		this.completedTurnIds.clear();
-		const response = await client.request<TurnStartResponse>("turn/start", {
-			threadId,
-			input,
-			// TurnStartParams.model overrides "for this turn and subsequent
-			// turns" -- Codex has no standalone set-model request, so this is
-			// where `setModel` takes effect.
-			...(this.model ? { model: this.model } : {}),
-		});
-		const responseTurnId = response.turn?.id;
-		this.turnId =
-			responseTurnId && !this.completedTurnIds.has(responseTurnId) ? responseTurnId : null;
-		this.completedTurnIds.clear();
+		this.pendingTurnStarts += 1;
+		let responseTurnId: string | undefined;
+		try {
+			const response = await client.request<TurnStartResponse>("turn/start", {
+				threadId,
+				input,
+				// TurnStartParams.model overrides "for this turn and subsequent
+				// turns" -- Codex has no standalone set-model request, so this is
+				// where `setModel` takes effect.
+				...(this.model ? { model: this.model } : {}),
+			});
+			responseTurnId = response.turn?.id;
+			this.turnId =
+				responseTurnId && !this.completedTurnIds.has(responseTurnId) ? responseTurnId : null;
+		} finally {
+			if (responseTurnId) this.completedTurnIds.delete(responseTurnId);
+			this.pendingTurnStarts -= 1;
+			if (this.pendingTurnStarts === 0) this.completedTurnIds.clear();
+		}
 	}
 
 	async abort(): Promise<void> {
@@ -374,7 +381,7 @@ export class CodexAdapter implements BackendAdapter {
 					this.turnId = msg.params.turn.id;
 					break;
 				case "turn/completed":
-					this.completedTurnIds.add(msg.params.turn.id);
+					if (this.pendingTurnStarts > 0) this.completedTurnIds.add(msg.params.turn.id);
 					if (this.turnId === msg.params.turn.id) this.turnId = null;
 					break;
 			}

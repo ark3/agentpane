@@ -604,6 +604,106 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
+	it("does not revive either of two overlapping turns completed before their continuations", async () => {
+		const proc = new AdapterProcess();
+		const pendingTurnStarts: number[] = [];
+		const emitCompletedTurn = (requestId: number, turnId: string): void => {
+			const turn = {
+				id: turnId,
+				items: [],
+				itemsView: "notLoaded",
+				status: "inProgress",
+				error: null,
+				startedAt: 1,
+				completedAt: null,
+				durationMs: null,
+			};
+			proc.emit({ id: requestId, result: { turn } });
+			proc.emit({
+				method: "turn/started",
+				params: { threadId: "thread-overlap", turn },
+			});
+			proc.emit({
+				method: "turn/completed",
+				params: {
+					threadId: "thread-overlap",
+					turn: {
+						...turn,
+						itemsView: "summary",
+						status: "completed",
+						completedAt: 2,
+						durationMs: 1000,
+					},
+				},
+			});
+		};
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			switch (message["method"]) {
+				case "initialize":
+					proc.emit({ id, result: {} });
+					break;
+				case "thread/start":
+					proc.emit({
+						id,
+						result: {
+							thread: { id: "thread-overlap", turns: [] },
+							model: "gpt",
+							modelProvider: "openai",
+						},
+					});
+					break;
+				case "turn/start":
+					pendingTurnStarts.push(id);
+					if (pendingTurnStarts.length === 2) {
+						emitCompletedTurn(pendingTurnStarts[0] ?? -1, "turn-overlap-a");
+						emitCompletedTurn(pendingTurnStarts[1] ?? -1, "turn-overlap-b");
+					}
+					break;
+				case "turn/interrupt":
+					proc.emit({ id, result: {} });
+					break;
+			}
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+
+		const first = adapter.submit("first overlapping prompt");
+		const second = adapter.submit("second overlapping prompt");
+		await Promise.all([first, second]);
+		await adapter.abort();
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("does not retain completion ids received without a pending turn start", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-idle-completions" });
+
+		for (let index = 0; index < 100; index += 1) {
+			proc.emit({
+				method: "turn/completed",
+				params: {
+					threadId: "thread-idle-completions",
+					turn: {
+						id: `turn-idle-${index}`,
+						items: [],
+						itemsView: "summary",
+						status: "completed",
+						error: null,
+						startedAt: 1,
+						completedAt: 2,
+						durationMs: 1000,
+					},
+				},
+			});
+		}
+
+		expect(
+			(adapter as unknown as { completedTurnIds: Set<string> }).completedTurnIds.size,
+		).toBe(0);
+	});
+
 	it("applies a selected model to subsequent turns", async () => {
 		const { adapter, proc } = await startedAdapter();
 
