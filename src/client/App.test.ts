@@ -46,9 +46,13 @@ class FakeController implements AgentpaneController {
 	workspaces: string[] = [];
 	started = 0;
 	disposed = 0;
+	notifications = 0;
 	private listeners = new Set<(next: ControllerView) => void>();
 
-	constructor(private current: ControllerView = view()) {}
+	constructor(
+		private current: ControllerView = view(),
+		private readonly submissionError: string | null = null,
+	) {}
 
 	getView() {
 		return this.current;
@@ -85,6 +89,10 @@ class FakeController implements AgentpaneController {
 
 	async submit() {
 		this.submitted += 1;
+		this.publish({ ...this.current, busy: "submitting", error: null });
+		if (this.submissionError) {
+			this.publish({ ...this.current, busy: "idle", error: this.submissionError });
+		}
 	}
 
 	async abort() {
@@ -93,11 +101,26 @@ class FakeController implements AgentpaneController {
 
 	publish(next: ControllerView) {
 		this.current = next;
-		for (const listener of this.listeners) listener(next);
+		for (const listener of this.listeners) {
+			this.notifications += 1;
+			listener(next);
+		}
 	}
 }
 
 describe("App", () => {
+	it("starts once, disposes once, and stops observing the controller when unmounted", () => {
+		const controller = new FakeController();
+		const { unmount } = render(App, { props: { controller } });
+
+		expect(controller.started).toBe(1);
+		unmount();
+		expect(controller.disposed).toBe(1);
+
+		controller.publish(view({ connection: "reconnecting" }));
+		expect(controller.notifications).toBe(0);
+	});
+
 	it("creates a session using the selected workspace and backend", async () => {
 		const controller = new FakeController();
 		render(App, { props: { controller } });
@@ -165,12 +188,14 @@ describe("App", () => {
 		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 	});
 
-	it("preserves the draft when the controller reports a submission failure", async () => {
-		const controller = new FakeController(view({ draft: "Retry this prompt" }));
+	it("preserves the typed draft when form submission fails", async () => {
+		const controller = new FakeController(view(), "Backend unavailable");
 		render(App, { props: { controller } });
 
-		controller.publish(view({ draft: "Retry this prompt", error: "Backend unavailable" }));
-		await tick();
+		await fireEvent.input(screen.getByLabelText("Prompt"), {
+			target: { value: "Retry this prompt" },
+		});
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 
 		expect(screen.getByLabelText("Prompt")).toHaveValue("Retry this prompt");
 		expect(screen.getByRole("alert")).toHaveTextContent("Backend unavailable");
