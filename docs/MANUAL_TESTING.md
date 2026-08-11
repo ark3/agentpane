@@ -196,9 +196,10 @@ source change.
 
 The final review did produce application hardening before the accepted run:
 the prompt route now acknowledges only after backend admission succeeds,
-selection ignores stale attach completions, and Codex disposal awaits process
-close with bounded SIGTERM-to-SIGKILL escalation. Four regression tests cover
-those behaviors; each was observed failing before its fix.
+selection ignores stale attach completions and stale create responses, and
+Codex disposal awaits process close with bounded SIGTERM-to-SIGKILL escalation.
+Five regression tests cover those behaviors; each was observed failing before
+its fix.
 
 ## Deferred Pi verification — unperformed
 

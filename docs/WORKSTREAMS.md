@@ -25,7 +25,7 @@ merge — and its largest file, the 293-line process shell, had no tests at all
 and held four real defects, including one that hung `start()` forever on a
 failed spawn. Read a branch before trusting its exit code.
 
-The assembled milestone has 555 offline tests. On 2026-08-11, the production
+The assembled milestone has 556 offline tests. On 2026-08-11, the production
 server also completed the six Codex smoke checks: create/attach, incremental
 text updates, idle completion, reconnect repaint without another native Codex
 worker, abort, and shutdown without an orphan. That run served the built client
