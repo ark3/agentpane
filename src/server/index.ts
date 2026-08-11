@@ -6,29 +6,23 @@
  * opening a socket. This file only decides *where* that handler is exposed and
  * *what* it is wired to.
  *
- * The wiring is deliberately thin and currently empty: the adapter registry and
- * the session index are owned by other workstreams (`src/server/adapters/*`,
- * `src/server/sessions/`). Integration fills in the two literals below; nothing
- * else here changes.
+ * The wiring is deliberately thin: production dependencies are composed once
+ * here, while the transport remains independently testable behind its seams.
  */
 
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
+import { createProductionDeps } from "./composition.ts";
 import { createApp } from "./http/app.ts";
-import { emptySessionIndex } from "./http/deps.ts";
 import { createStaticHandler } from "./http/static.ts";
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../dist/client");
+const productionDeps = createProductionDeps();
 
 const app = createApp({
-	// TODO(integration): the `SessionIndex` binding over src/server/sessions/.
-	// That module exports `listSessions(opts)` only -- it has no `get(ref)`, and
-	// `deps.ts` needs one (attach reads `cwd` from it). See the report.
-	index: emptySessionIndex,
-	// TODO(integration): { pi: new PiAdapterFactory(), codex: ... }.
-	adapters: {},
+	...productionDeps,
 	// Comfortably inside Bun's idle timeout below, and enough to notice a dead
 	// stream without generating noticeable traffic.
 	heartbeatMs: 15_000,
