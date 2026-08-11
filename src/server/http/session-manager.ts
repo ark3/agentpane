@@ -20,7 +20,12 @@ import type {
 	SessionSummary,
 } from "../../shared/protocol.ts";
 import { sessionKey } from "../../shared/protocol.ts";
-import type { AdapterState, BackendAdapter, Unsubscribe } from "../adapters/types.ts";
+import type {
+	AdapterState,
+	BackendAdapter,
+	ImageInput,
+	Unsubscribe,
+} from "../adapters/types.ts";
 import type { Broadcaster } from "./broadcaster.ts";
 import type { AppDeps, SessionIndex } from "./deps.ts";
 
@@ -56,10 +61,20 @@ interface ManagedSession {
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
 	lastStreaming: boolean;
 	createdAt: string;
+	/** What the index told us about this session, kept so attach need not re-walk. */
+	stored?: SessionSummary;
 }
 
 export class SessionManager {
 	readonly #sessions = new Map<string, ManagedSession>();
+	/**
+	 * Superseded id -> current id. A session adopts its backend's own id once the
+	 * backend names it (see `#adoptRef`), but the browser that created it is still
+	 * holding the old one and may already have a prompt in flight against it.
+	 * Honouring the old id costs one map entry and is the difference between "the
+	 * second message in a new conversation works" and a 404.
+	 */
+	readonly #aliases = new Map<string, string>();
 	/** requestId -> the session whose agent is blocked on it (D2a). */
 	readonly #pendingRequests = new Map<string, string>();
 	readonly #index: SessionIndex;
@@ -78,9 +93,26 @@ export class SessionManager {
 		this.#newId = deps.newId ?? (() => crypto.randomUUID());
 		this.#now = deps.now ?? (() => new Date().toISOString());
 		broadcaster.setSnapshotSource((ref) => {
-			const adapter = this.#sessions.get(sessionKey(ref))?.adapter;
+			const adapter = this.#lookup(ref)?.adapter;
 			return adapter ? adapter.getState() : null;
 		});
+	}
+
+	/** Resolve a ref the caller may be holding under a superseded id. */
+	#lookup(ref: SessionRef): ManagedSession | undefined {
+		const key = sessionKey(ref);
+		const direct = this.#sessions.get(key);
+		if (direct) return direct;
+		const canonical = this.#aliases.get(key);
+		return canonical === undefined ? undefined : this.#sessions.get(canonical);
+	}
+
+	/**
+	 * The id this session actually has now, which is what every event carries.
+	 * Returns `ref` unchanged when we know nothing about it.
+	 */
+	canonicalRef(ref: SessionRef): SessionRef {
+		return this.#lookup(ref)?.ref ?? ref;
 	}
 
 	/** Refs with live state, i.e. what a freshly connected client needs snapshots of. */
@@ -89,7 +121,7 @@ export class SessionManager {
 	}
 
 	adapterFor(ref: SessionRef): BackendAdapter | undefined {
-		return this.#sessions.get(sessionKey(ref))?.adapter;
+		return this.#lookup(ref)?.adapter;
 	}
 
 	isAttached(ref: SessionRef): boolean {
@@ -124,13 +156,15 @@ export class SessionManager {
 	 * exactly what a session switch wants) without touching the subprocess.
 	 */
 	async attach(ref: SessionRef): Promise<BackendAdapter> {
-		const key = sessionKey(ref);
-		const existing = this.#sessions.get(key);
+		const existing = this.#lookup(ref);
 		if (existing?.adapter) {
-			this.broadcaster.broadcastSnapshot(ref);
+			this.broadcaster.broadcastSnapshot(existing.ref);
 			return existing.adapter;
 		}
 
+		// Key the in-flight guard by whatever the caller said, so two concurrent
+		// attaches on the same (possibly superseded) id still collapse into one.
+		const key = sessionKey(existing?.ref ?? ref);
 		const inFlight = this.#attaching.get(key);
 		if (inFlight) return (await inFlight).adapter as BackendAdapter;
 
@@ -139,11 +173,59 @@ export class SessionManager {
 		try {
 			const session = await started;
 			this.broadcaster.sessionsChanged();
-			this.broadcaster.broadcastSnapshot(ref);
+			this.broadcaster.broadcastSnapshot(session.ref);
 			return session.adapter as BackendAdapter;
 		} finally {
 			this.#attaching.delete(key);
 		}
+	}
+
+	/**
+	 * Drive a turn. This goes through the manager rather than straight at the
+	 * adapter because `submit()` is one of the two points at which a session's id
+	 * can change under us -- see `#adoptRef`.
+	 */
+	async submit(ref: SessionRef, text: string, images?: ImageInput[]): Promise<void> {
+		const session = this.#lookup(ref);
+		if (!session?.adapter) throw new UnknownSessionError(ref);
+		this.markPrompted(session.ref);
+		try {
+			await session.adapter.submit(text, images);
+		} finally {
+			this.#adoptRef(session);
+		}
+	}
+
+	/**
+	 * Honour the adapter contract that `ref` is not stable: `PiAdapter` documents
+	 * that its id changes when `start()` resolves and when the first `submit()`
+	 * resolves, because Pi's session id IS its JSONL path (D9) and a `virtual`
+	 * session has no path until its first prompt writes one. Re-key everything
+	 * that is keyed by the old id, keep the old id as an alias for clients still
+	 * holding it, and tell the browsers so they can follow (`renamed`).
+	 */
+	#adoptRef(session: ManagedSession): void {
+		const next = session.adapter?.ref;
+		if (!next) return;
+		const oldKey = sessionKey(session.ref);
+		const newKey = sessionKey(next);
+		if (oldKey === newKey) return;
+
+		const from = session.ref;
+		this.#sessions.delete(oldKey);
+		session.ref = next;
+		this.#sessions.set(newKey, session);
+
+		this.#aliases.set(oldKey, newKey);
+		for (const [alias, target] of this.#aliases) {
+			if (target === oldKey) this.#aliases.set(alias, newKey);
+		}
+		for (const [requestId, owner] of this.#pendingRequests) {
+			if (owner === oldKey) this.#pendingRequests.set(requestId, newKey);
+		}
+
+		this.broadcaster.sessionsChanged();
+		this.broadcaster.renamed(from, next);
 	}
 
 	async #start(ref: SessionRef, existing: ManagedSession | undefined): Promise<ManagedSession> {
@@ -169,6 +251,7 @@ export class SessionManager {
 				subscriptions: [],
 				lastStreaming: false,
 				createdAt: summary.createdAt ?? this.#now(),
+				stored: summary,
 			};
 			this.#sessions.set(sessionKey(ref), session);
 		}
@@ -197,11 +280,17 @@ export class SessionManager {
 		} catch (err) {
 			for (const off of bound.subscriptions.splice(0)) off();
 			if (!existing) this.#sessions.delete(sessionKey(ref));
+			// The adapter spawns before it decides it has started -- PiAdapter
+			// spawns, then round-trips a readiness probe -- so a rejection can
+			// leave a live sandboxed agent behind. Nothing else will ever reap it.
+			await adapter.dispose().catch(() => {});
 			throw err;
 		}
 
 		bound.adapter = adapter;
 		bound.lastStreaming = adapter.getState().isStreaming;
+		// The first of the two points at which the id can change (D9).
+		this.#adoptRef(bound);
 		return bound;
 	}
 
@@ -226,7 +315,7 @@ export class SessionManager {
 
 	/** Mark a virtual session as materialised. Called on the first prompt (D9). */
 	markPrompted(ref: SessionRef): void {
-		const session = this.#sessions.get(sessionKey(ref));
+		const session = this.#lookup(ref);
 		if (session?.virtual) {
 			session.virtual = false;
 			this.broadcaster.sessionsChanged();
@@ -245,26 +334,43 @@ export class SessionManager {
 
 	/** Explicit close: this is the only thing besides shutdown that kills an agent. */
 	async close(ref: SessionRef): Promise<void> {
-		const key = sessionKey(ref);
-		const session = this.#sessions.get(key);
+		const session = this.#lookup(ref);
 		if (!session) return;
+		const key = sessionKey(session.ref);
 		this.#sessions.delete(key);
+		for (const [alias, target] of [...this.#aliases]) {
+			if (target === key || alias === key) this.#aliases.delete(alias);
+		}
 		for (const [requestId, owner] of [...this.#pendingRequests]) {
 			if (owner === key) this.#pendingRequests.delete(requestId);
 		}
 		for (const off of session.subscriptions.splice(0)) off();
-		await session.adapter?.dispose();
+		this.broadcaster.forget(session.ref);
+		// Swallowed deliberately. By this point the session is out of the table
+		// and unsubscribed, so it *is* closed as far as the caller is concerned;
+		// failing the DELETE would tell the browser to retry a close that has
+		// already happened. What a throw here can still mean is a subprocess that
+		// outlived its kill -- DESIGN's third open question, which needs a live
+		// spawn to settle and has no honest answer from in here.
+		await Promise.resolve(session.adapter?.dispose()).catch(() => {});
 		this.broadcaster.sessionsChanged();
 	}
 
 	async disposeAll(): Promise<void> {
 		const sessions = [...this.#sessions.values()];
 		this.#sessions.clear();
+		this.#aliases.clear();
 		this.#pendingRequests.clear();
-		for (const session of sessions) {
-			for (const off of session.subscriptions.splice(0)) off();
-			await session.adapter?.dispose();
-		}
+		// In parallel and settled, not sequential and awaited: every session left
+		// undisposed is a sandboxed agent still holding its workspace, so one
+		// adapter that cannot die must not spare the rest.
+		await Promise.allSettled(
+			sessions.map(async (session) => {
+				for (const off of session.subscriptions.splice(0)) off();
+				this.broadcaster.forget(session.ref);
+				await session.adapter?.dispose();
+			}),
+		);
 	}
 
 	/**
@@ -275,28 +381,53 @@ export class SessionManager {
 		const stored = await this.#index.list(query);
 		const byKey = new Map<string, SessionSummary>();
 		for (const summary of stored) {
-			byKey.set(sessionKey(summary.ref), { ...summary, ...this.#liveOverlay(summary.ref) });
+			const key = sessionKey(summary.ref);
+			// An id we have superseded is not a session of its own. Listing it
+			// alongside the session that outgrew it shows one conversation twice,
+			// and offers the browser a handle that opens a second agent on it.
+			if (this.#aliases.has(key)) continue;
+			byKey.set(key, { ...summary, ...this.#liveOverlay(summary.ref) });
 		}
 		for (const session of this.#sessions.values()) {
 			const key = sessionKey(session.ref);
 			if (byKey.has(key)) continue;
 			if (query?.cwd && session.cwd !== query.cwd) continue;
-			byKey.set(key, {
-				ref: session.ref,
-				cwd: session.cwd,
-				preview: null,
-				createdAt: session.createdAt,
-				updatedAt: session.createdAt,
-				...this.#liveOverlay(session.ref),
-			});
+			byKey.set(key, this.#ownSummary(session));
 		}
 		return [...byKey.values()].sort(
 			(a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? "") || 0,
 		);
 	}
 
+	/**
+	 * One session's summary. Deliberately not `list().find()`: that walks both
+	 * backends' whole session stores (973 files on this machine, D9) to answer a
+	 * question about a session we are already holding open, on the path a session
+	 * switch takes.
+	 */
+	summaryOf(ref: SessionRef): SessionSummary | null {
+		const session = this.#lookup(ref);
+		if (!session) return null;
+		const stored = session.stored;
+		return stored
+			? { ...stored, ref: session.ref, ...this.#liveOverlay(session.ref) }
+			: this.#ownSummary(session);
+	}
+
+	/** A session the index does not know about: everything we have is what we minted. */
+	#ownSummary(session: ManagedSession): SessionSummary {
+		return {
+			ref: session.ref,
+			cwd: session.cwd,
+			preview: null,
+			createdAt: session.createdAt,
+			updatedAt: session.createdAt,
+			...this.#liveOverlay(session.ref),
+		};
+	}
+
 	#liveOverlay(ref: SessionRef): { status: SessionStatus; isStreaming: boolean } {
-		const session = this.#sessions.get(sessionKey(ref));
+		const session = this.#lookup(ref);
 		if (session?.adapter) {
 			return { status: "attached", isStreaming: session.adapter.getState().isStreaming };
 		}

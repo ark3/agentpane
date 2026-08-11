@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type AgentRequestReply,
 	type ApiError,
+	type AttachSessionResponse,
 	type CreateSessionResponse,
 	type ForkPointsResponse,
 	type ForkResponse,
@@ -19,7 +20,7 @@ import {
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
-import { type App, type AttachSessionResponse, createApp } from "./app.ts";
+import { type App, createApp } from "./app.ts";
 import {
 	assistantMessage,
 	FakeAdapterFactory,
@@ -428,6 +429,57 @@ describe("prompting", () => {
 
 		const body = (await (await get(ROUTES.sessions)).json()) as ListSessionsResponse;
 		expect(body.sessions.find((s) => sessionKey(s.ref) === sessionKey(ref))?.status).toBe("attached");
+	});
+
+	it("follows a session that adopts its backend id on the first prompt (D9)", async () => {
+		// The whole life of a new Pi session in one test: create it virtual, prompt
+		// it, and watch it become a real JSONL path under the browser. The browser
+		// has to be able to follow that without losing the transcript, because the
+		// id it created the session with is not the id the session keeps.
+		const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
+		const renaming = new FakeAdapterFactory({
+			materialiseOnSubmit: REAL,
+			onSubmit(adapter, text) {
+				adapter.append(userMessage(text));
+			},
+		});
+		app = createApp({ index, adapters: { pi: renaming }, newId: () => "n1" });
+		const client = await openStream();
+
+		const { ref } = (await (
+			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })
+		).json()) as CreateSessionResponse;
+		expect(ref.id).toContain("virtual:");
+
+		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
+
+		const real: SessionRef = { backend: "pi", id: REAL };
+		await client.until(() => client.typed("renamed").length === 1, "the rename");
+		expect(client.typed("renamed")[0]?.from).toEqual(ref);
+		expect(client.typed("renamed")[0]?.session).toEqual(real);
+
+		// A client that follows the rename keeps the conversation, under the new id
+		// and only the new id.
+		await client.until(() => client.transcript(real).length === 1);
+		expect(client.transcript(ref)).toEqual([]);
+		expect(client.gaps).toEqual([]);
+
+		// The list shows the conversation once, under the id it now has.
+		const listed = ((await (await get(ROUTES.sessions)).json()) as ListSessionsResponse).sessions;
+		expect(listed.filter((s) => s.status === "attached").map((s) => s.ref.id)).toEqual([REAL]);
+
+		// A browser still holding the id it created the session with keeps working
+		// -- it may well have had this POST in flight when the rename happened.
+		expect((await post(ROUTES.prompt(ref), { text: "second" })).status).toBe(202);
+		await client.until(() => client.transcript(real).length === 2);
+		expect(renaming.created).toHaveLength(1);
+
+		// And the new id is a first-class handle: opening it re-attaches rather
+		// than spawning a second agent on the same session file.
+		const reopened = (await (await get(ROUTES.session(real))).json()) as AttachSessionResponse;
+		expect(reopened.session.ref).toEqual(real);
+		expect(renaming.created).toHaveLength(1);
+		await client.close();
 	});
 
 	it("reports a failed submit over SSE rather than in the POST status", async () => {

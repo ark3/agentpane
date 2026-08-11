@@ -117,6 +117,24 @@ export type ServerEvent =
 			seq: number;
 			message: string;
 	  }
+	| {
+			/**
+			 * A session's id changed under the client. Re-key everything held under
+			 * `from` to `session`; a `snapshot` for the new ref follows immediately.
+			 *
+			 * This is not an edge case, it is the normal life of a new Pi session.
+			 * Pi's id *is* its JSONL path (D9), and a `virtual` session has no path
+			 * until its first prompt materialises one -- so the id the browser
+			 * created a session with is not the id it keeps. The server honours the
+			 * old id on REST routes indefinitely, but every event from here on
+			 * carries the new one, so a client that ignores this renders a live
+			 * session into a transcript nothing updates.
+			 */
+			type: "renamed";
+			session: SessionRef;
+			seq: number;
+			from: SessionRef;
+	  }
 	/** The session list changed (created, deleted, or newly attached). Refetch it. */
 	| { type: "sessions-changed" };
 
@@ -140,6 +158,17 @@ export interface CreateSessionRequest {
 }
 export interface CreateSessionResponse {
 	ref: SessionRef;
+}
+
+/**
+ * GET /api/sessions/:backend/:id -- "open this session": spawns if needed and
+ * snapshots over SSE. The transcript is deliberately not in this body (D3); what
+ * is here is the summary, whose `ref` is *authoritative*. It can differ from the
+ * ref in the URL, because a session adopts its backend id on attach -- see the
+ * `renamed` event.
+ */
+export interface AttachSessionResponse {
+	session: SessionSummary;
 }
 
 /** POST /api/sessions/:backend/:id/prompt */

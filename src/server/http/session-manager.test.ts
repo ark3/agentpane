@@ -86,6 +86,10 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 
 		expect(sessions.canonicalRef(REF)).toEqual({ backend: "pi", id: REAL });
 		expect(sessions.liveRefs()).toEqual([{ backend: "pi", id: REAL }]);
+		// The summary the attach route hands back is the browser's other way of
+		// learning the new id, so it must not still carry the index's stale one.
+		expect(sessions.summaryOf(REF)?.ref).toEqual({ backend: "pi", id: REAL });
+		expect(sessions.summaryOf(REF)?.preview).toBe("hello");
 		// One session, listed once -- not once under each id.
 		const listed = await sessions.list();
 		expect(listed.filter((s) => s.status === "attached")).toHaveLength(1);
@@ -115,6 +119,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+		await sessions.attach(virtualRef);
 		await sessions.submit(virtualRef, "first");
 
 		// The browser POSTed against the id it created and has not refetched yet.

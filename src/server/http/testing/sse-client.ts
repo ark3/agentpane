@@ -64,6 +64,12 @@ export class SseTestClient {
 	#accept(event: ServerEvent): void {
 		if (this.options.drop?.(event, this.#received++)) return;
 		this.events.push(event);
+		if (event.type === "renamed") {
+			// The client half of the rename: everything held under the old id moves
+			// to the new one. Without this a browser keeps rendering a transcript
+			// that nothing will ever update again.
+			this.#rekey(sessionKey(event.from), sessionKey(event.session));
+		}
 		if (event.type !== "sessions-changed") {
 			const key = sessionKey(event.session);
 			if (event.type === "snapshot") {
@@ -86,6 +92,14 @@ export class SseTestClient {
 			if (!waiter.predicate()) continue;
 			this.#waiters = this.#waiters.filter((w) => w !== waiter);
 			waiter.resolve();
+		}
+	}
+
+	#rekey(from: string, to: string): void {
+		for (const map of [this.#transcripts, this.#streaming, this.#seq] as Map<string, unknown>[]) {
+			if (!map.has(from)) continue;
+			map.set(to, map.get(from));
+			map.delete(from);
 		}
 	}
 

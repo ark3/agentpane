@@ -15,6 +15,7 @@
 import {
 	type AgentRequestReply,
 	type ApiError,
+	type AttachSessionResponse,
 	type BackendId,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
@@ -33,11 +34,6 @@ import type { BackendAdapter } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
-
-/** Body of `GET /api/sessions/:backend/:id`. The transcript itself arrives over SSE (D3). */
-export interface AttachSessionResponse {
-	session: SessionSummary;
-}
 
 export interface App {
 	fetch(request: Request): Promise<Response>;
@@ -176,7 +172,10 @@ export function createApp(deps: AppDeps): App {
 		// snapshot over SSE. DELETE is the one thing that kills an agent.
 		if (request.method === "GET") {
 			await sessions.attach(ref);
-			const summary = (await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(ref));
+			// `summary.ref` is authoritative and may differ from the URL: attaching
+			// is one of the two points at which a session adopts its backend's own
+			// id (D9). Clients also hear about it as a `renamed` SSE event.
+			const summary = sessions.summaryOf(ref);
 			if (!summary) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
 			const body: AttachSessionResponse = { session: summary };
 			return json(body);
@@ -201,16 +200,21 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.text !== "string") {
 					return error(400, "bad_request", "text is required");
 				}
-				const adapter = await sessions.attach(ref);
-				sessions.markPrompted(ref);
+				await sessions.attach(ref);
+				// Through the manager, not straight at the adapter: `submit()` is
+				// one of the two points at which a session's id changes under us
+				// (D9), and the manager is what re-keys the process table.
+				//
 				// Deliberately not awaited. A turn can run for minutes and the
 				// adapter contract does not say whether submit() resolves on
 				// acceptance or on completion; either way the browser learns what
 				// happened from the stream, and a failure surfaces as an `error`
-				// event rather than as a stale HTTP status.
-				void adapter
-					.submit(body.value.text, body.value.images)
-					.catch((err: unknown) => broadcaster.error(ref, describe(err)));
+				// event rather than as a stale HTTP status. The error is reported
+				// against whatever id the session has by then, which is the id the
+				// browser is listening under.
+				void sessions
+					.submit(ref, body.value.text, body.value.images)
+					.catch((err: unknown) => broadcaster.error(sessions.canonicalRef(ref), describe(err)));
 				return accepted();
 			}
 			case "abort": {

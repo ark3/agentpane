@@ -129,6 +129,28 @@ export class Broadcaster {
 		this.#fanout({ type: "sessions-changed" });
 	}
 
+	/**
+	 * A session adopted its real backend id (D9). Told to everyone, then followed
+	 * by a snapshot under the new ref -- so the counter for the new key is reset
+	 * by that snapshot and the old key's is dropped here.
+	 */
+	renamed(from: SessionRef, to: SessionRef): void {
+		// Carry the counter across with the id. A client that has been counting
+		// this session's events is the same client that is about to re-key them,
+		// so restarting at 0 here would read to it as a dropped update. The
+		// snapshot below then resets both ends together, as it always does.
+		const fromKey = sessionKey(from);
+		this.#seq.set(sessionKey(to), this.#seq.get(fromKey) ?? 0);
+		this.#seq.delete(fromKey);
+		this.#fanout({ type: "renamed", session: to, seq: this.#bump(to), from });
+		this.broadcastSnapshot(to);
+	}
+
+	/** Drop a closed session's counter, so the map does not grow with the uptime. */
+	forget(ref: SessionRef): void {
+		this.#seq.delete(sessionKey(ref));
+	}
+
 	/** Current sequence number for a session. Exposed for tests and diagnostics. */
 	seqOf(ref: SessionRef): number {
 		return this.#seq.get(sessionKey(ref)) ?? 0;
