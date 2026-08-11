@@ -1,0 +1,29 @@
+{
+  "backend": "pi",
+  "scenario": "tool-edit",
+  "covers": "file change / diff rendering path",
+  "prompt": "Append a single line saying 'goodbye' to greeting.txt. Do not ask for confirmation.",
+  "workspace_files": [
+    "greeting.txt"
+  ],
+  "cli_version": "0.84.1",
+  "captured_at": "2026-08-10T23:38:11-0400",
+  "elapsed_seconds": 4.2,
+  "lines": 42,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 1,
+    "agent_settled": 1,
+    "agent_start": 1,
+    "message_end": 4,
+    "message_start": 4,
+    "message_update": 22,
+    "response": 1,
+    "tool_execution_end": 1,
+    "tool_execution_start": 1,
+    "tool_execution_update": 2,
+    "turn_end": 2,
+    "turn_start": 2
+  },
+  "dialogs_seen": []
+}

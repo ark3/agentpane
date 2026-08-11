@@ -1,0 +1,30 @@
+{
+  "backend": "codex",
+  "scenario": "tool-read",
+  "covers": "tool call + tool result pair",
+  "prompt": "Read greeting.txt and tell me, in one short sentence, what it says.",
+  "workspace_files": [
+    "greeting.txt"
+  ],
+  "cli_version": "codex-cli 0.147.0",
+  "captured_at": "2026-08-10T23:37:52-0400",
+  "elapsed_seconds": 4.2,
+  "lines": 60,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 2,
+    "item/agentMessage/delta": 34,
+    "item/completed": 4,
+    "item/started": 4,
+    "mcpServer/startupStatus/updated": 5,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 2,
+    "thread/tokenUsage/updated": 2,
+    "turn/completed": 1,
+    "turn/started": 1
+  },
+  "thread_id": "019feee5-d8fd-71a2-a21f-3f52ee8b8be2",
+  "server_requests_seen": []
+}

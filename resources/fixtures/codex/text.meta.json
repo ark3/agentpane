@@ -1,0 +1,28 @@
+{
+  "backend": "codex",
+  "scenario": "text",
+  "covers": "streaming text deltas, no tools",
+  "prompt": "Reply with exactly: hello there friend",
+  "workspace_files": [],
+  "cli_version": "codex-cli 0.147.0",
+  "captured_at": "2026-08-10T23:37:48-0400",
+  "elapsed_seconds": 3.3,
+  "lines": 24,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 1,
+    "item/agentMessage/delta": 3,
+    "item/completed": 3,
+    "item/started": 3,
+    "mcpServer/startupStatus/updated": 4,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 2,
+    "thread/tokenUsage/updated": 1,
+    "turn/completed": 1,
+    "turn/started": 1
+  },
+  "thread_id": "019feee5-cc20-7290-95fa-599abc243e55",
+  "server_requests_seen": []
+}

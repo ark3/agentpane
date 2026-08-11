@@ -1,0 +1,14 @@
+{"type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: hello there friend"}],"timestamp":1786419855346}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: hello there friend"}],"timestamp":1786419855346}}
+{"type":"message_start","message":{"role":"assistant","content":[],"api":"example-api-stream","provider":"example-provider","model":"example-model","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"pending","timestamp":1786419855390}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"h"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"ello there friend"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"hello there friend"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello there friend"}],"api":"example-api-stream","provider":"example-provider","model":"example-model","usage":{"input":2,"output":7,"cacheRead":0,"cacheWrite":2983,"totalTokens":2992,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1786419855390,"rawStopReason":"end_turn"}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"hello there friend"}],"api":"example-api-stream","provider":"example-provider","model":"example-model","usage":{"input":2,"output":7,"cacheRead":0,"cacheWrite":2983,"totalTokens":2992,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1786419855390,"rawStopReason":"end_turn"},"toolResults":[]}
+{"type":"agent_end","messages":[{"role":"user","content":[{"type":"text","text":"Reply with exactly: hello there friend"}],"timestamp":1786419855346},{"role":"assistant","content":[{"type":"text","text":"hello there friend"}],"api":"example-api-stream","provider":"example-provider","model":"example-model","usage":{"input":2,"output":7,"cacheRead":0,"cacheWrite":2983,"totalTokens":2992,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1786419855390,"rawStopReason":"end_turn"}],"willRetry":false}
+{"type":"agent_settled"}

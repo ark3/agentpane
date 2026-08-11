@@ -1,0 +1,24 @@
+{
+  "backend": "pi",
+  "scenario": "text",
+  "covers": "streaming text deltas, no tools",
+  "prompt": "Reply with exactly: hello there friend",
+  "workspace_files": [],
+  "cli_version": "0.84.1",
+  "captured_at": "2026-08-10T23:44:16-0400",
+  "elapsed_seconds": 1.9,
+  "lines": 14,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 1,
+    "agent_settled": 1,
+    "agent_start": 1,
+    "message_end": 2,
+    "message_start": 2,
+    "message_update": 4,
+    "response": 1,
+    "turn_end": 1,
+    "turn_start": 1
+  },
+  "dialogs_seen": []
+}
