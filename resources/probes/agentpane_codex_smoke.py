@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """One-shot live Codex smoke check through agentpane's production HTTP/SSE server.
 
-This makes real model calls. It never invokes Pi, prints credential contents,
-or inspects/kills Codex processes outside the server tree started by this run.
+This makes real model calls. It never invokes Pi and never prints credential
+contents. Process inspection is scoped to the server tree this run launched:
+finding descendants reads one parent link per process, and command lines are
+read only for pids already established as descendants. The only processes it
+ever signals are that server and the Codex workers it was seen to own.
 """
 
 from __future__ import annotations
@@ -57,31 +60,92 @@ def json_request(method: str, path: str, body: dict[str, Any] | None = None) -> 
     return status, json.loads(raw) if raw else None
 
 
-def proc_rows() -> dict[int, dict[str, Any]]:
-    rows: dict[int, dict[str, Any]] = {}
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = (entry / "stat").read_text().split()
-            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
-            comm = (entry / "comm").read_text().strip()
-            rows[int(entry.name)] = {"ppid": int(stat[3]), "comm": comm, "cmd": cmdline}
-        except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
-            continue
-    return rows
+def ppid_of(pid: int) -> int | None:
+    """This process's parent, and nothing else about it.
+
+    `/proc/<pid>/stat` is `pid (comm) state ppid ...`, and `comm` may contain
+    both spaces and parentheses. Splitting the whole line on whitespace and
+    taking field 3 therefore misreads the parent of any process whose name has
+    a space in it -- which either hides a real descendant of this run or
+    attributes an unrelated process to it. Parse after the final `)`.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+        fields = raw[raw.rindex(")") + 1 :].split()
+        return int(fields[1])
+    except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError, IndexError):
+        return None
 
 
 def descendants(root: int) -> list[dict[str, Any]]:
-    rows = proc_rows()
-    found: set[int] = set()
+    """Live descendants of `root`, with command lines read for those alone.
+
+    Finding children costs one parent link per process, because that is the
+    only way Linux answers "who are my descendants". Nothing else about an
+    unrelated process is opened: `comm` and `cmdline` are read after the tree
+    is known, so no command line outside this run's own server tree is ever
+    read, let alone recorded.
+    """
+    links: dict[int, int] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        parent = ppid_of(pid)
+        if parent is not None:
+            links[pid] = parent
+
+    children: dict[int, list[int]] = {}
+    for pid, parent in links.items():
+        children.setdefault(parent, []).append(pid)
+
+    found: list[int] = []
+    seen: set[int] = {root}
     frontier = [root]
     while frontier:
-        parent = frontier.pop()
-        children = [pid for pid, row in rows.items() if row["ppid"] == parent and pid not in found]
-        found.update(children)
-        frontier.extend(children)
-    return [dict(pid=pid, **rows[pid]) for pid in sorted(found) if pid in rows]
+        for child in children.get(frontier.pop(), []):
+            if child in seen:
+                continue
+            seen.add(child)
+            found.append(child)
+            frontier.append(child)
+
+    rows: list[dict[str, Any]] = []
+    for pid in sorted(found):
+        try:
+            comm = Path(f"/proc/{pid}/comm").read_text().strip()
+            cmd = (
+                Path(f"/proc/{pid}/cmdline")
+                .read_bytes()
+                .replace(b"\0", b" ")
+                .decode(errors="replace")
+                .strip()
+            )
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue  # exited while we walked; it is not a survivor either way
+        rows.append({"pid": pid, "ppid": links[pid], "comm": comm, "cmd": cmd})
+    return rows
+
+
+def reap(pids: set[int], grace: float) -> list[int]:
+    """Wait out this run's own Codex workers, then kill whatever is left.
+
+    Every pid here was recorded when it was observed as a descendant of the
+    server this run launched, so this signals nothing outside that tree. A
+    harness that quietly leaves a sandboxed agent running is worse than one
+    that reports the leak, so survivors are both killed and returned.
+    """
+    deadline = time.monotonic() + grace
+    alive = sorted(pid for pid in pids if Path(f"/proc/{pid}").exists())
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.1)
+        alive = sorted(pid for pid in pids if Path(f"/proc/{pid}").exists())
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return alive
 
 
 def codex_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -180,6 +244,29 @@ def streaming_value(event: dict[str, Any], ref: dict[str, str]) -> bool | None:
         return None
     value = event.get("isStreaming")
     return value if isinstance(value, bool) else None
+
+
+def last_streaming(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> bool | None:
+    """The most recent streaming state this session was reported to be in."""
+    for _, event in reversed(events):
+        value = streaming_value(event, ref)
+        if value is not None:
+            return value
+    return None
+
+
+def max_assistant_length(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> int:
+    """Longest assistant text seen for this session, across upserts and snapshots."""
+    longest = 0
+    for _, event in events:
+        if event.get("session") != ref:
+            continue
+        if event.get("type") == "upsert":
+            longest = max(longest, len(assistant_text(event.get("message", {}))))
+        elif event.get("type") == "snapshot":
+            for message in event.get("messages", []):
+                longest = max(longest, len(assistant_text(message)))
+    return longest
 
 
 def process_evidence(server_pid: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -447,30 +534,58 @@ def main() -> int:
 
         active_at = reconnect.wait_for(active, 60, "long turn streaming=true")
         time.sleep(0.35)
+
+        # Everything the abort is judged on has to arrive after this point.
+        # Scanning from the prompt instead lets a turn that ended on its own --
+        # or an idle event left over from the reconnect -- stand in for the
+        # abort, and that is a pass the check cannot tell from a real one. So:
+        # pin the cut, require the turn to be streaming right up to it, and
+        # accept only an idle that arrives past it.
+        pre_abort = reconnect.snapshot()
+        abort_index = len(pre_abort)
+        pre_abort_streaming = last_streaming(pre_abort, real_ref)
+        if pre_abort_streaming is not True:
+            raise RuntimeError(
+                "long turn was not streaming when the abort was issued "
+                f"(last reported state: {pre_abort_streaming})"
+            )
+        length_at_abort = max_assistant_length(pre_abort, real_ref)
+
         abort_requested_at = now()
         abort_status, abort_body = json_request("POST", ref_path(real_ref, "/abort"))
         if abort_status != 204:
             raise RuntimeError(f"abort failed: HTTP {abort_status} {abort_body}")
 
         def aborted_idle(events: list[tuple[str, dict[str, Any]]]) -> Any:
-            saw_active = False
-            for stamp, event in events[abort_start:]:
-                value = streaming_value(event, real_ref)
-                if value is True:
-                    saw_active = True
-                if saw_active and value is False:
+            for stamp, event in events[abort_index:]:
+                if streaming_value(event, real_ref) is False:
                     return {"timestamp": stamp, "event_type": event.get("type")}
             return None
 
         aborted_idle_event = reconnect.wait_for(aborted_idle, 60, "aborted turn streaming=false")
+
+        # Idle is a claim about the turn; the transcript is what proves it. A
+        # turn that keeps emitting text after reporting idle was not aborted.
+        settled_length = max_assistant_length(reconnect.snapshot(), real_ref)
+        time.sleep(1.5)
+        after_length = max_assistant_length(reconnect.snapshot(), real_ref)
+        if after_length != settled_length:
+            raise RuntimeError(
+                f"transcript kept growing after the abort reported idle: {settled_length} -> {after_length}"
+            )
         evidence["checks"]["abort"] = {
             "result": "pass",
             "prompt_http_status": long_status,
             "streaming_at": active_at,
+            "streaming_at_abort": pre_abort_streaming,
+            "events_before_abort": abort_index,
             "abort_requested_at": abort_requested_at,
             "abort_http_status": abort_status,
             "idle_at": aborted_idle_event["timestamp"],
             "idle_event_type": aborted_idle_event["event_type"],
+            "assistant_length_at_abort": length_at_abort,
+            "assistant_length_when_idle": settled_length,
+            "assistant_length_after_settling": after_length,
         }
 
         evidence["shutdown_requested_at"] = now()
@@ -492,16 +607,14 @@ def main() -> int:
 
         evidence["finished_at"] = now()
         evidence["result"] = "pass"
-        print(json.dumps(evidence, indent=2))
-        return 0
+        exit_code = 0
     except Exception as error:
         evidence["finished_at"] = now()
         evidence["result"] = "fail"
         evidence["error"] = f"{type(error).__name__}: {error}"
         if server_log.exists():
             evidence["server_log_tail"] = server_log.read_text(errors="replace")[-4000:]
-        print(json.dumps(evidence, indent=2))
-        return 1
+        exit_code = 1
     finally:
         for stream in streams:
             stream.close()
@@ -512,8 +625,33 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=5)
+
+        # Cleanup is a criterion, not a courtesy. `ignore_errors` and
+        # `missing_ok` make removal silent whether or not it worked, and a run
+        # that leaves a live sandboxed agent or a copy of the credentials
+        # behind has not passed no matter what its checks said. This runs on
+        # the failure path too: that is where leaks actually happen.
+        orphaned = reap(launched_workers, 10)
         shutil.rmtree(state_home, ignore_errors=True)
         server_log.unlink(missing_ok=True)
+        cleanup: dict[str, Any] = {
+            "orphaned_worker_pids": orphaned,
+            "codex_home_removed": not state_home.exists(),
+            "server_log_removed": not server_log.exists(),
+        }
+        cleanup["result"] = (
+            "pass"
+            if not orphaned and cleanup["codex_home_removed"] and cleanup["server_log_removed"]
+            else "fail"
+        )
+        evidence["cleanup"] = cleanup
+        if cleanup["result"] == "fail" and evidence.get("result") == "pass":
+            evidence["result"] = "fail"
+            evidence["error"] = f"checks passed but cleanup did not: {cleanup}"
+            exit_code = 1
+
+    print(json.dumps(evidence, indent=2))
+    return exit_code
 
 
 if __name__ == "__main__":
