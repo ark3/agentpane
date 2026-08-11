@@ -55,6 +55,8 @@ export interface CodexAdapterOptions {
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
 const START_ABORTED_ERROR = "codex adapter start aborted: disposed during startup";
+const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
+const TURN_ACTIVE_ERROR = "codex adapter cannot submit while a turn is active";
 
 /** JSON-RPC "request cancelled"; used when a blocking request is declined. */
 const DECLINED_CODE = -32800;
@@ -75,8 +77,15 @@ export class CodexAdapter implements BackendAdapter {
 	private ownership: ClientOwnership | null = null;
 	private threadId: string | null = null;
 	private turnId: string | null = null;
-	private pendingTurnStarts = 0;
-	private completedTurnIds = new Set<string>();
+	private turnStartPending = false;
+	/**
+	 * The one current-thread turn candidate observed while the single allowed
+	 * `turn/start` continuation can still resume. A completion can only update
+	 * an already-correlated candidate.
+	 */
+	private pendingTurnCompletions = new Map<string, "started" | "completed">();
+	/** Candidate overflow makes an unknown response unsafe to install as active. */
+	private pendingTurnCompletionOverflow = false;
 	private model: string | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
@@ -210,7 +219,8 @@ export class CodexAdapter implements BackendAdapter {
 		this.requestListeners.clear();
 		this.errorListeners.clear();
 		this.clearPendingRequests();
-		this.completedTurnIds.clear();
+		this.pendingTurnCompletions.clear();
+		this.pendingTurnCompletionOverflow = false;
 	}
 
 	// -- driving a turn -----------------------------------------------------
@@ -218,15 +228,14 @@ export class CodexAdapter implements BackendAdapter {
 	async submit(text: string, images?: ImageInput[]): Promise<void> {
 		const client = this.requireClient();
 		const threadId = this.requireThread();
+		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
+		if (this.turnId) throw new Error(TURN_ACTIVE_ERROR);
 		const input: UserInput[] = [];
 		if (text) input.push({ type: "text", text, text_elements: [] });
 		for (const image of images ?? []) {
 			input.push({ type: "image", url: `data:${image.mimeType};base64,${image.base64}` });
 		}
-		// Once a new turn is requested, the previous turn is no longer an abort
-		// target. A response or `turn/started` notification installs the new id.
-		this.turnId = null;
-		this.pendingTurnStarts += 1;
+		this.turnStartPending = true;
 		let responseTurnId: string | undefined;
 		try {
 			const response = await client.request<TurnStartResponse>("turn/start", {
@@ -238,12 +247,30 @@ export class CodexAdapter implements BackendAdapter {
 				...(this.model ? { model: this.model } : {}),
 			});
 			responseTurnId = response.turn?.id;
-			this.turnId =
-				responseTurnId && !this.completedTurnIds.has(responseTurnId) ? responseTurnId : null;
+			const completion = responseTurnId
+				? this.pendingTurnCompletions.get(responseTurnId)
+				: undefined;
+			if (responseTurnId) {
+				// Keep a lifecycle-established active id: a matching id is direct
+				// evidence even after overflow, while a different id is authoritative.
+				if (completion === "completed") {
+					if (this.turnId === responseTurnId) this.turnId = null;
+				} else if (
+					this.turnId === null &&
+					this.pendingTurnCompletions.size === 0 &&
+					!this.pendingTurnCompletionOverflow
+				) {
+					this.turnId = responseTurnId;
+				}
+				// With no active id, a mismatched candidate or overflow leaves the
+				// response untouched: it may name a submission steered into a turn that
+				// already completed, so failing closed avoids reviving it.
+			}
 		} finally {
-			if (responseTurnId) this.completedTurnIds.delete(responseTurnId);
-			this.pendingTurnStarts -= 1;
-			if (this.pendingTurnStarts === 0) this.completedTurnIds.clear();
+			if (responseTurnId) this.pendingTurnCompletions.delete(responseTurnId);
+			this.turnStartPending = false;
+			this.pendingTurnCompletions.clear();
+			this.pendingTurnCompletionOverflow = false;
 		}
 	}
 
@@ -377,13 +404,37 @@ export class CodexAdapter implements BackendAdapter {
 	private onServerMessage(msg: CodexServerMessage): void {
 		if ("method" in msg) {
 			switch (msg.method) {
-				case "turn/started":
-					this.turnId = msg.params.turn.id;
+				case "turn/started": {
+					if (msg.params.threadId !== this.threadId) return;
+					const startedTurnId = msg.params.turn.id;
+					this.turnId = startedTurnId;
+					if (
+						!this.pendingTurnCompletions.has(startedTurnId) &&
+						this.pendingTurnCompletions.size === 0 &&
+						this.turnStartPending
+					) {
+						this.pendingTurnCompletions.set(startedTurnId, "started");
+					} else if (
+						!this.pendingTurnCompletions.has(startedTurnId) &&
+						this.turnStartPending
+					) {
+						// `turn/started` has no JSON-RPC request id. If another
+						// same-thread producer exhausts the bounded candidate slots,
+						// an unknown response might already have completed. Prefer a
+						// no-op abort over reviving and interrupting that turn.
+						this.pendingTurnCompletionOverflow = true;
+					}
 					break;
-				case "turn/completed":
-					if (this.pendingTurnStarts > 0) this.completedTurnIds.add(msg.params.turn.id);
-					if (this.turnId === msg.params.turn.id) this.turnId = null;
+				}
+				case "turn/completed": {
+					if (msg.params.threadId !== this.threadId) return;
+					const completedTurnId = msg.params.turn.id;
+					if (this.pendingTurnCompletions.has(completedTurnId)) {
+						this.pendingTurnCompletions.set(completedTurnId, "completed");
+					}
+					if (this.turnId === completedTurnId) this.turnId = null;
 					break;
+				}
 			}
 		}
 		this.applyEffects(this.reducer.handle(msg));

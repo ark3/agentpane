@@ -527,17 +527,61 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
-	it("does not interrupt the previous turn while the next turn/start is pending", async () => {
-		const { adapter, proc } = await startedAdapter({ holdTurnStartAt: 2 });
+	it("ignores lifecycle notifications for another thread", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-current" });
+		await adapter.submit("begin");
+		const activeTurn = {
+			id: "turn-1",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-current", turn: activeTurn },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-other",
+				turn: {
+					...activeTurn,
+					id: "turn-other",
+					itemsView: "summary",
+					status: "completed",
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		expect(adapter.getState().isStreaming).toBe(true);
+		await adapter.abort();
+		expect(request(proc, "turn/interrupt")["params"]).toEqual({
+			threadId: "thread-current",
+			turnId: "turn-1",
+		});
+	});
+
+	it("rejects a submit while a turn is active without erasing its abort target", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-active-submit" });
 		await adapter.submit("first");
-		const second = adapter.submit("second");
-		const rejected = expect(second).rejects.toThrow("adapter disposed");
+
+		await expect(adapter.submit("second")).rejects.toThrow(
+			"codex adapter cannot submit while a turn is active",
+		);
 
 		await adapter.abort();
 
-		await adapter.dispose();
-		await rejected;
-		expect(methods(proc)).not.toContain("turn/interrupt");
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+		expect(request(proc, "turn/interrupt")["params"]).toEqual({
+			threadId: "thread-active-submit",
+			turnId: "turn-1",
+		});
 	});
 
 	it("does not revive a turn completed in the same chunk as turn/start response", async () => {
@@ -604,77 +648,252 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
-	it("does not revive either of two overlapping turns completed before their continuations", async () => {
+	it("rejects an overlapping pending submit without mutating the first turn's tracking", async () => {
 		const proc = new AdapterProcess();
-		const pendingTurnStarts: number[] = [];
-		const emitCompletedTurn = (requestId: number, turnId: string): void => {
-			const turn = {
-				id: turnId,
-				items: [],
-				itemsView: "notLoaded",
-				status: "inProgress",
-				error: null,
-				startedAt: 1,
-				completedAt: null,
-				durationMs: null,
-			};
-			proc.emit({ id: requestId, result: { turn } });
-			proc.emit({
-				method: "turn/started",
-				params: { threadId: "thread-overlap", turn },
-			});
+		configureHappyServer(proc, { threadId: "thread-overlap", holdTurnStart: true });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const first = adapter.submit("first held prompt");
+		const firstRequest = request(proc, "turn/start");
+		const secondRejected = expect(adapter.submit("second overlapping prompt")).rejects.toThrow(
+			"codex adapter cannot submit while turn/start is pending",
+		);
+		const turn = {
+			id: "turn-overlap-a",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-overlap", turn },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-overlap",
+				turn: {
+					...turn,
+					itemsView: "summary",
+					status: "completed",
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+		proc.emit({ id: firstRequest["id"], result: { turn } });
+
+		await first;
+		await secondRejected;
+		await adapter.abort();
+
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("bounds held-start tracking without reviving the real turn after completion floods", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { threadId: "thread-bounded", holdTurnStart: true });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const emitCompletion = (threadId: string, turnId: string): void => {
 			proc.emit({
 				method: "turn/completed",
 				params: {
-					threadId: "thread-overlap",
+					threadId,
 					turn: {
-						...turn,
+						id: turnId,
+						items: [],
 						itemsView: "summary",
 						status: "completed",
+						error: null,
+						startedAt: 1,
 						completedAt: 2,
 						durationMs: 1000,
 					},
 				},
 			});
 		};
-		proc.onWrite((message) => {
-			const id = message["id"];
-			if (typeof id !== "number") return;
-			switch (message["method"]) {
-				case "initialize":
-					proc.emit({ id, result: {} });
-					break;
-				case "thread/start":
-					proc.emit({
-						id,
-						result: {
-							thread: { id: "thread-overlap", turns: [] },
-							model: "gpt",
-							modelProvider: "openai",
-						},
-					});
-					break;
-				case "turn/start":
-					pendingTurnStarts.push(id);
-					if (pendingTurnStarts.length === 2) {
-						emitCompletedTurn(pendingTurnStarts[0] ?? -1, "turn-overlap-a");
-						emitCompletedTurn(pendingTurnStarts[1] ?? -1, "turn-overlap-b");
-					}
-					break;
-				case "turn/interrupt":
-					proc.emit({ id, result: {} });
-					break;
-			}
+
+		for (let index = 0; index < 1000; index += 1) {
+			emitCompletion("thread-unrelated", `turn-unrelated-${index}`);
+			emitCompletion("thread-bounded", `turn-unmatched-${index}`);
+		}
+		const nonlocalTurn = {
+			id: "turn-nonlocal",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-bounded", turn: nonlocalTurn },
 		});
+		emitCompletion("thread-bounded", nonlocalTurn.id);
+
+		const turn = {
+			id: "turn-held",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-bounded", turn },
+		});
+		emitCompletion("thread-bounded", turn.id);
+		proc.emit({ id: held["id"], result: { turn } });
+		const retainedTurnIds = (
+			adapter as unknown as { pendingTurnCompletions: Map<string, string> }
+		).pendingTurnCompletions.size;
+
+		await submitting;
+		await adapter.abort();
+
+		expect(retainedTurnIds).toBeLessThanOrEqual(1);
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("does not adopt a mismatched response after the sole candidate completed", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { threadId: "thread-steered", holdTurnStart: true });
 		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
 		await adapter.start({ cwd: "/workspace" });
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const candidate = {
+			id: "turn-active-candidate",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-steered", turn: candidate },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-steered",
+				turn: {
+					...candidate,
+					itemsView: "summary",
+					status: "completed",
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+		proc.emit({ id: held["id"], result: { turn: { id: "turn-submission-id" } } });
 
-		const first = adapter.submit("first overlapping prompt");
-		const second = adapter.submit("second overlapping prompt");
-		await Promise.all([first, second]);
+		await submitting;
 		await adapter.abort();
 
 		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("does not revive a retained candidate after a newer turn completed", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { threadId: "thread-superseded", holdTurnStart: true });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const inProgressTurn = (id: string) => ({
+			id,
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		});
+		const retainedTurn = inProgressTurn("turn-retained");
+		const newerTurn = inProgressTurn("turn-newer");
+		for (const turn of [retainedTurn, newerTurn]) {
+			proc.emit({
+				method: "turn/started",
+				params: { threadId: "thread-superseded", turn },
+			});
+		}
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-superseded",
+				turn: {
+					...newerTurn,
+					itemsView: "summary",
+					status: "completed",
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+		proc.emit({ id: held["id"], result: { turn: retainedTurn } });
+
+		await submitting;
+		await adapter.abort();
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("keeps a matching started turn active after bounded candidate overflow", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { threadId: "thread-overflow-active", holdTurnStart: true });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const inProgressTurn = (id: string) => ({
+			id,
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		});
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: "thread-overflow-active",
+				turn: inProgressTurn("turn-nonlocal"),
+			},
+		});
+		const realTurn = inProgressTurn("turn-real");
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-overflow-active", turn: realTurn },
+		});
+		proc.emit({ id: held["id"], result: { turn: realTurn } });
+
+		await submitting;
+		await adapter.abort();
+
+		expect(request(proc, "turn/interrupt")["params"]).toEqual({
+			threadId: "thread-overflow-active",
+			turnId: "turn-real",
+		});
 	});
 
 	it("does not retain completion ids received without a pending turn start", async () => {
@@ -700,7 +919,8 @@ describe("CodexAdapter turns", () => {
 		}
 
 		expect(
-			(adapter as unknown as { completedTurnIds: Set<string> }).completedTurnIds.size,
+			(adapter as unknown as { pendingTurnCompletions: Map<string, string> })
+				.pendingTurnCompletions.size,
 		).toBe(0);
 	});
 
