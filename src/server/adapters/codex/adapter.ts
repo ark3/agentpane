@@ -96,6 +96,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- lifecycle ----------------------------------------------------------
 
 	async start(opts: StartOptions): Promise<void> {
+		if (this.disposed) throw new Error("codex adapter disposed");
 		if (this.client) throw new Error("codex adapter already started");
 		this.cwd = opts.cwd;
 		if (opts.model) this.model = opts.model;
@@ -103,10 +104,14 @@ export class CodexAdapter implements BackendAdapter {
 		const spawner = this.options.spawn ?? spawnCodex;
 		const proc = spawner({ cwd: opts.cwd, env: this.options.env });
 		this.proc = proc;
-		const client = new CodexClient(proc, {
-			onMessage: (msg) => this.onServerMessage(msg),
+		let client: CodexClient;
+		client = new CodexClient(proc, {
+			onMessage: (msg) => {
+				if (this.disposed || this.proc !== proc || this.client !== client) return;
+				this.onServerMessage(msg);
+			},
 			onExit: (code, signal, error) => {
-				if (this.disposed || this.proc !== proc) return;
+				if (this.disposed || this.proc !== proc || this.client !== client) return;
 				this.emitError(
 					error?.message ??
 						`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
@@ -114,12 +119,18 @@ export class CodexAdapter implements BackendAdapter {
 			},
 		});
 		this.client = client;
+		const assertOwned = (): void => {
+			if (this.disposed || this.proc !== proc || this.client !== client) {
+				throw new Error("codex adapter disposed during start");
+			}
+		};
 
 		try {
 			await client.request("initialize", {
 				clientInfo: this.options.clientInfo ?? DEFAULT_CLIENT_INFO,
 				capabilities: null,
 			});
+			assertOwned();
 
 			const started = opts.resumeId
 				? await client.request<ThreadStartResponse>("thread/resume", {
@@ -132,6 +143,7 @@ export class CodexAdapter implements BackendAdapter {
 						...(this.model ? { model: this.model } : {}),
 						...(this.options.ephemeral ? { ephemeral: true } : {}),
 					});
+			assertOwned();
 
 			this.threadId = started.thread.id;
 			this.currentRef = { backend: "codex", id: started.thread.id };
@@ -147,18 +159,23 @@ export class CodexAdapter implements BackendAdapter {
 		} catch (error) {
 			client.dispose("codex adapter start failed");
 			if (this.client === client) this.client = null;
-			if (this.proc === proc) this.proc = null;
-			proc.kill();
+			if (this.proc === proc) {
+				this.proc = null;
+				proc.kill();
+			}
 			throw error;
 		}
 	}
 
 	async dispose(): Promise<void> {
+		if (this.disposed) return;
 		this.disposed = true;
-		this.client?.dispose();
-		this.proc?.kill();
+		const client = this.client;
+		const proc = this.proc;
 		this.client = null;
 		this.proc = null;
+		client?.dispose();
+		proc?.kill();
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
@@ -169,25 +186,29 @@ export class CodexAdapter implements BackendAdapter {
 
 	async submit(text: string, images?: ImageInput[]): Promise<void> {
 		const client = this.requireClient();
+		const threadId = this.requireThread();
 		const input: UserInput[] = [];
 		if (text) input.push({ type: "text", text, text_elements: [] });
 		for (const image of images ?? []) {
 			input.push({ type: "image", url: `data:${image.mimeType};base64,${image.base64}` });
 		}
+		// Once a new turn is requested, the previous turn is no longer an abort
+		// target. A response or `turn/started` notification installs the new id.
+		this.turnId = null;
 		const response = await client.request<TurnStartResponse>("turn/start", {
-			threadId: this.requireThread(),
+			threadId,
 			input,
 			// TurnStartParams.model overrides "for this turn and subsequent
 			// turns" -- Codex has no standalone set-model request, so this is
 			// where `setModel` takes effect.
 			...(this.model ? { model: this.model } : {}),
 		});
-		this.turnId = response.turn?.id ?? this.turnId;
+		this.turnId = response.turn?.id ?? null;
 	}
 
 	async abort(): Promise<void> {
 		const client = this.requireClient();
-		const turnId = this.turnId ?? this.reducer.turnId;
+		const turnId = this.turnId;
 		if (!turnId) return;
 		await client.request("turn/interrupt", { threadId: this.requireThread(), turnId });
 	}
@@ -310,6 +331,16 @@ export class CodexAdapter implements BackendAdapter {
 	// -- internals ----------------------------------------------------------
 
 	private onServerMessage(msg: CodexServerMessage): void {
+		if ("method" in msg) {
+			switch (msg.method) {
+				case "turn/started":
+					this.turnId = msg.params.turn.id;
+					break;
+				case "turn/completed":
+					if (this.turnId === msg.params.turn.id) this.turnId = null;
+					break;
+			}
+		}
 		this.applyEffects(this.reducer.handle(msg));
 	}
 
@@ -324,7 +355,7 @@ export class CodexAdapter implements BackendAdapter {
 					this.emitUpdate(undefined);
 					break;
 				case "request": {
-					const key = requestKey(effect.requestId);
+					const key = requestKey(this.threadId ?? this.currentRef.id, effect.requestId);
 					this.pendingRequests.set(key, { id: effect.requestId, kind: effect.kind });
 					const request: AgentRequest = {
 						requestId: key,
@@ -338,14 +369,15 @@ export class CodexAdapter implements BackendAdapter {
 				case "request-resolved":
 					// Codex resolved it without us (auto-approval, or another
 					// client). Drop it so a late `reply` is a no-op.
-					this.pendingRequests.delete(requestKey(effect.requestId));
+					this.pendingRequests.delete(
+						requestKey(this.threadId ?? this.currentRef.id, effect.requestId),
+					);
 					break;
 				case "error":
 					this.emitError(effect.message);
 					break;
 			}
 		}
-		if (this.reducer.turnId) this.turnId = this.reducer.turnId;
 	}
 
 	private emitUpdate(changedIndex?: number): void {

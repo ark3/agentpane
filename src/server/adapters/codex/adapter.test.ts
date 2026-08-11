@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionRef } from "../../../shared/protocol.ts";
+import type { AgentRequest, SessionRef } from "../../../shared/protocol.ts";
 import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
 import type { CodexProcess } from "./process.ts";
 import { FakeCodexProcess } from "./test-support.ts";
@@ -43,6 +43,8 @@ interface HappyServerOptions {
 	model?: string;
 	modelProvider?: string;
 	holdTurnStart?: boolean;
+	holdTurnStartAt?: number;
+	holdThreadStart?: boolean;
 }
 
 function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
@@ -56,6 +58,7 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				break;
 			case "thread/start":
 			case "thread/resume":
+				if (options.holdThreadStart) break;
 				proc.emit({
 					id,
 					result: {
@@ -66,8 +69,8 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				});
 				break;
 			case "turn/start":
-				if (!options.holdTurnStart) {
-					turn += 1;
+				turn += 1;
+				if (!options.holdTurnStart && options.holdTurnStartAt !== turn) {
 					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
 				}
 				break;
@@ -86,6 +89,10 @@ function request(proc: AdapterProcess, method: string): WireMessage {
 
 function methods(proc: AdapterProcess): unknown[] {
 	return proc.written.filter((message) => "method" in message).map((message) => message["method"]);
+}
+
+function responses(proc: AdapterProcess): WireMessage[] {
+	return proc.written.filter((message) => !("method" in message));
 }
 
 async function startedAdapter(
@@ -232,6 +239,90 @@ describe("CodexAdapter lifecycle", () => {
 
 		expect(errors).toHaveBeenCalledWith("Failed to spawn Codex: ENOENT\nstderr detail");
 	});
+
+	it("rejects start after public disposal without spawning", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc);
+		const spawn = vi.fn(() => proc);
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn });
+		await adapter.dispose();
+
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("codex adapter disposed");
+
+		expect(spawn).not.toHaveBeenCalled();
+	});
+
+	it("settles a held start on disposal without adopting a ref or killing twice", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { holdThreadStart: true });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		const starting = adapter.start({ cwd: "/workspace" });
+		const rejected = expect(starting).rejects.toThrow("adapter disposed");
+		await Promise.resolve();
+		const held = request(proc, "thread/start");
+
+		await adapter.dispose();
+		await rejected;
+		proc.emit({
+			id: held["id"],
+			result: { thread: { id: "thread-too-late", turns: [] }, model: "gpt", modelProvider: "openai" },
+		});
+		await adapter.dispose();
+
+		expect(adapter.ref).toEqual(VIRTUAL_REF);
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("ignores buffered pushed messages after disposal", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-disposed" });
+		await adapter.dispose();
+		const updates = vi.fn();
+		const requests = vi.fn();
+		adapter.onUpdate(updates);
+		adapter.onRequest(requests);
+
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: "thread-disposed",
+				turn: {
+					id: "turn-too-late",
+					items: [],
+					itemsView: "notLoaded",
+					status: "inProgress",
+					error: null,
+					startedAt: 1,
+					completedAt: null,
+					durationMs: null,
+				},
+			},
+		});
+		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
+
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false });
+		expect(updates).not.toHaveBeenCalled();
+		expect(requests).not.toHaveBeenCalled();
+	});
+
+	it("ignores buffered pushed messages after startup failure", async () => {
+		const proc = new AdapterProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			if (message["method"] === "initialize") proc.emit({ id, result: {} });
+			if (message["method"] === "thread/start") {
+				proc.emit({ id, error: { code: -32000, message: "workspace rejected" } });
+			}
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		const requests = vi.fn();
+		adapter.onRequest(requests);
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("workspace rejected");
+
+		proc.emit({ id: 10, method: "item/fileChange/requestApproval", params: {} });
+
+		expect(requests).not.toHaveBeenCalled();
+	});
 });
 
 describe("CodexAdapter turns", () => {
@@ -264,6 +355,90 @@ describe("CodexAdapter turns", () => {
 			threadId: "thread-abort",
 			turnId: "turn-1",
 		});
+	});
+
+	it("does not interrupt a completed turn", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-completed" });
+		await adapter.submit("begin");
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-completed",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "summary",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		await adapter.abort();
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("clears the completed turn before publishing its reducer update", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-completion-order" });
+		await adapter.submit("begin");
+		let abortFromCompletion: Promise<void> | undefined;
+		adapter.onUpdate((state) => {
+			if (!state.isStreaming) abortFromCompletion = adapter.abort();
+		});
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: "thread-completion-order",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "notLoaded",
+					status: "inProgress",
+					error: null,
+					startedAt: 1,
+					completedAt: null,
+					durationMs: null,
+				},
+			},
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-completion-order",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "summary",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		expect(abortFromCompletion).toBeDefined();
+		await abortFromCompletion;
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("does not interrupt the previous turn while the next turn/start is pending", async () => {
+		const { adapter, proc } = await startedAdapter({ holdTurnStartAt: 2 });
+		await adapter.submit("first");
+		const second = adapter.submit("second");
+		const rejected = expect(second).rejects.toThrow("adapter disposed");
+
+		await adapter.abort();
+
+		await adapter.dispose();
+		await rejected;
+		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
 	it("applies a selected model to subsequent turns", async () => {
@@ -334,7 +509,7 @@ describe("CodexAdapter reducer effects", () => {
 		});
 
 		expect(requests).toHaveBeenCalledWith({
-			requestId: "17",
+			requestId: expect.not.stringMatching(/^17$/),
 			session: { backend: "codex", id: "thread-requests" },
 			kind: "item/fileChange/requestApproval",
 			payload: { threadId: "thread-requests", turnId: "turn-1", itemId: "edit-1" },
@@ -353,33 +528,79 @@ describe("CodexAdapter reducer effects", () => {
 });
 
 describe("CodexAdapter request replies", () => {
+	it("scopes equal wire request ids to their adapter sessions", async () => {
+		const first = await startedAdapter({ threadId: "thread-first" });
+		const second = await startedAdapter({ threadId: "thread-second" });
+		const firstRequests: AgentRequest[] = [];
+		const secondRequests: AgentRequest[] = [];
+		first.adapter.onRequest((request) => firstRequests.push(request));
+		second.adapter.onRequest((request) => secondRequests.push(request));
+
+		first.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+		second.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+		const firstId = firstRequests[0]?.requestId ?? "";
+		const secondId = secondRequests[0]?.requestId ?? "";
+
+		expect(firstId).not.toBe(secondId);
+		await first.adapter.reply(firstId, { decision: "accept" });
+		expect(responses(first.proc)).toEqual([{ id: 0, result: { decision: "accept" } }]);
+		expect(responses(second.proc)).toEqual([]);
+		await second.adapter.reply(secondId, { decision: "decline" });
+		expect(responses(second.proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
+	});
+
+	it("distinguishes numeric and string wire request ids", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-typed-ids" });
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
+
+		proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
+		proc.emit({ id: "0", method: "item/fileChange/requestApproval", params: {} });
+		const numericId = requests[0]?.requestId ?? "";
+		const stringId = requests[1]?.requestId ?? "";
+
+		expect(numericId).not.toBe(stringId);
+		await adapter.reply(numericId, { decision: "numeric" });
+		await adapter.reply(stringId, { decision: "string" });
+		expect(responses(proc)).toEqual([
+			{ id: 0, result: { decision: "numeric" } },
+			{ id: "0", result: { decision: "string" } },
+		]);
+	});
+
 	it("correlates replies to the original numeric request id", async () => {
-		const { adapter, proc } = await startedAdapter();
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-correlate" });
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
 		proc.emit({ id: 23, method: "item/fileChange/requestApproval", params: { itemId: "edit-1" } });
 
-		await adapter.reply("23", { decision: "accept" });
+		await adapter.reply(requests[0]?.requestId ?? "", { decision: "accept" });
 
 		expect(proc.written.at(-1)).toEqual({ id: 23, result: { decision: "accept" } });
 	});
 
 	it("declines approvals with their protocol response shape", async () => {
 		const { adapter, proc } = await startedAdapter();
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
 		proc.emit({ id: "approval-1", method: "item/fileChange/requestApproval", params: {} });
 
-		await adapter.reply("approval-1", null);
+		await adapter.reply(requests[0]?.requestId ?? "", null);
 
 		expect(proc.written.at(-1)).toEqual({ id: "approval-1", result: { decision: "decline" } });
 	});
 
-	it("declines requests without a known response shape with a cancellation error", async () => {
+	it("declines MCP elicitations with their generated protocol response shape", async () => {
 		const { adapter, proc } = await startedAdapter();
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
 		proc.emit({ id: "elicitation-1", method: "mcpServer/elicitation/request", params: {} });
 
-		await adapter.reply("elicitation-1", null);
+		await adapter.reply(requests[0]?.requestId ?? "", null);
 
 		expect(proc.written.at(-1)).toEqual({
 			id: "elicitation-1",
-			error: { code: -32800, message: "declined by user" },
+			result: { action: "decline", content: null, _meta: null },
 		});
 	});
 });

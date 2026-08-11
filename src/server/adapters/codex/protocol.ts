@@ -54,6 +54,7 @@ import type { ServerNotification } from "../../../../resources/codex-protocol/Se
 import type { ServerRequest } from "../../../../resources/codex-protocol/ServerRequest";
 import type { CommandExecutionRequestApprovalResponse } from "../../../../resources/codex-protocol/v2/CommandExecutionRequestApprovalResponse";
 import type { FileChangeRequestApprovalResponse } from "../../../../resources/codex-protocol/v2/FileChangeRequestApprovalResponse";
+import type { McpServerElicitationRequestResponse } from "../../../../resources/codex-protocol/v2/McpServerElicitationRequestResponse";
 import type { ThreadItem } from "../../../../resources/codex-protocol/v2/ThreadItem";
 
 /** Narrow a `ThreadItem` to one variant, e.g. `CodexItem<"commandExecution">`. */
@@ -98,9 +99,14 @@ export function isCodexNotification(msg: CodexServerMessage): msg is CodexNotifi
 	return !("id" in msg) && "method" in msg;
 }
 
-/** `RequestId` is `string | number`; the wire contract's reply route is string-keyed. */
-export function requestKey(id: RequestId): string {
-	return String(id);
+/**
+ * Browser-facing request ids share one app-wide namespace. Scope the backend's
+ * per-process id to its thread and retain its JSON type (`0` and `"0"` are
+ * distinct RequestIds). The value is opaque to clients; only the adapter maps
+ * it back to the original wire id.
+ */
+export function requestKey(threadId: string, id: RequestId): string {
+	return JSON.stringify(["codex", threadId, typeof id, id]);
 }
 
 /**
@@ -115,4 +121,9 @@ export const DECLINE_RESPONSES: Readonly<Record<string, unknown>> = {
 	"item/fileChange/requestApproval": {
 		decision: "decline",
 	} satisfies FileChangeRequestApprovalResponse,
+	"mcpServer/elicitation/request": {
+		action: "decline",
+		content: null,
+		_meta: null,
+	} satisfies McpServerElicitationRequestResponse,
 };
