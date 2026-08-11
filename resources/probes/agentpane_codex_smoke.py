@@ -130,9 +130,14 @@ def descendants(root: int) -> list[dict[str, Any]]:
 def reap(pids: set[int], grace: float) -> list[int]:
     """Wait out this run's own Codex workers, then kill whatever is left.
 
-    Every pid here was recorded when it was observed as a descendant of the
-    server this run launched, so this signals nothing outside that tree. A
-    harness that quietly leaves a sandboxed agent running is worse than one
+    Every pid here was recorded while it was a descendant of the server this
+    run launched. That is an identity at the time of observation, not a
+    guarantee at the time of signalling: after the wait below, a pid the
+    kernel has recycled would belong to something else. The window is small
+    and this is a developer probe, but the claim is "signals only pids that
+    were ours", not "cannot possibly signal anything else".
+
+    A harness that quietly leaves a sandboxed agent running is worse than one
     that reports the leak, so survivors are both killed and returned.
     """
     deadline = time.monotonic() + grace
@@ -541,6 +546,12 @@ def main() -> int:
         # abort, and that is a pass the check cannot tell from a real one. So:
         # pin the cut, require the turn to be streaming right up to it, and
         # accept only an idle that arrives past it.
+        #
+        # The cut is taken immediately before the request, not after it, so a
+        # turn that ends of its own accord during the abort's round trip still
+        # satisfies this. That hole is narrow rather than closed; closing it
+        # needs a causal signal from the backend, which the SSE stream does not
+        # carry.
         pre_abort = reconnect.snapshot()
         abort_index = len(pre_abort)
         pre_abort_streaming = last_streaming(pre_abort, real_ref)
@@ -618,6 +629,19 @@ def main() -> int:
     finally:
         for stream in streams:
             stream.close()
+
+        # Enumerate before signalling anything. `launched_workers` is only
+        # appended to at the create and reconnect checkpoints, so a run that
+        # fails before them -- or between them -- has an empty set, and cleanup
+        # would report a clean bill of health for a worker it never looked at.
+        # Once the server is dead its children are reparented and this tree is
+        # gone, so this is the last moment the set can be completed.
+        if server is not None:
+            try:
+                launched_workers.update(row["pid"] for row in codex_workers(descendants(server.pid)))
+            except OSError:
+                pass
+
         if server is not None and server.poll() is None:
             server.send_signal(signal.SIGTERM)
             try:

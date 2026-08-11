@@ -51,9 +51,14 @@ class FakeChild extends EventEmitter {
 	readonly stdin = new FakeStdin();
 	killed = false;
 	killCalls = 0;
-	kill(): boolean {
+	readonly signals: (string | undefined)[] = [];
+	/** A real child closes when signalled; tests that need it not to clear this. */
+	autoClose = true;
+	kill(signal?: string): boolean {
 		this.killed = true;
 		this.killCalls++;
+		this.signals.push(signal);
+		if (this.autoClose) queueMicrotask(() => this.emit("close", 0, signal ?? "SIGTERM"));
 		return true;
 	}
 
@@ -562,6 +567,50 @@ describe("PiAdapter teardown", () => {
 
 		expect(h.child.killed).toBe(true);
 		expect(h.errors).toEqual([]);
+	});
+
+	it("does not resolve dispose() until the child has actually closed", async () => {
+		// The contract on BackendAdapter.dispose: shutdown resolving is the
+		// server's licence to exit, so an adapter that resolves on "SIGTERM sent"
+		// rather than "child gone" hands that licence out early. CodexAdapter
+		// waits and escalates; this is the same guarantee on the Pi side.
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.autoClose = false;
+
+		let settled = false;
+		const disposing = h.adapter.dispose().then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(h.child.killed).toBe(true);
+		expect(settled).toBe(false);
+
+		h.child.emit("close", 0, null);
+		await disposing;
+		expect(settled).toBe(true);
+	});
+
+	it("escalates to SIGKILL when the child ignores SIGTERM", async () => {
+		vi.useFakeTimers();
+		try {
+			const h = makeHarness();
+			await startAdapter(h);
+			h.child.autoClose = false;
+
+			const disposing = h.adapter.dispose();
+			await Promise.resolve();
+			expect(h.child.signals).toEqual([undefined]);
+
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(h.child.signals).toEqual([undefined, "SIGKILL"]);
+
+			// A child that outlives SIGKILL must not hang shutdown forever.
+			await vi.advanceTimersByTimeAsync(1_000);
+			await expect(disposing).resolves.toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("tears down once however many times it is disposed", async () => {

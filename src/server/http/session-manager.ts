@@ -36,6 +36,13 @@ export class UnknownBackendError extends Error {
 	}
 }
 
+export class ServerShuttingDownError extends Error {
+	constructor() {
+		super("server is shutting down; not spawning a new agent");
+		this.name = "ServerShuttingDownError";
+	}
+}
+
 export class UnknownSessionError extends Error {
 	constructor(readonly ref: SessionRef) {
 		super(`no such session: ${sessionKey(ref)}`);
@@ -104,6 +111,14 @@ export class SessionManager {
 	 * and is the only handle teardown has on an adapter that is still starting.
 	 */
 	readonly #attaching = new Map<string, PendingStart>();
+	/**
+	 * Set by `disposeAll()`. The HTTP server is still serving for the whole of
+	 * shutdown -- `src/server/index.ts` stops the socket *after* closing the app,
+	 * and killing one Codex child can take the full SIGTERM+SIGKILL grace -- so
+	 * without this an attach arriving mid-shutdown spawns an agent into a server
+	 * that has already walked its tables and is about to exit.
+	 */
+	#shuttingDown = false;
 
 	constructor(
 		deps: Pick<AppDeps, "index" | "adapters" | "newId" | "now">,
@@ -177,6 +192,7 @@ export class SessionManager {
 	 * exactly what a session switch wants) without touching the subprocess.
 	 */
 	async attach(ref: SessionRef): Promise<BackendAdapter> {
+		if (this.#shuttingDown) throw new ServerShuttingDownError();
 		const existing = this.#lookup(ref);
 		if (existing?.adapter) {
 			this.broadcaster.broadcastSnapshot(existing.ref);
@@ -330,6 +346,12 @@ export class SessionManager {
 			throw err;
 		}
 
+		// Publish the adapter *before* the rename below, and keep it that way.
+		// `#adoptRef` re-keys the session, so between it and attach's `finally`
+		// there is a window where a `close()` can miss the `#attaching` entry; it
+		// only stays safe because by then the adapter is reachable as
+		// `session.adapter` and close's other branch disposes it. Moving this line
+		// after `#adoptRef` turns that key miss into a leaked subprocess.
 		bound.adapter = adapter;
 		bound.lastStreaming = adapter.getState().isStreaming;
 		// The first of the two points at which the id can change (D9).
@@ -424,6 +446,9 @@ export class SessionManager {
 	}
 
 	async disposeAll(): Promise<void> {
+		// First, and before any await: the tables below are walked exactly once,
+		// so anything that starts after this point is in neither of them.
+		this.#shuttingDown = true;
 		const sessions = [...this.#sessions.values()];
 		const starting = [...this.#attaching.values()];
 		this.#sessions.clear();

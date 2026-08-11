@@ -341,10 +341,38 @@ describe("teardown racing a startup", () => {
 		expect(sessions.canonicalRef({ backend: "pi", id: RENAMED }).id).toBe(RENAMED);
 	});
 
-	it("kills the child once when a closed startup then fails on its own", async () => {
-		// Both the close and the startup's own failure path can see the adapter.
-		// Terminating twice re-signals a pid the OS may have already recycled, so
-		// the two paths have to share one disposal.
+	it("refuses to spawn once shutdown has begun", async () => {
+		// The HTTP server keeps serving while `disposeAll()` runs -- it is stopped
+		// after, not before -- and disposeAll walks the startup table exactly once.
+		// An attach arriving after that walk is in neither list, so it spawns a
+		// sandboxed agent into a server that is already leaving, and nothing will
+		// ever reap it. Killing one Codex child can take the full 3s grace, which
+		// is an enormous window for a session switch or a retrying tab.
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+		const first = sessions.createVirtual(WORKSPACE, "pi");
+
+		const attaching = sessions.attach(first);
+		await settle();
+		const shutdown = sessions.disposeAll();
+
+		// REF is on disk, so this attach can spawn on its own merits -- clearing
+		// the session table does not turn it away.
+		await expect(sessions.attach(REF)).rejects.toThrow();
+		gate.resolve();
+		await Promise.allSettled([attaching, shutdown]);
+
+		// Only the one that was already running; the latecomer never spawned.
+		expect(slow.created).toHaveLength(1);
+	});
+
+	it("closes a session whose startup then fails on its own", async () => {
+		// Not a test of the shared disposal -- against the unfixed code this
+		// passes, because close() disposed nothing and the failure path was the
+		// only caller. Exactly-once is pinned by the shutdown case above, which
+		// does go red. What this covers is that the two unwinding paths running
+		// back to back leave nothing registered.
 		const gate = deferred();
 		const flaky = new FakeAdapterFactory({
 			holdStart: gate.promise,
@@ -360,5 +388,7 @@ describe("teardown racing a startup", () => {
 		await expect(attaching).rejects.toThrow();
 
 		expect(flaky.created[0]?.disposals).toBe(1);
+		expect(sessions.isAttached(ref)).toBe(false);
+		expect(sessions.liveRefs()).toEqual([]);
 	});
 });

@@ -74,7 +74,7 @@ export interface PiChild {
 	readonly stderr: PiReadable;
 	readonly stdin: PiWritable;
 	on(event: string, listener: Listener): unknown;
-	kill(): unknown;
+	kill(signal?: NodeJS.Signals): unknown;
 }
 
 export type PiSpawn = (command: string, args: string[], options: { cwd: string }) => PiChild;
@@ -90,6 +90,9 @@ export interface PiAdapterDeps {
  * session.
  */
 const STDERR_TAIL_LIMIT = 8_192;
+/** Matches the Codex process shell, so both backends die on the same schedule. */
+const TERMINATE_GRACE_MS = 2_000;
+const KILL_GRACE_MS = 1_000;
 
 export class PiAdapter implements BackendAdapter {
 	/**
@@ -121,6 +124,9 @@ export class PiAdapter implements BackendAdapter {
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
+	/** Resolves when the child's `close` fires, so teardown can wait for it. */
+	private closedPromise?: Promise<void>;
+	private resolveClosed?: () => void;
 	/** Set once the child is gone; makes teardown idempotent and writes fail loudly. */
 	private closed = false;
 	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
@@ -150,6 +156,9 @@ export class PiAdapter implements BackendAdapter {
 
 		const child = this.spawn(command, args, { cwd });
 		this.child = child;
+		this.closedPromise = new Promise<void>((resolve) => {
+			this.resolveClosed = resolve;
+		});
 
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => this.handleChunk(chunk));
@@ -240,10 +249,33 @@ export class PiAdapter implements BackendAdapter {
 			pending.reject(new Error("Pi adapter disposed"));
 		}
 		this.pendingCommands.clear();
-		if (this.child) {
-			if (!this.child.stdin.destroyed) this.child.stdin.end();
-			this.child.kill();
-		}
+		const child = this.child;
+		if (!child) return;
+		if (!child.stdin.destroyed) child.stdin.end();
+		child.kill();
+		// Signalling is not reaping. The server treats this promise resolving as
+		// "the agent is gone" and exits on it, so waiting for `close` is the whole
+		// point -- and a sandboxed agent mid-turn does not always take the hint,
+		// which is what the escalation is for. Bounded at both steps, because a
+		// shutdown that hangs forever is its own failure.
+		if (await this.closesWithin(TERMINATE_GRACE_MS)) return;
+		child.kill("SIGKILL");
+		await this.closesWithin(KILL_GRACE_MS);
+	}
+
+	private closesWithin(milliseconds: number): Promise<boolean> {
+		if (this.closed) return Promise.resolve(true);
+		const closed = this.closedPromise;
+		if (!closed) return Promise.resolve(true);
+		return new Promise((resolve) => {
+			const timeout = setTimeout(() => resolve(false), milliseconds);
+			// Never hold the process open on our own grace period.
+			timeout.unref?.();
+			void closed.then(() => {
+				clearTimeout(timeout);
+				resolve(true);
+			});
+		});
 	}
 
 	// -- driving a turn ---------------------------------------------------------
@@ -413,6 +445,7 @@ export class PiAdapter implements BackendAdapter {
 	private handleClose(code: number | null, signal: NodeJS.Signals | null): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.resolveClosed?.();
 
 		// On a failed spawn the exit code is meaningless (-2 for ENOENT), so the
 		// `error` event's account wins when we have one.
