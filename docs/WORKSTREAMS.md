@@ -4,6 +4,34 @@ Five workstreams are built **in parallel**, each in its own git worktree. This
 document is the coordination contract. Read `HANDOFF.md` and `DESIGN.md` first
 — they carry the decisions and the evidence; this only says who builds what.
 
+## Status (2026-08-11)
+
+| Workstream | State | Where |
+|---|---|---|
+| session-index | **done, verified** — 32 tests, `bun run check` green | merged to `main` |
+| pi-adapter | WIP, unverified | branch `wip/pi-adapter` |
+| codex-adapter | WIP, unverified | branch `wip/codex-adapter` |
+| transport | WIP, unverified | branch `wip/transport` |
+| renderer | WIP, unverified | branch `wip/renderer` |
+
+The four WIP branches are agents that were killed mid-task by an account
+session limit and could not be resumed. Each holds real, substantial work that
+**never reached a passing `bun run check`** — tests may be missing or failing.
+
+Two things to know before building on them:
+
+1. They were written against a **broken import guard** (fixed in `7b4eb0c`,
+   which also gave it tests). It falsely flagged legal files and named the
+   wrong import, so their import ordering may be contorted around a bug that
+   no longer exists. Undo those workarounds.
+2. `main` has moved since they branched — the guard fix, the D9 corrections
+   (findings 26–27), and merged session-index.
+
+Picking one up: branch from `main`, merge or cherry-pick the WIP, then review
+it as unverified code rather than trusting it. Restarting from scratch is a
+legitimate choice if the partial work looks more confusing than helpful — say
+so rather than forcing it.
+
 ## The rule that makes parallelism safe
 
 **Own your directory. Do not edit anyone else's.** Merge conflicts between
