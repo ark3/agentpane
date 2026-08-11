@@ -70,6 +70,8 @@ the installed packages, the session directories named in 18, and
 | 23 | Codex emits substantially more than the DESIGN mapping table lists — `turn/diff/updated`, `thread/tokenUsage/updated`, `thread/status/changed`, `thread/started`, `account/rateLimits/updated`, `mcpServer/startupStatus/updated`, `remoteControl/status/changed` | event census in `resources/fixtures/codex/*.meta.json` |
 | 24 | Pi chose the **`bash`** tool to edit a file, not a dedicated edit tool; its assistant messages carry `text`, `thinking`, and `toolCall` blocks, with `stopReason` of `stop` and `toolUse` | `resources/fixtures/pi/*.jsonl` |
 | 25 | `thread/start` accepts **`ephemeral: true`**, which keeps a thread out of the on-disk rollout store — how the fixture capture avoids polluting `~/.codex/sessions` | `resources/codex-protocol/v2/ThreadStartParams.ts`; used in `capture_fixtures.py` |
+| 26 | Codex's session layout is **not uniformly `YYYY/MM/DD/`** — 3 files sit flat at `~/.codex/sessions/`, 580 are nested. Walk to arbitrary depth | census over the real directory |
+| 27 | A Codex session's **first user-role block is almost never the human's text** — 19 of 20 sampled open with harness-injected content (AGENTS.md, `<environment_context>`, `<user_instructions>`, plugin/skill boilerplate). The real message is usually the 2nd or 3rd user turn. Pi is unaffected | independent samples by the session-index workstream and by review |
 
 On 9–15, the net effect: `pi-web-ui`'s real contribution was message chrome,
 markdown, and a registry — while the tool renderers, the fallback hook, and

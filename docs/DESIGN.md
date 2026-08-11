@@ -283,9 +283,23 @@ nothing running.** Measured on this machine:
 - `attached` — live subprocess.
 
 **Spawn only on attach.** The list needs metadata only — id, cwd, timestamp,
-and a preview taken from the first user message — all cheap to read from the
-file. A session becomes `attached` when the user prompts it or opens its
-transcript.
+and a preview — all cheap to read from the file. A session becomes `attached`
+when the user prompts it or opens its transcript.
+
+Two corrections from building this, both verified:
+
+- **The Codex layout is not uniformly `YYYY/MM/DD/`.** Three files on this
+  machine sit flat at `~/.codex/sessions/` with no date nesting (580 are
+  nested). Walk to arbitrary depth; do not pattern-match the path.
+- **"Preview = first user message" is wrong for Codex.** In a 20-session
+  sample, only *one* had genuine human text as its first user-role block. The
+  rest open with harness-injected content — AGENTS.md dumps,
+  `<environment_context>`, `<user_instructions>`, plugin and skill
+  boilerplate — so a literal implementation shows a system-prompt dump as the
+  preview nearly every time. The real message is typically the 2nd or 3rd
+  user-role turn. Skipping known synthetic wrappers is a heuristic, not a
+  clean rule, and it will need maintenance as injected content drifts. Pi has
+  no such problem: its first user message is the human's text.
 
 Deliberately *not* doing: parsing the on-disk JSONL into `AgentMessage[]` to
 display a detached transcript without spawning. It would avoid a subprocess,
