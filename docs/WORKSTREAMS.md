@@ -17,7 +17,7 @@ evidence. Live verification details and its exact scope are in
 | pi-adapter | **done, offline verified** through fixtures, process tests, and contracts; live Pi remains deferred | this branch |
 | transport | **done, verified** offline and through the live Codex REST/SSE path | this branch |
 | renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | this branch |
-| codex-adapter | **done, verified** against fixtures and a live `codex-cli 0.147.0` turn | this branch |
+| codex-adapter | **implemented, fixture/live-smoke verified; final review pending** — lifecycle hardening remains | this branch |
 | client-shell | **done, offline verified**; the production-built client returned HTTP 200, but no browser automation was run | this branch |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
@@ -26,11 +26,13 @@ and held four real defects, including one that hung `start()` forever on a
 failed spawn. Read a branch before trusting its exit code.
 
 The assembled milestone has 556 offline tests. On 2026-08-11, the production
-server also completed the six Codex smoke checks: create/attach, incremental
+server completed the normal-path Codex smoke checks: create/attach, incremental
 text updates, idle completion, reconnect repaint without another native Codex
-worker, abort, and shutdown without an orphan. That run served the built client
-and drove REST/SSE with a local harness; it did **not** automate browser UI
-interaction. Pi was **not** live-tested in this environment.
+worker, abort, and shutdown without an orphan in that run. That run served the
+built client and drove REST/SSE with a local harness; it did **not** automate
+browser UI interaction. The final review found an untested in-flight-start
+shutdown race that must be fixed and re-verified before calling the milestone
+release-ready. Pi was **not** live-tested in this environment.
 
 ### What the Pi adapter expects of its caller
 
