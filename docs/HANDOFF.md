@@ -3,11 +3,21 @@
 You are picking up **agentpane** with none of the design conversation's
 context. This document gives you ground truth: what is already proven, where
 the reference material lives, and how to re-verify anything before you trust
-it. Read this, then `docs/DESIGN.md`.
+it.
+
+**The build has started.** This document is now the evidence base rather than
+the starting point — read `docs/DESIGN.md` for the decisions and
+`docs/WORKSTREAMS.md` for what is built, what is left, and what to pick up
+next. Two sections here stay live regardless: **Environment gotchas**, which
+will cost you an afternoon if you skip it, and **Reference material**, which is
+where the authoritative protocol docs live. The findings tables are the record
+of how each decision was established; consult them when a premise looks wrong.
 
 The one rule that produced this design: **verify at the source, don't reason
 from memory.** Every claim below was checked against a running CLI or an
-extracted type — not recalled. Hold yourself to the same bar.
+extracted type — not recalled. Hold yourself to the same bar. The most
+expensive defect found during the build was an unexamined assumption about
+which events `node:child_process` emits when a spawn fails.
 
 ## What agentpane is
 
@@ -83,6 +93,24 @@ On 18–21: an earlier draft of D9 had the server keep a workspace-less
 assumption that Codex sessions were only reachable through the protocol. They
 are on disk, exactly like Pi's. If you find yourself about to spawn a process
 to answer a *listing* question, re-read 18.
+
+## Third round: what building the Pi adapter established
+
+Findings 28–30 came out of implementing an adapter against a real subprocess
+rather than a fixture. DESIGN's "What the wrapper chain does to process events"
+is where they are acted on. Each is also pinned by a test in
+`src/server/adapters/pi/process.test.ts` that was confirmed to fail against the
+unfixed code.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 28 | A **failed spawn emits `error` then `close`, and never `exit`** (ENOENT gives `close` code `-2`). Reaping on `exit` alone therefore never reaps a failed spawn — the Pi adapter's readiness probe hung forever, so `start()` never rejected | direct probe against `node:child_process`, spawning a nonexistent binary |
+| 29 | **`direnv` writes routine diagnostics to stderr**, so a healthy start produces stderr output. Treating stderr as an error channel reports errors on working sessions; the useful signal is the retained tail at process death | `direnv exec` observed writing to fd 2 |
+| 30 | **Pi's `fork` veto is reported as `success: true`** with `data.cancelled: true`, not as an error response — a `session_before_fork` extension handler cancelling reads as a successful rewind unless the flag is checked | `pi-coding-agent/docs/rpc.md`, "fork" |
+
+Still unverified, and the reason it matters is in DESIGN's open questions:
+whether a signal to the spawned `direnv` reaches the agent two execs down
+inside `bwrap`. It needs a live spawn, which the sandbox below prevents.
 
 ## Environment gotchas (learned the hard way)
 
@@ -160,19 +188,21 @@ to answer a *listing* question, re-read 18.
 
 ## Workflow for building
 
-1. Re-run both probes in `resources/probes/` to confirm the CLIs still behave
-   as recorded (versions drift).
-2. Read `docs/DESIGN.md` — the Decisions section first (it carries the
-   reasoning, so you can tell when a premise has expired), then the adapter
-   contract and the Codex mapping table.
-3. Scaffold `src/` (pipane's `client`/`server`/`shared` split is a good model)
-   and adopt the test strategy in DESIGN before writing features.
-4. Follow the build order in DESIGN: Pi-only vertical slice first, Codex
+Steps 1–3 below are done: `src/` is scaffolded, the interfaces are in place,
+and session-index and the Pi adapter are built. `docs/WORKSTREAMS.md` carries
+the current state and the pickup order. What remains durably true:
+
+1. Re-run the probes in `resources/probes/` when a CLI's behaviour is in
+   question — versions drift, and both agents are moving targets.
+2. Read `docs/DESIGN.md`'s Decisions section before changing anything
+   structural. It carries the reasoning, so you can tell when a premise has
+   expired rather than guessing whether a decision still applies.
+3. Follow the build order in DESIGN: Pi-only vertical slice first, Codex
    adapter against fixtures second. The mapping is the only hard part and it
    should land against a UI that already works.
-5. Keep `resources/codex-protocol/` as the source of truth for Codex types —
+4. Keep `resources/codex-protocol/` as the source of truth for Codex types —
    decide whether to import them into `src/` or reference them; do not
    hand-write Codex types.
 
-Once the build starts, this HANDOFF can be archived; `docs/DESIGN.md` is the
-durable document.
+`docs/DESIGN.md` is the durable document. This one is the evidence behind it,
+and stays useful for as long as its findings are load-bearing.

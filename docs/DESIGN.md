@@ -472,6 +472,28 @@ builds the command itself:
 stdio crosses the bwrap boundary transparently (proven), so the adapter reads
 the same pipes whether or not sbox is present.
 
+### What the wrapper chain does to process events
+
+Three subprocess facts, each verified while building the Pi adapter and each
+capable of producing a bug that looks like something else entirely:
+
+- **A failed spawn emits `error` and `close`, never `exit`.** Verified against
+  `node:child_process`: a missing executable gives `error` (ENOENT) then
+  `close` with code `-2`, and no `exit` event at all. An adapter that reaps on
+  `exit` alone will not reap a spawn failure — the Pi adapter's readiness probe
+  hung forever this way, so `start()` never rejected and the session simply
+  never appeared. Bind `close`. It also fires strictly after stdio drains, so
+  it cannot reject a command whose response is still in the pipe.
+- **stderr is not an error channel.** `direnv` announces every `.envrc` it
+  loads on stderr, and sbox adds its own; a healthy start writes to it. Raising
+  each chunk as an adapter error puts a red banner on a working session. Retain
+  a bounded tail and spend it on the death report, where it is the only account
+  of why a process died — `EROFS ... auth.json.lock` reaches you no other way.
+- **The agent is a grandchild, not the child.** The spawned process is
+  `direnv`, which execs `sbox`, which runs `bwrap`, which runs the agent.
+  Whether a signal to the child reaches the agent is **unverified** — see the
+  open questions.
+
 ## Testing strategy
 
 - **Unit (bun test / vitest):** the adapters, especially the Codex
@@ -510,6 +532,13 @@ the same pipes whether or not sbox is present.
   types.
 - Whether sbox's injected `--sandbox danger-full-access` suppresses Codex's
   approval `ServerRequest`s entirely (D2a).
+- **Whether killing the spawned process actually stops the agent.** `dispose()`
+  signals `direnv`, but the agent runs two execs down, inside `bwrap`. If the
+  signal does not propagate, closing a session leaks a live agent holding its
+  workspace — and every session closed in a long-running server leaks another.
+  This needs a live spawn to settle and could not be tested from inside the
+  sandbox (see HANDOFF's environment gotchas), so it is the first thing to
+  check once the vertical slice runs unsandboxed.
 - Whether `plan` and `contextCompaction` items deserve bespoke rendering or
   fold into text.
 - Whether session listing needs an index cache once the corpus is larger than
