@@ -237,6 +237,15 @@ export function createApp(deps: AppDeps): App {
 				const adapter = await sessions.attach(ref);
 				const forked = await adapter.fork(body.value.entryId);
 				broadcaster.sessionsChanged();
+				// UNSETTLED, and it needs the Codex adapter to settle: the two
+				// backends' forks are different operations. Pi's rewinds the active
+				// branch of the *same* session file and returns the same ref, which
+				// works here -- the adapter re-hydrates and the resulting snapshot
+				// goes out on its own. Codex's `thread/fork` mints a *new* thread
+				// id, and a ref for a session this process table has never heard of
+				// and holds no adapter for. Opening it would go through the index,
+				// which may not see a thread the backend has not flushed. See
+				// DESIGN's open questions before implementing the Codex side.
 				const response: ForkResponse = { ref: forked };
 				return json(response, 201);
 			}

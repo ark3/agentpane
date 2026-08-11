@@ -109,6 +109,16 @@ Costs, accepted knowingly:
 If the client ever becomes chatty and needs constantly correlated replies,
 this is the decision to revisit — a single WebSocket would then be tidier.
 
+One thing building the transport added to the event union, because it is not
+optional and prose would not have survived the gap between the two halves:
+**`renamed`**. A session's id changes under the client during normal use — Pi's
+id *is* its JSONL path (D9) and a `virtual` session has no path until its first
+prompt materialises one — so the id the browser created a session with is not
+the id it keeps. The server keeps honouring the old id on REST routes
+indefinitely, but every event after the change carries the new one, so a client
+that ignores `renamed` renders a live session into a transcript nothing updates.
+See D9's "Three states".
+
 ### D2a. Server-initiated requests
 
 Codex's `ServerRequest` (`resources/codex-protocol/ServerRequest.ts`) is a
@@ -244,6 +254,22 @@ Bind `127.0.0.1` explicitly. No auth token, no cookie, no localhost-bypass
 layer — none of which needs to exist once remote access is off the table.
 (pipane binds all interfaces on purpose and gates it with a token; that is a
 different product decision.)
+
+**Closing the network is not closing the browser**, and the original wording
+above conflated them. Any page in any tab can issue a cross-origin request to a
+loopback port, and a `POST` with a simple content type is not preflighted — so
+`evil.com` cannot *read* our replies, but it can drive them, and every route
+behind `/api` spawns sandboxed agents with write access to the user's
+repositories. The transport therefore rejects any `/api` request carrying a
+non-loopback `Origin`.
+
+Note the rule is loopback-*origin*, not same-origin: in dev the page is served
+by Vite on another port and proxied here (`changeOrigin: false`), so an exact
+match would reject the only client we have. A request with **no** `Origin` is
+allowed — that is curl or a typed URL, and a page cannot produce one
+cross-origin. This is still not auth, and it is not meant to be; it is the
+missing half of "not remotely accessible". pipane has no equivalent (HANDOFF
+finding 17).
 
 ### D9. Sessions: enumerate from the filesystem, spawn only on attach
 
@@ -543,3 +569,24 @@ capable of producing a bug that looks like something else entirely:
   fold into text.
 - Whether session listing needs an index cache once the corpus is larger than
   the ~973 sessions measured for D9. Both upstreams eventually built one.
+- **Where the model list comes from with nothing attached.** `listModels()`
+  exists only on an adapter instance, and verified against the real
+  `PiAdapter`, calling it before `start()` rejects with "Pi process is not
+  running" — the answer lives in the subprocess. So `GET /api/models` reports
+  zero Pi models until a Pi session is open, which is exactly when a new-session
+  model picker needs it. Spawning to answer a *listing* question is what D9
+  rules out, so the candidates are a backend-level (not session-level) model
+  source, caching the last live answer, or accepting that you pick a model only
+  from an attached session. The route degrades quietly today; it does not fail.
+- **What a fork's returned ref means.** Pi's `fork` rewinds the active branch of
+  the *same* session file and returns the same ref; Codex's `thread/fork` mints
+  a new thread id. `POST .../fork` hands that ref straight back, so on Codex the
+  browser will receive a ref for a session the process table has never heard of
+  and holds no adapter for — and the on-disk index may not see a thread the
+  backend has not flushed. Settle it with the Codex adapter, not before.
+- **`SessionIndex.get(ref)` has no implementation.** `src/server/http/deps.ts`
+  needs it (attach reads a session's `cwd` from it, D7), but
+  `src/server/sessions/` exports only `listSessions(opts)`. Implementing `get`
+  as "list everything and find" puts a full two-store walk on every attach.
+  Pi can do better — its id *is* the file path, so it is a direct parse — but
+  Codex's UUID needs a walk or a `thread/list`. This is integration's first job.

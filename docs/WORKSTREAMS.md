@@ -15,7 +15,7 @@ evidence; this only says what is built, what is left, and in what order.
 |---|---|---|
 | session-index | **done, verified** — 32 tests | merged to `main` |
 | pi-adapter | **done, verified** — 112 tests, cold start and session identity closed | merged to `main` |
-| transport | unverified — `check` green, 90 tests, never reviewed | branch `wip/transport` |
+| transport | **done, verified** — 194 tests; session renaming, teardown, static serving and cross-origin closed | branch `transport` |
 | renderer | unverified — 2 failing tests, typecheck clean | branch `wip/renderer` |
 | codex-adapter | unverified — ~4 `TS2345` errors in `reducer.test.ts` | branch `wip/codex-adapter` |
 | client-shell | not started | — |
@@ -33,8 +33,9 @@ partial work looks more confusing than helpful — say so rather than forcing it
 ## Pickup order
 
 1. ~~**pi-adapter**~~ — done, merged.
-2. **transport** — review it; green but unreviewed is exactly the state
-   pi-adapter was in.
+2. ~~**transport**~~ — done, reviewed. The pattern held: `check` was green on
+   `wip/transport` and the largest gap was the *documented* caller contract
+   below, unimplemented, which broke the whole new-session flow.
 3. **renderer** — fix the two failures, review.
 4. **client-shell** — wire the three together. `src/client/App.svelte` and
    `src/client/main.ts` are still placeholders. This is DESIGN's build-order
@@ -61,6 +62,26 @@ Two contracts the server has to honour, both documented at their definitions:
 - **`start({ resumeId })` hydrates the transcript itself**, via `get_messages`.
   The caller does not need to re-query; a resumed adapter already holds the
   conversation by the time `start()` resolves.
+
+Both are now honoured, in `SessionManager.#adoptRef`. The first one was *not*
+honoured by the merged `wip/transport`, and it is the reason a new Pi session
+was unusable: the process table kept it keyed under its `virtual:` id forever,
+so it listed twice, was never findable on disk, and re-opening it spawned a
+second agent on the same session file. If you write a third adapter, `ref` is
+not stable — say where it changes, and the server will follow.
+
+### What the transport expects of its callers
+
+- **Drive turns through `SessionManager.submit`, not `adapter.submit`.** That is
+  where the rename above is picked up. Reaching past it re-introduces the bug.
+- **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is
+  authoritative** and may differ from the ref in the URL, for the same reason.
+- **A client must handle the `renamed` SSE event** by re-keying everything it
+  holds under `from`. A snapshot under the new ref follows immediately. The old
+  id keeps working on REST routes indefinitely, so an in-flight POST is safe,
+  but no *event* will ever carry it again.
+- **`/api` rejects a non-loopback `Origin`** (D8). Nothing to do from the app;
+  it matters if you ever test the API from a page served from somewhere else.
 
 ## File ownership
 
