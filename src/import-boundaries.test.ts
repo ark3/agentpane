@@ -26,18 +26,24 @@ export const TYPE_ONLY_PACKAGES = ["@earendil-works/pi-agent-core", "@earendil-w
  * version hardcoded the package into the pattern, which forced the lazy span
  * to run past unrelated imports and flag innocent files.
  *
- * `^[ \t]*` anchors the clause to the start of a line, which is where a real
- * import statement begins (indented inside a `<script>` block, in a .svelte
- * file). Prose that happens to contain the word `import` mid-sentence does
- * not start a match, and `stripComments` removes the docblocks such prose
- * lives in anyway. Both were needed: a docblock explaining that "every import
- * here is `import type`, so nothing from them reaches the bundle" flagged its
- * own file, because the lazy span ran from the word `import` in the sentence
- * to the specifier of the real (legal) import below it.
+ * `(?:^|;)[ \t]*` anchors the clause to where a real import statement can
+ * begin: the start of a line (indented inside a `<script>` block, in a
+ * .svelte file), or straight after a `;`. Prose containing the word `import`
+ * mid-sentence does not start a match, and `stripComments` removes the
+ * docblocks such prose lives in anyway. Both were needed: a docblock
+ * explaining that "every import here is `import type`, so nothing from them
+ * reaches the bundle" flagged its own file, because the lazy span ran from
+ * the word `import` in the sentence to the specifier of the real (legal)
+ * import below it.
+ *
+ * The `;` alternative is not decoration. `const a = 1; import { Agent } from
+ * "pkg";` is valid TypeScript -- confirmed with tsc, which reports only
+ * module resolution and no syntax error -- so a line anchor alone let a real
+ * value import through.
  */
-const IMPORT_RE = /^[ \t]*import\s+([\s\S]*?)\s+from\s+["']([^"']+)["']/gm;
+const IMPORT_RE = /(?:^|;)[ \t]*import\s+([\s\S]*?)\s+from\s+["']([^"']+)["']/gm;
 /** Side-effect import: `import "pkg"`. Never legitimate for a type-only package. */
-const BARE_IMPORT_RE = /^[ \t]*import\s+["']([^"']+)["']/gm;
+const BARE_IMPORT_RE = /(?:^|;)[ \t]*import\s+["']([^"']+)["']/gm;
 
 /**
  * Drop comments so prose is never scanned as code. The `[^:]` guard keeps
@@ -167,6 +173,15 @@ describe("findValueImports", () => {
 			`import type { AgentMessage } from "${PKG}";`,
 		].join("\n");
 		expect(findValueImports(text, [PKG])).toEqual([]);
+	});
+
+	it("catches a violation sharing a line with an earlier statement", () => {
+		// `const a = 1; import { Agent } from "pkg";` is valid TypeScript --
+		// verified with tsc, which reports only module resolution, no syntax
+		// error. Anchoring to line start alone missed it, so the anchor accepts
+		// a preceding `;` too. Prose keeps its protection from stripComments.
+		expect(findValueImports(`const a = 1; import { Agent } from "${PKG}";`, [PKG])).toHaveLength(1);
+		expect(findValueImports(`const a = 1; import "${PKG}";`, [PKG])).toHaveLength(1);
 	});
 
 	it("catches an indented violation, as in a .svelte <script> block", () => {
