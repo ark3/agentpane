@@ -1,0 +1,405 @@
+/**
+ * The HTTP surface: one SSE stream for server->browser, plain REST for
+ * everything else (D2). `src/shared/protocol.ts` is the contract; this file
+ * implements exactly it and invents nothing that is not there.
+ *
+ * `createApp` returns a bare `fetch(Request) => Response` handler with no
+ * runtime coupling, so the whole transport is exercisable in-process by tests
+ * that never open a socket. `src/server/index.ts` is the thin Bun binding.
+ *
+ * Ordering across the two channels is not guaranteed and nothing here assumes
+ * it: a prompt POST answers as soon as the turn is *accepted*, and the turn's
+ * events may well have reached the browser first.
+ */
+
+import {
+	type AgentRequestReply,
+	type ApiError,
+	type BackendId,
+	type CreateSessionRequest,
+	type CreateSessionResponse,
+	type ForkRequest,
+	type ForkResponse,
+	type ForkPointsResponse,
+	type ListSessionsResponse,
+	type ModelsResponse,
+	type PromptRequest,
+	type SessionRef,
+	type SessionSummary,
+	type SetModelRequest,
+	sessionKey,
+} from "../../shared/protocol.ts";
+import type { BackendAdapter } from "../adapters/types.ts";
+import { Broadcaster, type SseClient } from "./broadcaster.ts";
+import type { AppDeps } from "./deps.ts";
+import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
+
+/** Body of `GET /api/sessions/:backend/:id`. The transcript itself arrives over SSE (D3). */
+export interface AttachSessionResponse {
+	session: SessionSummary;
+}
+
+export interface App {
+	fetch(request: Request): Promise<Response>;
+	readonly sessions: SessionManager;
+	readonly broadcaster: Broadcaster;
+	/** Drop every stream and dispose every adapter. Server shutdown only. */
+	close(): Promise<void>;
+}
+
+const BACKENDS: readonly BackendId[] = ["pi", "codex"];
+
+export function createApp(deps: AppDeps): App {
+	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
+	const sessions = new SessionManager(deps, broadcaster);
+
+	async function handle(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		const segments = url.pathname.split("/").filter((s) => s.length > 0).map(decodeSegment);
+
+		if (segments[0] !== "api") {
+			const served = await deps.staticHandler?.(request);
+			return served ?? notFound(url.pathname);
+		}
+
+		// /api/events
+		if (segments.length === 2 && segments[1] === "events") {
+			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+			return openEventStream(request);
+		}
+
+		// /api/models
+		if (segments.length === 2 && segments[1] === "models") {
+			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+			return listModels(url.searchParams.get("backend"));
+		}
+
+		// /api/requests/:requestId
+		if (segments.length === 3 && segments[1] === "requests") {
+			if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+			return replyToRequest(request, segments[2] as string);
+		}
+
+		if (segments[1] === "sessions") {
+			// /api/sessions
+			if (segments.length === 2) {
+				if (request.method === "GET") return listSessions(url.searchParams.get("cwd"));
+				if (request.method === "POST") return createSession(request);
+				return methodNotAllowed(request.method, "GET, POST");
+			}
+
+			// /api/sessions/:backend/:id[/action]
+			if (segments.length === 4 || segments.length === 5) {
+				const backend = segments[2] as string;
+				const id = segments[3] as string;
+				if (!isBackendId(backend)) {
+					return error(400, "bad_backend", `unknown backend "${backend}"`);
+				}
+				const ref: SessionRef = { backend, id };
+				return segments.length === 4
+					? sessionRoute(request, ref)
+					: sessionAction(request, ref, segments[4] as string);
+			}
+		}
+
+		return notFound(url.pathname);
+	}
+
+	// -- SSE -----------------------------------------------------------------
+
+	function openEventStream(request: Request): Response {
+		let client: SseClient | undefined;
+		const encoder = new TextEncoder();
+
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				client = broadcaster.addClient(
+					(chunk) => controller.enqueue(encoder.encode(chunk)),
+					() => {
+						try {
+							controller.close();
+						} catch {
+							// Already closed by the other side; nothing to do.
+						}
+					},
+				);
+				// Attach and reconnect are the same thing (D3): the client's first
+				// events are a full snapshot of everything currently live. There is
+				// no resume protocol and deliberately no Last-Event-ID handling.
+				broadcaster.sendOpeningSnapshots(client, sessions.liveRefs());
+			},
+			cancel() {
+				// The browser went away. This is NOT a lifecycle event -- the
+				// subprocess is tied to the server, not to this stream.
+				client?.close();
+			},
+		});
+
+		request.signal?.addEventListener("abort", () => client?.close());
+
+		return new Response(stream, {
+			headers: {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache, no-transform",
+				connection: "keep-alive",
+				// Not proxied in practice, but harmless and saves a debugging hour
+				// if anyone ever puts one in front.
+				"x-accel-buffering": "no",
+			},
+		});
+	}
+
+	// -- sessions ------------------------------------------------------------
+
+	async function listSessions(cwd: string | null): Promise<Response> {
+		const body: ListSessionsResponse = {
+			sessions: await sessions.list(cwd ? { cwd } : undefined),
+		};
+		return json(body);
+	}
+
+	async function createSession(request: Request): Promise<Response> {
+		const body = await readJson<CreateSessionRequest>(request);
+		if (!body.ok) return body.response;
+		const { cwd, backend, model } = body.value;
+		if (typeof cwd !== "string" || cwd.length === 0) {
+			return error(400, "bad_request", "cwd is required and must be an absolute path");
+		}
+		if (!isBackendId(backend)) return error(400, "bad_backend", `unknown backend "${backend}"`);
+		const ref = sessions.createVirtual(cwd, backend, model);
+		const response: CreateSessionResponse = { ref };
+		return json(response, 201);
+	}
+
+	async function sessionRoute(request: Request, ref: SessionRef): Promise<Response> {
+		// GET is "open this session": spawn if needed, then everyone gets a
+		// snapshot over SSE. DELETE is the one thing that kills an agent.
+		if (request.method === "GET") {
+			await sessions.attach(ref);
+			const summary = (await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(ref));
+			if (!summary) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
+			const body: AttachSessionResponse = { session: summary };
+			return json(body);
+		}
+		if (request.method === "DELETE") {
+			await sessions.close(ref);
+			return noContent();
+		}
+		return methodNotAllowed(request.method, "GET, DELETE");
+	}
+
+	async function sessionAction(
+		request: Request,
+		ref: SessionRef,
+		action: string,
+	): Promise<Response> {
+		switch (action) {
+			case "prompt": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<PromptRequest>(request);
+				if (!body.ok) return body.response;
+				if (typeof body.value.text !== "string") {
+					return error(400, "bad_request", "text is required");
+				}
+				const adapter = await sessions.attach(ref);
+				sessions.markPrompted(ref);
+				// Deliberately not awaited. A turn can run for minutes and the
+				// adapter contract does not say whether submit() resolves on
+				// acceptance or on completion; either way the browser learns what
+				// happened from the stream, and a failure surfaces as an `error`
+				// event rather than as a stale HTTP status.
+				void adapter
+					.submit(body.value.text, body.value.images)
+					.catch((err: unknown) => broadcaster.error(ref, describe(err)));
+				return accepted();
+			}
+			case "abort": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const adapter = requireAttached(ref);
+				await adapter.abort();
+				return noContent();
+			}
+			case "fork": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<ForkRequest>(request);
+				if (!body.ok) return body.response;
+				if (typeof body.value.entryId !== "string") {
+					return error(400, "bad_request", "entryId is required");
+				}
+				const adapter = await sessions.attach(ref);
+				const forked = await adapter.fork(body.value.entryId);
+				broadcaster.sessionsChanged();
+				const response: ForkResponse = { ref: forked };
+				return json(response, 201);
+			}
+			case "fork-points": {
+				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+				const adapter = await sessions.attach(ref);
+				const response: ForkPointsResponse = { points: await adapter.listForkPoints() };
+				return json(response);
+			}
+			case "model": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<SetModelRequest>(request);
+				if (!body.ok) return body.response;
+				if (typeof body.value.model !== "string") {
+					return error(400, "bad_request", "model is required");
+				}
+				const adapter = await sessions.attach(ref);
+				await adapter.setModel(body.value.model);
+				return noContent();
+			}
+			default:
+				return notFound(`/api/sessions/${ref.backend}/.../${action}`);
+		}
+	}
+
+	function requireAttached(ref: SessionRef): BackendAdapter {
+		const adapter = sessions.adapterFor(ref);
+		if (!adapter) throw new UnknownSessionError(ref);
+		return adapter;
+	}
+
+	// -- models --------------------------------------------------------------
+
+	async function listModels(backend: string | null): Promise<Response> {
+		if (backend !== null && !isBackendId(backend)) {
+			return error(400, "bad_backend", `unknown backend "${backend}"`);
+		}
+		const wanted = backend ? [backend] : BACKENDS;
+		const models: ModelsResponse["models"] = [];
+		for (const id of wanted) {
+			const factory = deps.adapters[id];
+			if (!factory) continue;
+			// Prefer a live adapter -- a running agent can answer authoritatively.
+			// Otherwise ask an unstarted one, which is the only option when no
+			// session for this backend is open: model lists are a property of the
+			// backend, not of a session, but `listModels` only exists on an
+			// adapter instance. Construction is contractually side-effect-free,
+			// so this spawns nothing.
+			const live = sessions
+				.liveRefs()
+				.filter((ref) => ref.backend === id)
+				.map((ref) => sessions.adapterFor(ref))
+				.find((adapter) => adapter !== undefined);
+			const adapter = live ?? factory.create({ backend: id, id: "" });
+			try {
+				models.push(...(await adapter.listModels()));
+			} catch {
+				// A backend that cannot enumerate models without a subprocess must
+				// not take out the other backend's list.
+			} finally {
+				if (!live) await adapter.dispose().catch(() => {});
+			}
+		}
+		const body: ModelsResponse = { models };
+		return json(body);
+	}
+
+	// -- server-initiated requests (D2a) -------------------------------------
+
+	async function replyToRequest(request: Request, requestId: string): Promise<Response> {
+		const body = await readJson<AgentRequestReply>(request);
+		if (!body.ok) return body.response;
+		if (body.value.requestId !== undefined && body.value.requestId !== requestId) {
+			return error(400, "bad_request", "requestId in body does not match the route");
+		}
+		const ref = sessions.sessionOfRequest(requestId);
+		if (!ref) {
+			// Either already answered or never ours. Worth distinguishing from a
+			// bad route: an unanswered request hangs the agent's turn, so a client
+			// that gets this should stop waiting rather than retry forever.
+			return error(404, "unknown_request", `no pending request ${requestId}`);
+		}
+		const adapter = sessions.adapterFor(ref);
+		if (!adapter) return error(409, "not_attached", `session ${sessionKey(ref)} is no longer running`);
+		await adapter.reply(requestId, body.value.response ?? null);
+		sessions.clearRequest(requestId);
+		return noContent();
+	}
+
+	return {
+		async fetch(request: Request): Promise<Response> {
+			try {
+				return await handle(request);
+			} catch (err) {
+				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message);
+				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message);
+				return error(500, "internal_error", describe(err));
+			}
+		},
+		sessions,
+		broadcaster,
+		async close() {
+			broadcaster.closeAll();
+			await sessions.disposeAll();
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+function decodeSegment(segment: string): string {
+	try {
+		return decodeURIComponent(segment);
+	} catch {
+		// A malformed escape is not a path we have -- let it 404 as itself.
+		return segment;
+	}
+}
+
+function isBackendId(value: unknown): value is BackendId {
+	return value === "pi" || value === "codex";
+}
+
+function json(body: unknown, status = 200): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+function noContent(): Response {
+	return new Response(null, { status: 204 });
+}
+
+/** The prompt route: the turn is accepted, its events come over SSE. */
+function accepted(): Response {
+	return new Response(null, { status: 202 });
+}
+
+function error(status: number, code: string, detail?: string): Response {
+	const body: ApiError = detail === undefined ? { error: code } : { error: code, detail };
+	return json(body, status);
+}
+
+function notFound(path: string): Response {
+	return error(404, "not_found", `no route for ${path}`);
+}
+
+function methodNotAllowed(method: string, allow: string): Response {
+	const response = error(405, "method_not_allowed", `${method} not allowed; try ${allow}`);
+	response.headers.set("allow", allow);
+	return response;
+}
+
+type ReadResult<T> = { ok: true; value: T } | { ok: false; response: Response };
+
+async function readJson<T>(request: Request): Promise<ReadResult<T>> {
+	let parsed: unknown;
+	try {
+		parsed = await request.json();
+	} catch {
+		return { ok: false, response: error(400, "bad_json", "request body is not valid JSON") };
+	}
+	if (parsed === null || typeof parsed !== "object") {
+		return { ok: false, response: error(400, "bad_json", "request body must be a JSON object") };
+	}
+	return { ok: true, value: parsed as T };
+}
+
+function describe(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
