@@ -648,6 +648,74 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
+	it("rejects a settled submit disposed by its completion update without reviving turn state", async () => {
+		const { adapter, proc } = await startedAdapter({
+			threadId: "thread-dispose-completion",
+			holdTurnStart: true,
+		});
+		let disposal: Promise<void> | undefined;
+		adapter.onUpdate((state) => {
+			if (!state.isStreaming) disposal = adapter.dispose();
+		});
+		const submitting = adapter.submit("finish and dispose");
+		const held = request(proc, "turn/start");
+		const turn = {
+			id: "turn-dispose-completion",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		proc.emit({ id: held["id"], result: { turn } });
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-dispose-completion", turn },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-dispose-completion",
+				turn: {
+					...turn,
+					itemsView: "summary",
+					status: "completed",
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		await expect(submitting).rejects.toMatchObject({
+			name: "Error",
+			message: "codex adapter submit aborted: disposed during turn startup",
+		});
+
+		expect(disposal).toBeDefined();
+		await disposal;
+		expect(
+			adapter as unknown as {
+				turnId: string | null;
+				turnStartPending: boolean;
+				turnBusy: unknown;
+				pendingTurnCompletions: Map<string, string>;
+				pendingTurnCompletionOverflow: boolean;
+			},
+		).toMatchObject({
+			turnId: null,
+			turnStartPending: false,
+			turnBusy: null,
+			pendingTurnCompletionOverflow: false,
+		});
+		expect(
+			(adapter as unknown as { pendingTurnCompletions: Map<string, string> })
+				.pendingTurnCompletions.size,
+		).toBe(0);
+		expect(proc.killCount).toBe(1);
+	});
+
 	it("rejects an overlapping pending submit without mutating the first turn's tracking", async () => {
 		const proc = new AdapterProcess();
 		configureHappyServer(proc, { threadId: "thread-overlap", holdTurnStart: true });
@@ -808,6 +876,136 @@ describe("CodexAdapter turns", () => {
 		await adapter.abort();
 
 		expect(methods(proc)).not.toContain("turn/interrupt");
+	});
+
+	it("keeps an ambiguous successful submission busy until its response lifecycle completes", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, {
+			threadId: "thread-ambiguous-response",
+			holdTurnStartAt: 1,
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const candidate = {
+			id: "turn-candidate",
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		};
+		const completed = (turn: typeof candidate) => ({
+			...turn,
+			itemsView: "summary",
+			status: "completed",
+			completedAt: 2,
+			durationMs: 1000,
+		});
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-ambiguous-response", turn: candidate },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-ambiguous-response",
+				turn: completed(candidate),
+			},
+		});
+		const responseTurn = { ...candidate, id: "turn-response" };
+		proc.emit({ id: held["id"], result: { turn: responseTurn } });
+
+		await submitting;
+		await adapter.abort();
+		await expect(adapter.submit("must stay blocked")).rejects.toThrow(
+			"codex adapter cannot submit while a turn is active",
+		);
+		expect(methods(proc)).not.toContain("turn/interrupt");
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-ambiguous-response",
+				turn: completed(candidate),
+			},
+		});
+		await expect(adapter.submit("stale completion must not unblock")).rejects.toThrow(
+			"codex adapter cannot submit while a turn is active",
+		);
+
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-ambiguous-response", turn: responseTurn },
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-ambiguous-response",
+				turn: completed(responseTurn),
+			},
+		});
+		await adapter.submit("allowed after correlated completion");
+
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+	});
+
+	it("observes response lifecycle completion before the submit continuation resumes", async () => {
+		const { adapter, proc } = await startedAdapter({
+			threadId: "thread-response-completed",
+			holdTurnStartAt: 1,
+		});
+		const submitting = adapter.submit("held prompt");
+		const held = request(proc, "turn/start");
+		const inProgressTurn = (id: string) => ({
+			id,
+			items: [],
+			itemsView: "notLoaded",
+			status: "inProgress",
+			error: null,
+			startedAt: 1,
+			completedAt: null,
+			durationMs: null,
+		});
+		const emitCompleted = (turn: ReturnType<typeof inProgressTurn>): void => {
+			proc.emit({
+				method: "turn/completed",
+				params: {
+					threadId: "thread-response-completed",
+					turn: {
+						...turn,
+						itemsView: "summary",
+						status: "completed",
+						completedAt: 2,
+						durationMs: 1000,
+					},
+				},
+			});
+		};
+		const candidate = inProgressTurn("turn-candidate-before-response");
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-response-completed", turn: candidate },
+		});
+		emitCompleted(candidate);
+		const responseTurn = inProgressTurn("turn-response-completed");
+		proc.emit({ id: held["id"], result: { turn: responseTurn } });
+		proc.emit({
+			method: "turn/started",
+			params: { threadId: "thread-response-completed", turn: responseTurn },
+		});
+		emitCompleted(responseTurn);
+
+		await submitting;
+		await adapter.abort();
+		await adapter.submit("allowed after synchronous completion");
+
+		expect(methods(proc)).not.toContain("turn/interrupt");
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
 	});
 
 	it("does not revive a retained candidate after a newer turn completed", async () => {
