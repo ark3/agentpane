@@ -12,8 +12,9 @@ interaction in a real browser. The live run did exercise the same HTTP/SSE
 transport used by the client and a real Codex process spawned by the production
 composition.
 
-**Pi was not live-tested in this environment.** Its four deferred checks are
-listed below and remain unverified.
+**Pi has since been live-tested too**, through the same production composition
+— see "Observed Pi results" below. What remains unverified for both backends is
+the browser itself.
 
 ## Reproducible Codex setup
 
@@ -211,12 +212,27 @@ return having orphaned one; and Pi's first-prompt id probe can no longer fail a
 turn the backend has already admitted. Every one of those behaviours is covered
 by a regression that was observed failing before its fix.
 
-## Deferred Pi verification — unperformed
+## Observed Pi results
 
-These four manual checks come from the milestone design. They were recorded but
-**not run**, and must not be treated as passing:
+Run with `python3 resources/probes/agentpane_pi_smoke.py --workspace <dir>`,
+on `pi 0.84.1`, 2026-08-11 America/New_York. Three of the four checks that were
+deferred as manual are now automated; the fourth is partly closed.
 
-- `direnv -> sbox/bwrap -> pi` startup;
-- first-prompt virtual-id materialization and the `renamed` event;
-- real streaming and tool output in the browser;
-- abort and shutdown signal propagation with no orphaned Pi process.
+| Check | Observed result |
+|---|---|
+| 1. `direnv -> sbox/bwrap -> pi` startup | Passed. Create returned HTTP 201 and attach HTTP 200, with exactly one Pi agent under the server. The chain is `bun -> bwrap -> bwrap -> pi`; `direnv` and the Python `sbox` wrapper exec into it rather than surviving beside it, the same shape Codex shows. |
+| 2. Virtual-id materialization and the `renamed` event | Passed, but **not where it was expected**: Pi names its session file during `start()`, so the rename lands during attach rather than on the first prompt (HANDOFF finding 41). The adopted id is a real `.jsonl` path, the superseded `virtual:` id still resolves, and it resolves to the new ref. A prompt sent through the superseded id returned HTTP 202. |
+| 3. Streaming and tool output | Passed at the transport boundary. 16 upserts with 16 distinct increasing lengths, then idle via an authoritative snapshot. With `--tool-check`, a turn produced `thinking` and `toolCall` blocks with no approval dialog. **Still not verified in a browser** — this is the DOM half of the original check, and it remains open. |
+| 4. Abort and shutdown with no orphan | Passed. The long turn was streaming when abort was requested; abort returned HTTP 204 and idle followed, with the transcript unchanged 1.5s later. SIGTERM to the server exited it 0 with no run-scoped Pi worker remaining. |
+
+Cleanup was verified rather than assumed on every run: no orphaned worker, and
+the temporary `PI_CODING_AGENT_DIR` and server log both confirmed removed.
+
+## Still unverified
+
+- **The browser.** Neither backend has been driven through the DOM. Every live
+  check above ran against REST/SSE. Transcript rendering, tool cards, and any
+  interaction are unproven, and the application has been opened by a human once
+  with problems reported but not yet recorded.
+- Whether Pi raises approval dialogs when its `trust.json` does *not* already
+  trust the workspace (finding 42 copies one in).

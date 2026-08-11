@@ -28,9 +28,12 @@ failed spawn. Read a branch before trusting its exit code.
 The assembled milestone has 562 offline tests. On 2026-08-11, the production
 server completed the normal-path Codex smoke checks: create/attach, incremental
 text updates, idle completion, reconnect repaint without another native Codex
-worker, abort, and shutdown without an orphan in that run. That run served the
-built client and drove REST/SSE with a local harness; it did **not** automate
-browser UI interaction. Pi was **not** live-tested in this environment.
+worker, abort, and shutdown without an orphan in that run. **Pi has since been
+run live through the same composition** — the production `direnv -> sbox ->
+pi` chain, the id rename, streaming, abort, and shutdown without an orphan,
+which together settle DESIGN's third open question for both backends. Both runs
+served the built client and drove REST/SSE with a local harness; neither
+automated browser UI interaction, which is now the largest unverified surface.
 
 The final review's release blocker — an adapter still inside `start()` being
 invisible to `close()`/`disposeAll()`, so shutdown could return having orphaned

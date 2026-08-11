@@ -53,8 +53,10 @@ Run the complete offline verification suite with:
 bun run check
 ```
 
-The first production-composed Codex smoke run is recorded in
-[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md). It exercised the built
-client's reachability and the REST/SSE path with a real Codex process. Pi was
-not live-tested in that environment; its deferred checklist is explicit in the
-same document.
+Live runs against both real backends are recorded in
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) and re-runnable from
+`resources/probes/agentpane_{codex,pi}_smoke.py`. They exercise the built
+client's reachability and the REST/SSE path with a real agent subprocess:
+create/attach, streaming, idle, reconnect, abort, and shutdown without an
+orphan. Neither has been driven through a browser — transcript rendering and
+interaction are still unverified, and that gap is stated in the same document.

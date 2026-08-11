@@ -558,15 +558,16 @@ capable of producing a bug that looks like something else entirely:
   types.
 - Whether sbox's injected `--sandbox danger-full-access` suppresses Codex's
   approval `ServerRequest`s entirely (D2a).
-- **Whether killing the spawned process actually stops the agent.** *Settled
-  for Codex, still open for Pi.* The live slice shows `direnv` and the sbox
-  wrapper `exec` into the chain rather than surviving beside it, so the
-  server's own child is the `bwrap` chain and the signal does reach the native
-  `codex app-server` leaf: SIGTERM to the server left no run-scoped worker
-  behind (HANDOFF finding 34). Two things had to be fixed before that held —
-  `dispose()` did not await the child's close, and an adapter still inside
-  `start()` was invisible to shutdown entirely (finding 36). Pi has not been
-  spawned live, so its propagation is still assumed, not known.
+- ~~**Whether killing the spawned process actually stops the agent.**~~
+  **Settled, for both backends.** `direnv` and the sbox wrapper `exec` into the
+  chain rather than surviving beside it, so the server's own child is the
+  `bwrap` chain and a signal does reach the agent at the bottom of it. SIGTERM
+  to the server left no run-scoped worker behind for either `codex app-server`
+  or `pi --mode rpc` (HANDOFF findings 34 and 39). Three defects had to be
+  fixed before that held: `dispose()` did not await the child's close on either
+  side, and an adapter still inside `start()` was invisible to shutdown
+  entirely (findings 36 and 37). Re-provable with the two harnesses in
+  `resources/probes/`.
 - Whether `plan` and `contextCompaction` items deserve bespoke rendering or
   fold into text.
 - Whether session listing needs an index cache once the corpus is larger than

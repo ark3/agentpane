@@ -134,7 +134,7 @@ fixtures. Finding 34 settles DESIGN's third open question — for Codex.
 
 | # | Finding | How it was verified |
 |---|---------|---------------------|
-| 34 | **A signal to the server does reach the agent through the whole wrapper chain.** SIGTERM to the server exits the native `codex app-server` leaf two `exec`s down inside `bwrap`, leaving no orphan. The live chain is `bun server → bwrap → bwrap → node launcher → native codex`; `direnv` and the Python sbox wrapper `exec` into it rather than surviving as separate processes. **Pi remains unverified** — see the deferred checks in `docs/MANUAL_TESTING.md` | `resources/probes/agentpane_codex_smoke.py`; run-scoped process tree captured before and after SIGTERM |
+| 34 | **A signal to the server does reach the agent through the whole wrapper chain.** SIGTERM to the server exits the native `codex app-server` leaf two `exec`s down inside `bwrap`, leaving no orphan. The live chain is `bun server → bwrap → bwrap → node launcher → native codex`; `direnv` and the Python sbox wrapper `exec` into it rather than surviving as separate processes. Confirmed for Pi too — see 39 | `resources/probes/agentpane_codex_smoke.py`; run-scoped process tree captured before and after SIGTERM |
 | 35 | **The npm Codex launcher is itself a Node process whose argv also says `app-server`**, so counting workers by argv reports two agents where one is running. The live worker is the leaf whose `comm` is `codex` | same run; the launcher topology in its recorded process tree |
 | 36 | **An adapter owns its subprocess before `start()` resolves** — Codex across its `initialize` round trip, Pi across its `get_state` probe. Teardown that walks only the process table cannot see it, and `disposeAll()` returning is the server's licence to exit, so that window orphaned an agent on every attach that raced it | `src/server/http/session-manager.test.ts`, "teardown racing a startup" — each case confirmed failing first |
 | 37 | **`submit()` resolving is a promise that the backend admitted the turn.** The prompt route relays a rejection as a 500, and the browser answers by preserving the draft to send again. Any round trip an adapter runs *after* admission must therefore be unable to fail the submit, or the user is invited to resend a prompt that is already running | `src/server/adapters/pi/process.test.ts`, the first-prompt id probe |
@@ -144,6 +144,27 @@ Findings 36 and 37 are the same lesson from two directions: the moment a
 subprocess exists is earlier than the moment our bookkeeping says it does, and
 the moment a turn is committed is earlier than the moment `submit()` returns.
 Both windows are milliseconds wide and both were reachable on every prompt.
+
+## Sixth round: what running Pi live established
+
+Findings 39–42 came out of the first execution of the production Pi spawn
+chain. Nothing had run it before: `capture_fixtures.py` deliberately bypasses
+sbox because it only needs the protocol, so `direnv exec <workspace> sbox --
+pi --mode rpc` had been assembled, unit-tested against a fake, and never once
+executed. All four are pinned by `resources/probes/agentpane_pi_smoke.py`.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 39 | **The production Pi chain works, and a signal reaches through it.** `bun server → bwrap → bwrap → pi`, one agent, and SIGTERM to the server leaves no run-scoped worker. With 34, this settles DESIGN's third open question for both backends | live run; process tree captured at attach and again before shutdown |
+| 40 | **Pi's process reports `comm=pi` with a command line of exactly `pi`.** It is a `#!/usr/bin/env node` script, so both the name and the missing flags are surprising: setting `process.title` in Node overwrites the argv memory the command line is read from. The only processes still carrying `--mode rpc` are the `bwrap` wrappers, so an agent identified by argv is either invisible or triple-counted | `/proc/<pid>/{comm,cmdline}` for the live agent and every wrapper above it |
+| 41 | **Pi names its session file during `start()`, not on the first prompt.** D9 says a `virtual` session has no JSONL path until its first prompt writes one, and `PiAdapter` carries a second `get_state` probe in `submit()` for exactly that case. On 0.84.1 the file already exists when `start()`'s probe answers, so the id changes during **attach** and that second probe never fires. The adapter contract is satisfied either way — it promises `ref` is unstable at two points, not that it moves at exactly one — but code written for only the prompt-time rename will miss this | live `renamed` event, observed before any prompt was sent |
+| 42 | **Pi ran a shell tool with no approval dialog.** No `extension_ui_request` reached the wire; the turn produced `thinking` and `toolCall` blocks and completed. Note the harness copies `trust.json` into its temporary state dir, so this shows the sandboxed path does not *add* a prompt — not that Pi never asks | `--tool-check` run; `agent_requests_seen` empty |
+
+Finding 41 is the one to be careful with: it means the first-prompt
+materialisation path is currently dead code against this Pi version. Do not
+delete it on that basis — a `virtual` session whose backend has not yet written
+a file is exactly what D9 describes, and the behaviour here may be a property
+of how `pi --mode rpc` starts rather than a promise.
 
 ## Environment gotchas (learned the hard way)
 
