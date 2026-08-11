@@ -1,0 +1,160 @@
+:root {
+	/* -- type ------------------------------------------------------- */
+	--ap-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", sans-serif;
+	--ap-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+		"Liberation Mono", monospace;
+
+	--ap-text-2xs: 0.6875rem;
+	--ap-text-xs: 0.75rem;
+	--ap-text-sm: 0.8125rem;
+	--ap-text-md: 0.9375rem;
+	--ap-text-lg: 1.0625rem;
+	--ap-text-xl: 1.25rem;
+
+	--ap-leading-tight: 1.3;
+	--ap-leading-normal: 1.55;
+	--ap-leading-relaxed: 1.7;
+
+	/* -- space (4px base) ------------------------------------------- */
+	--ap-space-1: 0.25rem;
+	--ap-space-2: 0.5rem;
+	--ap-space-3: 0.75rem;
+	--ap-space-4: 1rem;
+	--ap-space-5: 1.5rem;
+	--ap-space-6: 2rem;
+	--ap-space-7: 3rem;
+
+	--ap-radius-sm: 4px;
+	--ap-radius-md: 7px;
+	--ap-radius-lg: 11px;
+
+	/* -- semantic colour (light) ------------------------------------ */
+	--ap-bg: #ffffff;
+	--ap-bg-sunken: #f5f6f8;
+	--ap-surface: #ffffff;
+	--ap-surface-raised: #f1f3f6;
+	--ap-border: #e2e5ea;
+	--ap-border-strong: #c8cdd6;
+
+	--ap-fg: #16191d;
+	--ap-fg-muted: #59616d;
+	--ap-fg-subtle: #8a929e;
+
+	--ap-accent: #3959d9;
+	--ap-accent-soft: #eaeeff;
+	--ap-success: #157f4b;
+	--ap-danger: #c22f3a;
+	--ap-danger-soft: #fdecee;
+	--ap-warning: #9a6700;
+
+	--ap-add-bg: #e6f6ec;
+	--ap-add-fg: #10693f;
+	--ap-del-bg: #fdecee;
+	--ap-del-fg: #a52734;
+
+	/* -- syntax ------------------------------------------------------ */
+	--ap-syn-keyword: #8b2fa0;
+	--ap-syn-string: #0a7d55;
+	--ap-syn-number: #a14a00;
+	--ap-syn-comment: #8a929e;
+	--ap-syn-function: #2b5fd0;
+	--ap-syn-type: #9a6700;
+	--ap-syn-attr: #b3462f;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ap-bg: #15171b;
+		--ap-bg-sunken: #101216;
+		--ap-surface: #191c21;
+		--ap-surface-raised: #21252c;
+		--ap-border: #2a2f37;
+		--ap-border-strong: #3b414b;
+
+		--ap-fg: #e4e8ee;
+		--ap-fg-muted: #9aa4b1;
+		--ap-fg-subtle: #6c7683;
+
+		--ap-accent: #7f9dff;
+		--ap-accent-soft: #1d2436;
+		--ap-success: #57c98a;
+		--ap-danger: #f2707c;
+		--ap-danger-soft: #2c1a1d;
+		--ap-warning: #d8a33a;
+
+		--ap-add-bg: #102a1c;
+		--ap-add-fg: #63cf94;
+		--ap-del-bg: #2c1a1d;
+		--ap-del-fg: #f2707c;
+
+		--ap-syn-keyword: #d08ce8;
+		--ap-syn-string: #77d1a3;
+		--ap-syn-number: #e5a26a;
+		--ap-syn-comment: #6c7683;
+		--ap-syn-function: #86a9ff;
+		--ap-syn-type: #e0c07a;
+		--ap-syn-attr: #f0937c;
+	}
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	background: var(--ap-bg-sunken);
+	color: var(--ap-fg);
+	font-family: var(--ap-font-sans);
+}
+
+button, input, select, textarea { font: inherit; }
+
+.shell {
+	display: grid;
+	grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+	grid-template-areas:
+		"masthead masthead"
+		"controls conversation"
+		"sessions conversation"
+		"sessions prompt";
+	gap: var(--ap-space-4);
+	max-width: 72rem;
+	min-height: 100vh;
+	margin: 0 auto;
+	padding: var(--ap-space-4);
+}
+
+.masthead { grid-area: masthead; display: flex; justify-content: space-between; align-items: baseline; }
+.masthead h1 { margin: 0; font-size: var(--ap-text-xl); }
+.masthead p { margin: 0; color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+
+.session-controls { grid-area: controls; display: grid; gap: var(--ap-space-3); align-content: start; }
+.session-controls label { display: grid; gap: var(--ap-space-1); font-size: var(--ap-text-sm); }
+
+input, select, textarea, button {
+	border: 1px solid var(--ap-border-strong);
+	border-radius: var(--ap-radius-sm);
+	background: var(--ap-surface);
+	color: inherit;
+}
+
+input, select, textarea { width: 100%; padding: var(--ap-space-2); }
+button { padding: var(--ap-space-2) var(--ap-space-3); cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--ap-accent-soft); }
+
+.sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; }
+.sessions button { text-align: left; overflow-wrap: anywhere; }
+.conversation { grid-area: conversation; min-width: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow: hidden; }
+.prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
+.prompt textarea { min-height: 6rem; resize: vertical; }
+.prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
+.abort, .error { color: var(--ap-danger); }
+.warning { margin: 0; color: var(--ap-warning); }
+
+@media (max-width: 42rem) {
+	.shell {
+		grid-template-columns: 1fr;
+		grid-template-areas: "masthead" "controls" "sessions" "conversation" "prompt";
+	}
+}
