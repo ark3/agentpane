@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdapterFactory } from "./adapters/types.ts";
+import { CodexAdapterFactory } from "./adapters/codex/index.ts";
 import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import { createProductionDeps, createSessionIndex } from "./composition.ts";
 
@@ -96,10 +97,12 @@ describe("production composition", () => {
 		});
 	});
 
-	it("registers Pi and accepts a replacement adapter registry", () => {
+	it("registers Pi and Codex and accepts a replacement adapter registry", () => {
 		const codex = {} as AdapterFactory;
+		const adapters = createProductionDeps().adapters;
 
-		expect(createProductionDeps().adapters.pi).toBeInstanceOf(PiAdapterFactory);
+		expect(adapters.pi).toBeInstanceOf(PiAdapterFactory);
+		expect(adapters.codex).toBeInstanceOf(CodexAdapterFactory);
 		expect(createProductionDeps({ adapters: { codex } }).adapters).toEqual({ codex });
 	});
 });

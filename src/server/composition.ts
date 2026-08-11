@@ -1,4 +1,5 @@
 import { sessionKey } from "../shared/protocol.ts";
+import { CodexAdapterFactory } from "./adapters/codex/index.ts";
 import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import type { AppDeps, SessionIndex } from "./http/deps.ts";
 import { listSessions } from "./sessions/index.ts";
@@ -25,6 +26,9 @@ export function createProductionDeps(
 ): Pick<AppDeps, "index" | "adapters"> {
 	return {
 		index: options.index ?? createSessionIndex(),
-		adapters: options.adapters ?? { pi: new PiAdapterFactory() },
+		adapters: options.adapters ?? {
+			pi: new PiAdapterFactory(),
+			codex: new CodexAdapterFactory(),
+		},
 	};
 }

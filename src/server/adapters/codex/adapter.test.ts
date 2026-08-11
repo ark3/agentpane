@@ -1,0 +1,398 @@
+import { describe, expect, it, vi } from "vitest";
+import type { SessionRef } from "../../../shared/protocol.ts";
+import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
+import type { CodexProcess } from "./process.ts";
+import { FakeCodexProcess } from "./test-support.ts";
+
+const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
+const STORED_REF: SessionRef = { backend: "codex", id: "thread-stored" };
+
+type WireMessage = Record<string, unknown>;
+
+class AdapterProcess extends FakeCodexProcess implements CodexProcess {
+	killCount = 0;
+	readonly #errorAwareExitHandlers: ((
+		code: number | null,
+		signal: string | null,
+		error?: Error,
+	) => void)[] = [];
+
+	override onExit(
+		cb: (code: number | null, signal: string | null, error?: Error) => void,
+	): void {
+		this.#errorAwareExitHandlers.push(cb);
+	}
+
+	override kill(): void {
+		this.killCount += 1;
+		super.kill();
+	}
+
+	override exit(
+		code: number | null = 0,
+		signal: string | null = null,
+		error?: Error,
+	): void {
+		for (const handler of [...this.#errorAwareExitHandlers]) handler(code, signal, error);
+	}
+}
+
+interface HappyServerOptions {
+	threadId?: string;
+	turns?: unknown[];
+	model?: string;
+	modelProvider?: string;
+	holdTurnStart?: boolean;
+}
+
+function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
+	let turn = 0;
+	proc.onWrite((message) => {
+		const id = message["id"];
+		if (typeof id !== "number") return;
+		switch (message["method"]) {
+			case "initialize":
+				proc.emit({ id, result: { userAgent: "test" } });
+				break;
+			case "thread/start":
+			case "thread/resume":
+				proc.emit({
+					id,
+					result: {
+						thread: { id: options.threadId ?? "thread-real", turns: options.turns ?? [] },
+						model: options.model ?? "gpt-started",
+						modelProvider: options.modelProvider ?? "openai",
+					},
+				});
+				break;
+			case "turn/start":
+				if (!options.holdTurnStart) {
+					turn += 1;
+					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
+				}
+				break;
+			case "turn/interrupt":
+				proc.emit({ id, result: {} });
+				break;
+		}
+	});
+}
+
+function request(proc: AdapterProcess, method: string): WireMessage {
+	const message = proc.lastRequest(method);
+	if (!message) throw new Error(`missing ${method} request`);
+	return message;
+}
+
+function methods(proc: AdapterProcess): unknown[] {
+	return proc.written.filter((message) => "method" in message).map((message) => message["method"]);
+}
+
+async function startedAdapter(
+	options: HappyServerOptions & CodexAdapterOptions = {},
+	ref: SessionRef = VIRTUAL_REF,
+): Promise<{ adapter: CodexAdapter; proc: AdapterProcess }> {
+	const proc = new AdapterProcess();
+	configureHappyServer(proc, options);
+	const adapter = new CodexAdapter(ref, { ...options, spawn: () => proc });
+	await adapter.start({ cwd: "/workspace", ...(ref === STORED_REF ? { resumeId: ref.id } : {}) });
+	return { adapter, proc };
+}
+
+describe("CodexAdapter lifecycle", () => {
+	it("keeps construction side-effect-free and initializes before starting a virtual thread", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc);
+		const spawn = vi.fn(() => proc);
+		const env = { PATH: "/test/bin" };
+		const adapter = new CodexAdapter(VIRTUAL_REF, {
+			spawn,
+			env,
+			ephemeral: true,
+			clientInfo: { name: "test-client", title: "Test Client", version: "1.2.3" },
+		});
+
+		expect(spawn).not.toHaveBeenCalled();
+		expect(adapter.ref).toEqual(VIRTUAL_REF);
+
+		await adapter.start({ cwd: "/workspace", model: "gpt-requested" });
+
+		expect(spawn).toHaveBeenCalledOnce();
+		expect(spawn).toHaveBeenCalledWith({ cwd: "/workspace", env });
+		expect(methods(proc)).toEqual(["initialize", "thread/start"]);
+		expect(request(proc, "initialize")["params"]).toEqual({
+			clientInfo: { name: "test-client", title: "Test Client", version: "1.2.3" },
+			capabilities: null,
+		});
+		expect(request(proc, "thread/start")["params"]).toEqual({
+			cwd: "/workspace",
+			model: "gpt-requested",
+			ephemeral: true,
+		});
+	});
+
+	it("resumes a stored thread and hydrates its returned transcript", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, {
+			threadId: STORED_REF.id,
+			turns: [
+				{
+					id: "turn-stored",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-stored",
+							clientId: null,
+							content: [{ type: "text", text: "saved prompt", text_elements: [] }],
+						},
+						{
+							type: "agentMessage",
+							id: "agent-stored",
+							text: "saved answer",
+							phase: "final_answer",
+							memoryCitation: null,
+						},
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1_700_000_000,
+					completedAt: 1_700_000_001,
+					durationMs: 1000,
+				},
+			],
+		});
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		const updates = vi.fn();
+		adapter.onUpdate(updates);
+
+		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+		expect(methods(proc)).toEqual(["initialize", "thread/resume"]);
+		expect(request(proc, "thread/resume")["params"]).toEqual({
+			threadId: STORED_REF.id,
+			cwd: "/workspace",
+		});
+		expect(adapter.getState().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		expect(adapter.getState().messages[0]).toMatchObject({
+			role: "user",
+			content: [{ type: "text", text: "saved prompt" }],
+		});
+		expect(adapter.getState().messages[1]).toMatchObject({
+			role: "assistant",
+			content: [{ type: "text", text: "saved answer" }],
+			model: "gpt-started",
+			provider: "openai",
+		});
+		expect(updates).toHaveBeenCalledWith(adapter.getState(), undefined);
+	});
+
+	it("adopts the real Codex thread id while start resolves", async () => {
+		const { adapter } = await startedAdapter({ threadId: "thread-adopted" });
+
+		expect(adapter.ref).toEqual({ backend: "codex", id: "thread-adopted" });
+	});
+
+	it("cleans up its client and process when thread startup fails", async () => {
+		const proc = new AdapterProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			if (message["method"] === "initialize") proc.emit({ id, result: {} });
+			if (message["method"] === "thread/start") {
+				proc.emit({ id, error: { code: -32000, message: "workspace rejected" } });
+			}
+		});
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("workspace rejected");
+
+		expect(proc.killCount).toBe(1);
+		await expect(adapter.submit("after failure")).rejects.toThrow("codex adapter not started");
+	});
+
+	it("rejects pending RPCs on disposal and kills its process exactly once", async () => {
+		const { adapter, proc } = await startedAdapter({ holdTurnStart: true });
+		const pending = adapter.submit("wait forever");
+		const rejected = expect(pending).rejects.toThrow("adapter disposed");
+
+		await adapter.dispose();
+		await adapter.dispose();
+
+		await rejected;
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("surfaces the process-provided exit cause to error subscribers", async () => {
+		const { adapter, proc } = await startedAdapter();
+		const errors = vi.fn();
+		adapter.onError(errors);
+
+		proc.exit(null, null, new Error("Failed to spawn Codex: ENOENT\nstderr detail"));
+
+		expect(errors).toHaveBeenCalledWith("Failed to spawn Codex: ENOENT\nstderr detail");
+	});
+});
+
+describe("CodexAdapter turns", () => {
+	it("maps text and images into turn/start input", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-input" });
+
+		await adapter.submit("describe this", [
+			{ mimeType: "image/png", base64: "iVBORw0=" },
+			{ mimeType: "image/jpeg", base64: "/9j/" },
+		]);
+
+		expect(request(proc, "turn/start")["params"]).toEqual({
+			threadId: "thread-input",
+			input: [
+				{ type: "text", text: "describe this", text_elements: [] },
+				{ type: "image", url: "data:image/png;base64,iVBORw0=" },
+				{ type: "image", url: "data:image/jpeg;base64,/9j/" },
+			],
+			model: "gpt-started",
+		});
+	});
+
+	it("interrupts the active turn returned by turn/start", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-abort" });
+		await adapter.submit("begin");
+
+		await adapter.abort();
+
+		expect(request(proc, "turn/interrupt")["params"]).toEqual({
+			threadId: "thread-abort",
+			turnId: "turn-1",
+		});
+	});
+
+	it("applies a selected model to subsequent turns", async () => {
+		const { adapter, proc } = await startedAdapter();
+
+		await adapter.setModel("gpt-selected");
+		await adapter.submit("use it");
+
+		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-selected" });
+	});
+});
+
+describe("CodexAdapter reducer effects", () => {
+	it("publishes streaming and message changes with the reducer's changed index", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-events" });
+		const updates = vi.fn();
+		adapter.onUpdate(updates);
+
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: "thread-events",
+				turn: {
+					id: "turn-live",
+					items: [],
+					itemsView: "notLoaded",
+					status: "inProgress",
+					error: null,
+					startedAt: 1,
+					completedAt: null,
+					durationMs: null,
+				},
+			},
+		});
+		proc.emit({
+			method: "item/started",
+			params: {
+				threadId: "thread-events",
+				turnId: "turn-live",
+				item: {
+					type: "agentMessage",
+					id: "message-live",
+					text: "",
+					phase: null,
+					memoryCitation: null,
+				},
+				startedAtMs: 10,
+			},
+		});
+
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true }, undefined);
+		expect(updates).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),
+			0,
+		);
+	});
+
+	it("publishes blocking requests with the adopted session ref", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-requests" });
+		const requests = vi.fn();
+		adapter.onRequest(requests);
+
+		proc.emit({
+			id: 17,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: "thread-requests", turnId: "turn-1", itemId: "edit-1" },
+		});
+
+		expect(requests).toHaveBeenCalledWith({
+			requestId: "17",
+			session: { backend: "codex", id: "thread-requests" },
+			kind: "item/fileChange/requestApproval",
+			payload: { threadId: "thread-requests", turnId: "turn-1", itemId: "edit-1" },
+		});
+	});
+
+	it("publishes reducer errors", async () => {
+		const { adapter, proc } = await startedAdapter();
+		const errors = vi.fn();
+		adapter.onError(errors);
+
+		proc.emit({ method: "error", params: { error: { message: "turn failed" } } });
+
+		expect(errors).toHaveBeenCalledWith("turn failed");
+	});
+});
+
+describe("CodexAdapter request replies", () => {
+	it("correlates replies to the original numeric request id", async () => {
+		const { adapter, proc } = await startedAdapter();
+		proc.emit({ id: 23, method: "item/fileChange/requestApproval", params: { itemId: "edit-1" } });
+
+		await adapter.reply("23", { decision: "accept" });
+
+		expect(proc.written.at(-1)).toEqual({ id: 23, result: { decision: "accept" } });
+	});
+
+	it("declines approvals with their protocol response shape", async () => {
+		const { adapter, proc } = await startedAdapter();
+		proc.emit({ id: "approval-1", method: "item/fileChange/requestApproval", params: {} });
+
+		await adapter.reply("approval-1", null);
+
+		expect(proc.written.at(-1)).toEqual({ id: "approval-1", result: { decision: "decline" } });
+	});
+
+	it("declines requests without a known response shape with a cancellation error", async () => {
+		const { adapter, proc } = await startedAdapter();
+		proc.emit({ id: "elicitation-1", method: "mcpServer/elicitation/request", params: {} });
+
+		await adapter.reply("elicitation-1", null);
+
+		expect(proc.written.at(-1)).toEqual({
+			id: "elicitation-1",
+			error: { code: -32800, message: "declined by user" },
+		});
+	});
+});
+
+describe("CodexAdapterFactory", () => {
+	it("creates only Codex adapters without spawning them", () => {
+		const spawn = vi.fn(() => new AdapterProcess());
+		const factory = new CodexAdapterFactory({ spawn });
+
+		expect(factory.create(VIRTUAL_REF)).toBeInstanceOf(CodexAdapter);
+		expect(spawn).not.toHaveBeenCalled();
+		expect(() => factory.create({ backend: "pi", id: "pi-session" })).toThrow(
+			'CodexAdapterFactory cannot create a "pi" adapter',
+		);
+	});
+});
