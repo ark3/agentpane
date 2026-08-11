@@ -52,6 +52,34 @@ location, creates and removes a temporary writable `CODEX_HOME`, copies only
 of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
 `"result": "pass"` is the acceptance signal.
 
+## `agentpane_pi_smoke.py`
+
+The same assembled application path with a real Pi process, plus the three
+things only Pi can establish: that the production `direnv exec <workspace>
+sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py`
+deliberately bypasses sbox, so nothing had ever run this), that the session id
+changes under the client and the superseded id keeps working, and that killing
+the server reaches an agent two `exec`s down inside `bwrap`.
+
+```bash
+python3 agentpane_pi_smoke.py --workspace /home/asa0717/src/agentpane
+python3 agentpane_pi_smoke.py --workspace ... --tool-check   # also assert a toolCall block
+```
+
+Same guarantees as the Codex harness: temporary writable state dir
+(`PI_CODING_AGENT_DIR`), credentials copied by name and never printed,
+inspection scoped to this run's server tree. It never invokes Codex.
+
+`--tool-check` is opt-in because it is the most model-dependent criterion --
+the model has to choose to call a tool. It passes; it is separated so the
+default run stays deterministic.
+
+## `agentpane_live_support.py`
+
+Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
+process-tree walk, the temporary state dir, and the cleanup criteria. It exists
+because the two harnesses differ only in which backend they drive.
+
 ## `capture_fixtures.py`
 
 The other two scripts *prove* the protocols work; this one **records** them.
