@@ -92,12 +92,32 @@ export interface FakeAdapterOptions {
 	materialiseOnSubmit?: string;
 	/** Emit this state change from inside `start()`, before it resolves. */
 	onStart?: (adapter: FakeAdapter) => void;
+	/**
+	 * Hold `start()` open until this resolves, leaving the adapter parked in the
+	 * window both real adapters have: the child is spawned and owned, but
+	 * `start()` has not returned so the manager has not recorded the adapter yet.
+	 * `CodexAdapter` assigns `this.proc` before its first `initialize` round trip
+	 * and `PiAdapter` assigns `this.child` before its `get_state` probe, so a
+	 * teardown landing here has a live subprocess to reap.
+	 */
+	holdStart?: Promise<void>;
+}
+
+/** A promise a test resolves by hand, to park an adapter mid-`start()`. */
+export function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
 }
 
 export class FakeAdapter implements BackendAdapter {
 	// -- observable by tests -------------------------------------------------
 	started = false;
 	disposed = false;
+	/** Dispose is reached from several paths; a leak and a double-kill both show up here. */
+	disposals = 0;
 	startOptions?: StartOptions;
 	readonly prompts: { text: string; images?: ImageInput[] }[] = [];
 	readonly replies: { requestId: string; response: unknown }[] = [];
@@ -128,6 +148,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async start(opts: StartOptions): Promise<void> {
+		if (this.options.holdStart) await this.options.holdStart;
 		if (this.options.failStart) throw new Error(this.options.failStart);
 		this.startOptions = opts;
 		this.started = true;
@@ -137,6 +158,7 @@ export class FakeAdapter implements BackendAdapter {
 
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		this.disposals++;
 		this.#updates.clear();
 		this.#requests.clear();
 		this.#errors.clear();

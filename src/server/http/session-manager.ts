@@ -65,6 +65,24 @@ interface ManagedSession {
 	stored?: SessionSummary;
 }
 
+/**
+ * A startup in flight. This exists because `ManagedSession.adapter` is only
+ * assigned once `start()` resolves, while the adapter owns a sandboxed child
+ * for the whole of `start()` -- `CodexAdapter` holds its process across an
+ * `initialize` round trip, `PiAdapter` across a `get_state` probe. Teardown
+ * walks `#sessions`, so for that entire window there is a live agent it cannot
+ * see, and an agent nothing can see is one nothing will ever reap.
+ */
+interface PendingStart {
+	promise: Promise<ManagedSession>;
+	/** Assigned the instant the adapter exists, with no `await` in between. */
+	adapter?: BackendAdapter;
+	/** Set by `close()`/`disposeAll()`. A startup that outlives it must not register. */
+	torndown: boolean;
+	/** The single termination both teardown and the startup's failure path await. */
+	disposal?: Promise<void>;
+}
+
 export class SessionManager {
 	readonly #sessions = new Map<string, ManagedSession>();
 	/**
@@ -81,8 +99,11 @@ export class SessionManager {
 	readonly #adapters: Partial<Record<BackendId, { create(ref: SessionRef): BackendAdapter }>>;
 	readonly #newId: () => string;
 	readonly #now: () => string;
-	/** Guards against two concurrent attaches racing to spawn the same session. */
-	readonly #attaching = new Map<string, Promise<ManagedSession>>();
+	/**
+	 * Guards against two concurrent attaches racing to spawn the same session,
+	 * and is the only handle teardown has on an adapter that is still starting.
+	 */
+	readonly #attaching = new Map<string, PendingStart>();
 
 	constructor(
 		deps: Pick<AppDeps, "index" | "adapters" | "newId" | "now">,
@@ -166,12 +187,18 @@ export class SessionManager {
 		// attaches on the same (possibly superseded) id still collapse into one.
 		const key = sessionKey(existing?.ref ?? ref);
 		const inFlight = this.#attaching.get(key);
-		if (inFlight) return (await inFlight).adapter as BackendAdapter;
+		if (inFlight) return (await inFlight.promise).adapter as BackendAdapter;
 
-		const started = this.#start(ref, existing);
-		this.#attaching.set(key, started);
+		const pending: PendingStart = {
+			torndown: false,
+			// Deferred by one microtask so this record is registered below -- and
+			// so reachable by close()/disposeAll() -- before `#start` can spawn
+			// anything. A startup teardown cannot see is a startup it cannot stop.
+			promise: Promise.resolve().then(() => this.#start(ref, existing, pending)),
+		};
+		this.#attaching.set(key, pending);
 		try {
-			const session = await started;
+			const session = await pending.promise;
 			this.broadcaster.sessionsChanged();
 			this.broadcaster.broadcastSnapshot(session.ref);
 			return session.adapter as BackendAdapter;
@@ -228,7 +255,11 @@ export class SessionManager {
 		this.broadcaster.renamed(from, next);
 	}
 
-	async #start(ref: SessionRef, existing: ManagedSession | undefined): Promise<ManagedSession> {
+	async #start(
+		ref: SessionRef,
+		existing: ManagedSession | undefined,
+		pending: PendingStart,
+	): Promise<ManagedSession> {
 		const factory = this.#adapters[ref.backend];
 		if (!factory) throw new UnknownBackendError(ref.backend);
 
@@ -253,10 +284,17 @@ export class SessionManager {
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};
-			this.#sessions.set(sessionKey(ref), session);
 		}
 
+		// Asking the index where this session lives is the one await before an
+		// adapter exists, so a teardown can land with nothing yet to dispose.
+		// Everything from here to `pending.adapter` below is synchronous: either
+		// teardown sees the adapter, or this sees the flag and never spawns.
+		if (pending.torndown) throw new UnknownSessionError(ref);
+		if (!existing) this.#sessions.set(sessionKey(ref), session);
+
 		const adapter = factory.create(ref);
+		pending.adapter = adapter;
 		// Subscribe *before* start(): a backend can emit its first state during
 		// startup and we would otherwise miss it.
 		const bound = session;
@@ -277,13 +315,18 @@ export class SessionManager {
 				...(bound.fromStore ? { resumeId: ref.id } : {}),
 				...(bound.model ? { model: bound.model } : {}),
 			});
+			// Teardown ran while we were starting. Publishing the adapter now
+			// would hand the table a live agent that shutdown has already walked
+			// past, and `#adoptRef` below would re-key a closed session back into
+			// it. Fall through to the same reaping the failure path uses.
+			if (pending.torndown) throw new UnknownSessionError(ref);
 		} catch (err) {
 			for (const off of bound.subscriptions.splice(0)) off();
 			if (!existing) this.#sessions.delete(sessionKey(ref));
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can
 			// leave a live sandboxed agent behind. Nothing else will ever reap it.
-			await adapter.dispose().catch(() => {});
+			await this.#terminate(pending);
 			throw err;
 		}
 
@@ -332,10 +375,33 @@ export class SessionManager {
 		this.#pendingRequests.delete(requestId);
 	}
 
+	/**
+	 * Kill an adapter that is still inside `start()`. Teardown and the startup's
+	 * own failure path can both be holding it, and signalling a child twice risks
+	 * a pid the OS has already recycled, so the first caller owns the disposal and
+	 * the second awaits that same one. Rejections are swallowed for the reason
+	 * `close()` gives below: the caller's session is gone either way.
+	 */
+	#terminate(pending: PendingStart): Promise<void> {
+		const adapter = pending.adapter;
+		if (!adapter) return Promise.resolve();
+		pending.disposal ??= Promise.resolve(adapter.dispose()).catch(() => {});
+		return pending.disposal;
+	}
+
 	/** Explicit close: this is the only thing besides shutdown that kills an agent. */
 	async close(ref: SessionRef): Promise<void> {
 		const session = this.#lookup(ref);
-		if (!session) return;
+		// Flag the startup before anything else: an adapter that does not exist
+		// yet cannot be disposed, and this is what stops it being born at all.
+		const pending = this.#attaching.get(sessionKey(session?.ref ?? ref));
+		if (pending) pending.torndown = true;
+		if (!session) {
+			// Nothing in the table, but a startup for this ref may be on its way to
+			// spawning one -- the stored-session path is mid-index-lookup here.
+			if (pending) await this.#terminate(pending);
+			return;
+		}
 		const key = sessionKey(session.ref);
 		this.#sessions.delete(key);
 		for (const [alias, target] of [...this.#aliases]) {
@@ -352,25 +418,34 @@ export class SessionManager {
 		// already happened. What a throw here can still mean is a subprocess that
 		// outlived its kill -- DESIGN's third open question, which needs a live
 		// spawn to settle and has no honest answer from in here.
-		await Promise.resolve(session.adapter?.dispose()).catch(() => {});
+		if (pending) await this.#terminate(pending);
+		else await Promise.resolve(session.adapter?.dispose()).catch(() => {});
 		this.broadcaster.sessionsChanged();
 	}
 
 	async disposeAll(): Promise<void> {
 		const sessions = [...this.#sessions.values()];
+		const starting = [...this.#attaching.values()];
 		this.#sessions.clear();
 		this.#aliases.clear();
 		this.#pendingRequests.clear();
+		// Before the first await, so a startup still short of creating its adapter
+		// finds this rather than spawning into a server that is already leaving.
+		for (const pending of starting) pending.torndown = true;
 		// In parallel and settled, not sequential and awaited: every session left
 		// undisposed is a sandboxed agent still holding its workspace, so one
 		// adapter that cannot die must not spare the rest.
-		await Promise.allSettled(
-			sessions.map(async (session) => {
+		await Promise.allSettled([
+			...sessions.map(async (session) => {
 				for (const off of session.subscriptions.splice(0)) off();
 				this.broadcaster.forget(session.ref);
 				await session.adapter?.dispose();
 			}),
-		);
+			// Adapters mid-`start()` are not in the table above: they own a child
+			// and their `ManagedSession.adapter` is still undefined. Resolving
+			// without reaping them is exactly how shutdown orphans an agent.
+			...starting.map((pending) => this.#terminate(pending)),
+		]);
 	}
 
 	/**

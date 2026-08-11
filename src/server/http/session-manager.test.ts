@@ -8,7 +8,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { type SessionRef, sessionKey } from "../../shared/protocol.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
-import { FakeAdapterFactory, FakeSessionIndex, storedSession, userMessage } from "./testing/fakes.ts";
+import type { SessionIndex } from "./deps.ts";
+import {
+	deferred,
+	FakeAdapterFactory,
+	FakeSessionIndex,
+	storedSession,
+	userMessage,
+} from "./testing/fakes.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/a.jsonl" };
 const WORKSPACE = "/home/u/src/agentpane";
@@ -228,5 +235,128 @@ describe("lifecycle", () => {
 
 		await expect(sessions.attach(REF)).rejects.toThrow("sbox: no git root");
 		expect(flaky.created[0]?.disposed).toBe(true);
+	});
+});
+
+describe("teardown racing a startup", () => {
+	// `start()` is the window in which an adapter already owns a sandboxed child
+	// but the manager has not recorded it: `#sessions` only learns about the
+	// adapter once `start()` resolves. A teardown that walks the table during
+	// that window sees nothing to kill, and the child that surfaces a moment
+	// later has nothing left that will ever reap it. Both real adapters take a
+	// round trip inside `start()` -- Codex's `initialize`, Pi's `get_state` --
+	// so this window is milliseconds wide on every single attach.
+
+	/** Let queued microtasks drain, so `start()` has actually been entered. */
+	async function settle(): Promise<void> {
+		for (let i = 0; i < 4; i++) await Promise.resolve();
+	}
+
+	it("disposes an adapter that was still starting when its session closed", async () => {
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+
+		const attaching = sessions.attach(ref);
+		await settle();
+		expect(slow.created).toHaveLength(1);
+
+		await sessions.close(ref);
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		expect(slow.created[0]?.disposed).toBe(true);
+		expect(sessions.isAttached(ref)).toBe(false);
+		expect(sessions.liveRefs()).toEqual([]);
+	});
+
+	it("disposes an adapter that was still starting when the server shut down", async () => {
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+
+		const attaching = sessions.attach(ref);
+		await settle();
+
+		await sessions.disposeAll();
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		// disposeAll() resolving is the server's licence to exit. An adapter that
+		// is only disposed after it resolves is an orphaned agent.
+		expect(slow.created[0]?.disposed).toBe(true);
+	});
+
+	it("does not spawn at all when teardown beats the adapter into existence", async () => {
+		// The stored-session path awaits the index before it can know the
+		// workspace, so a teardown can land before there is any adapter to
+		// dispose. The startup has to notice and never spawn.
+		const lookup = deferred();
+		const held: SessionIndex = {
+			list: (query) => index.list(query),
+			get: async (ref) => {
+				await lookup.promise;
+				return index.get(ref);
+			},
+		};
+		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
+
+		const attaching = sessions.attach(REF);
+		await settle();
+		await sessions.disposeAll();
+		lookup.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("does not resurrect a closed session when the adapter renames itself on start", async () => {
+		// `#adoptRef` re-keys the session into the table. Run against a session
+		// that has already been closed, it puts it back -- a closed conversation
+		// reappearing in the list under an id the client never asked for.
+		const gate = deferred();
+		const RENAMED = "/home/u/.pi/agent/sessions/real.jsonl";
+		const renaming = new FakeAdapterFactory({
+			holdStart: gate.promise,
+			materialiseOnStart: RENAMED,
+		});
+		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+
+		const attaching = sessions.attach(ref);
+		await settle();
+		await sessions.close(ref);
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		expect(sessions.liveRefs()).toEqual([]);
+		// Only what the store already held, under its own id: neither the closed
+		// virtual session nor the id the dying adapter adopted on its way out.
+		const listed = await sessions.list({ cwd: WORKSPACE });
+		expect(listed.map((s) => s.ref.id)).toEqual([REF.id]);
+		expect(sessions.canonicalRef({ backend: "pi", id: RENAMED }).id).toBe(RENAMED);
+	});
+
+	it("kills the child once when a closed startup then fails on its own", async () => {
+		// Both the close and the startup's own failure path can see the adapter.
+		// Terminating twice re-signals a pid the OS may have already recycled, so
+		// the two paths have to share one disposal.
+		const gate = deferred();
+		const flaky = new FakeAdapterFactory({
+			holdStart: gate.promise,
+			failStart: "sbox: no git root",
+		});
+		sessions = new SessionManager({ index, adapters: { pi: flaky } }, broadcaster);
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+
+		const attaching = sessions.attach(ref);
+		await settle();
+		await sessions.close(ref);
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		expect(flaky.created[0]?.disposals).toBe(1);
 	});
 });
