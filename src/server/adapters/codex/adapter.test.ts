@@ -9,6 +9,14 @@ const STORED_REF: SessionRef = { backend: "codex", id: "thread-stored" };
 
 type WireMessage = Record<string, unknown>;
 
+function deferred<T>() {
+	let resolve: (value: T | PromiseLike<T>) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve: resolve! };
+}
+
 class AdapterProcess extends FakeCodexProcess implements CodexProcess {
 	killCount = 0;
 	readonly #errorAwareExitHandlers: ((
@@ -23,9 +31,9 @@ class AdapterProcess extends FakeCodexProcess implements CodexProcess {
 		this.#errorAwareExitHandlers.push(cb);
 	}
 
-	override kill(): void {
+	override kill(): Promise<void> {
 		this.killCount += 1;
-		super.kill();
+		return super.kill();
 	}
 
 	override exit(
@@ -34,6 +42,15 @@ class AdapterProcess extends FakeCodexProcess implements CodexProcess {
 		error?: Error,
 	): void {
 		for (const handler of [...this.#errorAwareExitHandlers]) handler(code, signal, error);
+	}
+}
+
+class DelayedTerminationProcess extends AdapterProcess {
+	readonly termination = deferred<void>();
+
+	override kill(): Promise<void> {
+		void super.kill();
+		return this.termination.promise;
 	}
 }
 
@@ -248,6 +265,24 @@ describe("CodexAdapter lifecycle", () => {
 
 		await rejected;
 		expect(proc.killCount).toBe(1);
+	});
+
+	it("keeps disposal pending until process termination settles", async () => {
+		const proc = new DelayedTerminationProcess();
+		configureHappyServer(proc);
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		let disposed = false;
+
+		const disposal = adapter.dispose().then(() => {
+			disposed = true;
+		});
+		await Promise.resolve();
+		expect(disposed).toBe(false);
+
+		proc.termination.resolve();
+		await disposal;
+		expect(disposed).toBe(true);
 	});
 
 	it("surfaces the process-provided exit cause to error subscribers", async () => {

@@ -10,6 +10,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 const STDERR_TAIL_LIMIT = 8_192;
+const TERMINATE_GRACE_MS = 2_000;
+const KILL_GRACE_MS = 1_000;
 
 /** The subprocess seam. One implementation spawns; the other is a test double. */
 export interface CodexProcess {
@@ -17,7 +19,8 @@ export interface CodexProcess {
 	write(line: string): void;
 	onLine(cb: (line: string) => void): void;
 	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void;
-	kill(): void;
+	/** Signal termination and settle after close or bounded SIGKILL escalation. */
+	kill(): Promise<void>;
 }
 
 export interface CodexSpawnOptions {
@@ -101,11 +104,17 @@ class ChildCodexProcess implements CodexProcess {
 	private stdinError: string | undefined;
 	private closed = false;
 	private killed = false;
+	private readonly closedPromise: Promise<void>;
+	private resolveClosed!: () => void;
+	private killPromise: Promise<void> | null = null;
 
 	constructor(
 		private child: ChildProcessWithoutNullStreams,
 		private command: string,
 	) {
+		this.closedPromise = new Promise((resolve) => {
+			this.resolveClosed = resolve;
+		});
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {
 			this.splitter.push(chunk, (line) => this.emitLine(line));
@@ -145,16 +154,38 @@ class ChildCodexProcess implements CodexProcess {
 		this.exitHandlers.push(cb);
 	}
 
-	kill(): void {
-		if (this.killed) return;
+	kill(): Promise<void> {
+		if (this.closed) return Promise.resolve();
+		if (this.killPromise) return this.killPromise;
 		this.killed = true;
 		this.child.stdin.end();
-		this.child.kill();
+		this.child.kill("SIGTERM");
+		this.killPromise = this.finishTermination();
+		return this.killPromise;
+	}
+
+	private async finishTermination(): Promise<void> {
+		if (await this.closesWithin(TERMINATE_GRACE_MS)) return;
+		this.child.kill("SIGKILL");
+		await this.closesWithin(KILL_GRACE_MS);
+	}
+
+	private closesWithin(milliseconds: number): Promise<boolean> {
+		if (this.closed) return Promise.resolve(true);
+		return new Promise((resolve) => {
+			const timeout = setTimeout(() => resolve(false), milliseconds);
+			timeout.unref?.();
+			void this.closedPromise.then(() => {
+				clearTimeout(timeout);
+				resolve(true);
+			});
+		});
 	}
 
 	private handleClose(code: number | null, signal: string | null): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.resolveClosed();
 
 		const reason =
 			this.spawnError ??

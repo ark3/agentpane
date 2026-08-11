@@ -47,6 +47,7 @@ export interface BackendAdapter {
 	dispose(): Promise<void>;
 
 	// -- driving a turn -----------------------------------------------------
+	/** Resolves once the backend admits the turn, not when the turn completes. */
 	submit(text: string, images?: ImageInput[]): Promise<void>;
 	abort(): Promise<void>;
 

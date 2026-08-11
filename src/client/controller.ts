@@ -40,6 +40,7 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 	let connection: EventConnection | undefined;
 	let disposed = false;
 	let started = false;
+	let selectionIntent = 0;
 	const refreshes = new Map<string | undefined, Promise<void>>();
 	const recoveries = new Map<string, Promise<void>>();
 	const listeners = new Set<(next: ControllerView) => void>();
@@ -124,15 +125,23 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		return request;
 	}
 
-	async function attachAndSelect(ref: SessionRef): Promise<void> {
+	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
 		publish({ busy: "attaching", error: null });
 		try {
 			const attached = await api.attach(ref);
-			if (!disposed) applyAttached(attached, true, ref);
+			if (!disposed && intent === selectionIntent) {
+				applyAttached(attached, true, ref);
+			} else if (!disposed) {
+				// An older attach is still useful list state, but it no longer owns
+				// selection after a newer user intent.
+				publish({ state: replaceSummary(attached, ref) });
+			}
 		} catch (error: unknown) {
-			if (!disposed) publish({ error: errorMessage(error) });
+			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 		} finally {
-			if (!disposed && view.busy === "attaching") publish({ busy: "idle" });
+			if (!disposed && intent === selectionIntent && view.busy === "attaching") {
+				publish({ busy: "idle" });
+			}
 		}
 	}
 
@@ -185,18 +194,21 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
+			const intent = ++selectionIntent;
 			publish({ busy: "attaching", error: null });
 			try {
 				const created = await api.createSession({ cwd, backend });
-				if (!disposed) await attachAndSelect(created);
+				if (!disposed) await attachAndSelect(created, intent);
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && view.busy === "attaching") publish({ busy: "idle" });
+				if (!disposed && intent === selectionIntent && view.busy === "attaching") {
+					publish({ busy: "idle" });
+				}
 			}
 		},
 		async select(ref) {
-			await attachAndSelect(ref);
+			await attachAndSelect(ref, ++selectionIntent);
 		},
 		async submit() {
 			const selected = view.state.selected;

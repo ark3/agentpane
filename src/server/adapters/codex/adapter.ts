@@ -103,6 +103,7 @@ export class CodexAdapter implements BackendAdapter {
 	private model: string | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
+	private disposal: Promise<void> | null = null;
 
 	/** Unique to this adapter lifetime, even when a stored thread is reopened. */
 	private readonly requestNamespace = randomUUID();
@@ -212,15 +213,20 @@ export class CodexAdapter implements BackendAdapter {
 			if (this.client === client) this.client = null;
 			if (this.proc === proc) {
 				this.proc = null;
-				proc.kill();
+				await proc.kill();
 			}
 			throw error;
 		}
 	}
 
-	async dispose(): Promise<void> {
-		if (this.disposed) return;
+	dispose(): Promise<void> {
+		if (this.disposal) return this.disposal;
 		this.disposed = true;
+		this.disposal = this.finishDisposal();
+		return this.disposal;
+	}
+
+	private async finishDisposal(): Promise<void> {
 		const client = this.client;
 		const proc = this.proc;
 		if (this.ownership) this.ownership.ready = false;
@@ -228,7 +234,6 @@ export class CodexAdapter implements BackendAdapter {
 		this.client = null;
 		this.proc = null;
 		client?.dispose();
-		proc?.kill();
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
@@ -238,6 +243,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.turnBusy = null;
 		this.pendingTurnCompletions.clear();
 		this.pendingTurnCompletionOverflow = false;
+		await proc?.kill();
 	}
 
 	// -- driving a turn -----------------------------------------------------

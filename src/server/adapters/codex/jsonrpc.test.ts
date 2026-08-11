@@ -21,7 +21,9 @@ class FakeProcess implements CodexProcess {
 		this.exitHandlers.push(cb);
 	}
 
-	kill(): void {}
+	kill(): Promise<void> {
+		return Promise.resolve();
+	}
 
 	emit(message: unknown): void {
 		this.emitRaw(JSON.stringify(message));

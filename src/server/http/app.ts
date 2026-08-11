@@ -209,16 +209,11 @@ export function createApp(deps: AppDeps): App {
 				// one of the two points at which a session's id changes under us
 				// (D9), and the manager is what re-keys the process table.
 				//
-				// Deliberately not awaited. A turn can run for minutes and the
-				// adapter contract does not say whether submit() resolves on
-				// acceptance or on completion; either way the browser learns what
-				// happened from the stream, and a failure surfaces as an `error`
-				// event rather than as a stale HTTP status. The error is reported
-				// against whatever id the session has by then, which is the id the
-				// browser is listening under.
-				void sessions
-					.submit(ref, body.value.text, body.value.images)
-					.catch((err: unknown) => broadcaster.error(sessions.canonicalRef(ref), describe(err)));
+				// Both production adapters resolve submit() once the backend has
+				// admitted the turn, not when the turn completes. Await that boundary
+				// before acknowledging the POST so a rejected admission remains a
+				// normal HTTP failure and the browser can preserve its draft.
+				await sessions.submit(ref, body.value.text, body.value.images);
 				return accepted();
 			}
 			case "abort": {

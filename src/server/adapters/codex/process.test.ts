@@ -37,9 +37,11 @@ class FakeChild extends EventEmitter {
 	readonly stderr = new FakeReadable();
 	readonly stdin = new FakeWritable();
 	killCalls = 0;
+	readonly killSignals: (NodeJS.Signals | undefined)[] = [];
 
-	kill(): boolean {
+	kill(signal?: NodeJS.Signals): boolean {
 		this.killCalls++;
+		this.killSignals.push(signal);
 		return true;
 	}
 }
@@ -225,6 +227,41 @@ describe("Codex process lifecycle", () => {
 
 		expect(child.stdin.endCalls).toBe(1);
 		expect(child.killCalls).toBe(1);
+	});
+
+	it("does not settle kill until the child closes", async () => {
+		const { child, proc } = spawnHarness();
+
+		const stopping = proc.kill();
+		expect(stopping).toBeInstanceOf(Promise);
+		if (!(stopping instanceof Promise)) return;
+		let settled = false;
+		void stopping.then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(settled).toBe(false);
+
+		child.emit("close", 0, "SIGTERM");
+		await stopping;
+		expect(settled).toBe(true);
+	});
+
+	it("escalates a stuck termination and remains bounded", async () => {
+		vi.useFakeTimers();
+		try {
+			const { child, proc } = spawnHarness();
+			const stopping = proc.kill();
+			expect(stopping).toBeInstanceOf(Promise);
+			if (!(stopping instanceof Promise)) return;
+
+			await vi.runAllTimersAsync();
+			await stopping;
+
+			expect(child.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("refuses writes after kill starts teardown", () => {

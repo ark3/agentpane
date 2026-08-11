@@ -482,7 +482,7 @@ describe("prompting", () => {
 		await client.close();
 	});
 
-	it("reports a failed submit over SSE rather than in the POST status", async () => {
+	it("does not acknowledge a prompt before adapter admission succeeds", async () => {
 		const failing = new FakeAdapterFactory({
 			onSubmit() {
 				throw new Error("agent is wedged");
@@ -492,10 +492,9 @@ describe("prompting", () => {
 		const client = await openStream();
 
 		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go" });
-		expect(response.status).toBe(202);
-
-		await client.until(() => client.typed("error").length === 1);
-		expect(client.typed("error")[0]?.message).toBe("agent is wedged");
+		expect(response.status).toBe(500);
+		expect(await response.json()).toEqual({ error: "internal_error", detail: "agent is wedged" });
+		expect(client.typed("error")).toEqual([]);
 		await client.close();
 	});
 

@@ -85,6 +85,32 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
 	});
 
+	it("keeps the latest selection when earlier and later attaches resolve out of order", async () => {
+		const api = new FakeApi();
+		const firstRef: SessionRef = { backend: "pi", id: "/sessions/first.jsonl" };
+		const secondRef: SessionRef = { backend: "codex", id: "thread-second" };
+		const first = deferred<SessionSummary>();
+		const second = deferred<SessionSummary>();
+		api.attach.mockImplementation((session) => {
+			if (session.id === firstRef.id) return first.promise;
+			if (session.id === secondRef.id) return second.promise;
+			throw new Error(`unexpected ref ${session.id}`);
+		});
+		const controller = createController(api);
+
+		const selectingFirst = controller.select(firstRef);
+		const selectingSecond = controller.select(secondRef);
+		second.resolve(summary(secondRef));
+		await selectingSecond;
+		expect(controller.getView().state.selected).toEqual(secondRef);
+
+		first.resolve(summary(firstRef));
+		await selectingFirst;
+
+		expect(controller.getView().state.selected).toEqual(secondRef);
+		expect(controller.getView().state.summaries).toEqual([summary(secondRef), summary(firstRef)]);
+	});
+
 	it("keeps the draft when prompt submission fails", async () => {
 		const api = new FakeApi();
 		api.prompt.mockRejectedValue(new Error("offline"));

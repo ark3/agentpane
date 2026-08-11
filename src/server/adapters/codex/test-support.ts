@@ -107,8 +107,9 @@ export class FakeCodexProcess {
 		this.exitHandlers.push(cb);
 	}
 
-	kill(): void {
+	kill(): Promise<void> {
 		this.killed = true;
+		return Promise.resolve();
 	}
 
 	/** Called for every message the adapter writes. */
