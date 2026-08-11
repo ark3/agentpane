@@ -25,14 +25,19 @@ merge — and its largest file, the 293-line process shell, had no tests at all
 and held four real defects, including one that hung `start()` forever on a
 failed spawn. Read a branch before trusting its exit code.
 
-The assembled milestone has 556 offline tests. On 2026-08-11, the production
+The assembled milestone has 562 offline tests. On 2026-08-11, the production
 server completed the normal-path Codex smoke checks: create/attach, incremental
 text updates, idle completion, reconnect repaint without another native Codex
 worker, abort, and shutdown without an orphan in that run. That run served the
 built client and drove REST/SSE with a local harness; it did **not** automate
-browser UI interaction. The final review found an untested in-flight-start
-shutdown race that must be fixed and re-verified before calling the milestone
-release-ready. Pi was **not** live-tested in this environment.
+browser UI interaction. Pi was **not** live-tested in this environment.
+
+The final review's release blocker — an adapter still inside `start()` being
+invisible to `close()`/`disposeAll()`, so shutdown could return having orphaned
+it — is fixed and pinned by regressions that were confirmed failing first, and
+the live smoke was re-run against the fixed tree with tightened abort, process
+scope, and cleanup criteria. Its remaining honest limits are unchanged: no
+browser automation, and no live Pi.
 
 ### What the Pi adapter expects of its caller
 

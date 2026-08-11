@@ -126,9 +126,24 @@ accepts *both* an `edits[]` array and a flat `oldText`/`newText` (or
 `AgentMessage` should emit one of those two shapes, or register its own
 renderer.
 
-Still unverified, and the reason it matters is in DESIGN's open questions:
-whether a signal to the spawned `direnv` reaches the agent two execs down
-inside `bwrap`. It needs a live spawn, which the sandbox below prevents.
+## Fifth round: what the live vertical slice established
+
+Findings 34–38 came out of running the built server against a real
+`codex app-server` over the production REST/SSE path, rather than against
+fixtures. Finding 34 settles DESIGN's third open question — for Codex.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 34 | **A signal to the server does reach the agent through the whole wrapper chain.** SIGTERM to the server exits the native `codex app-server` leaf two `exec`s down inside `bwrap`, leaving no orphan. The live chain is `bun server → bwrap → bwrap → node launcher → native codex`; `direnv` and the Python sbox wrapper `exec` into it rather than surviving as separate processes. **Pi remains unverified** — see the deferred checks in `docs/MANUAL_TESTING.md` | `resources/probes/agentpane_codex_smoke.py`; run-scoped process tree captured before and after SIGTERM |
+| 35 | **The npm Codex launcher is itself a Node process whose argv also says `app-server`**, so counting workers by argv reports two agents where one is running. The live worker is the leaf whose `comm` is `codex` | same run; the launcher topology in its recorded process tree |
+| 36 | **An adapter owns its subprocess before `start()` resolves** — Codex across its `initialize` round trip, Pi across its `get_state` probe. Teardown that walks only the process table cannot see it, and `disposeAll()` returning is the server's licence to exit, so that window orphaned an agent on every attach that raced it | `src/server/http/session-manager.test.ts`, "teardown racing a startup" — each case confirmed failing first |
+| 37 | **`submit()` resolving is a promise that the backend admitted the turn.** The prompt route relays a rejection as a 500, and the browser answers by preserving the draft to send again. Any round trip an adapter runs *after* admission must therefore be unable to fail the submit, or the user is invited to resend a prompt that is already running | `src/server/adapters/pi/process.test.ts`, the first-prompt id probe |
+| 38 | **`/proc/<pid>/stat` cannot be split on whitespace.** `comm` sits in parentheses and may itself contain spaces and parentheses, so `split()[3]` is not the parent pid — it silently drops that process and every descendant hanging off it. Parse after the final `)` | direct probe against a synthesised stat line and against `ps` for every visible pid |
+
+Findings 36 and 37 are the same lesson from two directions: the moment a
+subprocess exists is earlier than the moment our bookkeeping says it does, and
+the moment a turn is committed is earlier than the moment `submit()` returns.
+Both windows are milliseconds wide and both were reachable on every prompt.
 
 ## Environment gotchas (learned the hard way)
 
@@ -150,6 +165,11 @@ inside `bwrap`. It needs a live spawn, which the sandbox below prevents.
   equivalent — see `ENV_AGENT_DIR` in `pi-coding-agent/dist`).
   A failure here is quiet and looks like success: the turn "completes" in
   under a second with `stopReason: "error"` and empty content.
+  With that state dir, a **live spawn from inside this sandbox does work** —
+  it is how `resources/probes/agentpane_codex_smoke.py` drives a real Codex
+  through the built server, and how finding 34 was settled. Earlier drafts of
+  this document said the sandbox prevented one; what it prevents is a spawn
+  that inherits the read-only `~/.codex`.
 - **Pi RPC framing is LF-only.** Split on `\n` only; do not use Node
   `readline` (it also splits on U+2028/U+2029, which are valid inside JSON
   strings). See Pi's `docs/rpc.md` "Framing".
