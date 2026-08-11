@@ -249,9 +249,24 @@ export class PiAdapter implements BackendAdapter {
 		// A `virtual` session materialises on its first prompt (D9), so this is
 		// the earliest Pi can name the file it just created. One extra round
 		// trip, only until the id resolves -- after that this is skipped.
+		//
+		// Awaited, because the manager reads `ref` the moment `submit()` settles
+		// and a rename that lands later is one it will never hear about. But not
+		// allowed to fail the submit: Pi has already accepted the prompt above,
+		// and `submit()` rejecting means "the turn was not admitted" (the frozen
+		// contract) -- which the HTTP layer relays as a 500 and the browser
+		// answers by preserving the draft to send again. Resending would put a
+		// second copy of a running prompt into the same turn. Leaving the id
+		// unresolved instead costs one more probe on the next prompt, which is
+		// the same path a session that had not materialised yet already takes.
 		if (!this.idResolved) {
-			const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
-			this.adoptSessionFile(state.data.sessionFile);
+			try {
+				const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+				this.adoptSessionFile(state.data.sessionFile);
+			} catch {
+				// Nothing to report: the turn is running. A dead process announces
+				// itself through `handleClose`, and disposal is not news either.
+			}
 		}
 	}
 

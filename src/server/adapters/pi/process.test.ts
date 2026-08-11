@@ -222,6 +222,43 @@ describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
 		expect(adapter.ref.id).toBe("/home/u/.pi/agent/sessions/materialised.jsonl");
 	});
 
+	it("still admits the turn when the follow-up id probe fails, because the prompt was accepted", async () => {
+		// `submit()` resolving means "the backend admitted the turn" (the frozen
+		// adapter contract), and the HTTP layer turns a rejection into a 500 that
+		// tells the browser to preserve its draft for retry. The id probe runs
+		// *after* Pi has accepted the prompt, so failing the submit on it would
+		// invite the user to resend a prompt that is already running -- and the
+		// resend would arrive mid-turn, where Pi steers it in as a second message.
+		const h = makeHarness();
+		const adapter = new PiAdapter(
+			{ backend: "pi", id: "__new__" },
+			{ spawn: () => h.child as unknown as PiChild },
+		);
+		const started = adapter.start({ cwd: WORKSPACE });
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		await started;
+
+		const submitted = adapter.submit("first prompt");
+		h.child.respondTo("prompt");
+		await Promise.resolve();
+		h.child.failCommand("get_state", "session not ready");
+
+		await expect(submitted).resolves.toBeUndefined();
+		// Unresolved rather than wrongly resolved: the next prompt probes again.
+		expect(adapter.ref.id).toBe("__new__");
+
+		const second = adapter.submit("second prompt");
+		h.child.respondTo("prompt");
+		await Promise.resolve();
+		h.child.respondTo("get_state", {
+			model: null,
+			isStreaming: false,
+			sessionFile: "/home/u/.pi/agent/sessions/materialised.jsonl",
+		});
+		await second;
+		expect(adapter.ref.id).toBe("/home/u/.pi/agent/sessions/materialised.jsonl");
+	});
+
 	it("stops re-probing once the id is known, so later prompts cost one round trip", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
