@@ -1,8 +1,7 @@
 # Workstreams
 
 The build was split into slices. They were originally built **in parallel**,
-each in its own git worktree; all six slices are now integrated on
-`feature/minimal-live-vertical-slice`.
+each in its own git worktree; all six are now integrated and merged to `main`.
 
 This document is the current state of each slice and the contracts they expose.
 Read `HANDOFF.md` and `DESIGN.md` first — they carry the decisions and the
@@ -13,19 +12,19 @@ evidence. Live verification details and its exact scope are in
 
 | Slice | State | Where |
 |---|---|---|
-| session-index | **done, offline verified** | this branch |
-| pi-adapter | **done, offline verified** through fixtures, process tests, and contracts; live Pi remains deferred | this branch |
-| transport | **done, verified** offline and through the live Codex REST/SSE path | this branch |
-| renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | this branch |
-| codex-adapter | **implemented, fixture/live-smoke verified; final review pending** — lifecycle hardening remains | this branch |
-| client-shell | **done, offline verified**; the production-built client returned HTTP 200, but no browser automation was run | this branch |
+| session-index | **done, offline verified** | main |
+| pi-adapter | **done, offline and live verified** through fixtures, process tests, contracts, and the live `direnv -> sbox -> pi` REST/SSE path | main |
+| transport | **done, verified** offline and through the live REST/SSE path on both backends | main |
+| renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | main |
+| codex-adapter | **done, fixture and live-smoke verified**; the final review's lifecycle findings are fixed | main |
+| client-shell | **offline verified only.** The built client returns HTTP 200 and mounts, but nothing has driven the DOM; it has been opened by hand once and has known problems, not yet recorded | main |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
 merge — and its largest file, the 293-line process shell, had no tests at all
 and held four real defects, including one that hung `start()` forever on a
 failed spawn. Read a branch before trusting its exit code.
 
-The assembled milestone has 562 offline tests. On 2026-08-11, the production
+The assembled milestone has 566 offline tests. On 2026-08-11, the production
 server completed the normal-path Codex smoke checks: create/attach, incremental
 text updates, idle completion, reconnect repaint without another native Codex
 worker, abort, and shutdown without an orphan in that run. **Pi has since been

@@ -137,7 +137,11 @@ unanswered one hangs the turn.
 
 Still unverified: whether sbox's injected `--sandbox danger-full-access`
 suppresses the exec/patch approvals specifically. The fixtures were captured
-*without* sbox, so they cannot answer it. Even if it does, `requestUserInput`
+*without* sbox, so they cannot answer it, and neither do the live smoke runs —
+the Codex one prompts "do not use tools" deliberately, to keep its transcript
+assertions deterministic. (Pi, separately, ran a shell tool through sbox with
+no dialog at all; that is a different backend and a copied `trust.json`, so it
+says nothing about this.) Even if it does, `requestUserInput`
 and MCP elicitation are separate and still need a path to the human.
 
 ### D3. State protocol: server-authoritative snapshot + tail upsert
@@ -517,8 +521,10 @@ capable of producing a bug that looks like something else entirely:
   of why a process died — `EROFS ... auth.json.lock` reaches you no other way.
 - **The agent is a grandchild, not the child.** The spawned process is
   `direnv`, which execs `sbox`, which runs `bwrap`, which runs the agent.
-  Whether a signal to the child reaches the agent is **unverified** — see the
-  open questions.
+  A signal to the child *does* reach it, **verified live on both backends**:
+  `direnv` and the `sbox` wrapper exec into the chain rather than surviving
+  beside it, so the server's own child is the `bwrap` chain. Re-provable with
+  `resources/probes/agentpane_{codex,pi}_smoke.py`.
 
 ## Testing strategy
 
