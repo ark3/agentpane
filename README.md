@@ -5,8 +5,9 @@ calls, session management, and fork-from-any-past-point — with a
 **pluggable backend** so it can drive either **Pi** (`pi --mode rpc`) or
 **Codex** (`codex app-server`), each sandboxed per workspace.
 
-Spiritually: [pipane](https://github.com/mike-heunher/pipane), but on the
-current maintained UI library and multi-backend.
+Spiritually: [pipane](https://github.com/mike-heunher/pipane) — same
+architecture (sandboxed subprocess per session, browser as a repaintable
+view), but multi-backend and with its own client stack.
 
 ## Start here
 
@@ -14,9 +15,9 @@ current maintained UI library and multi-backend.
    re-runnable evidence), reference material by absolute path, and the
    workflow for the fresh agent picking this up.
 2. **`docs/DESIGN.md`** — the design: goals/non-goals, architecture, the
-   backend adapter contract, the Codex→`AgentMessage` mapping, and the test
-   strategy.
-3. **`resources/`** — validated Codex protocol bindings and reproducible
-   probe scripts.
+   settled decisions and their reasoning, the backend adapter contract, the
+   Codex→`AgentMessage` mapping, and the test strategy.
+3. **`resources/`** — validated Codex protocol bindings, reproducible probe
+   scripts, and captured protocol fixtures for offline adapter tests.
 
 No source exists yet. This repo currently holds the design and its evidence.
