@@ -1,0 +1,155 @@
+/**
+ * The process shell: building the sandboxed command line, and reading LF-framed
+ * lines off a child's stdout.
+ *
+ * Kept apart from the reducer on purpose. Everything here touches the OS;
+ * nothing here knows what a `ThreadItem` is. Tests substitute a
+ * `CodexProcess` and never spawn anything.
+ */
+
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+
+const STDERR_TAIL_LIMIT = 8_192;
+
+/** The subprocess seam. One implementation spawns; the other is a test double. */
+export interface CodexProcess {
+	/** Write one message. The implementation appends the LF. */
+	write(line: string): void;
+	onLine(cb: (line: string) => void): void;
+	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void;
+	kill(): void;
+}
+
+export interface CodexSpawnOptions {
+	/**
+	 * The session's workspace. This is both the child's cwd and the path
+	 * `direnv exec` / `sbox` are pointed at -- get it wrong and sbox jails the
+	 * wrong tree while direnv loads the wrong environment (D7).
+	 */
+	cwd: string;
+	env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * `direnv exec <workspace> sbox -- codex app-server` (D7). The server builds
+ * this itself: no `sandboxed-codex` wrapper exists on PATH, and one seam is
+ * easier to test than a PATH dependency.
+ *
+ * sbox recognises the `codex` profile by command name -- it mounts `~/.codex`
+ * read-write (Codex needs a writable sqlite state runtime) and injects
+ * `--sandbox danger-full-access` so Codex does not double-sandbox inside
+ * bubblewrap. Neither flag belongs here; adding one by hand would fight sbox.
+ */
+export function codexCommand(cwd: string): { command: string; args: string[] } {
+	return { command: "direnv", args: ["exec", cwd, "sbox", "--", "codex", "app-server"] };
+}
+
+/**
+ * Split a byte stream into lines on **LF only**.
+ *
+ * Deliberately not `readline`: it also splits on U+2028/U+2029, which are
+ * legal inside JSON strings and would corrupt a message carrying either
+ * (HANDOFF, "Pi RPC framing is LF-only" -- the same hazard applies to any
+ * JSON-lines transport, Codex included).
+ */
+export class LineSplitter {
+	private buffer = "";
+
+	push(chunk: string, emit: (line: string) => void): void {
+		this.buffer += chunk;
+		let newline = this.buffer.indexOf("\n");
+		while (newline >= 0) {
+			const line = this.buffer.slice(0, newline).trim();
+			this.buffer = this.buffer.slice(newline + 1);
+			if (line) emit(line);
+			newline = this.buffer.indexOf("\n");
+		}
+	}
+
+	/** Whatever is left after the stream closed, if it is a complete-looking line. */
+	flush(emit: (line: string) => void): void {
+		const rest = this.buffer.trim();
+		this.buffer = "";
+		if (rest) emit(rest);
+	}
+}
+
+export type CodexSpawner = (options: CodexSpawnOptions) => CodexProcess;
+
+/** The real spawner. Injectable so nothing in the test suite starts a process. */
+export const spawnCodex: CodexSpawner = ({ cwd, env }) => {
+	const { command, args } = codexCommand(cwd);
+	const child: ChildProcessWithoutNullStreams = spawn(command, args, {
+		cwd,
+		env: env ?? process.env,
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	return new ChildCodexProcess(child, command);
+};
+
+class ChildCodexProcess implements CodexProcess {
+	private splitter = new LineSplitter();
+	private lineHandlers: ((line: string) => void)[] = [];
+	private exitHandlers: ((code: number | null, signal: string | null, error?: Error) => void)[] = [];
+	private stderrTail = "";
+	private spawnError: string | undefined;
+	private closed = false;
+	private killed = false;
+
+	constructor(
+		private child: ChildProcessWithoutNullStreams,
+		private command: string,
+	) {
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
+			this.splitter.push(chunk, (line) => this.emitLine(line));
+		});
+		child.stdout.on("end", () => this.splitter.flush((line) => this.emitLine(line)));
+
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => {
+			this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
+		});
+
+		child.on("error", (error: Error) => {
+			this.spawnError = `Failed to spawn Codex (${this.command}): ${error.message}`;
+		});
+		child.on("close", (code, signal) => this.handleClose(code, signal));
+	}
+
+	private emitLine(line: string): void {
+		for (const handler of this.lineHandlers) handler(line);
+	}
+
+	write(line: string): void {
+		if (this.killed || this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded) {
+			throw new Error("Codex process is not running");
+		}
+		this.child.stdin.write(`${line}\n`);
+	}
+
+	onLine(cb: (line: string) => void): void {
+		this.lineHandlers.push(cb);
+	}
+
+	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void {
+		this.exitHandlers.push(cb);
+	}
+
+	kill(): void {
+		if (this.killed) return;
+		this.killed = true;
+		this.child.stdin.end();
+		this.child.kill();
+	}
+
+	private handleClose(code: number | null, signal: string | null): void {
+		if (this.closed) return;
+		this.closed = true;
+
+		const reason = this.spawnError ?? `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
+		const detail = this.stderrTail.trim();
+		const error = new Error(detail ? `${reason}\n${detail}` : reason);
+		for (const handler of this.exitHandlers) handler(code, signal, error);
+	}
+}
