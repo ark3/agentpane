@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Local web UI for coding agents, with pluggable sandboxed backends (Pi, Codex)",
+  "license": "MIT",
+  "author": "Abhay Saxena",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ark3/agentpane.git"
+  },
   "scripts": {
     "dev": "bun run --hot src/server/index.ts",
     "dev:client": "vite",
