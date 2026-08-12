@@ -105,6 +105,10 @@ body {
 	background: var(--ap-bg-sunken);
 	color: var(--ap-fg);
 	font-family: var(--ap-font-sans);
+	/* Without this, `button, input, select, textarea { font: inherit; }` below
+	   inherits the browser's unstyled default rather than the token scale, so
+	   shell chrome reads noticeably larger than the transcript (OW-36). */
+	font-size: var(--ap-text-md);
 }
 
 button, input, select, textarea { font: inherit; }
