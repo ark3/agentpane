@@ -8,7 +8,9 @@ it.
 **The build has started.** This document is now the evidence base rather than
 the starting point — read `docs/DESIGN.md` for the decisions and
 `docs/WORKSTREAMS.md` for what is built, what is left, and what to pick up
-next. Two sections here stay live regardless: **Environment gotchas**, which
+next. Status lives only in WORKSTREAMS' Status table, and every outstanding
+item — defect, deferral, open question, unproven claim — only in its Open work
+list, as an `OW-` row. Cite an id from elsewhere; do not restate one. Two sections here stay live regardless: **Environment gotchas**, which
 will cost you an afternoon if you skip it, and **Reference material**, which is
 where the authoritative protocol docs live. The findings tables are the record
 of how each decision was established; consult them when a premise looks wrong.

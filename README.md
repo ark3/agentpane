@@ -58,5 +58,9 @@ Live runs against both real backends are recorded in
 `resources/probes/agentpane_{codex,pi}_smoke.py`. They exercise the built
 client's reachability and the REST/SSE path with a real agent subprocess:
 create/attach, streaming, idle, reconnect, abort, and shutdown without an
-orphan. Neither has been driven through a browser — transcript rendering and
-interaction are still unverified, and that gap is stated in the same document.
+orphan.
+
+**For what is done and what is left, read
+[`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its Status table is the only
+statement of project status, and its Open work list is the only list of
+outstanding items. Both are deliberately not repeated here.

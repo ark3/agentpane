@@ -8,7 +8,12 @@ Read `HANDOFF.md` and `DESIGN.md` first — they carry the decisions and the
 evidence. Live verification details and its exact scope are in
 `MANUAL_TESTING.md`.
 
-## Status (2026-08-11)
+## Status (2026-08-12)
+
+**This table is the single statement of project status.** README, DESIGN and
+MANUAL_TESTING link here rather than restating it; `MANUAL_TESTING.md` holds
+the evidence behind the "verified" claims, and **Open work** below holds
+everything still outstanding. If you change what is true, change it here.
 
 | Slice | State | Where |
 |---|---|---|
@@ -17,7 +22,7 @@ evidence. Live verification details and its exact scope are in
 | transport | **done, verified** offline and through the live REST/SSE path on both backends | main |
 | renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | main |
 | codex-adapter | **done, fixture and live-smoke verified**; the final review's lifecycle findings are fixed | main |
-| client-shell | **offline verified only.** The built client returns HTTP 200 and mounts, but nothing has driven the DOM; it has been opened by hand once and has known problems, not yet recorded | main |
+| client-shell | **offline verified only, and known-broken in a browser.** The built client returns HTTP 200 and mounts, but no automated test has driven the DOM. Opened by hand on 2026-08-12: the layout defect in OW-26 alone makes it impractical to test, and OW-26–OW-31 are open against it | main |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
 merge — and its largest file, the 293-line process shell, had no tests at all
@@ -38,8 +43,10 @@ The final review's release blocker — an adapter still inside `start()` being
 invisible to `close()`/`disposeAll()`, so shutdown could return having orphaned
 it — is fixed and pinned by regressions that were confirmed failing first, and
 the live smoke was re-run against the fixed tree with tightened abort, process
-scope, and cleanup criteria. Its remaining honest limits are unchanged: no
-browser automation, and no live Pi.
+scope, and cleanup criteria. One honest limit remains: **no browser
+automation.** (An earlier revision of this paragraph also claimed "no live Pi",
+which the paragraph above it had already contradicted — the Pi live run closed
+that gap on 2026-08-11.)
 
 ### What the Pi adapter expects of its caller
 
@@ -99,34 +106,80 @@ not stable — say where it changes, and the server will follow.
   the two entry points (`renderMarkdown`, `renderCode`) both end in DOMPurify.
   Anything else reaching `{@html}` is a new hole; there is no second net.
 
-## Known deferrals
+## Open work
 
-Things review found and judged not worth blocking a task on. None is a defect
-in a path the milestone exercises; each is a decision left open, or an edge
-nobody has needed yet. They are here because a finding that lives only in a
-session transcript dies with it — this list is the surviving copy.
+**Everything outstanding lives here**, in one list with stable ids. Before this
+was consolidated the same items were spread across three documents — this
+file's deferrals, DESIGN's "Remaining open questions", and MANUAL_TESTING's
+"Still unverified" — and drifted, in one case into a flat self-contradiction
+about whether Pi had been run live. Other documents now cite an `OW-` id
+instead of restating the item.
 
-Each was recorded by the review that found it, not re-verified since. Confirm
-against the source before acting on one.
+Four kinds share the list, because they share a lifecycle:
 
-| Where | Deferral |
-|---|---|
-| `src/shared/protocol.ts` | The wire contract says a snapshot resets the sequence, but not whether it should also clear a transient `error` or a pending `request`. The client preserves both when a session view already exists, which is a choice the contract does not sanction either way. |
-| client SSE adapter | Every native `error` callback is reported as a disconnect, and no reconnect/backoff policy exists anywhere — the browser's own `EventSource` retry is the whole story. Fine on loopback; nothing owns it if that stops being true. |
-| client workspace input | `setWorkspace` fires per keystroke, so typing an absolute path can enumerate every prefix of it. Decide between debouncing and committing on blur. |
-| Codex reducer | A multi-file edit flattens its hunks under the first path. The raw per-file data is retained, so this is fixable without recapturing fixtures. |
-| Codex reducer | Reset leaves `tokenUsage`, `threadId`, `turnId` and `unmappedItemTypes` in place. Whether those should survive a reset is unsettled. |
-| Codex reducer | `contextCompaction` is dropped, because the generated item carries no summary. DESIGN's wording says otherwise; one of the two has to change. |
-| Codex reducer | Only the last transcript entry is marked streaming, so an earlier concurrent pending tool call can look complete while it is still running. |
-| Codex adapter | The `thread/resume` response is asserted as `ThreadStartResponse` rather than the generated `ThreadResumeResponse`. |
-| Codex adapter | `setModel` changes outgoing turns, but the reducer's identity may still report the previous model. |
-| Pi process shell | Wrapping a spawn error loses the original stack, `code` and `cause`. The message survives; the identity does not. |
-| transport tests | The offline vertical test does not seed summaries, so it never integrates summary re-keying on `renamed`. |
-| live smoke harness | The abort case fires before the long turn has emitted assistant text, so its "transcript stopped growing" guard has little to bite on. A longer pre-abort wait would strengthen it. |
-| `session-manager.ts` | `disposeAll()` can reach one adapter through both the session table and its startup record, inside a one-microtask window. Correct only because `dispose()` is required to be idempotent (stated on the `BackendAdapter` contract), and not pinned by a test — the interleaving is not reachable deterministically. |
-| `session-manager.ts` | `close()` flags a startup as torn down but leaves the record in `#attaching`, so a re-attach arriving before that startup settles joins it and inherits its rejection — a 404 for a session that is on disk. Transient, and a retry works; the joiner should skip a torn-down record instead. |
-| Pi process shell | A `success:false` response to the post-admission `get_state` probe is swallowed with no diagnostic anywhere: `handleResponse` rejects the caller and returns before the `emitError` fallback. Keeping it off `onError` is right — the turn was admitted and is running — but a *persistent* probe failure leaves the session keyed to its `virtual:` id indefinitely, silently. |
-| both process shells | Nothing reports a child that outlives SIGKILL. Codex's `finishTermination` discards the boolean from `closesWithin`, Pi's now does the same, and the manager swallows dispose rejections — so the one condition DESIGN worried about is the one condition no layer would tell you about. Making `kill()` record or throw on a false return is the fix. |
+- **deferral** — review found it, judged it not worth blocking on. None is a
+  defect in a path the milestone exercises.
+- **defect** — observed or read as broken, and nothing depends on leaving it
+  that way. The client-shell rows are all of this kind.
+- **question** — a decision nobody has made yet. When one settles it leaves
+  this list and becomes a decision in `DESIGN.md`, which is where the reasoning
+  belongs.
+- **unverified** — believed to work, never proven. Closing one means producing
+  evidence, and the evidence goes in `MANUAL_TESTING.md`.
+
+They are here because a finding that lives only in a session transcript dies
+with it — this list is the surviving copy. Each was recorded by whoever found
+it and **not re-verified since; confirm against the source before acting on
+one** — OW-23 was stale enough to invert its own conclusion. Adding a row costs
+a line: take the next id, never reuse one.
+
+This shape is a deliberate experiment: a markdown table standing in for an
+issue tracker, chosen over adopting one (beads) because development is
+serialized and nothing here needs assignees or concurrent claims. The columns
+are the ones a tracker would want, so importing stays mechanical. Revisit if
+the list starts wanting fields this table cannot carry — dependency edges
+between rows, or who holds what.
+
+| ID | Kind | Where | Item |
+|---|---|---|---|
+| OW-1 | deferral | `src/shared/protocol.ts` | The wire contract says a snapshot resets the sequence, but not whether it should also clear a transient `error` or a pending `request`. The client preserves both when a session view already exists, which is a choice the contract does not sanction either way. |
+| OW-2 | deferral | client SSE adapter | Every native `error` callback is reported as a disconnect, and no reconnect/backoff policy exists anywhere — the browser's own `EventSource` retry is the whole story. Fine on loopback; nothing owns it if that stops being true. |
+| OW-3 | deferral | client workspace input | `setWorkspace` fires per keystroke, so typing an absolute path can enumerate every prefix of it. Decide between debouncing and committing on blur. |
+| OW-4 | deferral | Codex reducer | A multi-file edit flattens its hunks under the first path. The raw per-file data is retained, so this is fixable without recapturing fixtures. |
+| OW-5 | deferral | Codex reducer | Reset leaves `tokenUsage`, `threadId`, `turnId` and `unmappedItemTypes` in place. Whether those should survive a reset is unsettled. |
+| OW-6 | deferral | Codex reducer | `contextCompaction` is dropped, because the generated item carries no summary. DESIGN's wording says otherwise; one of the two has to change. |
+| OW-7 | deferral | Codex reducer | Only the last transcript entry is marked streaming, so an earlier concurrent pending tool call can look complete while it is still running. |
+| OW-8 | deferral | Codex adapter | The `thread/resume` response is asserted as `ThreadStartResponse` rather than the generated `ThreadResumeResponse`. |
+| OW-9 | deferral | Codex adapter | `setModel` changes outgoing turns, but the reducer's identity may still report the previous model. |
+| OW-10 | deferral | Pi process shell | Wrapping a spawn error loses the original stack, `code` and `cause`. The message survives; the identity does not. |
+| OW-11 | deferral | transport tests | The offline vertical test does not seed summaries, so it never integrates summary re-keying on `renamed`. |
+| OW-12 | deferral | live smoke harness | The abort case fires before the long turn has emitted assistant text, so its "transcript stopped growing" guard has little to bite on. A longer pre-abort wait would strengthen it. |
+| OW-13 | deferral | `session-manager.ts` | `disposeAll()` can reach one adapter through both the session table and its startup record, inside a one-microtask window. Correct only because `dispose()` is required to be idempotent (stated on the `BackendAdapter` contract), and not pinned by a test — the interleaving is not reachable deterministically. |
+| OW-14 | deferral | `session-manager.ts` | `close()` flags a startup as torn down but leaves the record in `#attaching`, so a re-attach arriving before that startup settles joins it and inherits its rejection — a 404 for a session that is on disk. Transient, and a retry works; the joiner should skip a torn-down record instead. |
+| OW-15 | deferral | Pi process shell | A `success:false` response to the post-admission `get_state` probe is swallowed with no diagnostic anywhere: `handleResponse` rejects the caller and returns before the `emitError` fallback. Keeping it off `onError` is right — the turn was admitted and is running — but a *persistent* probe failure leaves the session keyed to its `virtual:` id indefinitely, silently. |
+| OW-16 | deferral | both process shells | Nothing reports a child that outlives SIGKILL. Codex's `finishTermination` discards the boolean from `closesWithin`, Pi's now does the same, and the manager swallows dispose rejections — so the one condition DESIGN worried about is the one condition no layer would tell you about. Making `kill()` record or throw on a false return is the fix. |
+| OW-17 | question | `resources/codex-protocol/` | Whether to import the generated bindings into `src/` or reference them in place. Either way they stay the source of truth; do not hand-write Codex types. |
+| OW-18 | question | Codex approvals (D2a) | Whether sbox's injected `--sandbox danger-full-access` suppresses Codex's approval `ServerRequest`s entirely. |
+| OW-19 | question | renderer | Whether `plan` and `contextCompaction` items deserve bespoke rendering or fold into text. |
+| OW-20 | question | `src/server/sessions/` | Whether session listing needs an index cache once the corpus is larger than the ~973 sessions measured for D9 (HANDOFF 19). Both upstreams eventually built one. |
+| OW-21 | question | `GET /api/models` | **Where the model list comes from with nothing attached.** `listModels()` exists only on an adapter instance, and verified against the real `PiAdapter`, calling it before `start()` rejects with "Pi process is not running" — the answer lives in the subprocess. So the route reports zero Pi models until a Pi session is open, which is exactly when a new-session model picker needs it. Spawning to answer a *listing* question is what D9 rules out, so the candidates are a backend-level (not session-level) model source, caching the last live answer, or accepting that you pick a model only from an attached session. The route degrades quietly today; it does not fail. |
+| OW-22 | question | `POST .../fork` | **What a fork's returned ref means.** Pi's `fork` rewinds the active branch of the *same* session file and returns the same ref; Codex's `thread/fork` mints a new thread id. The route hands that ref straight back, so on Codex the browser will receive a ref for a session the process table has never heard of and holds no adapter for — and the on-disk index may not see a thread the backend has not flushed. Settle it with the Codex adapter, not before. |
+| OW-23 | deferral | `src/server/composition.ts:14` | **`SessionIndex.get(ref)` walks both stores on every cold attach.** Re-checked 2026-08-12: this row previously said `get` had no implementation and was "integration's first job" — that is stale. It is implemented in `createSessionIndex`, as exactly the "list everything and find" the original note warned against: `listSessions()` with no `cwd` filter, then a linear scan. `session-manager.ts:286` calls it for any session not already in the process table, so a cold attach reads the head of every session file in both stores — ~0.28s against finding 19's 973-file census, growing with the corpus. Cheapest real fix first: the call site knows the workspace, and `listSessions` already takes a `cwd` filter it does not pass. Beyond that, Pi's id *is* the file path, so its `get` can be a direct stat/parse; only Codex's UUID needs a walk or a `thread/list`. |
+| OW-24 | unverified | whole client | **No automated browser coverage exists.** DESIGN's testing strategy names Playwright E2E driving a real turn; none has been written. Every live check to date ran against REST/SSE, so transcript rendering and tool cards are unproven by any test. |
+| OW-25 | unverified | Pi approvals | Whether Pi raises approval dialogs when its `trust.json` does *not* already trust the workspace (HANDOFF finding 42 copies one in, so it shows only that the sandboxed path does not *add* a prompt). |
+| OW-26 | defect | `src/client/app.css:112` | **The prompt box is unreachable, which is what makes the app impractical to hand-test.** `.shell` is a `min-height:100vh` grid with no per-pane scrolling, so a growing conversation extends the document rather than scrolling inside itself, pushing the textarea arbitrarily far below the fold. The conversation needs to be its own scroll region with the masthead and prompt pinned. Observed in a browser, 2026-08-12. |
+| OW-27 | defect | `src/client/render/Transcript.svelte` | No autoscroll — and today no scroll container to autoscroll — so output arriving during a turn lands wherever the document happens to be sitting. Fixing OW-26 is a prerequisite. |
+| OW-28 | defect | `src/client/App.svelte:115` | **Enter does not send.** The prompt is a `<textarea>` inside a form, and a textarea does not submit a form on Enter; there is no keydown handler either, so every send is a mouse trip to the button. Read from source, not yet observed. |
+| OW-29 | defect | `src/client/App.svelte:88` | "New session" is enabled with an empty workspace. Read from source, not yet observed. |
+| OW-30 | defect | `src/client/App.svelte:92` | The session list renders `preview` or a bare `backend id`, with no timestamp, no ordering cue, and no way to distinguish two sessions in the same workspace — and nothing closes or deletes one. Read from source, not yet observed. |
+| OW-31 | defect | `src/client/App.svelte:103` | An error renders as a bare `<p role="alert">` that nothing dismisses and nothing clears on the next successful action, so a transient failure stays on screen indefinitely. Read from source, not yet observed. |
+
+OW-26 through OW-31 came out of the first hand-run of the built client on
+2026-08-12. Only OW-26 was observed directly; the rest were read out of the
+shell's source in the same session and are marked as such — confirm before
+acting. OW-3 is the seventh member of that group and predates it: the
+per-keystroke workspace input is a client-shell defect that review had already
+recorded as a deferral, and it is not duplicated here.
 
 ## File ownership
 
@@ -185,4 +238,9 @@ how the first round's reports were lost. Put them where they survive:
 - A defect in these documents: **fix the document**, in the same change.
 - A fact you had to verify: the commit message, or `DESIGN.md` when it changes
   a decision rather than confirming one.
-- Something you could not resolve: DESIGN's "Remaining open questions".
+- Evidence from a live run: `MANUAL_TESTING.md`.
+- **Anything left undone — a defect, a deferral, a question, an unproven
+  claim: a row in Open work above.** One list, one id, cited from elsewhere
+  rather than restated. Restating it in a second document is how the Pi
+  contradiction happened.
+- Project status: the Status table above, and nowhere else.

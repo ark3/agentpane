@@ -135,7 +135,7 @@ adapter matches it up and responds to Codex.
 answered by the capture harness, followed by `serverRequest/resolved`. An
 unanswered one hangs the turn.
 
-Still unverified: whether sbox's injected `--sandbox danger-full-access`
+Still unverified (OW-18): whether sbox's injected `--sandbox danger-full-access`
 suppresses the exec/patch approvals specifically. The fixtures were captured
 *without* sbox, so they cannot answer it, and neither do the live smoke runs —
 the Codex one prompts "do not use tools" deliberately, to keep its transcript
@@ -559,11 +559,14 @@ capable of producing a bug that looks like something else entirely:
 
 ## Remaining open questions
 
-- Whether to import `resources/codex-protocol/` into `src/` or reference it in
-  place. Either way it stays the source of truth; do not hand-write Codex
-  types.
-- Whether sbox's injected `--sandbox danger-full-access` suppresses Codex's
-  approval `ServerRequest`s entirely (D2a).
+**The open ones live in `WORKSTREAMS.md`'s Open work list, as OW-17 through
+OW-22** (OW-23 turned out to be answered in the code already, and is now a
+deferral there). They were moved there to carry ids and to sit beside everything else
+outstanding; keeping a second copy here is what let this document drift out of
+step with the others. A question that settles comes back here as a decision,
+with its reasoning — that is what this document is for, and it is why the one
+below stayed.
+
 - ~~**Whether killing the spawned process actually stops the agent.**~~
   **Settled, for both backends.** `direnv` and the sbox wrapper `exec` into the
   chain rather than surviving beside it, so the server's own child is the
@@ -574,28 +577,3 @@ capable of producing a bug that looks like something else entirely:
   side, and an adapter still inside `start()` was invisible to shutdown
   entirely (findings 36 and 37). Re-provable with the two harnesses in
   `resources/probes/`.
-- Whether `plan` and `contextCompaction` items deserve bespoke rendering or
-  fold into text.
-- Whether session listing needs an index cache once the corpus is larger than
-  the ~973 sessions measured for D9. Both upstreams eventually built one.
-- **Where the model list comes from with nothing attached.** `listModels()`
-  exists only on an adapter instance, and verified against the real
-  `PiAdapter`, calling it before `start()` rejects with "Pi process is not
-  running" — the answer lives in the subprocess. So `GET /api/models` reports
-  zero Pi models until a Pi session is open, which is exactly when a new-session
-  model picker needs it. Spawning to answer a *listing* question is what D9
-  rules out, so the candidates are a backend-level (not session-level) model
-  source, caching the last live answer, or accepting that you pick a model only
-  from an attached session. The route degrades quietly today; it does not fail.
-- **What a fork's returned ref means.** Pi's `fork` rewinds the active branch of
-  the *same* session file and returns the same ref; Codex's `thread/fork` mints
-  a new thread id. `POST .../fork` hands that ref straight back, so on Codex the
-  browser will receive a ref for a session the process table has never heard of
-  and holds no adapter for — and the on-disk index may not see a thread the
-  backend has not flushed. Settle it with the Codex adapter, not before.
-- **`SessionIndex.get(ref)` has no implementation.** `src/server/http/deps.ts`
-  needs it (attach reads a session's `cwd` from it, D7), but
-  `src/server/sessions/` exports only `listSessions(opts)`. Implementing `get`
-  as "list everything and find" puts a full two-store walk on every attach.
-  Pi can do better — its id *is* the file path, so it is a direct parse — but
-  Codex's UUID needs a walk or a `thread/list`. This is integration's first job.
