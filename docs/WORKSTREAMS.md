@@ -209,6 +209,37 @@ when the design calls for it, but deliberately — a change ripples into every
 unmerged `wip/*` branch, and `git diff main...wip/<slice>` is how you find out
 how far.
 
+## How work gets done (2026-08-12)
+
+Agreed with the repo's owner, and written here because the agreement itself
+would otherwise live only in a chat session — the failure mode this document
+exists to prevent.
+
+- **Development is serialized.** One thing at a time. No concurrent agents, so
+  no row in Open work needs an owner or a claim.
+- **Work lands directly on `main`**, committed as the work is done. No feature
+  branch, no PR. Small, single-purpose commits, because the commit log is the
+  only review surface left — the point is diagnosis later, not rollback.
+- **Never `git push`.** Committing is local and freely authorized; publishing
+  to `origin` happens only when the owner asks for it, by name.
+- **Never commit red.** `bun run check` before any commit touching `src/`
+  (~25s). Say so explicitly when a commit is documentation only.
+- **Delegation, when it earns its keep.** The loop is: pick the next `OW-` row,
+  write it up with success criteria, hand it to a single subagent in its own
+  worktree, review the result, land it. Do not dispatch work smaller than the
+  cost of a cold agent re-deriving this context — batch small rows, or just do
+  them. Choose the model per task: a crisp spec with mechanical verification
+  delegates well; work where *writing the spec is the hard part* does not.
+- **Success criteria must be observable**, never descriptive. A test that fails
+  before the change and passes after, or a screenshot — not "matches the
+  description." If the spec is checked only against itself, the spec's blind
+  spots survive review intact. `wip/pi-adapter` passed `bun run check` on merge
+  holding four real defects; that is the case this rule is aimed at.
+- **Closing a row**: strike it in place and append the evidence, the way
+  DESIGN's settled question is struck. Ids stay stable and the history stays
+  readable:
+  `~~**OW-26** ...~~ **Fixed** in <sha>; pinned by <test>, confirmed failing first.`
+
 ## Conventions
 
 - **Runtime is Bun**; tests are vitest. `bun install` first.
