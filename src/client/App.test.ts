@@ -119,6 +119,17 @@ class FakeController implements AgentpaneController {
 	}
 }
 
+/**
+ * jsdom never computes real layout, so scrollHeight/clientHeight are always 0.
+ * Stub them the way a real browser's would read during a turn, so the
+ * autoscroll *decision* (stick to bottom vs. respect a scrolled-up reader) is
+ * pinned by a test. The actual pixel behavior is verified live (OW-27).
+ */
+function mockScrollMetrics(el: Element, metrics: { scrollHeight: number; clientHeight: number }): void {
+	Object.defineProperty(el, "scrollHeight", { value: metrics.scrollHeight, configurable: true });
+	Object.defineProperty(el, "clientHeight", { value: metrics.clientHeight, configurable: true });
+}
+
 describe("App", () => {
 	it("starts once, disposes once, and stops observing the controller when unmounted", () => {
 		const controller = new FakeController();
@@ -234,6 +245,70 @@ describe("App", () => {
 		await tick();
 
 		expect(screen.getByText("Explain this change")).toBeInTheDocument();
+	});
+
+	it("restores each session's own scroll position when switching, and scrolls a fresh one to the tail", async () => {
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
+			"codex:codex-1": { ref: codexSession, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// The reader scrolls away from the tail on session A.
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+
+		// Session B has no scroll memory yet -- it lands at its own tail.
+		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: codexSession, sessions }) }));
+		await tick();
+		expect(el.scrollTop).toBe(700);
+
+		// Switching back to A restores its remembered, scrolled-up position.
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions }) }));
+		await tick();
+		expect(el.scrollTop).toBe(50);
+	});
+
+	it("keeps following new content while at the bottom, and stops once the reader scrolls away", async () => {
+		const base = { ref: piSession, messages: [user("first")], isStreaming: true, seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": base } }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// At the bottom already; new content pulls the view down with it.
+		mockScrollMetrics(el, { scrollHeight: 600, clientHeight: 500 });
+		el.scrollTop = 600;
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...base, messages: [...base.messages, user("second")] } },
+			}),
+		}));
+		await tick();
+		expect(el.scrollTop).toBe(900);
+
+		// The reader scrolls up to read history.
+		el.scrollTop = 100;
+		await fireEvent.scroll(el);
+
+		// More content arrives; the scrolled-up reader must not be yanked to the tail.
+		mockScrollMetrics(el, { scrollHeight: 1200, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...base, messages: [...base.messages, user("second"), user("third")] } },
+			}),
+		}));
+		await tick();
+		expect(el.scrollTop).toBe(100);
 	});
 
 	it("submits the prompt through its form and disables an empty prompt", async () => {

@@ -15,6 +15,10 @@
 	});
 	let workspace = $state("");
 	let backend = $state<BackendId>("pi");
+	let conversationEl: HTMLElement | undefined;
+	/** Per-session scroll memory (OW-27): keyed like everything else in the client state. */
+	const scrollMemory = new Map<string, { top: number; pinned: boolean }>();
+	let lastScrollKey: string | null = null;
 
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
@@ -47,10 +51,83 @@
 			view = next;
 		});
 		void controller.start();
+
+		// Belt-and-suspenders for the scroll effect below: Block.svelte throttles
+		// re-parsing a streaming message's markdown to a frame (DESIGN D5), so the
+		// transcript's real painted height can land a beat after the message
+		// state that triggered it. A ResizeObserver on the transcript's own
+		// content catches that late paint too, regardless of what caused it.
+		// jsdom has no ResizeObserver, so this is inert (and untested) there --
+		// the effect below covers the state-driven case jsdom can pin.
+		let observer: ResizeObserver | undefined;
+		const el = conversationEl;
+		const content = el?.firstElementChild;
+		if (el && content && typeof ResizeObserver !== "undefined") {
+			observer = new ResizeObserver(() => {
+				const ref = view.state.selected;
+				const key = ref ? sessionKey(ref) : null;
+				const anchor = key ? scrollMemory.get(key) : undefined;
+				if (!anchor || anchor.pinned) el.scrollTop = el.scrollHeight;
+			});
+			observer.observe(content);
+		}
+
 		return () => {
 			unsubscribe();
 			controller.dispose();
+			observer?.disconnect();
 		};
+	});
+
+	const NEAR_BOTTOM_PX = 48;
+
+	function isNearBottom(el: HTMLElement): boolean {
+		return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+	}
+
+	/** Records where the user left off, and whether they were following the tail. */
+	function handleConversationScroll(): void {
+		const el = conversationEl;
+		const ref = view.state.selected;
+		if (!el || !ref) return;
+		scrollMemory.set(sessionKey(ref), { top: el.scrollTop, pinned: isNearBottom(el) });
+	}
+
+	/**
+	 * Switching sessions restores that session's own scroll position (or the
+	 * tail, for one with no memory yet). Staying on the same session, new
+	 * content arriving (a message-boundary upsert or a status flip) only pulls
+	 * the view down if the user was already at the bottom.
+	 *
+	 * The "was at the bottom" answer comes from `scrollMemory`'s `pinned` flag
+	 * -- set only when the user actually scrolls -- not from re-deriving
+	 * proximity against the *current* scrollHeight each time this runs. A
+	 * single large upsert (or the update that first makes the transcript
+	 * overflow, when scrollTop has necessarily been 0) can move scrollHeight by
+	 * more than the near-bottom threshold in one step; comparing a still-stale
+	 * scrollTop to the new scrollHeight would then read as "not near the
+	 * bottom" even though the user never scrolled, silently ending autoscroll
+	 * for the rest of the turn. Caught live (OW-27): a synthetic stream with
+	 * multi-paragraph deltas reproduced exactly this.
+	 */
+	$effect(() => {
+		const ref = view.state.selected;
+		const key = ref ? sessionKey(ref) : null;
+		// Re-run on new transcript content, not just on selection changes.
+		void selectedSession?.messages;
+		void selectedSession?.isStreaming;
+
+		const el = conversationEl;
+		if (!el) return;
+		const anchor = key ? scrollMemory.get(key) : undefined;
+
+		if (key !== lastScrollKey) {
+			lastScrollKey = key;
+			el.scrollTop = anchor && !anchor.pinned ? anchor.top : el.scrollHeight;
+			return;
+		}
+
+		if (!anchor || anchor.pinned) el.scrollTop = el.scrollHeight;
 	});
 
 	function recency(summary: SessionSummary): number {
@@ -158,7 +235,7 @@
 		<p class="warning">Unsupported agent request pending.</p>
 	{/if}
 
-	<section class="conversation" aria-label="Conversation">
+	<section class="conversation" aria-label="Conversation" bind:this={conversationEl} onscroll={handleConversationScroll}>
 		<Transcript messages={selectedSession?.messages ?? []} isStreaming={selectedSession?.isStreaming ?? false} />
 	</section>
 
