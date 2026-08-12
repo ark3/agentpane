@@ -53,8 +53,8 @@ One server process (Bun)
    │      • metadata only (id, cwd, timestamp, preview) — no process
    ├── SessionManager:  {backend, id} → { child: sbox subprocess, adapter }
    │      • spawn on attach (cwd = that session's workspace), not on list
-   │      • subprocess lives as long as the server, NOT the connection
-   │      • kill on explicit close / server shutdown
+   │      • subprocess outlives the connection; reaped on idle / LRU / shutdown (D12)
+   │      • never killed by a dropped browser connection
    ├── Backend adapter (per session):  Pi | Codex
    │      • owns the child's stdio
    │      • owns the transcript: maintains AgentMessage[] + isStreaming
@@ -67,10 +67,15 @@ One server process (Bun)
 
 ### Why the subprocess outlives the connection
 
-A browser refresh drops the event stream but must not kill the agent. The
-subprocess's lifetime is tied to the server process only. Because the server
-owns the transcript (D3), reconnect is a *repaint*, not a lifecycle event —
-the client re-subscribes and receives a fresh snapshot.
+A browser refresh drops the event stream but must not kill the agent. A
+subprocess's lifetime is decoupled from any connection: the server, not the
+client, decides when it dies. Because the server owns the transcript (D3),
+reconnect is a *repaint*, not a lifecycle event — the client re-subscribes and
+receives a fresh snapshot.
+
+The subprocess is *not*, however, tied to the server's whole lifetime: it is
+bounded by idleness and by a count cap, and reclaimed automatically. That is
+D12, which supersedes the original "lives as long as the server" rule.
 
 ## Decisions
 
@@ -385,6 +390,88 @@ top level.
 This is the one place worth being concrete rather than leaving to
 implementation judgement: the two halves are written at different times and
 will drift if the contract is only described in prose.
+
+### D12. Bounded subprocess lifetime: idle timeout + LRU cap
+
+The first draft tied a subprocess's life to the *server's*: killed only on an
+explicit close or on shutdown, never otherwise. That does not bound resource
+use — a day of browsing leaves a sandboxed agent alive per session touched,
+each holding its workspace. This decision reverses that: subprocesses are
+reclaimed automatically, on two triggers. (There is no explicit "end session"
+control in the UI to retire — the `DELETE` route exists but nothing in the
+client invokes it; idle+LRU is simply the reclamation that was missing. The
+route stays: it is useful programmatically and shutdown-adjacent code leans
+on it.)
+
+**Why this is safe at all.** Eviction is not a new capability — it is the
+`attached → detached` transition D9 already defines, fired automatically
+instead of by hand. The adapter's in-memory `AgentMessage[]` is lost on
+eviction, but D3/D9 already rehydrate a detached session from disk on the next
+attach (`get_messages` for Pi, `thread/read` for Codex), verified on both
+backends. So an evicted session is a *detached* session, not a lost one; the
+next attach re-spawns and re-hydrates transparently. The "subprocess outlives
+the connection" invariant is untouched — it is now additionally *bounded*.
+
+**Two triggers, one predicate:**
+
+- **Idle timeout (15 min).** A per-session timer detaches a session that has
+  seen no activity for the interval. Bounds *time*.
+- **LRU cap (N=16).** Checked at attach, before spawning the 17th subprocess:
+  evict the coldest eligible session, then spawn. Bounds *count*.
+
+Both call the same `evict` = `dispose()` + flip to `detached`, keeping the
+summary in the list. Both are gated by the same **exemption predicate** — the
+load-bearing part of this decision, because "idle" is not "safe to kill":
+
+1. **Never evict a streaming turn** (`isStreaming`). This is what makes the
+   LRU age of a session you are actively watching irrelevant — it cannot be
+   reaped regardless.
+2. **Never evict a session blocked on a pending request** (D2a). A Codex
+   approval dialog is idle by token-flow but is holding a human hostage;
+   killing it strands the turn.
+3. **Never evict a `virtual`, unmaterialized session.** Before the first
+   prompt writes JSONL there is nothing on disk to rehydrate from — eviction
+   would be data loss, not detach.
+
+**Two clocks, not one**, because the triggers ask different questions:
+
+- **LRU recency = last *attach*.** "Select a session" is client-only; the
+  server hears it only as an `attach` call (`controller.select → api.attach`),
+  and `attach` is idempotent — switching back to a live session re-enters
+  `attach` and re-snapshots without respawning. So "which did I last select"
+  *is* "which did I last attach," for free, with no new client→server signal.
+- **Idle clock = last activity of any kind** — reset on attach, on submit, and
+  on turn-end. A session you prompt, whose turn runs three minutes and then
+  sits, should measure its 15 minutes from when the turn *ended*, not from the
+  prompt or the attach. Submit feeds this clock; it does not touch LRU order
+  (a just-prompted session is either streaming-exempt or already recent from
+  its attach).
+
+**All-busy is an immediate reject, not a wait.** If all 16 are exempt when the
+17th attach arrives, the attach fails with an at-capacity error rather than
+blocking. This is deliberately visible: the condition should be rare (idle
+sessions are always evictable, so it bites only under 16 concurrent
+streaming-or-blocked turns), and a reject removes the ambiguity between "waiting
+for a turn to finish" and "just slow to attach." Free one and retry.
+
+**Bookkeeping constraint (load-bearing).** The recency stamp lives **on the
+`ManagedSession` object**, never in a side map keyed by id. Pi's id changes
+under us (`#adoptRef`, D9's `renamed`), and `#adoptRef` re-keys the same object
+while preserving its identity — so an on-object stamp follows the rename
+automatically, whereas an id-keyed side map would strand it under the old
+`virtual:` key. The reaper must evict via the canonical ref (`#lookup` /
+`canonicalRef`) like everything else, or it reintroduces the exact
+double-spawn-on-stale-id bug that `#adoptRef` and the alias table exist to
+close.
+
+**Cost this shifts.** Frequent eviction makes cold reattach the common path,
+which promotes OW-23 (`SessionIndex.get` walks both stores on every cold
+attach, ~0.28s) from a deferral to the hot path. Fixing OW-23 — passing the
+`cwd` filter `listSessions` already accepts — is a prerequisite to landing
+this, not a follow-up.
+
+**Config.** Single-user, no config file: `idleTimeoutMs` and `maxSessions`
+are named constants at the top of the manager module, not env or file.
 
 ## The backend adapter contract
 
