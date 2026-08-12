@@ -112,6 +112,7 @@ button, input, select, textarea { font: inherit; }
 .shell {
 	display: grid;
 	grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+	grid-template-rows: auto auto 1fr auto;
 	grid-template-areas:
 		"masthead masthead"
 		"controls conversation"
@@ -119,7 +120,7 @@ button, input, select, textarea { font: inherit; }
 		"sessions prompt";
 	gap: var(--ap-space-4);
 	max-width: 72rem;
-	min-height: 100vh;
+	height: 100vh;
 	margin: 0 auto;
 	padding: var(--ap-space-4);
 }
@@ -145,7 +146,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 
 .sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; }
 .sessions button { text-align: left; overflow-wrap: anywhere; }
-.conversation { grid-area: conversation; min-width: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow: hidden; }
+.conversation { grid-area: conversation; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; }
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
