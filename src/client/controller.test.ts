@@ -262,6 +262,35 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBe("Workspace must be an absolute path.");
 	});
 
+	it("clears a session's persisted turn error on the next successful submit", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("The turn ended in an error.");
+
+		controller.setDraft("try again");
+		await controller.submit();
+
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
+	});
+
+	it("dismisses the view error and the selected session's persisted error", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
+
+		controller.clearError();
+
+		expect(controller.getView().error).toBeNull();
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
+	});
+
 	it("closes SSE and ignores later events after disposal", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

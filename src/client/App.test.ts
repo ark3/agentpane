@@ -43,6 +43,7 @@ class FakeController implements AgentpaneController {
 	selected: SessionRef[] = [];
 	submitted = 0;
 	aborted = 0;
+	clearErrorCalls = 0;
 	workspaces: string[] = [];
 	started = 0;
 	disposed = 0;
@@ -97,6 +98,11 @@ class FakeController implements AgentpaneController {
 
 	async abort() {
 		this.aborted += 1;
+	}
+
+	clearError() {
+		this.clearErrorCalls += 1;
+		this.publish({ ...this.current, error: null });
 	}
 
 	publish(next: ControllerView) {
@@ -214,6 +220,19 @@ describe("App", () => {
 
 		expect(screen.getByLabelText("Prompt")).toHaveValue("Retry this prompt");
 		expect(screen.getByRole("alert")).toHaveTextContent("Backend unavailable");
+	});
+
+	it("dismisses an error and does not leave it re-shown", async () => {
+		const controller = new FakeController(view({ error: "Backend unavailable" }));
+		render(App, { props: { controller } });
+
+		expect(screen.getByRole("alert")).toHaveTextContent("Backend unavailable");
+		await fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+		expect(controller.clearErrorCalls).toBe(1);
+
+		controller.publish(view({ error: null }));
+		await tick();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
 	it("shows Abort only while the selected session is streaming", async () => {

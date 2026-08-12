@@ -7,6 +7,7 @@ import {
 	sessionKey,
 } from "$shared/protocol.ts";
 import {
+	clearSessionError,
 	initialClientState,
 	reduceServerEvent,
 	type ClientState,
@@ -220,6 +221,20 @@ describe("client session state", () => {
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]?.requests).toEqual([request]);
+	});
+
+	it("clears a session's persisted error and leaves an unaffected session's state untouched (OW-31)", () => {
+		const withError = reduceServerEvent(stateAtSequence(ref, 1), {
+			type: "error",
+			session: ref,
+			seq: 2,
+			message: "turn failed",
+		}).state;
+
+		const cleared = clearSessionError(withError, ref);
+
+		expect(cleared.sessions[sessionKey(ref)]?.error).toBeNull();
+		expect(clearSessionError(withError, { backend: "codex", id: "no-such-session" })).toBe(withError);
 	});
 
 	it("requests a session summary refresh when sessions change", () => {

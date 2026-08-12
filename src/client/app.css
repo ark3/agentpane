@@ -150,7 +150,15 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
-.abort, .error { color: var(--ap-danger); }
+.abort { color: var(--ap-danger); }
+.error {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--ap-space-3);
+	color: var(--ap-danger);
+}
+.error button { flex: 0 0 auto; color: inherit; }
 .warning { margin: 0; color: var(--ap-warning); }
 
 @media (max-width: 42rem) {

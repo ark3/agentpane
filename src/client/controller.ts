@@ -2,6 +2,7 @@ import type { BackendId, ServerEvent, SessionRef, SessionSummary } from "$shared
 import { sessionKey } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
 import {
+	clearSessionError,
 	initialClientState,
 	reduceServerEvent,
 	type ClientState,
@@ -26,6 +27,8 @@ export interface AgentpaneController {
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
 	abort(): Promise<void>;
+	/** Dismiss the current error -- the view-level one and, if selected, the session's own. */
+	clearError(): void;
 }
 
 export function createController(api: AgentpaneApi): AgentpaneController {
@@ -221,7 +224,9 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			publish({ busy: "submitting", error: null });
 			try {
 				await api.prompt(selected, { text });
-				if (!disposed) publish({ draft: "", error: null });
+				if (!disposed) {
+					publish({ draft: "", error: null, state: clearSessionError(view.state, selected) });
+				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
@@ -242,6 +247,11 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			} finally {
 				if (!disposed && view.busy === "aborting") publish({ busy: "idle" });
 			}
+		},
+		clearError() {
+			const selected = view.state.selected;
+			const state = selected ? clearSessionError(view.state, selected) : view.state;
+			publish({ error: null, state });
 		},
 	};
 }

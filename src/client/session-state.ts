@@ -59,6 +59,13 @@ function updateSession(state: ClientState, view: SessionView): ClientState {
 	return { ...state, sessions: { ...state.sessions, [sessionKey(view.ref)]: view } };
 }
 
+/** Clear a session's persisted turn error, e.g. after the next prompt succeeds (OW-31). */
+export function clearSessionError(state: ClientState, ref: SessionRef): ClientState {
+	const view = state.sessions[sessionKey(ref)];
+	if (!view || view.error === null) return state;
+	return updateSession(state, { ...view, error: null });
+}
+
 export function reduceServerEvent(state: ClientState, event: ServerEvent): ReduceResult {
 	if (event.type === "sessions-changed") return result(state, [], true);
 

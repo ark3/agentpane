@@ -108,7 +108,10 @@
 	</nav>
 
 	{#if error}
-		<p class="error" role="alert">{error}</p>
+		<p class="error" role="alert">
+			<span>{error}</span>
+			<button type="button" aria-label="Dismiss error" onclick={() => controller.clearError()}>Dismiss</button>
+		</p>
 	{/if}
 
 	{#if selectedSession && selectedSession.requests.length > 0}
