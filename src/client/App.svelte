@@ -61,6 +61,13 @@
 		event.preventDefault();
 		if (view.draft) void controller.submit();
 	}
+
+	/** Ctrl/Cmd-Enter submits; plain Enter inserts a newline (prompts are routinely multi-line). */
+	function handlePromptKeydown(event: KeyboardEvent): void {
+		if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+		event.preventDefault();
+		if (view.draft) void controller.submit();
+	}
 </script>
 
 <svelte:head>
@@ -117,6 +124,7 @@
 			aria-label="Prompt"
 			value={view.draft}
 			oninput={(event) => controller.setDraft(event.currentTarget.value)}
+			onkeydown={handlePromptKeydown}
 			placeholder="Ask the agent…"
 		></textarea>
 		<div class="prompt-actions">

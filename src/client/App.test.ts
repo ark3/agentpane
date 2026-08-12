@@ -188,6 +188,21 @@ describe("App", () => {
 		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 	});
 
+	it("submits on Ctrl-Enter and Cmd-Enter but inserts a newline on plain Enter", async () => {
+		const controller = new FakeController(view({ draft: "Summarize the diff" }));
+		render(App, { props: { controller } });
+		const textarea = screen.getByLabelText("Prompt");
+
+		await fireEvent.keyDown(textarea, { key: "Enter" });
+		expect(controller.submitted).toBe(0);
+
+		await fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+		expect(controller.submitted).toBe(1);
+
+		await fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+		expect(controller.submitted).toBe(2);
+	});
+
 	it("preserves the typed draft when form submission fails", async () => {
 		const controller = new FakeController(view(), "Backend unavailable");
 		render(App, { props: { controller } });
