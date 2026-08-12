@@ -58,12 +58,12 @@
 		return iso ? Date.parse(iso) : 0;
 	}
 
-	/** UTC, so the label is deterministic regardless of the viewer's timezone. */
+	/** ISO to the second, UTC so it is deterministic regardless of the viewer's timezone. */
 	function formatTimestamp(iso: string | null): string {
 		if (!iso) return "";
 		const date = new Date(iso);
 		if (Number.isNaN(date.getTime())) return "";
-		return date.toISOString().slice(0, 16).replace("T", " ");
+		return date.toISOString().slice(0, 19).replace("T", " ");
 	}
 
 	/** A short, stable label distinguishing two sessions that share a workspace and preview. */
@@ -120,36 +120,30 @@
 	<nav class="sessions" aria-label="Sessions">
 		{#each sortedSummaries as summary (sessionKey(summary.ref))}
 			{@const label = summary.preview || `${summary.ref.backend} ${summary.ref.id}`}
-			<div class="session-row">
-				<button
-					type="button"
-					class="session-select"
-					aria-pressed={view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(summary.ref)}
-					aria-label={label}
-					onclick={() => void controller.select(summary.ref)}
-				>
-					<span class="session-preview">{label}</span>
-					<span class="session-meta">
-						<span class="session-backend">{summary.ref.backend}</span>
-						<span class="session-id">{shortId(summary.ref.id)}</span>
-						{#if formatTimestamp(summary.updatedAt ?? summary.createdAt)}
-							<time class="session-time" datetime={summary.updatedAt ?? summary.createdAt ?? undefined}>
-								{formatTimestamp(summary.updatedAt ?? summary.createdAt)}
-							</time>
-						{/if}
-					</span>
-				</button>
-				{#if summary.status === "attached"}
-					<button
-						type="button"
-						class="session-close"
-						aria-label={`Close ${label}`}
-						onclick={() => void controller.close(summary.ref)}
-					>
-						×
-					</button>
-				{/if}
-			</div>
+			<button
+				type="button"
+				class="session-select"
+				aria-pressed={view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(summary.ref)}
+				aria-label={label}
+				onclick={() => void controller.select(summary.ref)}
+			>
+				<span class="session-preview">{label}</span>
+				<span class="session-meta">
+					<span class="session-backend">{summary.ref.backend}</span>
+					<span class="session-id">{shortId(summary.ref.id)}</span>
+					{#if summary.cwd}
+						<span class="session-cwd">{summary.cwd}</span>
+					{/if}
+					{#if formatTimestamp(summary.updatedAt)}
+						<time class="session-time" datetime={summary.updatedAt ?? undefined}>
+							{formatTimestamp(summary.updatedAt)}
+						</time>
+					{/if}
+					{#if summary.isStreaming}
+						<span class="session-streaming" aria-label="Streaming">●</span>
+					{/if}
+				</span>
+			</button>
 		{/each}
 	</nav>
 

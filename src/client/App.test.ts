@@ -46,7 +46,6 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 class FakeController implements AgentpaneController {
 	created: Array<{ cwd: string; backend: BackendId }> = [];
 	selected: SessionRef[] = [];
-	closed: SessionRef[] = [];
 	submitted = 0;
 	aborted = 0;
 	clearErrorCalls = 0;
@@ -104,10 +103,6 @@ class FakeController implements AgentpaneController {
 
 	async abort() {
 		this.aborted += 1;
-	}
-
-	async close(ref: SessionRef) {
-		this.closed.push(ref);
 	}
 
 	clearError() {
@@ -174,10 +169,12 @@ describe("App", () => {
 		expect(Array.from(previews).map((node) => node.textContent)).toEqual(["Newer", "Older"]);
 	});
 
-	it("shows each session's backend, a distinguishing id, and its timestamp", () => {
+	it("shows each session's backend, a distinguishing id, its workspace, and a second-precision timestamp", () => {
 		const controller = new FakeController(view({
 			state: state({
-				summaries: [summary(piSession, "Same preview", { updatedAt: "2026-06-01T12:34:00.000Z" })],
+				summaries: [
+					summary(piSession, "Same preview", { cwd: "/work/project", updatedAt: "2026-06-01T12:34:56.000Z" }),
+				],
 			}),
 		}));
 		render(App, { props: { controller } });
@@ -185,19 +182,28 @@ describe("App", () => {
 
 		expect(nav.getByText("pi")).toBeInTheDocument();
 		expect(nav.getByText("pi-1")).toBeInTheDocument();
-		expect(nav.getByText("2026-06-01 12:34")).toBeInTheDocument();
+		expect(nav.getByText("/work/project")).toBeInTheDocument();
+		expect(nav.getByText("2026-06-01 12:34:56")).toBeInTheDocument();
 	});
 
-	it("closes an attached session's subprocess but not a detached one's", async () => {
-		const attached = summary(piSession, "Live", { status: "attached" });
-		const detached = summary(codexSession, "Idle", { status: "detached" });
-		const controller = new FakeController(view({ state: state({ summaries: [attached, detached] }) }));
+	it("shows a streaming indicator only for a session that is streaming", () => {
+		const idle = summary(piSession, "Idle turn", { isStreaming: false });
+		const live = summary(codexSession, "Live turn", { isStreaming: true });
+		const controller = new FakeController(view({ state: state({ summaries: [idle, live] }) }));
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		expect(nav.queryByLabelText("Streaming")).toBeInTheDocument();
+		expect(nav.getAllByLabelText("Streaming")).toHaveLength(1);
+	});
+
+	it("does not offer a way to close or disconnect a session from the UI (D12 owns reclamation)", () => {
+		const controller = new FakeController(view({
+			state: state({ summaries: [summary(piSession, "Live", { status: "attached" })] }),
+		}));
 		render(App, { props: { controller } });
 
-		expect(screen.queryByRole("button", { name: "Close Idle" })).not.toBeInTheDocument();
-		await fireEvent.click(screen.getByRole("button", { name: "Close Live" }));
-
-		expect(controller.closed).toEqual([piSession]);
+		expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
 	});
 
 	it("shows an empty transcript until the selected session has messages", () => {
