@@ -47,6 +47,8 @@ export interface AgentpaneApi {
 	attach(ref: SessionRef): Promise<SessionSummary>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
 	abort(ref: SessionRef): Promise<void>;
+	/** Ends a session's live subprocess (DELETE); the session stays listed, detached. */
+	close(ref: SessionRef): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -89,6 +91,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		abort(ref) {
 			return requestNoContent(ROUTES.abort(ref), { method: "POST" });
+		},
+		close(ref) {
+			return requestNoContent(ROUTES.session(ref), { method: "DELETE" });
 		},
 		connect(handlers) {
 			return openEvents(ROUTES.events, handlers);

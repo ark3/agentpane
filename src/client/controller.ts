@@ -27,6 +27,8 @@ export interface AgentpaneController {
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
 	abort(): Promise<void>;
+	/** Ends a session's live subprocess; it stays listed, detached. */
+	close(ref: SessionRef): Promise<void>;
 	/** Dismiss the current error -- the view-level one and, if selected, the session's own. */
 	clearError(): void;
 }
@@ -246,6 +248,13 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
 				if (!disposed && view.busy === "aborting") publish({ busy: "idle" });
+			}
+		},
+		async close(ref) {
+			try {
+				await api.close(ref);
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
 			}
 		},
 		clearError() {

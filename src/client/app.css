@@ -144,8 +144,12 @@ button { padding: var(--ap-space-2) var(--ap-space-3); cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--ap-accent-soft); }
 
-.sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; }
-.sessions button { text-align: left; overflow-wrap: anywhere; }
+.sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; overflow-y: auto; min-height: 0; }
+.session-row { display: flex; gap: var(--ap-space-1); }
+.session-select { flex: 1; min-width: 0; display: grid; gap: var(--ap-space-1); text-align: left; overflow-wrap: anywhere; }
+.session-preview { overflow-wrap: anywhere; }
+.session-meta { display: flex; flex-wrap: wrap; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
+.session-close { flex: 0 0 auto; padding: 0 var(--ap-space-2); color: var(--ap-fg-muted); }
 .conversation { grid-area: conversation; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; }
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }

@@ -33,6 +33,7 @@ class FakeApi implements AgentpaneApi {
 	readonly attach = vi.fn(async (session: SessionRef) => summary(session));
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
+	readonly close = vi.fn(async (_session: SessionRef) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
@@ -260,6 +261,25 @@ describe("client controller", () => {
 		expect(api.listSessions).not.toHaveBeenCalled();
 		expect(api.createSession).not.toHaveBeenCalled();
 		expect(controller.getView().error).toBe("Workspace must be an absolute path.");
+	});
+
+	it("closes a session's subprocess through the api", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+
+		await controller.close(ref);
+
+		expect(api.close).toHaveBeenCalledWith(ref);
+	});
+
+	it("reports a failed close as a view error", async () => {
+		const api = new FakeApi();
+		api.close.mockRejectedValue(new Error("session busy"));
+		const controller = createController(api);
+
+		await controller.close(ref);
+
+		expect(controller.getView().error).toBe("session busy");
 	});
 
 	it("clears a session's persisted turn error on the next successful submit", async () => {

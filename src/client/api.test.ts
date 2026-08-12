@@ -101,6 +101,16 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("closes a session with DELETE and no request body", async () => {
+		const fetch = fetchRecorder(new Response(null, { status: 204 }));
+		const api = createAgentpaneApi({ fetch });
+
+		await expect(api.close(ref)).resolves.toBeUndefined();
+		expect(fetch).toHaveBeenCalledWith(ROUTES.session(ref), {
+			method: "DELETE",
+		});
+	});
+
 	it("turns a JSON API error into an ApiClientError", async () => {
 		const fetch = fetchRecorder(response({ error: "not_found", detail: "missing session" }, 404));
 		const api = createAgentpaneApi({ fetch });

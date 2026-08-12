@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { sessionKey, type BackendId } from "$shared/protocol.ts";
+	import { sessionKey, type BackendId, type SessionSummary } from "$shared/protocol.ts";
 	import type { AgentpaneController, ControllerView } from "./controller.ts";
 	import Transcript from "./render/Transcript.svelte";
 	import { initialClientState } from "./session-state.ts";
@@ -18,6 +18,10 @@
 
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
+	);
+	/** Most-recently-updated first -- the ordering cue the list otherwise has none of. */
+	const sortedSummaries = $derived(
+		[...view.state.summaries].sort((a, b) => recency(b) - recency(a)),
 	);
 	const error = $derived(view.error ?? selectedSession?.error ?? null);
 	const status = $derived.by(() => {
@@ -48,6 +52,24 @@
 			controller.dispose();
 		};
 	});
+
+	function recency(summary: SessionSummary): number {
+		const iso = summary.updatedAt ?? summary.createdAt;
+		return iso ? Date.parse(iso) : 0;
+	}
+
+	/** UTC, so the label is deterministic regardless of the viewer's timezone. */
+	function formatTimestamp(iso: string | null): string {
+		if (!iso) return "";
+		const date = new Date(iso);
+		if (Number.isNaN(date.getTime())) return "";
+		return date.toISOString().slice(0, 16).replace("T", " ");
+	}
+
+	/** A short, stable label distinguishing two sessions that share a workspace and preview. */
+	function shortId(id: string): string {
+		return id.length > 8 ? id.slice(-8) : id;
+	}
 
 	function selectWorkspace(): void {
 		void controller.setWorkspace(workspace);
@@ -96,14 +118,38 @@
 	</section>
 
 	<nav class="sessions" aria-label="Sessions">
-		{#each view.state.summaries as summary (sessionKey(summary.ref))}
-			<button
-				type="button"
-				aria-pressed={view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(summary.ref)}
-				onclick={() => void controller.select(summary.ref)}
-			>
-				{summary.preview || `${summary.ref.backend} ${summary.ref.id}`}
-			</button>
+		{#each sortedSummaries as summary (sessionKey(summary.ref))}
+			{@const label = summary.preview || `${summary.ref.backend} ${summary.ref.id}`}
+			<div class="session-row">
+				<button
+					type="button"
+					class="session-select"
+					aria-pressed={view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(summary.ref)}
+					aria-label={label}
+					onclick={() => void controller.select(summary.ref)}
+				>
+					<span class="session-preview">{label}</span>
+					<span class="session-meta">
+						<span class="session-backend">{summary.ref.backend}</span>
+						<span class="session-id">{shortId(summary.ref.id)}</span>
+						{#if formatTimestamp(summary.updatedAt ?? summary.createdAt)}
+							<time class="session-time" datetime={summary.updatedAt ?? summary.createdAt ?? undefined}>
+								{formatTimestamp(summary.updatedAt ?? summary.createdAt)}
+							</time>
+						{/if}
+					</span>
+				</button>
+				{#if summary.status === "attached"}
+					<button
+						type="button"
+						class="session-close"
+						aria-label={`Close ${label}`}
+						onclick={() => void controller.close(summary.ref)}
+					>
+						×
+					</button>
+				{/if}
+			</div>
 		{/each}
 	</nav>
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
@@ -11,7 +11,11 @@ import { user } from "./render/samples.ts";
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
 
-function summary(ref: SessionRef, preview: string | null = null): SessionSummary {
+function summary(
+	ref: SessionRef,
+	preview: string | null = null,
+	overrides: Partial<SessionSummary> = {},
+): SessionSummary {
 	return {
 		ref,
 		cwd: "/work/project",
@@ -20,6 +24,7 @@ function summary(ref: SessionRef, preview: string | null = null): SessionSummary
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		...overrides,
 	};
 }
 
@@ -41,6 +46,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 class FakeController implements AgentpaneController {
 	created: Array<{ cwd: string; backend: BackendId }> = [];
 	selected: SessionRef[] = [];
+	closed: SessionRef[] = [];
 	submitted = 0;
 	aborted = 0;
 	clearErrorCalls = 0;
@@ -100,6 +106,10 @@ class FakeController implements AgentpaneController {
 		this.aborted += 1;
 	}
 
+	async close(ref: SessionRef) {
+		this.closed.push(ref);
+	}
+
 	clearError() {
 		this.clearErrorCalls += 1;
 		this.publish({ ...this.current, error: null });
@@ -150,6 +160,44 @@ describe("App", () => {
 
 		expect(controller.selected).toEqual([piSession]);
 		expect(screen.getByRole("button", { name: "codex codex-1" })).toBeInTheDocument();
+	});
+
+	it("orders sessions by recency, most recently updated first", () => {
+		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
+		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });
+		const controller = new FakeController(view({ state: state({ summaries: [older, newer] }) }));
+		render(App, { props: { controller } });
+
+		const previews = screen
+			.getByRole("navigation", { name: "Sessions" })
+			.querySelectorAll(".session-preview");
+		expect(Array.from(previews).map((node) => node.textContent)).toEqual(["Newer", "Older"]);
+	});
+
+	it("shows each session's backend, a distinguishing id, and its timestamp", () => {
+		const controller = new FakeController(view({
+			state: state({
+				summaries: [summary(piSession, "Same preview", { updatedAt: "2026-06-01T12:34:00.000Z" })],
+			}),
+		}));
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		expect(nav.getByText("pi")).toBeInTheDocument();
+		expect(nav.getByText("pi-1")).toBeInTheDocument();
+		expect(nav.getByText("2026-06-01 12:34")).toBeInTheDocument();
+	});
+
+	it("closes an attached session's subprocess but not a detached one's", async () => {
+		const attached = summary(piSession, "Live", { status: "attached" });
+		const detached = summary(codexSession, "Idle", { status: "detached" });
+		const controller = new FakeController(view({ state: state({ summaries: [attached, detached] }) }));
+		render(App, { props: { controller } });
+
+		expect(screen.queryByRole("button", { name: "Close Idle" })).not.toBeInTheDocument();
+		await fireEvent.click(screen.getByRole("button", { name: "Close Live" }));
+
+		expect(controller.closed).toEqual([piSession]);
 	});
 
 	it("shows an empty transcript until the selected session has messages", () => {
