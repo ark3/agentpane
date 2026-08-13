@@ -214,84 +214,8 @@ when the design calls for it, but deliberately — a change ripples into every
 unmerged `wip/*` branch, and `git diff main...wip/<slice>` is how you find out
 how far.
 
-## How work gets done (2026-08-12)
+## How work gets done
 
-Agreed with the repo's owner, and written here because the agreement itself
-would otherwise live only in a chat session — the failure mode this document
-exists to prevent.
-
-- **Development is serialized.** One thing at a time. No concurrent agents, so
-  no row in Open work needs an owner or a claim.
-- **Work lands directly on `main`**, committed as the work is done. No feature
-  branch, no PR. Small, single-purpose commits, because the commit log is the
-  only review surface left — the point is diagnosis later, not rollback.
-- **Never `git push`.** Committing is local and freely authorized; publishing
-  to `origin` happens only when the owner asks for it, by name.
-- **Never commit red.** `bun run check` before any commit touching `src/`
-  (~25s). Say so explicitly when a commit is documentation only.
-- **Delegation, when it earns its keep.** The loop is: pick the next `OW-` row,
-  write it up with success criteria, hand it to a single subagent in its own
-  worktree, review the result, land it. Do not dispatch work smaller than the
-  cost of a cold agent re-deriving this context — batch small rows, or just do
-  them. Choose the model per task: a crisp spec with mechanical verification
-  delegates well; work where *writing the spec is the hard part* does not.
-- **A work item carries grounding and intent, not a restatement.** Grounding
-  is the addresses that make reads targeted — file paths, symbol names, the
-  exact test invocation, a pointer to the spec section or prior `OW-` row
-  whose close notes matter; skip anything the agent can cheaply re-derive
-  from a named file, and put background that isn't a pointer in the project
-  brain instead, which loads anyway. Intent is what done looks like and
-  which specifics are load-bearing versus incidental, enough to stop a
-  fresh agent from overshooting past the point or complying with a stale
-  detail (a moved path, a renamed symbol) instead of noticing the item was
-  wrong about it. Neither needs a template — three lines of each is normal,
-  and padding to fill a schema costs tokens on every read. If the fresh
-  agent is searching, the item failed; if it's reading what the item named
-  and then working, the item succeeded. Filing a row mid-work with full
-  context loaded? Write the addresses down now — the agent that picks it
-  up later starts cold.
-- **Success criteria must be observable**, never descriptive. A test that fails
-  before the change and passes after, or a screenshot — not "matches the
-  description." If the spec is checked only against itself, the spec's blind
-  spots survive review intact. `wip/pi-adapter` passed `bun run check` on merge
-  holding four real defects; that is the case this rule is aimed at.
-- **Closing a row**: strike it in place and append the evidence, the way
-  DESIGN's settled question is struck. Ids stay stable and the history stays
-  readable:
-  `~~**OW-26** ...~~ **Fixed** in <sha>; pinned by <test>, confirmed failing first.`
-
-## Conventions
-
-- **Runtime is Bun**; tests are vitest. `bun install` first.
-- **`bun run check` must pass** before you are done (typecheck + svelte-check +
-  all tests). Not just your own tests.
-- **Two test projects.** Server-side tests (`src/server/**`, `src/shared/**`)
-  run in `node`; client tests (`src/client/**`) run in `jsdom`. Put the file in
-  the right place rather than writing a per-file environment docblock.
-- **Path aliases**: `$shared/*`, `$server/*`, `$client/*`. Imports carry real
-  `.ts` extensions.
-- **The pi packages are types-only** (D10). `import type` only —
-  `src/import-boundaries.test.ts` fails the build otherwise, naming your file.
-- Assert on **structure**, never on model wording — fixture text varies per
-  capture.
-- **Verify at the source**, which is HANDOFF's one rule. Where a claim about a
-  CLI, a protocol, or a runtime is load-bearing, reproduce it and record how.
-  The most expensive defect found so far was an unexamined assumption about
-  which events `node:child_process` emits when a spawn fails.
-- **A test that has never failed has not been shown to test anything.** For a
-  fix, break it again and watch the test go red before you trust it.
-
-## Recording what you find
-
-A finding that lives only in a chat transcript dies with the session — which is
-how the first round's reports were lost. Put them where they survive:
-
-- A defect in these documents: **fix the document**, in the same change.
-- A fact you had to verify: the commit message, or `DESIGN.md` when it changes
-  a decision rather than confirming one.
-- Evidence from a live run: `MANUAL_TESTING.md`.
-- **Anything left undone — a defect, a deferral, a question, an unproven
-  claim: a row in Open work above.** One list, one id, cited from elsewhere
-  rather than restated. Restating it in a second document is how the Pi
-  contradiction happened.
-- Project status: the Status table above, and nowhere else.
+Process rules live where they load: `CLAUDE.md` for what applies to anyone
+touching the repo, `/author` for writing rows, `/execute` for landing them.
+This document holds the work, not the process.
