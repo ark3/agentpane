@@ -235,6 +235,21 @@ exists to prevent.
   cost of a cold agent re-deriving this context — batch small rows, or just do
   them. Choose the model per task: a crisp spec with mechanical verification
   delegates well; work where *writing the spec is the hard part* does not.
+- **A work item carries grounding and intent, not a restatement.** Grounding
+  is the addresses that make reads targeted — file paths, symbol names, the
+  exact test invocation, a pointer to the spec section or prior `OW-` row
+  whose close notes matter; skip anything the agent can cheaply re-derive
+  from a named file, and put background that isn't a pointer in the project
+  brain instead, which loads anyway. Intent is what done looks like and
+  which specifics are load-bearing versus incidental, enough to stop a
+  fresh agent from overshooting past the point or complying with a stale
+  detail (a moved path, a renamed symbol) instead of noticing the item was
+  wrong about it. Neither needs a template — three lines of each is normal,
+  and padding to fill a schema costs tokens on every read. If the fresh
+  agent is searching, the item failed; if it's reading what the item named
+  and then working, the item succeeded. Filing a row mid-work with full
+  context loaded? Write the addresses down now — the agent that picks it
+  up later starts cold.
 - **Success criteria must be observable**, never descriptive. A test that fails
   before the change and passes after, or a screenshot — not "matches the
   description." If the spec is checked only against itself, the spec's blind
