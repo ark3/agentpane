@@ -29,7 +29,8 @@ closed rows carry long close notes and drown the open ones. Then wait.
    are not the finding. Look for work beyond what the row asked (the row is the
    scope — delete the extra), drift from the agreed spec where the row named
    one, and tests that pass without having been shown to fail first.
-4. **Land.** `bun run check`, commit, strike the row with its sha and evidence.
+4. **Land.** `bun run check`, commit, then move the row out of WORKSTREAMS'
+   Open work list into `docs/CLOSED.md`, appending its sha and the evidence.
 5. **Hand back.** Say what changed and how to see it — what to run, what to
    look at, what would count as working. Then stop.
 
