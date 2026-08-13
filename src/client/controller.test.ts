@@ -277,6 +277,48 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
 	});
 
+	it("clears the persisted error on the session's new key when a rename lands mid-submit (D9)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "error", session: ref, seq: 2, message: "Stale error from a prior turn." });
+
+		controller.setDraft("try again");
+		const submitted = controller.submit();
+
+		// The session renames (virtual -> real) while the prompt is still in flight.
+		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
+		api.emit({ type: "renamed", from: ref, session: renamed, seq: 3 });
+		prompt.resolve();
+		await submitted;
+
+		expect(controller.getView().state.sessions["pi:/sessions/renamed.jsonl"]?.error).toBeNull();
+	});
+
+	it("does not clear a fresh same-turn error that races in via SSE before the prompt POST resolves (D2)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+
+		controller.setDraft("try again");
+		const submitted = controller.submit();
+
+		// A genuine error for *this* turn arrives before the POST's own response does.
+		api.emit({ type: "error", session: ref, seq: 2, message: "This turn just failed." });
+		prompt.resolve();
+		await submitted;
+
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("This turn just failed.");
+	});
+
 	it("dismisses the view error and the selected session's persisted error", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

@@ -19,6 +19,8 @@ export interface ControllerView {
 export interface AgentpaneController {
 	getView(): ControllerView;
 	subscribe(listener: (view: ControllerView) => void): () => void;
+	/** Fires synchronously, ahead of the state publish, when a `renamed` event arrives (D9). */
+	onRename(listener: (from: SessionRef, to: SessionRef) => void): () => void;
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
@@ -47,6 +49,7 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 	const refreshes = new Map<string | undefined, Promise<void>>();
 	const recoveries = new Map<string, Promise<void>>();
 	const listeners = new Set<(next: ControllerView) => void>();
+	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
 	function publish(next: Partial<ControllerView>): void {
 		if (disposed) return;
@@ -152,6 +155,9 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		onEvent(event: ServerEvent) {
 			if (disposed) return;
 			const result = reduceServerEvent(view.state, event);
+			if (event.type === "renamed") {
+				for (const listener of renameListeners) listener(event.from, event.session);
+			}
 			if (result.state !== view.state) publish({ state: result.state });
 			for (const ref of result.recover) void recover(ref);
 			if (result.refreshSessions) void refreshSessions();
@@ -174,6 +180,10 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		subscribe(listener) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
+		},
+		onRename(listener) {
+			renameListeners.add(listener);
+			return () => renameListeners.delete(listener);
 		},
 		async start() {
 			if (disposed || started) return;
@@ -221,15 +231,30 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			}
 			if (!view.draft) return;
 			const text = view.draft;
+			// Track the target session through a possible rename (D9) while the
+			// request is in flight, and remember its error so success only clears
+			// it if nothing new landed via SSE in the meantime -- cross-event
+			// ordering relative to the POST response is not guaranteed (D2), so a
+			// same-turn error can otherwise race in and be wiped by this same
+			// submit's own success handler.
+			let ref = selected;
+			const priorError = view.state.sessions[sessionKey(selected)]?.error ?? null;
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) === sessionKey(ref)) ref = to;
+			};
+			renameListeners.add(onRename);
 			publish({ busy: "submitting", error: null });
 			try {
 				await api.prompt(selected, { text });
 				if (!disposed) {
-					publish({ draft: "", error: null, state: clearSessionError(view.state, selected) });
+					const currentError = view.state.sessions[sessionKey(ref)]?.error ?? null;
+					const state = currentError === priorError ? clearSessionError(view.state, ref) : view.state;
+					publish({ draft: "", error: null, state });
 				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
+				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
 			}
 		},

@@ -83,6 +83,25 @@
 		const unsubscribe = controller.subscribe((next) => {
 			view = next;
 		});
+		// Re-key the local follow/scroll maps synchronously, ahead of the state
+		// publish above and thus ahead of the effects below that key off it --
+		// otherwise a session's own rename (D9: every new session gets one, on
+		// its first prompt) orphans its in-flight follow state under the old key.
+		const unsubscribeRename = controller.onRename((from, to) => {
+			const fromKey = sessionKey(from);
+			const toKey = sessionKey(to);
+			const scroll = sessionScroll.get(fromKey);
+			if (scroll) {
+				sessionScroll.delete(fromKey);
+				sessionScroll.set(toKey, scroll);
+			}
+			const pending = pendingFollow.get(fromKey);
+			if (pending !== undefined) {
+				pendingFollow.delete(fromKey);
+				pendingFollow.set(toKey, pending);
+			}
+			if (lastScrollKey === fromKey) lastScrollKey = toKey;
+		});
 		void controller.start();
 
 		// Belt-and-suspenders for the effects below: Block.svelte throttles
@@ -101,6 +120,7 @@
 
 		return () => {
 			unsubscribe();
+			unsubscribeRename();
 			controller.dispose();
 			observer?.disconnect();
 		};
@@ -308,11 +328,6 @@
 		return date.toISOString().slice(0, 19).replace("T", " ");
 	}
 
-	/** A short, stable label distinguishing two sessions that share a workspace and preview. */
-	function shortId(id: string): string {
-		return id.length > 8 ? id.slice(-8) : id;
-	}
-
 	function selectWorkspace(): void {
 		void controller.setWorkspace(workspace);
 	}
@@ -376,7 +391,6 @@
 				<span class="session-preview">{label}</span>
 				<span class="session-meta">
 					<span class="session-backend">{summary.ref.backend}</span>
-					<span class="session-id">{shortId(summary.ref.id)}</span>
 					{#if summary.cwd}
 						<span class="session-cwd">{summary.cwd}</span>
 					{/if}

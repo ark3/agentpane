@@ -54,6 +54,7 @@ class FakeController implements AgentpaneController {
 	disposed = 0;
 	notifications = 0;
 	private listeners = new Set<(next: ControllerView) => void>();
+	private renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
 	constructor(
 		private current: ControllerView = view(),
@@ -67,6 +68,16 @@ class FakeController implements AgentpaneController {
 	subscribe(listener: (next: ControllerView) => void) {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
+	}
+
+	onRename(listener: (from: SessionRef, to: SessionRef) => void) {
+		this.renameListeners.add(listener);
+		return () => this.renameListeners.delete(listener);
+	}
+
+	/** Simulates the server's `renamed` event (D9): fires ahead of the state publish, as the real controller does. */
+	fireRename(from: SessionRef, to: SessionRef) {
+		for (const listener of this.renameListeners) listener(from, to);
 	}
 
 	async start() {
@@ -198,7 +209,7 @@ describe("App", () => {
 		expect(Array.from(previews).map((node) => node.textContent)).toEqual(["Newer", "Older"]);
 	});
 
-	it("shows each session's backend, a distinguishing id, its workspace, and a second-precision timestamp", () => {
+	it("shows each session's backend, its workspace, and a second-precision timestamp", () => {
 		const controller = new FakeController(view({
 			state: state({
 				summaries: [
@@ -210,7 +221,6 @@ describe("App", () => {
 		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
 
 		expect(nav.getByText("pi")).toBeInTheDocument();
-		expect(nav.getByText("pi-1")).toBeInTheDocument();
 		expect(nav.getByText("/work/project")).toBeInTheDocument();
 		expect(nav.getByText("2026-06-01 12:34:56")).toBeInTheDocument();
 	});
@@ -349,6 +359,60 @@ describe("App", () => {
 
 		// Follow must still be armed -- the two false-streaming upserts before
 		// this one must not have silently disarmed it.
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
+	});
+
+	it("keeps following across a virtual session's rename on its first submit (D9: every new session gets one)", async () => {
+		const virtualSession: SessionRef = { backend: "pi", id: "virtual:1" };
+		const realSession: SessionRef = { backend: "pi", id: "pi-77" };
+		const sessions = {
+			"pi:virtual:1": { ref: virtualSession, messages: [], isStreaming: false, seq: null, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({
+			draft: "First prompt",
+			state: state({ selected: virtualSession, sessions }),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.submitted).toBe(1);
+
+		// The server accepts the prompt and, in the same tick, renames the
+		// session (virtual -> real) before its snapshot/upsert events arrive.
+		controller.fireRename(virtualSession, realSession);
+		const submittedMessage = user("First prompt");
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({
+			draft: "",
+			state: state({
+				selected: realSession,
+				sessions: {
+					"pi:pi-77": { ref: realSession, messages: [submittedMessage], isStreaming: false, seq: 1, error: null, requests: [] },
+				},
+			}),
+		}));
+		await tick();
+		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+
+		// The assistant streams a reply under the new (post-rename) key.
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: realSession,
+				sessions: {
+					"pi:pi-77": { ref: realSession, messages: [submittedMessage], isStreaming: true, seq: 2, error: null, requests: [] },
+				},
+			}),
+		}));
+		await tick();
+		await nextFrame();
+
+		// Follow must have engaged despite the rename -- if pendingFollow/sessionScroll
+		// were still keyed under the pre-rename "pi:virtual:1", this would read 0
+		// (jumped-and-stuck) instead of tracking to the tail.
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
