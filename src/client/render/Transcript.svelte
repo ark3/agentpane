@@ -18,6 +18,7 @@
 			message={entry.message}
 			results={view.results}
 			streaming={isStreaming && entry.index === view.lastIndex}
+			index={entry.index}
 		/>
 	{/each}
 

@@ -16,9 +16,42 @@
 	let workspace = $state("");
 	let backend = $state<BackendId>("pi");
 	let conversationEl: HTMLElement | undefined;
-	/** Per-session scroll memory (OW-27): keyed like everything else in the client state. */
-	const scrollMemory = new Map<string, { top: number; pinned: boolean }>();
+
+	/**
+	 * Per-session follow state (OW-27), keyed like everything else in the
+	 * client state. `anchorIndex` is the message follow-mode is tracking --
+	 * the one that was submitted -- or null when not following.
+	 */
+	interface SessionScroll {
+		/** Last scrollTop, restored when switching back to a session that is not following. */
+		top: number;
+		anchorIndex: number | null;
+		/**
+		 * Whether `isStreaming` has read true at least once since `anchorIndex`
+		 * was armed. `isStreaming` commonly still reads false on the upsert(s)
+		 * that echo the submitted message and even the assistant's own
+		 * placeholder back -- it is a separate SSE event, and D2 is explicit
+		 * that cross-event ordering is not guaranteed -- so "not streaming" is
+		 * only trustworthy as "the turn ended" once we know the turn actually
+		 * started. Without this, the very first post-submit upsert(s) can
+		 * disarm follow before the assistant's first token ever arrives.
+		 */
+		hasStreamed: boolean;
+	}
+	const sessionScroll = new Map<string, SessionScroll>();
+	/**
+	 * Session key -> `messages.length` right before a submit. Follow only
+	 * engages once a message at or beyond that index actually exists: SSE
+	 * ordering relative to the POST response is not guaranteed (D2), so this
+	 * is re-checked against the live array on every update rather than
+	 * assumed present the instant submit's promise resolves.
+	 */
+	const pendingFollow = new Map<string, number>();
 	let lastScrollKey: string | null = null;
+	let suppressScrollHandling = false;
+	let followFrame: number | null = null;
+	/** Shows whenever scrolled up from the true bottom, streaming or not. */
+	let showJumpToLatest = $state(false);
 
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
@@ -52,23 +85,17 @@
 		});
 		void controller.start();
 
-		// Belt-and-suspenders for the scroll effect below: Block.svelte throttles
-		// re-parsing a streaming message's markdown to a frame (DESIGN D5), so the
-		// transcript's real painted height can land a beat after the message
-		// state that triggered it. A ResizeObserver on the transcript's own
-		// content catches that late paint too, regardless of what caused it.
-		// jsdom has no ResizeObserver, so this is inert (and untested) there --
-		// the effect below covers the state-driven case jsdom can pin.
+		// Belt-and-suspenders for the effects below: Block.svelte throttles
+		// re-parsing a streaming message's markdown to a frame (DESIGN D5), so
+		// the transcript's real painted height can land a beat after the message
+		// state that triggered it, and a state-driven check alone can
+		// undershoot. A ResizeObserver on the transcript's own content is a
+		// second trigger for the same reconciliation, regardless of what caused
+		// the resize. jsdom has no ResizeObserver, so this is inert there.
 		let observer: ResizeObserver | undefined;
-		const el = conversationEl;
-		const content = el?.firstElementChild;
-		if (el && content && typeof ResizeObserver !== "undefined") {
-			observer = new ResizeObserver(() => {
-				const ref = view.state.selected;
-				const key = ref ? sessionKey(ref) : null;
-				const anchor = key ? scrollMemory.get(key) : undefined;
-				if (!anchor || anchor.pinned) el.scrollTop = el.scrollHeight;
-			});
+		const content = conversationEl?.firstElementChild;
+		if (content && typeof ResizeObserver !== "undefined") {
+			observer = new ResizeObserver(() => reconcile());
 			observer.observe(content);
 		}
 
@@ -79,55 +106,193 @@
 		};
 	});
 
-	const NEAR_BOTTOM_PX = 48;
-
-	function isNearBottom(el: HTMLElement): boolean {
-		return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+	// jsdom is configured with rAF, but do not make this depend on it -- same
+	// fallback Markdown.svelte uses for its own throttle.
+	function scheduleFrame(fn: () => void): number {
+		return typeof requestAnimationFrame === "function"
+			? requestAnimationFrame(fn)
+			: (setTimeout(fn, 16) as unknown as number);
 	}
 
-	/** Records where the user left off, and whether they were following the tail. */
-	function handleConversationScroll(): void {
-		const el = conversationEl;
-		const ref = view.state.selected;
-		if (!el || !ref) return;
-		scrollMemory.set(sessionKey(ref), { top: el.scrollTop, pinned: isNearBottom(el) });
+	function unscheduleFrame(handle: number): void {
+		if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(handle);
+		else clearTimeout(handle);
+	}
+
+	function applyScrollTop(el: HTMLElement, value: number): void {
+		const clamped = Math.max(0, value);
+		// No-op guard matters here: assigning scrollTop fires a native `scroll`
+		// event even when the value does not change, which would arm the
+		// suppress flag for an event that may never come (or that arrives late
+		// and swallows a genuine later user scroll).
+		if (el.scrollTop === clamped) return;
+		suppressScrollHandling = true;
+		el.scrollTop = clamped;
 	}
 
 	/**
-	 * Switching sessions restores that session's own scroll position (or the
-	 * tail, for one with no memory yet). Staying on the same session, new
-	 * content arriving (a message-boundary upsert or a status flip) only pulls
-	 * the view down if the user was already at the bottom.
-	 *
-	 * The "was at the bottom" answer comes from `scrollMemory`'s `pinned` flag
-	 * -- set only when the user actually scrolls -- not from re-deriving
-	 * proximity against the *current* scrollHeight each time this runs. A
-	 * single large upsert (or the update that first makes the transcript
-	 * overflow, when scrollTop has necessarily been 0) can move scrollHeight by
-	 * more than the near-bottom threshold in one step; comparing a still-stale
-	 * scrollTop to the new scrollHeight would then read as "not near the
-	 * bottom" even though the user never scrolled, silently ending autoscroll
-	 * for the rest of the turn. Caught live (OW-27): a synthetic stream with
-	 * multi-paragraph deltas reproduced exactly this.
+	 * How far down the scrollable content the anchor's own top edge sits.
+	 * `getBoundingClientRect`, not `offsetTop`: neither `.conversation` nor
+	 * `.transcript` establishes a positioned offsetParent, so `offsetTop` would
+	 * be measured from `<body>`, not from the scroll container.
+	 */
+	function anchorTop(el: HTMLElement, anchorEl: HTMLElement): number {
+		return anchorEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+	}
+
+	function updateJumpAffordance(el: HTMLElement): void {
+		const SLACK_PX = 4;
+		showJumpToLatest = el.scrollHeight - el.scrollTop - el.clientHeight > SLACK_PX;
+	}
+
+	/**
+	 * The one place follow-mode actually moves the viewport. While anchored,
+	 * keep the transcript scrolled to its true bottom -- except never far
+	 * enough to push the anchor's own top edge above the container's top edge.
+	 * That is the spec's "the message reaching the top of the viewport, where
+	 * it locks": `Math.min` below is the cap, recomputed fresh every call, so
+	 * once continuing would scroll the anchor off-screen the position simply
+	 * stops advancing instead of chasing further growth below it.
+	 */
+	function reconcile(): void {
+		const el = conversationEl;
+		const ref = view.state.selected;
+		if (!el || !ref) return;
+		const state = sessionScroll.get(sessionKey(ref));
+		if (state?.anchorIndex != null) {
+			const anchorEl = el.querySelector<HTMLElement>(`[data-index="${state.anchorIndex}"]`);
+			if (anchorEl) {
+				const bottom = el.scrollHeight - el.clientHeight;
+				applyScrollTop(el, Math.min(bottom, anchorTop(el, anchorEl)));
+			}
+		}
+		updateJumpAffordance(el);
+	}
+
+	/** Same coalescing Block.svelte uses for its markdown throttle (D5): one pending frame while streaming, synchronous once settled. */
+	function scheduleFollow(streaming: boolean): void {
+		if (!streaming) {
+			if (followFrame !== null) {
+				unscheduleFrame(followFrame);
+				followFrame = null;
+			}
+			reconcile();
+			return;
+		}
+		if (followFrame === null) {
+			followFrame = scheduleFrame(() => {
+				followFrame = null;
+				reconcile();
+			});
+		}
+	}
+
+	function handleConversationScroll(): void {
+		if (suppressScrollHandling) {
+			suppressScrollHandling = false;
+			return;
+		}
+		const el = conversationEl;
+		const ref = view.state.selected;
+		if (!el || !ref) return;
+		const key = sessionKey(ref);
+		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+		state.top = el.scrollTop;
+		state.anchorIndex = null; // a manual scroll always disengages follow
+		sessionScroll.set(key, state);
+		updateJumpAffordance(el);
+	}
+
+	/** Snaps once to the true bottom; never re-arms follow -- only a fresh submit does that. */
+	function jumpToLatest(): void {
+		const el = conversationEl;
+		const ref = view.state.selected;
+		if (!el || !ref) return;
+		const key = sessionKey(ref);
+		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+		state.anchorIndex = null;
+		sessionScroll.set(key, state);
+		applyScrollTop(el, el.scrollHeight - el.clientHeight);
+		updateJumpAffordance(el);
+	}
+
+	/** On submit, arm follow-mode for whatever message this submission produces. */
+	function armFollow(): void {
+		const ref = view.state.selected;
+		if (!ref) return;
+		pendingFollow.set(sessionKey(ref), selectedSession?.messages.length ?? 0);
+	}
+
+	/**
+	 * Switching sessions restores that session's own scroll position -- or, if
+	 * it is mid-follow (submitted, then switched away before the turn ended),
+	 * re-anchors immediately against the freshly rendered DOM. A session never
+	 * opened yet has no memory, so it defaults to the bottom.
 	 */
 	$effect(() => {
 		const ref = view.state.selected;
 		const key = ref ? sessionKey(ref) : null;
-		// Re-run on new transcript content, not just on selection changes.
-		void selectedSession?.messages;
-		void selectedSession?.isStreaming;
+		if (key === lastScrollKey) return;
+		lastScrollKey = key;
 
 		const el = conversationEl;
 		if (!el) return;
-		const anchor = key ? scrollMemory.get(key) : undefined;
+		const state = key ? sessionScroll.get(key) : undefined;
+		if (state?.anchorIndex != null) {
+			reconcile();
+		} else {
+			applyScrollTop(el, state ? state.top : el.scrollHeight);
+			updateJumpAffordance(el);
+		}
+	});
 
-		if (key !== lastScrollKey) {
-			lastScrollKey = key;
-			el.scrollTop = anchor && !anchor.pinned ? anchor.top : el.scrollHeight;
-			return;
+	/**
+	 * Message-boundary upserts and turn-status flips drive follow mode:
+	 * arming a pending follow (from `armFollow`) once its message exists, and
+	 * disengaging when the turn ends (nothing left to chase). The actual
+	 * scroll adjustment is `reconcile`, via the same throttle as the markdown
+	 * re-render (D5).
+	 */
+	$effect(() => {
+		const ref = view.state.selected;
+		const key = ref ? sessionKey(ref) : null;
+		const messages = selectedSession?.messages;
+		const streaming = selectedSession?.isStreaming ?? false;
+		if (!key || !messages || key !== lastScrollKey) return;
+
+		// `isStreaming` commonly still reads false on the upsert(s) that echo
+		// the submitted message, and even the assistant's own placeholder,
+		// back -- it is a separate SSE event and D2 is explicit that
+		// cross-event ordering is not guaranteed. So "not streaming" only means
+		// "the turn ended" once we know the turn actually *started* -- tracked
+		// per-anchor via `hasStreamed`, set the first time this session reads
+		// isStreaming:true while armed. Without that distinction, an early
+		// false reading disarms follow before the assistant ever gets going.
+		// Caught live (OW-27): a synthetic submit, followed by upserts for both
+		// the echoed user message and the assistant's opening content, with the
+		// matching status:true event arriving only after both, reproduced
+		// exactly this.
+		const existing = sessionScroll.get(key);
+		if (existing?.anchorIndex != null) {
+			if (streaming) existing.hasStreamed = true;
+			else if (existing.hasStreamed) existing.anchorIndex = null;
 		}
 
-		if (!anchor || anchor.pinned) el.scrollTop = el.scrollHeight;
+		const pendingFrom = pendingFollow.get(key);
+		if (pendingFrom !== undefined) {
+			for (let i = messages.length - 1; i >= pendingFrom; i--) {
+				if (messages[i]?.role === "user") {
+					const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+					state.anchorIndex = i;
+					state.hasStreamed = streaming;
+					sessionScroll.set(key, state);
+					pendingFollow.delete(key);
+					break;
+				}
+			}
+		}
+
+		scheduleFollow(streaming);
 	});
 
 	function recency(summary: SessionSummary): number {
@@ -158,14 +323,18 @@
 
 	function submitPrompt(event: SubmitEvent): void {
 		event.preventDefault();
-		if (view.draft) void controller.submit();
+		if (!view.draft) return;
+		armFollow();
+		void controller.submit();
 	}
 
 	/** Ctrl/Cmd-Enter submits; plain Enter inserts a newline (prompts are routinely multi-line). */
 	function handlePromptKeydown(event: KeyboardEvent): void {
 		if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
 		event.preventDefault();
-		if (view.draft) void controller.submit();
+		if (!view.draft) return;
+		armFollow();
+		void controller.submit();
 	}
 </script>
 
@@ -237,6 +406,9 @@
 
 	<section class="conversation" aria-label="Conversation" bind:this={conversationEl} onscroll={handleConversationScroll}>
 		<Transcript messages={selectedSession?.messages ?? []} isStreaming={selectedSession?.isStreaming ?? false} />
+		{#if showJumpToLatest}
+			<button type="button" class="jump-to-latest" onclick={jumpToLatest}>Jump to latest ↓</button>
+		{/if}
 	</section>
 
 	<form class="prompt" onsubmit={submitPrompt}>

@@ -6,7 +6,7 @@ import type { BackendId, SessionRef, SessionSummary } from "$shared/protocol.ts"
 import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
 import { initialClientState, type ClientState } from "./session-state.ts";
-import { user } from "./render/samples.ts";
+import { assistant, user } from "./render/samples.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
@@ -129,6 +129,24 @@ function mockScrollMetrics(el: Element, metrics: { scrollHeight: number; clientH
 	Object.defineProperty(el, "scrollHeight", { value: metrics.scrollHeight, configurable: true });
 	Object.defineProperty(el, "clientHeight", { value: metrics.clientHeight, configurable: true });
 }
+
+/**
+ * `getBoundingClientRect().top` fixed at a given position *within the
+ * scrollable content* (not the viewport) -- `App.svelte`'s `anchorTop` helper
+ * combines this with `el`'s own rect and `scrollTop` to recover that content
+ * position, so a `contentTop` mock here round-trips through the real formula
+ * exactly as a real element whose position in the content never moves would.
+ */
+function mockContentTop(el: HTMLElement, scrollParent: HTMLElement, contentTop: number): void {
+	const rect = (top: number) => ({ top, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: top, toJSON() {} }) as DOMRect;
+	Object.defineProperty(el, "getBoundingClientRect", {
+		value: () => rect(contentTop - scrollParent.scrollTop),
+		configurable: true,
+	});
+}
+
+/** App.svelte's follow-mode reconciliation is rAF-throttled while streaming (same pattern as Block.test.ts). */
+const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
 
 describe("App", () => {
 	it("starts once, disposes once, and stops observing the controller when unmounted", () => {
@@ -275,40 +293,259 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(50);
 	});
 
-	it("keeps following new content while at the bottom, and stops once the reader scrolls away", async () => {
-		const base = { ref: piSession, messages: [user("first")], isStreaming: true, seq: 1, error: null, requests: [] };
-		const controller = new FakeController(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": base } }) }));
+	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true (D2: cross-event ordering is not guaranteed)", async () => {
+		const old = user("old message");
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({
+			draft: "New prompt",
+			state: state({ selected: piSession, sessions }),
+		}));
 		const { container } = render(App, { props: { controller } });
 		await tick();
 		const el = container.querySelector(".conversation") as HTMLElement;
 
-		// At the bottom already; new content pulls the view down with it.
-		mockScrollMetrics(el, { scrollHeight: 600, clientHeight: 500 });
-		el.scrollTop = 600;
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+
+		// The echoed user message arrives first -- isStreaming still false,
+		// exactly as it would before the assistant itself has started.
+		const submittedMessage = user("New prompt");
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({
+			draft: "",
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: false } },
+			}),
+		}));
+		await tick();
+		// Anchor's position within the content is fixed far below any cap this
+		// test would hit, so this stays a pure tracking case throughout.
+		const anchorEl = el.querySelector('[data-index="1"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+
+		// The assistant's own placeholder lands next -- still isStreaming:false.
+		const placeholder = assistant([], "pending");
+		mockScrollMetrics(el, { scrollHeight: 620, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage, placeholder], isStreaming: false } },
+			}),
+		}));
+		await tick();
+
+		// Only now does status:true arrive.
 		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
 		controller.publish(view({
 			state: state({
 				selected: piSession,
-				sessions: { "pi:pi-1": { ...base, messages: [...base.messages, user("second")] } },
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage, placeholder], isStreaming: true } },
 			}),
 		}));
 		await tick();
-		expect(el.scrollTop).toBe(900);
+		await nextFrame();
 
-		// The reader scrolls up to read history.
-		el.scrollTop = 100;
+		// Follow must still be armed -- the two false-streaming upserts before
+		// this one must not have silently disarmed it.
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
+	});
+
+	it("re-arms follow on submit even after the reader had scrolled away, tracks growth, and locks once the submitted message would be pushed off the top", async () => {
+		const old = user("old message");
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({
+			draft: "New prompt",
+			state: state({ selected: piSession, sessions }),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// The reader had scrolled away from the tail before submitting.
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
 		await fireEvent.scroll(el);
 
-		// More content arrives; the scrolled-up reader must not be yanked to the tail.
-		mockScrollMetrics(el, { scrollHeight: 1200, clientHeight: 500 });
+		// Submitting arms follow -- unconditionally, regardless of that scroll.
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.submitted).toBe(1);
+
+		// The submitted message lands (simulating the resulting SSE upsert). Its
+		// position within the scrollable content is fixed at 400px from the top
+		// and never moves as later content grows below it -- exactly what a real
+		// message that finished rendering and isn't itself changing would do.
+		const submittedMessage = user("New prompt");
+		const anchorContentTop = 400;
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({
+			draft: "",
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
+			}),
+		}));
+		await tick();
+		const anchorEl = el.querySelector('[data-index="1"]') as HTMLElement;
+		expect(anchorEl).toBeTruthy();
+		mockContentTop(anchorEl, el, anchorContentTop);
+		// The mock above only takes effect on the *next* reconcile -- force one
+		// the same way a further upsert would.
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
 		controller.publish(view({
 			state: state({
 				selected: piSession,
-				sessions: { "pi:pi-1": { ...base, messages: [...base.messages, user("second"), user("third")] } },
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
 			}),
 		}));
 		await tick();
-		expect(el.scrollTop).toBe(100);
+		await nextFrame(); // reconcile() is rAF-throttled while streaming
+		expect(el.scrollTop).toBe(60); // scrollHeight(560) - clientHeight(500): tracking, well short of the 400px cap.
+
+		// The response grows below the anchor; still short of the cap, so it keeps tracking.
+		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
+			}),
+		}));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(200);
+
+		// It grows past the point where the anchor's own top would leave the viewport: locks at the cap.
+		mockScrollMetrics(el, { scrollHeight: 1100, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
+			}),
+		}));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(anchorContentTop);
+
+		// Further growth does not push the anchor off-screen -- it stays locked.
+		mockScrollMetrics(el, { scrollHeight: 1400, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
+			}),
+		}));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(anchorContentTop);
+
+		// A manual scroll disengages follow -- later growth no longer chases it.
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+		mockScrollMetrics(el, { scrollHeight: 1800, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true } },
+			}),
+		}));
+		await tick();
+		expect(el.scrollTop).toBe(50);
+	});
+
+	it("stops following once the turn ends, even without a manual scroll", async () => {
+		const old = user("old message");
+		const submittedMessage = user("New prompt");
+		const initial = {
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({
+			draft: "New prompt",
+			state: state({ selected: piSession, sessions: initial }),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// Submitting arms follow for whatever message this submission produces
+		// -- it does not exist in the transcript yet, matching the real
+		// submit-then-SSE-upsert ordering (D2).
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		const sessions = {
+			"pi:pi-1": { ...initial["pi:pi-1"], messages: [old, submittedMessage], isStreaming: true },
+		};
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({
+			draft: "",
+			state: state({ selected: piSession, sessions }),
+		}));
+		await tick();
+		const anchorEl = el.querySelector('[data-index="1"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000); // far below any cap, so this is a pure tracking case.
+		// The mock above only takes effect on the *next* reconcile -- force one.
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions }) }));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
+
+		// The turn ends; nothing left to chase.
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], isStreaming: false } },
+			}),
+		}));
+		await tick();
+
+		// A hypothetical later change (e.g. a fork-in prior turn) no longer autoscrolls this session.
+		mockScrollMetrics(el, { scrollHeight: 1300, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], isStreaming: false, messages: [old, submittedMessage, user("later")] } },
+			}),
+		}));
+		await tick();
+		expect(el.scrollTop).toBe(400); // unchanged -- follow did not resume
+	});
+
+	it("shows a jump-to-latest affordance whenever scrolled up, streaming or not, and it snaps once without re-arming follow", async () => {
+		const messages = [user("first")];
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		expect(screen.queryByRole("button", { name: /jump to latest/i })).not.toBeInTheDocument();
+
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 100;
+		await fireEvent.scroll(el);
+		await tick();
+		expect(screen.getByRole("button", { name: /jump to latest/i })).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole("button", { name: /jump to latest/i }));
+		expect(el.scrollTop).toBe(500); // scrollHeight(1000) - clientHeight(500): the true bottom, once.
+		await tick();
+		expect(screen.queryByRole("button", { name: /jump to latest/i })).not.toBeInTheDocument();
+
+		// More content arrives; jump-to-latest does not re-arm following -- it only ever snapped once.
+		mockScrollMetrics(el, { scrollHeight: 1400, clientHeight: 500 });
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [...messages, user("second")] } },
+			}),
+		}));
+		await tick();
+		expect(el.scrollTop).toBe(500); // unchanged: no submit happened, so follow never engaged.
 	});
 
 	it("submits the prompt through its form and disables an empty prompt", async () => {

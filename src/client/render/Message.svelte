@@ -22,10 +22,13 @@
 		message,
 		results = new Map<string, ToolResultMessage>(),
 		streaming = false,
+		index,
 	}: {
 		message: AgentMessage;
 		results?: Map<string, ToolResultMessage>;
 		streaming?: boolean;
+		/** Position in the original `messages` array (OW-27: lets the shell find a specific message's DOM node, e.g. to anchor follow-mode). Omitted, no `data-index` renders. */
+		index?: number;
 	} = $props();
 
 	/** `UserMessage.content` is `string | blocks[]`; normalise so Block handles both. */
@@ -37,7 +40,7 @@
 </script>
 
 {#if message.role === "user"}
-	<article class="msg user" data-role="user">
+	<article class="msg user" data-role="user" data-index={index}>
 		<span class="who">You</span>
 		<div class="body">
 			{#each userBlocks(message.content) as block, i (i)}
@@ -46,7 +49,7 @@
 		</div>
 	</article>
 {:else if message.role === "assistant"}
-	<article class="msg assistant" data-role="assistant">
+	<article class="msg assistant" data-role="assistant" data-index={index}>
 		<div class="body">
 			{#each message.content as block, i (i)}
 				<Block {block} {results} streaming={streaming && i === message.content.length - 1} />
@@ -77,7 +80,7 @@
 	</article>
 {:else if message.role === "toolResult"}
 	<!-- An orphan: the call it answers is not in this transcript slice. -->
-	<article class="msg tool-result" data-role="tool-result">
+	<article class="msg tool-result" data-role="tool-result" data-index={index}>
 		<ToolCard
 			name={message.toolName}
 			summary={oneLine(resultText(message)) || "result"}
@@ -87,7 +90,7 @@
 		</ToolCard>
 	</article>
 {:else}
-	<article class="msg unknown" data-role="unknown">
+	<article class="msg unknown" data-role="unknown" data-index={index}>
 		<Output text={JSON.stringify(message, null, 2)} language="json" />
 	</article>
 {/if}

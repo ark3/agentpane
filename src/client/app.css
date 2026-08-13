@@ -156,7 +156,16 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .session-meta { display: flex; flex-wrap: wrap; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
 .session-cwd { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-streaming { color: var(--ap-accent); }
-.conversation { grid-area: conversation; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; }
+.conversation { grid-area: conversation; position: relative; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; }
+/* Absolute, not sticky: it must float over the content without adding to
+   .conversation's own scrollHeight, which the follow-mode math above reads. */
+.jump-to-latest {
+	position: absolute;
+	left: 50%;
+	bottom: var(--ap-space-4);
+	transform: translateX(-50%);
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
