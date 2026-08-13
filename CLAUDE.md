@@ -1,8 +1,7 @@
 # agentpane
 
-Local web UI for coding agents; two sandboxed backends (Pi, Codex) behind one
-adapter contract. Decisions D1–D12 in `docs/DESIGN.md`, open work in
-`docs/WORKSTREAMS.md`, the evidence behind both in `docs/HANDOFF.md`.
+Decisions D1–D12 in `docs/DESIGN.md`, open work in `docs/WORKSTREAMS.md`, the
+evidence behind both in `docs/HANDOFF.md`.
 
 ## Commands
 
@@ -40,4 +39,6 @@ touching `src/`; say so explicitly when a commit is docs only.
 
 ## Sessions
 
-Invoke one at the start: `/author` writes work items, `/execute` lands them.
+Work happens in one of two modes. If the user has not invoked `/author`
+(writing work items) or `/execute` (landing them), ask which one before doing
+anything else — including in reply to an opening greeting.
