@@ -336,8 +336,47 @@ describe("App", () => {
 		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
 
 		expect(nav.getByText("pi")).toBeInTheDocument();
-		expect(nav.getByText("/work/project")).toBeInTheDocument();
+		expect(nav.getByText("project")).toBeInTheDocument();
 		expect(nav.getByText("2026-06-01 12:34:56")).toBeInTheDocument();
+	});
+
+	it("shows the workspace basename rather than the full cwd in the session list and workspace dropdown, with the full path as title", () => {
+		const controller = new FakeController(view({
+			state: state({
+				summaries: [summary(piSession, "Same preview", { cwd: "/work/deep/project" })],
+			}),
+		}));
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		const cwdEl = nav.getByText("project");
+		expect(cwdEl).toHaveAttribute("title", "/work/deep/project");
+		expect(nav.queryByText("/work/deep/project")).not.toBeInTheDocument();
+
+		const option = screen.getByRole("option", { name: "project" }) as HTMLOptionElement;
+		expect(option.value).toBe("/work/deep/project");
+		expect(option).toHaveAttribute("title", "/work/deep/project");
+	});
+
+	it("color-codes the backend badge per backend, with an unrecognised backend id falling back to grey", () => {
+		const unknownSession: SessionRef = { backend: "future" as BackendId, id: "future-1" };
+		const controller = new FakeController(view({
+			state: state({
+				summaries: [
+					summary(piSession, "Pi turn"),
+					summary(codexSession, "Codex turn"),
+					summary(unknownSession, "Future turn"),
+				],
+			}),
+		}));
+		const { container } = render(App, { props: { controller } });
+
+		const badges = Array.from(container.querySelectorAll<HTMLElement>(".session-backend"));
+		const colors = new Map(badges.map((badge) => [badge.textContent, badge.style.color]));
+
+		expect(colors.get("pi")).toBe("var(--ap-accent)");
+		expect(colors.get("codex")).toBe("var(--ap-success)");
+		expect(colors.get("future")).toBe("var(--ap-fg-subtle)");
 	});
 
 	it("shows a streaming indicator only for a session that is streaming", () => {

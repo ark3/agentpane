@@ -393,6 +393,20 @@
 		return date.toISOString().slice(0, 19).replace("T", " ");
 	}
 
+	/** The final path segment of a cwd, which is always absolute (see ALL_WORKSPACES above). */
+	function basename(cwd: string): string {
+		return cwd.slice(cwd.lastIndexOf("/") + 1);
+	}
+
+	/** Keyed lookup rather than if/else so an unrecognised future backend id falls through to grey instead of silently matching a branch. */
+	const backendColors: Partial<Record<BackendId, string>> = {
+		codex: "var(--ap-success)",
+		pi: "var(--ap-accent)",
+	};
+	function backendColor(id: BackendId): string {
+		return backendColors[id] ?? "var(--ap-fg-subtle)";
+	}
+
 	/** New session inherits the selected session's workspace (OW-39); disabled when there is none. */
 	function createSession(): void {
 		if (!newSessionWorkspace) return;
@@ -441,7 +455,7 @@
 			<select aria-label="Workspace" bind:value={workspace}>
 				<option value={ALL_WORKSPACES}>All workspaces</option>
 				{#each workspaceOptions as cwd (cwd)}
-					<option value={cwd}>{cwd}</option>
+					<option value={cwd} title={cwd}>{basename(cwd)}</option>
 				{/each}
 			</select>
 		</label>
@@ -467,14 +481,14 @@
 			>
 				<span class="session-preview">{label}</span>
 				<span class="session-meta">
-					<span class="session-backend">{summary.ref.backend}</span>
-					{#if summary.cwd}
-						<span class="session-cwd">{summary.cwd}</span>
-					{/if}
+					<span class="session-backend" style="color: {backendColor(summary.ref.backend)}">{summary.ref.backend}</span>
 					{#if formatTimestamp(summary.updatedAt)}
 						<time class="session-time" datetime={summary.updatedAt ?? undefined}>
 							{formatTimestamp(summary.updatedAt)}
 						</time>
+					{/if}
+					{#if summary.cwd}
+						<span class="session-cwd" title={summary.cwd}>{basename(summary.cwd)}</span>
 					{/if}
 					{#if summary.isStreaming}
 						<span class="session-streaming" aria-label="Streaming">●</span>
