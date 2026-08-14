@@ -10,6 +10,7 @@
 import type {
 	BackendId,
 	ListSessionsQuery,
+	SessionPreviewTurn,
 	SessionRef,
 	SessionSummary,
 } from "../../shared/protocol.ts";
@@ -34,6 +35,13 @@ export interface SessionIndex {
 	 * jails the wrong tree).
 	 */
 	get(ref: SessionRef): Promise<SessionSummary | null>;
+	/**
+	 * A read-only, non-attaching transcript preview for one stored session
+	 * (OW-38). Distinct from `get`: it reads the session's own JSONL and returns
+	 * its flattened text turns, spawning nothing. Like the rest of this seam it
+	 * touches exactly the one session's file, never the whole corpus.
+	 */
+	preview(ref: SessionRef): Promise<SessionPreviewTurn[]>;
 }
 
 /** An index with nothing in it. Useful before the real one exists. */
@@ -43,6 +51,9 @@ export const emptySessionIndex: SessionIndex = {
 	},
 	async get() {
 		return null;
+	},
+	async preview() {
+		return [];
 	},
 };
 

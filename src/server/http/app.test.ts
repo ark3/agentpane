@@ -6,7 +6,7 @@
  * `src/shared/protocol.ts` and not an internal call sequence.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentRequestReply,
 	type ApiError,
@@ -17,6 +17,7 @@ import {
 	type ListSessionsResponse,
 	type ModelsResponse,
 	ROUTES,
+	type SessionPreviewResponse,
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
@@ -145,6 +146,86 @@ describe("sessions", () => {
 		expect(response.status).toBe(204);
 		expect(adapter?.disposed).toBe(true);
 		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
+	});
+});
+
+describe("preview (OW-38, read-only, non-attaching)", () => {
+	it("returns the flattened text turns for a stored Pi session without spawning", async () => {
+		index.previews.set(sessionKey(PI_SESSION), [
+			{ role: "user", text: "a pi question" },
+			{ role: "assistant", text: "a pi answer" },
+		]);
+
+		const response = await get(ROUTES.preview(PI_SESSION));
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as SessionPreviewResponse;
+
+		expect(body.ref).toEqual(PI_SESSION);
+		expect(body.turns).toEqual([
+			{ role: "user", text: "a pi question" },
+			{ role: "assistant", text: "a pi answer" },
+		]);
+		// The whole point of the route: no subprocess, no attach.
+		expect(pi.created).toHaveLength(0);
+		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
+	});
+
+	it("returns the flattened text turns for a stored Codex session without spawning", async () => {
+		index.previews.set(sessionKey(CODEX_SESSION), [
+			{ role: "user", text: "a codex question" },
+			{ role: "assistant", text: "a codex answer" },
+		]);
+
+		const response = await get(ROUTES.preview(CODEX_SESSION));
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as SessionPreviewResponse;
+
+		expect(body.ref).toEqual(CODEX_SESSION);
+		expect(body.turns).toEqual([
+			{ role: "user", text: "a codex question" },
+			{ role: "assistant", text: "a codex answer" },
+		]);
+		expect(codex.created).toHaveLength(0);
+		expect(app.sessions.isAttached(CODEX_SESSION)).toBe(false);
+	});
+
+	it("never touches the session manager: preview does not attach", async () => {
+		// A spy on the manager's attach proves the read path stays off it entirely.
+		const attachSpy = vi.spyOn(app.sessions, "attach");
+
+		await get(ROUTES.preview(PI_SESSION));
+		await get(ROUTES.preview(CODEX_SESSION));
+
+		expect(attachSpy).not.toHaveBeenCalled();
+		expect(pi.created).toHaveLength(0);
+		expect(codex.created).toHaveLength(0);
+		// It went through the read seam instead, once per request.
+		expect(index.previewed).toEqual([PI_SESSION, CODEX_SESSION]);
+	});
+
+	it("is a distinct route: opening the transcript preview does not disturb attach-on-GET", async () => {
+		// Preview first...
+		await get(ROUTES.preview(PI_SESSION));
+		expect(pi.created).toHaveLength(0);
+
+		// ...then the existing attach route still spawns exactly as before.
+		const attached = (await (await get(ROUTES.session(PI_SESSION))).json()) as AttachSessionResponse;
+		expect(attached.session.status).toBe("attached");
+		expect(pi.forRef(PI_SESSION)?.started).toBe(true);
+	});
+
+	it("empty turns for a session the store cannot find, without spawning", async () => {
+		const unknown: SessionRef = { backend: "pi", id: "/nope.jsonl" };
+		const response = await get(ROUTES.preview(unknown));
+		expect(response.status).toBe(200);
+		expect(((await response.json()) as SessionPreviewResponse).turns).toEqual([]);
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("405s a non-GET method", async () => {
+		const response = await post(ROUTES.preview(PI_SESSION));
+		expect(response.status).toBe(405);
+		expect(response.headers.get("allow")).toBe("GET");
 	});
 });
 

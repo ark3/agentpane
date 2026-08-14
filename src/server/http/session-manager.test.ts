@@ -302,6 +302,7 @@ describe("teardown racing a startup", () => {
 				await lookup.promise;
 				return index.get(ref);
 			},
+			preview: (ref) => index.preview(ref),
 		};
 		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
 

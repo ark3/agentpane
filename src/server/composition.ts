@@ -3,6 +3,7 @@ import { CodexAdapterFactory } from "./adapters/codex/index.ts";
 import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import type { AppDeps, SessionIndex } from "./http/deps.ts";
 import { listSessions } from "./sessions/index.ts";
+import { readSessionPreview } from "./sessions/preview.ts";
 
 export interface CompositionOptions {
 	index?: SessionIndex;
@@ -17,6 +18,9 @@ export function createSessionIndex(): SessionIndex {
 			const sessions = await listSessions();
 			return sessions.find((item) => sessionKey(item.ref) === sessionKey(ref)) ?? null;
 		},
+		// Non-attaching preview (OW-38): reads exactly the one session file, never
+		// the corpus `list`/`get` walk.
+		preview: (ref) => readSessionPreview(ref),
 	};
 }
 

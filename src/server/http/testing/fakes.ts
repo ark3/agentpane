@@ -18,6 +18,7 @@ import type {
 	ForkPoint,
 	ListSessionsQuery,
 	ModelInfo,
+	SessionPreviewTurn,
 	SessionRef,
 	SessionSummary,
 } from "../../../shared/protocol.ts";
@@ -320,7 +321,14 @@ export class FakeAdapterFactory implements AdapterFactory {
 
 /** Stands in for the on-disk walk (D9) without touching a filesystem. */
 export class FakeSessionIndex implements SessionIndex {
-	constructor(public summaries: SessionSummary[] = []) {}
+	/** Records every ref the preview route asked for, so a test can prove it was used. */
+	readonly previewed: SessionRef[] = [];
+
+	constructor(
+		public summaries: SessionSummary[] = [],
+		/** Canned preview turns keyed by `sessionKey(ref)`. */
+		public previews: Map<string, SessionPreviewTurn[]> = new Map(),
+	) {}
 
 	async list(query?: ListSessionsQuery): Promise<SessionSummary[]> {
 		return query?.cwd ? this.summaries.filter((s) => s.cwd === query.cwd) : this.summaries;
@@ -328,6 +336,11 @@ export class FakeSessionIndex implements SessionIndex {
 
 	async get(ref: SessionRef): Promise<SessionSummary | null> {
 		return this.summaries.find((s) => sessionKey(s.ref) === sessionKey(ref)) ?? null;
+	}
+
+	async preview(ref: SessionRef): Promise<SessionPreviewTurn[]> {
+		this.previewed.push(ref);
+		return this.previews.get(sessionKey(ref)) ?? [];
 	}
 }
 

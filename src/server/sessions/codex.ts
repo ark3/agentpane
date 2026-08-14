@@ -13,7 +13,7 @@
  */
 
 import type { Stats } from "node:fs";
-import type { SessionSummary } from "../../shared/protocol.ts";
+import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
 import { trimPreview } from "./text.ts";
 
@@ -176,4 +176,75 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 		status: "detached",
 		isStreaming: false,
 	};
+}
+
+/**
+ * The full text conversation of a stored Codex session, flattened for the
+ * read-only preview (OW-38). Sibling of `parseCodexSession`'s `preview`: same
+ * file, same line reader, but it keeps every user and assistant *text* block in
+ * order instead of stopping at the first real user message.
+ *
+ * The synthetic-block filtering (`isSyntheticBlock`) is reused so the
+ * harness-injected wrappers -- `<environment_context>`, AGENTS.md dumps, and
+ * the rest -- do not surface as conversation turns. Assistant text carries no
+ * such wrappers, so it is kept verbatim. Reasoning, tool calls, and tool
+ * results are dropped (see `SessionPreviewResponse`).
+ */
+export async function extractCodexPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
+	const turns: SessionPreviewTurn[] = [];
+	let lineNo = 0;
+	for await (const line of readLinesLfOnly(filePath)) {
+		lineNo++;
+		if (lineNo === 1) continue;
+		const turn = extractTextTurn(line);
+		if (turn) turns.push(turn);
+	}
+	return turns;
+}
+
+/**
+ * One text turn from a Codex message line, or null if it carries no display
+ * text. Handles both the current `response_item`-wrapped shape and the drifted
+ * flat `{type:"message"}` shape, in either the `text` or `input_text`/
+ * `output_text` block flavours.
+ */
+function extractTextTurn(line: string): SessionPreviewTurn | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		return null;
+	}
+	if (typeof parsed !== "object" || parsed === null) return null;
+	const rec = parsed as Record<string, unknown>;
+
+	let role: unknown;
+	let content: unknown;
+	if (rec.type === "response_item" && typeof rec.payload === "object" && rec.payload !== null) {
+		const payload = rec.payload as Record<string, unknown>;
+		if (payload.type === "message") {
+			role = payload.role;
+			content = payload.content;
+		}
+	} else if (rec.type === "message") {
+		role = rec.role;
+		content = rec.content;
+	}
+
+	if ((role !== "user" && role !== "assistant") || !Array.isArray(content)) return null;
+
+	const texts: string[] = [];
+	for (const block of content) {
+		if (block && typeof block === "object") {
+			const text = (block as Record<string, unknown>).text;
+			if (typeof text === "string") texts.push(text);
+		}
+	}
+
+	// A user turn that is entirely harness-injected wrapper content is not
+	// something a human said; drop it, matching the preview heuristic. Assistant
+	// text never carries these wrappers.
+	const kept = role === "user" ? texts.filter((t) => !isSyntheticBlock(t)) : texts;
+	const text = kept.join("").trim();
+	return text.length > 0 ? { role, text } : null;
 }

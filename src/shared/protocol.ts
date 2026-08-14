@@ -171,6 +171,28 @@ export interface AttachSessionResponse {
 	session: SessionSummary;
 }
 
+/**
+ * GET /api/sessions/:backend/:id/preview -- a read-only, non-attaching
+ * transcript preview (OW-38). Unlike the attach route above, this spawns
+ * nothing: it reads exactly one stored session file by ref and flattens it to
+ * text turns for the main pane.
+ *
+ * Deliberately narrow. Only user and assistant *text* survives the flattening
+ * -- tools, thinking, images, and approvals are dropped -- and this makes no
+ * claim of parity with the `snapshot` an attached session streams over SSE.
+ * Selecting a session to look at must stay as cheap as listing one (D9), so
+ * this reads a single file and never the whole corpus.
+ */
+export interface SessionPreviewTurn {
+	role: "user" | "assistant";
+	text: string;
+}
+export interface SessionPreviewResponse {
+	/** The ref the preview was read for, echoed back so the client can key it. */
+	ref: SessionRef;
+	turns: SessionPreviewTurn[];
+}
+
 /** POST /api/sessions/:backend/:id/prompt */
 export interface PromptRequest {
 	text: string;
@@ -227,6 +249,8 @@ export const ROUTES = {
 	sessions: "/api/sessions",
 	models: "/api/models",
 	session: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}`,
+	preview: (ref: SessionRef) =>
+		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/preview`,
 	prompt: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/prompt`,
 	abort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/abort`,

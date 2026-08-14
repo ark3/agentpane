@@ -38,6 +38,12 @@ const DEFAULT_CODEX_ROOT = join(homedir(), ".codex", "sessions");
 const DEFAULT_PI_ROOT = join(homedir(), ".pi", "agent", "sessions");
 const DEFAULT_CONCURRENCY = 64;
 
+/** Store roots, shared with the preview path so it locates files the same way. */
+export const SESSION_ROOTS = {
+	codex: DEFAULT_CODEX_ROOT,
+	pi: DEFAULT_PI_ROOT,
+} as const;
+
 async function mapLimit<T, R>(
 	items: readonly T[],
 	limit: number,
