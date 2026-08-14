@@ -228,6 +228,43 @@ deferred as manual are now automated; the fourth is partly closed.
 Cleanup was verified rather than assumed on every run: no orphaned worker, and
 the temporary `PI_CODING_AGENT_DIR` and server log both confirmed removed.
 
+## Observed preview and listing timing (OW-38, OW-23)
+
+Recorded 2026-08-14 against a running production server (`bun run start`,
+default port 4173) over a live local corpus of **1001 stored sessions**. These
+are REST-only `curl` timings of two read paths that **spawn nothing** — the
+on-disk listing and the OW-38 preview route; no agent subprocess was involved.
+Not browser automation (OW-24).
+
+Reproduce, with the server already listening:
+
+```bash
+curl -s -o /tmp/sessions.json \
+  -w '%{time_total}s %{size_download}B\n' \
+  http://127.0.0.1:4173/api/sessions
+jq '.sessions | length' /tmp/sessions.json
+```
+
+| Path | Observed |
+|---|---|
+| `GET /api/sessions` (1001 sessions) | 0.16–0.24s warm, 429 KB. Matches OW-23's whole-corpus parse (the ~0.28s/973-files figure cited there); real and roughly corpus-linear, but not the cause of any freeze. |
+| `GET /…/preview` × the 10 most-recent | 6–14 ms each, size-insensitive: a 36-turn/15 KB Pi transcript previewed in 6.6 ms, a 1-turn/112 B Codex session in 11 ms. |
+
+Two structural findings, both confirming OW-38's design holds at scale:
+
+- The preview reads exactly one file and never walks the corpus — cost is flat
+  in transcript size, so a large most-recent session does not make the *fetch*
+  slow. Any startup cost from a big transcript is client-side rendering, not the
+  route.
+- Pi previews (~6 ms) beat Codex (~11–13 ms) consistently: Pi's ref *is* the
+  JSONL path (D9, a direct read), while Codex does the `findJsonlFiles`
+  readdir walk to match the thread id in the filename.
+
+The perceived "slow session load" reported the same day was **not** either
+endpoint: the browser was spinning in OW-39's startup auto-select loop
+(`effect_update_depth_exceeded`, OW-41) until Svelte aborted. Neither read path
+is implicated.
+
 ## Still unverified
 
 Tracked as rows in `WORKSTREAMS.md`'s Open work list, not restated here:
@@ -236,4 +273,5 @@ ran against REST/SSE) and **OW-25** (whether Pi raises approval dialogs without
 a trusting `trust.json`).
 
 The application has since been opened by hand in a browser, on 2026-08-12. What
-that found is OW-26 through OW-31.
+that found is OW-26 through OW-31. A further hand-open on 2026-08-14, after
+OW-39 landed, hit the startup freeze recorded as OW-41.
