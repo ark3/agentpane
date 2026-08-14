@@ -398,6 +398,36 @@
 		return cwd.slice(cwd.lastIndexOf("/") + 1);
 	}
 
+	/**
+	 * The sidebar row's label. `summary.preview` is server-supplied, parsed from
+	 * the *first user message* of the stored JSONL -- which does not exist yet
+	 * for a session whose first prompt has only just been sent, and nothing
+	 * re-lists that session afterwards (only create/attach/rename/close emit
+	 * `sessions-changed`), so it stays null until the next reload and the row
+	 * shows the raw ref. Fall back to the same first-user-message text from the
+	 * live view we already hold: this client *sent* that text, so it is certain
+	 * whatever the file has, and it is the server's own preview semantics, so
+	 * the eventual server value agrees rather than flickering to another string.
+	 */
+	function sessionLabel(summary: SessionSummary): string {
+		return summary.preview || firstUserText(summary) || `${summary.ref.backend} ${summary.ref.id}`;
+	}
+
+	function firstUserText(summary: SessionSummary): string {
+		for (const message of view.state.sessions[sessionKey(summary.ref)]?.messages ?? []) {
+			if (message.role !== "user") continue;
+			if (typeof message.content === "string") {
+				if (message.content.trim()) return message.content.trim();
+				continue;
+			}
+			const parts: string[] = [];
+			for (const block of message.content) if (block.type === "text") parts.push(block.text);
+			const text = parts.join(" ").trim();
+			if (text) return text;
+		}
+		return "";
+	}
+
 	/** Keyed lookup rather than if/else so an unrecognised future backend id falls through to grey instead of silently matching a branch. */
 	const backendColors: Partial<Record<BackendId, string>> = {
 		codex: "var(--ap-success)",
@@ -473,7 +503,7 @@
 
 	<nav class="sessions" aria-label="Sessions">
 		{#each filteredSummaries as summary (sessionKey(summary.ref))}
-			{@const label = summary.preview || `${summary.ref.backend} ${summary.ref.id}`}
+			{@const label = sessionLabel(summary)}
 			<button
 				type="button"
 				class="session-select"

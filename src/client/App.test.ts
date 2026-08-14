@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
-import { initialClientState, type ClientState } from "./session-state.ts";
+import { initialClientState, reduceServerEvent, type ClientState } from "./session-state.ts";
 import { assistant, user } from "./render/samples.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
@@ -251,6 +251,38 @@ describe("App", () => {
 		expect(controller.previewed).toEqual([piSession]);
 		expect(controller.selected).toEqual([]); // a row click never spawns via attach
 		expect(screen.getByRole("button", { name: "codex codex-1" })).toBeInTheDocument();
+	});
+
+	it("labels a just-prompted session by its own first user message while the server preview is still null", async () => {
+		// The real SSE order for a first prompt on a virtual Pi session
+		// (broadcaster.ts): sessions-changed, renamed, then the snapshot for the
+		// new ref. Replayed through the real reducer rather than hand-assembled,
+		// so the end state is the one the client would actually hold.
+		const virtualRef: SessionRef = { backend: "pi", id: "virtual:abc" };
+		const realRef: SessionRef = { backend: "pi", id: "/home/u/.pi/sessions/abc.jsonl" };
+
+		let current = state();
+		const changed = reduceServerEvent(current, { type: "sessions-changed" });
+		expect(changed.refreshSessions).toBe(true);
+		// The refresh it asks for reads the list *before* the JSONL has the user
+		// turn, so preview comes back null -- that is the whole bug.
+		current = { ...changed.state, summaries: [summary(virtualRef, null)] };
+		current = reduceServerEvent(current, { type: "renamed", session: realRef, seq: 1, from: virtualRef }).state;
+		current = reduceServerEvent(current, {
+			type: "snapshot",
+			session: realRef,
+			seq: 2,
+			messages: [user("Explain the crash")],
+			isStreaming: false,
+		}).state;
+
+		const controller = new FakeController(view({ state: current }));
+		render(App, { props: { controller } });
+		await tick();
+
+		const row = screen.getByRole("button", { name: "Explain the crash" });
+		expect(within(row).getByText("Explain the crash")).toHaveClass("session-preview");
+		expect(screen.queryByRole("button", { name: `pi ${realRef.id}` })).not.toBeInTheDocument();
 	});
 
 	it("auto-selects the most recent session in scope on startup", async () => {
