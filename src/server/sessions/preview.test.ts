@@ -149,6 +149,29 @@ describe("readSessionPreview", () => {
 			expect(turns).toEqual([{ role: "user", text: "only me" }]);
 			expect(reads).toEqual([wanted]);
 		});
+
+		it("reads past line-reader's enumeration caps (200 lines, 512KB) to the real end of a long session (OW-43)", async () => {
+			// readLinesLfOnly defaults to 200 lines / 512KB -- sized for enumeration,
+			// which reads just far enough to find one message and stops. The preview
+			// extractor must not inherit those caps: it needs the whole file. This
+			// fixture crosses both defaults well before its last message.
+			const file = join(root, "long-session.jsonl");
+			const filler = "x".repeat(3000);
+			const messageCount = 300;
+			const lines: unknown[] = [piHeader()];
+			for (let i = 0; i < messageCount; i++) {
+				lines.push(piMessage(i % 2 === 0 ? "user" : "assistant", `${filler} turn-${i}`));
+			}
+			await writeJsonl(file, lines);
+
+			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
+
+			expect(turns.length).toBe(messageCount);
+			// This turn sits past both the 200-line cap and the 512KB cap (each
+			// ~3KB message line pushes bytesRead past 512KB by line ~170).
+			const late = turns[250];
+			expect(late?.text).toContain("turn-250");
+		});
 	});
 
 	describe("Codex", () => {
@@ -217,6 +240,23 @@ describe("readSessionPreview", () => {
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
 			expect(turns).toEqual([]);
+		});
+
+		it("reads past line-reader's enumeration caps (200 lines, 512KB) to the real end of a long session (OW-43)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			const filler = "x".repeat(3000);
+			const messageCount = 300;
+			const lines: unknown[] = [codexHeader(THREAD)];
+			for (let i = 0; i < messageCount; i++) {
+				lines.push(i % 2 === 0 ? codexUser(`${filler} turn-${i}`) : codexAssistant(`${filler} turn-${i}`));
+			}
+			await writeJsonl(file, lines);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.length).toBe(messageCount);
+			const late = turns[250];
+			expect(late?.text).toContain("turn-250");
 		});
 	});
 });

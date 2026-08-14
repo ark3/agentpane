@@ -193,7 +193,10 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 export async function extractCodexPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
 	let lineNo = 0;
-	for await (const line of readLinesLfOnly(filePath)) {
+	// Unbounded: unlike enumeration, the preview must reach the real end of the
+	// file (attaching already shows the whole transcript, so the preview
+	// stopping early at the enumeration caps would be a visible regression).
+	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
 		if (lineNo === 1) continue;
 		const turn = extractTextTurn(line);
