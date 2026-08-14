@@ -9,6 +9,10 @@ Produce rows a cold agent can act on. **No code changes here.** Reading widely
 is expected — this is the session that pays exploration once, so execution
 sessions do not pay it again on every row.
 
+When you add or materially revise `OW-` rows, land that docs change in
+`docs/WORKSTREAMS.md` and commit it unless the user asks not to. A row that
+exists only in chat does not exist.
+
 ## What a row carries
 
 **Grounding — the addresses that make reads targeted.** File paths, symbol

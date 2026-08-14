@@ -1,7 +1,8 @@
 # agentpane
 
-Decisions D1–D12 in `docs/DESIGN.md`, open work in `docs/WORKSTREAMS.md`, the
-evidence behind both in `docs/HANDOFF.md`.
+Decisions D1–D12 in `docs/DESIGN.md`, open work in `docs/WORKSTREAMS.md`,
+closed work in `docs/CLOSED.md`, the evidence behind both in
+`docs/HANDOFF.md`.
 
 ## Commands
 
@@ -30,6 +31,8 @@ touching `src/`; say so explicitly when a commit is docs only.
 
 - Commit directly on `main` as the work is done, small and single-purpose. No
   branch, no PR. Never `git push` unless asked by name.
+- Work items live only in `docs/WORKSTREAMS.md` and `docs/CLOSED.md`, not in
+  GitHub issues or any other external tracker.
 - A finding that lives only in a transcript dies with the session. A doc defect:
   fix the doc in the same change. A fact you verified: the commit message, or
   `DESIGN.md` if it changes a decision. Live-run evidence: `MANUAL_TESTING.md`.
@@ -42,3 +45,6 @@ touching `src/`; say so explicitly when a commit is docs only.
 Work happens in one of two modes. If the user has not invoked `/author`
 (writing work items) or `/execute` (landing them), ask which one before doing
 anything else — including in reply to an opening greeting.
+
+The slash-command skill definitions live in `.claude/skills/author/SKILL.md`
+and `.claude/skills/execute/SKILL.md`.
