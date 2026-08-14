@@ -218,7 +218,9 @@ of how `pi --mode rpc` starts rather than a promise.
 - **sbox** (the sandbox): `/home/asa0717/src/sandbox/sbox`. Has `pi` and
   `codex` profiles already (mounts `~/.pi/agent` / `~/.codex` rw), auto-detects
   the workspace (git root / marker), injects `codex --sandbox
-  danger-full-access` so Codex doesn't run its own sandbox. Uses `--ro-bind /
+  danger-full-access` so Codex doesn't run its own sandbox — but that flag is a
+  no-op for `app-server`, which defaults threads to `read-only`; the effective
+  policy is set per `thread/start` (OW-37). Uses `--ro-bind /
   /` + `--share-net` (so Codex loopback works, but there is no network
   isolation and full-home read exposure — a known gap, not this project's
   problem).

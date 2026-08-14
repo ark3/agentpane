@@ -140,8 +140,11 @@ adapter matches it up and responds to Codex.
 answered by the capture harness, followed by `serverRequest/resolved`. An
 unanswered one hangs the turn.
 
-Still unverified (OW-18): whether sbox's injected `--sandbox danger-full-access`
-suppresses the exec/patch approvals specifically. The fixtures were captured
+Still unverified (OW-18): whether a `danger-full-access` thread (OW-37)
+suppresses the exec/patch approvals specifically. Note the older framing here —
+that sbox's injected `--sandbox danger-full-access` governs this — was wrong:
+that CLI flag is a no-op for `app-server` (OW-37), and the effective lever is
+the per-`thread/start` sandbox policy. The fixtures were captured
 *without* sbox, so they cannot answer it, and neither do the live smoke runs —
 the Codex one prompts "do not use tools" deliberately, to keep its transcript
 assertions deterministic. (Pi, separately, ran a shell tool through sbox with
@@ -579,9 +582,12 @@ builds the command itself:
   of the spawn cwd.
 - Codex: `direnv exec <workspace> sbox -- codex app-server` — sbox's `codex`
   profile mounts `~/.codex` rw (so the sqlite state runtime works) and injects
-  `--sandbox danger-full-access` so Codex does not double-sandbox. The
-  injection is keyed on the command name, so it applies to `codex` and not to
-  the surrounding wrapper.
+  `--sandbox danger-full-access`. That injection is keyed on the command name,
+  so it applies to `codex` and not to the surrounding wrapper — but it is a
+  **no-op for `app-server`**, which ignores the CLI flag and defaults each
+  thread to `read-only`. The sandbox policy that actually takes effect is set
+  per `thread/start` by the adapter (OW-37); `danger-full-access` there, since
+  sbox's bwrap jail is already the confinement boundary.
 - **The server must spawn each subprocess with `cwd` = that session's
   workspace**, or sbox jails the wrong tree (or refuses if there is no git
   root), and `direnv` loads the wrong environment.
