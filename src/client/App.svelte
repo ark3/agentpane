@@ -459,14 +459,16 @@
 				{/each}
 			</select>
 		</label>
-		<label>
-			Backend
-			<select aria-label="Backend" bind:value={backend}>
-				<option value="pi">pi</option>
-				<option value="codex">codex</option>
-			</select>
-		</label>
-		<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New session</button>
+		<div class="session-controls-row">
+			<label>
+				Backend
+				<select aria-label="Backend" bind:value={backend}>
+					<option value="pi">pi</option>
+					<option value="codex">codex</option>
+				</select>
+			</label>
+			<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New</button>
+		</div>
 	</section>
 
 	<nav class="sessions" aria-label="Sessions">

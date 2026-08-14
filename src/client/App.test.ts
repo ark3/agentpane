@@ -217,7 +217,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 
 		await fireEvent.change(screen.getByLabelText("Backend"), { target: { value: "codex" } });
-		await fireEvent.click(screen.getByRole("button", { name: "New session" }));
+		await fireEvent.click(screen.getByRole("button", { name: "New" }));
 
 		expect(controller.created).toEqual([{ cwd: "/work/project", backend: "codex" }]);
 	});
@@ -226,7 +226,16 @@ describe("App", () => {
 		const controller = new FakeController();
 		render(App, { props: { controller } });
 
-		expect(screen.getByRole("button", { name: "New session" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "New" })).toBeDisabled();
+	});
+
+	it("places the New session button in the same row as the Backend selector", () => {
+		const controller = new FakeController();
+		render(App, { props: { controller } });
+
+		const button = screen.getByRole("button", { name: "New" });
+		const select = screen.getByLabelText("Backend");
+		expect(button.parentElement).toBe(select.parentElement?.parentElement);
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {

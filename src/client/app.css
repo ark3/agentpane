@@ -135,6 +135,8 @@ button, input, select, textarea { font: inherit; }
 
 .session-controls { grid-area: controls; display: grid; gap: var(--ap-space-3); align-content: start; }
 .session-controls label { display: grid; gap: var(--ap-space-1); font-size: var(--ap-text-sm); }
+.session-controls-row { display: flex; align-items: flex-end; gap: var(--ap-space-2); }
+.session-controls-row label { flex: 1; }
 
 input, select, textarea, button {
 	border: 1px solid var(--ap-border-strong);
