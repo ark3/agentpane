@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BackendId, ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
+import type {
+	BackendId,
+	ServerEvent,
+	SessionPreviewResponse,
+	SessionRef,
+	SessionSummary,
+} from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
 import { createController } from "./controller.ts";
 
@@ -31,6 +37,9 @@ function deferred<T>() {
 class FakeApi implements AgentpaneApi {
 	readonly createSession = vi.fn(async (_body: { cwd: string; backend: BackendId }) => ref);
 	readonly attach = vi.fn(async (session: SessionRef) => summary(session));
+	readonly preview = vi.fn(
+		async (session: SessionRef): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
+	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
@@ -83,6 +92,53 @@ describe("client controller", () => {
 		expect(api.attach).toHaveBeenCalledWith(ref);
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
+	});
+
+	it("previews a stored session read-only, selecting it without attaching or spawning", async () => {
+		const api = new FakeApi();
+		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+		const controller = createController(api);
+
+		await controller.preview(ref);
+
+		expect(api.preview).toHaveBeenCalledWith(ref);
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(controller.getView().preview).toEqual({ ref, turns: [{ role: "user", text: "hi" }] });
+		expect(controller.getView().state.selected).toEqual(ref);
+	});
+
+	it("reselects an already-attached session live instead of re-fetching a stale preview", async () => {
+		const api = new FakeApi();
+		api.attach.mockResolvedValue(summary(attachedRef));
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		// The snapshot a real attach produces gives this client live state for it.
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false });
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		api.preview.mockClear();
+
+		await controller.preview(attachedRef);
+
+		expect(api.preview).not.toHaveBeenCalled();
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(controller.getView().preview).toBeNull();
+	});
+
+	it("clears the read-only preview once the session is attached", async () => {
+		const api = new FakeApi();
+		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+		api.attach.mockResolvedValue(summary(attachedRef));
+		const controller = createController(api);
+
+		await controller.preview(ref);
+		expect(controller.getView().preview).not.toBeNull();
+
+		await controller.select(ref);
+
+		expect(api.attach).toHaveBeenCalledWith(ref);
+		expect(controller.getView().preview).toBeNull();
+		expect(controller.getView().state.selected).toEqual(attachedRef);
 	});
 
 	it("keeps the latest selection when earlier and later attaches resolve out of order", async () => {
@@ -229,35 +285,12 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
 	});
 
-	it("refreshes the new workspace while startup listing is in flight without applying its stale result", async () => {
-		const api = new FakeApi();
-		const allSessions = deferred<SessionSummary[]>();
-		const workspaceSessions = deferred<SessionSummary[]>();
-		const scopedRef: SessionRef = { backend: "codex", id: "workspace-session" };
-		api.listSessions.mockImplementationOnce(() => allSessions.promise).mockImplementationOnce(() => workspaceSessions.promise);
-		const controller = createController(api);
-
-		const starting = controller.start();
-		const selectingWorkspace = controller.setWorkspace("/work/project");
-
-		expect(api.listSessions).toHaveBeenNthCalledWith(1, undefined);
-		expect(api.listSessions).toHaveBeenNthCalledWith(2, "/work/project");
-		workspaceSessions.resolve([summary(scopedRef, "/work/project")]);
-		await selectingWorkspace;
-		allSessions.resolve([summary(ref)]);
-		await starting;
-
-		expect(controller.getView().state.summaries).toEqual([summary(scopedRef, "/work/project")]);
-	});
-
-	it("rejects relative workspace input before listing or creating a session", async () => {
+	it("rejects a relative workspace before creating a session", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 
-		await controller.setWorkspace("work/project");
 		await controller.create("work/project", "pi");
 
-		expect(api.listSessions).not.toHaveBeenCalled();
 		expect(api.createSession).not.toHaveBeenCalled();
 		expect(controller.getView().error).toBe("Workspace must be an absolute path.");
 	});

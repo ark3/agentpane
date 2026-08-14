@@ -7,6 +7,7 @@ import {
 	type ListSessionsResponse,
 	type PromptRequest,
 	type ServerEvent,
+	type SessionPreviewResponse,
 	type SessionRef,
 	type SessionSummary,
 } from "$shared/protocol.ts";
@@ -45,6 +46,8 @@ export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
 	createSession(body: CreateSessionRequest): Promise<SessionRef>;
 	attach(ref: SessionRef): Promise<SessionSummary>;
+	/** Read-only, non-attaching transcript preview (OW-38): spawns nothing. */
+	preview(ref: SessionRef): Promise<SessionPreviewResponse>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
 	abort(ref: SessionRef): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
@@ -83,6 +86,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 			return request(ROUTES.session(ref), { method: "GET" }, (body) => {
 				return (body as AttachSessionResponse).session;
 			});
+		},
+		preview(ref) {
+			return request(ROUTES.preview(ref), { method: "GET" }, (body) => body as SessionPreviewResponse);
 		},
 		prompt(ref, body) {
 			return requestNoContent(ROUTES.prompt(ref), jsonRequest(body));

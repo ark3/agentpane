@@ -78,6 +78,15 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("fetches a read-only preview by ref without a request body", async () => {
+		const preview = { ref, turns: [{ role: "user" as const, text: "hi" }] };
+		const fetch = fetchRecorder(response(preview));
+		const api = createAgentpaneApi({ fetch });
+
+		expect(await api.preview(ref)).toEqual(preview);
+		expect(fetch).toHaveBeenCalledWith(ROUTES.preview(ref), { method: "GET" });
+	});
+
 	it("prompts a session with a JSON body", async () => {
 		const fetch = fetchRecorder(new Response(null, { status: 202 }));
 		const api = createAgentpaneApi({ fetch });

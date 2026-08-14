@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
-import type { BackendId, SessionRef, SessionSummary } from "$shared/protocol.ts";
+import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
 import { initialClientState, type ClientState } from "./session-state.ts";
@@ -39,6 +39,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		error: null,
+		preview: null,
 		...overrides,
 	};
 }
@@ -46,10 +47,10 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 class FakeController implements AgentpaneController {
 	created: Array<{ cwd: string; backend: BackendId }> = [];
 	selected: SessionRef[] = [];
+	previewed: SessionRef[] = [];
 	submitted = 0;
 	aborted = 0;
 	clearErrorCalls = 0;
-	workspaces: string[] = [];
 	started = 0;
 	disposed = 0;
 	notifications = 0;
@@ -92,16 +93,29 @@ class FakeController implements AgentpaneController {
 		this.publish({ ...this.current, draft: text });
 	}
 
-	async setWorkspace(cwd: string) {
-		this.workspaces.push(cwd);
-	}
-
 	async create(cwd: string, backend: BackendId) {
 		this.created.push({ cwd, backend });
 	}
 
+	async preview(ref: SessionRef) {
+		this.previewed.push(ref);
+	}
+
+	/** The real attach path clears the preview and gives the session a live view. */
 	async select(ref: SessionRef) {
 		this.selected.push(ref);
+		this.publish({
+			...this.current,
+			preview: null,
+			state: {
+				...this.current.state,
+				selected: ref,
+				sessions: {
+					...this.current.state.sessions,
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
+				},
+			},
+		});
 	}
 
 	async submit() {
@@ -172,29 +186,93 @@ describe("App", () => {
 		expect(controller.notifications).toBe(0);
 	});
 
-	it("creates a session using the selected workspace and backend", async () => {
-		const controller = new FakeController();
+	it("creates a new session in the selected session's workspace with the chosen backend", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "P", { cwd: "/work/project" })] }),
+		}));
 		render(App, { props: { controller } });
 
-		await fireEvent.input(screen.getByLabelText("Workspace"), {
-			target: { value: "/work/project" },
-		});
 		await fireEvent.change(screen.getByLabelText("Backend"), { target: { value: "codex" } });
 		await fireEvent.click(screen.getByRole("button", { name: "New session" }));
 
 		expect(controller.created).toEqual([{ cwd: "/work/project", backend: "codex" }]);
 	});
 
-	it("selects a session from its preview and falls back to its backend and id", async () => {
+	it("disables New session when there is no selected workspace to inherit", () => {
+		const controller = new FakeController();
+		render(App, { props: { controller } });
+
+		expect(screen.getByRole("button", { name: "New session" })).toBeDisabled();
+	});
+
+	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {
 		const controller = new FakeController(view({
 			state: state({ summaries: [summary(piSession, "Review the patch"), summary(codexSession)] }),
 		}));
 		render(App, { props: { controller } });
+		await tick();
+		controller.previewed.length = 0; // discard the startup auto-select
 
 		await fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
 
-		expect(controller.selected).toEqual([piSession]);
+		expect(controller.previewed).toEqual([piSession]);
+		expect(controller.selected).toEqual([]); // a row click never spawns via attach
 		expect(screen.getByRole("button", { name: "codex codex-1" })).toBeInTheDocument();
+	});
+
+	it("auto-selects the most recent session in scope on startup", async () => {
+		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
+		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });
+		const controller = new FakeController(view({ state: state({ summaries: [older, newer] }) }));
+		render(App, { props: { controller } });
+		await tick();
+
+		expect(controller.previewed).toEqual([codexSession]);
+	});
+
+	it("re-selects the most recent session in scope when the workspace filter changes", async () => {
+		const projectA: SessionRef = { backend: "pi", id: "a" };
+		const projectB: SessionRef = { backend: "pi", id: "b" };
+		const projectAgain: SessionRef = { backend: "pi", id: "c" };
+		const controller = new FakeController(view({
+			state: state({
+				summaries: [
+					summary(projectA, "A", { cwd: "/work/a", updatedAt: "2026-01-01T00:00:00.000Z" }),
+					summary(projectB, "B", { cwd: "/work/b", updatedAt: "2026-02-01T00:00:00.000Z" }),
+					summary(projectAgain, "C", { cwd: "/work/a", updatedAt: "2026-03-01T00:00:00.000Z" }),
+				],
+			}),
+		}));
+		render(App, { props: { controller } });
+		await tick();
+		// Default (all) auto-selected the most recent overall.
+		expect(controller.previewed).toEqual([projectAgain]);
+		controller.previewed.length = 0;
+
+		await fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "/work/b" } });
+		await tick();
+
+		expect(controller.previewed).toEqual([projectB]);
+	});
+
+	it("swaps the composer for an Attach button while previewing, opens the live session, and focuses the prompt", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+			preview: { ref: piSession, turns: [{ role: "user", text: "earlier question" }] },
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		// Read-only: the preview turn shows, the composer is replaced by Attach.
+		expect(screen.getByText("earlier question")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+		expect(controller.selected).toEqual([piSession]);
+
+		await tick();
+		await tick();
+		expect(screen.getByLabelText("Prompt")).toHaveFocus();
 	});
 
 	it("orders sessions by recency, most recently updated first", () => {

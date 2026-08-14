@@ -1,4 +1,10 @@
-import type { BackendId, ServerEvent, SessionRef, SessionSummary } from "$shared/protocol.ts";
+import type {
+	BackendId,
+	ServerEvent,
+	SessionPreviewTurn,
+	SessionRef,
+	SessionSummary,
+} from "$shared/protocol.ts";
 import { sessionKey } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
 import {
@@ -14,6 +20,13 @@ export interface ControllerView {
 	connection: "connecting" | "connected" | "reconnecting";
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting";
 	error: string | null;
+	/**
+	 * Read-only transcript of the selected session (OW-39), when it is being
+	 * *previewed* rather than attached. Null once the session is attached (a
+	 * live transcript takes over) or when nothing is being previewed. Its `ref`
+	 * always equals `state.selected` while non-null.
+	 */
+	preview: { ref: SessionRef; turns: SessionPreviewTurn[] } | null;
 }
 
 export interface AgentpaneController {
@@ -24,8 +37,13 @@ export interface AgentpaneController {
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
-	setWorkspace(cwd: string): Promise<void>;
 	create(cwd: string, backend: BackendId): Promise<void>;
+	/**
+	 * Cheap, read-only selection (OW-39): load OW-38's non-attaching preview for
+	 * a stored session, or -- if the session is already attached -- just reselect
+	 * its live transcript. Spawns nothing for a stored session.
+	 */
+	preview(ref: SessionRef): Promise<void>;
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
 	abort(): Promise<void>;
@@ -40,13 +58,13 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		connection: "connecting",
 		busy: "idle",
 		error: null,
+		preview: null,
 	};
-	let workspace: string | undefined;
 	let connection: EventConnection | undefined;
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
-	const refreshes = new Map<string | undefined, Promise<void>>();
+	let refreshInFlight: Promise<void> | undefined;
 	const recoveries = new Map<string, Promise<void>>();
 	const listeners = new Set<(next: ControllerView) => void>();
 	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
@@ -74,7 +92,8 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested))
 			? summary.ref
 			: view.state.selected;
-		publish({ state: { ...replaceSummary(summary, requested), selected }, error: null });
+		// An explicit attach replaces any read-only preview with the live transcript.
+		publish({ state: { ...replaceSummary(summary, requested), selected }, error: null, ...(select ? { preview: null } : {}) });
 	}
 
 	function validWorkspace(cwd: string): boolean {
@@ -83,28 +102,25 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		return false;
 	}
 
+	// Always lists the whole corpus: the workspace filter is a client-side view
+	// over these summaries now (OW-39), not a server round-trip -- which also
+	// retires OW-3's per-keystroke enumeration at the source.
 	async function refreshSessions(): Promise<void> {
-		const requestedWorkspace = workspace;
-		const inFlight = refreshes.get(requestedWorkspace);
-		if (inFlight) return inFlight;
+		if (refreshInFlight) return refreshInFlight;
 		const request = (async () => {
 			publish({ busy: "listing", error: null });
 			try {
-				const summaries = await api.listSessions(requestedWorkspace);
-				if (!disposed && workspace === requestedWorkspace) {
-					publish({ state: { ...view.state, summaries }, error: null });
-				}
+				const summaries = await api.listSessions(undefined);
+				if (!disposed) publish({ state: { ...view.state, summaries }, error: null });
 			} catch (error: unknown) {
-				if (!disposed && workspace === requestedWorkspace) publish({ error: errorMessage(error) });
+				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && workspace === requestedWorkspace && view.busy === "listing") {
-					publish({ busy: "idle" });
-				}
+				if (!disposed && view.busy === "listing") publish({ busy: "idle" });
 			}
 		})();
-		refreshes.set(requestedWorkspace, request);
+		refreshInFlight = request;
 		void request.finally(() => {
-			if (refreshes.get(requestedWorkspace) === request) refreshes.delete(requestedWorkspace);
+			if (refreshInFlight === request) refreshInFlight = undefined;
 		});
 		return request;
 	}
@@ -200,10 +216,27 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 		setDraft(text) {
 			publish({ draft: text });
 		},
-		async setWorkspace(cwd) {
-			if (!validWorkspace(cwd)) return;
-			workspace = cwd;
-			await refreshSessions();
+		async preview(ref) {
+			const intent = ++selectionIntent;
+			// A session already attached in this client keeps its live transcript --
+			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
+			if (view.state.sessions[sessionKey(ref)]) {
+				publish({ state: { ...view.state, selected: ref }, preview: null, error: null });
+				return;
+			}
+			publish({ error: null });
+			try {
+				const response = await api.preview(ref);
+				if (!disposed && intent === selectionIntent) {
+					publish({
+						state: { ...view.state, selected: response.ref },
+						preview: { ref: response.ref, turns: response.turns },
+						error: null,
+					});
+				}
+			} catch (error: unknown) {
+				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
+			}
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
