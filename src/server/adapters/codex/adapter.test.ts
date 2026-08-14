@@ -172,6 +172,7 @@ describe("CodexAdapter lifecycle", () => {
 			cwd: "/workspace",
 			model: "gpt-requested",
 			ephemeral: true,
+			sandbox: "danger-full-access",
 		});
 	});
 
@@ -216,6 +217,7 @@ describe("CodexAdapter lifecycle", () => {
 		expect(request(proc, "thread/resume")["params"]).toEqual({
 			threadId: STORED_REF.id,
 			cwd: "/workspace",
+			sandbox: "danger-full-access",
 		});
 		expect(adapter.getState().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 		expect(adapter.getState().messages[0]).toMatchObject({

@@ -34,6 +34,7 @@ export type { TokenUsageBreakdown } from "../../../../resources/codex-protocol/v
 export type { FileUpdateChange } from "../../../../resources/codex-protocol/v2/FileUpdateChange";
 export type { Model as CodexModel } from "../../../../resources/codex-protocol/v2/Model";
 export type { ThreadStartParams } from "../../../../resources/codex-protocol/v2/ThreadStartParams";
+export type { SandboxMode } from "../../../../resources/codex-protocol/v2/SandboxMode";
 export type { ThreadStartResponse } from "../../../../resources/codex-protocol/v2/ThreadStartResponse";
 export type { ThreadResumeParams } from "../../../../resources/codex-protocol/v2/ThreadResumeParams";
 export type { ThreadForkParams } from "../../../../resources/codex-protocol/v2/ThreadForkParams";

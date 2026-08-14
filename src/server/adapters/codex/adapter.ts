@@ -28,6 +28,7 @@ import {
 	type CodexServerMessage,
 	type ModelListResponse,
 	type RequestId,
+	type SandboxMode,
 	type Thread,
 	type ThreadForkResponse,
 	type ThreadReadResponse,
@@ -49,11 +50,19 @@ export interface CodexAdapterOptions {
 	 * adapter-construction option rather than a per-start one.
 	 */
 	ephemeral?: boolean;
+	/**
+	 * Start threads with this sandbox policy. Defaults to `danger-full-access`:
+	 * agentpane already runs Codex inside sbox's bwrap jail, so the OS layer is
+	 * the confinement boundary and anything narrower would re-implement sbox's
+	 * mount list in a second place that will drift.
+	 */
+	sandbox?: SandboxMode;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
+const DEFAULT_SANDBOX: SandboxMode = "danger-full-access";
 const START_ABORTED_ERROR = "codex adapter start aborted: disposed during startup";
 const TURN_START_ABORTED_ERROR = "codex adapter submit aborted: disposed during turn startup";
 const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
@@ -76,6 +85,7 @@ export class CodexAdapter implements BackendAdapter {
 	private currentRef: SessionRef;
 	private options: CodexAdapterOptions;
 	private reducer: CodexReducer;
+	private readonly sandbox: SandboxMode;
 
 	private proc: CodexProcess | null = null;
 	private client: CodexClient | null = null;
@@ -126,6 +136,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.currentRef = ref;
 		this.options = options;
 		this.reducer = new CodexReducer({ now: options.now });
+		this.sandbox = options.sandbox ?? DEFAULT_SANDBOX;
 	}
 
 	/**
@@ -180,10 +191,12 @@ export class CodexAdapter implements BackendAdapter {
 				? await client.request<ThreadStartResponse>("thread/resume", {
 						threadId: opts.resumeId,
 						cwd: opts.cwd,
+						sandbox: this.sandbox,
 						...(this.model ? { model: this.model } : {}),
 					})
 				: await client.request<ThreadStartResponse>("thread/start", {
 						cwd: opts.cwd,
+						sandbox: this.sandbox,
 						...(this.model ? { model: this.model } : {}),
 						...(this.options.ephemeral ? { ephemeral: true } : {}),
 					});

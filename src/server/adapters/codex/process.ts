@@ -40,8 +40,11 @@ export interface CodexSpawnOptions {
  *
  * sbox recognises the `codex` profile by command name -- it mounts `~/.codex`
  * read-write (Codex needs a writable sqlite state runtime) and injects
- * `--sandbox danger-full-access` so Codex does not double-sandbox inside
- * bubblewrap. Neither flag belongs here; adding one by hand would fight sbox.
+ * `--sandbox danger-full-access`. That injected flag is a no-op for
+ * `app-server`, which ignores it and defaults each thread to `read-only`; the
+ * sandbox policy that actually takes effect is set per `thread/start` by the
+ * adapter (`CodexAdapterOptions.sandbox`). The mount, on the other hand, is
+ * real and needed. Neither belongs here; adding one by hand would fight sbox.
  */
 export function codexCommand(cwd: string): { command: string; args: string[] } {
 	return { command: "direnv", args: ["exec", cwd, "sbox", "--", "codex", "app-server"] };
