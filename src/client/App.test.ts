@@ -145,6 +145,30 @@ class FakeController implements AgentpaneController {
 }
 
 /**
+ * `FakeController.preview` above only records the call, which the real one does
+ * not: `controller.preview` publishes synchronously (`publish({ error: null })`)
+ * *before* it awaits `api.preview`, so that publish lands while
+ * `state.selected` is still null. Anything in `App.svelte` that re-runs on a
+ * publish and keys off `selected` therefore sees its own write, and only a fake
+ * that publishes the same way can expose it (OW-41).
+ */
+class PublishingPreviewController extends FakeController {
+	override async preview(ref: SessionRef) {
+		this.previewed.push(ref);
+		const before = this.getView();
+		this.publish({ ...before, error: null }); // synchronous, selected still null
+		await Promise.resolve();
+		const after = this.getView();
+		this.publish({
+			...after,
+			state: { ...after.state, selected: ref },
+			preview: { ref, turns: [] },
+			error: null,
+		});
+	}
+}
+
+/**
  * jsdom never computes real layout, so scrollHeight/clientHeight are always 0.
  * Stub them the way a real browser's would read during a turn, so the
  * autoscroll *decision* (stick to bottom vs. respect a scrolled-up reader) is
@@ -228,6 +252,19 @@ describe("App", () => {
 		await tick();
 
 		expect(controller.previewed).toEqual([codexSession]);
+	});
+
+	it("auto-selects exactly once when preview publishes before it resolves", async () => {
+		const controller = new PublishingPreviewController(
+			view({ state: state({ summaries: [summary(piSession, "Stored")] }) }),
+		);
+		render(App, { props: { controller } });
+		await tick();
+		await tick();
+
+		// Without a per-ref guard the effect re-fires on preview's own synchronous
+		// publish (selected is still null) until Svelte's depth guard throws.
+		expect(controller.previewed).toEqual([piSession]);
 	});
 
 	it("re-selects the most recent session in scope when the workspace filter changes", async () => {

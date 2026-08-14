@@ -357,15 +357,25 @@
 	 * recency-sorted list. `controller.preview` keeps this cheap: it loads a
 	 * read-only preview for a stored session and spawns nothing, or reselects a
 	 * session this client is already attached to.
+	 *
+	 * The guard tracks the *ref* already auto-previewed, not just the workspace,
+	 * and is written before the call: `controller.preview` publishes
+	 * synchronously before it awaits, which re-invalidates this effect while
+	 * `selected` is still null, so a guard that only clears on the async resolve
+	 * never converges (OW-41 -- it threw `effect_update_depth_exceeded`).
 	 */
 	let autoWorkspace: string | null = null;
+	let autoPreviewedKey: string | null = null;
 	$effect(() => {
 		const top = filteredSummaries[0];
+		const topKey = top ? sessionKey(top.ref) : null;
 		if (workspace !== autoWorkspace) {
 			autoWorkspace = workspace;
+			autoPreviewedKey = topKey;
 			if (top) void controller.preview(top.ref);
-		} else if (view.state.selected === null && top) {
+		} else if (view.state.selected === null && top && autoPreviewedKey !== topKey) {
 			// Startup: sessions arrived after the filter had already settled.
+			autoPreviewedKey = topKey;
 			void controller.preview(top.ref);
 		}
 	});
