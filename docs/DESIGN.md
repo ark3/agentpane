@@ -468,10 +468,11 @@ double-spawn-on-stale-id bug that `#adoptRef` and the alias table exist to
 close.
 
 **Cost this shifts.** Frequent eviction makes cold reattach the common path,
-which promotes OW-23 (`SessionIndex.get` walks both stores on every cold
-attach, ~0.28s) from a deferral to the hot path. Fixing OW-23 — passing the
-`cwd` filter `listSessions` already accepts — is a prerequisite to landing
-this, not a follow-up.
+which promoted OW-23 (`SessionIndex.get` walked both stores on every cold
+attach, ~0.28s) from a deferral to the hot path, and made fixing it a
+prerequisite to landing this rather than a follow-up. **Now fixed:** `get`
+locates and parses exactly one file per lookup. Note that a `cwd` filter would
+not have helped — `listSessions` applies it only after the walk+parse.
 
 **Config.** Single-user, no config file: `idleTimeoutMs` and `maxSessions`
 are named constants at the top of the manager module, not env or file.
@@ -653,8 +654,8 @@ capable of producing a bug that looks like something else entirely:
 ## Remaining open questions
 
 **The open ones live in `WORKSTREAMS.md`'s Open work list, as OW-17 through
-OW-22** (OW-23 turned out to be answered in the code already, and is now a
-deferral there). They were moved there to carry ids and to sit beside everything else
+OW-22** (OW-23 was a defect there, not a question, and is now fixed and closed
+— see `CLOSED.md`). They were moved there to carry ids and to sit beside everything else
 outstanding; keeping a second copy here is what let this document drift out of
 step with the others. A question that settles comes back here as a decision,
 with its reasoning — that is what this document is for, and it is why the one
