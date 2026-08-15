@@ -8,6 +8,9 @@ import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import { createProductionDeps, createSessionIndex } from "./composition.ts";
 
 const fixture = vi.hoisted(() => ({ codexRoot: "", piRoot: "" }));
+// Counts which files' content the parsers actually see, so a test can prove
+// `get` reads only the one matching file, not the whole corpus.
+const reads = vi.hoisted(() => ({ codex: [] as string[], pi: [] as string[] }));
 
 vi.mock("./sessions/index.ts", async (importOriginal) => {
 	const sessions = await importOriginal<typeof import("./sessions/index.ts")>();
@@ -15,6 +18,30 @@ vi.mock("./sessions/index.ts", async (importOriginal) => {
 		...sessions,
 		listSessions: (options = {}) =>
 			sessions.listSessions({ ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot }),
+		getSession: (ref: Parameters<typeof sessions.getSession>[0], options = {}) =>
+			sessions.getSession(ref, { ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot }),
+	};
+});
+
+vi.mock("./sessions/codex.ts", async (importOriginal) => {
+	const codex = await importOriginal<typeof import("./sessions/codex.ts")>();
+	return {
+		...codex,
+		parseCodexSession: (filePath: string, stat: Parameters<typeof codex.parseCodexSession>[1]) => {
+			reads.codex.push(filePath);
+			return codex.parseCodexSession(filePath, stat);
+		},
+	};
+});
+
+vi.mock("./sessions/pi.ts", async (importOriginal) => {
+	const pi = await importOriginal<typeof import("./sessions/pi.ts")>();
+	return {
+		...pi,
+		parsePiSession: (filePath: string, stat: Parameters<typeof pi.parsePiSession>[1]) => {
+			reads.pi.push(filePath);
+			return pi.parsePiSession(filePath, stat);
+		},
 	};
 });
 
@@ -84,6 +111,8 @@ describe("production composition", () => {
 		root = await mkdtemp(join(tmpdir(), "agentpane-composition-"));
 		fixture.codexRoot = join(root, "codex-sessions");
 		fixture.piRoot = join(root, "pi-sessions");
+		reads.codex = [];
+		reads.pi = [];
 	});
 
 	afterEach(async () => {
@@ -131,6 +160,40 @@ describe("production composition", () => {
 			ref: { backend: "codex", id: "old" },
 			cwd: null,
 		});
+	});
+
+	it("gets a session by reading only its own file, never the rest of the corpus", async () => {
+		// Five sibling files per backend besides the wanted one, so a whole-corpus
+		// `get` (the pre-fix implementation) shows up unmistakably in the counters.
+		const wantedPi = join(fixture.piRoot, "ws", "wanted.jsonl");
+		await writeJsonl(wantedPi, [piHeader("pi-wanted", "/workspace/one"), piUserMessage("wanted")]);
+		for (let i = 0; i < 5; i++) {
+			await writeJsonl(join(fixture.piRoot, "ws", `other-${i}.jsonl`), [
+				piHeader(`pi-other-${i}`, "/workspace/other"),
+				piUserMessage("other"),
+			]);
+		}
+
+		const thread = "019f1aae-2a5e-7173-a90a-aad3e2b17d0b";
+		const wantedCodex = join(fixture.codexRoot, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${thread}.jsonl`);
+		await writeJsonl(wantedCodex, [codexHeader(thread, "/workspace/two"), codexUserItem("wanted")]);
+		for (let i = 0; i < 5; i++) {
+			await writeJsonl(join(fixture.codexRoot, `other-${i}.jsonl`), [
+				codexHeader(`codex-other-${i}`, "/workspace/other"),
+				codexUserItem("other"),
+			]);
+		}
+
+		const index = createSessionIndex();
+		const piSummary = await index.get({ backend: "pi", id: wantedPi });
+		const codexSummary = await index.get({ backend: "codex", id: thread });
+
+		expect(piSummary).toMatchObject({ ref: { backend: "pi", id: wantedPi }, cwd: "/workspace/one" });
+		expect(codexSummary).toMatchObject({ ref: { backend: "codex", id: thread }, cwd: "/workspace/two" });
+		// 6 Pi files and 6 Codex files exist; only the two matching ones were ever
+		// handed to a parser.
+		expect(reads.pi).toEqual([wantedPi]);
+		expect(reads.codex).toEqual([wantedCodex]);
 	});
 
 	it("previews a stored Pi session by reading only its own file (OW-38)", async () => {

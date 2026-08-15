@@ -25,7 +25,7 @@ import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { extractCodexPreviewTurns } from "./codex.ts";
 import { SESSION_ROOTS } from "./index.ts";
 import { extractPiPreviewTurns } from "./pi.ts";
-import { findJsonlFiles } from "./walk.ts";
+import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
 export interface ReadPreviewOptions {
 	/** Override the Codex sessions root. Primarily for hermetic tests. */
@@ -41,20 +41,6 @@ export interface ReadPreviewOptions {
 	readPiTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
 	/** Codex text-turn extractor seam. Defaults to the real one. */
 	readCodexTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
-}
-
-/** A UUID sitting inside a Codex rollout filename, e.g. `rollout-<ts>-<uuid>.jsonl`. */
-function fileMatchesThreadId(filePath: string, threadId: string): boolean {
-	const base = filePath.slice(filePath.lastIndexOf("/") + 1);
-	// The id is the trailing segment of the name before the extension
-	// (`rollout-<ts>-<uuid>.jsonl`), delimited on the left by `-` or the start
-	// and on the right by `.` or the end -- so a longer id that merely contains
-	// this one as a prefix (`<uuid>-extra`) does not match.
-	return new RegExp(`(^|[-])${escapeRegExp(threadId)}([.]|$)`).test(base);
-}
-
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function readSessionPreview(

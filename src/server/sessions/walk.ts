@@ -13,6 +13,24 @@ import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+/**
+ * A UUID (or other backend-issued id) sitting inside a session filename, e.g.
+ * Codex's `rollout-<ts>-<uuid>.jsonl`. The id is anchored as a trailing name
+ * segment -- delimited on the left by `-` or the start, on the right by `.`
+ * or the end -- so a longer id that merely contains this one as a substring
+ * (`<uuid>-extra`) does not false-match. Shared by the preview path (OW-38)
+ * and the single-session lookup in `sessions/index.ts`, which locate
+ * their one Codex file the same way.
+ */
+export function fileMatchesThreadId(filePath: string, threadId: string): boolean {
+	const base = filePath.slice(filePath.lastIndexOf("/") + 1);
+	return new RegExp(`(^|[-])${escapeRegExp(threadId)}([.]|$)`).test(base);
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function findJsonlFiles(root: string): Promise<string[]> {
 	const out: string[] = [];
 

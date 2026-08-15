@@ -13,10 +13,10 @@ import type { Stats } from "node:fs";
 import { stat as fsStat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { SessionSummary } from "../../shared/protocol.ts";
+import type { SessionRef, SessionSummary } from "../../shared/protocol.ts";
 import { parseCodexSession } from "./codex.ts";
 import { parsePiSession } from "./pi.ts";
-import { findJsonlFiles } from "./walk.ts";
+import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
 export interface ListSessionsOptions {
 	/**
@@ -113,4 +113,40 @@ export async function listSessions(opts: ListSessionsOptions = {}): Promise<Sess
 	});
 
 	return all;
+}
+
+export interface GetSessionOptions {
+	/** Override the Codex sessions root. Primarily for hermetic tests. */
+	codexRoot?: string;
+	/** Override the Pi sessions root. Primarily for hermetic tests. */
+	piRoot?: string;
+}
+
+/**
+ * Metadata for exactly one stored session, located without walking or parsing
+ * the rest of the corpus the way `listSessions` must. The two
+ * backends locate their one file the same way the preview path (OW-38) does:
+ *
+ *  - **Pi**: the ref IS the file path (D9), so this is a direct stat + parse,
+ *    no discovery at all.
+ *  - **Codex**: the ref's id is a uuid embedded in the filename. A
+ *    readdir-only walk (`findJsonlFiles`) locates the one matching name, and
+ *    only that file is stat'd and parsed.
+ *
+ * A missing/unreadable file, or (for Codex) no filename match, returns null --
+ * the same "unknown ref" result `listSessions().find(...)` gave before.
+ */
+export async function getSession(
+	ref: SessionRef,
+	opts: GetSessionOptions = {},
+): Promise<SessionSummary | null> {
+	if (ref.backend === "pi") {
+		return loadOne(ref.id, parsePiSession);
+	}
+
+	const root = opts.codexRoot ?? DEFAULT_CODEX_ROOT;
+	const files = await findJsonlFiles(root);
+	const match = files.find((file) => fileMatchesThreadId(file, ref.id));
+	if (!match) return null;
+	return loadOne(match, parseCodexSession);
 }
