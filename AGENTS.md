@@ -10,6 +10,12 @@ closed work in `docs/CLOSED.md`, the evidence behind both in
 (typecheck + svelte-check + all tests, ~25s) must pass before any commit
 touching `src/`; say so explicitly when a commit is docs only.
 
+`bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless
+Chromium). It is **not** part of `bun run check` — it needs a browser, so
+nothing runs it for you (OW-49). Run it by hand when you touch follow-mode
+scrolling in `App.svelte` or `.conversation` in `app.css`; jsdom cannot see
+layout, scroll anchoring, or real scroll-event timing.
+
 ## Code
 
 - Path aliases `$shared/*`, `$server/*`, `$client/*`. Imports carry `.ts`.

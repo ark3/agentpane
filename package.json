@@ -17,6 +17,7 @@
     "start": "bun run src/server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "playwright test",
     "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json",
     "check": "bun run typecheck && bun run test"
   },
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.84.1",
     "@earendil-works/pi-ai": "0.84.1",
+    "@playwright/test": "^1.62.1",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.2.8",

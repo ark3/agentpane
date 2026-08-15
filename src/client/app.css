@@ -158,7 +158,14 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .session-meta { display: flex; flex-wrap: wrap; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
 .session-cwd { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-streaming { color: var(--ap-accent); }
-.conversation { grid-area: conversation; position: relative; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; }
+/* `overflow-anchor: none` because follow mode does this job itself, against a
+   message it chose (App.svelte's anchorIndex/anchorTop). CSS scroll anchoring
+   is the browser doing the same job with its own policy, and two anchoring
+   mechanisms on one scroller fight: measured in a real browser (OW-47), the
+   browser moved scrollTop as the transcript reflowed, under-compensating by
+   10px, and that scroll -- which the app never performed -- read as the reader
+   taking over and disengaged follow mid-turn. */
+.conversation { grid-area: conversation; position: relative; min-width: 0; min-height: 0; border: 1px solid var(--ap-border); border-radius: var(--ap-radius-md); overflow-y: auto; overflow-anchor: none; }
 /* Absolute, not sticky: it must float over the content without adding to
    .conversation's own scrollHeight, which the follow-mode math above reads. */
 .jump-to-latest {

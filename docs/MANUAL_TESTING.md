@@ -265,6 +265,51 @@ endpoint: the browser was spinning in OW-39's startup auto-select loop
 (`effect_update_depth_exceeded`, OW-41) until Svelte aborted. Neither read path
 is implicated.
 
+## Observed follow-mode decay in a real browser (OW-47)
+
+Recorded 2026-08-15 in headless Chromium (Chrome for Testing 151), driven by
+the committed harness in `e2e/` — the real `App.svelte` and the real
+`controller.ts` against a synthetic `AgentpaneApi`, no backend and no
+subprocess. This is the first browser automation in the repo; it is a vehicle
+for this one defect and **not** the general E2E coverage OW-24 still tracks.
+
+Reproduce:
+
+```bash
+bun run test:browser                       # green
+sed -i 's/ overflow-anchor: none;//' src/client/app.css
+bun run test:browser                       # red, then: git checkout src/client/app.css
+```
+
+| Condition | Observed |
+|---|---|
+| `.conversation` with `overflow-anchor: none` | All 10 turns of a 40-turn-deep conversation end locked flush at the pane top (≤2px). |
+| Same, fix reverted | Fails on the first measured turn: the prompt stops **51px** from the top and stays stranded there. |
+
+The cause is **CSS scroll anchoring**, which none of the row's three candidates
+named. The browser repositions `scrollTop` itself to keep a visual anchor
+stable as content reflows above the viewport; the agent's instrumented run
+measured it under-compensating by ~10px per adjustment. That produces a
+`scroll` event the application never performed, and
+`handleConversationScroll` correctly cannot tell it from a reader grabbing the
+scrollbar — so it clears the anchor and follow disengages mid-turn. Candidate
+(a) was the right *shape* (a phantom scroll read as manual) but the wrong
+source: not two programmatic scrolls racing one boolean, but the browser
+scrolling on its own. A guard against the boolean race was tried and reverted
+after it changed no outcome — that race remains real but unproven, now OW-48.
+
+Two findings worth keeping:
+
+- **The transcript has to shrink mid-turn to reproduce this.** `Thinking.svelte`
+  holds its `<details>` open only while it is the streaming block, so the moment
+  a `toolCall` lands the thinking block collapses and the transcript gets
+  shorter. Text-only turns were driven to 200 seeded turns and never
+  reproduced it. Any future follow-mode harness needs a turn shape that
+  contracts, not just one that grows.
+- **jsdom could not have found this**, and still cannot pin it: no layout, no
+  scroll anchoring, no real scroll-event timing. `bun run check` does not run
+  the browser test (OW-49).
+
 ## Still unverified
 
 Tracked as rows in `WORKSTREAMS.md`'s Open work list, not restated here:
