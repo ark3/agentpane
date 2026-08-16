@@ -23,14 +23,19 @@ closed rows carry long close notes and drown the open ones. Then wait.
 2. **Dispatch.** One subagent, its own worktree, model chosen per row. Open by
    telling it to read `CLAUDE.md` — it does not inherit it. Then the row's
    grounding and intent inline: paths, symbols, the test invocation, what done
-   looks like. Do not send it to read WORKSTREAMS.
+   looks like. Do not send it to read WORKSTREAMS. Say outright that it commits
+   on its worktree's own branch and cannot commit on `main`.
 3. **Review.** Read the diff yourself. No review subagents, and never
    `/code-review ultra` here — it has cost a full budget window. Green tests
    are not the finding. Look for work beyond what the row asked (the row is the
    scope — delete the extra), drift from the agreed spec where the row named
    one, and tests that pass without having been shown to fail first.
-4. **Land.** `bun run check`, commit, then move the row out of WORKSTREAMS'
-   Open work list into `docs/CLOSED.md`, appending its sha and the evidence.
+4. **Land.** `git cherry-pick` the subagent's commit — not `git merge`, history
+   on `main` is linear. Then `git commit --amend` for whatever review changed;
+   a bare cherry-pick lands the version review rejected. `bun run check`,
+   `git worktree remove`, `git branch -D`, then move the row out of
+   WORKSTREAMS' Open work list into `docs/CLOSED.md`, appending its sha and the
+   evidence.
 5. **Hand back.** Say what changed and how to see it — what to run, what to
    look at, what would count as working. Then stop.
 

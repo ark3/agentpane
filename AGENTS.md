@@ -35,8 +35,10 @@ layout, scroll anchoring, or real scroll-event timing.
 
 ## Landing work
 
-- Commit directly on `main` as the work is done, small and single-purpose. No
-  branch, no PR. Never `git push` unless asked by name.
+- The session agent commits directly on `main` as the work is done, small and
+  single-purpose. No branch, no PR. A dispatched subagent cannot — it is on its
+  own worktree's branch, so it commits there and the session agent cherry-picks
+  that onto `main`. Never `git push` unless asked by name.
 - Work items live only in `docs/WORKSTREAMS.md` and `docs/CLOSED.md`, not in
   GitHub issues or any other external tracker.
 - A finding that lives only in a transcript dies with the session. A doc defect:
