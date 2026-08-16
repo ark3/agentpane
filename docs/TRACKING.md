@@ -109,7 +109,23 @@ change becomes a rename, and the syntax is unpleasant), the `tmp/`-then-rename
 delivery protocol (git already provides atomicity), and the `new/`/`cur/`
 split (no analogue worth having).
 
-### Tool surface
+## Tooling, which is a separate item
+
+The format above lands with none of this written. Closing becomes `git mv` plus
+an append to a short file — already fewer moves than today's string surgery
+against two 30KB ones — so the storage change collects most of the measured
+cost win on its own. That makes these two items, not one: migrate the format,
+live with it, and let that evidence decide which subcommand is worth writing,
+in what order, and whether any of them is. Deciding both at once forces a
+judgement about tooling before there is any experience of the storage to base
+it on.
+
+One real consequence of the split, worth seeing before choosing it: `ow list`
+is what replaces the scannable table, so between the format landing and the
+tool existing there is no single view of open work — `ls docs/work/open/` and
+`grep` are the interim, or a generated index stays committed until `ow list`
+exists and then stops being. That interim is the cost of separating them, and
+it is bounded and reversible, which is why it is worth paying.
 
 Small, because the storage does most of the work:
 
@@ -125,14 +141,18 @@ part worth a human; placement is the part worth a script.
 
 ## Open questions
 
-1. **Build it, or adopt beads?** The sketch above converges on roughly what
-   beads is, which makes this a live comparison rather than the settled thing
-   an earlier draft of this reasoning assumed. Bespoke buys a ~100-line tool
-   with no dependency and full control of the format; beads buys a dependency
-   plus a query layer and a real dependency graph, already written. The owner's
-   position on 2026-08-15 was that a small bespoke one is itself a hobby
-   project worth having, which is a legitimate reason and should be recorded as
-   the reason if that is the choice.
+1. **Build it, or adopt beads — which is two questions, not one.** The sketch
+   above converges on roughly what beads is, which makes this a live comparison
+   rather than the settled thing an earlier draft of this reasoning assumed.
+   But format and tooling each choose independently, and beads is the option
+   that couples them: adopting it settles both at once, which is most of what
+   adopting it means. Bespoke buys files this project controls outright plus a
+   ~100-line tool with no dependency; beads buys a dependency, a query layer
+   and a real dependency graph, already written. The owner's position on
+   2026-08-15 was that a small bespoke one is itself a hobby project worth
+   having, which is a legitimate reason and should be recorded as the reason if
+   that is the choice. Settle the format first: it is the half carrying
+   measured cost behind it, and it is the half that constrains the other.
 2. **Is the index committed?** Recommendation: no. A committed summary of the
    rows is a hand-maintained summary's twin and drifts the moment someone
    closes a row without regenerating — which is exactly OW-53. `ow list` prints
