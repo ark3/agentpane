@@ -22,7 +22,7 @@ everything still outstanding. If you change what is true, change it here.
 | transport | **done, verified** offline and through the live REST/SSE path on both backends | main |
 | renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | main |
 | codex-adapter | **done, fixture and live-smoke verified**; the final review's lifecycle findings are fixed | main |
-| client-shell | **offline verified, and hand-tested live in a browser (still no automated DOM test — OW-24).** Opened by hand on 2026-08-12: the layout defect in OW-26 made it impractical to test; OW-26 is now fixed, and of the defects it exposed, OW-27, OW-28, OW-30, OW-31, and OW-36 are fixed; OW-29 is now fixed too, closed with OW-39. OW-39's own startup auto-select regressed the live app with an infinite loop on load; that is fixed and closed with OW-41, which also added the first test that drives `App` against a controller publishing the way the real one does. A second live run on 2026-08-14 produced OW-43..OW-47; of those, OW-43, OW-44, OW-45, OW-46 and OW-47 are all now fixed, leaving OW-42 open. OW-47 (autoscroll decay) closed on 2026-08-15 against the repo's **first browser test** — `e2e/`, Playwright, `bun run test:browser` — which is a vehicle for that one defect and does not discharge OW-24; it also does not run under `bun run check` (OW-49). | main |
+| client-shell | **offline verified, and hand-tested live in a browser** (open: OW-24, OW-42, OW-48, OW-49, OW-56) | main |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
 merge — and its largest file, the 293-line process shell, had no tests at all
