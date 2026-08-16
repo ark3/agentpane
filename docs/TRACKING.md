@@ -109,6 +109,42 @@ change becomes a rename, and the syntax is unpleasant), the `tmp/`-then-rename
 delivery protocol (git already provides atomicity), and the `new/`/`cur/`
 split (no analogue worth having).
 
+### Staying greppable, which is what makes the interim survivable
+
+Until `ow list` exists the list *is* a `grep`, so the format has to earn that
+rather than assume it. Three constraints, each measured against a throwaway
+prototype on 2026-08-16 rather than reasoned about:
+
+- **The headline is the first body line, `# `-prefixed, and never wraps.**
+  Every row today is prose wrapped at eighty columns; a wrapped headline yields
+  half a title. Body subheadings therefore start at `##`, which keeps `^# `
+  matching exactly once per file — confirmed against a body containing both a
+  `##` subheading and a mid-sentence `# `.
+- **Frontmatter fields are one-line flat scalars.** No block scalars, or
+  `^kind: ` stops matching and filtering by kind needs a parser.
+- **The command must not depend on `grep`'s output order.** Two independent
+  reasons, both reproduced: shell glob order is lexicographic, so `OW-10.md`
+  sorts before `OW-2.md`; and in an agent shell `grep` is a function routing to
+  ugrep, which searches files in parallel and returned a *different* order on
+  each of three consecutive runs. Piping to `sort -V` fixes both and was stable
+  across three runs under each of GNU grep 3.12 and ugrep 7.5.0.
+
+So the interim list is one line, and the kind filter another:
+
+```
+grep -H '^# ' docs/work/open/*.md | sort -V
+grep -l '^kind: defect' docs/work/open/*.md | sort -V
+```
+
+Ids stay unpadded (`OW-7`, not `OW-007`) because the filename *is* the id and
+every citation across the docs is plain text; padding the filename alone would
+make the two disagree. `sort -V` carries that cost instead, in one place.
+
+The other `grep` case improves outright, and is an argument for this format the
+rest of this document does not make: searching today's table for a term returns
+the entire 400-word line it appears in, which cannot be read in a terminal.
+Per-file, `grep -l` returns the ids that matched.
+
 ## Tooling, which is a separate item
 
 The format above lands with none of this written. Closing becomes `git mv` plus
