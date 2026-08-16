@@ -24,7 +24,10 @@ closed rows carry long close notes and drown the open ones. Then wait.
    telling it to read `CLAUDE.md` — it does not inherit it. Then the row's
    grounding and intent inline: paths, symbols, the test invocation, what done
    looks like. Do not send it to read WORKSTREAMS. Say outright that it commits
-   on its worktree's own branch and cannot commit on `main`.
+   on its worktree's own branch and cannot commit on `main`. Tell it to
+   `git merge --ff-only main` before starting and to report the sha it started
+   at — the harness cuts from `origin/main`, which this project never pushes
+   to, so the worktree is stale by every commit since the last push.
 3. **Review.** Read the diff yourself. No review subagents, and never
    `/code-review ultra` here — it has cost a full budget window. Green tests
    are not the finding. Look for work beyond what the row asked (the row is the

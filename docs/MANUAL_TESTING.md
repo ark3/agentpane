@@ -310,6 +310,45 @@ Two findings worth keeping:
   scroll anchoring, no real scroll-event timing. `bun run check` does not run
   the browser test (OW-49).
 
+## Observed worktree base for dispatched subagents (OW-58)
+
+Recorded 2026-08-16 from two dispatched worktrees in the same session, each
+measured before the agent had edited anything. Not an application test: what is
+under test is the harness that cuts the worktree.
+
+Reproduce, first thing in a dispatched worktree:
+
+```bash
+git rev-parse HEAD main origin/main origin/HEAD
+git rev-list --count HEAD..main
+git reflog show "$(git branch --show-current)" | tail -1
+```
+
+| Run | Worktree `HEAD` at start | Local `main` | Behind |
+|---|---|---|---|
+| 1 (landed `9b786a6`) | `9ad0a6d` | `c04f26c` | 19 |
+| 2 (this record) | `9ad0a6d` | `cda74e6` | 21 |
+
+`origin/main` and `origin/HEAD` both point at `9ad0a6d`. That is what makes the
+base identifiable rather than merely old: run 2 started at the same sha as run
+1, though `main` had moved on two commits in between. The branch's own reflog
+says it outright — its oldest entry reads `branch: Created from origin/main`,
+which is the mechanism stated rather than inferred from the shas.
+
+The base is the **remote tracking ref** — not local `main`, and not the parent
+session's HEAD. `AGENTS.md` forbids `git push` unless asked by name, so
+`origin/main` is frozen at whatever was last pushed and the gap grows without
+bound; it stood at 21 commits at the time of writing. Run 1 paid for it: the
+line numbers its prompt cited were off by six against the tree it was given.
+
+This accounts for the two earlier runs recorded as cut behind `main` without
+needing the hypothesis that the parent session held a stale HEAD.
+
+The fix landed alongside: `/execute`'s dispatch step now requires the prompt to
+tell the subagent to fast-forward to `main` before starting and to report the
+sha it started at. Keeping `origin/main` fresh by pushing was rejected — the
+never-push rule forbids it.
+
 ## Still unverified
 
 Tracked as rows in `WORKSTREAMS.md`'s Open work list, not restated here:
