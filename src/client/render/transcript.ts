@@ -64,3 +64,45 @@ export function buildTranscript(messages: AgentMessage[]): TranscriptView {
 
 	return { entries, results, lastIndex: entries[entries.length - 1]?.index ?? -1 };
 }
+
+/**
+ * Reading view (OW-51): the same transcript with the tool chrome elided --
+ * tool results, tool calls, thinking -- so the prose can be scrolled back
+ * through while the session is still running.
+ *
+ * It filters a *built* view rather than the raw messages, and that is the
+ * whole point of the signature. `TranscriptEntry.index` is a position in the
+ * original `messages` array, and follow mode finds its anchor in the DOM by
+ * exactly that number (`App.svelte`'s `reconcile`, via `[data-index]`).
+ * Filtering keeps those indices; re-deriving them from the condensed array
+ * would renumber every entry after an elision and strand the anchor. The
+ * anchor is always a user message, which is never elided.
+ */
+export function condense(view: TranscriptView): TranscriptView {
+	const entries: TranscriptEntry[] = [];
+
+	for (const entry of view.entries) {
+		const message = entry.message;
+		if (message.role === "toolResult") continue; // orphans included: it is all tool chrome
+		if (message.role !== "assistant") {
+			entries.push(entry);
+			continue;
+		}
+
+		const content = message.content.filter(
+			(block) => block.type !== "toolCall" && block.type !== "thinking",
+		);
+		// A turn that was only tool calls and thinking has nothing left to read;
+		// left in it renders an empty article, or -- if it is the streaming one
+		// -- a bare cursor, and reading view carries no liveness cue by design.
+		// A failed or aborted turn is the exception: its banner is not tool
+		// chrome, and dropping it would hide that the turn ended badly.
+		const banner = message.stopReason === "error" || message.stopReason === "aborted";
+		if (content.length === 0 && !banner) continue;
+
+		// Same key, so toggling reading view updates the surviving DOM in place.
+		entries.push({ ...entry, message: { ...message, content } });
+	}
+
+	return { entries, results: view.results, lastIndex: entries[entries.length - 1]?.index ?? -1 };
+}

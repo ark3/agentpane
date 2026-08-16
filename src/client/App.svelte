@@ -22,6 +22,12 @@
 	const ALL_WORKSPACES = "__all__";
 	let workspace = $state(ALL_WORKSPACES);
 	let backend = $state<BackendId>("pi");
+	/**
+	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
+	 * while a session runs. One global boolean, deliberately not persisted and
+	 * not per-session -- it resets on reload like the selects above.
+	 */
+	let reading = $state(false);
 	let conversationEl: HTMLElement | undefined;
 	// $state because it is bound inside a conditional block -- Svelte updates the
 	// binding (element <-> undefined) as the composer swaps in and out.
@@ -502,6 +508,10 @@
 			</label>
 			<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New</button>
 		</div>
+		<!-- Stays visible, and inert, while previewing: a preview renders no tool
+		     chrome to elide, and a control that appears and disappears on attach
+		     is worse than one that is briefly a no-op. -->
+		<button type="button" aria-pressed={reading} onclick={() => (reading = !reading)}>Reading view</button>
 	</section>
 
 	<nav class="sessions" aria-label="Sessions">
@@ -557,7 +567,11 @@
 				<Transcript messages={previewMessageList} />
 			{/if}
 		{:else}
-			<Transcript messages={selectedSession?.messages ?? []} isStreaming={selectedSession?.isStreaming ?? false} />
+			<Transcript
+				messages={selectedSession?.messages ?? []}
+				isStreaming={selectedSession?.isStreaming ?? false}
+				{reading}
+			/>
 		{/if}
 		{#if showJumpToLatest}
 			<button type="button" class="jump-to-latest" onclick={jumpToLatest}>Jump to latest ↓</button>

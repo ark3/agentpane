@@ -2,14 +2,20 @@
 	/** The transcript is a keyed list of messages. */
 	import type { AgentMessage } from "@earendil-works/pi-agent-core";
 	import Message from "./Message.svelte";
-	import { buildTranscript } from "./transcript.ts";
+	import { buildTranscript, condense } from "./transcript.ts";
 
 	let {
 		messages = [],
 		isStreaming = false,
-	}: { messages?: AgentMessage[]; isStreaming?: boolean } = $props();
+		reading = false,
+	}: {
+		messages?: AgentMessage[];
+		isStreaming?: boolean;
+		/** Reading view (OW-51): elide tool calls, tool results and thinking. */
+		reading?: boolean;
+	} = $props();
 
-	const view = $derived(buildTranscript(messages));
+	const view = $derived(reading ? condense(buildTranscript(messages)) : buildTranscript(messages));
 </script>
 
 <div class="transcript" role="log" aria-busy={isStreaming}>

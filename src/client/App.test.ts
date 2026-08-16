@@ -13,7 +13,7 @@ import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState } from "./session-state.ts";
-import { assistant, user } from "./render/samples.ts";
+import { assistant, toolRead, user } from "./render/samples.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
@@ -557,6 +557,58 @@ describe("App", () => {
 		await tick();
 
 		expect(screen.getByText("Explain this change")).toBeInTheDocument();
+	});
+
+	it("hides tool and thinking chrome behind the reading view toggle, and restores it", async () => {
+		const controller = new FakeController(view({
+			state: state({
+				selected: piSession,
+				sessions: {
+					"pi:pi-1": { ref: piSession, messages: toolRead, isStreaming: false, seq: 1, error: null, requests: [] },
+				},
+			}),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const toggle = screen.getByRole("button", { name: "Reading view" });
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(container.querySelector("details.tool")).not.toBeNull();
+		expect(container.querySelector("details.thinking")).not.toBeNull();
+
+		await fireEvent.click(toggle);
+		await tick();
+
+		expect(toggle).toHaveAttribute("aria-pressed", "true");
+		expect(container.querySelector("details.tool")).toBeNull();
+		expect(container.querySelector("details.thinking")).toBeNull();
+		// The prose on both sides of the elided turn is exactly what survives.
+		expect(screen.getByText(/Read greeting.txt/)).toBeInTheDocument();
+		expect(screen.getByText(/quick brown fox jumps over a lazy dog/)).toBeInTheDocument();
+		// And the surviving entries still carry their *original* message index:
+		// follow mode finds its anchor by this attribute (reconcile), and the
+		// closing assistant turn is message 3 even though 1 and 2 are gone.
+		expect(container.querySelector('[data-index="0"]')?.getAttribute("data-role")).toBe("user");
+		expect(container.querySelector('[data-index="3"]')?.getAttribute("data-role")).toBe("assistant");
+
+		await fireEvent.click(toggle);
+		await tick();
+
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(container.querySelector("details.tool")).not.toBeNull();
+		expect(container.querySelector("details.thinking")).not.toBeNull();
+	});
+
+	it("keeps the reading view toggle visible while previewing", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+			preview: { ref: piSession, turns: [{ role: "user", text: "earlier question" }] },
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		// A preview has no tool chrome to elide, so the toggle is a no-op there --
+		// but a control that appears and disappears on attach is worse.
+		expect(screen.getByRole("button", { name: "Reading view" })).toBeInTheDocument();
 	});
 
 	it("restores each session's own scroll position when switching, and scrolls a fresh one to the tail", async () => {

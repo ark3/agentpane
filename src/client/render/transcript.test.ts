@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assistant, orphanResult, toolRead, toolResult, user } from "./samples.ts";
-import { buildTranscript } from "./transcript.ts";
+import { assistant, errors, orphanResult, streamingTurn, toolRead, toolResult, user } from "./samples.ts";
+import { buildTranscript, condense } from "./transcript.ts";
 
 describe("buildTranscript", () => {
 	it("indexes tool results by the call they answer", () => {
@@ -44,5 +44,80 @@ describe("buildTranscript", () => {
 		];
 		const keys = buildTranscript(messages).entries.map((e) => e.key);
 		expect(new Set(keys).size).toBe(keys.length);
+	});
+});
+
+describe("condense", () => {
+	const reading = (messages: Parameters<typeof buildTranscript>[0]) =>
+		condense(buildTranscript(messages));
+
+	it("drops tool results, including an orphan the full view keeps", () => {
+		expect(reading(orphanResult).entries.map((e) => e.message.role)).toEqual(["assistant"]);
+	});
+
+	it("drops toolCall and thinking blocks but keeps the assistant's own text", () => {
+		// streamingTurn's tail is text + a toolCall; only the text survives.
+		const entries = reading(streamingTurn).entries;
+		expect(entries.map((e) => e.message.role)).toEqual(["user", "assistant"]);
+		const tail = entries[1]!.message as { content: { type: string }[] };
+		expect(tail.content.map((block) => block.type)).toEqual(["text"]);
+	});
+
+	it("does not mutate the message it condenses", () => {
+		const messages = structuredClone(streamingTurn);
+		reading(messages);
+		expect(messages).toEqual(streamingTurn);
+	});
+
+	it("keeps every surviving entry's original index across an elision", () => {
+		// toolRead is user(0), assistant(1: thinking + toolCall), toolResult(2),
+		// assistant(3: text). Entries 1 and 2 both vanish -- *before* the last
+		// one -- so a condensed view that re-derived index from array position
+		// would call the final assistant 1. Follow mode looks its anchor up in
+		// the DOM by `[data-index]`, which is this number (App.svelte's
+		// reconcile), so re-deriving it would silently strand the anchor.
+		const view = reading(toolRead);
+		expect(view.entries.map((e) => e.index)).toEqual([0, 3]);
+		expect(view.lastIndex).toBe(3);
+	});
+
+	it("never elides the user message follow mode anchors to", () => {
+		const view = reading(toolRead);
+		const anchor = view.entries.find((e) => e.message.role === "user");
+		expect(anchor?.index).toBe(0);
+	});
+
+	it("keeps the same key for an entry it keeps, so toggling updates the DOM in place", () => {
+		const full = buildTranscript(toolRead);
+		const condensed = condense(full);
+		expect(condensed.entries.map((e) => e.key)).toEqual([full.entries[0]!.key, full.entries[2]!.key]);
+	});
+
+	it("drops an assistant turn left with nothing to read", () => {
+		// toolRead's first assistant turn is thinking + a tool call and nothing
+		// else; left in, it renders an empty article.
+		expect(reading(toolRead).entries.map((e) => e.index)).not.toContain(1);
+	});
+
+	it("drops the empty placeholder of a turn that is still starting", () => {
+		// Reading view carries no liveness cue -- the Abort button is the one
+		// that matters, and it is not in the transcript.
+		const view = reading([user("go"), assistant([], "pending")]);
+		expect(view.entries.map((e) => e.index)).toEqual([0]);
+		expect(view.lastIndex).toBe(0);
+	});
+
+	it("keeps a turn that failed or was aborted, whose banner is not tool chrome", () => {
+		// `errors` ends on assistant([], "error"): no blocks to elide, but the
+		// banner is the only report that the turn went wrong.
+		const view = reading(errors);
+		expect(view.entries.map((e) => e.index)).toEqual([0, 3]);
+		expect(reading([user("go"), assistant([], "aborted")]).entries.map((e) => e.index)).toEqual([0, 1]);
+	});
+
+	it("is empty for an empty transcript", () => {
+		const view = reading([]);
+		expect(view.entries).toEqual([]);
+		expect(view.lastIndex).toBe(-1);
 	});
 });
