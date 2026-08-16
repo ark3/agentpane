@@ -24,6 +24,14 @@ describe("Message", () => {
 		).toEqual(["assistant"]);
 	});
 
+	it("renders no role label for a user turn", () => {
+		// The filled surface and accent border on .user already mark a user
+		// turn as the reader's own (OW-52); the word "You" is redundant.
+		const { container } = render(Message, { props: { message: user("hi") } });
+		expect(container.querySelector(".who")).toBeNull();
+		expect(container.textContent).not.toContain("You");
+	});
+
 	it("accepts a user message whose content is a bare string", () => {
 		// UserMessage.content is `string | blocks[]` in pi-ai; both are real.
 		const { container } = render(Message, {

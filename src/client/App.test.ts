@@ -404,7 +404,7 @@ describe("App", () => {
 		expect(previewDom).toBe(attached.container.querySelector(".transcript")?.innerHTML);
 	});
 
-	it("labels a previewed turn like the transcript does and attributes it to the backend", async () => {
+	it("labels a previewed turn like the transcript does (no role label) and attributes it to the backend", async () => {
 		const controller = new FakeController(view({
 			state: state({ selected: codexSession, summaries: [summary(codexSession, "Stored")] }),
 			preview: {
@@ -419,8 +419,8 @@ describe("App", () => {
 		await tick();
 
 		const conversation = within(screen.getByRole("region", { name: "Conversation" }));
-		// Only the user is labelled -- the transcript has never labelled the agent.
-		expect(conversation.getByText("You")).toBeInTheDocument();
+		// Neither role is labelled -- the transcript never labels a turn (OW-52).
+		expect(conversation.queryByText("You")).not.toBeInTheDocument();
 		expect(conversation.queryByText("Agent")).not.toBeInTheDocument();
 		// The backend id is the one identity a preview knows, and it shows.
 		expect(container.querySelector("[data-role='assistant'] .meta")?.textContent).toContain("codex");

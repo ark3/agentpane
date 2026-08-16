@@ -41,7 +41,6 @@
 
 {#if message.role === "user"}
 	<article class="msg user" data-role="user" data-index={index}>
-		<span class="who">You</span>
 		<div class="body">
 			{#each userBlocks(message.content) as block, i (i)}
 				<Block {block} {results} />
@@ -126,14 +125,6 @@
 		border: 1px solid var(--ap-border);
 		border-left: 2px solid var(--ap-accent);
 		border-radius: var(--ap-radius-lg);
-	}
-
-	.who {
-		font-size: var(--ap-text-2xs);
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--ap-fg-subtle);
 	}
 
 	.banner {
