@@ -122,18 +122,21 @@ prototype on 2026-08-16 rather than reasoned about:
   `##` subheading and a mid-sentence `# `.
 - **Frontmatter fields are one-line flat scalars.** No block scalars, or
   `^kind: ` stops matching and filtering by kind needs a parser.
-- **The command must not depend on `grep`'s output order.** Two independent
-  reasons, both reproduced: shell glob order is lexicographic, so `OW-10.md`
-  sorts before `OW-2.md`; and in an agent shell `grep` is a function routing to
-  ugrep, which searches files in parallel and returned a *different* order on
-  each of three consecutive runs. Piping to `sort -V` fixes both and was stable
-  across three runs under each of GNU grep 3.12 and ugrep 7.5.0.
+- **The command must pin its own order, whatever the searcher.** Two
+  independent reasons, both reproduced: lexicographic order is the wrong order,
+  putting `OW-10` before `OW-2`; and every searcher on this machine walks files
+  in parallel, so output order is not stable run to run. ripgrep 15.2.0 gave
+  five different orders in five consecutive runs; ugrep 7.5.0 — what a bare
+  `grep` resolves to in an agent shell, via an injected shell function — gave
+  three in three. `rg --sort path` is a trap rather than a fix: it buys
+  determinism and keeps the wrong order. Piping to `sort -V` gets both, and was
+  stable across repeated runs under ripgrep, ugrep and GNU grep 3.12 alike.
 
 So the interim list is one line, and the kind filter another:
 
 ```
-grep -H '^# ' docs/work/open/*.md | sort -V
-grep -l '^kind: defect' docs/work/open/*.md | sort -V
+rg -N '^# ' docs/work/open | sort -V
+rg -l '^kind: defect' docs/work/open | sort -V
 ```
 
 Ids stay unpadded (`OW-7`, not `OW-007`) because the filename *is* the id and
