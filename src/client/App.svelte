@@ -3,7 +3,7 @@
 	import { sessionKey, type BackendId, type SessionSummary } from "$shared/protocol.ts";
 	import type { AgentpaneController, ControllerView } from "./controller.ts";
 	import Transcript from "./render/Transcript.svelte";
-	import Markdown from "./render/Markdown.svelte";
+	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
 
 	let { controller }: { controller: AgentpaneController } = $props();
@@ -88,7 +88,10 @@
 	);
 	/** Whether the pane is showing a read-only preview rather than a live/attached transcript. */
 	const previewing = $derived(view.preview !== null);
-	const previewTurns = $derived(view.preview?.turns ?? []);
+	/** The preview's text turns as messages, so the one Transcript renders both (OW-50). */
+	const previewMessageList = $derived(
+		view.preview ? previewMessages(view.preview.turns, view.preview.ref.backend) : [],
+	);
 	/** The summary for the currently selected session, for its workspace (New session inherits it). */
 	const selectedSummary = $derived(
 		view.state.selected === null
@@ -544,18 +547,15 @@
 	<section class="conversation" aria-label="Conversation" bind:this={conversationEl} onscroll={handleConversationScroll}>
 		{#if previewing}
 			<!-- Read-only, non-attaching (OW-38/OW-39): text turns only, no streaming,
-			     no tool/thinking chrome -- deliberately not a claim of live parity. -->
-			<div class="preview" role="log">
-				{#each previewTurns as turn, i (i)}
-					<article class="preview-turn" data-role={turn.role}>
-						<span class="preview-role">{turn.role === "user" ? "You" : "Agent"}</span>
-						<Markdown text={turn.text} />
-					</article>
-				{/each}
-				{#if previewTurns.length === 0}
-					<p class="preview-empty">This session has no readable transcript to preview.</p>
-				{/if}
-			</div>
+			     no tool/thinking chrome -- deliberately not a claim of live parity.
+			     The empty case keeps its own wording rather than going through
+			     Transcript: the server's text-only extraction can come up empty on a
+			     session that has plenty in it, which "No messages yet" would misreport. -->
+			{#if previewMessageList.length === 0}
+				<p class="preview-empty">This session has no readable transcript to preview.</p>
+			{:else}
+				<Transcript messages={previewMessageList} />
+			{/if}
 		{:else}
 			<Transcript messages={selectedSession?.messages ?? []} isStreaming={selectedSession?.isStreaming ?? false} />
 		{/if}

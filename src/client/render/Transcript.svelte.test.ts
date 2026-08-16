@@ -41,6 +41,28 @@ describe("Message", () => {
 		expect(meta).toMatch(/\d+\s*tok/);
 	});
 
+	it("still names the model of a finished turn that reports no usage", () => {
+		// A synthesised preview turn (OW-50) has no usage, and neither does a real
+		// turn whose provider reported none -- the model is known either way.
+		const { container } = render(Message, {
+			props: {
+				message: assistant([{ type: "text", text: "done" }], "stop", {
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+				}),
+			},
+		});
+		const meta = container.querySelector(".meta")?.textContent ?? "";
+		expect(meta).toContain("example-model");
+		expect(meta).not.toMatch(/tok/);
+	});
+
 	it("shows no cost while the turn is still pending", () => {
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "..." }], "pending") },

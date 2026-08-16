@@ -182,19 +182,8 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .attach button { width: 100%; border-color: var(--ap-accent); color: var(--ap-accent); }
 .abort { color: var(--ap-danger); }
 
-/* Read-only preview turns (OW-39): plain role-labelled text, no live chrome. */
-.preview { display: flex; flex-direction: column; gap: var(--ap-space-5); padding: var(--ap-space-5) var(--ap-space-4); }
-.preview-turn { display: flex; flex-direction: column; gap: var(--ap-space-2); min-width: 0; }
-.preview-turn[data-role="user"] {
-	align-self: flex-start;
-	max-width: min(100%, 62ch);
-	padding: var(--ap-space-3) var(--ap-space-4);
-	background: var(--ap-surface-raised);
-	border: 1px solid var(--ap-border);
-	border-left: 2px solid var(--ap-accent);
-	border-radius: var(--ap-radius-lg);
-}
-.preview-role { font-size: var(--ap-text-2xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ap-fg-subtle); }
+/* A preview's turns render through Transcript (OW-50), which brings its own
+   styling; only the empty case is the preview's own. */
 .preview-empty { margin: 0; color: var(--ap-fg-subtle); font-size: var(--ap-text-sm); padding: var(--ap-space-5) var(--ap-space-4); }
 .error {
 	display: flex;

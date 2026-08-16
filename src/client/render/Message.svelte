@@ -68,12 +68,19 @@
 			<p class="banner aborted" role="status">Aborted.</p>
 		{/if}
 
-		{#if message.stopReason !== "pending" && message.usage.totalTokens > 0}
+		<!-- The model and the accounting are separate facts: a finished turn can
+		     report no usage (a synthesised preview turn, or a provider that sends
+		     none) and still know which model answered. -->
+		{#if message.stopReason !== "pending" && (message.model || message.usage.totalTokens > 0)}
 			<p class="meta">
-				<span>{message.model}</span>
-				<span>{compact.format(message.usage.totalTokens)} tok</span>
-				{#if message.usage.cost.total > 0}
-					<span>${message.usage.cost.total.toFixed(4)}</span>
+				{#if message.model}
+					<span>{message.model}</span>
+				{/if}
+				{#if message.usage.totalTokens > 0}
+					<span>{compact.format(message.usage.totalTokens)} tok</span>
+					{#if message.usage.cost.total > 0}
+						<span>${message.usage.cost.total.toFixed(4)}</span>
+					{/if}
 				{/if}
 			</p>
 		{/if}

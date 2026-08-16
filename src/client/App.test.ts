@@ -2,9 +2,16 @@ import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
-import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
+import {
+	sessionKey,
+	type BackendId,
+	type SessionPreviewTurn,
+	type SessionRef,
+	type SessionSummary,
+} from "$shared/protocol.ts";
 import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
+import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState } from "./session-state.ts";
 import { assistant, user } from "./render/samples.ts";
 
@@ -351,6 +358,88 @@ describe("App", () => {
 		await tick();
 		await tick();
 		expect(screen.getByLabelText("Prompt")).toHaveFocus();
+	});
+
+	it("renders a preview through the same transcript DOM as an attached session", async () => {
+		// The point of mapping preview turns to messages (OW-50): one renderer,
+		// so the two paths cannot drift. Same content in, same DOM out.
+		const turns: SessionPreviewTurn[] = [
+			{ role: "user", text: "earlier question" },
+			{ role: "assistant", text: "earlier answer" },
+		];
+		const previewed = render(App, {
+			props: {
+				controller: new FakeController(view({
+					state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+					preview: { ref: piSession, turns },
+				})),
+			},
+		});
+		await tick();
+		const previewDom = previewed.container.querySelector(".transcript")?.innerHTML;
+
+		const attached = render(App, {
+			props: {
+				controller: new FakeController(view({
+					state: state({
+						selected: piSession,
+						summaries: [summary(piSession, "Stored")],
+						sessions: {
+							[sessionKey(piSession)]: {
+								ref: piSession,
+								messages: previewMessages(turns, piSession.backend),
+								isStreaming: false,
+								seq: 1,
+								error: null,
+								requests: [],
+							},
+						},
+					}),
+				})),
+			},
+		});
+		await tick();
+
+		expect(previewDom).toBeTruthy();
+		expect(previewDom).toBe(attached.container.querySelector(".transcript")?.innerHTML);
+	});
+
+	it("labels a previewed turn like the transcript does and attributes it to the backend", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: codexSession, summaries: [summary(codexSession, "Stored")] }),
+			preview: {
+				ref: codexSession,
+				turns: [
+					{ role: "user", text: "earlier question" },
+					{ role: "assistant", text: "earlier answer" },
+				],
+			},
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		const conversation = within(screen.getByRole("region", { name: "Conversation" }));
+		// Only the user is labelled -- the transcript has never labelled the agent.
+		expect(conversation.getByText("You")).toBeInTheDocument();
+		expect(conversation.queryByText("Agent")).not.toBeInTheDocument();
+		// The backend id is the one identity a preview knows, and it shows.
+		expect(container.querySelector("[data-role='assistant'] .meta")?.textContent).toContain("codex");
+	});
+
+	it("keeps its own wording for a session with no readable transcript", async () => {
+		// More accurate than the transcript's "No messages yet": the server's
+		// text-only extraction can come up empty on a session with plenty in it.
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+			preview: { ref: piSession, turns: [] },
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		expect(container.querySelector(".preview-empty")?.textContent).toBe(
+			"This session has no readable transcript to preview.",
+		);
+		expect(container.querySelector(".transcript")).toBeNull();
 	});
 
 	it("orders sessions by recency, most recently updated first", () => {
