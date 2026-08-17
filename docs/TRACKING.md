@@ -243,16 +243,22 @@ still tells the truth.
 This is where the volume is, and the per-row transform is close to an ideal
 fan-out: 67 independent items, mechanically constrained, checkable afterwards.
 **Farm it to small subagents rather than pulling 67 row bodies through one
-context** (owner, 2026-08-17) — the orchestrator then holds ids and pass/fail
-rather than prose. Two things keep the results one house style instead of
+context** (owner, 2026-08-17; read to the ask two paragraphs below before acting
+on this) — the orchestrator then holds ids and pass/fail rather than prose. Two things keep the results one house style instead of
 sixty-seven: convert three or four rows first and pass that output to every
 later agent as the worked example, and give them all one identical spec rather
 than a paraphrase each. Use a single model tier throughout — the long rows
 (OW-54, OW-59 and OW-63 run 500-675 words, with nested bold and code spans) are
 where a too-small model mangles markup, and mixing tiers buys complexity for a
-saving that no longer matters. The executing session may need to be told to fan
-out in as many words, since spawning subagents is not something it reaches for
-uninvited.
+saving that no longer matters.
+
+**Your first action in this phase is to ask, not to convert.** You may not be
+permitted to spawn subagents or a workflow on your own initiative, and should
+not assume you are, so the fan-out happens only if you request it and the owner
+grants it. He set it up this way on 2026-08-17
+precisely so that a fresh agent would prompt him for it rather than quietly
+grind through 67 rows alone — so ask before converting a single row. If he
+declines, convert serially and say that is what you are doing.
 
 One transform detail that corrupts silently if missed: **a cell-escaped `\|`
 becomes a literal `|`**, there being no table left to escape for. There are five
