@@ -471,10 +471,17 @@ Then check equivalence **mechanically**, before anything is deleted — this is
 the last moment the check is possible. It cannot be a substring test: the
 transform drops `~~`, unescapes `\|`, and promotes a `**bolded**` span into a
 headline, so a literal comparison fails spuriously and whoever runs it will
-weaken the check until it passes. Normalise both sides first — strip `~~` and
-`**`, unescape `\|`, collapse whitespace — then assert each row's text is
-present in its file. A throwaway script, not an eyeball: a corpus this size is
-well past where reading catches a silent drop.
+weaken the check until it passes. Normalise both sides first, and the list is
+longer than it looks: strip `~~` and `**`, unescape `\|`, collapse whitespace —
+and **on the file side additionally strip the frontmatter block and the leading
+`# `**, and allow the one stranded connector promotion drops. Those last three
+exist only in the file, so a check implementing the first four alone fails all
+sixty-nine and its reader starts weakening it, which is the trap this paragraph
+is here to prevent. Then assert each row's text is present in its file, and
+assert the Kind and Where cells against the frontmatter too — it is checking
+`where:` that catches a mangled quote, on the 52 rows where the value cannot be
+written unquoted at all. A throwaway script, not an eyeball: a corpus this size
+is well past where reading catches a silent drop.
 
 **Phase 2 — rewrite the process docs.** `AGENTS.md` and both skills describe the
 old storage as procedure, and they are the loaded surface every session reads.
