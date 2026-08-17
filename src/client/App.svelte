@@ -66,8 +66,22 @@
 	let lastScrollKey: string | null = null;
 	let suppressScrollHandling = false;
 	let followFrame: number | null = null;
-	/** Shows whenever scrolled up from the true bottom, streaming or not. */
-	let showJumpToLatest = $state(false);
+	/**
+	 * Which right-rail segments are inert (OW-60). The rail itself is always
+	 * present -- it lives outside the scroller, so unlike the button it replaced
+	 * it cannot scroll away from the reader -- and only its four segments come
+	 * and go, by going disabled.
+	 */
+	let navDisabled = $state({ start: true, prev: true, next: true, end: true });
+	/** Sub-pixel scroll positions are routine; treat this much as "already there". */
+	const NAV_SLACK_PX = 4;
+	/** 16x16 chevron glyphs for the rail, drawn as stroked polylines. */
+	const NAV_ICONS = {
+		start: ["M4 7.5 L8 3.5 L12 7.5", "M4 12.5 L8 8.5 L12 12.5"],
+		prev: ["M4 10 L8 6 L12 10"],
+		next: ["M4 6 L8 10 L12 6"],
+		end: ["M4 3.5 L8 7.5 L12 3.5", "M4 8.5 L8 12.5 L12 8.5"],
+	} as const;
 
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
@@ -185,7 +199,18 @@
 	}
 
 	function applyScrollTop(el: HTMLElement, value: number): void {
-		const clamped = Math.max(0, value);
+		// Clamped to the scroller's *real* range, not just at zero, because the
+		// no-op guard below is only sound if the assignment that follows it
+		// actually moves. The browser clamps to that range regardless, so an
+		// over-range value can pass the guard, change nothing, and fire no
+		// `scroll` event -- stranding `suppressScrollHandling` armed for an event
+		// that never comes, which then swallows the reader's next genuine scroll.
+		// Measured in a real browser (OW-60): the session-switch effect below
+		// runs `applyScrollTop(el, el.scrollHeight)`, which is always a full
+		// clientHeight past the bottom, so attaching a session left the flag set;
+		// a subsequent 4960px scroll fired its event and was discarded, and the
+		// nav rail kept reporting the reader was still at the top.
+		const clamped = Math.max(0, Math.min(value, el.scrollHeight - el.clientHeight));
 		// No-op guard matters here: assigning scrollTop fires a native `scroll`
 		// event even when the value does not change, which would arm the
 		// suppress flag for an event that may never come (or that arrives late
@@ -205,9 +230,58 @@
 		return anchorEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
 	}
 
-	function updateJumpAffordance(el: HTMLElement): void {
-		const SLACK_PX = 4;
-		showJumpToLatest = el.scrollHeight - el.scrollTop - el.clientHeight > SLACK_PX;
+	/**
+	 * The user turns in document order -- the only candidates the rail steps
+	 * between. Assistant and tool messages carry `data-role` too, and however
+	 * many of them sit between two user turns they must not affect the step, so
+	 * the selector names the role rather than walking siblings. `transcript.ts`
+	 * preserves the original `data-index` even in reading view precisely so this
+	 * stays true there.
+	 */
+	function userTurns(el: HTMLElement): HTMLElement[] {
+		return Array.from(el.querySelectorAll<HTMLElement>('[data-role="user"]'));
+	}
+
+	/**
+	 * The pivot is the first user turn at or below the viewport top; `prev` is the
+	 * turn before it, `next` the turn after it. Deliberately not "the most
+	 * visible turn": each jump parks its target's top edge on the viewport top,
+	 * which makes that target the next pivot, so stepping from the pivot is what
+	 * makes repeated clicks walk the transcript one user turn at a time in either
+	 * direction. When every user turn is above the viewport top there is no
+	 * pivot, and the last turn is the only place `prev` can go.
+	 */
+	function navTargets(el: HTMLElement): { prev: HTMLElement | null; next: HTMLElement | null } {
+		const turns = userTurns(el);
+		const pivot = turns.findIndex((turn) => anchorTop(el, turn) >= el.scrollTop - NAV_SLACK_PX);
+		if (pivot === -1) return { prev: turns[turns.length - 1] ?? null, next: null };
+		return { prev: turns[pivot - 1] ?? null, next: turns[pivot + 1] ?? null };
+	}
+
+	/**
+	 * A direction is dead when the scroller is already hard against that end, or
+	 * when there is no user turn to step to that way.
+	 *
+	 * The end conditions are not redundant for `prev`/`next`. The last screenful
+	 * can hold user turns the scroller can never bring to its top, and there
+	 * `next` would otherwise stay live while clicking it moved nothing: the jump
+	 * clamps to the bottom, which is where it already was, so the pivot never
+	 * advances. `prev` takes the mirror condition for symmetry, though at the top
+	 * there is provably no earlier turn anyway.
+	 *
+	 * Must run from every path that moves the scroller or changes the transcript:
+	 * `reconcile`, `handleConversationScroll`, and `navigate` itself.
+	 */
+	function updateNavState(el: HTMLElement): void {
+		const atTop = el.scrollTop <= NAV_SLACK_PX;
+		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NAV_SLACK_PX;
+		const { prev, next } = navTargets(el);
+		navDisabled = {
+			start: atTop,
+			prev: atTop || prev === null,
+			next: atBottom || next === null,
+			end: atBottom,
+		};
 	}
 
 	/**
@@ -231,7 +305,7 @@
 				applyScrollTop(el, Math.min(bottom, anchorTop(el, anchorEl)));
 			}
 		}
-		updateJumpAffordance(el);
+		updateNavState(el);
 	}
 
 	/** Same coalescing Block.svelte uses for its markdown throttle (D5): one pending frame while streaming, synchronous once settled. */
@@ -265,20 +339,39 @@
 		state.top = el.scrollTop;
 		state.anchorIndex = null; // a manual scroll always disengages follow
 		sessionScroll.set(key, state);
-		updateJumpAffordance(el);
+		updateNavState(el);
 	}
 
-	/** Snaps once to the true bottom; never re-arms follow -- only a fresh submit does that. */
-	function jumpToLatest(): void {
+	/**
+	 * The one mover behind all four rail segments. `start`/`end` are the true top
+	 * and bottom of the scroller, not the first/last user turn. Every one of them
+	 * is a manual reading action, so -- exactly like a manual scroll, and like the
+	 * jump-to-latest button this rail replaces -- it disengages follow and never
+	 * re-arms it. Only a fresh submit arms follow.
+	 */
+	function navigate(to: "start" | "prev" | "next" | "end"): void {
 		const el = conversationEl;
 		const ref = view.state.selected;
 		if (!el || !ref) return;
+		let target: number;
+		if (to === "start") target = 0;
+		else if (to === "end") target = el.scrollHeight - el.clientHeight;
+		else {
+			const node = navTargets(el)[to];
+			if (!node) return;
+			target = anchorTop(el, node);
+		}
 		const key = sessionKey(ref);
 		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
 		state.anchorIndex = null;
+		applyScrollTop(el, target);
+		// `applyScrollTop` suppresses the scroll handler, so this is the only
+		// chance to keep the session's remembered position (restored on switch)
+		// from going stale. Read back rather than reusing `target`: the browser
+		// clamps to the real scroll range.
+		state.top = el.scrollTop;
 		sessionScroll.set(key, state);
-		applyScrollTop(el, el.scrollHeight - el.clientHeight);
-		updateJumpAffordance(el);
+		updateNavState(el);
 	}
 
 	/** On submit, arm follow-mode for whatever message this submission produces. */
@@ -307,7 +400,7 @@
 			reconcile();
 		} else {
 			applyScrollTop(el, state ? state.top : el.scrollHeight);
-			updateJumpAffordance(el);
+			updateNavState(el);
 		}
 	});
 
@@ -482,6 +575,14 @@
 	<title>agentpane</title>
 </svelte:head>
 
+<!-- `aria-hidden` throughout: the rail's buttons are icon-only, so their whole
+     accessible name is the `aria-label` on the button. -->
+{#snippet navIcon(paths: readonly string[])}
+	<svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+		{#each paths as d (d)}<path {d} />{/each}
+	</svg>
+{/snippet}
+
 <main class="shell">
 	<header class="masthead">
 		<h1>agentpane</h1>
@@ -573,10 +674,26 @@
 				{reading}
 			/>
 		{/if}
-		{#if showJumpToLatest}
-			<button type="button" class="jump-to-latest" onclick={jumpToLatest}>Jump to latest ↓</button>
-		{/if}
 	</section>
+
+	<!-- Outside `.conversation` on purpose (OW-60). Inside the scroller it would
+	     scroll away with the very content it navigates, would sit over the
+	     transcript, and would count toward the `scrollHeight` follow mode
+	     measures. As a grid sibling it does none of the three. -->
+	<nav class="rail" aria-label="Transcript navigation">
+		<button type="button" aria-label="Jump to start" disabled={navDisabled.start} onclick={() => navigate("start")}>
+			{@render navIcon(NAV_ICONS.start)}
+		</button>
+		<button type="button" aria-label="Previous user message" disabled={navDisabled.prev} onclick={() => navigate("prev")}>
+			{@render navIcon(NAV_ICONS.prev)}
+		</button>
+		<button type="button" aria-label="Next user message" disabled={navDisabled.next} onclick={() => navigate("next")}>
+			{@render navIcon(NAV_ICONS.next)}
+		</button>
+		<button type="button" aria-label="Jump to end" disabled={navDisabled.end} onclick={() => navigate("end")}>
+			{@render navIcon(NAV_ICONS.end)}
+		</button>
+	</nav>
 
 	{#if previewing}
 		<div class="prompt attach">

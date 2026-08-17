@@ -13,7 +13,7 @@ import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState } from "./session-state.ts";
-import { assistant, toolRead, user } from "./render/samples.ts";
+import { assistant, toolRead, toolResult, user } from "./render/samples.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
@@ -199,6 +199,19 @@ function mockContentTop(el: HTMLElement, scrollParent: HTMLElement, contentTop: 
 		value: () => rect(contentTop - scrollParent.scrollTop),
 		configurable: true,
 	});
+}
+
+/**
+ * Fix each rendered user turn at a known position within the scrollable content
+ * (OW-60). The rail's target selection is entirely a function of where the user
+ * turns sit relative to `scrollTop`, and jsdom puts every one of them at 0, so
+ * without this there is no geometry to select against at all.
+ */
+function placeUserTurns(el: HTMLElement, tops: number[]): HTMLElement[] {
+	const turns = Array.from(el.querySelectorAll<HTMLElement>('[data-role="user"]'));
+	if (turns.length !== tops.length) throw new Error(`expected ${tops.length} user turns, rendered ${turns.length}`);
+	turns.forEach((turn, i) => mockContentTop(turn, el, tops[i]!));
+	return turns;
 }
 
 /** App.svelte's follow-mode reconciliation is rAF-throttled while streaming (same pattern as Block.test.ts). */
@@ -626,11 +639,15 @@ describe("App", () => {
 		el.scrollTop = 50;
 		await fireEvent.scroll(el);
 
-		// Session B has no scroll memory yet -- it lands at its own tail.
+		// Session B has no scroll memory yet -- it lands at its own tail. 200,
+		// not 700: the tail is scrollHeight - clientHeight, and `applyScrollTop`
+		// clamps to it. jsdom would have accepted the un-clamped 700 that no
+		// browser ever holds, and accepting it stranded `suppressScrollHandling`
+		// on an assignment the browser turned into a no-op (OW-60).
 		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
 		controller.publish(view({ state: state({ selected: codexSession, sessions }) }));
 		await tick();
-		expect(el.scrollTop).toBe(700);
+		expect(el.scrollTop).toBe(200);
 
 		// Switching back to A restores its remembered, scrolled-up position.
 		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
@@ -913,7 +930,132 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(400); // unchanged -- follow did not resume
 	});
 
-	it("shows a jump-to-latest affordance whenever scrolled up, streaming or not, and it snaps once without re-arming follow", async () => {
+	it("steps the rail between user turns from the first one at or below the viewport top, skipping however many assistant and tool messages sit between them", async () => {
+		// Three user turns, but seven messages: the gaps between them are filled
+		// with the assistant/tool chrome a real turn produces. A rail that
+		// stepped by message, or by DOM sibling, would land in the middle of one.
+		const messages = [
+			user("first"),
+			assistant([{ type: "toolCall", id: "c1", name: "bash", arguments: {} }], "toolUse"),
+			toolResult("c1", "bash", "output"),
+			assistant([{ type: "text", text: "an answer" }], "stop"),
+			user("second"),
+			assistant([{ type: "text", text: "another answer" }], "stop"),
+			user("third"),
+		];
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		mockScrollMetrics(el, { scrollHeight: 2600, clientHeight: 500 });
+		expect(placeUserTurns(el, [0, 1000, 2000])).toHaveLength(3);
+		// One non-user landmark per gap and then some, so "skips them" is a real
+		// claim here. Three, not four: the toolResult renders inside its
+		// toolCall's block rather than as a landmark of its own.
+		expect(el.querySelectorAll('[data-index]:not([data-role="user"])')).toHaveLength(3);
+
+		el.scrollTop = 0;
+		await fireEvent.scroll(el);
+		await tick();
+
+		// Pivot is the first user turn (top 0, at the viewport top): nothing before it.
+		await fireEvent.click(screen.getByRole("button", { name: "Next user message" }));
+		expect(el.scrollTop).toBe(1000);
+		await fireEvent.click(screen.getByRole("button", { name: "Next user message" }));
+		expect(el.scrollTop).toBe(2000);
+
+		// And back the same way -- each jump parks its target on the viewport
+		// top, so the target itself becomes the pivot for the next step.
+		await fireEvent.click(screen.getByRole("button", { name: "Previous user message" }));
+		expect(el.scrollTop).toBe(1000);
+		await fireEvent.click(screen.getByRole("button", { name: "Previous user message" }));
+		expect(el.scrollTop).toBe(0);
+	});
+
+	it("keeps the rail present at all times and disables only the directions the reader cannot go", async () => {
+		const messages = [user("first"), assistant([{ type: "text", text: "a" }], "stop"), user("second")];
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+		const rail = () => ({
+			start: screen.getByRole("button", { name: "Jump to start" }),
+			prev: screen.getByRole("button", { name: "Previous user message" }),
+			next: screen.getByRole("button", { name: "Next user message" }),
+			end: screen.getByRole("button", { name: "Jump to end" }),
+		});
+
+		// scrollHeight(2600) - clientHeight(500) = 2100, well past the last user
+		// turn at 2000: `start`/`end` are the scroller's true ends, not turns.
+		mockScrollMetrics(el, { scrollHeight: 2600, clientHeight: 500 });
+		placeUserTurns(el, [0, 2000]);
+		el.scrollTop = 0;
+		await fireEvent.scroll(el);
+		await tick();
+
+		// Hard against the top: nowhere up to go, in either sense.
+		expect(rail().start).toBeDisabled();
+		expect(rail().prev).toBeDisabled();
+		expect(rail().next).toBeEnabled();
+		expect(rail().end).toBeEnabled();
+
+		await fireEvent.click(rail().end);
+		await tick();
+		expect(el.scrollTop).toBe(2100); // the true bottom, not the last user turn's 2000.
+		expect(rail().end).toBeDisabled();
+		expect(rail().start).toBeEnabled();
+		// Every user turn is now above the viewport top, so there is no pivot and
+		// `prev` can only mean the last one; there is nothing after it.
+		expect(rail().next).toBeDisabled();
+		expect(rail().prev).toBeEnabled();
+
+		await fireEvent.click(rail().prev);
+		await tick();
+		expect(el.scrollTop).toBe(2000);
+		expect(rail().prev).toBeEnabled(); // the first turn is still above
+		expect(rail().next).toBeDisabled();
+
+		await fireEvent.click(rail().start);
+		await tick();
+		expect(el.scrollTop).toBe(0);
+		expect(rail().start).toBeDisabled();
+		expect(rail().prev).toBeDisabled();
+	});
+
+	it("disables next at the bottom even when later user turns are still below the viewport top", async () => {
+		// Two user turns inside the last screenful. The scroller cannot bring
+		// either to its top edge, so `next` would clamp straight back to where it
+		// already is -- a live control that moves nothing.
+		const messages = [user("first"), assistant([{ type: "text", text: "a" }], "stop"), user("second"), user("third")];
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		mockScrollMetrics(el, { scrollHeight: 2600, clientHeight: 500 });
+		placeUserTurns(el, [0, 2300, 2400]); // both past the 2100 the scroller stops at
+		el.scrollTop = 2100;
+		await fireEvent.scroll(el);
+		await tick();
+
+		// The pivot here is the turn at 2300 and there *is* one after it, so the
+		// "no later user turn" half of the rule does not cover this case.
+		expect(screen.getByRole("button", { name: "Next user message" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Jump to end" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Previous user message" })).toBeEnabled();
+	});
+
+	it("treats a rail jump as a manual reading action: it disengages follow and never re-arms it", async () => {
 		const messages = [user("first")];
 		const sessions = {
 			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
@@ -923,29 +1065,32 @@ describe("App", () => {
 		await tick();
 		const el = container.querySelector(".conversation") as HTMLElement;
 
-		expect(screen.queryByRole("button", { name: /jump to latest/i })).not.toBeInTheDocument();
-
 		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		placeUserTurns(el, [0]);
 		el.scrollTop = 100;
 		await fireEvent.scroll(el);
 		await tick();
-		expect(screen.getByRole("button", { name: /jump to latest/i })).toBeInTheDocument();
 
-		await fireEvent.click(screen.getByRole("button", { name: /jump to latest/i }));
+		await fireEvent.click(screen.getByRole("button", { name: "Jump to end" }));
 		expect(el.scrollTop).toBe(500); // scrollHeight(1000) - clientHeight(500): the true bottom, once.
-		await tick();
-		expect(screen.queryByRole("button", { name: /jump to latest/i })).not.toBeInTheDocument();
 
-		// More content arrives; jump-to-latest does not re-arm following -- it only ever snapped once.
+		// More content arrives, streaming. Landing on the bottom is not follow
+		// mode: only a submit arms that, and there has not been one.
+		const grown = { ...sessions["pi:pi-1"], messages: [...messages, user("second")], isStreaming: true };
 		mockScrollMetrics(el, { scrollHeight: 1400, clientHeight: 500 });
-		controller.publish(view({
-			state: state({
-				selected: piSession,
-				sessions: { "pi:pi-1": { ...sessions["pi:pi-1"], messages: [...messages, user("second")] } },
-			}),
-		}));
+		controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": grown } }) }));
 		await tick();
-		expect(el.scrollTop).toBe(500); // unchanged: no submit happened, so follow never engaged.
+		// Park the new turn far below any cap, and force the next reconcile: were
+		// follow armed on it, this would now track the tail at
+		// scrollHeight(1400) - clientHeight(500). Without this the assertion below
+		// holds for the wrong reason -- an unmocked rect reads 0, which happens to
+		// reconcile back to the position the jump already left behind.
+		mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 5000);
+		mockScrollMetrics(el, { scrollHeight: 1400, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": grown } }) }));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(500); // unchanged -- it did not track the growth.
 	});
 
 	it("submits the prompt through its form and disables an empty prompt", async () => {
