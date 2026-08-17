@@ -19,10 +19,13 @@ each cell, appending `**Fixed** in <sha>: <evidence>`, deleting the line from
 one file and inserting it in id order into the other.
 
 That shape was chosen deliberately over adopting beads, on the grounds that
-development is serialized and nothing needs assignees or concurrent claims.
-`WORKSTREAMS.md` states its own revisit condition: *"if the list starts wanting
-fields this table cannot carry — dependency edges between rows, or who holds
-what."*
+development is serialized and nothing needs assignees or concurrent claims. It
+carried its own revisit condition — *"if the list starts wanting fields this
+table cannot carry — dependency edges between rows, or who holds what"* — which
+`WORKSTREAMS.md` **no longer states in those words**: that paragraph was
+rewritten on 2026-08-17 to record instead that neither half is what fired. Do
+not go looking for the sentence; the wording above is quoted from the version
+this document was written against.
 
 ### The `OW` prefix
 
@@ -39,39 +42,51 @@ actively mislead if it still meant anything.
 
 The owner raised renaming it on 2026-08-17, wanting a prefix that generalises
 if the tooling ever serves other projects. Measured the same day, because the
-cost of a rename is the whole argument: **76 of this repo's 166 commit subjects
-name an `OW-` id** — 46% of the history — and the repo is now pushed, so
+cost of a rename is the whole argument: **80 of this repo's 172 commit subjects
+name an `OW-` id** — 47% of the history — and the repo is now pushed, so
 rewriting them is off the table. A rename orphans every one of those
-permanently. Outside the two row files there are a further ~79 citations, in
-`TRACKING.md` (37), `MANUAL_TESTING.md` (24), `DESIGN.md` (8), the two skills
-(6), `HANDOFF.md` (2) and `AGENTS.md` (2); those are mechanical.
+permanently. Outside the two row files there are a further **143 citations
+across 35 files**, and the split is the part that matters, because an earlier
+count here saw only the first half: 78 in prose (`TRACKING.md` 43,
+`MANUAL_TESTING.md` 23, `DESIGN.md` 8, `execute/SKILL.md` 2, `HANDOFF.md` 1,
+`AGENTS.md` 1, and **zero** in `README.md` and `author/SKILL.md`) and **65 in
+code comments and test names across 29 files** under `src/`, `e2e/` and
+`playwright.config.ts`. All mechanical, but the code half is the larger one and
+no criterion that stops at `docs/` sees it. Recounted 2026-08-17; these drift,
+so recount rather than cite.
 
 Two things follow. **The migration does not make a later rename cheaper or
 dearer**, so there is no now-or-never moment to force a decision at: today it
-is a `sed` across eight files, afterwards a scripted `git mv` across 67 plus
-the same `sed`. And **the generality the owner actually wants does not require
+is a `sed` across the 37 files that carry an id (the 35 above plus the two row
+files), afterwards a scripted `git mv` across one file per row plus the same
+`sed`. And **the generality the owner actually wants does not require
 the rename at all** — it requires the tool not to care, which is an OW-59
 question. This project keeps `OW-`, whose only real defect is that nobody
 remembers what it stood for; a different project picks its own.
 
 ## What is and is not going wrong
 
-Measured 2026-08-15 at 34 open and 18 closed rows; re-counted 2026-08-17 at
-**40 open and 27 closed**, the two files now 48KB and 76KB — then 41 open
-within the hour, when OW-68 was filed out of the same conversation. Fifteen rows
-in two days, and a count that aged while being written down. That rate is itself
-part of what follows.
+Measured 2026-08-15 at 34 open and 18 closed rows; re-counted 2026-08-17 at 40
+open and 27 closed, then 41 within the hour when OW-68 was filed out of the same
+conversation, then **42 open and 27 closed** — 60KB and 76KB — when OW-69 was
+filed out of the audit of this document. Seventeen rows in two days, and a count
+that has now aged three times inside one day of being written down. That rate is
+itself part of what follows, and it is why every figure in this document is
+dated and none should be cited without recounting.
 
-**Integrity is fine.** An audit across both files found no id in both, no gaps
-in 1..53, no cited-but-undefined id anywhere in `docs/`, `AGENTS.md` or
-`README.md`, and every closed row carrying a real commit sha. Fifty-two rows,
+**Integrity is fine.** Re-audited 2026-08-17, this time across the whole repo
+rather than just `docs/`: no id in both files, no gaps in 1..69, each of the 69
+defined exactly once, every cited id resolving to a definition (checked over
+`docs/`, `AGENTS.md`, `README.md`, both skills, `src/`, `e2e/` and
+`playwright.config.ts` — the one unmatched string is `OW-007`, this document's
+own padding example), and every closed row carrying a real commit sha. 69 rows,
 hand-maintained, zero errors. Automating for *correctness* would solve a
 problem this project does not have.
 
-**Cost is not fine, and the reason outlived the premise it was argued on.** 28
-of the last 40 commits touched only docs, eight of them titled `docs: close
+**Cost is not fine, and the reason outlived the premise it was argued on.** 34
+of the last 40 commits touched only docs, nine of them titled `docs: close
 OW-N with its sha and evidence`. A close is four to six tool calls of string
-surgery against two files now 48KB and 76KB, and it is structurally a second
+surgery against two files now 60KB and 76KB, and it is structurally a second
 commit, because the sha does not exist until the fix is committed. This was
 first argued as token cost at the end of long sessions, under a shared 5-hour
 budget — a premise that expired on 2026-08-17 when the owner moved to a Max
@@ -93,22 +108,22 @@ conflict rate therefore tracks how fast authoring goes, not how often closes
 happen.** Resolution is mechanical every time, which is the tell: it is exactly
 the work worth not doing by hand.
 
-**Neither documented revisit condition is what fired.** `WORKSTREAMS.md` names
-them as "dependency edges between rows, or who holds what." Edges did become
-prose (below), but nothing is blocked on them. And nobody holds anything — the
-two machines are partitioned by *role*, not racing for rows, so no assignee or
+**Neither documented revisit condition is what fired.** They were "dependency
+edges between rows, or who holds what." Edges did become prose (below), but
+nothing is blocked on them. And nobody holds anything — the two machines are
+partitioned by *role*, not racing for rows, so no assignee or
 claim is wanted even now. The condition that actually bit — **one file, edited
 from two clones that diverge for hours** — was not on the list. It is now.
 
-**The container has outgrown the content.** Median row is 58 words; the top
-five are 200-400. One row is one physical line, with consequences: the table
-cannot be scanned without truncating lines; editing a row's middle means
-anchoring on a fragment of a 400-word line; changing one clause rewrites the
-whole line in the diff, so row history is effectively lost; and cells cannot
-hold lists, code blocks, or paragraphs, so rows with real structure (OW-18's
-two parts, OW-51's five decisions) get flattened into run-on prose. Ordering is
-a convention with nothing enforcing it — three rows were inserted in the wrong
-position on 2026-08-15 and moved by hand.
+**The container has outgrown the content.** Median open row is 86 words
+(2026-08-17); the five longest run 390-980. One row is one physical line, with
+consequences: the table cannot be scanned without truncating lines; editing a
+row's middle means anchoring on a fragment of a 400-word line; changing one
+clause rewrites the whole line in the diff, so row history is effectively lost;
+and cells cannot hold lists, code blocks, or paragraphs, so rows with real
+structure (OW-18's two parts, OW-51's five decisions) get flattened into run-on
+prose. Ordering is a convention with nothing enforcing it — three rows were
+inserted in the wrong position on 2026-08-15 and moved by hand.
 
 **Dependency edges are already prose.** OW-51 and OW-52 both assume OW-50 lands
 first; OW-49 is "entangled with OW-24"; OW-33/34/35 are one cluster; OW-42
@@ -142,8 +157,12 @@ Why the directory rather than a `status:` field:
 
 - **The invariant becomes structural.** A row cannot be open and closed at
   once, or disagree with an index, because a file is in exactly one directory.
-  Today "status lives in the Status table and nowhere else" is a rule enforced
-  by remembering it, and OW-53 is what happened when it stopped being.
+  Today a row's status *is* which of the two files its line sits in, enforced by
+  remembering to move the line and to strike the cells — and OW-53 is what
+  happened when a second place started restating it. Not to be confused with
+  `AGENTS.md:49`, "Status lives in that file's Status table and nowhere else":
+  that rule is about **build-slice** status, the table at the top of
+  `WORKSTREAMS.md`, and it is untouched by anything here (see phase 2).
 - **Lock-free concurrency, which is the point of Maildir.** Written as a hedge
   against a future, and now the operative reason. Under the two-machine split
   above, adding a row creates `open/OW-68.md` while closing one renames
@@ -186,7 +205,8 @@ prototype on 2026-08-16 rather than reasoned about:
   stable across repeated runs under ripgrep, ugrep and GNU grep 3.12 alike.
 
 So the interim list is one line, the fuller survey another, and the kind filter
-a third — all measured 2026-08-17 against the same kind of throwaway prototype:
+a third — all three run on 2026-08-17 against the same kind of throwaway
+prototype:
 
 ```
 rg -N '^# ' docs/work/open | sort -V
@@ -194,22 +214,43 @@ rg --no-heading -N -H '^(# |kind: )' docs/work/open | sort -V
 rg -l '^kind: defect' docs/work/open | sort -V
 ```
 
-The second is the one that stands in for the scannable table. `-H` keeps the
-filename, so `sort -V` groups both matches of a row together and orders rows by
-id; each row then prints as kind-then-headline with no parser involved.
-Measured at **~4.3KB for 40 rows**, against 48KB to open the table. The
-within-row order is a `sort -V` collation artifact rather than something this
-document reasoned out, so re-check it if the searcher ever changes — the same
-caution the ordering bullet above earns.
+The second is the one that stands in for the scannable table: `sort -V` groups
+both matches of a row together and orders rows by id, so each row prints as
+kind-then-headline with no parser involved.
+
+Three things about that output, reproduced against a throwaway prototype under
+ripgrep 15.2.0 on 2026-08-17 because an earlier draft of this paragraph guessed
+at all three. **Every one of these commands prints `path:content`, including the
+first** — ripgrep prefixes the path per line whenever its output is not a
+terminal, which is every piped use, so command 1 is a path-and-headline list
+rather than the bare headline list it reads as. **That prefix is load-bearing,
+not noise:** it is what `sort -V` sorts on, so it is what produces id order.
+Add `--no-filename` and you get bare headlines sorted alphabetically by title,
+which is the wrong order and silently so. And `-H --no-heading` on command 2 is
+not redundant even though a pipe would do it: run interactively, ripgrep groups
+matches under a filename *heading* instead of prefixing each line, and the two
+flags force the per-line form either way. The within-row order — `kind:` before
+the headline — is a `sort -V` collation artifact rather than something this
+document reasoned out, so re-check it if the searcher ever changes.
+
+Size, and it is a **simulation rather than a measurement**, there being no real
+row files yet to measure: command 2's output over today's 42 open rows, with
+each headline taken as the row's bolded lead claim, is **~7KB** against 60KB to
+open the table. An earlier figure of ~4.3KB here was extrapolated from six short
+synthetic rows and was presented as measured; it was not, and real headlines are
+longer. The ratio is the claim worth keeping, not the number.
 
 Ids stay unpadded (`OW-7`, not `OW-007`) because the filename *is* the id and
-every citation across the docs is plain text; padding the filename alone would
+every citation in the repo is plain text; padding the filename alone would
 make the two disagree. `sort -V` carries that cost instead, in one place.
 
 The other `grep` case improves outright, and is an argument for this format the
 rest of this document does not make: searching today's table for a term returns
 the entire 400-word line it appears in, which cannot be read in a terminal.
-Per-file, `grep -l` returns the ids that matched.
+Per-file, `grep -l` returns one **path** per matching row —
+`docs/work/open/OW-63.md`, not `OW-63`. Three places in this document, and one
+in OW-59, used to say it returns ids; the id has to be read off the path, which
+costs nothing at a terminal and is a `basename` for anything parsing it.
 
 ### Two clones can mint the same id, and that is fine
 
@@ -246,25 +287,43 @@ drift with every row authored on the laptop.
 
 This is where the volume is, and the per-row transform is close to an ideal
 fan-out: one independent item per row, mechanically constrained, checkable
-afterwards.
-**Farm it to small subagents rather than pulling 67 row bodies through one
-context** (owner, 2026-08-17; read to the ask two paragraphs below before acting
-on this) — the orchestrator then holds ids and pass/fail rather than prose. Two things keep the results one house style instead of
-sixty-seven: convert three or four rows first and pass that output to every
-later agent as the worked example, and give them all one identical spec rather
-than a paraphrase each. Use a single model tier throughout — the long rows
-(OW-54, OW-59 and OW-63 run 500-675 words, with nested bold and code spans) are
-where a too-small model mangles markup, and mixing tiers buys complexity for a
-saving that no longer matters.
+afterwards. **Farm it to small subagents rather than pulling every row body
+through one context** (owner, 2026-08-17; read to the ask two paragraphs below
+before acting on this) — the orchestrator then holds ids and pass/fail rather
+than prose. Two things keep the results one house style instead of one per
+agent: convert three or four rows first and pass that output to every later
+agent as the worked example, and give them all one identical spec rather than a
+paraphrase each. Use a single model tier throughout — the long rows (OW-54,
+OW-63, OW-69 and OW-59 run 500-1000 words as of 2026-08-17, with nested bold and
+code spans) are where a too-small model mangles markup, and mixing tiers buys
+complexity for a saving that no longer matters.
 
 **Your first action in this phase is to ask, not to convert.** You have the
 capability — the owner confirmed on 2026-08-17 that the executing session runs
 with the same tools as the one that wrote this — but you will not reach for it
 unprompted, because spawning subagents or a workflow is opt-in and the opt-in is
-his to give. So the fan-out happens only if you request it and he grants it. He set it up this way on 2026-08-17
-precisely so that a fresh agent would prompt him for it rather than quietly
-grind through the whole corpus alone — so ask before converting a single row. If he
-declines, convert serially and say that is what you are doing.
+his to give. So the fan-out happens only if you request it and he grants it. He
+set it up this way on 2026-08-17 precisely so that a fresh agent would prompt
+him for it rather than quietly grind through the whole corpus alone — so ask
+before converting a single row. If he declines, convert serially and say that is
+what you are doing.
+
+**How that fan-out lands, because `/execute`'s dispatch rules assume exactly one
+subagent and would otherwise be read as forbidding this.**
+`.claude/skills/execute/SKILL.md:23` says "One subagent, its own worktree" and
+`:36` says to cherry-pick its commit; both are written for a code row, where the
+worktree buys isolation and `bun run check` has to pass on the result. Phase 1
+is neither. It only *creates* files, every agent's paths are disjoint from every
+other's, and no code is touched — so: no worktree, no branch, no cherry-pick.
+Hand each agent the main clone and one row (or a small batch), tell it to write
+the file and report, and **tell it not to commit**. The orchestrator commits the
+generated tree itself, once, after the equivalence check below passes; a
+subagent whose output fails the check is re-run rather than merged. The commit
+is docs only, so say so in the message rather than claiming `bun run check`.
+This does not reopen OW-57 or OW-58: both fixed hazards of *worktree* dispatch —
+an unexecutable "commit on `main`" instruction, and worktrees cut from
+`origin/main` rather than local `main` — and neither exists for an agent that
+has no worktree and commits nothing.
 
 One transform detail that corrupts silently if missed: **a cell-escaped `\|`
 becomes a literal `|`**, there being no table left to escape for. There are five
@@ -295,24 +354,115 @@ another guess; being checkable is the point, not the value. Coherent at the end:
 they describe storage that exists, and the stale tables are still present with
 nothing pointing at them.
 
+The loaded surface does not merely *mention* the old storage — it argues for it,
+and four of the rules below actively contradict the format. Found by auditing
+both skills and `AGENTS.md` against this document on 2026-08-17 (OW-69), and
+listed so the phase-2 agent edits a known set rather than grepping for
+`WORKSTREAMS`. The last entry is here to be **left alone**, which is the one a
+grep would have got wrong:
+
+- **`author/SKILL.md:28`, "There is no template, and none is coming."** The
+  format does mandate a shape — a `# ` headline, flat `kind:` frontmatter — so
+  the rule as written contradicts it, and its stated reason ("a row padded to
+  satisfy a schema costs tokens on every read of the file") is a
+  single-shared-file argument that dissolves when a read is one row. Keep the
+  substance, which is still right: no required prose sections, nothing padded to
+  fill a heading. Replace the reason, and say what the mandated shape is and
+  where it is specified (this document's format section).
+- **`execute/SKILL.md:23` and `:36`, "One subagent, its own worktree" and
+  cherry-pick its commit.** Written for a code row and correct there (OW-57,
+  OW-58). Phase 1 is the counter-example and has its own procedure above; phase
+  2 decides whether the skill carries the general form — a docs-only fan-out
+  writes in the main clone, commits nothing, and the session commits the tree.
+- **`execute/SKILL.md:26`, "Do not send it to read WORKSTREAMS."** The reason
+  was that reading it means loading 60KB of unrelated rows. That reason is gone;
+  the intent — the subagent works the row it was given and does not go shopping
+  — is not. Becomes: send it the row file, and nothing else from the corpus.
+- **`execute/SKILL.md:40`, the close procedure.** Targets a file phase 3
+  deletes. Becomes `git mv docs/work/open/OW-N.md docs/work/closed/` plus
+  appending the `**Fixed** in <sha>: <evidence>` note as a body section, no
+  strikethrough.
+- **`AGENTS.md:3-4`, `:42`, `:48`** — the three places that name
+  `docs/WORKSTREAMS.md` or `docs/CLOSED.md` as where work lives.
+- **`AGENTS.md:49`, "Status lives in that file's Status table and nowhere else"
+  — leave this one alone.** It is about build-slice status, the table at the top
+  of `WORKSTREAMS.md`, which survives phase 3 intact. An earlier draft of this
+  document quoted it as if it governed *row* status, which would have had a
+  phase-2 agent delete a live rule; `README.md:64` and `HANDOFF.md:11` both read
+  it the same way it is meant.
+
+Both skills' YAML `description:` fields also name `docs/WORKSTREAMS.md`
+(`author/SKILL.md:3`, `execute/SKILL.md:3`), as does `author/SKILL.md:13`.
+
 **Phase 3 — delete.** Remove the Open work table from `WORKSTREAMS.md`, which
-survives on its Status table, its four caller contracts, File ownership and the
-shared interfaces. Delete `CLOSED.md` outright — it is a 9-line header plus the
+survives on its Status table, its three caller contracts, File ownership and the
+shared interfaces. Delete `CLOSED.md` outright — it is a 10-line header plus the
 table — carrying its one durable claim, that close notes are kept because they
 are sometimes the grounding a later row needs, into wherever phase 2 describes
 the new storage.
 
+**Emptying the table orphans four things around it, and each needs saying where
+it goes** — otherwise they are deleted with the table or left pointing at
+nothing. `WORKSTREAMS.md`'s five-kind legend (`:124-139`) is the definition of
+what `kind:` may hold, so it moves into this document's format section and
+`author/SKILL.md` cites it there. "Adding a row costs a line: take the next id,
+never reuse one" (`:144-145`) moves to `author/SKILL.md`, beside the
+id-collision finding above. "Closing one moves it to `docs/CLOSED.md` with its
+sha and the evidence" (`:145-146`) is superseded by phase 2's close procedure
+and is deleted, not moved. The OW-26–31 provenance note (`:203-208`) is a fact
+about seven specific rows, so it goes **into those seven files** — one line each
+in `closed/OW-3.md` and `closed/OW-26.md` through `closed/OW-31.md` — which is
+the only place it cannot go stale. Two more paragraphs are safe to delete
+outright, and knowing that is the point of listing them: the "not re-verified
+since, confirm against the source" rule (`:141-144`) is already
+`execute/SKILL.md:20-22` verbatim in substance, and the Open-work intro
+(`:117-122`) plus the experiment-concluded paragraph (`:148-156`) are history
+this document already carries.
+
+**Then check that paths resolve, not just ids.** OW-54's done-when checks that
+every cited `OW-` id resolves to exactly one file, which is the wrong invariant
+for this phase: what phase 3 breaks is *prose pointing at a table*, and no id
+check sees it. These were found by hand on 2026-08-17, and none of the four
+files the first four groups live in was in OW-54's Where — fix them and re-grep
+rather than trusting this list to be complete:
+
+- `docs/DESIGN.md:656-658` — "live in `WORKSTREAMS.md`'s Open work list" and
+  "see `CLOSED.md`".
+- `docs/MANUAL_TESTING.md:6` and `:359` — "its Open work list holds what is
+  still outstanding", "Tracked as rows in `WORKSTREAMS.md`'s Open work list".
+- `README.md:63-66` — "its Open work list is the only list of outstanding
+  items", and this is the repo's one **markdown link** into the row storage.
+  Note it carries zero `OW-` citations, so an id check reports it clean; the
+  row's premise that every `OW-` citation is plain text is true and simply never
+  covered path references like this one.
+- `docs/HANDOFF.md:10-12` — "every outstanding item ... only in its Open work
+  list"; `:255` also points at `WORKSTREAMS.md` for what it carries.
+- **Inside the migrated rows themselves**, which is the easiest set to miss
+  because they are the output rather than the input: `OW-24`, and closed
+  `OW-41`, `OW-53` and `OW-58`, all cite `docs/CLOSED.md` or
+  `docs/WORKSTREAMS.md` in their bodies. Rewrite the pointer, never the
+  historical claim around it.
+
+Two code comments (`src/server/adapters/pi/index.ts:2`,
+`src/server/adapters/pi/reducer.test.ts:5`) cite `WORKSTREAMS.md` for File
+ownership and the fixture-wording rule; both survive phase 3, so leave them.
+`docs/superpowers/plans/` is a frozen record of a past plan and is deliberately
+not updated.
+
 ### Two details that decide how much judgement this needs
 
 **Headlines are mostly mechanical, which was measured** rather than assumed.
-Counted 2026-08-17: 22 of 41 open rows and 25 of 27 closed ones already open
-with a bolded lead claim, which becomes the headline verbatim. The rest are the
-short early rows — median 58 words — whose first sentence is already the claim
-("A multi-file edit flattens its hunks under the first path"), plus four
-`question` rows whose "Whether ..." opening reads as a headline unchanged. So no
-row needs a headline *invented*: extract the bolded span, else take the first
-sentence, then read the result. The never-wraps rule bounds nothing about
-length — it forbids hard-wrapping the line, not a long line.
+Counted 2026-08-17: 23 of 42 open rows and 25 of 27 closed ones already open
+with a bolded lead claim, which becomes the headline verbatim. The remaining 19
+open rows are all early ones, none past OW-25 and **median 26 words, longest
+55** — which is the number that matters here, not the 86-word corpus median
+quoted further up, and an earlier draft of this paragraph used the corpus figure
+by mistake. Their first sentence is already the claim ("A multi-file edit
+flattens its hunks under the first path"), and four of them open with "Whether
+...", which reads as a headline unchanged. So no row needs a headline
+*invented*: extract the bolded span, else take the first sentence, then read the
+result. The never-wraps rule bounds nothing about length — it forbids
+hard-wrapping the line, not a long line.
 
 **Closed rows lose their strikethrough.** `CLOSED.md` calls it a vestige of
 closing in place, left as-is rather than rewritten. Under directory-as-status it
@@ -328,17 +478,17 @@ exist at all.
 
 The format above lands with none of this written. Closing becomes `git mv` plus
 an append to a short file — already fewer moves than today's string surgery
-against two 30KB ones — so the storage change collects most of the measured
-cost win on its own. That makes these two items, not one: migrate the format,
-live with it, and let that evidence decide which subcommand is worth writing,
-in what order, and whether any of them is. Deciding both at once forces a
-judgement about tooling before there is any experience of the storage to base
+against a 60KB file and a 76KB one — so the storage change collects most of the
+measured cost win on its own. That makes these two items, not one: migrate the
+format, live with it, and let that evidence decide which subcommand is worth
+writing, in what order, and whether any of them is. Deciding both at once forces
+a judgement about tooling before there is any experience of the storage to base
 it on.
 
 One real consequence of the split, worth seeing before choosing it: `ow list` is
 what replaces the scannable table, so between the format landing and the tool
 existing there is no *command named for the job*. There is still a single view —
-the two-line survey measured above, at ~4.3KB for 40 rows — so this interim is
+the two-line survey above, simulated at ~7KB for 42 rows — so this interim is
 milder than an earlier draft of this paragraph claimed, and the alternative that
 draft offered (keep a generated index committed until `ow list` exists) is now
 ruled out outright by finding 2 below. What `ow list` would actually buy over
@@ -364,21 +514,21 @@ conversation that produced the two-machine finding above. Kept as findings
 rather than deleted: the reasons are the part worth not re-deriving.
 
 1. **Build it, or adopt beads? Build it.** Two independent reasons, either
-   sufficient on its own. First, **beads does not fix the problem.** Its
-   primary storage is a single JSONL, so add-vs-close from two clones lands in
-   one hot file exactly as the table does — arguably worse, since a markdown
-   row is at least human-mergeable at a glance. Adopting it would buy a
-   dependency and a CLI learning curve on every cold agent (the reason recorded
-   when this was deferred on 2026-08-13) and still leave conflicts to resolve
-   by hand. Second, **the benefit beads is built for does not land here.**
-   Agents claiming work autonomously, doing it and closing it presupposes an
-   agent *selecting* work; agents here do not select, the owner does, by id,
-   from a machine he is not implementing on. Not foreclosed: flat one-line
-   frontmatter over one file per row is already a document store, so if agents
-   ever do claim work, importing from it is more mechanical than from today's
-   table, not less. The owner's 2026-08-15 position — that a small bespoke tool
-   is itself a hobby project worth having — stands, but it is no longer the
-   load-bearing reason and should not be cited as one.
+   sufficient on its own. First, **beads does not fix the problem.** Its primary
+   storage is a single JSONL, so add-vs-close from two clones lands in one hot
+   file exactly as the table does — arguably worse, since a markdown row is at
+   least human-mergeable at a glance. Adopting it would buy a dependency and a
+   CLI learning curve on every cold agent (the reason recorded when this was
+   deferred on 2026-08-13) and still leave conflicts to resolve by hand. Second,
+   **the benefit beads is built for does not land here.** Agents claiming work
+   autonomously, doing it and closing it presupposes an agent *selecting* work;
+   agents here do not select, the owner does, by id, from a machine he is not
+   implementing on. Not foreclosed: flat one-line frontmatter over one file per
+   row is already a document store, so if agents ever do claim work, importing
+   from it is more mechanical than from today's table, not less. The owner's
+   2026-08-15 position — that a small bespoke tool is itself a hobby project
+   worth having — stands, but it is no longer the load-bearing reason and should
+   not be cited as one.
 2. **Is the index committed? No, and now structurally.** It was recommended
    against on drift-hygiene grounds: a committed summary of the rows is a
    hand-maintained summary's twin and drifts the moment someone closes a row
@@ -389,44 +539,62 @@ rather than deleted: the reasons are the part worth not re-deriving.
    whole list opens in one file, including on a phone; afterwards it takes a
    command.
 3. **Do kinds stay as they are? Yes, five — and the drift is the evidence.**
-   Counted 2026-08-17: open rows are 20 `deferral`, 8 `question`, 5 `defect`, 4
-   `unverified`, 3 `feature`; closed are 23 `defect`, 3 `change`, 1 `deferral`.
-   `feature` appears in no legend, neither this document's nor
+   Counted 2026-08-17, **before** the correction this finding goes on to
+   describe: open rows were 20 `deferral`, 8 `question`, 5 `defect`, 4
+   `unverified`, 3 `feature` and zero `change`. Re-counted after it, and after
+   two more rows were filed: **21 `deferral`, 7 `question`, 6 `defect`, 4
+   `change`, 4 `unverified`**, no `feature` left; closed are 23 `defect`, 3
+   `change`, 1 `deferral`. The pre-correction census is the evidence and is kept
+   for that reason — quoting it as the current one is the mistake to avoid.
+   `feature` appeared in no legend, neither this document's nor
    `WORKSTREAMS.md`'s, while `change` — which *is* documented — had drifted to
    zero open rows. Read against its definition ("a deliberate change to
    behaviour or presentation that nobody considers broken today"), the three
    `feature` rows are `change` rows under a name authoring reached for
    naturally; they were corrected in the same change, and the legend now says
    so. The set does not need to grow. What it needed was for the drift to be
-   visible, and under a single 48KB table it was not — in frontmatter a stray
+   visible, and under a single 60KB table it was not — in frontmatter a stray
    `kind:` is one `grep` away, which is what this question was really asking.
 4. **What does migration cost? Known, and it is not the parsing.** The table is
-   regular enough to parse, and every `OW-N` citation across the docs is plain
-   text rather than a markdown link, so nothing breaks in a move. The real work
-   is rewriting `AGENTS.md` and both skills to describe the new storage. One
-   operational constraint found here rather than predicted: the migration
-   rewrites every row, so it must run with **both clones in sync and nothing
-   unpushed on either**. A laptop carrying new rows through it is the one merge
-   that would genuinely hurt.
+   regular enough to parse, and **every `OW-N` citation in the repo is plain
+   text** — re-checked 2026-08-17 across `docs/`, `README.md`, `AGENTS.md`, both
+   skills, `src/` and `e2e/`, with a pattern for markdown links containing an id
+   in either the text or the target; zero hits — so no id breaks in a move. Two
+   things that claim does not cover, both of which cost real work: citations are
+   not confined to `docs/` (65 of them sit in code comments and test names,
+   above), and *path* references to the two files are a separate class that no
+   id check sees, one of which is a genuine markdown link (`README.md:64`).
+   Phase 3 carries the list. The rest of the real work is rewriting `AGENTS.md`
+   and both skills to describe the new storage. One operational constraint found
+   here rather than predicted: the migration rewrites every row, so it must run
+   with **both clones in sync and nothing unpushed on either**. A laptop
+   carrying new rows through it is the one merge that would genuinely hurt.
 5. **Does `/author` still want the whole list in context? Both modes want
    cross-row access, and cross-row access is the thing this format improves
    most.** An earlier answer here was "no, authoring wants a headline index",
-   and the owner corrected it on 2026-08-17 with two cases it ignored:
-   authoring refers to other rows to find dependencies and to avoid filing a
-   redundant one, and `/execute` invoked without an id is asked "what is on
-   deck, what do you recommend". Both need to reach across every row.
+   and the owner corrected it on 2026-08-17 with two cases it ignored: authoring
+   refers to other rows to find dependencies and to avoid filing a redundant
+   one, and `/execute` invoked without an id is asked "what is on deck, what do
+   you recommend". Both need to reach across every row.
 
-   Prototyped the same day rather than argued. **Redundancy:** `rg -l 'copy'
-   docs/work/open | sort -V` returns `OW-63.md` — an id. The same search
-   against the table returns the entire 400-word line the term appears in,
-   which cannot be read in a terminal. **Reverse dependencies:** `rg -l 'OW-24'
-   docs/work/open | sort -V` returns `OW-56.md`, a lookup the table cannot do
-   readably at all. **Survey:** the two-line command above prints all 40 rows
-   as kind-plus-headline in id order, ~4.3KB against 48KB.
+   Prototyped the same day, then **re-derived against the real corpus on
+   2026-08-17, which changed every number here**: the first pass ran against six
+   short synthetic rows and each command happened to match exactly one of them,
+   which read as a property of the format and is not one. **Redundancy:** `rg -l
+   'copy' docs/work/open | sort -V` returns four paths today — OW-63, OW-64,
+   OW-67 and OW-69 — not one, and it returns them as *paths*
+   (`docs/work/open/OW-63.md`), not ids. The same search against the table
+   returns the entire 400-word line the term appears in, which cannot be read in
+   a terminal. That is the durable claim, and it does not need the match to be
+   unique. **Reverse dependencies:** `rg -l 'OW-24' docs/work/open | sort -V`
+   returns five — OW-24 itself, OW-42, OW-49, OW-56 and OW-69 — a lookup the
+   table cannot do readably at all; note a row matches its own id, so the
+   caller subtracts it. **Survey:** the two-line command above prints all 42
+   rows as kind-plus-headline in id order, simulated at ~7KB against 60KB.
 
    So the corrected finding is the opposite of the one it replaces: the format
    serves all three access patterns better, and the only thing genuinely lost
-   is reading forty rows' *full text* in a single file — which is not what
+   is reading every row's *full text* in a single file — which is not what
    either mode was doing it for, and half of which is `deferral` anyway. Two
    consequences fall out. The headline now carries the survey, so it has to be
    a real claim rather than a truncation (see OW-54). And picking a winner from
@@ -435,7 +603,9 @@ rather than deleted: the reasons are the part worth not re-deriving.
 
 ## Relationship to the UI work
 
-OW-53 (the Status cell restating closed work) overlaps: its "restates what
-CLOSED.md holds" half dissolves under this storage. The rest of it does not —
-that cell describes build slices, not rows — so the row stands on its own and
-should be fixed regardless of what happens here.
+OW-53 (the Status cell restating closed work) overlapped: its "restates what
+CLOSED.md holds" half dissolves under this storage. **It was closed in `6f07f49`
+before any of this landed**, which is the outcome this section used to recommend
+— the rest of it never depended on the storage, because that cell describes
+build slices rather than rows. Nothing here is waiting on it; it is cited as the
+case that shows why a second copy of status drifts.
