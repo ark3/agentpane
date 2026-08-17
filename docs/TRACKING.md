@@ -285,6 +285,16 @@ still tells the truth. **Count the rows yourself here and carry that number**;
 the counts written into this document and into OW-54 were true when written and
 drift with every row authored on the laptop.
 
+**Carry it in the phase-1 commit message** (owner, 2026-08-17). The row permits
+stopping at a phase boundary, so the tally has to survive a session boundary,
+and it may not go into OW-54 itself or into a committed index. A commit message
+is durable, immutable and findable with `git log --grep`, where a line in this
+document is one more count that goes stale — and recounting at the start of a
+later phase is *not* equivalent: the laptop can file a row between phases, so a
+fresh count would legitimately differ from what phase 1 converted and the
+done-when would fail for the wrong reason. Say in that message how many open and
+closed rows were converted, and repeat the pair in OW-54's own close note.
+
 This is where the volume is, and the per-row transform is close to an ideal
 fan-out: one independent item per row, mechanically constrained, checkable
 afterwards. **Farm it to small subagents rather than pulling every row body
@@ -345,14 +355,26 @@ The "~40 lines per file" ceiling that used to govern them was **retired on
 calibrated to a token budget that has since expired; it appeared in no file in
 this repo, only in an agent memory; and it was never true — measured that day,
 `AGENTS.md` is 58 lines, `execute/SKILL.md` 59, `author/SKILL.md` 45. A ceiling
-that nothing states and nothing meets is not a constraint. **~60 lines replaces
-it, and the discipline that was doing the real work stays: a new rule means an
-old one leaves.** That part outlives the token argument, because loaded prose
-competes for attention rather than just budget, and a rule nobody follows is
-worse than no rule — which is what the 2026-08-13 restructure was for. Sixty is
-another guess; being checkable is the point, not the value. Coherent at the end:
-they describe storage that exists, and the stale tables are still present with
-nothing pointing at them.
+that nothing states and nothing meets is not a constraint.
+
+**The ~60-line replacement is retired too, and there is now no line ceiling on
+these files** (owner, 2026-08-17, asked because `execute/SKILL.md` was at 59 and
+phase 2 adds to it): *"The ceiling has dubious value. We spend most of our tokens
+on tool calls, not skill file reads."* That is the token argument gone at the
+root rather than recalibrated, and it settles the question phase 2 would
+otherwise have had to — **no existing rule has to leave `execute/SKILL.md` to
+make room for the close procedure and the no-id survey.** Write what the storage
+needs and let the file be as long as that takes. What survives is the discipline
+the number was standing in for, now judged rather than counted: **a new rule
+means an old one earns its place again**, because loaded prose competes for
+attention even when it is free, and a rule nobody follows is worse than no rule —
+which is what the 2026-08-13 restructure was for. One hazard the freed space
+creates: phase 2 may now copy the survey commands into `execute/SKILL.md` rather
+than citing them, which is two copies of a command that can drift. If it does,
+this document is the spec and the skill follows it.
+
+Coherent at the end: they describe storage that exists, and the stale tables are
+still present with nothing pointing at them.
 
 The loaded surface does not merely *mention* the old storage — it argues for it,
 and four of the rules below actively contradict the format. Found by auditing
@@ -448,6 +470,12 @@ Two code comments (`src/server/adapters/pi/index.ts:2`,
 ownership and the fixture-wording rule; both survive phase 3, so leave them.
 `docs/superpowers/plans/` is a frozen record of a past plan and is deliberately
 not updated.
+
+**OW-54 closes as `docs/work/closed/OW-54.md`** (owner, 2026-08-17) — under the
+storage it created, since the close procedure it replaces targets a file it
+deletes. That makes its own close the first exercise of phase 2's new procedure,
+which is the right place to find out whether that procedure is written clearly
+enough to follow.
 
 ### Two details that decide how much judgement this needs
 
