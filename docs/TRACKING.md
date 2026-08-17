@@ -166,12 +166,22 @@ prototype on 2026-08-16 rather than reasoned about:
   determinism and keeps the wrong order. Piping to `sort -V` gets both, and was
   stable across repeated runs under ripgrep, ugrep and GNU grep 3.12 alike.
 
-So the interim list is one line, and the kind filter another:
+So the interim list is one line, the fuller survey another, and the kind filter
+a third — all measured 2026-08-17 against the same kind of throwaway prototype:
 
 ```
 rg -N '^# ' docs/work/open | sort -V
+rg --no-heading -N -H '^(# |kind: )' docs/work/open | sort -V
 rg -l '^kind: defect' docs/work/open | sort -V
 ```
+
+The second is the one that stands in for the scannable table. `-H` keeps the
+filename, so `sort -V` groups both matches of a row together and orders rows by
+id; each row then prints as kind-then-headline with no parser involved.
+Measured at **~4.3KB for 40 rows**, against 48KB to open the table. The
+within-row order is a `sort -V` collation artifact rather than something this
+document reasoned out, so re-check it if the searcher ever changes — the same
+caution the ordering bullet above earns.
 
 Ids stay unpadded (`OW-7`, not `OW-007`) because the filename *is* the id and
 every citation across the docs is plain text; padding the filename alone would
@@ -207,12 +217,15 @@ in what order, and whether any of them is. Deciding both at once forces a
 judgement about tooling before there is any experience of the storage to base
 it on.
 
-One real consequence of the split, worth seeing before choosing it: `ow list`
-is what replaces the scannable table, so between the format landing and the
-tool existing there is no single view of open work — `ls docs/work/open/` and
-`grep` are the interim, or a generated index stays committed until `ow list`
-exists and then stops being. That interim is the cost of separating them, and
-it is bounded and reversible, which is why it is worth paying.
+One real consequence of the split, worth seeing before choosing it: `ow list` is
+what replaces the scannable table, so between the format landing and the tool
+existing there is no *command named for the job*. There is still a single view —
+the two-line survey measured above, at ~4.3KB for 40 rows — so this interim is
+milder than an earlier draft of this paragraph claimed, and the alternative that
+draft offered (keep a generated index committed until `ow list` exists) is now
+ruled out outright by finding 2 below. What `ow list` would actually buy over
+the raw command is formatting and a memorable name, which is a smaller thing
+than "no view at all" and is exactly why OW-59 waits for evidence.
 
 Small, because the storage does most of the work:
 
@@ -277,14 +290,30 @@ rather than deleted: the reasons are the part worth not re-deriving.
    rewrites every row, so it must run with **both clones in sync and nothing
    unpushed on either**. A laptop carrying new rows through it is the one merge
    that would genuinely hurt.
-5. **Does `/author` still want the whole list in context? No.** Authoring wants
-   to see what is open, which is not the same as loading it. Half the open list
-   — 20 of 40 rows — is `deferral`, explicitly judged not-now, and a laptop
-   session capturing one freshly-noticed bug pays 48KB to reach it. The
-   headline index (`rg -N '^# ' docs/work/open | sort -V`) plus opening the two
-   or three rows that matter serves authoring; `rg -l '^kind: deferral'`
-   removes half of what is left. Executing wants exactly one row and gets it
-   directly.
+5. **Does `/author` still want the whole list in context? Both modes want
+   cross-row access, and cross-row access is the thing this format improves
+   most.** An earlier answer here was "no, authoring wants a headline index",
+   and the owner corrected it on 2026-08-17 with two cases it ignored:
+   authoring refers to other rows to find dependencies and to avoid filing a
+   redundant one, and `/execute` invoked without an id is asked "what is on
+   deck, what do you recommend". Both need to reach across every row.
+
+   Prototyped the same day rather than argued. **Redundancy:** `rg -l 'copy'
+   docs/work/open | sort -V` returns `OW-63.md` — an id. The same search
+   against the table returns the entire 400-word line the term appears in,
+   which cannot be read in a terminal. **Reverse dependencies:** `rg -l 'OW-24'
+   docs/work/open | sort -V` returns `OW-56.md`, a lookup the table cannot do
+   readably at all. **Survey:** the two-line command above prints all 40 rows
+   as kind-plus-headline in id order, ~4.3KB against 48KB.
+
+   So the corrected finding is the opposite of the one it replaces: the format
+   serves all three access patterns better, and the only thing genuinely lost
+   is reading forty rows' *full text* in a single file — which is not what
+   either mode was doing it for, and half of which is `deferral` anyway. Two
+   consequences fall out. The headline now carries the survey, so it has to be
+   a real claim rather than a truncation (see OW-54). And picking a winner from
+   a survey line may still mean opening three or four files, which is cheap and
+   is the specific thing OW-59 should watch.
 
 ## Relationship to the UI work
 
