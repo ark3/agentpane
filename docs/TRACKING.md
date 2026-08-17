@@ -34,8 +34,25 @@ expanded the abbreviation, which is why nobody remembers it.
 Treat it as an opaque prefix rather than a claim about a row's state. Ids are
 stable and never reused, so it cannot be renamed without touching every row,
 every citation, and the commit history that references them — and under the
-storage sketched below a closed row would live at `closed/OW-50.md`, where the
-prefix would actively mislead if it still meant anything.
+storage below a closed row lives at `closed/OW-50.md`, where the prefix would
+actively mislead if it still meant anything.
+
+The owner raised renaming it on 2026-08-17, wanting a prefix that generalises
+if the tooling ever serves other projects. Measured the same day, because the
+cost of a rename is the whole argument: **76 of this repo's 166 commit subjects
+name an `OW-` id** — 46% of the history — and the repo is now pushed, so
+rewriting them is off the table. A rename orphans every one of those
+permanently. Outside the two row files there are a further ~79 citations, in
+`TRACKING.md` (37), `MANUAL_TESTING.md` (24), `DESIGN.md` (8), the two skills
+(6), `HANDOFF.md` (2) and `AGENTS.md` (2); those are mechanical.
+
+Two things follow. **The migration does not make a later rename cheaper or
+dearer**, so there is no now-or-never moment to force a decision at: today it
+is a `sed` across eight files, afterwards a scripted `git mv` across 67 plus
+the same `sed`. And **the generality the owner actually wants does not require
+the rename at all** — it requires the tool not to care, which is an OW-59
+question. This project keeps `OW-`, whose only real defect is that nobody
+remembers what it stood for; a different project picks its own.
 
 ## What is and is not going wrong
 
