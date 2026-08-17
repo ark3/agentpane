@@ -238,16 +238,50 @@ than hand over half a phase.
 **Phase 1 — generate alongside.** Write all 67 files into
 `docs/work/{open,closed}/`, both tables left exactly as they are. The tables are
 still the source of truth and the new directory is inert, so every document
-still tells the truth. Then check equivalence **mechanically** before going
-further: each row's text must appear in its corresponding file. A throwaway
-script, not an eyeball — 67 rows is well past where reading catches a silent
-drop, and this is the last moment the check is possible.
+still tells the truth.
+
+This is where the volume is, and the per-row transform is close to an ideal
+fan-out: 67 independent items, mechanically constrained, checkable afterwards.
+**Farm it to small subagents rather than pulling 67 row bodies through one
+context** (owner, 2026-08-17) — the orchestrator then holds ids and pass/fail
+rather than prose. Two things keep the results one house style instead of
+sixty-seven: convert three or four rows first and pass that output to every
+later agent as the worked example, and give them all one identical spec rather
+than a paraphrase each. Use a single model tier throughout — the long rows
+(OW-54, OW-59 and OW-63 run 500-675 words, with nested bold and code spans) are
+where a too-small model mangles markup, and mixing tiers buys complexity for a
+saving that no longer matters. The executing session may need to be told to fan
+out in as many words, since spawning subagents is not something it reaches for
+uninvited.
+
+One transform detail that corrupts silently if missed: **a cell-escaped `\|`
+becomes a literal `|`**, there being no table left to escape for. There are five
+of them, three inside OW-54's own survey commands.
+
+Then check equivalence **mechanically**, before anything is deleted — this is
+the last moment the check is possible. It cannot be a substring test: the
+transform drops `~~`, unescapes `\|`, and promotes a `**bolded**` span into a
+headline, so a literal comparison fails spuriously and whoever runs it will
+weaken the check until it passes. Normalise both sides first — strip `~~` and
+`**`, unescape `\|`, collapse whitespace — then assert each row's text is
+present in its file. A throwaway script, not an eyeball: 67 rows is well past
+where reading catches a silent drop.
 
 **Phase 2 — rewrite the process docs.** `AGENTS.md` and both skills describe the
-old storage as procedure, and they are the loaded surface every session reads,
-so the ~40-line budget per file applies. Coherent at the end: they describe
-storage that exists, and the stale tables are still present but nothing points
-at them.
+old storage as procedure, and they are the loaded surface every session reads.
+The "~40 lines per file" ceiling that used to govern them was **retired on
+2026-08-17, not relaxed.** It was the agent's invention rather than the owner's,
+calibrated to a token budget that has since expired; it appeared in no file in
+this repo, only in an agent memory; and it was never true — measured that day,
+`AGENTS.md` is 58 lines, `execute/SKILL.md` 59, `author/SKILL.md` 45. A ceiling
+that nothing states and nothing meets is not a constraint. **~60 lines replaces
+it, and the discipline that was doing the real work stays: a new rule means an
+old one leaves.** That part outlives the token argument, because loaded prose
+competes for attention rather than just budget, and a rule nobody follows is
+worse than no rule — which is what the 2026-08-13 restructure was for. Sixty is
+another guess; being checkable is the point, not the value. Coherent at the end:
+they describe storage that exists, and the stale tables are still present with
+nothing pointing at them.
 
 **Phase 3 — delete.** Remove the Open work table from `WORKSTREAMS.md`, which
 survives on its Status table, its four caller contracts, File ownership and the
