@@ -7,14 +7,19 @@ them. It does not state project status — `WORKSTREAMS.md`'s Status table does
 that, and its Open work list holds what is still outstanding. Record a run's
 results here; record what the run left undone as an `OW-` row there.
 
-Two runs are recorded below, both on 2026-08-11 (America/New_York): Codex with
-`codex-cli 0.147.0`, and Pi with `pi 0.84.1`, each through the production
-composition.
+Two substantial live-backend runs are recorded below, both on 2026-08-11
+(America/New_York): Codex with `codex-cli 0.147.0`, and Pi with `pi 0.84.1`,
+each through the production composition. Later sections record narrower
+measurements made after that: preview/listing timing, the browser-only OW-47
+follow-mode reproduction, and the dispatched-worktree base probe.
 
-Both drove the application's REST and SSE interfaces from a deterministic local
-harness, against a real agent subprocess, after fetching the production-built
-client from the Bun server. Neither was **browser automation**: no run below
-claims mouse, keyboard, or DOM interaction (OW-24).
+Those two backend-backed runs drove the application's REST and SSE interfaces
+from a deterministic local harness, against a real agent subprocess, after
+fetching the production-built client from the Bun server. Neither of those two
+runs was **browser automation**: they make no mouse, keyboard, or DOM
+assertions. The browser-automation evidence now in this file is the later OW-47
+section, and it is intentionally narrow — a synthetic backend in `e2e/`, not
+the backend-backed E2E coverage OW-24 still tracks.
 
 ## Reproducible Codex setup
 
@@ -222,7 +227,7 @@ deferred as manual are now automated; the fourth is partly closed.
 |---|---|
 | 1. `direnv -> sbox/bwrap -> pi` startup | Passed. Create returned HTTP 201 and attach HTTP 200, with exactly one Pi agent under the server. The chain is `bun -> bwrap -> bwrap -> pi`; `direnv` and the Python `sbox` wrapper exec into it rather than surviving beside it, the same shape Codex shows. |
 | 2. Virtual-id materialization and the `renamed` event | Passed, but **not where it was expected**: Pi names its session file during `start()`, so the rename lands during attach rather than on the first prompt (HANDOFF finding 41). The adopted id is a real `.jsonl` path, the superseded `virtual:` id still resolves, and it resolves to the new ref. A prompt sent through the superseded id returned HTTP 202. |
-| 3. Streaming and tool output | Passed at the transport boundary. 16 upserts with 16 distinct increasing lengths, then idle via an authoritative snapshot. With `--tool-check`, a turn produced `thinking` and `toolCall` blocks with no approval dialog. **Still not verified in a browser** — the DOM half of the original check, open as OW-24. |
+| 3. Streaming and tool output | Passed at the transport boundary. 16 upserts with 16 distinct increasing lengths, then idle via an authoritative snapshot. With `--tool-check`, a turn produced `thinking` and `toolCall` blocks with no approval dialog. **Still not verified in a browser against a real backend** — the DOM half of the original check, open as OW-24. |
 | 4. Abort and shutdown with no orphan | Passed. The long turn was streaming when abort was requested; abort returned HTTP 204 and idle followed, with the transcript unchanged 1.5s later. SIGTERM to the server exited it 0 with no run-scoped Pi worker remaining. |
 
 Cleanup was verified rather than assumed on every run: no orphaned worker, and
@@ -352,9 +357,9 @@ never-push rule forbids it.
 ## Still unverified
 
 Tracked as rows in `WORKSTREAMS.md`'s Open work list, not restated here:
-**OW-24** (no automated browser coverage on either backend — every check above
-ran against REST/SSE) and **OW-25** (whether Pi raises approval dialogs without
-a trusting `trust.json`).
+**OW-24** (no browser automation yet of a real backend-backed turn — the only
+browser vehicle is the synthetic `e2e/` follow-mode harness) and **OW-25**
+(whether Pi raises approval dialogs without a trusting `trust.json`).
 
 The application has since been opened by hand in a browser, on 2026-08-12. What
 that found is OW-26 through OW-31. A further hand-open on 2026-08-14, after
