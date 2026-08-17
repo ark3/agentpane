@@ -12,6 +12,43 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+/**
+ * An assistant turn, plus the one fact about it that pi-ai has no field for.
+ *
+ * Codex answers `thread/start` and `thread/resume` with `reasoningEffort`, and
+ * a reader wants it next to the model name. `AssistantMessage` carries
+ * api/provider/model/responseModel/usage/stopReason/timestamp and nothing about
+ * effort, and D10 makes the pi packages types-only -- so the field cannot be
+ * added there, and augmenting their interfaces from here would put an
+ * agentpane-only property on every consumer of pi-ai. One optional property on
+ * a type we own is the smallest shape that does the job, and it survives the
+ * JSON round trip on the existing `AgentMessage` payloads untouched.
+ *
+ * Named `effort`, not `reasoningEffort`: Codex uses both names for the same
+ * concept (`reasoningEffort` on the start/resume responses, `effort` on
+ * `ThreadSettings`) and the shorter one is what the meta line shows.
+ */
+export interface AssistantTurn extends AssistantMessage {
+	effort?: string;
+}
+
+/**
+ * `AgentMessage` with that widened assistant arm -- what the transport actually
+ * carries. `Exclude` rather than a hand-written union so the openness of
+ * `AgentMessage` (`Message | CustomAgentMessages[keyof CustomAgentMessages]`)
+ * survives: a backend can still declaration-merge new message kinds in.
+ *
+ * Mutually assignable with `AgentMessage`, since `effort` is optional. That is
+ * deliberate: every producer and consumer in between can keep saying
+ * `AgentMessage`, and only the two ends that care need to name this.
+ */
+export type PaneMessage = Exclude<AgentMessage, AssistantMessage> | AssistantTurn;
 
 // ---------------------------------------------------------------------------
 // Sessions (D9)
@@ -93,7 +130,7 @@ export type ServerEvent =
 			type: "snapshot";
 			session: SessionRef;
 			seq: number;
-			messages: AgentMessage[];
+			messages: PaneMessage[];
 			isStreaming: boolean;
 	  }
 	| {
@@ -106,7 +143,7 @@ export type ServerEvent =
 			session: SessionRef;
 			seq: number;
 			index: number;
-			message: AgentMessage;
+			message: PaneMessage;
 	  }
 	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean }
 	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }

@@ -203,7 +203,13 @@ export class CodexAdapter implements BackendAdapter {
 			assertOwned();
 
 			this.model = started.model ?? this.model;
-			this.reducer.setIdentity({ model: started.model, modelProvider: started.modelProvider });
+			// `ThreadResumeResponse` carries `reasoningEffort` identically, so this
+			// one line covers both branches above.
+			this.reducer.setIdentity({
+				model: started.model,
+				modelProvider: started.modelProvider,
+				reasoningEffort: started.reasoningEffort,
+			});
 
 			// `thread/resume` returns the thread's turns, so a reattach repaints
 			// without a second round trip (D3's cold-start path).

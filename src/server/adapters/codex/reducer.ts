@@ -77,7 +77,7 @@ export class CodexReducer {
 	private slots = new Map<string, Slot>();
 	private streaming = false;
 	private now: () => number;
-	private identity: { api: string; provider: string; model: string };
+	private identity: { api: string; provider: string; model: string; effort: string | null };
 
 	/** Latest cumulative diff for the turn (`turn/diff/updated`). */
 	turnDiff: string | null = null;
@@ -98,6 +98,9 @@ export class CodexReducer {
 			api: options.api ?? DEFAULT_API,
 			provider: options.provider ?? DEFAULT_PROVIDER,
 			model: options.model ?? DEFAULT_MODEL,
+			// Unknown until the start/resume response arrives, and legitimately
+			// absent after it for a model with no effort setting.
+			effort: null,
 		};
 	}
 
@@ -114,9 +117,14 @@ export class CodexReducer {
 	}
 
 	/** From the `thread/start` / `thread/resume` / `thread/fork` response. */
-	setIdentity(id: { model?: string | null; modelProvider?: string | null }): void {
+	setIdentity(id: {
+		model?: string | null;
+		modelProvider?: string | null;
+		reasoningEffort?: string | null;
+	}): void {
 		if (id.model) this.identity.model = id.model;
 		if (id.modelProvider) this.identity.provider = id.modelProvider;
+		if (id.reasoningEffort) this.identity.effort = id.reasoningEffort;
 	}
 
 	reset(): void {
@@ -374,4 +382,7 @@ function appendAt(parts: string[], index: number, delta: string): void {
 }
 
 /** The `thread/start` response shape we care about, minus the 12 fields we do not. */
-export type ThreadIdentityResponse = Pick<ThreadStartResponse, "model" | "modelProvider">;
+export type ThreadIdentityResponse = Pick<
+	ThreadStartResponse,
+	"model" | "modelProvider" | "reasoningEffort"
+>;

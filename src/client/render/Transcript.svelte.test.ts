@@ -71,6 +71,31 @@ describe("Message", () => {
 		expect(meta).not.toMatch(/tok/);
 	});
 
+	it("shows the reasoning effort beside the model when the backend reported one", () => {
+		// Codex answers `thread/start`/`thread/resume` with `reasoningEffort`;
+		// nothing in this UI can change it mid-session, so the turn carries it.
+		const { container } = render(Message, {
+			props: { message: { ...assistant([{ type: "text", text: "done" }]), effort: "high" } },
+		});
+		const spans = [...(container.querySelector(".meta")?.querySelectorAll("span") ?? [])].map(
+			(el) => el.textContent,
+		);
+		expect(spans).toContain("example-model");
+		expect(spans).toContain("high");
+	});
+
+	it("names only the model when no effort was reported", () => {
+		// Pi reports no effort at all, so the absent case is the common one: no
+		// placeholder, no "unknown", nothing extra in the meta line.
+		const { container } = render(Message, {
+			props: { message: assistant([{ type: "text", text: "done" }]) },
+		});
+		const spans = [...(container.querySelector(".meta")?.querySelectorAll("span") ?? [])].map(
+			(el) => el.textContent,
+		);
+		expect(spans).toEqual(["example-model", expect.stringMatching(/tok$/)]);
+	});
+
 	it("shows no cost while the turn is still pending", () => {
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "..." }], "pending") },

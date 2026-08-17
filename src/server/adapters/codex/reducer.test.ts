@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantTurn } from "../../../shared/protocol.ts";
 import { CODEX_TOOL_NAMES } from "./mapping.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import { isRecord, type CodexServerMessage, type ThreadItem } from "./protocol.ts";
@@ -114,7 +115,7 @@ function expectedMessageCount(name: FixtureName): number {
 	return total;
 }
 
-function isAssistant(message: AgentMessage | undefined): message is AssistantMessage {
+function isAssistant(message: AgentMessage | undefined): message is AssistantTurn {
 	return message?.role === "assistant";
 }
 
@@ -199,6 +200,36 @@ describe.each(FIXTURES)("replaying the %s fixture", (name) => {
 			.filter((block) => block.type === "text")
 			.map((block) => block.text);
 		for (const text of finals) expect(rendered).toContain(text);
+	});
+});
+
+describe("reasoning effort", () => {
+	function turn(reducer: CodexReducer): AssistantTurn {
+		reducer.handle(
+			completedItem(
+				{ type: "agentMessage", id: "a", text: "answered", phase: null, memoryCitation: null },
+				10,
+			),
+		);
+		const message = reducer.getState().messages.find(isAssistant);
+		if (!message) throw new Error("no assistant message");
+		return message;
+	}
+
+	it("stamps the effort the thread reported alongside the model", () => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		// Both `thread/start` and `thread/resume` answer with `reasoningEffort`;
+		// the adapter hands either straight to `setIdentity`.
+		reducer.setIdentity({ model: "m", modelProvider: "p", reasoningEffort: "high" });
+		expect(turn(reducer).effort).toBe("high");
+	});
+
+	it("carries no effort field at all when the thread reports none", () => {
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.setIdentity({ model: "m", modelProvider: "p", reasoningEffort: null });
+		const message = turn(reducer);
+		expect(message.model).toBe("m");
+		expect("effort" in message).toBe(false);
 	});
 });
 

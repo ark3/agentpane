@@ -23,6 +23,7 @@ import type {
 	UserMessage,
 } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantTurn } from "../../../shared/protocol.ts";
 import { parsePatch } from "diff";
 import { isRecord } from "./protocol.ts";
 import type {
@@ -67,6 +68,11 @@ export interface MapContext {
 	api: string;
 	provider: string;
 	model: string;
+	/**
+	 * The thread's reasoning effort, or null when the backend reports none. Null
+	 * omits the field entirely rather than stamping a placeholder.
+	 */
+	effort: string | null;
 	/** False for `item/started` and deltas; true for authoritative completion/hydration. */
 	completed: boolean;
 }
@@ -233,13 +239,14 @@ function assistant(
 	ctx: MapContext,
 	content: AssistantMessage["content"],
 	stopReason: AssistantMessage["stopReason"],
-): AssistantMessage {
+): AssistantTurn {
 	return {
 		role: "assistant",
 		content,
 		api: ctx.api,
 		provider: ctx.provider,
 		model: ctx.model,
+		...(ctx.effort ? { effort: ctx.effort } : {}),
 		usage: emptyUsage(),
 		stopReason,
 		timestamp: ctx.timestamp,

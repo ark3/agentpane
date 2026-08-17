@@ -4,13 +4,14 @@
 	 * component only decides how the message *frame* looks (D5) and hands the
 	 * blocks to `Block.svelte`.
 	 *
-	 * `AgentMessage` is open by construction -- it is
+	 * `PaneMessage` is `AgentMessage` with the assistant arm widened by the
+	 * fields this repo adds. It is open by construction -- `AgentMessage` is
 	 * `Message | CustomAgentMessages[keyof CustomAgentMessages]`, and a backend
 	 * can declaration-merge new kinds in. The final `{:else}` is therefore not
 	 * dead code even though today it is unreachable by type.
 	 */
-	import type { AgentMessage } from "@earendil-works/pi-agent-core";
 	import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
+	import type { PaneMessage } from "$shared/protocol.ts";
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
 	import { oneLine, resultText } from "./types.ts";
@@ -24,7 +25,7 @@
 		streaming = false,
 		index,
 	}: {
-		message: AgentMessage;
+		message: PaneMessage;
 		results?: Map<string, ToolResultMessage>;
 		streaming?: boolean;
 		/** Position in the original `messages` array (OW-27: lets the shell find a specific message's DOM node, e.g. to anchor follow-mode). Omitted, no `data-index` renders. */
@@ -74,6 +75,11 @@
 			<p class="meta">
 				{#if message.model}
 					<span>{message.model}</span>
+				{/if}
+				<!-- Effort is a property of the model that answered, so it sits with
+				     the model. Only Codex reports one (OW-61); absent, nothing shows. -->
+				{#if message.effort}
+					<span>{message.effort}</span>
 				{/if}
 				{#if message.usage.totalTokens > 0}
 					<span>{compact.format(message.usage.totalTokens)} tok</span>
