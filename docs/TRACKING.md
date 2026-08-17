@@ -161,12 +161,14 @@ is prose with headings, lists and code blocks available.
 
 ### The conversion spec, which has to be exact
 
-Phase 1 hands one identical spec to every fan-out agent, so anything left to
-prose is left to sixty-nine agents to decide separately. A first attempt at this
-section gave one example and a paragraph; a dry-run read on 2026-08-17 produced
-the artifacts from it and found **twenty points it had to invent**, three of
-them introduced by the example itself. What follows is the whole of it. Phase 1
-is **transcription**: it changes the container and nothing else.
+This section is phase 1's whole specification, and its exactness is what makes
+phase 1 a script rather than a fan-out: anything left to prose is something the
+transform's author invents alone, and the equivalence check cannot arbitrate a
+rule it was written from. A first attempt at this section gave one example and a
+paragraph; a dry-run read on 2026-08-17 produced the artifacts from it and found
+**twenty points it had to invent**, three of them introduced by the example
+itself. Closing those twenty is what made the script possible. Phase 1 is
+**transcription**: it changes the container and nothing else.
 
 ```
 ---
@@ -216,8 +218,17 @@ where: '<the Where cell, verbatim, in single quotes>'
   and the `**Fixed** in <sha>: <evidence>` note becomes the **final paragraph
   with no heading above it**. All 27 are regular enough for that to be
   mechanical.
-- Unescape every `\|` to `|`. One blank line after the closing `---`. The file
-  ends with exactly one newline and carries no trailing spaces.
+- **Split each row into exactly four cells — id, kind, where, and everything
+  after the third `|` as the Item. Do not split on every `|`.** Six rows carry
+  a raw, unescaped `|` inside a code span: OW-38, OW-39, OW-44, OW-60, OW-61
+  and OW-65, between one and four each, all of them TypeScript unions or a
+  `||`. A naive split gives those rows five to eight cells and silently
+  truncates the Item, which is the corruption this spec is least likely to
+  survive by eye. Counted 2026-08-17.
+- Unescape every `\|` to `|`, there being no table left to escape for. There
+  are five, three of them inside OW-54's own survey commands; verified
+  2026-08-17. One blank line after the closing `---`. The file ends with
+  exactly one newline and carries no trailing spaces.
 
 Two worked examples, which are the spec as much as the rules are. An open row
 with a bolded lead claim and a backticked Where cell — OW-32 — becomes
@@ -405,67 +416,44 @@ fresh count would legitimately differ from what phase 1 converted and the
 done-when would fail for the wrong reason. Say in that message how many open and
 closed rows were converted, and repeat the pair in OW-54's own close note.
 
-This is where the volume is, and the per-row transform is close to an ideal
-fan-out: one independent item per row, mechanically constrained, checkable
-afterwards. **Farm it to small subagents rather than pulling every row body
-through one context** (owner, 2026-08-17; read to the ask two paragraphs below
-before acting on this) — the orchestrator then holds ids and pass/fail rather
-than prose. Two things keep the results one house style instead of one per
-agent: convert three or four rows first and pass that output to every later
-agent as the worked example, and give them all one identical spec rather than a
-paraphrase each. Use a single model tier throughout — the long rows (OW-54,
-OW-63, OW-69 and OW-59 run 500-1000 words as of 2026-08-17, with nested bold and
-code spans) are where a too-small model mangles markup, and mixing tiers buys
-complexity for a saving that no longer matters.
+**Write one transform script rather than farming rows out to subagents**
+(owner, 2026-08-17, reversing the fan-out this section prescribed earlier the
+same day). The fan-out was chosen while the conversion spec still had twenty
+things an agent would have had to invent, and small contexts exercising
+judgement was the right shape for that. The second dry run closed those twenty,
+and the spec above is now deterministic — measured across all 69 rows on
+2026-08-17, headline extraction resolves 48 by bolded lead span and 21 by first
+sentence with **nothing left over**; no bolded lead carries a nested `**` to
+defeat a non-greedy match; and no first-sentence headline terminates inside a
+code span, `trust.json` in OW-25 being the near miss that the "period then
+whitespace" rule declines correctly. Everything else in the spec is
+substitution. A job with no judgement left in it is a script, and sixty-nine
+agents doing substitutions is the thing this document's own cost argument
+objects to.
 
-**Your first action in this phase is to ask, not to convert.** You have the
-capability — the owner confirmed on 2026-08-17 that the executing session runs
-with the same tools as the one that wrote this — but you will not reach for it
-unprompted, because spawning subagents or a workflow is opt-in and the opt-in is
-his to give. So the fan-out happens only if you request it and he grants it. He
-set it up this way on 2026-08-17 precisely so that a fresh agent would prompt
-him for it rather than quietly grind through the whole corpus alone — so ask
-before converting a single row. If he declines, convert serially and say that is
-what you are doing.
+Three things follow. The transform is re-runnable, so a failing equivalence
+check is fixed once in one place and re-run over the whole corpus rather than
+re-dispatched per row. There is no house style to hold across agents, so the
+three-or-four-row worked-example batch that used to seed them is unnecessary —
+the two examples in the spec are for whoever writes the script. And
+`/execute`'s worktree and cherry-pick rules (`.claude/skills/execute/SKILL.md:23`
+and `:36`) do not bind, because nothing that writes is dispatched at all; the
+rehearsal of the dispatch mechanism this section used to require goes with them,
+as does the risk of a model quietly tidying the markup the spec says to
+transcribe as found.
 
-**How that fan-out lands, because `/execute`'s dispatch rules assume exactly one
-subagent and would otherwise be read as forbidding this.**
-`.claude/skills/execute/SKILL.md:23` says "One subagent, its own worktree" and
-`:36` says to cherry-pick its commit; both are written for a code row, where the
-worktree buys isolation and `bun run check` has to pass on the result. Phase 1
-is neither. It only *creates* files, every agent's paths are disjoint from every
-other's, and no code is touched — so: no worktree, no branch, no cherry-pick.
-Hand each agent the main clone and one row (or a small batch), tell it to write
-the file and report, and **tell it not to commit**. The orchestrator commits the
-generated tree itself, once, after the equivalence check below passes; a
-subagent whose output fails the check is re-run rather than merged. The commit
-is docs only, so say so in the message rather than claiming `bun run check`.
-This does not reopen OW-57 or OW-58: both fixed hazards of *worktree* dispatch —
-an unexecutable "commit on `main`" instruction, and worktrees cut from
-`origin/main` rather than local `main` — and neither exists for an agent that
-has no worktree and commits nothing. One more rule of `execute/SKILL.md` does
-not survive contact with this phase: `:26`, "Do not send it to read
-WORKSTREAMS", is unfollowable here, because the row file it would otherwise be
-handed is the thing being created. Tell each agent to `grep` its own row out of
-the table — and note `grep '^| OW-4 '` needs the trailing space, or it also
-matches OW-40 through OW-49.
-
-**Convert the first three or four rows as a rehearsal of the dispatch itself,
-not just of the house style.** The batch is already prescribed above as the
-worked example every later agent is given; it is also the only chance to find
-out whether this dispatch mode behaves as described, because **nothing in this
-repo has ever run it.** OW-57 and OW-58 are both cases where dispatch behaved
-differently than the docs assumed, and in OW-58's case the cause was neither of
-the two mechanisms its row predicted — the harness cuts worktrees from the
-remote tracking ref, which nobody had guessed. The procedure above sidesteps
-both known hazards by construction, which is not the same as having been
-observed. So after the first batch, check that the files landed where they
-should, that no agent committed anything, and that `git status` shows what you
-expect, before handing the same prompt to sixty more.
-
-One transform detail that corrupts silently if missed: **a cell-escaped `\|`
-becomes a literal `|`**, there being no table left to escape for. There are five
-of them, three inside OW-54's own survey commands.
+**Then spot-check the output with one adversarial read-only subagent** (owner,
+2026-08-17), which is where agent judgement still earns its keep: the
+equivalence check tests the transform against its own idea of the transform, so
+it is blind to a rule that is wrong in both. Hand it both tables and a sample of
+the generated files — the long rows (OW-54, OW-59, OW-63 and OW-69 run 500-1000
+words with nested bold and code spans), the six raw-pipe rows named in the spec,
+and two or three closed ones — and ask it for text whose *meaning* changed,
+rather than text that differs. It reads and reports; it writes nothing and
+commits nothing, so there is no worktree and no cherry-pick. `execute/SKILL.md:26`,
+"Do not send it to read WORKSTREAMS", is the one dispatch rule this crosses, and
+deliberately: the tables are the ground truth it checks against. Dispatching
+this one agent is pre-authorised. Reintroducing the fan-out is not.
 
 Then check equivalence **mechanically**, before anything is deleted — this is
 the last moment the check is possible. It cannot be a substring test: the
@@ -528,9 +516,10 @@ grep would have got wrong:
   where it is specified (this document's format section).
 - **`execute/SKILL.md:23` and `:36`, "One subagent, its own worktree" and
   cherry-pick its commit.** Written for a code row and correct there (OW-57,
-  OW-58). Phase 1 is the counter-example and has its own procedure above; phase
-  2 decides whether the skill carries the general form — a docs-only fan-out
-  writes in the main clone, commits nothing, and the session commits the tree.
+  OW-58). Phase 1's spot-check agent is the counter-example: it reads and
+  reports, so it wants no worktree, no branch and no commit to pick. Phase 2
+  decides whether the skill says so — a read-only subagent is a shape the rule
+  as written does not admit.
 - **`execute/SKILL.md:26`, "Do not send it to read WORKSTREAMS."** The reason
   was that reading it means loading 60KB of unrelated rows. That reason is gone;
   the intent — the subagent works the row it was given and does not go shopping
