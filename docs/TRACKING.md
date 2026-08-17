@@ -57,8 +57,10 @@ remembers what it stood for; a different project picks its own.
 ## What is and is not going wrong
 
 Measured 2026-08-15 at 34 open and 18 closed rows; re-counted 2026-08-17 at
-**40 open and 27 closed**, the two files now 48KB and 76KB. Fifteen rows in two
-days. That rate is itself part of what follows.
+**40 open and 27 closed**, the two files now 48KB and 76KB — then 41 open
+within the hour, when OW-68 was filed out of the same conversation. Fifteen rows
+in two days, and a count that aged while being written down. That rate is itself
+part of what follows.
 
 **Integrity is fine.** An audit across both files found no id in both, no gaps
 in 1..53, no cited-but-undefined id anywhere in `docs/`, `AGENTS.md` or
@@ -235,13 +237,16 @@ this resumable rather than one-shot. A session running out of room should stop
 at a boundary and name it. A session that stops mid-phase should reset rather
 than hand over half a phase.
 
-**Phase 1 — generate alongside.** Write all 67 files into
+**Phase 1 — generate alongside.** Write a file per row into
 `docs/work/{open,closed}/`, both tables left exactly as they are. The tables are
 still the source of truth and the new directory is inert, so every document
-still tells the truth.
+still tells the truth. **Count the rows yourself here and carry that number**;
+the counts written into this document and into OW-54 were true when written and
+drift with every row authored on the laptop.
 
 This is where the volume is, and the per-row transform is close to an ideal
-fan-out: 67 independent items, mechanically constrained, checkable afterwards.
+fan-out: one independent item per row, mechanically constrained, checkable
+afterwards.
 **Farm it to small subagents rather than pulling 67 row bodies through one
 context** (owner, 2026-08-17; read to the ask two paragraphs below before acting
 on this) — the orchestrator then holds ids and pass/fail rather than prose. Two things keep the results one house style instead of
@@ -252,12 +257,13 @@ than a paraphrase each. Use a single model tier throughout — the long rows
 where a too-small model mangles markup, and mixing tiers buys complexity for a
 saving that no longer matters.
 
-**Your first action in this phase is to ask, not to convert.** You may not be
-permitted to spawn subagents or a workflow on your own initiative, and should
-not assume you are, so the fan-out happens only if you request it and the owner
-grants it. He set it up this way on 2026-08-17
+**Your first action in this phase is to ask, not to convert.** You have the
+capability — the owner confirmed on 2026-08-17 that the executing session runs
+with the same tools as the one that wrote this — but you will not reach for it
+unprompted, because spawning subagents or a workflow is opt-in and the opt-in is
+his to give. So the fan-out happens only if you request it and he grants it. He set it up this way on 2026-08-17
 precisely so that a fresh agent would prompt him for it rather than quietly
-grind through 67 rows alone — so ask before converting a single row. If he
+grind through the whole corpus alone — so ask before converting a single row. If he
 declines, convert serially and say that is what you are doing.
 
 One transform detail that corrupts silently if missed: **a cell-escaped `\|`
@@ -270,8 +276,8 @@ transform drops `~~`, unescapes `\|`, and promotes a `**bolded**` span into a
 headline, so a literal comparison fails spuriously and whoever runs it will
 weaken the check until it passes. Normalise both sides first — strip `~~` and
 `**`, unescape `\|`, collapse whitespace — then assert each row's text is
-present in its file. A throwaway script, not an eyeball: 67 rows is well past
-where reading catches a silent drop.
+present in its file. A throwaway script, not an eyeball: a corpus this size is
+well past where reading catches a silent drop.
 
 **Phase 2 — rewrite the process docs.** `AGENTS.md` and both skills describe the
 old storage as procedure, and they are the loaded surface every session reads.
