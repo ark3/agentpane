@@ -191,6 +191,52 @@ describe("sanitization", () => {
 	});
 });
 
+/**
+ * OW-62: a markdown link whose href is a local path has nowhere to go --
+ * agentpane is not a file viewer, and the SPA fallback would just reload the
+ * app -- so it renders as an inline reference instead of an anchor. Both
+ * directions are the contract: local paths must not be links, real web URLs
+ * must still be, and no other scheme changes hands.
+ */
+describe("file references", () => {
+	it.each([
+		["a relative path with a line suffix", "[src/client/api.ts:35](src/client/api.ts:35)", "src/client/api.ts:35"],
+		["a label collapsed to the file name", "[api.ts](src/client/api.ts:35)", "src/client/api.ts:35"],
+		[
+			"an absolute path with an #Lnn fragment",
+			"[api.ts](/home/u/agentpane/src/client/api.ts#L35)",
+			"/home/u/agentpane/src/client/api.ts#L35",
+		],
+		["a file: url", "[a](file:///home/u/a.ts)", "file:///home/u/a.ts"],
+	])("renders %s as a non-link reference that keeps the location visible", (_name, source, shown) => {
+		const host = parse(renderMarkdown(source));
+		expect(host.querySelector("a")).toBeNull();
+		const ref = host.querySelector(".ap-file-ref");
+		expect(ref?.textContent).toBe(shown);
+		expect(ref?.getAttribute("href")).toBeNull();
+	});
+
+	it("leaves a real web url a hardened link", () => {
+		const host = parse(renderMarkdown("[docs](https://example.invalid/x)"));
+		expect(host.querySelector(".ap-file-ref")).toBeNull();
+		const anchor = host.querySelector("a");
+		expect(anchor?.getAttribute("href")).toBe("https://example.invalid/x");
+		expect(anchor?.getAttribute("target")).toBe("_blank");
+	});
+
+	it("claims neither in-document nor hostile hrefs", () => {
+		// `#section` is a working link; `javascript:` must stay DOMPurify's
+		// problem rather than becoming a reference span behind its back.
+		const inDoc = parse(renderMarkdown("[here](#section)"));
+		expect(inDoc.querySelector(".ap-file-ref")).toBeNull();
+		expect(inDoc.querySelector("a")?.getAttribute("href")).toBe("#section");
+
+		const hostile = parse(renderMarkdown("[click](javascript:alert(1))"));
+		expect(hostile.querySelector(".ap-file-ref")).toBeNull();
+		expect(hostile.querySelector("a")).not.toBeNull();
+	});
+});
+
 describe("highlightCode", () => {
 	it("escapes when no language is given", () => {
 		expect(highlightCode("<script>", undefined)).toBe("&lt;script&gt;");

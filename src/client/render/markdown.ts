@@ -118,6 +118,24 @@ export function highlightCode(code: string, language?: string | undefined): stri
 // ---------------------------------------------------------------------------
 
 /**
+ * The location a local file reference points at, or `undefined` if the href is
+ * not one (OW-62).
+ *
+ * Deliberately narrow: only an href with **no URI scheme at all** (a relative
+ * or absolute path -- `src/api.ts:35` has no valid scheme, since a scheme
+ * cannot contain `/` or `.`) or a `file:` url. Everything else keeps the
+ * anchor path exactly as before, which matters most for the schemes we do not
+ * want to own: `javascript:` and `data:` stay DOMPurify's business, and `#`
+ * fragments are working in-document links.
+ */
+function fileReference(href: string): string | undefined {
+	if (!href || href.startsWith("#")) return undefined;
+	const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(href)?.[0];
+	if (scheme && scheme.toLowerCase() !== "file:") return undefined;
+	return href;
+}
+
+/**
  * A private `Marked` instance: `marked.use()` on the module singleton is
  * global mutable state, and this package should not change how anything else
  * in the process parses markdown.
@@ -134,6 +152,26 @@ const parser = new Marked({
 			const body = highlightCode(text, known);
 			const cls = known ? `hljs language-${escapeHtml(known)}` : "hljs";
 			return `<pre class="ap-code"><code class="${cls}">${body}</code></pre>\n`;
+		},
+		/**
+		 * A local file reference is not a link: agentpane has nowhere to send
+		 * it, and the href would fall into the SPA fallback and reload the app.
+		 * A `<span>` instead of an `<a>` removes the false affordance while
+		 * leaving ordinary text selection intact.
+		 *
+		 * The visible text is the location, not the author's label, unless the
+		 * label already contains it -- that is what stops `[api.ts](a/b.ts:35)`
+		 * from hiding the line number the reader came for.
+		 *
+		 * Returning `false` hands the token back to marked's own `link`
+		 * renderer, so http(s), `mailto:`, `#` fragments and hostile schemes
+		 * all reach the sanitizer exactly as they did before.
+		 */
+		link(token) {
+			const location = fileReference(token.href);
+			if (location === undefined) return false;
+			const body = token.text.includes(location) ? this.parser.parseInline(token.tokens) : escapeHtml(location);
+			return `<span class="ap-file-ref">${body}</span>`;
 		},
 	},
 });

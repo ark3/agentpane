@@ -126,6 +126,16 @@
 		text-underline-offset: 2px;
 	}
 
+	/* A file reference is not a link and must not look like one: monospace and
+	   muted, marked as a location by a dotted rule rather than by accent
+	   colour. First cut -- the verdict comes from looking at it (OW-62). */
+	.markdown :global(.ap-file-ref) {
+		font-family: var(--ap-font-mono);
+		font-size: 0.9em;
+		color: var(--ap-fg-muted);
+		border-bottom: 1px dotted var(--ap-border-strong);
+	}
+
 	.markdown :global(blockquote) {
 		padding-left: var(--ap-space-3);
 		border-left: 2px solid var(--ap-border-strong);
