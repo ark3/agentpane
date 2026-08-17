@@ -159,29 +159,105 @@ Closing is `git mv` plus appending the close note. Frontmatter carries the
 fields that vary (kind, where, `needs:` edges, and on close the sha); the body
 is prose with headings, lists and code blocks available.
 
-The shape, written out because phase 1 has to hand every fan-out agent one
-identical spec and a prose description of a file format is not one — a dry-run
-read of OW-54 on 2026-08-17 found this the largest thing left to invent, and
-sixty-nine files inventing it separately is the failure:
+### The conversion spec, which has to be exact
+
+Phase 1 hands one identical spec to every fan-out agent, so anything left to
+prose is left to sixty-nine agents to decide separately. A first attempt at this
+section gave one example and a paragraph; a dry-run read on 2026-08-17 produced
+the artifacts from it and found **twenty points it had to invent**, three of
+them introduced by the example itself. What follows is the whole of it. Phase 1
+is **transcription**: it changes the container and nothing else.
 
 ```
 ---
-kind: change
-where: docs/TRACKING.md, AGENTS.md, .claude/skills/execute/SKILL.md
+kind: <the Kind cell, verbatim, unquoted>
+where: '<the Where cell, verbatim, in single quotes>'
 ---
 
-# Replace both row tables with one-file-per-row storage under docs/work/
+# <the headline, one line, never wrapped>
 
-Body prose. `##` for subheadings, lists and code blocks available.
+<the rest of the Item cell, wrapped at 80 columns>
 ```
 
-`kind` and `where` are the table's cells, verbatim. `sha:` is added on close.
-**`needs:` is not populated by the migration** — dependency edges are prose
-today (OW-51 and OW-52 assume OW-50; OW-49 is "entangled with OW-24") and
-deriving them is judgement, not transcription, so phase 1 leaves the field
-absent rather than having each agent decide. It exists for whatever OW-59 wants.
-The `---` fences are what keep the headline "the first body line" true while
-still letting `^kind: ` match, and no field may wrap.
+- **`where:` is always single-quoted, and the quotes are not optional.** 52 of
+  the 69 Where cells begin with a backtick, which YAML forbids as the first
+  character of a plain scalar (`Plain value cannot start with reserved
+  character`, reproduced 2026-08-17), and four contain a `"`. No Where cell
+  contains an apostrophe, so nothing needs escaping; if one ever does, double
+  it. Keep the backticks and the full value — do not tidy it, shorten it, or let
+  it wrap.
+- **No field but `kind:` and `where:`.** Not `needs:` — dependency edges are
+  prose today (OW-51 and OW-52 assume OW-50; OW-49 is "entangled with OW-24")
+  and deriving them is judgement rather than transcription. Not `sha:` either,
+  even on a closed row: four close notes name two shas, so there is no single
+  value to put there, and the sha stays in the note text where its author put
+  it. Both fields exist for whatever OW-59 wants; the migration does not
+  populate them.
+- **The headline is promoted, not copied.** If the Item cell opens with a `**`
+  span, the headline is that span with the markers dropped and **everything else
+  inside it kept** — code spans, dates, the trailing period, a second sentence.
+  Otherwise it is the first sentence up to and including its period. Either way
+  it leaves the body: it must not appear twice in the file. Exactly one line may
+  begin with `# `.
+- **The body is the remainder, verbatim, wrapped at 80 columns** at spaces that
+  are already there. Promotion strands a leading connector on two rows (OW-54's
+  body would open on an em dash, closed OW-41's on an open paren); dropping that
+  one connector is the **only** deletion permitted, and the equivalence check
+  allows it.
+- **Insert no structure.** No `##` headings, no lists, no code blocks, no
+  paragraph breaks of your own — even where a row obviously has parts. The
+  format makes those available and rows should acquire them, but as later
+  per-row edits with the reasoning in a commit, not silently during a migration
+  whose only check is that the text survived.
+- **Transcribe malformed markup as found.** Closed OW-46 carries a broken
+  code-span nesting twice. Repairing it during transcription defeats the check;
+  file it or fix it afterwards.
+- **Closed rows:** delete every `~~`, keeping all the text between the marks,
+  and the `**Fixed** in <sha>: <evidence>` note becomes the **final paragraph
+  with no heading above it**. All 27 are regular enough for that to be
+  mechanical.
+- Unescape every `\|` to `|`. One blank line after the closing `---`. The file
+  ends with exactly one newline and carries no trailing spaces.
+
+Two worked examples, which are the spec as much as the rules are. An open row
+with a bolded lead claim and a backticked Where cell — OW-32 — becomes
+`docs/work/open/OW-32.md`:
+
+```
+---
+kind: deferral
+where: '`src/server/adapters/codex/mapping.ts`'
+---
+
+# The Codex mapping handles item and content types DESIGN's mapping table does not name, so the table reads as a contract it is not.
+
+`mapItem` (line 295) adds `imageGeneration` and `imageView` — both produce
+output, neither is in `SILENT_ITEM_TYPES` — beyond DESIGN's ten-row table; ...
+```
+
+That headline is 143 characters and is not wrapped. A closed row with no bolded
+lead, showing the strikethrough strip and the close note — OW-3 — becomes
+`docs/work/closed/OW-3.md`:
+
+```
+---
+kind: deferral
+where: 'client workspace input'
+---
+
+# `setWorkspace` fires per keystroke, so typing an absolute path can enumerate every prefix of it.
+
+Decide between debouncing and committing on blur.
+
+**Fixed** in `26d104f` as part of OW-39: `setWorkspace` and the per-keystroke
+server round-trip are gone entirely — the free-form input is replaced by a
+workspace `<select>` derived from the already-listed sessions, and filtering is
+now purely client-side over that in-memory list. No keystroke reaches the
+server, so there is no prefix to enumerate.
+```
+
+Note what the second example does *not* do: no `sha:` field, no `## Fixed`
+heading, and the headline keeps its code span and its trailing period.
 
 Why the directory rather than a `status:` field:
 
@@ -218,10 +294,14 @@ rather than assume it. Three constraints, each measured against a throwaway
 prototype on 2026-08-16 rather than reasoned about:
 
 - **The headline is the first body line, `# `-prefixed, and never wraps.**
-  Every row today is prose wrapped at eighty columns; a wrapped headline yields
-  half a title. Body subheadings therefore start at `##`, which keeps `^# `
-  matching exactly once per file — confirmed against a body containing both a
-  `##` subheading and a mid-sentence `# `.
+  Bodies are wrapped at eighty columns, so a headline that wrapped with them
+  would yield half a title. (An earlier draft of this bullet said "every row
+  today is prose wrapped at eighty columns", which is false of the tables — one
+  row is one physical line — and it was the only sentence from which the
+  body-wrapping rule could be inferred, so a dry run had to invent that rule. It
+  is in the conversion spec now.) Body subheadings therefore start at `##`,
+  which keeps `^# ` matching exactly once per file — confirmed against a body
+  containing both a `##` subheading and a mid-sentence `# `.
 - **Frontmatter fields are one-line flat scalars.** No block scalars, or
   `^kind: ` stops matching and filtering by kind needs a parser.
 - **The command must pin its own order, whatever the searcher.** Two
@@ -363,7 +443,12 @@ is docs only, so say so in the message rather than claiming `bun run check`.
 This does not reopen OW-57 or OW-58: both fixed hazards of *worktree* dispatch —
 an unexecutable "commit on `main`" instruction, and worktrees cut from
 `origin/main` rather than local `main` — and neither exists for an agent that
-has no worktree and commits nothing.
+has no worktree and commits nothing. One more rule of `execute/SKILL.md` does
+not survive contact with this phase: `:26`, "Do not send it to read
+WORKSTREAMS", is unfollowable here, because the row file it would otherwise be
+handed is the thing being created. Tell each agent to `grep` its own row out of
+the table — and note `grep '^| OW-4 '` needs the trailing space, or it also
+matches OW-40 through OW-49.
 
 **Convert the first three or four rows as a rehearsal of the dispatch itself,
 not just of the house style.** The batch is already prescribed above as the
