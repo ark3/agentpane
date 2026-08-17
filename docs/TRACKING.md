@@ -365,6 +365,19 @@ an unexecutable "commit on `main`" instruction, and worktrees cut from
 `origin/main` rather than local `main` — and neither exists for an agent that
 has no worktree and commits nothing.
 
+**Convert the first three or four rows as a rehearsal of the dispatch itself,
+not just of the house style.** The batch is already prescribed above as the
+worked example every later agent is given; it is also the only chance to find
+out whether this dispatch mode behaves as described, because **nothing in this
+repo has ever run it.** OW-57 and OW-58 are both cases where dispatch behaved
+differently than the docs assumed, and in OW-58's case the cause was neither of
+the two mechanisms its row predicted — the harness cuts worktrees from the
+remote tracking ref, which nobody had guessed. The procedure above sidesteps
+both known hazards by construction, which is not the same as having been
+observed. So after the first batch, check that the files landed where they
+should, that no agent committed anything, and that `git status` shows what you
+expect, before handing the same prompt to sixty more.
+
 One transform detail that corrupts silently if missed: **a cell-escaped `\|`
 becomes a literal `|`**, there being no table left to escape for. There are five
 of them, three inside OW-54's own survey commands.
