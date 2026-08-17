@@ -40,25 +40,29 @@ every citation, and the commit history that references them — and under the
 storage below a closed row lives at `closed/OW-50.md`, where the prefix would
 actively mislead if it still meant anything.
 
-The owner raised renaming it on 2026-08-17, wanting a prefix that generalises
-if the tooling ever serves other projects. Measured the same day, because the
-cost of a rename is the whole argument: **80 of this repo's 172 commit subjects
-name an `OW-` id** — 47% of the history — and the repo is now pushed, so
-rewriting them is off the table. A rename orphans every one of those
-permanently. Outside the two row files there are a further **143 citations
-across 35 files**, and the split is the part that matters, because an earlier
-count here saw only the first half: 78 in prose (`TRACKING.md` 43,
-`MANUAL_TESTING.md` 23, `DESIGN.md` 8, `execute/SKILL.md` 2, `HANDOFF.md` 1,
-`AGENTS.md` 1, and **zero** in `README.md` and `author/SKILL.md`) and **65 in
+The owner raised renaming it on 2026-08-17, wanting a prefix that generalises if
+the tooling ever serves other projects. Measured the same day, because the cost
+of a rename is the whole argument: **82 of this repo's 174 commit subjects name
+an `OW-` id** — 47% of the history, at `97731f0` — and the published history
+already holds most of them, so rewriting them is off the table. A rename orphans
+every one of those permanently.
+
+Outside the two row files, the durable half of the census is **65 citations in
 code comments and test names across 29 files** under `src/`, `e2e/` and
-`playwright.config.ts`. All mechanical, but the code half is the larger one and
-no criterion that stops at `docs/` sees it. Recounted 2026-08-17; these drift,
-so recount rather than cite.
+`playwright.config.ts` — the half an earlier count here missed entirely, and the
+one that does not move when a document is edited. The prose half is around 115
+more across six files, most of it this document's own cross-references
+(`MANUAL_TESTING.md` 23, `DESIGN.md` 8, `execute/SKILL.md` 2, `HANDOFF.md` 1,
+`AGENTS.md` 1, **zero** in `README.md` and `author/SKILL.md`, and the rest
+here). **That last figure counts the document stating it, so any edit to this
+file invalidates it** — it went from 43 to 77 inside the session that wrote the
+sentence. Take the file count and the code half as the measurement; treat the
+prose total as an order of magnitude and recount if it matters.
 
 Two things follow. **The migration does not make a later rename cheaper or
 dearer**, so there is no now-or-never moment to force a decision at: today it
-is a `sed` across the 37 files that carry an id (the 35 above plus the two row
-files), afterwards a scripted `git mv` across one file per row plus the same
+is a `sed` across the 37 files that carry an id (35 plus the two row files),
+afterwards a scripted `git mv` across one file per row plus the same
 `sed`. And **the generality the owner actually wants does not require
 the rename at all** — it requires the tool not to care, which is an OW-59
 question. This project keeps `OW-`, whose only real defect is that nobody
@@ -83,7 +87,7 @@ own padding example), and every closed row carrying a real commit sha. 69 rows,
 hand-maintained, zero errors. Automating for *correctness* would solve a
 problem this project does not have.
 
-**Cost is not fine, and the reason outlived the premise it was argued on.** 34
+**Cost is not fine, and the reason outlived the premise it was argued on.** 35
 of the last 40 commits touched only docs, nine of them titled `docs: close
 OW-N with its sha and evidence`. A close is four to six tool calls of string
 surgery against two files now 60KB and 76KB, and it is structurally a second
@@ -115,15 +119,17 @@ partitioned by *role*, not racing for rows, so no assignee or
 claim is wanted even now. The condition that actually bit — **one file, edited
 from two clones that diverge for hours** — was not on the list. It is now.
 
-**The container has outgrown the content.** Median open row is 86 words
-(2026-08-17); the five longest run 390-980. One row is one physical line, with
-consequences: the table cannot be scanned without truncating lines; editing a
-row's middle means anchoring on a fragment of a 400-word line; changing one
-clause rewrites the whole line in the diff, so row history is effectively lost;
-and cells cannot hold lists, code blocks, or paragraphs, so rows with real
-structure (OW-18's two parts, OW-51's five decisions) get flattened into run-on
-prose. Ordering is a convention with nothing enforcing it — three rows were
-inserted in the wrong position on 2026-08-15 and moved by hand.
+**The container has outgrown the content.** Median open row is 86 words and the
+five longest run 394-980, by `wc -w` over the Item cell at `97731f0` — state the
+method, because two agents counting this differently on the same day disagreed
+by 20%. One row is one physical line, with consequences: the table cannot be
+scanned without truncating lines; editing a row's middle means anchoring on a
+fragment of a 400-word line; changing one clause rewrites the whole line in the
+diff, so row history is effectively lost; and cells cannot hold lists, code
+blocks, or paragraphs, so rows with real structure (OW-18's two parts, OW-51's
+five decisions) get flattened into run-on prose. Ordering is a convention with
+nothing enforcing it — three rows were inserted in the wrong position on
+2026-08-15 and moved by hand.
 
 **Dependency edges are already prose.** OW-51 and OW-52 both assume OW-50 lands
 first; OW-49 is "entangled with OW-24"; OW-33/34/35 are one cluster; OW-42
@@ -152,6 +158,30 @@ docs/work/
 Closing is `git mv` plus appending the close note. Frontmatter carries the
 fields that vary (kind, where, `needs:` edges, and on close the sha); the body
 is prose with headings, lists and code blocks available.
+
+The shape, written out because phase 1 has to hand every fan-out agent one
+identical spec and a prose description of a file format is not one — a dry-run
+read of OW-54 on 2026-08-17 found this the largest thing left to invent, and
+sixty-nine files inventing it separately is the failure:
+
+```
+---
+kind: change
+where: docs/TRACKING.md, AGENTS.md, .claude/skills/execute/SKILL.md
+---
+
+# Replace both row tables with one-file-per-row storage under docs/work/
+
+Body prose. `##` for subheadings, lists and code blocks available.
+```
+
+`kind` and `where` are the table's cells, verbatim. `sha:` is added on close.
+**`needs:` is not populated by the migration** — dependency edges are prose
+today (OW-51 and OW-52 assume OW-50; OW-49 is "entangled with OW-24") and
+deriving them is judgement, not transcription, so phase 1 leaves the field
+absent rather than having each agent decide. It exists for whatever OW-59 wants.
+The `---` fences are what keep the headline "the first body line" true while
+still letting `^kind: ` match, and no field may wrap.
 
 Why the directory rather than a `status:` field:
 
@@ -359,16 +389,16 @@ that nothing states and nothing meets is not a constraint.
 
 **The ~60-line replacement is retired too, and there is now no line ceiling on
 these files** (owner, 2026-08-17, asked because `execute/SKILL.md` was at 59 and
-phase 2 adds to it): *"The ceiling has dubious value. We spend most of our tokens
-on tool calls, not skill file reads."* That is the token argument gone at the
-root rather than recalibrated, and it settles the question phase 2 would
+phase 2 adds to it): *"The ceiling has dubious value. We spend most of our
+tokens on tool calls, not skill file reads."* That is the token argument gone at
+the root rather than recalibrated, and it settles the question phase 2 would
 otherwise have had to — **no existing rule has to leave `execute/SKILL.md` to
 make room for the close procedure and the no-id survey.** Write what the storage
 needs and let the file be as long as that takes. What survives is the discipline
 the number was standing in for, now judged rather than counted: **a new rule
 means an old one earns its place again**, because loaded prose competes for
-attention even when it is free, and a rule nobody follows is worse than no rule —
-which is what the 2026-08-13 restructure was for. One hazard the freed space
+attention even when it is free, and a rule nobody follows is worse than no rule
+— which is what the 2026-08-13 restructure was for. One hazard the freed space
 creates: phase 2 may now copy the survey commands into `execute/SKILL.md` rather
 than citing them, which is two copies of a command that can drift. If it does,
 this document is the spec and the skill follows it.
@@ -404,14 +434,23 @@ grep would have got wrong:
   deletes. Becomes `git mv docs/work/open/OW-N.md docs/work/closed/` plus
   appending the `**Fixed** in <sha>: <evidence>` note as a body section, no
   strikethrough.
+- **`execute/SKILL.md:15-16`, "Do not paste the table — closed rows carry long
+  close notes and drown the open ones."** This sits in the "Invoked with no id"
+  branch, which is exactly where phase 2's survey belongs, so an agent working
+  from a list that omitted it would add the command and leave the stale sentence
+  directly above it. The caution dies with the table; what replaces it is the
+  survey.
 - **`AGENTS.md:3-4`, `:42`, `:48`** — the three places that name
   `docs/WORKSTREAMS.md` or `docs/CLOSED.md` as where work lives.
 - **`AGENTS.md:49`, "Status lives in that file's Status table and nowhere else"
-  — leave this one alone.** It is about build-slice status, the table at the top
-  of `WORKSTREAMS.md`, which survives phase 3 intact. An earlier draft of this
-  document quoted it as if it governed *row* status, which would have had a
-  phase-2 agent delete a live rule; `README.md:64` and `HANDOFF.md:11` both read
-  it the same way it is meant.
+  — keep the rule, but it needs a new antecedent.** It is about build-slice
+  status, the table at the top of `WORKSTREAMS.md`, which survives phase 3
+  intact; an earlier draft of this document quoted it as if it governed *row*
+  status, which would have had a phase-2 agent delete a live rule, and
+  `README.md:64` and `HANDOFF.md:11` both read it the way it is meant. The trap
+  is that "**that file**" refers to `docs/WORKSTREAMS.md` as named on `:48` —
+  the line being rewritten — so editing `:48` and leaving `:49` verbatim strands
+  the pronoun. Name the file in the rule itself.
 
 Both skills' YAML `description:` fields also name `docs/WORKSTREAMS.md`
 (`author/SKILL.md:3`, `execute/SKILL.md:3`), as does `author/SKILL.md:13`.
@@ -423,9 +462,13 @@ table — carrying its one durable claim, that close notes are kept because they
 are sometimes the grounding a later row needs, into wherever phase 2 describes
 the new storage.
 
-**Emptying the table orphans four things around it, and each needs saying where
+**Emptying the table orphans five things around it, and each needs saying where
 it goes** — otherwise they are deleted with the table or left pointing at
-nothing. `WORKSTREAMS.md`'s five-kind legend (`:124-139`) is the definition of
+nothing. One of them is inside the part of `WORKSTREAMS.md` that *survives*,
+which is why it is the easiest to miss: `:15-16`, "**Open work** below holds
+everything still outstanding", in the Status section's own preamble. It becomes
+a pointer to `docs/work/open/`. The other four are inside the section being
+emptied. `WORKSTREAMS.md`'s five-kind legend (`:124-139`) is the definition of
 what `kind:` may hold, so it moves into this document's format section and
 `author/SKILL.md` cites it there. "Adding a row costs a line: take the next id,
 never reuse one" (`:144-145`) moves to `author/SKILL.md`, beside the
@@ -450,7 +493,7 @@ rather than trusting this list to be complete:
 
 - `docs/DESIGN.md:656-658` — "live in `WORKSTREAMS.md`'s Open work list" and
   "see `CLOSED.md`".
-- `docs/MANUAL_TESTING.md:6` and `:359` — "its Open work list holds what is
+- `docs/MANUAL_TESTING.md:6-7` and `:359` — "its Open work list holds what is
   still outstanding", "Tracked as rows in `WORKSTREAMS.md`'s Open work list".
 - `README.md:63-66` — "its Open work list is the only list of outstanding
   items", and this is the repo's one **markdown link** into the row storage.
