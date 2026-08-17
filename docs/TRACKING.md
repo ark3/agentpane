@@ -223,6 +223,61 @@ two lines that both merge, silently. And a colliding id is by construction
 — citations across the docs and the commit history — does not apply. Renaming
 is a `git mv` and one headline edit. Resolve it when git says so.
 
+## Migrating, in three phases
+
+OW-54 is the row; this is how it runs, kept here rather than in the row because
+a row is not the place for a procedure. The shape answers one constraint above
+all: **a migration cannot be verified after its source is deleted.** So nothing
+is deleted until the replacement has been checked against it.
+
+Each phase ends at a commit that leaves the repo coherent, which is what makes
+this resumable rather than one-shot. A session running out of room should stop
+at a boundary and name it. A session that stops mid-phase should reset rather
+than hand over half a phase.
+
+**Phase 1 — generate alongside.** Write all 67 files into
+`docs/work/{open,closed}/`, both tables left exactly as they are. The tables are
+still the source of truth and the new directory is inert, so every document
+still tells the truth. Then check equivalence **mechanically** before going
+further: each row's text must appear in its corresponding file. A throwaway
+script, not an eyeball — 67 rows is well past where reading catches a silent
+drop, and this is the last moment the check is possible.
+
+**Phase 2 — rewrite the process docs.** `AGENTS.md` and both skills describe the
+old storage as procedure, and they are the loaded surface every session reads,
+so the ~40-line budget per file applies. Coherent at the end: they describe
+storage that exists, and the stale tables are still present but nothing points
+at them.
+
+**Phase 3 — delete.** Remove the Open work table from `WORKSTREAMS.md`, which
+survives on its Status table, its four caller contracts, File ownership and the
+shared interfaces. Delete `CLOSED.md` outright — it is a 9-line header plus the
+table — carrying its one durable claim, that close notes are kept because they
+are sometimes the grounding a later row needs, into wherever phase 2 describes
+the new storage.
+
+### Two details that decide how much judgement this needs
+
+**Headlines are mostly mechanical, which was measured** rather than assumed.
+Counted 2026-08-17: 22 of 41 open rows and 25 of 27 closed ones already open
+with a bolded lead claim, which becomes the headline verbatim. The rest are the
+short early rows — median 58 words — whose first sentence is already the claim
+("A multi-file edit flattens its hunks under the first path"), plus four
+`question` rows whose "Whether ..." opening reads as a headline unchanged. So no
+row needs a headline *invented*: extract the bolded span, else take the first
+sentence, then read the result. The never-wraps rule bounds nothing about
+length — it forbids hard-wrapping the line, not a long line.
+
+**Closed rows lose their strikethrough.** `CLOSED.md` calls it a vestige of
+closing in place, left as-is rather than rewritten. Under directory-as-status it
+is a second encoding of status that can disagree with the directory — the OW-53
+failure this format exists to make structural — and it would land as
+`# ~~headline~~` in every survey. The `**Fixed** in <sha>: <evidence>` note
+stays, as a body section. Note `git mv` has nothing to move during the
+migration, since closed rows are lines inside a file rather than files; it is
+what preserves history across a *future* close, which is why two directories
+exist at all.
+
 ## Tooling, which is a separate item
 
 The format above lands with none of this written. Closing becomes `git mv` plus
