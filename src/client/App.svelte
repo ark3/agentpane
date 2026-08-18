@@ -33,9 +33,6 @@
 	// $state because it is bound inside a conditional block -- Svelte updates the
 	// binding (element <-> undefined) as the composer swaps in and out.
 	let promptEl = $state<HTMLTextAreaElement | undefined>();
-	// The tools popup under the composer (OW-72). A native <details> is the
-	// smallest thing that does the job; bound so its entries can close it.
-	let toolsMenu = $state<HTMLDetailsElement | undefined>();
 
 	/**
 	 * Per-session follow state (OW-27), keyed like everything else in the
@@ -550,7 +547,6 @@
 	 * to inherit -- so this guard is the whole of that case.
 	 */
 	function newConversation(): void {
-		if (toolsMenu) toolsMenu.open = false;
 		const ref = view.state.selected;
 		if (!ref || !newSessionWorkspace) return;
 		void controller.create(newSessionWorkspace, ref.backend);
@@ -558,7 +554,6 @@
 
 	/** Compact the selected session's context (OW-72). */
 	function compactSession(): void {
-		if (toolsMenu) toolsMenu.open = false;
 		void controller.compact();
 	}
 
@@ -739,23 +734,31 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
-				<details class="tools-menu" bind:this={toolsMenu}>
-					<summary aria-label="Tools">Tools</summary>
-					<div class="tools-menu-list" role="menu">
-						<button
-							type="button"
+				<!-- A popover, not the <details> OW-72 first reached for (OW-80): a
+				     disclosure widget never light-dismisses, while an auto popover
+				     gets outside-click and Escape for free, with no JS. The entries
+				     hide it declaratively because activating a control *inside* an
+				     auto popover does not dismiss it -- verified in Chromium, the
+				     menu stayed open -- so only a click outside would close it. -->
+				<button type="button" class="tools-menu" popovertarget="tools-menu">Tools</button>
+				<div id="tools-menu" popover class="tools-menu-list" role="menu">
+					<button
+						type="button"
 						role="menuitem"
+						popovertarget="tools-menu"
+						popovertargetaction="hide"
 						onclick={newConversation}
 						disabled={view.state.selected === null}
 					>New conversation</button>
-						<button
-							type="button"
+					<button
+						type="button"
 						role="menuitem"
+						popovertarget="tools-menu"
+						popovertargetaction="hide"
 						onclick={compactSession}
 						disabled={view.state.selected === null}
 					>Compact</button>
-					</div>
-				</details>
+				</div>
 				<button type="submit" disabled={!view.draft}>Send</button>
 				{#if selectedSession?.isStreaming}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Abort</button>

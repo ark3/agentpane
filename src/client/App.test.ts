@@ -268,6 +268,16 @@ describe("App", () => {
 		expect(button.parentElement).toBe(select.parentElement?.parentElement);
 	});
 
+	/**
+	 * The three tests below reach the menu's entries with `hidden: true`, and
+	 * without opening the menu first, because jsdom implements none of the
+	 * Popover API the menu is now built on (OW-80) while still applying the UA
+	 * rule that hides a `[popover]`: `showPopover` is `undefined`, a
+	 * `popovertarget` click is a no-op, and the entries are therefore
+	 * permanently `display: none` and out of the accessibility tree. What each
+	 * one asserts is unchanged. That the menu *dismisses* is the part jsdom
+	 * cannot host at all, and it lives in `e2e/tools-menu.spec.ts`.
+	 */
 	it("the composer's New conversation inherits the selected session's workspace AND backend (OW-72)", async () => {
 		// Unlike the configured New button (which reads the two selects), this
 		// entry inherits the selected session's own backend. The selected session
@@ -282,8 +292,7 @@ describe("App", () => {
 		}));
 		render(App, { props: { controller } });
 
-		await fireEvent.click(screen.getByText("Tools"));
-		await fireEvent.click(screen.getByRole("menuitem", { name: "New conversation" }));
+		await fireEvent.click(screen.getByRole("menuitem", { name: "New conversation", hidden: true }));
 
 		expect(controller.created).toEqual([{ cwd: "/work/project", backend: "codex" }]);
 	});
@@ -292,8 +301,8 @@ describe("App", () => {
 		const controller = new FakeController();
 		render(App, { props: { controller } });
 
-		expect(screen.getByRole("menuitem", { name: "New conversation" })).toBeDisabled();
-		expect(screen.getByRole("menuitem", { name: "Compact" })).toBeDisabled();
+		expect(screen.getByRole("menuitem", { name: "New conversation", hidden: true })).toBeDisabled();
+		expect(screen.getByRole("menuitem", { name: "Compact", hidden: true })).toBeDisabled();
 	});
 
 	it("the composer's Compact tool compacts the selected session (OW-72)", async () => {
@@ -302,8 +311,7 @@ describe("App", () => {
 		}));
 		render(App, { props: { controller } });
 
-		await fireEvent.click(screen.getByText("Tools"));
-		await fireEvent.click(screen.getByRole("menuitem", { name: "Compact" }));
+		await fireEvent.click(screen.getByRole("menuitem", { name: "Compact", hidden: true }));
 
 		expect(controller.compacted).toBe(1);
 	});

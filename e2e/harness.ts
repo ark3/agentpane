@@ -16,7 +16,9 @@
  * produce -- see OW-27's close note.
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
- * This is the vehicle for one defect, not a browser E2E suite.
+ * It is the vehicle for the few claims that need a real browser -- follow mode,
+ * the nav rail, and the tools menu's light dismiss (OW-80) -- not a browser E2E
+ * suite.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";

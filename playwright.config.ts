@@ -3,9 +3,11 @@ import { defineConfig } from "@playwright/test";
 const PORT = 5199;
 
 /**
- * One browser test vehicle, for follow mode (OW-47). It serves `e2e/harness.html`
- * through the project's own Vite config, so the aliases and the Svelte plugin
- * are the real ones. No backend is involved -- see `e2e/harness.ts`.
+ * The browser test vehicle, for the claims jsdom cannot host -- follow mode
+ * (OW-47) and the tools menu's light dismiss (OW-80). It serves
+ * `e2e/harness.html` through the project's own Vite config, so the aliases and
+ * the Svelte plugin are the real ones. No backend is involved -- see
+ * `e2e/harness.ts`.
  */
 export default defineConfig({
 	testDir: "e2e",

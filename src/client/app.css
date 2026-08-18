@@ -225,12 +225,16 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
 /* The tools popup sits at the left of the action row (OW-72); margin-right:auto
-   pushes Send/Abort to the right. A native <details> gives open/close for free. */
-.tools-menu { position: relative; margin-right: auto; }
-.tools-menu > summary { list-style: none; cursor: pointer; padding: var(--ap-space-1) var(--ap-space-2); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); color: var(--ap-fg-muted); }
-.tools-menu > summary::-webkit-details-marker { display: none; }
-.tools-menu > summary:hover { background: var(--ap-surface-raised); color: var(--ap-fg); }
-.tools-menu-list { position: absolute; bottom: calc(100% + var(--ap-space-1)); left: 0; z-index: 10; display: flex; flex-direction: column; min-width: 12rem; padding: var(--ap-space-1); background: var(--ap-surface-raised); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); box-shadow: var(--ap-shadow-1, 0 4px 12px rgba(0,0,0,0.3)); }
+   pushes Send/Abort to the right. The list is a popover (OW-80), so it renders
+   in the top layer, which the composer does not position: anchor positioning is
+   what puts it back above the trigger's left edge, where the old <details> had
+   it. `display` lives on `:popover-open` deliberately -- an author `display`
+   beats the UA rule that hides a closed popover, so declaring it unconditionally
+   would leave the menu permanently open. */
+.tools-menu { margin-right: auto; anchor-name: --tools-menu; background: none; padding: var(--ap-space-1) var(--ap-space-2); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); color: var(--ap-fg-muted); }
+.tools-menu:hover { background: var(--ap-surface-raised); color: var(--ap-fg); }
+.tools-menu-list { position: fixed; position-anchor: --tools-menu; inset: auto; bottom: calc(anchor(top) + var(--ap-space-1)); left: anchor(left); margin: 0; min-width: 12rem; padding: var(--ap-space-1); background: var(--ap-surface-raised); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); box-shadow: var(--ap-shadow-1, 0 4px 12px rgba(0,0,0,0.3)); }
+.tools-menu-list:popover-open { display: flex; flex-direction: column; }
 .tools-menu-list button { text-align: left; background: none; border: none; padding: var(--ap-space-1) var(--ap-space-2); border-radius: var(--ap-radius-1); color: var(--ap-fg); }
 .tools-menu-list button:hover:not(:disabled) { background: var(--ap-surface); }
 .tools-menu-list button:disabled { color: var(--ap-fg-subtle); }
