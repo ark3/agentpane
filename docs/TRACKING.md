@@ -11,10 +11,11 @@ got them there.
 > present tense **no longer exist**.
 >
 > Still current: "The format: Maildir-shaped work items", "Staying greppable",
-> "Two clones can mint the same id", "The `OW` prefix", and "Tooling" (OW-59 is
+> "Ids are drawn at random", "The `OW` prefix", and "Tooling" (OW-59 is
 > genuinely still open). Everything else is a record of how the decision was
 > reached and how the conversion was specified — accurate about the past, wrong
-> about today, and marked section by section below.
+> about today, and marked section by section below. "Two clones can mint the
+> same id" was superseded on 2026-08-18 by the id scheme that follows it.
 >
 > Expect this file to be retired or moved somewhere explicitly historical once
 > the new storage has baked in.
@@ -423,6 +424,12 @@ costs nothing at a terminal and is a `basename` for anything parsing it.
 
 ### Two clones can mint the same id, and that is fine
 
+> ⚠️ **Superseded 2026-08-18** by "Ids are drawn at random, because the writers
+> are unbounded", below — "take the next id" is no longer the rule. Kept because
+> its evidence is why the rule changed: both failure modes it records are real,
+> and the silent one is why the id scheme changed rather than the process
+> around it.
+
 "Take the next id, never reuse one" was only ever safe because nothing ran
 concurrently. Both machines can now read `OW-67` and write `OW-68`. Do not
 design around this — no id partitioning by machine, no timestamps, no random
@@ -448,6 +455,76 @@ cheap problem rather than an argument for id partitioning. The remedy is a
 non-clobbering write and re-reading the max id at write time, not a change to
 the id scheme (`.claude/skills/author/SKILL.md`); whether tooling should own the
 allocation instead is OW-59.
+
+### Ids are drawn at random, because the writers are unbounded
+
+> **Decided 2026-08-18 by the owner.** This supersedes the section above and
+> keeps its evidence.
+
+A sequential id needs a serialization point, and this repo has none between
+pushes. That is not a discipline problem to be more careful about — it is the
+scheme working as specified, with every session an independent allocator
+reading a stale max. And the writers are not two machines, which is what the
+section above assumed: they are every session in this clone, every session in
+the other, and **every dispatched subagent, which works in its own worktree cut
+from `origin/main`** (`.claude/skills/execute/SKILL.md`). That last one is what
+rules out partitioning the id space. A worktree is created on demand, so there
+is no moment at which a partition could be assigned to it, and a per-clone
+stride would not reach it anyway — its `docs/work/open/` is a different
+directory holding stale state.
+
+So the name has to be chosen by the writer with no coordination at all. Two
+forms do that: a slug derived from the headline, or a random string.
+
+**Random won, on framing drift.** A slug is a second, unrenameable statement of
+what an item is about, and headlines here get sharpened as understanding
+improves — the slug cannot follow, so the corpus accumulates filenames that
+misdescribe their items, which is the one failure a bare number avoided by
+saying nothing at all. Against that, a slug is readable in a `git log --stat`,
+in an `rg -l` result, and in conversation. **That readability is the whole of
+what this decision bets against**, so the evidence that it was the wrong bet is
+noticing you looked at a *filename* rather than a file and wanted to know what
+it was.
+
+Two arguments made on the way and withdrawn, recorded so they are not revived:
+that a slug collision usefully signals a duplicate item — it mostly would not
+fire, since two sessions describing the same item pick different words — and
+that shorter ids tokenize more cheaply, which is true and irrelevant at this
+scale. The pronounceable form was chosen for a different reason: a transposed
+random string, `OW-kerata` for `OW-keraha`, looks exactly as plausible as the
+original and nothing catches it.
+
+**The form is `OW-` and three consonant-vowel syllables.** Eighteen consonants
+— no `c`, `q` or `x`, ambiguous or awkward without a following `u` — times five
+vowels is ninety per syllable, 729,000 in three. All lowercase, no digits,
+nothing needing a shift key. Until `ow new` exists (OW-59), the generator is:
+
+```
+python3 -c "
+import random
+c, v = 'bdfghjklmnprstvwyz', 'aeiou'
+print('OW-' + ''.join(random.choice(c)+random.choice(v) for _ in range(3)))
+"
+```
+
+Draw collisions run about one in nine thousand against today's 78 items, which
+is not why the writing step still checks both directories and creates
+exclusively. The realistic duplicate is a model reusing a name it saw earlier in
+its own context instead of running the generator, and that one is silent.
+
+**The prefix stays `OW-`.** A second prefix for the new scheme was considered
+and rejected the same day: two prefixes makes every search `(OW|AP)-`
+permanently, and renaming the numeric items instead would orphan the **129 of
+227 commit subjects** that name an `OW-` id at `3895125`. No operation needs to
+know which scheme an id came from. "The `OW` prefix" above reached this for the
+tooling question; this is the same answer for the same reason.
+
+**The numeric items keep their names**, so the corpus is permanently mixed —
+`OW-33.md` beside `OW-keraha.md`. Nothing is renamed, no history is rewritten,
+every existing citation stays true. One consequence for the survey command in
+"Staying greppable": `sort -V` still earns its keep, but only over the numeric
+half, where it is what puts `OW-9` before `OW-10`. Over the drawn names it is
+plain lexical order, which is arbitrary and only has to be stable.
 
 ## Migrating, in three phases
 
