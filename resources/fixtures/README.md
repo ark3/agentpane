@@ -29,11 +29,16 @@ key (`model`, `provider`, `modelProvider`, `api`, `serverName`, `userAgent`),
 so tool names like `bash` and `read` are untouched and remain assertable.
 
 The by-key substitution above cannot see operator data a backend replays into
-*content* — Codex folds the host's skills manifest into the turn context, so a
-fork capture carries the operator's home path and private `SKILL.md` list in
-message text and in the `host_skills` world-state block. `fork_probe.py`
-therefore also blanks those in place (`scrub_content`), replacing the manifest
-with a placeholder while leaving the fork lineage and the post-fork turn intact.
+*content*, and that gap is a trap for anyone adding a probe or scenario: Codex
+folds the host's skills manifest into the turn context, so a fork capture
+carried the operator's home path and private `SKILL.md` list in message text and
+in the `host_skills` world-state block — past the key-based scrub and into a
+commit (caught in review, `fork_probe.py`'s `scrub_content` now blanks it). The
+general rule a new capture must follow: a scrub keyed on JSON field names
+protects only the fields you named, so **grep the generated fixture for the
+operator's identifiers before committing it** — home path, username, hostnames —
+because a backend may echo any of them into free-form content the key scrub
+never visits.
 
 Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.

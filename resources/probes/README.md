@@ -87,7 +87,12 @@ It runs a set of scenarios against each backend and writes every emitted line
 to `../fixtures/<backend>/<scenario>.jsonl`, plus a `.meta.json` with
 provenance and an event census. Identifying values (model ids, provider names,
 hostnames, user agent) are scrubbed to placeholders on the way out, because
-fixtures get committed — see `SCRUB_KEYS` in the script.
+fixtures get committed — see `SCRUB_KEYS` in the script. That scrub is keyed on
+JSON field names, so it cannot catch operator data a backend echoes into
+free-form *content* (a fork capture leaked the home path and skills manifest
+this way — see `../fixtures/README.md`, "Scrubbed values"). Any new capturing
+probe must grep its generated fixture for operator identifiers before the
+fixture is committed.
 
 ```bash
 python3 capture_fixtures.py                                # all

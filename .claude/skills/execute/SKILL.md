@@ -91,7 +91,9 @@ Then wait.
 
 The user tries it; their reaction is the finding. Working means wait for the
 next pick. Wrong means a new item, or amend this one and re-dispatch.
-Something else surfaced means a new item, not this session's job.
+Something else surfaced means a new item, not this session's job. A new item
+follows `.claude/skills/author/SKILL.md`: its id is **drawn, not chosen**, and
+checked against `docs/work/open/` and `docs/work/closed/` before you write it.
 
 Say when the conversation has grown long enough to be worth restarting — a
 fresh session costs less than a long one.

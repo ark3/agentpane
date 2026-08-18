@@ -49,10 +49,12 @@ timing, or the Popover API, none of which it implements.
   was agreed, what was tried, what the evidence was.
 - A finding that lives only in a transcript dies with the session. A doc defect:
   fix the doc in the same change. A fact you verified: the commit message, or
-  `DESIGN.md` if it changes a decision. Live-run evidence: `MANUAL_TESTING.md`.
+  `docs/DESIGN.md` if it changes a decision. Live-run evidence:
+  `docs/MANUAL_TESTING.md`.
 - Anything left undone — defect, deferral, question, unproven claim — becomes
-  an open work item: a new file in `docs/work/open/`. Cite ids elsewhere; never
-  restate an item.
+  an open work item: a new file in `docs/work/open/`, its id **drawn, not
+  chosen** (`.claude/skills/author/SKILL.md`, and `docs/TRACKING.md` for why).
+  Cite ids elsewhere; never restate an item.
 - Build-slice status lives in the Status table at the top of
   `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not work
   items; an item's own status is which directory its file sits in.
