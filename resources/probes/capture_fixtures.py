@@ -84,6 +84,42 @@ SCENARIOS: dict[str, dict] = {
         "files": {"greeting.txt": "The quick brown fox jumps over the lazy dog.\n"},
         "covers": "file change / diff rendering path",
     },
+    "compact": {
+        # A prompt that puts real content into the context, so a manual
+        # compaction afterwards has something to summarise and the token
+        # figure actually drops. The prose subject is irrelevant -- the
+        # fixture is about the compaction wire shapes, not the answer.
+        #
+        # Several turns, not one: Pi refuses a manual compaction it judges too
+        # small ("Nothing to compact (session too small)"), so the context has
+        # to be primed past that floor before the compact command lands.
+        "prompt": (
+            "Explain, in several detailed paragraphs, how the TCP/IP networking "
+            "stack works from the physical layer up through the application "
+            "layer. Cover framing, addressing, routing, congestion control, and "
+            "at least three application protocols."
+        ),
+        "prompts": [
+            "Explain, in several detailed paragraphs, how the TCP/IP networking "
+            "stack works from the physical layer up through the application "
+            "layer. Cover framing, addressing, routing, congestion control, and "
+            "at least three application protocols.",
+            "Now do the same for how a modern optimizing compiler works: "
+            "lexing, parsing, semantic analysis, IR, optimization passes, and "
+            "code generation. Several detailed paragraphs.",
+            "Now explain, in similar depth, how a log-structured merge-tree "
+            "database engine handles writes, reads, compaction, and crash "
+            "recovery. Several detailed paragraphs.",
+            "Finally, explain in the same depth how a preemptive operating "
+            "system kernel schedules threads, handles interrupts, and manages "
+            "virtual memory. Several detailed paragraphs.",
+        ],
+        "files": {},
+        "covers": "manual compaction: the compact command plus its events",
+        # After the priming turns settle, issue the backend's manual-compaction
+        # command and record the compaction request/response and events.
+        "compact": True,
+    },
 }
 
 
@@ -230,6 +266,30 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
     home = make_state_home(Path.home() / ".pi" / "agent", PI_STATE_FILES,
                            "agentpane-pihome-")
     dialogs: list[str] = []
+    # The compact scenario runs in two phases: the prompt turn, then a manual
+    # compaction. `phase` decides which terminal signal sets `rec.done`.
+    want_compact = bool(spec.get("compact"))
+    phase = {"name": "prompt", "compacted": False}
+
+    if want_compact:
+        # Pi refuses to compact when everything still fits inside
+        # `keepRecentTokens` (default 20000): with nothing older than that
+        # window there is nothing to summarise, and it throws "Nothing to
+        # compact (session too small)" (verified against 0.84.2's
+        # `prepareCompaction`). Lower the window in the *throwaway* state dir so
+        # the priming turns fall outside it and the manual compaction has real
+        # history to fold. This edits only the copied settings, never the
+        # operator's own.
+        settings_path = home / "settings.json"
+        try:
+            settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+        except ValueError:
+            settings = {}
+        compaction = dict(settings.get("compaction", {}))
+        compaction["enabled"] = True
+        compaction["keepRecentTokens"] = 2000
+        settings["compaction"] = compaction
+        settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     proc = subprocess.Popen(
         ["pi", "--mode", "rpc", "--no-session"],
@@ -239,7 +299,7 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
 
     def on_event(event: dict) -> None:
         kind = event.get("type", "")
-        if kind in ("message_end", "tool_execution_end"):
+        if kind in ("message_end", "tool_execution_end", "compaction_start", "compaction_end"):
             print(f"  << {kind}")
         elif kind == "extension_ui_request":
             method = event.get("method", "")
@@ -250,14 +310,35 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
                 print(f"  >> extension dialog: {method} (cancelling)")
                 rec.send({"type": "extension_ui_response",
                           "id": event.get("id"), "cancelled": True})
+        # In the compact phase the terminal signal is `compaction_end`, not
+        # `agent_settled`; the summary and its post-compaction token figure
+        # ride that event and its response.
+        if phase["name"] == "compact":
+            if kind == "compaction_end":
+                phase["compacted"] = True
+                rec.done.set()
+            return
         # `agent_settled` is the real terminal signal: `agent_end` can still be
         # followed by a retry, compaction, or a queued continuation.
         if kind == "agent_settled":
             rec.done.set()
 
     rec = Recorder(proc, on_event)
-    rec.send({"type": "prompt", "message": spec["prompt"]})
-    settled = rec.wait(timeout)
+    prompts = spec.get("prompts") or [spec["prompt"]]
+    settled = True
+    for prompt in prompts:
+        rec.done.clear()
+        rec.send({"type": "prompt", "message": prompt})
+        settled = rec.wait(timeout)
+        if not settled:
+            break
+    if want_compact and settled:
+        # Turns settled; now drive a manual compaction and record it.
+        phase["name"] = "compact"
+        rec.done.clear()
+        print("  -- issuing manual compaction")
+        rec.send({"type": "compact"})
+        settled = rec.wait(timeout) and phase["compacted"]
     proc.terminate()
     try:
         proc.wait(timeout=10)
@@ -292,6 +373,7 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
     work = make_workspace(spec["files"])
     home = make_state_home(Path.home() / ".codex", CODEX_STATE_FILES,
                            "agentpane-codexhome-")
+    want_compact = bool(spec.get("compact"))
 
     proc = subprocess.Popen(
         ["codex", "app-server"],
@@ -348,10 +430,27 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
 
     completed = False
     if state["thread_id"]:
-        rec.send({"id": 3, "method": "turn/start",
-                  "params": {"threadId": state["thread_id"],
-                             "input": [{"type": "text", "text": spec["prompt"]}]}})
-        completed = rec.wait(timeout)
+        prompts = spec.get("prompts") or [spec["prompt"]]
+        turn_id = 3
+        for prompt in prompts:
+            rec.done.clear()
+            rec.send({"id": turn_id, "method": "turn/start",
+                      "params": {"threadId": state["thread_id"],
+                                 "input": [{"type": "text", "text": prompt}]}})
+            turn_id += 1
+            completed = rec.wait(timeout)
+            if not completed:
+                break
+        if want_compact and completed:
+            # Manual compaction runs as its own (non-steerable) turn: send
+            # `thread/compact/start` and wait for that turn to complete, so the
+            # recorded stream carries the contextCompaction item and the
+            # post-compaction token usage.
+            rec.done.clear()
+            print("  -- issuing thread/compact/start")
+            rec.send({"id": turn_id, "method": "thread/compact/start",
+                      "params": {"threadId": state["thread_id"]}})
+            completed = rec.wait(timeout)
 
     proc.terminate()
     try:

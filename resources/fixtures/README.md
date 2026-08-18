@@ -38,6 +38,7 @@ locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 | `text` | reply with a fixed string | streaming text deltas, no tools |
 | `tool-read` | read a file and summarise it | tool call + tool result pair |
 | `tool-edit` | append a line to a file | file change / diff path |
+| `compact` | prime the context, then compact it | manual compaction command + its events (OW-72) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
 
@@ -54,8 +55,32 @@ a fixed tool vocabulary.
 **Codex** exercised five `ThreadItem` types: `userMessage`, `reasoning`,
 `agentMessage`, `commandExecution`, `fileChange`. Reasoning items appear even
 in the `text` scenario. Still uncovered, because they are hard to trigger
-deterministically: `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`,
-`contextCompaction`. Add scenarios when you implement those mapping rows.
+deterministically: `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`.
+Add scenarios when you implement those mapping rows.
+
+## The compact scenario (OW-72, captured 2026-08-18)
+
+`compact` primes the context with several long turns and then drives the
+backend's manual compaction, so the fixture carries the compaction wire shapes
+both adapters reduce against. It is a two-phase capture, and it needed one
+non-obvious step per backend:
+
+- **Codex** (`compact.jsonl`, 5247 lines): after the priming turns settle the
+  harness sends `thread/compact/start` (params `{ threadId }`, response `{}`),
+  which Codex runs as its own non-steerable turn. The fixture contains a
+  `contextCompaction` `item/completed` — the item carries *no* summary and *no*
+  token figure, only `{ type, id }` — and `thread/tokenUsage/updated` shows the
+  drop: total `totalTokens` went **16802 → 9231** across the compaction. The
+  adapter maps `contextCompaction` to a bare `compactionSummary` marker.
+- **Pi** (`compact.jsonl`, 3587 lines): Pi refuses to compact a session that
+  still fits inside `keepRecentTokens` ("Nothing to compact (session too
+  small)"; default 20000, verified against 0.84.2's `prepareCompaction`), so
+  the capture lowers `keepRecentTokens` in the *throwaway* state dir before
+  priming. The successful `compaction_end` carries `{ summary,
+  firstKeptEntryId, tokensBefore: 17660, estimatedTokensAfter: 4040, usage,
+  details }`. Pi does **not** re-emit the summary through
+  `message_start`/`message_end`, so the reducer synthesises the
+  `compactionSummary` message from `compaction_end` itself.
 
 ## Two things the captures proved
 
