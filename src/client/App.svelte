@@ -121,6 +121,8 @@
 	);
 	const newSessionWorkspace = $derived(selectedSummary?.cwd ?? null);
 	const error = $derived(view.error ?? selectedSession?.error ?? null);
+	/** Advisory only (OW-73): a leading `/` is the whole trigger, deliberately imprecise -- Send still works either way. */
+	const looksLikeSlashCommand = $derived(view.draft.startsWith("/"));
 	const status = $derived.by(() => {
 		if (view.connection === "reconnecting") return "Reconnecting…";
 		if (view.connection === "connecting") return "Connecting…";
@@ -703,6 +705,9 @@
 		</div>
 	{:else}
 		<form class="prompt" onsubmit={submitPrompt}>
+			{#if looksLikeSlashCommand}
+				<p class="warning">Agentpane does not run slash commands — this will be sent to the agent as plain text.</p>
+			{/if}
 			<textarea
 				aria-label="Prompt"
 				bind:this={promptEl}

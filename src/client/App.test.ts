@@ -1222,4 +1222,29 @@ describe("App", () => {
 		expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
 		expect(screen.getByText("Unsupported agent request pending.")).toBeInTheDocument();
 	});
+
+	it("warns by the composer when the draft starts with / but does not submit anything (OW-73)", async () => {
+		const controller = new FakeController(view({ draft: "/compact" }));
+		render(App, { props: { controller } });
+
+		expect(screen.getByText(/does not run slash commands/i)).toBeInTheDocument();
+		expect(controller.submitted).toBe(0);
+	});
+
+	it("still submits a slash-prefixed draft, unchanged, when sent (OW-73)", async () => {
+		const controller = new FakeController(view({ draft: "/compact" }));
+		render(App, { props: { controller } });
+
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+
+		expect(controller.submitted).toBe(1);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("/compact");
+	});
+
+	it("shows no slash-command warning for an ordinary draft (OW-73)", async () => {
+		const controller = new FakeController(view({ draft: "Summarize the diff" }));
+		render(App, { props: { controller } });
+
+		expect(screen.queryByText(/does not run slash commands/i)).not.toBeInTheDocument();
+	});
 });
