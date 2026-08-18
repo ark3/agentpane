@@ -1,6 +1,23 @@
 # Tracking
 
-How agentpane's work items are stored, and a sketch of replacing that storage.
+How agentpane's work items are stored, and the record of the migration that
+got them there.
+
+> ⚠️ **Parts of this document are outdated as of 2026-08-17.** The migration it
+> proposes **has happened**: work items are one file each under
+> `docs/work/open/` and `docs/work/closed/`, landed in `7ece977`, `d82885f` and
+> `5440377` and closed as OW-54 in `ef1403d`. The markdown tables in
+> `WORKSTREAMS.md` and `CLOSED.md` that several sections below describe in the
+> present tense **no longer exist**.
+>
+> Still current: "The format: Maildir-shaped work items", "Staying greppable",
+> "Two clones can mint the same id", "The `OW` prefix", and "Tooling" (OW-59 is
+> genuinely still open). Everything else is a record of how the decision was
+> reached and how the conversion was specified — accurate about the past, wrong
+> about today, and marked section by section below.
+>
+> Expect this file to be retired or moved somewhere explicitly historical once
+> the new storage has baked in.
 
 This is **a separate project from the agent UI** that happens to live in the
 same repo, because its subject is this repo's own bookkeeping. Nothing here
@@ -11,6 +28,10 @@ would muddy both, so there is no `D` number. The tooling on top of it is *not*
 decided (OW-59), tracked under `docs/work/open/` like everything else.
 
 ## What exists now
+
+> ⚠️ **Outdated as of 2026-08-17** — this describes the tables OW-54 deleted.
+> Kept because the rest of the document argues against it. The subsection that
+> follows it, "The `OW` prefix", is still current.
 
 `WORKSTREAMS.md` holds a markdown table of open rows, `CLOSED.md` the same
 table of closed ones. A row is one table line. Closing means striking through
@@ -68,6 +89,11 @@ question. This project keeps `OW-`, whose only real defect is that nobody
 remembers what it stood for; a different project picks its own.
 
 ## What is and is not going wrong
+
+> ⚠️ **Outdated as of 2026-08-17** — the case for migrating, measured against
+> the tables while they still existed. The counts and the complaints are about
+> storage that is gone; the reasoning is why the current format looks as it
+> does.
 
 Measured 2026-08-15 at 34 open and 18 closed rows; re-counted 2026-08-17 at 40
 open and 27 closed, then 41 within the hour when OW-68 was filed out of the same
@@ -178,6 +204,10 @@ one corpus, because they share a lifecycle:
   items before a count caught it on 2026-08-17 (finding 3 below).
 
 ### The conversion spec, which has to be exact
+
+> ⚠️ **Executed 2026-08-17 in `7ece977`.** A spec for reading table cells that
+> no longer exist. Nothing here is a rule for writing a work item today — that
+> is the parent section, "The format: Maildir-shaped work items".
 
 This section is phase 1's whole specification, and its exactness is what makes
 phase 1 a script rather than a fan-out: anything left to prose is something the
@@ -406,6 +436,10 @@ two lines that both merge, silently. And a colliding id is by construction
 is a `git mv` and one headline edit. Resolve it when git says so.
 
 ## Migrating, in three phases
+
+> ⚠️ **Done 2026-08-17** — phase 1 in `7ece977`, phase 2 in `d82885f`, phase 3
+> in `5440377`, closed as OW-54 in `ef1403d`. Kept as the record of what was
+> actually run and checked.
 
 OW-54 is the row; this is how it runs, kept here rather than in the row because
 a row is not the place for a procedure. The shape answers one constraint above
