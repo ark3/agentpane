@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="agentpane">
+	<!--
+	  Drawn on a 16-unit grid so every edge lands on a whole device pixel at
+	  16px, the only size that matters in a tab strip (OW-ropuwo). Two reads,
+	  one degrading into the other: the four panes carry the mark when the
+	  icon is large, and at 16px they soften into texture while the white A,
+	  the one high-contrast element, stays crisp. The panes are deliberately a
+	  low-contrast blue. White panes competed with the letter and the whole
+	  tile went grey at 16px.
+
+	  No em dashes in here. XML forbids a double hyphen inside a comment, and
+	  a favicon that fails to parse renders as nothing at all, silently.
+	-->
+	<rect width="16" height="16" rx="3.5" fill="#3959d9" />
+	<g fill="#6b82e3">
+		<rect x="2" y="2" width="5" height="5" rx="1" />
+		<rect x="9" y="2" width="5" height="5" rx="1" />
+		<rect x="2" y="9" width="5" height="5" rx="1" />
+		<rect x="9" y="9" width="5" height="5" rx="1" />
+	</g>
+	<path d="M3.3 13.1 8 3.1 12.7 13.1 M4.6 10.4 H11.4"
+		fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round" />
+</svg>
