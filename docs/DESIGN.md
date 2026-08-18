@@ -653,13 +653,13 @@ capable of producing a bug that looks like something else entirely:
 
 ## Remaining open questions
 
-**The open ones live in `WORKSTREAMS.md`'s Open work list, as OW-17 through
-OW-22** (OW-23 was a defect there, not a question, and is now fixed and closed
-— see `CLOSED.md`). They were moved there to carry ids and to sit beside everything else
-outstanding; keeping a second copy here is what let this document drift out of
-step with the others. A question that settles comes back here as a decision,
-with its reasoning — that is what this document is for, and it is why the one
-below stayed.
+**The open ones live in `docs/work/open/`, as OW-17 through OW-22** (OW-23 was
+a defect rather than a question, and is now fixed and closed as
+`docs/work/closed/OW-23.md`). They were moved there to carry ids and to sit
+beside everything else outstanding; keeping a second copy here is what let this
+document drift out of step with the others. A question that settles comes back
+here as a decision, with its reasoning — that is what this document is for, and
+it is why the one below stayed.
 
 - ~~**Whether killing the spawned process actually stops the agent.**~~
   **Settled, for both backends.** `direnv` and the sbox wrapper `exec` into the

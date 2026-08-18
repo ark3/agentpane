@@ -43,7 +43,9 @@ layout, scroll anchoring, or real scroll-event timing.
 - Work items live only in `docs/work/`, not in GitHub issues or any other
   external tracker. One file per row, `docs/work/open/OW-N.md`; closing it is a
   `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
-  paragraph appended to the body.
+  paragraph appended to the body. A closed row is kept rather than deleted,
+  because its close note is sometimes the grounding a later row needs — what
+  was agreed, what was tried, what the evidence was.
 - A finding that lives only in a transcript dies with the session. A doc defect:
   fix the doc in the same change. A fact you verified: the commit message, or
   `DESIGN.md` if it changes a decision. Live-run evidence: `MANUAL_TESTING.md`.

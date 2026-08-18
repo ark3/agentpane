@@ -34,7 +34,14 @@ scalars — `where:` always single-quoted, since most values open with a backtic
 and YAML forbids that in a plain scalar — then exactly one `# ` line, the
 headline, which never wraps, then the body wrapped at eighty columns with `##`
 for any subheading. `docs/TRACKING.md`, "The format: Maildir-shaped rows", is
-the spec; it also says why each rule is load-bearing rather than stylistic.
+the spec; it also says why each rule is load-bearing rather than stylistic, and
+its five kinds are the whole of what `kind:` may hold — there is no sixth.
+
+Adding a row is one new file in `docs/work/open/`: take the next id, never
+reuse one. Two clones can both take it, which is fine and is not designed
+around — git reports the add/add collision on the filename, and the fix is a
+`git mv` plus one headline edit (`docs/TRACKING.md`, "Two clones can mint the
+same id").
 
 **The headline is the row's lead claim, not a title.** It is the whole of what
 the survey prints, so a row whose headline says "clipboard work" is invisible to

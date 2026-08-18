@@ -60,7 +60,7 @@ client's reachability and the REST/SSE path with a real agent subprocess:
 create/attach, streaming, idle, reconnect, abort, and shutdown without an
 orphan.
 
-**For what is done and what is left, read
-[`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its Status table is the only
-statement of project status, and its Open work list is the only list of
-outstanding items. Both are deliberately not repeated here.
+**For what is done, read [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its
+Status table is the only statement of project status. **For what is left, read
+[`docs/work/open/`](docs/work/open/)**, one file per outstanding item and the
+only list of them. Both are deliberately not repeated here.

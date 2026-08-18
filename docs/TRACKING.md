@@ -159,6 +159,25 @@ Closing is `git mv` plus appending the close note. Frontmatter carries the
 fields that vary (kind, where, `needs:` edges, and on close the sha); the body
 is prose with headings, lists and code blocks available.
 
+**What `kind:` may hold**, carried here from the table this format replaces,
+with the pointers into that table rewritten and nothing else. Five kinds share
+one corpus, because they share a lifecycle:
+
+- **deferral** — review found it, judged it not worth blocking on. None is a
+  defect in a path the milestone exercises.
+- **defect** — observed or read as broken, and nothing depends on leaving it
+  that way. The client-shell rows are all of this kind.
+- **question** — a decision nobody has made yet. When one settles the row
+  closes and the decision goes in `DESIGN.md`, which is where the reasoning
+  belongs.
+- **unverified** — believed to work, never proven. Closing one means producing
+  evidence, and the evidence goes in `MANUAL_TESTING.md`.
+- **change** — a deliberate change to behaviour or presentation that nobody
+  considers broken today, **a new feature included**. Decided, not yet built;
+  the decision and who took it belong in the row, because there is no defect to
+  rediscover it from. `feature` is not a sixth kind: it drifted into three rows
+  before a count caught it on 2026-08-17 (finding 3 below).
+
 ### The conversion spec, which has to be exact
 
 This section is phase 1's whole specification, and its exactness is what makes

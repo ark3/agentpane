@@ -7,13 +7,15 @@ it.
 
 **The build has started.** This document is now the evidence base rather than
 the starting point — read `docs/DESIGN.md` for the decisions and
-`docs/WORKSTREAMS.md` for what is built, what is left, and what to pick up
-next. Status lives only in WORKSTREAMS' Status table, and every outstanding
-item — defect, deferral, open question, unproven claim — only in its Open work
-list, as an `OW-` row. Cite an id from elsewhere; do not restate one. Two sections here stay live regardless: **Environment gotchas**, which
-will cost you an afternoon if you skip it, and **Reference material**, which is
-where the authoritative protocol docs live. The findings tables are the record
-of how each decision was established; consult them when a premise looks wrong.
+`docs/WORKSTREAMS.md` for what is built, and `docs/work/open/` for what is left
+and what to pick up next. Status lives only in WORKSTREAMS' Status table, and
+every outstanding item — defect, deferral, open question, unproven claim — only
+under `docs/work/open/`, one `OW-` row per file. Cite an id from elsewhere; do
+not restate one. Two sections here stay live regardless: **Environment
+gotchas**, which will cost you an afternoon if you skip it, and **Reference
+material**, which is where the authoritative protocol docs live. The findings
+tables are the record of how each decision was established; consult them when a
+premise looks wrong.
 
 The one rule that produced this design: **verify at the source, don't reason
 from memory.** Every claim below was checked against a running CLI or an
@@ -253,7 +255,8 @@ of how `pi --mode rpc` starts rather than a promise.
 
 Steps 1–3 below are done: `src/` is scaffolded, the interfaces are in place,
 and session-index and the Pi adapter are built. `docs/WORKSTREAMS.md` carries
-the current state and the pickup order. What remains durably true:
+the current state, and `docs/work/open/` the pickup order. What remains durably
+true:
 
 1. Re-run the probes in `resources/probes/` when a CLI's behaviour is in
    question — versions drift, and both agents are moving targets.

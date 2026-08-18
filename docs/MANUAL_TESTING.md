@@ -4,8 +4,8 @@
 
 **The evidence behind the live runs**, and the instructions for reproducing
 them. It does not state project status — `WORKSTREAMS.md`'s Status table does
-that, and its Open work list holds what is still outstanding. Record a run's
-results here; record what the run left undone as an `OW-` row there.
+that, and `docs/work/open/` holds what is still outstanding. Record a run's
+results here; record what the run left undone as a new `OW-` row there.
 
 Two substantial live-backend runs are recorded below, both on 2026-08-11
 (America/New_York): Codex with `codex-cli 0.147.0`, and Pi with `pi 0.84.1`,
@@ -356,7 +356,7 @@ never-push rule forbids it.
 
 ## Still unverified
 
-Tracked as rows in `WORKSTREAMS.md`'s Open work list, not restated here:
+Tracked as rows under `docs/work/open/`, not restated here:
 **OW-24** (no browser automation yet of a real backend-backed turn — the only
 browser vehicle is the synthetic `e2e/` follow-mode harness) and **OW-25**
 (whether Pi raises approval dialogs without a trusting `trust.json`).
