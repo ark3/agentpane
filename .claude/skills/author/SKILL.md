@@ -9,10 +9,15 @@ Produce work items a cold agent can act on. **No code changes here.** Reading
 widely is expected — this is the session that pays exploration once, so
 execution sessions do not pay it again on every item.
 
-When you add or materially revise work items, land that docs change — a new
-`docs/work/open/OW-N.md`, or an edit to the file of an existing item — and
-commit it unless the user asks not to. An item that exists only in chat does
-not exist.
+Discuss each observation to agreement before writing its file. Answers to your
+own questions are not agreement — they cover what you thought to ask, and the
+item commits to everything else. Write it and land it once the user says that
+observation is settled, then take the next one.
+
+Then land it: a new `docs/work/open/OW-N.md`, or an edit to the file of an
+existing item, committed unless the user asks not to. Same for a material
+revision to an item already on disk. An item that exists only in chat does not
+exist.
 
 ## What a work item carries
 
