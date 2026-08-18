@@ -234,6 +234,16 @@ export function createApp(deps: AppDeps): App {
 				await adapter.abort();
 				return noContent();
 			}
+			case "compact": {
+				// Like abort, this acts on a session already attached -- compaction
+				// only makes sense against a live context. The adapter's reducer is
+				// what turns the backend's compaction events into the transcript
+				// marker; this route just admits the request (OW-72).
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const adapter = requireAttached(ref);
+				await adapter.compact();
+				return noContent();
+			}
 			case "fork": {
 				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
 				const body = await readJson<ForkRequest>(request);

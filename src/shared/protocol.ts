@@ -299,6 +299,8 @@ export const ROUTES = {
 	prompt: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/prompt`,
 	abort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/abort`,
+	compact: (ref: SessionRef) =>
+		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/compact`,
 	fork: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork`,
 	forkPoints: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,

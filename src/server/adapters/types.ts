@@ -62,6 +62,14 @@ export interface BackendAdapter {
 	/** Resolves once the backend admits the turn, not when the turn completes. */
 	submit(text: string, images?: ImageInput[]): Promise<void>;
 	abort(): Promise<void>;
+	/**
+	 * Compact the session's context, summarising the history so far to reduce
+	 * the token count the next turn carries. Required (OW-72): both backends
+	 * have the capability -- Codex's `thread/compact/start`, Pi's `compact`
+	 * command -- so nothing is forced to fake it. What the transcript shows
+	 * afterwards is the adapter's own reducer's business, not this method's.
+	 */
+	compact(): Promise<void>;
 
 	// -- fork-from-past -----------------------------------------------------
 	listForkPoints(): Promise<ForkPoint[]>;
