@@ -36,24 +36,30 @@ Then wait.
 1. **Check the item.** They were recorded by whoever found them and not
    re-verified since; OW-23 was stale enough to invert its own conclusion.
    Confirm against the source first, and say so if it has drifted.
-2. **Dispatch.** One subagent, model chosen per item. Open by telling it to
-   read `CLAUDE.md` — it does not inherit it. Then the item's grounding and
-   intent inline: paths, symbols, the test invocation, what done looks like.
-   Point it at `docs/work/open/OW-N.md` and nothing else under `docs/work/` —
-   it works the item it was given and does not go shopping.
+2. **Dispatch.** One subagent, model chosen per item.
 
-   **If it writes**, it gets its own worktree. Say outright that it commits on
-   that worktree's own branch and cannot commit on `main`. Tell it to
-   `git merge --ff-only main` before starting and to report the sha it started
-   at — the harness cuts from `origin/main`, which this project never pushes
-   to, so the worktree is stale by every commit since the last push.
+   **If it writes**, it gets its own worktree, cut from `origin/main` — never
+   pushed to, so stale by every commit since, `CLAUDE.md` and the skills
+   included. So the prompt opens with the worktree, before anything read from
+   it can be trusted: `git merge --ff-only main`, report the sha it started at,
+   then `bun install` (a worktree has no `node_modules`; git skips ignored
+   files). Not a fast-forward means the other clone's work, not staleness —
+   stop and report. It commits on that worktree's own branch and cannot commit
+   on `main`; say so outright.
+
+   Only then the reading: `CLAUDE.md` and the `AGENTS.md` it points at, neither
+   inherited. Then the item's grounding and intent inline: paths, symbols, the
+   test invocation, what done looks like. Point it at `docs/work/open/OW-N.md`
+   and nothing else under `docs/work/` — it works the item it was given and
+   does not go shopping.
 
    **If it only reads and reports** — a cold read of an item before you start
-   it, an adversarial check of something already written — it gets no worktree,
-   no branch and no commit, so there is no diff to review and nothing to
-   cherry-pick. Closing it in step 4 is unchanged. Its report is the whole
-   output; act on it here. Say "read only, write nothing, commit nothing"
-   outright, because the default shape above is the writing one.
+   it, an adversarial check of something already written — it gets no worktree
+   and so no freshness step, no branch and no commit, so there is no diff to
+   review and nothing to cherry-pick. Closing it in step 4 is unchanged. Its
+   report is the whole output; act on it here. Say "read only, write nothing,
+   commit nothing" outright, because the default shape above is the writing
+   one.
 3. **Review.** Read the diff yourself. No review subagents, and never
    `/code-review ultra` here — it has cost a full budget window. Green tests
    are not the finding. Look for work beyond what the item asked (the item is
