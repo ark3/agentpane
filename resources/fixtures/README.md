@@ -28,6 +28,13 @@ operator's infrastructure with structurally-equivalent placeholders —
 key (`model`, `provider`, `modelProvider`, `api`, `serverName`, `userAgent`),
 so tool names like `bash` and `read` are untouched and remain assertable.
 
+The by-key substitution above cannot see operator data a backend replays into
+*content* — Codex folds the host's skills manifest into the turn context, so a
+fork capture carries the operator's home path and private `SKILL.md` list in
+message text and in the `host_skills` world-state block. `fork_probe.py`
+therefore also blanks those in place (`scrub_content`), replacing the manifest
+with a placeholder while leaving the fork lineage and the post-fork turn intact.
+
 Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 
@@ -39,6 +46,7 @@ locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 | `tool-read` | read a file and summarise it | tool call + tool result pair |
 | `tool-edit` | append a line to a file | file change / diff path |
 | `compact` | prime the context, then compact it | manual compaction command + its events (OW-72) |
+| `fork` | fork/clone from a past point, then take a turn | fork-from-past on-disk residue and lineage (OW-mewiga) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
 
@@ -99,6 +107,26 @@ cumulative turn diff, 4x during `tool-edit`), `thread/tokenUsage/updated`,
 are directly useful — token usage for cost display, status changes for the
 streaming signal. Read a fixture before assuming the mapping table is
 exhaustive.
+
+## The fork scenario (OW-mewiga, captured 2026-08-18)
+
+Not produced by `capture_fixtures.py` but by `../probes/fork_probe.py`, which
+ran the first fork on either backend. Each `fork.jsonl` is a session that was
+branched into and then had a real turn driven inside it, so the lineage marker
+and the post-fork turn are both present:
+
+- **Pi** (`pi/fork.jsonl`): a `clone` of an active branch (whole branch copied
+  to a new file), switched into, then continued. The header carries
+  `parentSession` pointing at the file it was cloned from. Pi's `fork` is
+  copy-on-write on 0.84.2, so the abandoned branch survives as its own intact
+  file rather than as an in-file sibling (HANDOFF 43–44).
+- **Codex** (`codex/fork.jsonl`): a `thread/fork` through an earlier turn,
+  continued with a real turn. The `session_meta` header carries
+  **`forked_from_id`** (snake_case) — the on-disk mirror of the protocol's
+  `Thread.forkedFromId` (finding 21) — pointing at the parent thread (HANDOFF
+  45). `thread/rollback`, the in-place rewind, is deprecated and unused
+  (HANDOFF 46), so there is no Codex-rewind fixture: that cell is a documented
+  absence, not a capture.
 
 ## Determinism
 

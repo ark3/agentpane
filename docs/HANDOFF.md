@@ -49,7 +49,7 @@ Every load-bearing assumption was reproduced live. Re-run the probes in
 | 4 | `codex app-server` speaks a real protocol over **stdio** (`stdio://` is the default `--listen`), so it is sbox-transparent like Pi | `codex app-server --help`; `resources/probes/codex_turn_probe.py` |
 | 5 | Codex ships its **entire protocol as generated TypeScript + JSON Schema** (`codex app-server generate-ts` / `generate-json-schema`) | Generated bindings copied to `resources/codex-protocol/` (642 files, 550 of them under `v2/`) |
 | 6 | A full Codex turn works: `initialize` → `thread/start` → `turn/start` → streaming `item/agentMessage/delta` → `item/completed` → `turn/completed` | `resources/probes/codex_turn_probe.py`, live turn on codex-cli 0.147.0 |
-| 7 | **Both** backends support fork-from-past natively: Pi `fork`/`get_fork_messages`; Codex `thread/fork` + `thread/rollback` | Pi `docs/rpc.md`; Codex `resources/codex-protocol/ClientRequest.ts` |
+| 7 | **Both** backends support fork-from-past natively: Pi `fork`/`get_fork_messages`; Codex `thread/fork` + `thread/rollback` | Pi `docs/rpc.md`; Codex `resources/codex-protocol/ClientRequest.ts` **— corrected by findings 43–48: this flattens two operations, and `thread/rollback` is deprecated. Nothing here had been run; OW-mewiga ran it.** |
 | 8 | The sandbox seam works transparently over stdio | Proven in production: pipane ran `sandboxed-pi` (`~/.local/bin/sandboxed-pi` → `sbox -- pi`) |
 
 **No showstopper was found.** The single real engineering task is still the
@@ -169,6 +169,35 @@ materialisation path is currently dead code against this Pi version. Do not
 delete it on that basis — a `virtual` session whose backend has not yet written
 a file is exactly what D9 describes, and the behaviour here may be a property
 of how `pi --mode rpc` starts rather than a promise.
+
+## Seventh round: the first fork ever run on either backend (OW-mewiga)
+
+Finding 7 asserted fork support from `rpc.md` and the Codex bindings alone;
+nothing had run a fork on either backend. Findings 43–48 are the four cells of
+`{Pi, Codex} × {rewind, new session}` run live on this laptop, plus the two
+command-surface deltas OW-mewiga asked to bring back. All are reproduced by
+`resources/probes/fork_probe.py` (pi 0.84.2 / codex-cli 0.147.0), with a forked
+session fixture per backend at `resources/fixtures/{pi,codex}/fork.jsonl`.
+Finding 7 is corrected below; DESIGN's fork goal (`DESIGN.md:21`) was likewise
+flattened and is now split into the two operations.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 43 | **Pi's `fork` is copy-on-write, not the in-place rewind its adapter docblock claims.** `pi/process.ts:343` says `fork` "rewinds the active branch of the SAME session file in place." On 0.84.2 it does not: the active file is left **byte-identical** (sha unchanged, its tail still the abandoned assistant reply), and the post-fork re-ask lands in a **new** file whose header carries a `parentSession` pointer back to it. The abandoned tail therefore always survives on disk. Separately, 81 of 419 corpus files carry in-file sibling branches under one parent id — the TUI `/fork` shape — so both routes preserve and neither destroys. No destructive-rewind warning is warranted, which was the open question the cell existed to settle | `resources/probes/fork_probe.py` `pi_rewind` cell; corpus tree scan over `~/.pi/agent/sessions` |
+| 44 | **Pi's `clone` takes NO entry id** (the highest-value unknown in OW-mewiga). `rpc.md` "clone": it duplicates the *whole active branch* into a new session at the current position — there is no per-entry parameter. So branching-into-a-new-session-from-a-chosen-point on Pi is a composition: `fork` (rewind) to the point, then `clone`; or `clone` then `switch_session` into the copy. The RPC process does **not** auto-switch to the clone (`get_state` still reports the original file), so a caller that wants to work in it must `switch_session` first. The probe clones, switches, and drives a completed turn inside the clone | `resources/probes/fork_probe.py` `pi_new_session` cell; `rpc.md` "clone" |
+| 45 | **Codex `thread/fork` mints a new thread whose on-disk rollout carries `forked_from_id`.** `thread/fork` with `lastTurnId` (inclusive) returns a new thread id; a real turn drives to a completed `agentMessage` inside it; the parent rollout is untouched. The lineage is on disk, not only over the protocol: `session_meta.payload.forked_from_id` (snake_case) mirrors the `Thread.forkedFromId` (camelCase) of finding 21. 21 of 597 corpus files carry it — `source: cli` / `thread_source: user` for real user forks, and a `subagent` variant for spawned agents | `resources/probes/fork_probe.py` `codex_new_session` cell; `forked_from_id` census over `~/.codex/sessions` |
+| 46 | **Codex still cannot rewind in place — `thread/rollback` remains DEPRECATED.** The generated schema for 0.147.0 (`ClientRequest.json` → `ThreadRollbackParams`) carries `description: "DEPRECATED: \`thread/rollback\` will be removed soon."`, and its own docstring warns it only edits history and does not revert file changes. There is no non-deprecated in-place rewind command. "Codex cannot rewind" is a result, not a gap in the probe: rewind on Codex is expressed as a new-session fork through an earlier turn (finding 45), which is exactly the adapter's design (`codex/adapter.ts:370`) | `resources/probes/fork_probe.py` `codex_rewind` cell reads the live schema |
+| 47 | **`rpc.md` documents 32 RPC commands; `PiCommand` transcribes 11.** The 21 absent, all real and simply never sent: `steer`, `follow_up`, `new_session`, `cycle_model`, `set_thinking_level`, `cycle_thinking_level`, `get_available_thinking_levels`, `set_steering_mode`, `set_follow_up_mode`, `set_auto_compaction`, `set_auto_retry`, `abort_retry`, `bash`, `abort_bash`, `get_session_stats`, `export_html`, `switch_session`, `clone`, `get_tree`, `get_last_assistant_text`, `set_session_name`, `get_commands`. Fork-relevant among these: **`clone`** (finding 44), **`switch_session`** (drive a turn in a clone), **`new_session`** (with optional `parentSession` lineage), and **`get_tree`** (`DESIGN.md:520` lists it but it is not transcribed). `PiCommand`'s docstring already says it is a deliberate subset; this records the exact delta so the next fork/tree work knows what is upstream vs. untranscribed | `diff` of `#### ` command headers in `rpc.md` §Commands against `type: "…"` arms of `PiCommand` (`pi/protocol.ts`) |
+| 48 | **Codex's `ClientRequest.json` carries 133 request methods; the adapter speaks ~11.** The generated schema (`codex app-server generate-json-schema --experimental`) enumerates 133 client→server methods. The adapter uses `initialize`, `thread/start`, `thread/resume`, `thread/fork`, `thread/read`, `thread/compact/start`, `turn/start`, `turn/interrupt`, and reads `model/list`. Directly fork/rewind-relevant and unused: **`thread/rollback`** (deprecated, finding 46), **`thread/list`** (finding 21, lineage over the protocol), **`thread/turns/list`** / **`thread/items/list`** (turn granularity for fork points without a full `thread/read`), and **`thread/delete`** / **`thread/archive`** (managing the threads a fork multiplies). `ThreadForkParams` also offers a `path`-based fork and per-fork config overrides (`model`, `sandbox`, `cwd`) the adapter does not pass | `ClientRequest.json` method census vs. `client.request(...)` call sites in `codex/adapter.ts` |
+
+On finding 7's correction: "both backends support fork-from-past natively" was
+true but flat — it collapsed two operations that behave differently per backend.
+**New-session fork** is native and symmetric: Pi `clone` (whole branch) or
+`fork`+`clone`, Codex `thread/fork` (turn-granular), both leaving lineage on
+disk. **In-place rewind** is not symmetric: Pi's `fork` does it (as copy-on-
+write, preserving the old branch), Codex has no supported command for it and
+expresses it as a new-session fork instead. The table's finding-7 row is
+unchanged as a record of what was believed; this round is its correction.
 
 ## Environment gotchas (learned the hard way)
 

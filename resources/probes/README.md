@@ -96,6 +96,40 @@ python3 capture_fixtures.py --backend codex --scenario tool-edit
 
 Read `../fixtures/README.md` for what was captured and what it revealed.
 
+## `fork_probe.py`
+
+Proves: **the 2×2 of `{Pi, Codex} × {rewind, new session}`** — the fork claim
+in `DESIGN.md:21` and HANDOFF finding 7, which nothing had ever run (OW-mewiga).
+Runs all four cells live and prints a JSON record saying, for each, whether the
+operation exists, what it returned, and what it left on disk:
+
+- **Pi rewind** (`fork`): copy-on-write on 0.84.2 — original file untouched, the
+  re-ask spins off a new `parentSession`-linked file, so the abandoned tail
+  survives (HANDOFF 43).
+- **Pi new session** (`clone` + `switch_session`): `clone` takes no entry id;
+  it copies the whole active branch to a new file and the process is switched
+  into it to drive a real turn (HANDOFF 44).
+- **Codex new session** (`thread/fork` + `lastTurnId`): new thread id, on-disk
+  `forked_from_id`, a real turn driven in the fork (HANDOFF 45).
+- **Codex rewind** (`thread/rollback`): recorded as DEPRECATED from the live
+  schema rather than fired — "Codex cannot rewind" is the result (HANDOFF 46).
+
+```bash
+python3 fork_probe.py                 # all four cells, write fixtures
+python3 fork_probe.py --no-fixtures   # record only
+python3 fork_probe.py --backend pi    # one side
+```
+
+Writes `../fixtures/{pi,codex}/fork.jsonl` (a forked/cloned session per backend,
+with a turn driven inside it). Same writable-state-dir and never-fork-a-corpus-
+session discipline as `capture_fixtures.py`; Codex threads are deliberately NOT
+ephemeral here because the on-disk residue is the question. New-session cells
+end with a completed assistant turn inside the fork, so a returned id alone
+cannot pass the check. Exit non-zero if either new-session cell failed to drive
+a turn.
+
+Verified with: `pi` 0.84.2, `codex-cli` 0.147.0.
+
 Two things it handles that the older probes do not, and that will bite anyone
 writing their own harness:
 

@@ -1,0 +1,8 @@
+{
+  "backend": "codex",
+  "scenario": "fork",
+  "covers": "a forked Codex thread with a turn driven inside it",
+  "cli_version": "codex-cli 0.147.0",
+  "captured_at": "2026-08-18T16:10:58-0400",
+  "note": "Produced by thread/fork (lastTurnId inclusive) then a turn in the fork. The session_meta header carries forked_from_id."
+}
