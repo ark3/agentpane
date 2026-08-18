@@ -354,6 +354,40 @@ tell the subagent to fast-forward to `main` before starting and to report the
 sha it started at. Keeping `origin/main` fresh by pushing was rejected — the
 never-push rule forbids it.
 
+## Observed manual compaction, both backends (OW-72)
+
+Captured 2026-08-18 while landing OW-72, through `resources/probes/
+capture_fixtures.py --scenario compact`, which primes a context with several
+long turns and then drives each backend's manual compaction. These are live
+runs against the real CLIs (Codex `codex-cli 0.147.0`, Pi `0.84.2`); the
+recorded streams are committed as `resources/fixtures/{codex,pi}/compact.jsonl`
+and the token figures below are read straight from them, not estimated.
+
+**Codex** compacts as its own non-steerable turn, triggered by
+`thread/compact/start`. Its `thread/tokenUsage/updated` events bracket the
+compaction, and the total context dropped from **16802 → 9231 tokens** across
+it (a 45% reduction). The `contextCompaction` item Codex emits carries no
+summary text and no token figure — only `{ type, id }` — so the transcript
+renders it as a bare marker, which is exactly what the mapped
+`compactionSummary` message (empty summary, `tokensBefore: 0`) produces.
+
+**Pi** compacts in response to a `{ type: "compact" }` command. It refuses when
+the whole context still fits inside `keepRecentTokens` ("Nothing to compact
+(session too small)"; the default is 20000, confirmed against 0.84.2's
+`prepareCompaction`), so the capture lowers that knob in the throwaway state
+dir before priming. The successful `compaction_end` reported **tokensBefore
+17660 → estimatedTokensAfter 4040** (a 77% estimated reduction) along with the
+summary text and `firstKeptEntryId`. Pi does not re-emit that summary through
+`message_start`/`message_end`, so the reducer builds the `compactionSummary`
+message from `compaction_end` itself — verified by the fixture, whose only
+events after `compaction_start` are `compaction_end` and the command response.
+
+The two backends therefore differ in what a compaction can show: Pi has a
+summary and a real before/after figure; Codex has neither on the item and only
+a marker, with the token drop visible only via the separate token-usage
+stream. One `Message.svelte` renderer covers both — marker always, summary and
+token figure only when present.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
