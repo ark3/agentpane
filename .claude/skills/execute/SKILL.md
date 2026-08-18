@@ -36,9 +36,10 @@ Then wait.
 
    **If it writes**, it gets its own worktree under `.worktrees/<id>` at the
    project root. The prompt opens with the worktree setup: `git merge --ff-only
-   main`, report the sha it started at, then `bun install`. If the fast-forward
-   fails, stop and report. Tell it outright that it commits on that worktree's
-   branch and cannot commit on `main`.
+   main`, report the sha it started at, then `bun install`. A failed
+   fast-forward is the other clone's work, not staleness — stop and report,
+   never force it. Tell it outright that it commits on that worktree's branch
+   and cannot commit on `main`.
 
    Only then the reading: `CLAUDE.md` and the `AGENTS.md` it points at, neither
    inherited. Then the item's grounding and intent inline: paths, symbols, the
@@ -51,9 +52,10 @@ Then wait.
    no freshness step, no branch, and no commit. Its report is the whole output;
    act on it here. Say "read only, write nothing, commit nothing" outright.
 3. **Review.** Read the diff yourself. No review subagents, and never
-   `/code-review ultra` here. Green tests are not the finding. Look for work
-   beyond what the item asked, drift from the agreed spec where it named one,
-   and tests that pass without having been shown to fail first.
+   `/code-review ultra` here — it has cost a full budget window. Green tests
+   are not the finding. Look for work beyond what the item asked, drift from
+   the agreed spec where it named one, and tests that pass without having been
+   shown to fail first.
 4. **Land.** `git cherry-pick` the subagent's commit. Then `git commit --amend`
    for whatever review changed. `bun run check`,
    `git worktree remove`, `git branch -D`. Then close the item:

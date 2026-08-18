@@ -36,7 +36,9 @@ for any subheading. `docs/TRACKING.md`, "The format: Maildir-shaped work
 items", is the spec; its five kinds are the whole of what `kind:` may hold.
 
 Adding an item is one new file in `docs/work/open/`, and **its name is drawn,
-never chosen**. Draw the name with:
+never chosen** — on 2026-08-18 `5addf08` took the next number from a listing
+read minutes earlier and filed over the OW-70 and OW-71 that `1e40fc4` had
+created six minutes before; recovered in `410b5cb`. Draw the name with:
 
 ```
 python3 -c "

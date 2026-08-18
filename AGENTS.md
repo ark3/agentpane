@@ -34,6 +34,10 @@ timing, or the Popover API, none of which it implements.
   load-bearing, reproduce it and record how.
 - A test that has never failed has not been shown to test anything. For a fix,
   break it again and watch it go red first.
+- State the why only where there is a body behind it: an incident that happened
+  or a default the reader will actually follow. Refuting something nobody would
+  have tried costs the budget twice — it argues with no one, and it plants the
+  bad move next to the instruction.
 
 ## Landing work
 
