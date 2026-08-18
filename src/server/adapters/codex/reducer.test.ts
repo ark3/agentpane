@@ -682,7 +682,6 @@ describe("defensive handling", () => {
 		"collabAgentToolCall",
 		"subAgentActivity",
 		"hookPrompt",
-		"contextCompaction",
 		"enteredReviewMode",
 	])("does not crash on the uncaptured item type %s", (type) => {
 		const r = reducer();
@@ -899,12 +898,15 @@ describe("item types with no fixture yet", () => {
 		expect(r.getState().messages).toHaveLength(1); // r2 stayed empty
 	});
 
-	it("drops contextCompaction, which carries no payload to render", () => {
-		// Codex's contextCompaction item is `{type, id}` and nothing else, and
-		// the compaction message type Pi has (`CompactionSummaryMessage`) is
-		// declared in pi-coding-agent, which is not a dependency here. See the
-		// workstream report.
-		expect(complete({ type: "contextCompaction", id: "c1" })).toEqual([]);
+	it("renders contextCompaction as a bare marker: no summary text, no token figure", () => {
+		// OW-72: the item is `{ type, id }` and nothing else, so the marker is
+		// empty-bodied -- a `compactionSummary` message with an empty summary and
+		// no positive token figure. `Message.svelte` draws the marker regardless,
+		// and the transcript can no longer silently drop the compaction. The old
+		// behaviour was `toEqual([])`; this went red against that first.
+		const messages = complete({ type: "contextCompaction", id: "c1" });
+		expect(messages).toHaveLength(1);
+		expect(messages[0]).toMatchObject({ role: "compactionSummary", summary: "", tokensBefore: 0 });
 	});
 });
 

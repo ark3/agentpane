@@ -284,8 +284,6 @@ function asArguments(value: JsonValue): Record<string, unknown> {
 
 /** Item types we knowingly produce no message for; anything else is genuinely unknown. */
 const SILENT_ITEM_TYPES = new Set<string>([
-	// No payload at all beyond an id -- see `mapContextCompaction` note below.
-	"contextCompaction",
 	"hookPrompt",
 	"enteredReviewMode",
 	"exitedReviewMode",
@@ -473,6 +471,17 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			};
 		}
 
+		case "contextCompaction": {
+			// The item is `{ type, id }` and nothing else -- no summary text, no
+			// token figure (OW-72). So it maps to a bare compaction marker: a
+			// `compactionSummary` message with an empty summary, which
+			// `Message.svelte`'s one compaction renderer draws as a marker with no
+			// body. `tokensBefore` is unknown here (it rides `thread/tokenUsage/
+			// updated`, not the item), so 0 -- the renderer shows a figure only
+			// when it is positive.
+			return { kind: "single", message: compactionMarker(ctx.timestamp) };
+		}
+
 		default: {
 			const type = item.type;
 			return {
@@ -486,6 +495,19 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 /** `AssistantMessage.content` cannot hold an image block; describe it instead. */
 function blockAsAssistant(block: TextContent | ImageContent): TextContent {
 	return block.type === "text" ? block : { type: "text", text: `[image: ${block.mimeType}]` };
+}
+
+/**
+ * A bare compaction marker (OW-72). Codex's `contextCompaction` item carries no
+ * summary and no token figure, so both fields are empty here; `Message.svelte`
+ * draws the marker regardless and the summary/figure only when present. Built
+ * as the `CompactionSummaryMessage` shape pi-agent-core declaration-merges into
+ * `AgentMessage` -- constructed inline rather than via
+ * `createCompactionSummaryMessage`, because the pi packages are types-only
+ * (D10, enforced by import-boundaries.test.ts).
+ */
+function compactionMarker(timestamp: number): AgentMessage {
+	return { role: "compactionSummary", summary: "", tokensBefore: 0, timestamp };
 }
 
 /**
