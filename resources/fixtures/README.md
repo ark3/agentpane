@@ -40,6 +40,12 @@ operator's identifiers before committing it** — home path, username, hostnames
 because a backend may echo any of them into free-form content the key scrub
 never visits.
 
+`src/fixture-scrub.test.ts` enforces the home-path half of that: `bun run check`
+fails and names the file, line, and column if any `.jsonl` or `.meta.json` here
+contains a `/home/`, `/Users/`, or `/root/` path. It deliberately does **not**
+scan for the username or hostname as bare tokens — the docblock says why, and
+those two are still yours to grep for.
+
 Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 

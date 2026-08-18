@@ -92,7 +92,8 @@ JSON field names, so it cannot catch operator data a backend echoes into
 free-form *content* (a fork capture leaked the home path and skills manifest
 this way — see `../fixtures/README.md`, "Scrubbed values"). Any new capturing
 probe must grep its generated fixture for operator identifiers before the
-fixture is committed.
+fixture is committed; `src/fixture-scrub.test.ts` fails `bun run check` on a
+home path, but the username and hostname are still yours to check.
 
 ```bash
 python3 capture_fixtures.py                                # all
