@@ -25,12 +25,12 @@ function piHeader(cwd = "/ws/project") {
 	return { type: "session", version: 3, id: "hdr-id", timestamp: "2026-01-01T00:00:00.000Z", cwd };
 }
 
-function piMessage(role: "user" | "assistant", text: string) {
+function piMessage(role: "user" | "assistant", text: string, timestamp = "2026-06-05T18:25:00.147Z") {
 	return {
 		type: "message",
 		id: "m",
 		parentId: null,
-		timestamp: "t",
+		timestamp,
 		message: { role, content: [{ type: "text", text }] },
 	};
 }
@@ -45,6 +45,7 @@ function codexHeader(id: string, cwd = "/ws/project") {
 function codexUser(...texts: string[]) {
 	return {
 		type: "response_item",
+		timestamp: "2026-08-13T02:10:54.809Z",
 		payload: { type: "message", role: "user", content: texts.map((text) => ({ type: "input_text", text })) },
 	};
 }
@@ -52,6 +53,7 @@ function codexUser(...texts: string[]) {
 function codexAssistant(text: string) {
 	return {
 		type: "response_item",
+		timestamp: "2026-08-13T02:10:54.809Z",
 		payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
 	};
 }
@@ -72,21 +74,37 @@ describe("readSessionPreview", () => {
 			const file = join(root, "session.jsonl");
 			await writeJsonl(file, [
 				piHeader(),
-				piMessage("user", "First question."),
-				piMessage("assistant", "First answer."),
-				piMessage("user", "Second question."),
-				piMessage("assistant", "Second answer."),
+				piMessage("user", "First question.", "2026-06-05T18:25:00.147Z"),
+				piMessage("assistant", "First answer.", "2026-06-05T18:25:03.200Z"),
+				piMessage("user", "Second question.", "2026-06-05T18:26:00.000Z"),
+				piMessage("assistant", "Second answer.", "2026-06-05T18:26:07.500Z"),
 			]);
 
 			const ref: SessionRef = { backend: "pi", id: file };
 			const turns = await readSessionPreview(ref, { piRoot: root });
 
+			// The record's own timestamp rides each turn (OW-71), not dropped.
 			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "First question." },
-				{ role: "assistant", text: "First answer." },
-				{ role: "user", text: "Second question." },
-				{ role: "assistant", text: "Second answer." },
+				{ role: "user", text: "First question.", timestamp: "2026-06-05T18:25:00.147Z" },
+				{ role: "assistant", text: "First answer.", timestamp: "2026-06-05T18:25:03.200Z" },
+				{ role: "user", text: "Second question.", timestamp: "2026-06-05T18:26:00.000Z" },
+				{ role: "assistant", text: "Second answer.", timestamp: "2026-06-05T18:26:07.500Z" },
 			]);
+		});
+
+		it("carries no timestamp for a record whose timestamp is not a string (OW-71)", async () => {
+			// Absent must stay absent: the client edge renders no time rather than
+			// the epoch. A non-string timestamp is the shape a malformed record has.
+			const file = join(root, "no-stamp.jsonl");
+			await writeJsonl(file, [
+				piHeader(),
+				{ type: "message", id: "m", parentId: null, message: { role: "user", content: [{ type: "text", text: "no time on me" }] } },
+			]);
+
+			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
+
+			expect(turns).toEqual<SessionPreviewTurn[]>([{ role: "user", text: "no time on me" }]);
+			expect(turns[0]).not.toHaveProperty("timestamp");
 		});
 
 		it("drops tool results and thinking, keeping only the text turns", async () => {
@@ -121,8 +139,8 @@ describe("readSessionPreview", () => {
 			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "Read the file." },
-				{ role: "assistant", text: "It says hello." },
+				{ role: "user", text: "Read the file.", timestamp: "2026-06-05T18:25:00.147Z" },
+				{ role: "assistant", text: "It says hello.", timestamp: "2026-06-05T18:25:00.147Z" },
 			]);
 		});
 
@@ -188,11 +206,25 @@ describe("readSessionPreview", () => {
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
 
-			// The synthetic wrapper turn is dropped; the real turns survive in order.
+			// The synthetic wrapper turn is dropped; the real turns survive in order,
+			// each carrying its record's own timestamp (OW-71).
 			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "Fix the failing test." },
-				{ role: "assistant", text: "Done, it passes now." },
+				{ role: "user", text: "Fix the failing test.", timestamp: "2026-08-13T02:10:54.809Z" },
+				{ role: "assistant", text: "Done, it passes now.", timestamp: "2026-08-13T02:10:54.809Z" },
 			]);
+		});
+
+		it("carries no timestamp for a record without a string timestamp (OW-71)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				{ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "no time on me" }] } },
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns).toEqual<SessionPreviewTurn[]>([{ role: "user", text: "no time on me" }]);
+			expect(turns[0]).not.toHaveProperty("timestamp");
 		});
 
 		it("returns an empty preview when no file carries the thread id, rather than throwing", async () => {

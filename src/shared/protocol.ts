@@ -223,6 +223,14 @@ export interface AttachSessionResponse {
 export interface SessionPreviewTurn {
 	role: "user" | "assistant";
 	text: string;
+	/**
+	 * When the turn happened, the record's own ISO string (OW-71) -- the same
+	 * shape `SessionSummary.createdAt`/`updatedAt` carry, so the wire stays ISO
+	 * end to end and the client edge does the one conversion to epoch-ms a
+	 * message needs. Optional: a record with no parsable timestamp carries
+	 * none, and the render path shows no time rather than the epoch.
+	 */
+	timestamp?: string;
 }
 export interface SessionPreviewResponse {
 	/** The ref the preview was read for, echoed back so the client can key it. */

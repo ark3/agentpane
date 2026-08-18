@@ -84,7 +84,7 @@ function piUserMessage(text: string) {
 		type: "message",
 		id: "m",
 		parentId: null,
-		timestamp: "t",
+		timestamp: "2026-01-01T00:00:05.000Z",
 		message: { role: "user", content: [{ type: "text", text }] },
 	};
 }
@@ -94,7 +94,7 @@ function piAssistantMessage(text: string) {
 		type: "message",
 		id: "a",
 		parentId: null,
-		timestamp: "t",
+		timestamp: "2026-01-01T00:00:07.000Z",
 		message: { role: "assistant", content: [{ type: "text", text }] },
 	};
 }
@@ -213,8 +213,8 @@ describe("production composition", () => {
 
 		const turns = await createSessionIndex().preview({ backend: "pi", id: wanted });
 		expect(turns).toEqual([
-			{ role: "user", text: "the real question" },
-			{ role: "assistant", text: "the real answer" },
+			{ role: "user", text: "the real question", timestamp: "2026-01-01T00:00:05.000Z" },
+			{ role: "assistant", text: "the real answer", timestamp: "2026-01-01T00:00:07.000Z" },
 		]);
 	});
 

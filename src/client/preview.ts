@@ -28,17 +28,25 @@ const NO_USAGE: Usage = {
 };
 
 /**
- * A stored turn has no timestamp -- the preview drops everything but the text.
- * It only feeds the `{#each}` key (`keyFor` in `render/transcript.ts`), which
- * already carries the index and the role, so a constant is enough and, unlike
- * a clock read, does not churn the key on every re-render.
+ * A turn's timestamp is the record's own ISO string, or absent (OW-71). It
+ * becomes `AgentMessage.timestamp`, a required epoch-ms `number`, so the one
+ * ISO-to-epoch conversion sits here at the client edge -- the wire keeps the
+ * ISO shape `SessionSummary` already uses, and nothing on the server has to
+ * learn epoch-ms. An absent timestamp maps to `NaN`, not `0`: `formatTimestamp`
+ * (via `new Date(NaN)`) renders `NaN` as the empty string, so a genuinely
+ * timeless turn shows no time, where `0` would render the epoch as a real date.
+ * `NaN` still keys the `{#each}` (`keyFor` stringifies it) stably per turn.
  */
-const NO_TIMESTAMP = 0;
+function turnEpoch(iso: string | undefined): number {
+	if (iso === undefined) return Number.NaN;
+	const ms = new Date(iso).getTime();
+	return Number.isNaN(ms) ? Number.NaN : ms;
+}
 
 export function previewMessages(turns: SessionPreviewTurn[], backend: BackendId): AgentMessage[] {
 	return turns.map((turn) =>
 		turn.role === "user"
-			? { role: "user", content: turn.text, timestamp: NO_TIMESTAMP }
+			? { role: "user", content: turn.text, timestamp: turnEpoch(turn.timestamp) }
 			: {
 					role: "assistant",
 					content: [{ type: "text", text: turn.text }],
@@ -47,7 +55,7 @@ export function previewMessages(turns: SessionPreviewTurn[], backend: BackendId)
 					model: backend,
 					usage: NO_USAGE,
 					stopReason: "stop",
-					timestamp: NO_TIMESTAMP,
+					timestamp: turnEpoch(turn.timestamp),
 				},
 	);
 }

@@ -157,5 +157,10 @@ function extractTextTurn(line: string): SessionPreviewTurn | null {
 		}
 	}
 	const text = texts.join("").trim();
-	return text.length > 0 ? { role: msg.role, text } : null;
+	if (text.length === 0) return null;
+	// The record's own timestamp (OW-71), the same field read for the header's
+	// `createdAt`. Optional: a record without a string timestamp carries none,
+	// so the render path shows no time rather than the epoch.
+	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
+	return { role: msg.role, text, ...(timestamp ? { timestamp } : {}) };
 }

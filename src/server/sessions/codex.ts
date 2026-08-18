@@ -249,5 +249,10 @@ function extractTextTurn(line: string): SessionPreviewTurn | null {
 	// text never carries these wrappers.
 	const kept = role === "user" ? texts.filter((t) => !isSyntheticBlock(t)) : texts;
 	const text = kept.join("").trim();
-	return text.length > 0 ? { role, text } : null;
+	if (text.length === 0) return null;
+	// The record-level timestamp (OW-71), at the top level even though the
+	// message rides in `payload`. Optional: no string timestamp, no time -- the
+	// render path shows nothing rather than the epoch.
+	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
+	return { role, text, ...(timestamp ? { timestamp } : {}) };
 }

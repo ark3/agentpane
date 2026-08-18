@@ -10,6 +10,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
 import { formatTimestamp } from "../time.ts";
+import { previewMessages } from "../preview.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
 import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
@@ -157,6 +158,44 @@ describe("Message", () => {
 		});
 		expect(roles(container)).toEqual(["unknown"]);
 		expect(container.textContent).toContain("compaction");
+	});
+});
+
+describe("preview timestamps (OW-71)", () => {
+	it("renders a preview turn's real time, converted from the wire's ISO string", () => {
+		// The turn carries the record's ISO string; `previewMessages` converts it
+		// to epoch-ms at the client edge, and the shared formatter renders it.
+		const iso = "2026-06-05T18:25:00.147Z";
+		const assistantMsg = previewMessages([{ role: "assistant", text: "hi", timestamp: iso }], "pi")[0]!;
+		const { container } = render(Message, { props: { message: assistantMsg } });
+		const time = container.querySelector(".meta time");
+		expect(time?.textContent?.trim()).toMatch(STAMP);
+		expect(time?.textContent?.trim()).toBe(formatTimestamp(iso));
+	});
+
+	it("puts a preview user turn's real time in its block action row", () => {
+		const iso = "2026-06-05T18:25:00.147Z";
+		const userMsg = previewMessages([{ role: "user", text: "hi", timestamp: iso }], "pi")[0]!;
+		const { container } = render(Message, { props: { message: userMsg } });
+		const time = container.querySelector("[data-block-actions='text'] time");
+		expect(time?.textContent?.trim()).toMatch(STAMP);
+		expect(time?.textContent?.trim()).toBe(formatTimestamp(iso));
+	});
+
+	it("renders no time at all for a preview turn that carries none", () => {
+		// The genuinely-absent case: no wire timestamp maps to NaN at the edge,
+		// which the formatter renders as empty -- no <time>, not the epoch.
+		const assistantMsg = previewMessages([{ role: "assistant", text: "hi" }], "pi")[0]!;
+		const { container } = render(Message, { props: { message: assistantMsg } });
+		expect(container.querySelector(".meta time")).toBeNull();
+		expect(container.textContent).not.toContain("1970");
+	});
+
+	it("renders no time for an absent-timestamp user turn either", () => {
+		const userMsg = previewMessages([{ role: "user", text: "hi" }], "pi")[0]!;
+		const { container } = render(Message, { props: { message: userMsg } });
+		expect(container.querySelector("[data-block-actions='text'] time")).toBeNull();
+		expect(container.textContent).not.toContain("1970");
 	});
 });
 
