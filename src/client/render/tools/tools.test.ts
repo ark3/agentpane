@@ -193,13 +193,13 @@ describe("tool cards", () => {
 
 describe("tool output", () => {
 	it("clips output an agent could produce megabytes of, and says so", () => {
-		const huge = "x".repeat(30_000);
+		const huge = "x".repeat(300_000);
 		const { container } = render(ToolCallBlock, {
 			props: { call: call("bash", { command: "cat big" }), result: result(huge) },
 		});
 		const shown = container.querySelector("pre.output:last-of-type")?.textContent ?? "";
 		expect(shown.length).toBeLessThan(huge.length);
-		expect(container.querySelector(".clipped")?.textContent).toContain("30,000");
+		expect(container.querySelector(".clipped")?.textContent).toContain("300,000");
 	});
 });
 

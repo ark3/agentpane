@@ -57,8 +57,8 @@ function dialog(scope: ParentNode): HTMLElement | null {
 	return scope.querySelector("[role='dialog']");
 }
 
-/** A tool result whose text is longer than `Output`'s 20000-character display limit. */
-const longOutput = "a line of command output\n".repeat(1000);
+/** A tool result whose text is longer than `Output`'s 250000-character display limit. */
+const longOutput = "a line of command output\n".repeat(10001);
 
 function toolCallWithResult(text: string): { block: ContentBlock; results: Map<string, never> } {
 	return {

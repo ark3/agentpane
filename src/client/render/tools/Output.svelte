@@ -16,7 +16,7 @@
 		language,
 		error = false,
 		/** Agents can emit megabytes; the card is a preview, not a file viewer. */
-		limit = 20000,
+		limit = 250000,
 		/** Copy/expand chrome. Off inside the expand overlay, which is already showing this text. */
 		actions = true,
 	}: {
