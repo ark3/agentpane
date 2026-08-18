@@ -28,6 +28,10 @@ the path prefix is what `sort -V` sorts on.
 two identical — and carries the headline-only and `kind:`-filter variants plus
 the evidence for every flag.
 
+That command *is* the listing. Do not `ls docs/work/open/` first — a drawn id
+says nothing about its item, so the filenames are noise, and what the summary
+needs is the headline the survey already prints.
+
 Then summarize, grouped so they can be chosen between: what each is, roughly
 what it costs, what it unblocks or depends on. Open the handful of files you
 need in order to say that; the survey is there so you do not read all of them.
