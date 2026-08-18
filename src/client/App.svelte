@@ -33,6 +33,9 @@
 	// $state because it is bound inside a conditional block -- Svelte updates the
 	// binding (element <-> undefined) as the composer swaps in and out.
 	let promptEl = $state<HTMLTextAreaElement | undefined>();
+	// The tools popup under the composer (OW-72). A native <details> is the
+	// smallest thing that does the job; bound so its entries can close it.
+	let toolsMenu = $state<HTMLDetailsElement | undefined>();
 
 	/**
 	 * Per-session follow state (OW-27), keyed like everything else in the
@@ -540,6 +543,25 @@
 		void controller.create(newSessionWorkspace, backend);
 	}
 
+	/**
+	 * "Another conversation like this one" (OW-72): inherit the selected
+	 * session's workspace AND backend, unlike the configured New button which
+	 * reads the two selects. Disabled with nothing selected -- there is nothing
+	 * to inherit -- so this guard is the whole of that case.
+	 */
+	function newConversation(): void {
+		if (toolsMenu) toolsMenu.open = false;
+		const ref = view.state.selected;
+		if (!ref || !newSessionWorkspace) return;
+		void controller.create(newSessionWorkspace, ref.backend);
+	}
+
+	/** Compact the selected session's context (OW-72). */
+	function compactSession(): void {
+		if (toolsMenu) toolsMenu.open = false;
+		void controller.compact();
+	}
+
 	/** Promote a read-only preview into a live session via the existing attach path, then focus the prompt. */
 	async function attachSelected(): Promise<void> {
 		const ref = view.preview?.ref;
@@ -717,6 +739,23 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
+				<details class="tools-menu" bind:this={toolsMenu}>
+					<summary aria-label="Tools">Tools</summary>
+					<div class="tools-menu-list" role="menu">
+						<button
+							type="button"
+						role="menuitem"
+						onclick={newConversation}
+						disabled={view.state.selected === null}
+					>New conversation</button>
+						<button
+							type="button"
+						role="menuitem"
+						onclick={compactSession}
+						disabled={view.state.selected === null}
+					>Compact</button>
+					</div>
+				</details>
 				<button type="submit" disabled={!view.draft}>Send</button>
 				{#if selectedSession?.isStreaming}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Abort</button>

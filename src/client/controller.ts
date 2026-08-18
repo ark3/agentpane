@@ -47,6 +47,8 @@ export interface AgentpaneController {
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
 	abort(): Promise<void>;
+	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
+	compact(): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
 	/** Dismiss the current error -- the view-level one and, if selected, the session's own. */
@@ -307,6 +309,19 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
 				if (!disposed && view.busy === "aborting") publish({ busy: "idle" });
+			}
+		},
+		async compact() {
+			const selected = view.state.selected;
+			if (!selected) {
+				publish({ error: "Select a session before compacting." });
+				return;
+			}
+			publish({ error: null });
+			try {
+				await api.compact(selected);
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
 			}
 		},
 		clearError() {

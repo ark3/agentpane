@@ -224,6 +224,16 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
+/* The tools popup sits at the left of the action row (OW-72); margin-right:auto
+   pushes Send/Abort to the right. A native <details> gives open/close for free. */
+.tools-menu { position: relative; margin-right: auto; }
+.tools-menu > summary { list-style: none; cursor: pointer; padding: var(--ap-space-1) var(--ap-space-2); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); color: var(--ap-fg-muted); }
+.tools-menu > summary::-webkit-details-marker { display: none; }
+.tools-menu > summary:hover { background: var(--ap-surface-raised); color: var(--ap-fg); }
+.tools-menu-list { position: absolute; bottom: calc(100% + var(--ap-space-1)); left: 0; z-index: 10; display: flex; flex-direction: column; min-width: 12rem; padding: var(--ap-space-1); background: var(--ap-surface-raised); border: 1px solid var(--ap-border); border-radius: var(--ap-radius-1); box-shadow: var(--ap-shadow-1, 0 4px 12px rgba(0,0,0,0.3)); }
+.tools-menu-list button { text-align: left; background: none; border: none; padding: var(--ap-space-1) var(--ap-space-2); border-radius: var(--ap-radius-1); color: var(--ap-fg); }
+.tools-menu-list button:hover:not(:disabled) { background: var(--ap-surface); }
+.tools-menu-list button:disabled { color: var(--ap-fg-subtle); }
 /* A read-only preview has no composer -- attaching is the one explicit action. */
 .attach button { width: 100%; border-color: var(--ap-accent); color: var(--ap-accent); }
 .abort { color: var(--ap-danger); }

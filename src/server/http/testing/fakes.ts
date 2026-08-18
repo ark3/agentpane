@@ -124,6 +124,7 @@ export class FakeAdapter implements BackendAdapter {
 	readonly replies: { requestId: string; response: unknown }[] = [];
 	readonly forks: string[] = [];
 	aborts = 0;
+	compactions = 0;
 	model?: string;
 
 	// -- state ---------------------------------------------------------------
@@ -182,6 +183,10 @@ export class FakeAdapter implements BackendAdapter {
 	async abort(): Promise<void> {
 		this.aborts++;
 		this.setStreaming(false);
+	}
+
+	async compact(): Promise<void> {
+		this.compactions++;
 	}
 
 	async listForkPoints(): Promise<ForkPoint[]> {

@@ -168,6 +168,7 @@ const api: AgentpaneApi = {
 		turnSettled = runTurn(body.text);
 	},
 	async abort() {},
+	async compact() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());

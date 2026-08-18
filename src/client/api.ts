@@ -50,6 +50,7 @@ export interface AgentpaneApi {
 	preview(ref: SessionRef): Promise<SessionPreviewResponse>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
 	abort(ref: SessionRef): Promise<void>;
+	compact(ref: SessionRef): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -95,6 +96,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		abort(ref) {
 			return requestNoContent(ROUTES.abort(ref), { method: "POST" });
+		},
+		compact(ref) {
+			return requestNoContent(ROUTES.compact(ref), { method: "POST" });
 		},
 		connect(handlers) {
 			return openEvents(ROUTES.events, handlers);

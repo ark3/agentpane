@@ -159,6 +159,36 @@ describe("Message", () => {
 		expect(roles(container)).toEqual(["unknown"]);
 		expect(container.textContent).toContain("compaction");
 	});
+
+	it("renders a compactionSummary as its own marker, not the unknown dump (OW-72)", () => {
+		// One renderer for both backends. The marker must not fall through to the
+		// unknown JSON dump -- that is the whole point of the branch.
+		const { container } = render(Message, {
+			props: {
+				message: { role: "compactionSummary", summary: "folded history", tokensBefore: 17660, timestamp: 1 } as unknown as AgentMessage,
+			},
+		});
+		expect(roles(container)).toEqual(["compactionSummary"]);
+		expect(roles(container)).not.toContain("unknown");
+		// Pi supplies a summary and a token figure: both are shown.
+		expect(container.querySelector(".compaction-marker")).not.toBeNull();
+		expect(container.textContent).toContain("folded history");
+		expect(container.querySelector(".compaction-tokens")?.textContent).toMatch(/18K/);
+	});
+
+	it("renders a bare compactionSummary marker with no summary and no token figure (OW-72)", () => {
+		// Codex's contextCompaction carries neither: still a marker, but no body
+		// and no token figure. Same renderer, same data-role -- just empty fields.
+		const { container } = render(Message, {
+			props: {
+				message: { role: "compactionSummary", summary: "", tokensBefore: 0, timestamp: 1 } as unknown as AgentMessage,
+			},
+		});
+		expect(roles(container)).toEqual(["compactionSummary"]);
+		expect(container.querySelector(".compaction-marker")).not.toBeNull();
+		expect(container.querySelector(".compaction-tokens")).toBeNull();
+		expect(container.querySelector(".body")).toBeNull();
+	});
 });
 
 describe("preview timestamps (OW-71)", () => {

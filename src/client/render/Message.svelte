@@ -113,6 +113,27 @@
 			<ResultBody result={message} />
 		</ToolCard>
 	</article>
+{:else if message.role === "compactionSummary"}
+	<!-- One renderer for both backends (OW-72): always a marker, plus the summary
+	     text and token figure only when the backend supplied them. Codex's
+	     contextCompaction carries neither, so it draws as a bare marker -- the
+	     normal path, not a fallback -- while Pi's carries both. -->
+	<article class="msg compaction" data-role="compactionSummary" data-index={index}>
+		<p class="compaction-marker">
+			<span class="compaction-rule" aria-hidden="true"></span>
+			<span class="compaction-label">
+				Context compacted{#if message.tokensBefore > 0}
+					<span class="compaction-tokens">from {compact.format(message.tokensBefore)} tok</span>
+				{/if}
+			</span>
+			<span class="compaction-rule" aria-hidden="true"></span>
+		</p>
+		{#if message.summary}
+			<div class="body">
+				<Block block={{ type: "text", text: message.summary }} {results} />
+			</div>
+		{/if}
+	</article>
 {:else}
 	<article class="msg unknown" data-role="unknown" data-index={index}>
 		<Output text={JSON.stringify(message, null, 2)} language="json" />
@@ -169,6 +190,40 @@
 		font-size: var(--ap-text-2xs);
 		color: var(--ap-fg-subtle);
 		font-variant-numeric: tabular-nums;
+	}
+
+	/* A compaction marker reads as a divider, not a message: it is the seam the
+	   context was folded at, so it spans the column with a centred label rather
+	   than sitting in a bubble. The summary (Pi) rides below it as ordinary prose;
+	   Codex draws the marker alone. */
+	.compaction-marker {
+		display: flex;
+		align-items: center;
+		gap: var(--ap-space-3);
+		margin: 0;
+		color: var(--ap-fg-subtle);
+		font-size: var(--ap-text-2xs);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	.compaction-rule {
+		flex: 1;
+		height: 1px;
+		background: var(--ap-border);
+	}
+
+	.compaction-label {
+		display: inline-flex;
+		gap: var(--ap-space-2);
+		align-items: baseline;
+		white-space: nowrap;
+	}
+
+	.compaction-tokens {
+		font-variant-numeric: tabular-nums;
+		text-transform: none;
+		letter-spacing: 0;
 	}
 
 	.cursor {

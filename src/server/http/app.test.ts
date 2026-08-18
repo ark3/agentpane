@@ -590,6 +590,19 @@ describe("prompting", () => {
 		expect((await post(ROUTES.abort(PI_SESSION))).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.aborts).toBe(1);
 	});
+
+	it("compacts only an attached session (OW-72)", async () => {
+		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(404);
+		await get(ROUTES.session(PI_SESSION));
+		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(204);
+		expect(pi.forRef(PI_SESSION)?.compactions).toBe(1);
+	});
+
+	it("rejects a non-POST compact with 405 (OW-72)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		expect((await get(ROUTES.compact(PI_SESSION))).status).toBe(405);
+		expect(pi.forRef(PI_SESSION)?.compactions).toBe(0);
+	});
 });
 
 describe("server-initiated requests (D2a)", () => {

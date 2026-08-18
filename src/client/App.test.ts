@@ -57,6 +57,7 @@ class FakeController implements AgentpaneController {
 	previewed: SessionRef[] = [];
 	submitted = 0;
 	aborted = 0;
+	compacted = 0;
 	clearErrorCalls = 0;
 	refreshCalls = 0;
 	started = 0;
@@ -136,6 +137,10 @@ class FakeController implements AgentpaneController {
 
 	async abort() {
 		this.aborted += 1;
+	}
+
+	async compact() {
+		this.compacted += 1;
 	}
 
 	async refreshSessions() {
@@ -261,6 +266,46 @@ describe("App", () => {
 		const button = screen.getByRole("button", { name: "New" });
 		const select = screen.getByLabelText("Backend");
 		expect(button.parentElement).toBe(select.parentElement?.parentElement);
+	});
+
+	it("the composer's New conversation inherits the selected session's workspace AND backend (OW-72)", async () => {
+		// Unlike the configured New button (which reads the two selects), this
+		// entry inherits the selected session's own backend. The selected session
+		// is codex; the backend select stays on its default. Inheriting the
+		// backend is what this asserts -- so the created backend is codex, not the
+		// select's value.
+		const controller = new FakeController(view({
+			state: state({
+				selected: codexSession,
+				summaries: [summary(codexSession, "C", { cwd: "/work/project" })],
+			}),
+		}));
+		render(App, { props: { controller } });
+
+		await fireEvent.click(screen.getByText("Tools"));
+		await fireEvent.click(screen.getByRole("menuitem", { name: "New conversation" }));
+
+		expect(controller.created).toEqual([{ cwd: "/work/project", backend: "codex" }]);
+	});
+
+	it("disables the composer's New conversation and Compact when nothing is selected (OW-72)", () => {
+		const controller = new FakeController();
+		render(App, { props: { controller } });
+
+		expect(screen.getByRole("menuitem", { name: "New conversation" })).toBeDisabled();
+		expect(screen.getByRole("menuitem", { name: "Compact" })).toBeDisabled();
+	});
+
+	it("the composer's Compact tool compacts the selected session (OW-72)", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "P")] }),
+		}));
+		render(App, { props: { controller } });
+
+		await fireEvent.click(screen.getByText("Tools"));
+		await fireEvent.click(screen.getByRole("menuitem", { name: "Compact" }));
+
+		expect(controller.compacted).toBe(1);
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {

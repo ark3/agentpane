@@ -42,6 +42,7 @@ class FakeApi implements AgentpaneApi {
 	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
+	readonly compact = vi.fn(async (_session: SessionRef) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
