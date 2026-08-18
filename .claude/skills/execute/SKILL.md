@@ -6,8 +6,7 @@ description: Land one open work item from docs/work/open/. Pass an id (/execute 
 # Execution session
 
 **One work item per invocation.** Land it, hand it back to be tried, stop.
-Never move on to another on your own — picking is the user's, and trying the
-last fix is how they decide what is next.
+Never move on to another on your own.
 
 ## Invoked with no id
 
@@ -17,20 +16,11 @@ Survey what is open:
 rg --no-heading -N -H '^(# |kind: )' docs/work/open | sort -V
 ```
 
-One item prints as two lines, its kind then its headline, both prefixed with the
-path the id is read off. The pipe is what pins the order at all — the searcher
-walks files in parallel and its own order is not stable run to run — and `sort
--V` specifically is what holds the numbered items in id order, since plain sort
-puts `OW-10` before `OW-2`. Drawn ids sort lexically, which is arbitrary and
-only has to be stable. Do not drop the pipe, and do not add `--no-filename`:
-the path prefix is what `sort -V` sorts on.
-`docs/TRACKING.md`, "Staying greppable", is the spec for this command — keep the
-two identical — and carries the headline-only and `kind:`-filter variants plus
-the evidence for every flag.
+One item prints as two lines, its kind then its headline, both prefixed with
+the path the id is read off. Keep this command identical to
+`docs/TRACKING.md`, "Staying greppable".
 
-That command *is* the listing. Do not `ls docs/work/open/` first — a drawn id
-says nothing about its item, so the filenames are noise, and what the summary
-needs is the headline the survey already prints.
+That command is the listing. Do not `ls docs/work/open/` first.
 
 Then summarize, grouped so they can be chosen between: what each is, roughly
 what it costs, what it unblocks or depends on. Open the handful of files you
@@ -40,19 +30,15 @@ Then wait.
 ## Invoked with an id
 
 1. **Check the item.** They were recorded by whoever found them and not
-   re-verified since; OW-23 was stale enough to invert its own conclusion.
-   Confirm against the source first, and say so if it has drifted.
+   re-verified since. Confirm against the source first, and say so if it has
+   drifted.
 2. **Dispatch.** One subagent, model chosen per item.
 
    **If it writes**, it gets its own worktree under `.worktrees/<id>` at the
-   project root (gitignored; it must live inside the repo tree — see HANDOFF's
-   "Environment gotchas"), cut from `origin/main` — never pushed to, so stale by
-   every commit since, `CLAUDE.md` and the skills included. So the prompt opens
-   with the worktree, before anything read from it can be trusted: `git merge
-   --ff-only main`, report the sha it started at, then `bun install` (a worktree
-   has no `node_modules`; git skips ignored files). Not a fast-forward means the
-   other clone's work, not staleness — stop and report. It commits on that
-   worktree's own branch and cannot commit on `main`; say so outright.
+   project root. The prompt opens with the worktree setup: `git merge --ff-only
+   main`, report the sha it started at, then `bun install`. If the fast-forward
+   fails, stop and report. Tell it outright that it commits on that worktree's
+   branch and cannot commit on `main`.
 
    Only then the reading: `CLAUDE.md` and the `AGENTS.md` it points at, neither
    inherited. Then the item's grounding and intent inline: paths, symbols, the
@@ -61,20 +47,15 @@ Then wait.
    does not go shopping.
 
    **If it only reads and reports** — a cold read of an item before you start
-   it, an adversarial check of something already written — it gets no worktree
-   and so no freshness step, no branch and no commit, so there is no diff to
-   review and nothing to cherry-pick. Closing it in step 4 is unchanged. Its
-   report is the whole output; act on it here. Say "read only, write nothing,
-   commit nothing" outright, because the default shape above is the writing
-   one.
+   it, an adversarial check of something already written — it gets no worktree,
+   no freshness step, no branch, and no commit. Its report is the whole output;
+   act on it here. Say "read only, write nothing, commit nothing" outright.
 3. **Review.** Read the diff yourself. No review subagents, and never
-   `/code-review ultra` here — it has cost a full budget window. Green tests
-   are not the finding. Look for work beyond what the item asked (the item is
-   the scope — delete the extra), drift from the agreed spec where it named
-   one, and tests that pass without having been shown to fail first.
-4. **Land.** `git cherry-pick` the subagent's commit — not `git merge`, history
-   on `main` is linear. Then `git commit --amend` for whatever review changed;
-   a bare cherry-pick lands the version review rejected. `bun run check`,
+   `/code-review ultra` here. Green tests are not the finding. Look for work
+   beyond what the item asked, drift from the agreed spec where it named one,
+   and tests that pass without having been shown to fail first.
+4. **Land.** `git cherry-pick` the subagent's commit. Then `git commit --amend`
+   for whatever review changed. `bun run check`,
    `git worktree remove`, `git branch -D`. Then close the item:
 
    ```
@@ -83,21 +64,19 @@ Then wait.
 
    and append to that file, as its last body paragraph, `**Fixed** in <sha>:
    <evidence>` — the landed sha and what shows it works. No heading above it,
-   no strikethrough anywhere, no `sha:` frontmatter field. The `git mv` is the
-   status change; git records it as a rename, so the body keeps its history.
+   no strikethrough anywhere, no `sha:` frontmatter field.
 5. **Hand back.** Say what changed and how to see it — what to run, what to
    look at, what would count as working. Then stop.
 
 ## Between items
 
-The user tries it; their reaction is the finding. Working means wait for the
-next pick. Wrong means a new item, or amend this one and re-dispatch.
+The user tries it. Working means wait for the next pick. Wrong means a new
+item, or amend this one and re-dispatch.
 Something else surfaced means a new item, not this session's job. A new item
 follows `.claude/skills/author/SKILL.md`: its id is **drawn, not chosen**, and
 checked against `docs/work/open/` and `docs/work/closed/` before you write it.
 
-Say when the conversation has grown long enough to be worth restarting — a
-fresh session costs less than a long one.
+Say when the conversation has grown long enough to be worth restarting.
 
 ## Never
 
