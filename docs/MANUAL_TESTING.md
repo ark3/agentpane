@@ -388,6 +388,70 @@ a marker, with the token drop visible only via the separate token-usage
 stream. One `Message.svelte` renderer covers both — marker always, summary and
 token figure only when present.
 
+## Observed fork-from-past, the 2×2 of {Pi, Codex} × {rewind, new session} (OW-mewiga)
+
+Run on the work laptop 2026-08-18, **pi 0.84.2 / codex-cli 0.147.0**, by
+`resources/probes/fork_probe.py`. Until this, nothing had ever run a fork on
+either backend — `DESIGN.md:21` and HANDOFF finding 7 asserted support from
+`rpc.md` and the Codex bindings alone. All four cells ran; the corrections to
+finding 7 and `DESIGN.md:21` landed with this work (HANDOFF findings 43–48).
+Every run used a throwaway workspace and a throwaway state dir
+(`PI_CODING_AGENT_DIR` / `CODEX_HOME`, credentials copied in) — no corpus
+session was ever forked, since Pi's fork could rewrite a file in place. Codex
+threads were **not** `ephemeral`, because the on-disk residue is the question.
+New-session cells end with a completed assistant turn *inside* the fork; rewind
+is proven against disk, not against the response (finding 30: a vetoed Pi fork
+reports `success: true` with `cancelled: true`).
+
+**Pi, rewind (RPC `fork`).** Exists: returns `{ text: "<forked-from message>",
+cancelled: false }`. The surprise is on disk. The adapter docblock
+(`pi/process.ts:343`) says `fork` "rewinds the active branch of the SAME
+session file in place"; on 0.84.2 it is **copy-on-write** — the active file is
+left byte-identical (sha unchanged, its last entry still the abandoned `BETA`
+assistant reply), and the post-fork re-ask lands in a **new** file whose header
+carries a `parentSession` pointer back. The abandoned tail always survives.
+Corroborated by the corpus: 81 of 419 Pi files carry in-file sibling branches
+under one parent id (the TUI `/fork` shape). Both routes preserve; neither
+destroys. **No destructive-rewind warning is warranted** — the open question the
+cell existed to settle (HANDOFF 43). That the adapter still returns an unchanged
+`ref` after a fork that moved the active file is the open concern in OW-pifowo.
+
+**Pi, new session (RPC `clone` + `switch_session`).** Exists: `{ cancelled:
+false }`. The highest-value unknown answered: **`clone` takes no entry id.** Per
+`rpc.md` and confirmed live, it duplicates the *whole active branch* into a new
+session at the current position — no per-entry parameter — so branching into a
+new session from a chosen point is a composition (`fork` then `clone`, or
+`clone` then `switch_session`). The RPC process does **not** auto-switch to the
+clone (`get_state` still reports the original), so the probe `switch_session`s
+in and drives a real turn: assistant replied `EPSILON`, the clone grew to 9
+entries, the original untouched (HANDOFF 44).
+
+**Codex, new session (`thread/fork` with `lastTurnId`).** Exists, wired and
+used by the adapter (`codex/adapter.ts:391`). `lastTurnId` (inclusive) returns
+a `Thread` with a fresh `id`, `forkedFromId` set to the parent, and its own
+`sessionId`; the probe drove a real turn in the fork (assistant replied
+`GAMMA`). On disk the new rollout's `session_meta.payload` carries
+**`forked_from_id`** (snake_case) — the on-disk mirror of the protocol's
+`Thread.forkedFromId` (finding 21). The parent rollout is untouched; 21 of 597
+corpus files carry `forked_from_id` (HANDOFF 45).
+
+**Codex, rewind (`thread/rollback`) — unavailable, by design.** The method is
+still in the 0.147.0 schema, but its `ThreadRollbackParams` description reads
+verbatim "DEPRECATED: `thread/rollback` will be removed soon" and its docstring
+warns it edits only history without reverting file changes. The probe records
+the deprecation from the live schema rather than firing a command slated for
+removal, which the adapter deliberately never calls (`codex/adapter.ts:370`).
+*Codex cannot rewind in place*; rewind on Codex is expressed as a new-session
+fork through an earlier turn — exactly the adapter's design. This is a reported
+result, not a probe failure (HANDOFF 46).
+
+Artifacts: the re-runnable probe `resources/probes/fork_probe.py` (`--backend
+pi|codex` to run one side, `--no-fixtures` to record without writing them), a
+fork fixture per backend at `resources/fixtures/{pi,codex}/fork.jsonl` (both
+scrubbed per `resources/fixtures/README.md`), and the two command-surface
+deltas as HANDOFF findings 47 (`rpc.md` 32 commands vs `PiCommand`'s 11) and 48
+(`ClientRequest.json` 133 methods vs the adapter's ~11).
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
