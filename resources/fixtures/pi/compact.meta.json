@@ -1,0 +1,26 @@
+{
+  "backend": "pi",
+  "scenario": "compact",
+  "covers": "manual compaction: the compact command plus its events",
+  "prompt": "Explain, in several detailed paragraphs, how the TCP/IP networking stack works from the physical layer up through the application layer. Cover framing, addressing, routing, congestion control, and at least three application protocols.",
+  "workspace_files": [],
+  "cli_version": "0.84.2",
+  "captured_at": "2026-08-18T12:53:32-0400",
+  "elapsed_seconds": 235.9,
+  "lines": 3587,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 4,
+    "agent_settled": 4,
+    "agent_start": 4,
+    "compaction_end": 1,
+    "compaction_start": 1,
+    "message_end": 8,
+    "message_start": 8,
+    "message_update": 3544,
+    "response": 5,
+    "turn_end": 4,
+    "turn_start": 4
+  },
+  "dialogs_seen": []
+}

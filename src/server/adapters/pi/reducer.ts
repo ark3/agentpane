@@ -119,6 +119,24 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			if (!event.aborted && event.errorMessage) {
 				return { state, error: event.errorMessage };
 			}
+			// A successful compaction reports its summary and the token count it
+			// shrank (OW-72). Pi does NOT push this through message_start/end --
+			// verified against resources/fixtures/pi/compact.jsonl, where the only
+			// events after compaction_start are compaction_end and the command
+			// response -- so the transcript would show nothing unless we append a
+			// message here. Mirror the `CompactionSummaryMessage` shape
+			// pi-agent-core declaration-merges into AgentMessage; `Message.svelte`
+			// draws the marker plus this summary text.
+			if (event.result) {
+				const summary: AgentMessage = {
+					role: "compactionSummary",
+					summary: event.result.summary,
+					tokensBefore: event.result.tokensBefore,
+					timestamp: Date.now(),
+				};
+				const messages = [...state.messages, summary];
+				return { state: { ...state, messages }, changedIndex: messages.length - 1 };
+			}
 			return { state };
 
 		// No structural effect on AgentMessage[] or isStreaming: turn boundaries

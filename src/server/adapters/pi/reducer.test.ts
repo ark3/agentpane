@@ -120,6 +120,48 @@ describe("reducePiNotification: text fixture (streaming text, no tools)", () => 
 	});
 });
 
+describe("reducePiNotification: compact fixture (manual compaction, OW-72)", () => {
+	const lines = readFixture("compact.jsonl");
+
+	/** The compaction_end the capture recorded, with its result payload. */
+	function compactionEnd(): Extract<PiNotification, { type: "compaction_end" }> {
+		const event = lines.find((l) => l.type === "compaction_end");
+		if (event?.type !== "compaction_end") throw new Error("fixture has no compaction_end");
+		return event;
+	}
+
+	it("the fixture actually compacted: compaction_end carries a result, not an error", () => {
+		// Guards the fixture itself. Pi refuses to compact a session under
+		// keepRecentTokens ("Nothing to compact"), so a stale capture would carry
+		// an errorMessage and null result -- and every assertion below would be
+		// vacuous. Assert the shape, never the summary wording.
+		const end = compactionEnd();
+		expect(end.result).not.toBeNull();
+		expect(end.result?.tokensBefore).toBeGreaterThan(end.result?.estimatedTokensAfter ?? 0);
+	});
+
+	it("appends exactly one compactionSummary message carrying the summary and tokensBefore", () => {
+		const before = runThroughReducer(lines.filter((l) => l.type !== "compaction_end"));
+		const after = runThroughReducer(lines);
+		// The whole effect of compaction_end is one extra message, at the end.
+		expect(after.finalState.messages).toHaveLength(before.finalState.messages.length + 1);
+		const summary = after.finalState.messages.at(-1);
+		const end = compactionEnd();
+		expect(summary).toMatchObject({
+			role: "compactionSummary",
+			summary: end.result?.summary,
+			tokensBefore: end.result?.tokensBefore,
+		});
+	});
+
+	it("reports the appended summary via changedIndex and raises no error", () => {
+		const { results, finalState } = runThroughReducer(lines);
+		const endResult = results.at(-1);
+		expect(endResult?.error).toBeUndefined();
+		expect(endResult?.changedIndex).toBe(finalState.messages.length - 1);
+	});
+});
+
 describe("reducePiNotification: tool-read fixture (tool call + result pair)", () => {
 	const lines = readFixture("tool-read.jsonl");
 
