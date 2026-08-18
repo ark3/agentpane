@@ -118,10 +118,11 @@ button, input, select, textarea { font: inherit; }
 	/* The third column is the transcript nav rail (OW-60): `auto`, so it costs
 	   exactly its own width and the conversation keeps the rest. */
 	grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr) auto;
-	grid-template-rows: auto auto 1fr auto;
+	grid-template-rows: auto auto auto 1fr auto;
 	grid-template-areas:
 		"masthead masthead masthead"
 		"controls conversation rail"
+		"sessions-header conversation rail"
 		"sessions conversation rail"
 		"sessions prompt prompt";
 	gap: var(--ap-space-4);
@@ -171,14 +172,19 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .ap-action[data-copy="copied"] { color: var(--ap-success); }
 .ap-action[data-copy="failed"] { color: var(--ap-danger); }
 
-.sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; overflow-y: auto; min-height: 0; }
-.session-select { min-width: 0; display: grid; gap: var(--ap-space-1); text-align: left; }
+.sessions-header { grid-area: sessions-header; display: flex; align-items: center; justify-content: space-between; gap: var(--ap-space-2); }
+.sessions-header h2 { margin: 0; font-size: var(--ap-text-sm); color: var(--ap-fg-muted); }
+.sessions-header button { padding: var(--ap-space-1) var(--ap-space-2); font-size: var(--ap-text-xs); }
+.sessions { grid-area: sessions; display: grid; gap: var(--ap-space-1); align-content: start; overflow-y: auto; min-height: 0; }
+.session-select { min-width: 0; display: grid; gap: var(--ap-space-1); padding: var(--ap-space-1) var(--ap-space-2); text-align: left; }
 /* A row is exactly this tall, never more: a growing preview or a long
    workspace path truncates instead of wrapping the row across lines. */
-.session-preview { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.session-meta { display: flex; flex-wrap: wrap; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
+.session-preview { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--ap-text-sm); }
+/* Same one-line intent as .session-preview above: no wrap, however long the cwd. */
+.session-meta { display: flex; min-width: 0; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
 .session-cwd { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-streaming { color: var(--ap-accent); }
+.session-backend-attached { font-weight: 700; }
 /* `overflow-anchor: none` because follow mode does this job itself, against a
    message it chose (App.svelte's anchorIndex/anchorTop). CSS scroll anchoring
    is the browser doing the same job with its own policy, and two anchoring
@@ -238,7 +244,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 @media (max-width: 42rem) {
 	.shell {
 		grid-template-columns: 1fr;
-		grid-template-areas: "masthead" "controls" "sessions" "conversation" "rail" "prompt";
+		grid-template-areas: "masthead" "controls" "sessions-header" "sessions" "conversation" "rail" "prompt";
 	}
 	/* One column means the rail is a full-width row rather than a right margin,
 	   so it lies down: the segments keep their order left-to-right. */

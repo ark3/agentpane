@@ -47,6 +47,8 @@ export interface AgentpaneController {
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
 	abort(): Promise<void>;
+	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
+	refreshSessions(): Promise<void>;
 	/** Dismiss the current error -- the view-level one and, if selected, the session's own. */
 	clearError(): void;
 }
@@ -201,6 +203,7 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 			renameListeners.add(listener);
 			return () => renameListeners.delete(listener);
 		},
+		refreshSessions,
 		async start() {
 			if (disposed || started) return;
 			started = true;

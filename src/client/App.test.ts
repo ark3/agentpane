@@ -58,6 +58,7 @@ class FakeController implements AgentpaneController {
 	submitted = 0;
 	aborted = 0;
 	clearErrorCalls = 0;
+	refreshCalls = 0;
 	started = 0;
 	disposed = 0;
 	notifications = 0;
@@ -135,6 +136,10 @@ class FakeController implements AgentpaneController {
 
 	async abort() {
 		this.aborted += 1;
+	}
+
+	async refreshSessions() {
+		this.refreshCalls += 1;
 	}
 
 	clearError() {
@@ -531,6 +536,29 @@ describe("App", () => {
 
 		expect(nav.queryByLabelText("Streaming")).toBeInTheDocument();
 		expect(nav.getAllByLabelText("Streaming")).toHaveLength(1);
+	});
+
+	it("boldfaces the backend badge only for an attached session", () => {
+		const attached = summary(piSession, "Attached turn", { status: "attached" });
+		const detached = summary(codexSession, "Detached turn", { status: "detached" });
+		const controller = new FakeController(view({ state: state({ summaries: [attached, detached] }) }));
+		const { container } = render(App, { props: { controller } });
+		const badges = Array.from(container.querySelectorAll<HTMLElement>(".session-backend"));
+
+		const attachedBadge = badges.find((badge) => badge.textContent === "pi");
+		const detachedBadge = badges.find((badge) => badge.textContent === "codex");
+
+		expect(attachedBadge?.classList.contains("session-backend-attached")).toBe(true);
+		expect(detachedBadge?.classList.contains("session-backend-attached")).toBe(false);
+	});
+
+	it("invokes refreshSessions from the sessions header refresh control", async () => {
+		const controller = new FakeController(view());
+		render(App, { props: { controller } });
+
+		await fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+		expect(controller.refreshCalls).toBe(1);
 	});
 
 	it("does not offer a way to close or disconnect a session from the UI (D12 owns reclamation)", () => {

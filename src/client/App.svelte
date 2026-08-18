@@ -608,7 +608,12 @@
 		<button type="button" aria-pressed={reading} onclick={() => (reading = !reading)}>Reading view</button>
 	</section>
 
-	<nav class="sessions" aria-label="Sessions">
+	<div class="sessions-header">
+		<h2 id="sessions-heading">Sessions</h2>
+		<button type="button" onclick={() => void controller.refreshSessions()}>Refresh</button>
+	</div>
+
+	<nav class="sessions" aria-labelledby="sessions-heading">
 		{#each filteredSummaries as summary (sessionKey(summary.ref))}
 			{@const label = sessionLabel(summary)}
 			<button
@@ -620,7 +625,11 @@
 			>
 				<span class="session-preview">{label}</span>
 				<span class="session-meta">
-					<span class="session-backend" style="color: {backendColor(summary.ref.backend)}">{summary.ref.backend}</span>
+					<span
+						class="session-backend"
+						class:session-backend-attached={summary.status === "attached"}
+						style="color: {backendColor(summary.ref.backend)}"
+					>{summary.ref.backend}</span>
 					{#if formatTimestamp(summary.updatedAt)}
 						<time class="session-time" datetime={summary.updatedAt ?? undefined}>
 							{formatTimestamp(summary.updatedAt)}
