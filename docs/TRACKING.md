@@ -805,7 +805,9 @@ than "no view at all" and is exactly why OW-59 waits for evidence.
 
 Small, because the storage does most of the work:
 
-- `ow new <kind> <where>` — next id, skeleton file in `open/`.
+- `ow new <kind> <where>` — skeleton file in `open/` under a drawn id. The
+  draw itself is one line of `python3` (`author/SKILL.md`), so this buys the
+  skeleton and nothing else; OW-59 records the day it stopped earning more.
 - `ow close OW-N <sha|HEAD> <evidence>` — `git mv`, append the note. Resolving
   `HEAD` matters: the sha is only knowable after the fix commits.
 - `ow list` — render the scannable table on demand.
