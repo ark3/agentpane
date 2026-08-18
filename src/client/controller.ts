@@ -18,7 +18,7 @@ export interface ControllerView {
 	state: ClientState;
 	draft: string;
 	connection: "connecting" | "connected" | "reconnecting";
-	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting";
+	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting";
 	error: string | null;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
@@ -317,11 +317,13 @@ export function createController(api: AgentpaneApi): AgentpaneController {
 				publish({ error: "Select a session before compacting." });
 				return;
 			}
-			publish({ error: null });
+			publish({ busy: "compacting", error: null });
 			try {
 				await api.compact(selected);
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
+			} finally {
+				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
 			}
 		},
 		clearError() {

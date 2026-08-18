@@ -367,6 +367,25 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
 	});
 
+	it("reads as compacting for the whole of the compaction request (OW-81)", async () => {
+		const api = new FakeApi();
+		const compacting = deferred<void>();
+		api.compact.mockReturnValue(compacting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+
+		const compacted = controller.compact();
+
+		expect(api.compact).toHaveBeenCalledWith(ref);
+		expect(controller.getView().busy).toBe("compacting");
+
+		compacting.resolve();
+		await compacted;
+
+		expect(controller.getView().busy).toBe("idle");
+	});
+
 	it("closes SSE and ignores later events after disposal", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

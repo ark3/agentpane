@@ -135,6 +135,8 @@
 				return "Sending prompt…";
 			case "aborting":
 				return "Aborting turn…";
+			case "compacting":
+				return "Compacting context…";
 			default:
 				return "Connected";
 		}
@@ -756,7 +758,7 @@
 						popovertarget="tools-menu"
 						popovertargetaction="hide"
 						onclick={compactSession}
-						disabled={view.state.selected === null}
+						disabled={view.state.selected === null || view.busy === "compacting"}
 					>Compact</button>
 				</div>
 				<button type="submit" disabled={!view.draft}>Send</button>
