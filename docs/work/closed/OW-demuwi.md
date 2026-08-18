@@ -56,3 +56,17 @@ scan over the whole directory flags it.
 a `/home/<user>/.../SKILL.md` path is planted in one — then green when it is
 removed. Show that transition; a guard that has only ever been green has not
 been shown to guard anything.
+
+**Fixed** in 2504889: `src/fixture-scrub.test.ts` sits in the same slot as
+`import-boundaries.test.ts`, so `bun run check` fails and names file, line and
+column when any committed `.jsonl` or `.meta.json` under `resources/fixtures/`
+carries a `/home/`, `/Users/` or `/root/` path. Shown red twice, by two people
+and in two different fixtures: the executor planted a `SKILL.md` path in
+`codex/fork.jsonl:53:91`, and the session agent independently planted one in
+`pi/text.jsonl:15:80` — each named its own file, and each went green on restore.
+The shapes are a fixed list, not identifiers read from the environment: the
+item's `may` trap is real and worse than recorded, 113 matches across the
+fixtures, all of them the English modal verb in Codex's captured vendor prompt.
+Fixed shapes also keep the guard meaning the same on both clones. Username and
+hostname are deliberately **not** scanned, and both READMEs now say so, so the
+human grep for those is still asked for rather than silently assumed covered.

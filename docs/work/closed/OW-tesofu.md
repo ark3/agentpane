@@ -34,3 +34,12 @@ defines — the audit is a five-line script over the file, not a reading — and
 menu's corners are visibly rounded in the browser. `bun run check` green; no new
 test, since this is a value that no test asserts and `svelte-check` does not
 resolve custom properties.
+
+**Fixed** in 6cdece4: the three `.tools-menu` rules take `--ap-radius-sm`, the
+size the button family at `app.css:146` already uses, and the shadow literal is
+now an `--ap-shadow-1` token in the block beside the radius tokens rather than a
+fallback at one call site. The audit the item asked for is a set difference over
+the file — every `var(--ap-…)` use against every `--ap-…:` definition — and
+used-not-defined is now empty, where it was `--ap-radius-1` and `--ap-shadow-1`.
+The shadow renders identically (the fallback was already supplying that value);
+the corners are the visible change. `bun run check` green, 722 tests.

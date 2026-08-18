@@ -49,3 +49,26 @@ that the `<link rel="icon">` in the served page resolves. That the icon is
 real tab strip alongside at least two other tabs, and that is the verdict.
 
 `OW-diyuwu` overlays a status dot on this icon and depends on it landing first.
+
+**Fixed** in eda8311: `public/favicon.svg` plus one `<link>` in `index.html`,
+exactly the one-file-one-line shape the item predicted — `bun run build` puts
+`dist/client/favicon.svg` in place, confirming the Vite `public/` path end to
+end. `e2e/favicon.spec.ts` asserts 200 + `image/svg+xml` and that the `<link>`
+resolves, and was confirmed red three ways: no `<link>`, a `<link>` pointing at
+nothing, and a malformed SVG. Two findings worth keeping. Vite answers an
+unknown path with `index.html` at 200, so a status assertion alone proves
+nothing about the href — the content type is what separates a hit from the SPA
+fallback. And a double hyphen is illegal inside an XML comment: the first cut
+carried one, the icon failed to parse, and Chromium rendered nothing and said
+nothing, which is why the spec decodes the image rather than trusting 200. That
+trap is called out in the file, since this repo's prose uses `--` freely and
+OW-diyuwu edits this same file next.
+
+The 16px verdict, the risk the item named: the icon does **not** mush, but only
+because the panes gave way. The white `A` is crisp and unambiguous; the 2x2
+panes read as faint texture and resolve as panes only at ~32px. White panes were
+tried first and produced exactly the predicted grey smudge, so the panes were
+dropped to `#6b82e3` to put all the contrast in the letter. What reaches a tab
+strip is effectively a blue tile with a white `A`. The panes-or-letter fallback
+was deliberately not taken unilaterally; whether to take it is a verdict from
+use.
