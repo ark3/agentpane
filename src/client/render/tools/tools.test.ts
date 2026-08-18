@@ -178,7 +178,7 @@ describe("tool cards", () => {
 		});
 
 		const body = card(container).querySelector(".body");
-		expect(body?.querySelector("time")?.textContent?.trim()).toBe("2026-08-11 03:44:15");
+		expect(body?.querySelector("time")?.textContent?.trim()).toBe("2026-08-11 09:14:15");
 		expect(card(container).querySelector("summary time")).toBeNull();
 		expect(summaryLine(container)).not.toMatch(/\d{4}-\d{2}-\d{2}/);
 	});

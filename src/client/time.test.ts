@@ -18,13 +18,15 @@ describe("formatTimestamp", () => {
 		expect(formatTimestamp(MS)).toBe(formatTimestamp(ISO));
 	});
 
-	it("is ISO to the second, and UTC whatever the viewer's timezone is", () => {
-		// Not toLocaleString: the same session must read the same on two machines.
-		expect(formatTimestamp(MS)).toBe("2026-08-11 03:44:15");
+	it("is ISO to the second, in the viewer's own timezone", () => {
+		// `TZ=Asia/Kolkata` is pinned by the `test` script: a +05:30 zone, so
+		// both the clock and the offset arithmetic show up in this literal.
+		// Not toLocaleString: its output shape moves with the locale.
+		expect(formatTimestamp(MS)).toBe("2026-08-11 09:14:15");
 	});
 
 	it("drops the sub-second precision the underlying value carries", () => {
-		expect(formatTimestamp(MS + 400)).toBe("2026-08-11 03:44:15");
+		expect(formatTimestamp(MS + 400)).toBe("2026-08-11 09:14:15");
 	});
 
 	it("renders nothing at all rather than 'Invalid Date'", () => {

@@ -485,7 +485,7 @@ describe("App", () => {
 
 		expect(nav.getByText("pi")).toBeInTheDocument();
 		expect(nav.getByText("project")).toBeInTheDocument();
-		expect(nav.getByText("2026-06-01 12:34:56")).toBeInTheDocument();
+		expect(nav.getByText("2026-06-01 18:04:56")).toBeInTheDocument();
 	});
 
 	it("shows the workspace basename rather than the full cwd in the session list and workspace dropdown, with the full path as title", () => {

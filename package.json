@@ -15,8 +15,8 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "bun run src/server/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "TZ=Asia/Kolkata vitest run",
+    "test:watch": "TZ=Asia/Kolkata vitest",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json",
     "check": "bun run typecheck && bun run test"
