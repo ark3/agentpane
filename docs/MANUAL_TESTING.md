@@ -5,7 +5,7 @@
 **The evidence behind the live runs**, and the instructions for reproducing
 them. It does not state project status — `WORKSTREAMS.md`'s Status table does
 that, and `docs/work/open/` holds what is still outstanding. Record a run's
-results here; record what the run left undone as a new `OW-` row there.
+results here; record what the run left undone as a new work item there.
 
 Two substantial live-backend runs are recorded below, both on 2026-08-11
 (America/New_York): Codex with `codex-cli 0.147.0`, and Pi with `pi 0.84.1`,
@@ -291,7 +291,7 @@ bun run test:browser                       # red, then: git checkout src/client/
 | `.conversation` with `overflow-anchor: none` | All 10 turns of a 40-turn-deep conversation end locked flush at the pane top (≤2px). |
 | Same, fix reverted | Fails on the first measured turn: the prompt stops **51px** from the top and stays stranded there. |
 
-The cause is **CSS scroll anchoring**, which none of the row's three candidates
+The cause is **CSS scroll anchoring**, which none of the item's three candidates
 named. The browser repositions `scrollTop` itself to keep a visual anchor
 stable as content reflows above the viewport; the agent's instrumented run
 measured it under-compensating by ~10px per adjustment. That produces a
@@ -356,7 +356,7 @@ never-push rule forbids it.
 
 ## Still unverified
 
-Tracked as rows under `docs/work/open/`, not restated here:
+Tracked as work items under `docs/work/open/`, not restated here:
 **OW-24** (no browser automation yet of a real backend-backed turn — the only
 browser vehicle is the synthetic `e2e/` follow-mode harness) and **OW-25**
 (whether Pi raises approval dialogs without a trusting `trust.json`).

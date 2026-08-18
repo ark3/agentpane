@@ -13,7 +13,8 @@ evidence. Live verification details and its exact scope are in
 **This table is the single statement of project status.** README, DESIGN and
 MANUAL_TESTING link here rather than restating it; `MANUAL_TESTING.md` holds
 the evidence behind the "verified" claims, and `docs/work/open/` holds what is
-still outstanding, one row per file. If you change what is true, change it here.
+still outstanding, one file per item. If you change what is true, change it
+here.
 
 | Slice | State | Where |
 |---|---|---|
@@ -143,6 +144,6 @@ how far.
 ## How work gets done
 
 Process rules live where they load: `CLAUDE.md` for what applies to anyone
-touching the repo, `/author` for writing rows, `/execute` for landing them.
-This document holds slice status and the contracts, not the process and not the
-rows — those are one file each under `docs/work/`.
+touching the repo, `/author` for writing work items, `/execute` for landing
+them. This document holds slice status and the contracts, not the process and
+not the work items — those are one file each under `docs/work/`.

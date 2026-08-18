@@ -10,7 +10,7 @@ the starting point — read `docs/DESIGN.md` for the decisions and
 `docs/WORKSTREAMS.md` for what is built, and `docs/work/open/` for what is left
 and what to pick up next. Status lives only in WORKSTREAMS' Status table, and
 every outstanding item — defect, deferral, open question, unproven claim — only
-under `docs/work/open/`, one `OW-` row per file. Cite an id from elsewhere; do
+under `docs/work/open/`, one work item per file. Cite an id from elsewhere; do
 not restate one. Two sections here stay live regardless: **Environment
 gotchas**, which will cost you an afternoon if you skip it, and **Reference
 material**, which is where the authoritative protocol docs live. The findings

@@ -8,8 +8,7 @@ blocks or is blocked by the UI work. **The storage format below is decided**
 (owner, 2026-08-17), and this document carries that decision rather than
 `DESIGN.md`, which holds the agent UI's — mixing two projects' decision records
 would muddy both, so there is no `D` number. The tooling on top of it is *not*
-decided (OW-59). Tracked as rows in `WORKSTREAMS.md` so the "everything
-outstanding lives in that list" invariant stays true.
+decided (OW-59), tracked under `docs/work/open/` like everything else.
 
 ## What exists now
 
@@ -34,10 +33,10 @@ this document was written against.
 documents that had drifted into contradicting each other. No document has ever
 expanded the abbreviation, which is why nobody remembers it.
 
-Treat it as an opaque prefix rather than a claim about a row's state. Ids are
-stable and never reused, so it cannot be renamed without touching every row,
+Treat it as an opaque prefix rather than a claim about an item's state. Ids are
+stable and never reused, so it cannot be renamed without touching every item,
 every citation, and the commit history that references them — and under the
-storage below a closed row lives at `closed/OW-50.md`, where the prefix would
+storage below a closed item lives at `closed/OW-50.md`, where the prefix would
 actively mislead if it still meant anything.
 
 The owner raised renaming it on 2026-08-17, wanting a prefix that generalises if
@@ -145,9 +144,9 @@ storage format detects a row whose claim about the code has aged out. Only
 reading the source before acting on a row does, which `/execute` already
 requires.
 
-## The format: Maildir-shaped rows
+## The format: Maildir-shaped work items
 
-One file per row, and **status is the containing directory**:
+One file per item, and **status is the containing directory**:
 
 ```
 docs/work/
@@ -166,17 +165,17 @@ one corpus, because they share a lifecycle:
 - **deferral** — review found it, judged it not worth blocking on. None is a
   defect in a path the milestone exercises.
 - **defect** — observed or read as broken, and nothing depends on leaving it
-  that way. The client-shell rows are all of this kind.
-- **question** — a decision nobody has made yet. When one settles the row
+  that way. The client-shell items are all of this kind.
+- **question** — a decision nobody has made yet. When one settles the item
   closes and the decision goes in `DESIGN.md`, which is where the reasoning
   belongs.
 - **unverified** — believed to work, never proven. Closing one means producing
   evidence, and the evidence goes in `MANUAL_TESTING.md`.
 - **change** — a deliberate change to behaviour or presentation that nobody
   considers broken today, **a new feature included**. Decided, not yet built;
-  the decision and who took it belong in the row, because there is no defect to
-  rediscover it from. `feature` is not a sixth kind: it drifted into three rows
-  before a count caught it on 2026-08-17 (finding 3 below).
+  the decision and who took it belong in the item, because there is no defect
+  to rediscover it from. `feature` is not a sixth kind: it drifted into three
+  items before a count caught it on 2026-08-17 (finding 3 below).
 
 ### The conversion spec, which has to be exact
 
@@ -355,7 +354,7 @@ rg -l '^kind: defect' docs/work/open | sort -V
 ```
 
 The second is the one that stands in for the scannable table: `sort -V` groups
-both matches of a row together and orders rows by id, so each row prints as
+both matches of an item together and orders them by id, so each prints as
 kind-then-headline with no parser involved.
 
 Three things about that output, reproduced against a throwaway prototype under
@@ -369,7 +368,7 @@ Add `--no-filename` and you get bare headlines sorted alphabetically by title,
 which is the wrong order and silently so. And `-H --no-heading` on command 2 is
 not redundant even though a pipe would do it: run interactively, ripgrep groups
 matches under a filename *heading* instead of prefixing each line, and the two
-flags force the per-line form either way. The within-row order — `kind:` before
+flags force the per-line form either way. The within-item order — `kind:` before
 the headline — is a `sort -V` collation artifact rather than something this
 document reasoned out, so re-check it if the searcher ever changes.
 
@@ -387,7 +386,7 @@ make the two disagree. `sort -V` carries that cost instead, in one place.
 The other `grep` case improves outright, and is an argument for this format the
 rest of this document does not make: searching today's table for a term returns
 the entire 400-word line it appears in, which cannot be read in a terminal.
-Per-file, `grep -l` returns one **path** per matching row —
+Per-file, `grep -l` returns one **path** per matching item —
 `docs/work/open/OW-63.md`, not `OW-63`. Three places in this document, and one
 in OW-59, used to say it returns ids; the id has to be read off the path, which
 costs nothing at a terminal and is a `basename` for anything parsing it.
@@ -399,7 +398,7 @@ concurrently. Both machines can now read `OW-67` and write `OW-68`. Do not
 design around this — no id partitioning by machine, no timestamps, no random
 suffixes, all of which trade a rare cheap problem for a permanent ugly one.
 
-Two reasons it stays cheap. Under one file per row a duplicate id is an
+Two reasons it stays cheap. Under one file per item a duplicate id is an
 **add/add collision on one filename**, which git reports; in the table it is
 two lines that both merge, silently. And a colliding id is by construction
 *brand new*, which is the one case where the thing that makes ids unrenameable

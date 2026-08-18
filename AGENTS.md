@@ -1,9 +1,9 @@
 # agentpane
 
 Decisions D1–D12 in `docs/DESIGN.md`, the evidence behind the work in
-`docs/HANDOFF.md`. Work rows are one file each under `docs/work/open/` and
+`docs/HANDOFF.md`. Work items are one file each under `docs/work/open/` and
 `docs/work/closed/` — **status is the directory**. `docs/TRACKING.md` specifies
-the row format and why it is shaped that way.
+the file format and why it is shaped that way.
 
 ## Commands
 
@@ -41,20 +41,20 @@ layout, scroll anchoring, or real scroll-event timing.
   it is on its own worktree's branch, so it commits there and the session agent
   cherry-picks that onto `main`. Never `git push` unless asked by name.
 - Work items live only in `docs/work/`, not in GitHub issues or any other
-  external tracker. One file per row, `docs/work/open/OW-N.md`; closing it is a
-  `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
-  paragraph appended to the body. A closed row is kept rather than deleted,
-  because its close note is sometimes the grounding a later row needs — what
+  external tracker. One file per item, `docs/work/open/OW-N.md`; closing it is
+  a `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
+  paragraph appended to the body. A closed item is kept rather than deleted,
+  because its close note is sometimes the grounding a later one needs — what
   was agreed, what was tried, what the evidence was.
 - A finding that lives only in a transcript dies with the session. A doc defect:
   fix the doc in the same change. A fact you verified: the commit message, or
   `DESIGN.md` if it changes a decision. Live-run evidence: `MANUAL_TESTING.md`.
-- Anything left undone — defect, deferral, question, unproven claim — becomes an
-  `OW-` row: a new file in `docs/work/open/`. Cite ids elsewhere; never restate
-  a row.
+- Anything left undone — defect, deferral, question, unproven claim — becomes
+  an open work item: a new file in `docs/work/open/`. Cite ids elsewhere; never
+  restate an item.
 - Build-slice status lives in the Status table at the top of
-  `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not rows; a
-  row's own status is which directory its file sits in.
+  `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not work
+  items; an item's own status is which directory its file sits in.
 
 ## Sessions
 
