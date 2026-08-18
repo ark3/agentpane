@@ -12,6 +12,7 @@
 	 */
 	import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 	import type { PaneMessage } from "$shared/protocol.ts";
+	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
 	import { oneLine, resultText } from "./types.ts";
@@ -43,8 +44,12 @@
 {#if message.role === "user"}
 	<article class="msg user" data-role="user" data-index={index}>
 		<div class="body">
+			<!-- When the message happened is a fact about the *message*, but a user
+			     message is effectively one text block, so it rides the first block's
+			     action row (OW-63) rather than growing a meta row of its own. Only
+			     the first block is offered it, so it can never render twice. -->
 			{#each userBlocks(message.content) as block, i (i)}
-				<Block {block} {results} />
+				<Block {block} {results} timestamp={i === 0 ? message.timestamp : undefined} />
 			{/each}
 		</div>
 	</article>
@@ -72,7 +77,13 @@
 		     report no usage (a synthesised preview turn, or a provider that sends
 		     none) and still know which model answered. -->
 		{#if message.stopReason !== "pending" && (message.model || message.usage.totalTokens > 0)}
+			{@const time = formatTimestamp(message.timestamp)}
 			<p class="meta">
+				<!-- Absolute and UTC, byte-identical to the session list's (OW-67):
+				     the same formatter, so the two can never drift apart. -->
+				{#if time}
+					<time datetime={timestampIso(message.timestamp)}>{time}</time>
+				{/if}
 				{#if message.model}
 					<span>{message.model}</span>
 				{/if}
@@ -97,6 +108,7 @@
 			name={message.toolName}
 			summary={oneLine(resultText(message)) || "result"}
 			state={message.isError ? "error" : "ok"}
+			timestamp={message.timestamp}
 		>
 			<ResultBody result={message} />
 		</ToolCard>

@@ -15,6 +15,7 @@
 	 * no store, no context and no plumbing through `App.svelte` to be
 	 * expandable. Read-only, deliberately -- edit and resubmit is OW-22.
 	 */
+	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Expanded from "./Expanded.svelte";
 	import CopyButton from "./CopyButton.svelte";
 
@@ -23,17 +24,28 @@
 		kind = "markdown",
 		language,
 		label = "block",
+		timestamp,
 	}: {
 		source: string;
 		kind?: "markdown" | "code";
 		language?: string | undefined;
 		label?: string;
+		/**
+		 * When the message happened (OW-67), epoch-ms. A message-level fact
+		 * sharing a block-level row: a user message is one text block, and this
+		 * row is the only chrome it has. Unset for every other caller.
+		 */
+		timestamp?: number | undefined;
 	} = $props();
 
 	let expanded = $state(false);
+	const time = $derived(formatTimestamp(timestamp));
 </script>
 
 <div class="actions" data-block-actions={label}>
+	{#if time}
+		<time class="time" datetime={timestampIso(timestamp)}>{time}</time>
+	{/if}
 	<CopyButton {source} label="Copy {label}" />
 	<button
 		class="ap-action"
@@ -66,5 +78,13 @@
 	.actions:hover,
 	.actions:focus-within {
 		opacity: 1;
+	}
+
+	/* The buttons stay right-aligned; the time takes the other end of the row. */
+	.time {
+		margin-right: auto;
+		font-size: var(--ap-text-2xs);
+		color: var(--ap-fg-subtle);
+		font-variant-numeric: tabular-nums;
 	}
 </style>

@@ -10,6 +10,7 @@
 	 * not a degraded one.
 	 */
 	import type { Snippet } from "svelte";
+	import { formatTimestamp, timestampIso } from "../../time.ts";
 	import type { ToolState } from "../types.ts";
 
 	let {
@@ -17,14 +18,24 @@
 		summary = "",
 		state = "ok",
 		open = false,
+		timestamp,
 		children,
 	}: {
 		name: string;
 		summary?: string;
 		state?: ToolState;
 		open?: boolean;
+		/**
+		 * When the result landed (OW-67), epoch-ms. Unset while the tool is still
+		 * running -- there is no time to show yet. It belongs in the body, not the
+		 * summary: the collapsed line is what a reader scans, and a stamp on every
+		 * one of them is noise.
+		 */
+		timestamp?: number | undefined;
 		children?: Snippet;
 	} = $props();
+
+	const time = $derived(formatTimestamp(timestamp));
 </script>
 
 <details class="tool" data-tool={name} data-state={state} {open}>
@@ -37,6 +48,9 @@
 	</summary>
 	<div class="body">
 		{@render children?.()}
+		{#if time}
+			<time class="time" datetime={timestampIso(timestamp)}>{time}</time>
+		{/if}
 	</div>
 </details>
 
@@ -121,6 +135,13 @@
 		border-top: 1px solid var(--ap-border);
 		padding-top: var(--ap-space-3);
 		min-width: 0;
+	}
+
+	.time {
+		align-self: flex-start;
+		font-size: var(--ap-text-2xs);
+		color: var(--ap-fg-subtle);
+		font-variant-numeric: tabular-nums;
 	}
 
 	@media (prefers-reduced-motion: reduce) {

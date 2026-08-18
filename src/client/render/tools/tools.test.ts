@@ -167,6 +167,28 @@ describe("tool cards", () => {
 		expect(summaryLine(container)).toContain("3 lines");
 		expect(container.textContent).toContain("one\ntwo\nthree");
 	});
+
+	it("stamp the expanded body with when the result landed, never the summary line", () => {
+		// The collapsed line is the primary presentation (D5) and a transcript is
+		// mostly tool calls: a stamp on every one of them is noise. OW-67 puts it
+		// in the body, which you only see once you have asked for the detail.
+		const landed = { ...result("ok"), timestamp: 1786419855000 };
+		const { container } = render(ToolCallBlock, {
+			props: { call: call("bash", { command: "ls" }), result: landed },
+		});
+
+		const body = card(container).querySelector(".body");
+		expect(body?.querySelector("time")?.textContent?.trim()).toBe("2026-08-11 03:44:15");
+		expect(card(container).querySelector("summary time")).toBeNull();
+		expect(summaryLine(container)).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+	});
+
+	it("stamp nothing on a card whose tool has not answered yet", () => {
+		const { container } = render(ToolCallBlock, {
+			props: { call: call("bash", { command: "sleep 1" }), streaming: true },
+		});
+		expect(card(container).querySelector("time")).toBeNull();
+	});
 });
 
 describe("tool output", () => {

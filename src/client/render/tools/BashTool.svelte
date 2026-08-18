@@ -17,7 +17,7 @@
 	const state = $derived(toolState({ call, result, streaming }));
 </script>
 
-<ToolCard name={call.name} summary={oneLine(command) || "shell"} {state}>
+<ToolCard name={call.name} summary={oneLine(command) || "shell"} {state} timestamp={result?.timestamp}>
 	{#if command}
 		<Output text={command} language="bash" />
 	{/if}

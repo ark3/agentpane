@@ -9,12 +9,16 @@ import { render } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
+import { formatTimestamp } from "../time.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
 import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
 
 const roles = (container: HTMLElement) =>
 	[...container.querySelectorAll("article")].map((el) => el.dataset.role);
+
+/** What the session list renders: ISO to the second, UTC, no sub-second part. */
+const STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 describe("Message", () => {
 	it("gives each role its own chrome", () => {
@@ -86,7 +90,8 @@ describe("Message", () => {
 
 	it("names only the model when no effort was reported", () => {
 		// Pi reports no effort at all, so the absent case is the common one: no
-		// placeholder, no "unknown", nothing extra in the meta line.
+		// placeholder, no "unknown", nothing extra in the meta line. The row's
+		// timestamp (OW-67) is a <time>, not a <span>, so it is not in this list.
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "done" }]) },
 		});
@@ -94,6 +99,33 @@ describe("Message", () => {
 			(el) => el.textContent,
 		);
 		expect(spans).toEqual(["example-model", expect.stringMatching(/tok$/)]);
+	});
+
+	it("stamps a finished turn with when it happened, in the session list's format", () => {
+		// Absolute, not relative (OW-67): nothing here ticks, and the string is
+		// the shared formatter's, so the transcript and the session list agree.
+		const message = assistant([{ type: "text", text: "done" }]);
+		const { container } = render(Message, { props: { message } });
+		const time = container.querySelector(".meta time");
+		expect(time?.textContent?.trim()).toMatch(STAMP);
+		expect(time?.textContent?.trim()).toBe(formatTimestamp(message.timestamp));
+		expect(time?.getAttribute("datetime")).toBe(new Date(message.timestamp).toISOString());
+	});
+
+	it("puts a user turn's time in its block action row, the only chrome it has", () => {
+		const message = user("hi");
+		const { container } = render(Message, { props: { message } });
+		const time = container.querySelector("[data-block-actions='text'] time");
+		expect(time?.textContent?.trim()).toBe(formatTimestamp(message.timestamp));
+	});
+
+	it("does not stamp an assistant's text block, which already has a meta row", () => {
+		// The action row is per-block and every role has one; only the user arm
+		// hands it a time, or a turn would carry the same stamp twice.
+		const { container } = render(Message, {
+			props: { message: assistant([{ type: "text", text: "done" }]) },
+		});
+		expect(container.querySelector("[data-block-actions] time")).toBeNull();
 	});
 
 	it("shows no cost while the turn is still pending", () => {

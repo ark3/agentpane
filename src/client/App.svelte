@@ -5,6 +5,7 @@
 	import Transcript from "./render/Transcript.svelte";
 	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
+	import { formatTimestamp } from "./time.ts";
 
 	let { controller }: { controller: AgentpaneController } = $props();
 	let view = $state<ControllerView>({
@@ -485,14 +486,6 @@
 	function recency(summary: SessionSummary): number {
 		const iso = summary.updatedAt ?? summary.createdAt;
 		return iso ? Date.parse(iso) : 0;
-	}
-
-	/** ISO to the second, UTC so it is deterministic regardless of the viewer's timezone. */
-	function formatTimestamp(iso: string | null): string {
-		if (!iso) return "";
-		const date = new Date(iso);
-		if (Number.isNaN(date.getTime())) return "";
-		return date.toISOString().slice(0, 19).replace("T", " ");
 	}
 
 	/** The final path segment of a cwd, which is always absolute (see ALL_WORKSPACES above). */

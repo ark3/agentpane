@@ -23,7 +23,7 @@
 	const args = $derived(prettyArgs(call.arguments));
 </script>
 
-<ToolCard name={call.name} {summary} {state}>
+<ToolCard name={call.name} {summary} {state} timestamp={result?.timestamp}>
 	{#if args}
 		<Output text={args} language="json" />
 	{/if}

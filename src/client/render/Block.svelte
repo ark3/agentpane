@@ -17,10 +17,17 @@
 		block,
 		results = new Map<string, ToolResultMessage>(),
 		streaming = false,
+		timestamp,
 	}: {
 		block: ContentBlock;
 		results?: Map<string, ToolResultMessage>;
 		streaming?: boolean;
+		/**
+		 * When the *message* this block belongs to happened (OW-67). Passed only
+		 * by the user arm of `Message.svelte`, which has no meta row to put it in;
+		 * an assistant block leaves it unset, its turn's `.meta` already says.
+		 */
+		timestamp?: number | undefined;
 	} = $props();
 </script>
 
@@ -31,7 +38,7 @@
 	     nothing to copy. Images get no controls at all (OW-63): text actions
 	     act on text. -->
 	{#if block.text.trim()}
-		<BlockActions source={block.text} label="text" />
+		<BlockActions source={block.text} label="text" {timestamp} />
 	{/if}
 {:else if block.type === "thinking"}
 	<Thinking text={block.thinking} redacted={block.redacted ?? false} {streaming} />

@@ -25,7 +25,7 @@
 	);
 </script>
 
-<ToolCard name={call.name} {summary} {state}>
+<ToolCard name={call.name} {summary} {state} timestamp={result?.timestamp}>
 	{#if path}
 		<p class="path" title={path}>{path}</p>
 	{/if}
