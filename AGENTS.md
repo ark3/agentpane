@@ -1,8 +1,9 @@
 # agentpane
 
-Decisions D1–D12 in `docs/DESIGN.md`, open work in `docs/WORKSTREAMS.md`,
-closed work in `docs/CLOSED.md`, the evidence behind both in
-`docs/HANDOFF.md`.
+Decisions D1–D12 in `docs/DESIGN.md`, the evidence behind the work in
+`docs/HANDOFF.md`. Work rows are one file each under `docs/work/open/` and
+`docs/work/closed/` — **status is the directory**. `docs/TRACKING.md` specifies
+the row format and why it is shaped that way.
 
 ## Commands
 
@@ -36,17 +37,22 @@ layout, scroll anchoring, or real scroll-event timing.
 ## Landing work
 
 - The session agent commits directly on `main` as the work is done, small and
-  single-purpose. No branch, no PR. A dispatched subagent cannot — it is on its
-  own worktree's branch, so it commits there and the session agent cherry-picks
-  that onto `main`. Never `git push` unless asked by name.
-- Work items live only in `docs/WORKSTREAMS.md` and `docs/CLOSED.md`, not in
-  GitHub issues or any other external tracker.
+  single-purpose. No branch, no PR. A dispatched subagent that writes cannot —
+  it is on its own worktree's branch, so it commits there and the session agent
+  cherry-picks that onto `main`. Never `git push` unless asked by name.
+- Work items live only in `docs/work/`, not in GitHub issues or any other
+  external tracker. One file per row, `docs/work/open/OW-N.md`; closing it is a
+  `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
+  paragraph appended to the body.
 - A finding that lives only in a transcript dies with the session. A doc defect:
   fix the doc in the same change. A fact you verified: the commit message, or
   `DESIGN.md` if it changes a decision. Live-run evidence: `MANUAL_TESTING.md`.
 - Anything left undone — defect, deferral, question, unproven claim — becomes an
-  `OW-` row in `docs/WORKSTREAMS.md`. Cite ids elsewhere; never restate a row.
-  Status lives in that file's Status table and nowhere else.
+  `OW-` row: a new file in `docs/work/open/`. Cite ids elsewhere; never restate
+  a row.
+- Build-slice status lives in the Status table at the top of
+  `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not rows; a
+  row's own status is which directory its file sits in.
 
 ## Sessions
 
