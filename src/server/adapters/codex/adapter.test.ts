@@ -114,6 +114,10 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 			case "turn/interrupt":
 				proc.emit({ id, result: {} });
 				break;
+			case "thread/compact/start":
+				// OW-72: params `{ threadId }`, response an empty object.
+				proc.emit({ id, result: {} });
+				break;
 		}
 	});
 }
@@ -618,6 +622,57 @@ describe("CodexAdapter turns", () => {
 		expect(request(proc, "turn/interrupt")["params"]).toEqual({
 			threadId: "thread-active-submit",
 			turnId: "turn-1",
+		});
+	});
+
+	it("compacts an idle thread via thread/compact/start with just the thread id (OW-72)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact" });
+
+		await adapter.compact();
+
+		expect(request(proc, "thread/compact/start")["params"]).toEqual({ threadId: "thread-compact" });
+	});
+
+	it("refuses to compact while a turn is active, and sends nothing on the wire (OW-72)", async () => {
+		// Codex runs compaction as its own non-steerable turn, so app-server
+		// would reject a second turn anyway; the adapter's single-flight gate
+		// turns that opaque wire error into a well-defined "busy". Same gate as
+		// submit's, deliberately.
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact-busy" });
+		await adapter.submit("begin");
+
+		await expect(adapter.compact()).rejects.toThrow(
+			"codex adapter cannot submit while a turn is active",
+		);
+		expect(methods(proc)).not.toContain("thread/compact/start");
+
+		await adapter.abort(); // leave the fixture's turn tidily interrupted
+	});
+
+	it("compacts once the active turn has completed (OW-72)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact-after" });
+		await adapter.submit("begin");
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-compact-after",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "summary",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		await adapter.compact();
+
+		expect(request(proc, "thread/compact/start")["params"]).toEqual({
+			threadId: "thread-compact-after",
 		});
 	});
 

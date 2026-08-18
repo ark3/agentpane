@@ -341,6 +341,27 @@ export class CodexAdapter implements BackendAdapter {
 		await client.request("turn/interrupt", { threadId: this.requireThread(), turnId });
 	}
 
+	/**
+	 * Compact the thread's context via `thread/compact/start` (params
+	 * `{ threadId }`, response an empty object -- OW-72, verified against
+	 * codex-cli 0.147.0's generated schema).
+	 *
+	 * Refused while a turn is active, deliberately, for the same reason
+	 * `submit()` is: Codex runs compaction as its own turn, and `compact` is one
+	 * of the two `NonSteerableTurnKind`s -- app-server will not start a second
+	 * turn (nor steer the live one) while one is running, so admitting the
+	 * request here only to have app-server reject it would turn a well-defined
+	 * "busy" into an opaque wire error. The single-flight admission gate
+	 * (`turnBusy`/`turnId`/`turnStartPending`) is exactly the one `submit` uses.
+	 */
+	async compact(): Promise<void> {
+		const client = this.requireClient();
+		const threadId = this.requireThread();
+		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
+		if (this.turnBusy || this.turnId) throw new Error(TURN_ACTIVE_ERROR);
+		await client.request("thread/compact/start", { threadId });
+	}
+
 	// -- fork-from-past -----------------------------------------------------
 
 	/**
