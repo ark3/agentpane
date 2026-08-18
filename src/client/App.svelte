@@ -168,6 +168,15 @@
 		});
 		void controller.start();
 
+		// A read-only preview polls itself, but the controller owns no DOM (OW-76),
+		// so the tab's comings and goings are heard here and forwarded. `focus` as
+		// well as `visibilitychange` because switching windows on one desktop never
+		// hides the document. Going *out* matters as much as coming back: the
+		// controller reads the injected predicate and stops its timer.
+		const onTabVisibility = () => void controller.refreshPreview();
+		document.addEventListener("visibilitychange", onTabVisibility);
+		window.addEventListener("focus", onTabVisibility);
+
 		// Belt-and-suspenders for the effects below: Block.svelte throttles
 		// re-parsing a streaming message's markdown to a frame (DESIGN D5), so
 		// the transcript's real painted height can land a beat after the message
@@ -185,6 +194,8 @@
 		return () => {
 			unsubscribe();
 			unsubscribeRename();
+			document.removeEventListener("visibilitychange", onTabVisibility);
+			window.removeEventListener("focus", onTabVisibility);
 			controller.dispose();
 			observer?.disconnect();
 		};

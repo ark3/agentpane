@@ -60,6 +60,7 @@ class FakeController implements AgentpaneController {
 	compacted = 0;
 	clearErrorCalls = 0;
 	refreshCalls = 0;
+	previewRefreshes = 0;
 	started = 0;
 	disposed = 0;
 	notifications = 0;
@@ -145,6 +146,10 @@ class FakeController implements AgentpaneController {
 
 	async refreshSessions() {
 		this.refreshCalls += 1;
+	}
+
+	async refreshPreview() {
+		this.previewRefreshes += 1;
 	}
 
 	clearError() {
@@ -1299,5 +1304,27 @@ describe("App", () => {
 		render(App, { props: { controller } });
 
 		expect(screen.queryByText(/does not run slash commands/i)).not.toBeInTheDocument();
+	});
+
+	/**
+	 * Forwarding is all this side owns (OW-76): the controller holds the timer and
+	 * decides whether there is anything to re-read, so the assertion here is the
+	 * wiring itself -- unconditional, on both events, and torn down on unmount.
+	 */
+	it("asks the controller to re-read the preview when the tab comes back", async () => {
+		const controller = new FakeController(view({ preview: { ref: piSession, turns: [{ role: "user", text: "hi" }] } }));
+		const { unmount } = render(App, { props: { controller } });
+		await tick();
+		expect(controller.previewRefreshes).toBe(0);
+
+		document.dispatchEvent(new Event("visibilitychange"));
+		window.dispatchEvent(new Event("focus"));
+		await tick();
+		expect(controller.previewRefreshes).toBe(2);
+
+		unmount();
+		document.dispatchEvent(new Event("visibilitychange"));
+		window.dispatchEvent(new Event("focus"));
+		expect(controller.previewRefreshes).toBe(2);
 	});
 });

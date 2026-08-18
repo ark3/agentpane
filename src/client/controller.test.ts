@@ -3,6 +3,7 @@ import type {
 	BackendId,
 	ServerEvent,
 	SessionPreviewResponse,
+	SessionPreviewTurn,
 	SessionRef,
 	SessionSummary,
 } from "$shared/protocol.ts";
@@ -396,5 +397,248 @@ describe("client controller", () => {
 
 		expect(api.connection.close).toHaveBeenCalledOnce();
 		expect(api.listSessions).toHaveBeenCalledTimes(1);
+	});
+
+	/**
+	 * The preview poll (OW-76). All of these drive the *real* `createController`
+	 * with a fake api on purpose: `App.test.ts`'s `FakeController.preview` only
+	 * records the call and never replaces `turns`, so a poll test written against
+	 * it would assert call counts while proving nothing about the transcript.
+	 */
+	describe("preview self-refresh", () => {
+		const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+
+		function growingPreview(api: FakeApi, turns: () => SessionPreviewTurn[]) {
+			api.preview.mockImplementation(async (session: SessionRef) => ({ ref: session, turns: turns() }));
+		}
+
+		it("polls a showing preview, speeds up on a change, and backs off to the ceiling", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				growingPreview(api, () => turns);
+				const controller = createController(api);
+				await controller.preview(ref);
+				api.preview.mockClear();
+
+				// Starts quiet: nothing until the 16s idle delay is actually up.
+				await vi.advanceTimersByTimeAsync(15_999);
+				expect(api.preview).not.toHaveBeenCalled();
+				turns = [...turns, { role: "assistant", text: "there" }];
+				await vi.advanceTimersByTimeAsync(1);
+				expect(api.preview).toHaveBeenCalledTimes(1);
+				expect(controller.getView().preview?.turns).toHaveLength(2);
+
+				// Having found a change, the next fetch lands 1s later, not 16.
+				turns = [...turns, { role: "user", text: "more" }];
+				await vi.advanceTimersByTimeAsync(999);
+				expect(api.preview).toHaveBeenCalledTimes(1);
+				await vi.advanceTimersByTimeAsync(1);
+				expect(api.preview).toHaveBeenCalledTimes(2);
+				expect(controller.getView().preview?.turns).toHaveLength(3);
+
+				// Quiet from here: the gap stretches back out and then holds at 16s.
+				let fetches = 2;
+				for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 16_000]) {
+					await vi.advanceTimersByTimeAsync(delay - 1);
+					expect(api.preview).toHaveBeenCalledTimes(fetches);
+					await vi.advanceTimersByTimeAsync(1);
+					fetches += 1;
+					expect(api.preview).toHaveBeenCalledTimes(fetches);
+				}
+
+				// Polling never touches the selection, and never attaches.
+				expect(controller.getView().state.selected).toEqual(ref);
+				expect(api.attach).not.toHaveBeenCalled();
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("re-reads the preview when the sessions are refreshed, not just the sidebar", async () => {
+			const api = new FakeApi();
+			let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+			growingPreview(api, () => turns);
+			const controller = createController(api);
+			await controller.preview(ref);
+			api.preview.mockClear();
+			turns = [...turns, { role: "assistant", text: "there" }];
+
+			await controller.refreshSessions();
+
+			expect(api.preview).toHaveBeenCalledTimes(1);
+			expect(api.preview).toHaveBeenCalledWith(ref);
+			expect(controller.getView().preview?.turns).toHaveLength(2);
+			expect(controller.getView().state.selected).toEqual(ref);
+			controller.dispose();
+		});
+
+		it("resets the poll to its fastest rate when a returning tab finds a change, and leaves it alone when it does not", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				growingPreview(api, () => turns);
+				const controller = createController(api);
+				await controller.preview(ref);
+				api.preview.mockClear();
+
+				// What App.svelte's visibilitychange/focus listener calls.
+				turns = [...turns, { role: "assistant", text: "there" }];
+				await controller.refreshPreview();
+				expect(api.preview).toHaveBeenCalledTimes(1);
+				expect(controller.getView().preview?.turns).toHaveLength(2);
+
+				// A second gesture, this one finding nothing, must not back the delay
+				// off: backoff measures how quiet the file is, and a gesture is not
+				// evidence about that. Only a timer tick may stretch the gap.
+				await controller.refreshPreview();
+				expect(api.preview).toHaveBeenCalledTimes(2);
+
+				// So the next *poll* still lands 1s after the change, not 16s and not 2s.
+				await vi.advanceTimersByTimeAsync(999);
+				expect(api.preview).toHaveBeenCalledTimes(2);
+				await vi.advanceTimersByTimeAsync(1);
+				expect(api.preview).toHaveBeenCalledTimes(3);
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("never polls a hidden tab, and picks up again when it comes back", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				let visible = true;
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				const controller = createController(api, () => visible);
+				await controller.preview(ref);
+				api.preview.mockClear();
+
+				// The visibilitychange on the way *out* is the same call as on the way in.
+				visible = false;
+				await controller.refreshPreview();
+				await vi.advanceTimersByTimeAsync(60_000);
+				expect(api.preview).not.toHaveBeenCalled();
+
+				visible = true;
+				await controller.refreshPreview();
+				expect(api.preview).toHaveBeenCalledTimes(1);
+				await vi.advanceTimersByTimeAsync(16_000);
+				expect(api.preview).toHaveBeenCalledTimes(2);
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("stops polling on attach, and a fetch that lands afterwards cannot put the preview back", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				api.attach.mockResolvedValue(summary(attachedRef));
+				const controller = createController(api);
+				await controller.preview(ref);
+
+				// A poll is in flight at the moment the user attaches.
+				const late = deferred<SessionPreviewResponse>();
+				api.preview.mockReturnValueOnce(late.promise);
+				await vi.advanceTimersByTimeAsync(16_000);
+				await controller.select(ref);
+				expect(controller.getView().preview).toBeNull();
+
+				late.resolve({ ref, turns: [{ role: "user", text: "hi" }, { role: "assistant", text: "late" }] });
+				await late.promise;
+				await vi.advanceTimersByTimeAsync(0);
+				expect(controller.getView().preview).toBeNull();
+
+				api.preview.mockClear();
+				await vi.advanceTimersByTimeAsync(60_000);
+				expect(api.preview).not.toHaveBeenCalled();
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("polls the session now on screen, at a fresh idle delay, after the user switches previews", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				growingPreview(api, () => turns);
+				const controller = createController(api);
+				await controller.preview(ref);
+				// Drive the first session's poll down to its fastest rate.
+				turns = [...turns, { role: "assistant", text: "there" }];
+				await vi.advanceTimersByTimeAsync(16_000);
+
+				await controller.preview(otherRef);
+				api.preview.mockClear();
+
+				// The busy session's 1s countdown does not carry over to the quiet one.
+				await vi.advanceTimersByTimeAsync(15_999);
+				expect(api.preview).not.toHaveBeenCalled();
+				await vi.advanceTimersByTimeAsync(1);
+				expect(api.preview).toHaveBeenCalledTimes(1);
+				expect(api.preview).toHaveBeenCalledWith(otherRef);
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("does not cancel a click that is still in flight when a poll fires", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				const controller = createController(api);
+				await controller.preview(ref);
+
+				// The user clicks another row, and its fetch is still in flight...
+				const clicked = deferred<SessionPreviewResponse>();
+				api.preview.mockReturnValueOnce(clicked.promise);
+				const clicking = controller.preview(otherRef);
+				// ...when the poll for the preview still on screen fires. A refresh is
+				// not a new selection: it captures the selection intent rather than
+				// bumping it, or it would silently cancel the click.
+				await vi.advanceTimersByTimeAsync(16_000);
+
+				clicked.resolve({ ref: otherRef, turns: [{ role: "user", text: "other" }] });
+				await clicking;
+
+				expect(controller.getView().state.selected).toEqual(otherRef);
+				expect(controller.getView().preview).toEqual({
+					ref: otherRef,
+					turns: [{ role: "user", text: "other" }],
+				});
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("stops polling after disposal", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				const controller = createController(api);
+				await controller.preview(ref);
+				api.preview.mockClear();
+
+				controller.dispose();
+				await vi.advanceTimersByTimeAsync(60_000);
+
+				expect(api.preview).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 	});
 });
