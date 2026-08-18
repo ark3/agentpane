@@ -6,6 +6,7 @@
 	 * introduces something new.
 	 */
 	import type { ToolResultMessage } from "@earendil-works/pi-ai";
+	import BlockActions from "./BlockActions.svelte";
 	import ImageBlock from "./ImageBlock.svelte";
 	import Markdown from "./Markdown.svelte";
 	import Thinking from "./Thinking.svelte";
@@ -25,6 +26,13 @@
 
 {#if block.type === "text"}
 	<Markdown text={block.text} {streaming} />
+	<!-- The source markdown, not the rendered prose, and only once there is
+	     something to act on -- a block that is still empty mid-stream has
+	     nothing to copy. Images get no controls at all (OW-63): text actions
+	     act on text. -->
+	{#if block.text.trim()}
+		<BlockActions source={block.text} label="text" />
+	{/if}
 {:else if block.type === "thinking"}
 	<Thinking text={block.thinking} redacted={block.redacted ?? false} {streaming} />
 {:else if block.type === "toolCall"}

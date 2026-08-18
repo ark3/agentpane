@@ -27,7 +27,15 @@ export {
 } from "./tools/registry.ts";
 
 export { buildDiff, diffStats, type DiffLine, type DiffLineType } from "./tools/diff.ts";
-export { highlightCode, languageFromPath, renderCode, renderMarkdown, sanitize } from "./markdown.ts";
+export {
+	highlightCode,
+	languageFromPath,
+	renderCode,
+	renderMarkdown,
+	renderMarkdownWithFences,
+	sanitize,
+	type Fence,
+} from "./markdown.ts";
 export { buildTranscript, type TranscriptEntry, type TranscriptView } from "./transcript.ts";
 export { editHunks, prettyArgs, summarizeArgs, type EditHunk } from "./tools/args.ts";
 export {

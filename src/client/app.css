@@ -152,6 +152,25 @@ button { padding: var(--ap-space-2) var(--ap-space-3); cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--ap-accent-soft); }
 
+/* The transcript's per-block copy/expand chrome (OW-63). Global rather than
+   component-scoped because three components share exactly one look -- the copy
+   button, the expand button beside it, and the overlay's close -- and scoping
+   it would mean maintaining the same rule in each of them. */
+.ap-action {
+	flex: none;
+	min-width: 1.5rem;
+	padding: 0 var(--ap-space-1);
+	border: 1px solid transparent;
+	background: none;
+	color: var(--ap-fg-subtle);
+	font-size: var(--ap-text-xs);
+	line-height: 1.6;
+}
+.ap-action:hover { border-color: var(--ap-border-strong); background: var(--ap-surface-raised); color: var(--ap-fg); }
+/* Copy feedback is inline on the button and transient -- no toast layer. */
+.ap-action[data-copy="copied"] { color: var(--ap-success); }
+.ap-action[data-copy="failed"] { color: var(--ap-danger); }
+
 .sessions { grid-area: sessions; display: grid; gap: var(--ap-space-2); align-content: start; overflow-y: auto; min-height: 0; }
 .session-select { min-width: 0; display: grid; gap: var(--ap-space-1); text-align: left; }
 /* A row is exactly this tall, never more: a growing preview or a long

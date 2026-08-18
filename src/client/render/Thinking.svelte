@@ -7,6 +7,7 @@
 	 * worth screen space. It closes itself when the turn settles, unless the
 	 * reader has taken manual control of the disclosure.
 	 */
+	import BlockActions from "./BlockActions.svelte";
 	import Markdown from "./Markdown.svelte";
 	import { oneLine } from "./types.ts";
 
@@ -61,7 +62,10 @@
 		<div class="body">
 			{#if text}
 				<Markdown {text} {streaming} />
+				<BlockActions source={text} label="thinking" />
 			{:else if redacted}
+				<!-- Nothing to copy and nothing to expand: a redacted block is the
+				     provider's refusal, not content, so it gets no controls. -->
 				<p class="note">The provider withheld this reasoning.</p>
 			{/if}
 		</div>

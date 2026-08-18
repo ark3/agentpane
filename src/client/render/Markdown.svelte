@@ -14,15 +14,21 @@
 	 *   false) are synchronous, so a settled transcript is never a frame behind
 	 *   and tests do not have to await one.
 	 */
-	import { renderMarkdown } from "./markdown.ts";
+	import BlockActions from "./BlockActions.svelte";
+	import { renderMarkdownWithFences } from "./markdown.ts";
 
-	let { text = "", streaming = false }: { text?: string; streaming?: boolean } = $props();
+	let {
+		text = "",
+		streaming = false,
+		/** Per-fence copy/expand controls. Off inside the expand overlay, which is already showing one block. */
+		fenceActions = true,
+	}: { text?: string; streaming?: boolean; fenceActions?: boolean } = $props();
 
 	// Both of these capture `text`'s *initial* value on purpose: the effect
 	// below owns every subsequent update, and seeding synchronously is what
 	// makes a settled transcript paint in one pass.
 	// svelte-ignore state_referenced_locally
-	let html = $state(renderMarkdown(text));
+	let rendered = $state(renderMarkdownWithFences(text));
 	// svelte-ignore state_referenced_locally
 	let latest = text;
 	let frame: number | null = null;
@@ -48,14 +54,14 @@
 				unschedule(frame);
 				frame = null;
 			}
-			html = renderMarkdown(latest);
+			rendered = renderMarkdownWithFences(latest);
 			return;
 		}
 
 		if (frame === null) {
 			frame = schedule(() => {
 				frame = null;
-				html = renderMarkdown(latest);
+				rendered = renderMarkdownWithFences(latest);
 			});
 		}
 	});
@@ -63,11 +69,55 @@
 	$effect(() => () => {
 		if (frame !== null) unschedule(frame);
 	});
+
+	/**
+	 * Fence controls (OW-63). A fenced code block is one of the units the
+	 * reader copies, but there is no component for it: it reaches the DOM as
+	 * part of this one `{@html}` string, and `sanitize()` forbids `<button>`,
+	 * so the control cannot be emitted inside that string -- nor should it be,
+	 * since that is exactly the choke point D5 exists to keep narrow.
+	 *
+	 * So the controls are ours, rendered by Svelte below with real listeners
+	 * and no `{@html}` anywhere near them, and this effect only *moves* each
+	 * one next to the `<pre>` it belongs to, matched by the `data-fence` index
+	 * the code renderer wrote.
+	 *
+	 * A re-parse replaces the `<pre>` a control was moved next to, but not the
+	 * control: `{@html}` removes only the nodes it inserted, so a node we moved
+	 * in survives and the new `<pre>` lands in front of it (verified in jsdom --
+	 * the element identity changes, the adjacency does not). What the `rendered`
+	 * dependency actually buys is a change in the *number* of fences: a fence
+	 * that first appears in a later streaming frame has no control beside it
+	 * until this effect runs again.
+	 */
+	let host: HTMLElement | undefined = $state();
+	let controls: (HTMLElement | undefined)[] = $state([]);
+
+	$effect(() => {
+		void rendered;
+		if (!host) return;
+		for (const pre of host.querySelectorAll("pre.ap-code[data-fence]")) {
+			const node = controls[Number(pre.getAttribute("data-fence"))];
+			if (node) pre.insertAdjacentElement("afterend", node);
+		}
+	});
 </script>
 
-<!-- Safe by construction: `renderMarkdown` is the only producer of this
-     string and it ends in DOMPurify. See markdown.ts. -->
-<div class="markdown">{@html html}</div>
+<!-- Safe by construction: `renderMarkdownWithFences` is the only producer of
+     this string and it ends in DOMPurify. See markdown.ts. -->
+<div class="markdown" bind:this={host}>{@html rendered.html}</div>
+
+<!-- Unattached controls stay in here and stay hidden; the effect above lifts
+     each one out to the fence it belongs to. -->
+{#if fenceActions}
+	<div class="fence-dock" hidden>
+		{#each rendered.fences as fence, i (i)}
+			<div class="fence-actions" bind:this={controls[i]}>
+				<BlockActions source={fence.code} kind="code" language={fence.language} label="code block" />
+			</div>
+		{/each}
+	</div>
+{/if}
 
 <style>
 	.markdown {
@@ -171,6 +221,12 @@
 		/* Wide content scrolls inside its own box; the page never scrolls sideways. */
 		overflow-x: auto;
 		line-height: var(--ap-leading-normal);
+	}
+
+	/* Lifted out of the dock and dropped in after its `<pre>`, so it sits in the
+	   gap that block's margin already leaves. */
+	.fence-actions {
+		margin: calc(-1 * var(--ap-space-2)) 0 var(--ap-space-3);
 	}
 
 	.markdown :global(table) {

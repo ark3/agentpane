@@ -7,6 +7,7 @@
 	 * because "highlight.js escapes its own output" is exactly the kind of
 	 * assumption that stops being true one dependency upgrade later.
 	 */
+	import BlockActions from "../BlockActions.svelte";
 	import { renderCode } from "../markdown.ts";
 	import { truncate } from "../types.ts";
 
@@ -16,11 +17,14 @@
 		error = false,
 		/** Agents can emit megabytes; the card is a preview, not a file viewer. */
 		limit = 20000,
+		/** Copy/expand chrome. Off inside the expand overlay, which is already showing this text. */
+		actions = true,
 	}: {
 		text?: string;
 		language?: string | undefined;
 		error?: boolean;
 		limit?: number;
+		actions?: boolean;
 	} = $props();
 
 	const clipped = $derived(truncate(text, limit));
@@ -31,6 +35,12 @@
 	<pre class="output" class:error>{@html html}</pre>
 	{#if text.length > limit}
 		<p class="clipped">Output truncated ({text.length.toLocaleString()} characters).</p>
+	{/if}
+	<!-- `text`, not `clipped`: what the card shows is a preview, and a copy
+	     limited to the preview would be a worse version of selecting it by hand
+	     (OW-63). Expand shows all of it too. -->
+	{#if actions}
+		<BlockActions source={text} kind="code" {language} label="output" />
 	{/if}
 {/if}
 

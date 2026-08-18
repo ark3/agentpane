@@ -136,6 +136,17 @@ function fileReference(href: string): string | undefined {
 }
 
 /**
+ * Raw source of each fence in the parse that is running right now, in document
+ * order, indexed by the `data-fence` attribute the code renderer writes (OW-63).
+ *
+ * Module state is safe here only because `parser.parse` is synchronous
+ * (`async: false`) and this is a single-threaded renderer: one parse runs to
+ * completion before the next begins, and `renderMarkdownWithFences` owns the
+ * reset. Nothing outside that function may read it.
+ */
+let fenceSources: Fence[] = [];
+
+/**
  * A private `Marked` instance: `marked.use()` on the module singleton is
  * global mutable state, and this package should not change how anything else
  * in the process parses markdown.
@@ -151,7 +162,13 @@ const parser = new Marked({
 			const known = language && hljs.getLanguage(language) ? language : undefined;
 			const body = highlightCode(text, known);
 			const cls = known ? `hljs language-${escapeHtml(known)}` : "hljs";
-			return `<pre class="ap-code"><code class="${cls}">${body}</code></pre>\n`;
+			// The index is the only way back to the raw source: what lands in the
+			// DOM is highlighted HTML, and a copy button must send the bytes the
+			// model wrote. `sanitize()` forbids <button>, and rightly so, so the
+			// control itself cannot ride along inside this string -- the caller
+			// pairs it up with the source through this attribute (OW-63).
+			const index = fenceSources.push({ code: text, language: known }) - 1;
+			return `<pre class="ap-code" data-fence="${index}"><code class="${cls}">${body}</code></pre>\n`;
 		},
 		/**
 		 * A local file reference is not a link: agentpane has nowhere to send
@@ -216,11 +233,38 @@ export function sanitize(html: string): string {
 	});
 }
 
+/** One fenced (or indented) code block, as the author wrote it. */
+export interface Fence {
+	/** The raw code -- not the highlighted HTML, and not the language tag. */
+	code: string;
+	/** The info string, if it names a language the highlighter knows. */
+	language?: string | undefined;
+}
+
+/** Sanitized HTML plus the source of every fence it contains. */
+export interface RenderedMarkdown {
+	html: string;
+	/** Indexed by the `data-fence` attribute on `pre.ap-code`. */
+	fences: Fence[];
+}
+
+/**
+ * Markdown source -> sanitized HTML *and* the fence sources behind it, so a
+ * caller can offer a per-fence copy without re-parsing or scraping the DOM
+ * (OW-63).
+ */
+export function renderMarkdownWithFences(source: string): RenderedMarkdown {
+	if (!source) return { html: "", fences: [] };
+	fenceSources = [];
+	const parsed = parser.parse(source, { async: false });
+	const fences = fenceSources;
+	fenceSources = [];
+	return { html: sanitize(typeof parsed === "string" ? parsed : ""), fences };
+}
+
 /** Markdown source -> sanitized HTML, ready for `{@html}`. */
 export function renderMarkdown(source: string): string {
-	if (!source) return "";
-	const parsed = parser.parse(source, { async: false });
-	return sanitize(typeof parsed === "string" ? parsed : "");
+	return renderMarkdownWithFences(source).html;
 }
 
 /** A standalone code body -> sanitized, highlighted HTML. */
