@@ -204,7 +204,11 @@ unchanged as a record of what was believed; this round is its correction.
 - **Sandbox.** This machine runs inside a bubblewrap sandbox (`~/bin/sbox`);
   most of the filesystem is read-only. `~/src/agentpane` was granted write
   access specifically for this work. If you can write elsewhere in `$HOME`,
-  the sandbox is off — warn the user.
+  the sandbox is off — warn the user. One consequence bites dispatch: a
+  dispatched worktree must live *inside* the repo tree (`.worktrees/<id>`,
+  gitignored), because it is the only path mounted read-write — a worktree
+  anywhere outside it (`~/src/`, `/tmp`, a sibling of the repo) fails with
+  `Read-only file system` (`.claude/skills/execute/SKILL.md`).
 - **Both agents need a writable state directory, and sbox will not give you
   one from inside this sandbox.** Codex initializes a sqlite state runtime
   under `~/.codex`; Pi takes a lock under `~/.pi/agent` merely to *read* its

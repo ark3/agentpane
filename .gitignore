@@ -6,6 +6,7 @@ build/
 test-results/
 .vite/
 .claude/worktrees/
+.worktrees/
 .env
 .env.*
 

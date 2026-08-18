@@ -44,14 +44,15 @@ Then wait.
    Confirm against the source first, and say so if it has drifted.
 2. **Dispatch.** One subagent, model chosen per item.
 
-   **If it writes**, it gets its own worktree, cut from `origin/main` — never
-   pushed to, so stale by every commit since, `CLAUDE.md` and the skills
-   included. So the prompt opens with the worktree, before anything read from
-   it can be trusted: `git merge --ff-only main`, report the sha it started at,
-   then `bun install` (a worktree has no `node_modules`; git skips ignored
-   files). Not a fast-forward means the other clone's work, not staleness —
-   stop and report. It commits on that worktree's own branch and cannot commit
-   on `main`; say so outright.
+   **If it writes**, it gets its own worktree under `.worktrees/<id>` at the
+   project root (gitignored; it must live inside the repo tree — see HANDOFF's
+   "Environment gotchas"), cut from `origin/main` — never pushed to, so stale by
+   every commit since, `CLAUDE.md` and the skills included. So the prompt opens
+   with the worktree, before anything read from it can be trusted: `git merge
+   --ff-only main`, report the sha it started at, then `bun install` (a worktree
+   has no `node_modules`; git skips ignored files). Not a fast-forward means the
+   other clone's work, not staleness — stop and report. It commits on that
+   worktree's own branch and cannot commit on `main`; say so outright.
 
    Only then the reading: `CLAUDE.md` and the `AGENTS.md` it points at, neither
    inherited. Then the item's grounding and intent inline: paths, symbols, the
