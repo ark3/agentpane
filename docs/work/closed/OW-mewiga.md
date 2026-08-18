@@ -120,3 +120,23 @@ adapter deltas are recorded as HANDOFF findings. `DESIGN.md:21` and HANDOFF
 finding 7 are corrected wherever *"both backends support this natively"* proves
 too flat to be true — on the evidence in hand it already flattens two different
 operations, and the correction is part of this item rather than a later one.
+
+**Fixed** in 7e1ceac: all four cells run live on the work laptop (pi 0.84.2 /
+codex-cli 0.147.0) by `resources/probes/fork_probe.py`, recorded in
+`MANUAL_TESTING.md`. Pi rewind (`fork`) is copy-on-write — the active file is
+left byte-identical and the re-ask spins off a new `parentSession`-linked file,
+so the abandoned tail always survives and no destructive-rewind warning is
+warranted (HANDOFF 43). Pi's `clone` takes no entry id — it copies the whole
+active branch, so branch-from-a-point is `fork`+`clone` (HANDOFF 44, the
+highest-value unknown). Codex `thread/fork` mints a new thread whose on-disk
+rollout carries `forked_from_id`, with a real turn driven inside it (HANDOFF
+45). Codex `thread/rollback` is still DEPRECATED in the 0.147.0 schema with no
+replacement — Codex cannot rewind in place, expressing it as a new-session fork
+(HANDOFF 46). Command-surface deltas recorded: rpc.md 32 commands vs
+`PiCommand`'s 11 (HANDOFF 47), `ClientRequest.json` 133 methods vs the adapter's
+~11 (HANDOFF 48). Fixtures at `resources/fixtures/{pi,codex}/fork.jsonl`, both
+scrubbed. `DESIGN.md:21` and finding 7 corrected: fork is two operations
+(rewind vs new-session), asymmetric across backends. Review before landing fixed
+a duplicated HANDOFF paragraph and scrubbed the operator's home path and private
+skills manifest that had leaked into the Codex content fixture (probe's
+`scrub_content` hardened so re-runs stay clean).
