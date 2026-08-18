@@ -362,6 +362,27 @@ describe("PiAdapter command correlation", () => {
 		h.child.respondTo("set_model", { provider: "anthropic", id: "claude-opus-5", name: "Opus 5" });
 		await done;
 	});
+
+	it("sends a bare compact command and resolves on its response (OW-72)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const done = h.adapter.compact();
+		// Pi's manual-compaction command is `{ type: "compact" }` and nothing
+		// else (rpc.md; verified against 0.84.2). The summary rides the
+		// compaction_end notification, not this response, so the adapter needs
+		// only wait for the command to be acknowledged.
+		const cmd = h.child.lastSent("compact");
+		expect(cmd).toMatchObject({ type: "compact" });
+		expect(Object.keys(cmd).sort()).toEqual(["id", "type"]);
+		h.child.respondTo("compact", {
+			summary: "folded",
+			firstKeptEntryId: "e9",
+			tokensBefore: 17660,
+			estimatedTokensAfter: 4040,
+		});
+		await expect(done).resolves.toBeUndefined();
+	});
 });
 
 describe("PiAdapter stdout framing", () => {

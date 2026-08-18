@@ -9,9 +9,10 @@
  * against the installed CLI's `dist/modes/rpc/rpc-types.d.ts`.
  *
  * Only the commands/events/responses this adapter actually speaks are
- * included -- not the full RPC surface (thinking level, compaction knobs,
- * bash-as-a-command, session naming, etc. are all real commands we simply
- * never send).
+ * included -- not the full RPC surface (thinking level, bash-as-a-command,
+ * session naming, etc. are all real commands we simply never send). The
+ * manual-compaction `compact` command IS spoken (OW-72), transcribed from
+ * rpc.md's "Compaction" section.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -30,6 +31,7 @@ export type PiCommand =
 			streamingBehavior?: "steer" | "followUp";
 	  }
 	| { id?: string; type: "abort" }
+	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
 	| { id?: string; type: "get_available_models" }
@@ -50,6 +52,15 @@ export type PiCommandType = PiCommand["type"];
 export type PiResponse =
 	| { id?: string; type: "response"; command: "prompt"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
+	| {
+			id?: string;
+			type: "response";
+			command: "compact";
+			success: true;
+			// rpc.md "Compaction": the summary plus the token accounting the
+			// compaction shrank (same shape `compaction_end` carries in `result`).
+			data: PiCompactionResult;
+	  }
 	| {
 			id?: string;
 			type: "response";
@@ -90,6 +101,21 @@ export type PiResponse =
 
 /** Narrow `PiResponse` to the one matching a given command's `type`. */
 export type PiResponseFor<C extends PiCommandType> = Extract<PiResponse, { command: C }>;
+
+/**
+ * The payload a successful compaction reports (rpc.md "Compaction"): the
+ * summary that replaces the folded history, and the token accounting it
+ * shrank. Rides both the `compact` command response's `data` and the
+ * `compaction_end` notification's `result`.
+ */
+export interface PiCompactionResult {
+	summary: string;
+	firstKeptEntryId: string;
+	tokensBefore: number;
+	estimatedTokensAfter: number;
+	usage?: unknown;
+	details?: unknown;
+}
 
 // ---------------------------------------------------------------------------
 // message_update deltas
@@ -163,7 +189,9 @@ export type PiNotification =
 	| {
 			type: "compaction_end";
 			reason: "manual" | "threshold" | "overflow";
-			result: unknown;
+			// `result` is the same shape the `compact` command response carries, or
+			// null when the compaction aborted or failed (rpc.md "compaction_end").
+			result: PiCompactionResult | null;
 			aborted: boolean;
 			willRetry: boolean;
 			errorMessage?: string;

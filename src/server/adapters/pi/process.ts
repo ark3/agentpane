@@ -322,6 +322,17 @@ export class PiAdapter implements BackendAdapter {
 		await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
 	}
 
+	/**
+	 * Compact the session's context via Pi's `compact` command (rpc.md
+	 * "Compaction", OW-72). Pi runs this as a normal command and reports the
+	 * summary through the `compaction_start`/`compaction_end` notifications the
+	 * reducer already sees, so this only has to issue the command and await its
+	 * admission -- the transcript marker is the reducer's job.
+	 */
+	async compact(): Promise<void> {
+		await this.sendCommand<PiResponseFor<"compact">>({ type: "compact" });
+	}
+
 	// -- fork-from-past -----------------------------------------------------
 
 	async listForkPoints(): Promise<ForkPoint[]> {
