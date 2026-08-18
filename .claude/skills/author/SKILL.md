@@ -45,6 +45,15 @@ around — git reports the add/add collision on the filename, and the fix is a
 `git mv` plus one headline edit (`docs/TRACKING.md`, "Two clones can mint the
 same id").
 
+**That safeguard does not cover a second session in *this* clone, so write with
+`set -o noclobber` or `cp -n` and re-read the max id in the same command that
+writes.** A concurrent session commits to the same working tree, so its new file
+is already tracked when you arrive: a redirect overwrites it, `git add` stages
+the overwrite as an ordinary modification, and nothing anywhere says a word.
+Happened on 2026-08-18 — ids read at 09:34, `1e40fc4` filed OW-70 and OW-71 at
+10:05, both destroyed at 10:11. An id read minutes ago is not evidence about the
+directory you are about to write into.
+
 **The headline is the item's lead claim, not a title.** It is the whole of what
 the survey prints, so an item whose headline says "clipboard work" is invisible
 to the person picking; "Copying a tool result copies the status pill with it" is

@@ -435,6 +435,20 @@ two lines that both merge, silently. And a colliding id is by construction
 — citations across the docs and the commit history — does not apply. Renaming
 is a `git mv` and one headline edit. Resolve it when git says so.
 
+**Two sessions in one clone are the case this does not cover, and there it is
+silent.** Recorded 2026-08-18, when it happened: an authoring session read the
+max id as 69 at 09:34, another session committed `OW-70.md` and `OW-71.md` to
+the same working tree at 10:05 (`1e40fc4`), and the first session's redirects
+overwrote both at 10:11 (`5addf08`). No collision was ever reported, because by
+then the files were tracked and the write was an ordinary modification that
+`git add` staged without comment — the add/add report above needs two *branches*
+to meet, and these never diverged. Both items were recovered from `1e40fc4` and
+renumbered, so the loss was repairable, which is the only reason this stays a
+cheap problem rather than an argument for id partitioning. The remedy is a
+non-clobbering write and re-reading the max id at write time, not a change to
+the id scheme (`.claude/skills/author/SKILL.md`); whether tooling should own the
+allocation instead is OW-59.
+
 ## Migrating, in three phases
 
 > ⚠️ **Done 2026-08-17** — phase 1 in `7ece977`, phase 2 in `d82885f`, phase 3
