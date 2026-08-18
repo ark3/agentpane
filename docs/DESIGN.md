@@ -481,6 +481,65 @@ not have helped — `listSessions` applies it only after the walk+parse.
 **Config.** Single-user, no config file: `idleTimeoutMs` and `maxSessions`
 are named constants at the top of the manager module, not env or file.
 
+### D13. Agentpane owns one small state file, and its marks are server state
+
+Agentpane has never written anything of its own. D9 enumerates sessions from
+the backends' stores, and every server-side fact is derived from a file some
+other program wrote. This decision changes that, narrowly: a session can be
+marked **starred** or **hidden**, and the marks live in a file the server owns.
+
+One three-state field per session -- normal, starred, hidden -- rather than two
+independent flags. The combination the flags would buy is "starred and hidden",
+which is incoherent, and a single field forbids it by construction instead of
+leaving it representable and then policing it.
+
+**Why the server rather than the browser.** The rejected alternative was a
+per-viewer `localStorage` set, which is what OW-66 originally proposed and what
+D8 argues for: loopback only, one browser on one machine, so curation that
+travels between browsers is worth almost nothing. What decides it instead is
+that a mark may need to **originate server-side**. The server is what performs a
+fork, and a fork is exactly the operation that leaves behind a session the
+person may never want to see again; a browser-local store cannot express a mark
+the server sets, because some browser would have to be listening at the moment
+it happened. Whether anything ever sets a mark automatically is deliberately not
+decided here -- but the store is placed where it *could* be.
+
+**Config is not state**, and D12's "single-user, no config file, constants at
+the top of the manager module" still holds unchanged. That rule is about values
+the developer chooses, which belong in code. This file holds what the *user*
+authored, which cannot.
+
+**Shape**, all of it deliberately small:
+
+- `~/.agentpane/`, matching the `~/.pi` and `~/.codex` it already reads. It is
+  per-user state, not per-checkout. The path is injectable, or every server test
+  writes into a real home directory.
+- One JSON object, `sessionKey(ref)` -> `"starred" | "hidden"`. Only marked
+  sessions appear; normal is the absence of a record, so the file stays
+  proportional to what you touched rather than to how many sessions exist.
+- Written on every toggle -- the file is small and toggles are human-paced, so
+  debouncing would be complexity with no case behind it -- via a temp file and
+  `rename`. One process, one writer, loopback: no lock. (Pi, by contrast, takes
+  a lock under `~/.pi/agent` merely to *read*.)
+- Keyed by `sessionKey(ref)`, and **no mark on a `virtual` session**: D9's
+  rename on first prompt would strand a key placed before it.
+- The server does not filter. `SessionSummary` carries the mark and the client
+  decides what to draw, because a "show hidden" control needs the rows in hand
+  either way and this leaves the route's meaning unchanged.
+
+**A corrupt file is reported, not logged.** If the file will not parse, it is
+renamed aside and the store starts empty -- keeping the evidence rather than
+eating it -- and the server *tells the browser*. A log line on a headless
+server is indistinguishable from swallowing it, which this repo already has a
+name for (OW-15). Reporting it needs a session-less `notice` arm on the
+`ServerEvent` union, since every error today carries a `session` ref and a
+per-session `seq` and this condition belongs to no session. It lands with this
+feature rather than ahead of it, following the pattern the compaction work used
+for `compact()`, and it is small because `sessions-changed` is already a
+session-less, seq-less arm. It will not stay single-use: a D12 reaper eviction
+and a spawn that fails before any session exists are both server-global and
+both currently unreportable.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**. Each backend implements
