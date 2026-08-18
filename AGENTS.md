@@ -41,7 +41,7 @@ layout, scroll anchoring, or real scroll-event timing.
   it is on its own worktree's branch, so it commits there and the session agent
   cherry-picks that onto `main`. Never `git push` unless asked by name.
 - Work items live only in `docs/work/`, not in GitHub issues or any other
-  external tracker. One file per item, `docs/work/open/OW-N.md`; closing it is
+  external tracker. One file per item, `docs/work/open/<id>.md`; closing it is
   a `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
   paragraph appended to the body. A closed item is kept rather than deleted,
   because its close note is sometimes the grounding a later one needs — what

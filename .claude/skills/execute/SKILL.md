@@ -18,10 +18,12 @@ rg --no-heading -N -H '^(# |kind: )' docs/work/open | sort -V
 ```
 
 One item prints as two lines, its kind then its headline, both prefixed with the
-path the id is read off. `sort -V` is what puts them in id order — the searcher
-walks files in parallel and its own order is not stable run to run, and plain
-sort puts `OW-10` before `OW-2`. Do not drop the pipe, and do not add
-`--no-filename`: the path prefix is what `sort -V` sorts on.
+path the id is read off. The pipe is what pins the order at all — the searcher
+walks files in parallel and its own order is not stable run to run — and `sort
+-V` specifically is what holds the numbered items in id order, since plain sort
+puts `OW-10` before `OW-2`. Drawn ids sort lexically, which is arbitrary and
+only has to be stable. Do not drop the pipe, and do not add `--no-filename`:
+the path prefix is what `sort -V` sorts on.
 `docs/TRACKING.md`, "Staying greppable", is the spec for this command — keep the
 two identical — and carries the headline-only and `kind:`-filter variants plus
 the evidence for every flag.
@@ -49,7 +51,7 @@ Then wait.
 
    Only then the reading: `CLAUDE.md` and the `AGENTS.md` it points at, neither
    inherited. Then the item's grounding and intent inline: paths, symbols, the
-   test invocation, what done looks like. Point it at `docs/work/open/OW-N.md`
+   test invocation, what done looks like. Point it at `docs/work/open/<id>.md`
    and nothing else under `docs/work/` — it works the item it was given and
    does not go shopping.
 
@@ -71,7 +73,7 @@ Then wait.
    `git worktree remove`, `git branch -D`. Then close the item:
 
    ```
-   git mv docs/work/open/OW-N.md docs/work/closed/
+   git mv docs/work/open/<id>.md docs/work/closed/
    ```
 
    and append to that file, as its last body paragraph, `**Fixed** in <sha>:

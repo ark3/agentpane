@@ -14,7 +14,7 @@ own questions are not agreement — they cover what you thought to ask, and the
 item commits to everything else. Write it and land it once the user says that
 observation is settled, then take the next one.
 
-Then land it: a new `docs/work/open/OW-N.md`, or an edit to the file of an
+Then land it: a new `docs/work/open/<id>.md`, or an edit to the file of an
 existing item, committed unless the user asks not to. Same for a material
 revision to an item already on disk. An item that exists only in chat does not
 exist.
@@ -44,20 +44,27 @@ items", is the spec; it also says why each rule is load-bearing rather than
 stylistic, and its five kinds are the whole of what `kind:` may hold — there is
 no sixth.
 
-Adding an item is one new file in `docs/work/open/`: take the next id, never
-reuse one. Two clones can both take it, which is fine and is not designed
-around — git reports the add/add collision on the filename, and the fix is a
-`git mv` plus one headline edit (`docs/TRACKING.md`, "Two clones can mint the
-same id").
+Adding an item is one new file in `docs/work/open/`, and **its name is drawn,
+never chosen**. Not the next number: an id read minutes ago is not evidence
+about the directory you are about to write into, and on 2026-08-18 that cost
+two items — read at 09:34, `1e40fc4` filed OW-70 and OW-71 at 10:05, both
+destroyed at 10:11 with nothing anywhere saying a word. Draw the name instead:
 
-**That safeguard does not cover a second session in *this* clone, so write with
-`set -o noclobber` or `cp -n` and re-read the max id in the same command that
-writes.** A concurrent session commits to the same working tree, so its new file
-is already tracked when you arrive: a redirect overwrites it, `git add` stages
-the overwrite as an ordinary modification, and nothing anywhere says a word.
-Happened on 2026-08-18 — ids read at 09:34, `1e40fc4` filed OW-70 and OW-71 at
-10:05, both destroyed at 10:11. An id read minutes ago is not evidence about the
-directory you are about to write into.
+```
+python3 -c "
+import random
+c, v = 'bdfghjklmnprstvwyz', 'aeiou'
+print('OW-' + ''.join(random.choice(c)+random.choice(v) for _ in range(3)))
+"
+```
+
+Check it against `docs/work/open/` *and* `docs/work/closed/`, and create the
+file exclusively — `set -o noclobber` or `cp -n`. Not for the draw, which
+collides about once in nine thousand: for the case where you reuse a name you
+saw earlier in this conversation instead of running the generator, which is the
+silent one. Numbered items keep their names and nothing is renamed, so the
+corpus stays mixed on purpose. `docs/TRACKING.md`, "Ids are drawn at random",
+is the spec and carries why.
 
 **The headline is the item's lead claim, not a title.** It is the whole of what
 the survey prints, so an item whose headline says "clipboard work" is invisible
