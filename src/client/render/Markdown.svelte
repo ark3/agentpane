@@ -6,8 +6,13 @@
 	 * streaming message. Two things keep that cheap:
 	 *
 	 * - **Only the tail block re-parses.** Each text block is its own instance
-	 *   of this component, so Svelte only re-runs the effect whose `text` prop
-	 *   actually changed. Earlier blocks in the same message are untouched.
+	 *   of this component, and an unchanged block's `text` prop reads `===`, so
+	 *   the effect below is not re-run and earlier blocks are untouched. That
+	 *   rests on `App.svelte`'s `view` being `$state.raw` (OW-detepa), not on
+	 *   the component boundary: `text={block.text}` in `Block.svelte` creates no
+	 *   derived boundary, so this effect subscribes straight to the `{#each}`
+	 *   item source and a deep proxy's reassignment marked it *dirty*, not
+	 *   maybe-dirty -- and effects, unlike deriveds, do not value-compare.
 	 * - **Throttled to a frame.** While `streaming`, updates coalesce into one
 	 *   `requestAnimationFrame`; deltas that land inside the same frame are
 	 *   collapsed. The initial parse and the final one (when `streaming` goes

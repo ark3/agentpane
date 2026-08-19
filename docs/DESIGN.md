@@ -242,7 +242,12 @@ that spawns processes. Sanitize the parsed output. Prefer `shiki` over
 complicates token-by-token rendering.
 
 Known hot spot: re-parsing markdown per token on a long message. Only the
-tail block changes; re-parse just that block and throttle to a frame.
+tail block changes; re-parse just that block and throttle to a frame. What
+confines it to the tail block is `App.svelte`'s `view` being `$state.raw`
+(OW-detepa) — an unchanged block's `text` prop then reads `===` and its
+effect is not re-run. Under a deep `$state` it did not hold, because
+`text={block.text}` creates no derived boundary and effects do not
+value-compare.
 
 On looks: nothing in a dependency confers taste. Define a type scale, a
 spacing scale, and semantic color as CSS custom properties early; collapse

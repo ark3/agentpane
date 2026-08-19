@@ -16,7 +16,20 @@
 	import { formatTimestamp } from "./time.ts";
 
 	let { controller }: { controller: AgentpaneController } = $props();
-	let view = $state<ControllerView>({
+	/**
+	 * `$state.raw`, and that is load-bearing rather than a micro-optimisation
+	 * (OW-detepa). A deep `$state` proxies the whole view, and `publish()`
+	 * swaps a fresh `ControllerView` per SSE event, so every settled markdown
+	 * block in the selected transcript re-parsed on every event -- including
+	 * events for sessions that are not on screen, at ~92ms each on a 180-message
+	 * transcript. Raw keeps object identity for the parts that did not change,
+	 * and the derived equality check stops propagation at the top.
+	 *
+	 * It stops working silently the moment anything mutates `view` in place:
+	 * nothing enforces that, so assign a new object, as `controller.publish`
+	 * does. `App.streaming-cost.test.ts` counts the parses.
+	 */
+	let view = $state.raw<ControllerView>({
 		state: initialClientState(),
 		draft: "",
 		connection: "connecting",

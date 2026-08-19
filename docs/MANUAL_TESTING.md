@@ -497,6 +497,47 @@ above is headless and has no tab strip to repaint. The request Gecko fires on
 the swap is the closest proxy available here, not the pixel. Tracked as
 OW-yiduso.
 
+## Observed streaming cost before and after `$state.raw` (OW-detepa)
+
+Recorded 2026-08-19 on the home server (Intel i3-4010U, 4 cores), Playwright's
+bundled headless Chromium 1.62.1. Both runs are a **production build** of
+`e2e/perf.html` — `./node_modules/.bin/vite build --config vite.perf.config.ts`,
+then `python3 -m http.server 5199 --directory dist/perf`, then
+`PERF_URL=http://127.0.0.1:5199/e2e/perf.html bun e2e/perf-probe.ts`. Not under
+`bun run dev`: there Svelte's `get_stack`/`get_error` tracing dominates the
+profile and roughly doubles every figure.
+
+Median wall time of one `upsert` event, 60 events per cell, before is `5af4a5e`
+and after is the same tree with `view` at `src/client/App.svelte` switched from
+`$state` to `$state.raw`:
+
+| Scenario | selected before | selected after | background before | background after |
+|---|---|---|---|---|
+| short transcript (15 msgs), 2 sessions | 8.90ms | 1.00ms | 7.60ms | 0.20ms |
+| long transcript (180 msgs), 2 sessions | 78.00ms | 7.90ms | 74.20ms | 1.70ms |
+| long transcript (180 msgs), 400 sessions | 92.60ms | 7.30ms | 91.20ms | 5.50ms |
+| short transcript (15 msgs), 400 sessions | 21.10ms | 1.90ms | 22.30ms | 1.60ms |
+
+The DOM-mutation counts the harness collects are unchanged across the swap — 21
+for the selected session, **0** for the background one, in every scenario both
+before and after. That is the point: the work removed produced no pixels.
+
+**The call counts the jsdom test discriminates on.**
+`src/client/App.streaming-cost.test.ts` counts `renderMarkdownWithFences`
+through a `vi.mock`/`importOriginal` spy, over ten deltas driven through the
+real `reduceServerEvent` and a controller that publishes the way
+`controller.ts`'s `publish()` does:
+
+| Assertion | Before | After |
+|---|---|---|
+| ten deltas for a **non-selected** session, 8-turn selected transcript | 160 | 0 |
+| ten deltas for the **selected** session, 8-turn transcript | 171 | 11 |
+| ten deltas for the **selected** session, 24-turn transcript | 491 | 11 |
+
+160 is 16 rendered markdown blocks × 10 events, all of it for a session with no
+DOM on screen. The second pair is the constancy claim: after the change the
+cost of a delta no longer tracks the length of the transcript behind it.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
