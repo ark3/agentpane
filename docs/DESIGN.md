@@ -546,6 +546,29 @@ session-less, seq-less arm. It will not stay single-use: a D12 reaper eviction
 and a spawn that fails before any session exists are both server-global and
 both currently unreportable.
 
+### D14. Every affordance is reachable with a pointer; the keyboard types text
+
+The owner's rule, stated on 2026-08-19: **nothing in this UI requires the
+keyboard except typing text into the composer.** Keyboard paths are welcome
+alongside -- Escape to dismiss, Enter to send -- but never as the only way to
+reach a behaviour.
+
+This is a constraint on what gets built rather than a rendering detail, which
+is why it is here and not inside the item that provoked it: it binds every UI
+item written from now on, and the next one should not have to rediscover it.
+
+The default it exists to stop is not hypothetical. OW-hezidi was filed with
+"whether cancel is a button or Escape" listed among the incidentals to decide
+in flight, which left it open that the only way out of an editing mode would be
+a key -- caught the same day, but filed that way first. A pointer user who
+enters a mode and does not know the key is stuck in it, and that item's whole
+design rests on entering the mode being cheap and abandonable. Escape as well
+is right; Escape only is the failure.
+
+So: when an interaction introduces a mode, the control that leaves it is
+visible and clickable, and it is drawn where the mode announces itself rather
+than somewhere the user has to go looking.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**. Each backend implements

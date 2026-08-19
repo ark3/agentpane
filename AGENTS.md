@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D13 in `docs/DESIGN.md`, the evidence behind the work in
+Decisions D1–D14 in `docs/DESIGN.md`, the evidence behind the work in
 `docs/HANDOFF.md`. Work items are one file each under `docs/work/open/` and
 `docs/work/closed/` — **status is the directory**. `docs/TRACKING.md` specifies
 the file format and why it is shaped that way.
