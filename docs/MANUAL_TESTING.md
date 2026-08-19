@@ -538,6 +538,48 @@ real `reduceServerEvent` and a controller that publishes the way
 DOM on screen. The second pair is the constancy claim: after the change the
 cost of a delta no longer tracks the length of the transcript behind it.
 
+## Observed sidebar sort cost before and after memoising `summaries` (OW-jineli)
+
+Recorded 2026-08-19 on the same machine and the same production-build recipe as
+the section above, except that the static server was
+`./node_modules/.bin/vite preview --config vite.perf.config.ts --port 5199
+--strictPort` (it binds `localhost`, so `PERF_URL` has to say `localhost` rather
+than the probe's `127.0.0.1` default). `e2e/perf-probe.ts` now carries that
+recipe; it used to give the `bun run dev` one, which is the wrong instrument.
+
+Both sides are on top of OW-detepa's `$state.raw`, so this is what is left after
+it. Before is `6f65b16`, after is the same tree with `sortedSummaries` reading a
+`summaries` derived instead of `view.state.summaries`. Median wall time of one
+`upsert`, 60 events per cell, and because the run-to-run spread at 400 sessions
+is wider than the effect in a single run, each cell is the **median of three
+full probe runs**:
+
+| Scenario | selected before | selected after | background before | background after |
+|---|---|---|---|---|
+| short transcript (15 msgs), 2 sessions | 1.00ms | 0.90ms | 0.30ms | 0.20ms |
+| long transcript (180 msgs), 2 sessions | 5.30ms | 5.30ms | 1.10ms | 1.40ms |
+| long transcript (180 msgs), 400 sessions | 7.80ms | 6.50ms | 3.40ms | 1.90ms |
+| short transcript (15 msgs), 400 sessions | 1.90ms | 1.00ms | 1.70ms | 0.70ms |
+
+The 2-session rows are the control and they do not move, which is what a sort of
+two elements should cost. The saving is the whole of the corpus-size term: at
+400 sessions a background event drops to what a 2-session one costs.
+
+**The call counts the jsdom test discriminates on.**
+`src/client/App.sort-cost.test.ts` counts `recency` — now exported from
+`src/client/time.ts` so it can be spied on — through the same
+`vi.mock`/`importOriginal` vehicle, over 22 `upsert` events (11 deltas each into
+two sessions) with 8 summaries listed:
+
+| Assertion | Before | After |
+|---|---|---|
+| 22 upserts, selected and background | 308 | 0 |
+| one publish carrying a genuinely new `summaries` array | 14 | 14 |
+
+308 is 22 events × the 14 calls one sort of 8 summaries costs — a full re-sort
+per token, for a list that did not change. The second row is the guard: the
+memo must not stop the list re-sorting when it really is re-listed.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:

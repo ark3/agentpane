@@ -12,6 +12,8 @@
  * either rather than each side formatting its own.
  */
 
+import type { SessionSummary } from "$shared/protocol.ts";
+
 /** Display form, `2026-08-18 12:00:00`. Empty string for anything unusable. */
 export function formatTimestamp(value: string | number | null | undefined): string {
 	const date = toDate(value);
@@ -35,4 +37,15 @@ function toDate(value: string | number | null | undefined): Date | null {
 	if (value === null || value === undefined) return null;
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * The sort key the session list orders by: `updatedAt`, or `createdAt` where a
+ * session has never been updated, as epoch-ms. Exported rather than local to
+ * `App.svelte` so `App.sort-cost.test.ts` can count the comparisons -- that
+ * count is the whole assertion there.
+ */
+export function recency(summary: SessionSummary): number {
+	const iso = summary.updatedAt ?? summary.createdAt;
+	return iso ? Date.parse(iso) : 0;
 }

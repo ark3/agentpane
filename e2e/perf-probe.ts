@@ -1,10 +1,16 @@
 /**
  * Runs the streaming-cost harness and prints a table. Not a test -- there is no
  * assertion here, because the question it answers ("where does the time go")
- * has a number for an answer, not a boolean. Run it by hand:
+ * has a number for an answer, not a boolean. Run it by hand, against a
+ * production build -- the dev server puts Svelte's `get_stack`/`get_error`
+ * tracing at ~47% of samples and roughly doubles every figure here (OW-detepa),
+ * so it measures the instrument rather than the client:
  *
- *   ./node_modules/.bin/vite --port 5199 --strictPort &
- *   bun e2e/perf-probe.ts
+ *   ./node_modules/.bin/vite build --config vite.perf.config.ts   # at the repo root
+ *   ./node_modules/.bin/vite preview --config vite.perf.config.ts --port 5199 --strictPort &
+ *   PERF_URL=http://localhost:5199/e2e/perf.html bun e2e/perf-probe.ts
+ *
+ * `bun run test:browser` binds the same port, so run one at a time.
  */
 
 import { chromium } from "@playwright/test";

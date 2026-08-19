@@ -13,7 +13,7 @@
 	import Transcript from "./render/Transcript.svelte";
 	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
-	import { formatTimestamp } from "./time.ts";
+	import { formatTimestamp, recency } from "./time.ts";
 
 	let { controller }: { controller: AgentpaneController } = $props();
 	/**
@@ -115,10 +115,19 @@
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
 	);
-	/** Most-recently-updated first -- the ordering cue the list otherwise has none of. */
-	const sortedSummaries = $derived(
-		[...view.state.summaries].sort((a, b) => recency(b) - recency(a)),
-	);
+	/**
+	 * Most-recently-updated first -- the ordering cue the list otherwise has none of.
+	 *
+	 * The extra derived is the point (OW-jineli): it makes the sort depend on the
+	 * *array* rather than on `view`, and nothing in an `upsert` touches
+	 * `summaries`, so a streaming token recomputes `summaries` to the identical
+	 * reference and stops there rather than re-sorting the whole corpus. It works
+	 * only while `view` is `$state.raw` (the docblock at the top of this file):
+	 * under a deep proxy the array reference changes on every publish and this
+	 * buys nothing.
+	 */
+	const summaries = $derived(view.state.summaries);
+	const sortedSummaries = $derived([...summaries].sort((a, b) => recency(b) - recency(a)));
 	/** The distinct workspaces to offer, most-recently-used first (derived from the listed sessions). */
 	const workspaceOptions = $derived.by(() => {
 		const seen = new Set<string>();
@@ -568,11 +577,6 @@
 			void controller.preview(top.ref);
 		}
 	});
-
-	function recency(summary: SessionSummary): number {
-		const iso = summary.updatedAt ?? summary.createdAt;
-		return iso ? Date.parse(iso) : 0;
-	}
 
 	/** The final path segment of a cwd, which is always absolute (see ALL_WORKSPACES above). */
 	function basename(cwd: string): string {
