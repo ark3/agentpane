@@ -5,6 +5,8 @@ where: '`src/client/api.ts`, `src/client/App.svelte`, `src/client/session-state.
 
 # Nothing in the client can answer an agent's approval request, so a `ServerRequest` hangs the turn forever behind one line of text.
 
+**Work laptop:** needs a live Pi or Codex run.
+
 The server half is built and tested. `ROUTES.reply` (`src/shared/protocol.ts`)
 addresses `POST /api/requests/:requestId`, `replyToRequest`
 (`src/server/http/app.ts`) resolves it against `sessions.sessionOfRequest` and

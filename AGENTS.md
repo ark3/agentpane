@@ -38,6 +38,14 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
 
 - Verify at the source. Where a claim about a CLI, a protocol, or a runtime is
   load-bearing, reproduce it and record how.
+- **Neither backend CLI is runnable here.** This machine has no `pi` at all,
+  and while Codex is installed, running it is expensive enough that it is not
+  to be run without being asked. So an item whose evidence has to come from a
+  live turn belongs on the work laptop, and carries the marker
+  `docs/TRACKING.md` names. Collect them with
+  `rg -l '^\*\*Work laptop:\*\*' docs/work/open | sort -V`. Reading a
+  captured fixture under `resources/fixtures/` is not a live run and is fine
+  here.
 - A test that has never failed has not been shown to test anything. For a fix,
   break it again and watch it go red first.
 - State the why only where there is a body behind it: an incident that happened

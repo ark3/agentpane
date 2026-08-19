@@ -5,6 +5,8 @@ where: '`src/server/adapters/pi/process.ts:343-360`'
 
 # Pi's `fork` is copy-on-write, so the adapter's docblock is wrong and its returned ref may be stale.
 
+**Work laptop:** needs a live Pi run.
+
 OW-mewiga ran the first Pi fork (HANDOFF 43, `MANUAL_TESTING.md`): on 0.84.2
 `fork` does **not** "rewind the active branch of the SAME session file in place"
 as the docblock at `process.ts:343-360` claims. It is copy-on-write — the active
