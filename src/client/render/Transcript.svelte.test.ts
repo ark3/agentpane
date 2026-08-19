@@ -45,6 +45,44 @@ describe("Message", () => {
 		expect(container.querySelector(".markdown")?.textContent).toContain("plain string");
 	});
 
+	it("offers no edit control unless a composer asked for one (OW-hezidi)", () => {
+		const { container } = render(Message, { props: { message: user("hi"), index: 0 } });
+		expect(container.querySelector("[data-edit]")).toBeNull();
+	});
+
+	it("hangs the edit control on the first block that has an action row, not the first block (OW-hezidi)", () => {
+		// A user message leading with an image has no action row on block 0 --
+		// `Block` draws one only for a text block with something in it -- so a
+		// control pinned to block 0 would simply never render.
+		const leadingImage: AgentMessage = {
+			role: "user",
+			content: [
+				{ type: "image", mimeType: "image/png", data: "AAAA" },
+				{ type: "text", text: "what is this?" },
+			],
+			timestamp: 1,
+		};
+		const { container } = render(Message, {
+			props: { message: leadingImage, index: 3, onedit: () => {} },
+		});
+
+		const rows = container.querySelectorAll("[data-block-actions]");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.querySelector("[data-edit]")).not.toBeNull();
+	});
+
+	it("reports the message's own index when its edit control is used (OW-hezidi)", async () => {
+		const edited: number[] = [];
+		const { container } = render(Message, {
+			props: { message: user("hi"), index: 7, onedit: (index: number) => edited.push(index) },
+		});
+
+		(container.querySelector("[data-edit]") as HTMLButtonElement).click();
+		await tick();
+
+		expect(edited).toEqual([7]);
+	});
+
 	it("shows the model and token cost of a finished turn", () => {
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "done" }]) },

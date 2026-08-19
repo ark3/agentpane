@@ -10,12 +10,12 @@
 	 * can declaration-merge new kinds in. The final `{:else}` is therefore not
 	 * dead code even though today it is unreachable by type.
 	 */
-	import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
+	import type { ToolResultMessage } from "@earendil-works/pi-ai";
 	import type { AssistantTurn, PaneMessage } from "$shared/protocol.ts";
 	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
-	import { oneLine, resultText } from "./types.ts";
+	import { oneLine, resultText, userBlocks } from "./types.ts";
 	import Output from "./tools/Output.svelte";
 	import ResultBody from "./tools/ResultBody.svelte";
 	import ToolCard from "./tools/ToolCard.svelte";
@@ -25,17 +25,33 @@
 		results = new Map<string, ToolResultMessage>(),
 		streaming = false,
 		index,
+		editing = false,
+		dimmed = false,
+		onedit,
 	}: {
 		message: PaneMessage;
 		results?: Map<string, ToolResultMessage>;
 		streaming?: boolean;
 		/** Position in the original `messages` array (OW-27: lets the shell find a specific message's DOM node, e.g. to anchor follow-mode). Omitted, no `data-index` renders. */
 		index?: number;
+		/** This user message is the one the composer is editing (OW-hezidi). */
+		editing?: boolean;
+		/** This message sits after the edit point, so it is not where the composer will send (OW-hezidi). */
+		dimmed?: boolean;
+		/** Offer an edit control on this user message. Absent -- a preview, or any other role -- and none is drawn. */
+		onedit?: ((index: number) => void) | undefined;
 	} = $props();
 
-	/** `UserMessage.content` is `string | blocks[]`; normalise so Block handles both. */
-	function userBlocks(content: string | (TextContent | ImageContent)[]): ContentBlock[] {
-		return typeof content === "string" ? [{ type: "text", text: content }] : content;
+	/**
+	 * Which block's action row carries the edit control (OW-hezidi), or -1.
+	 *
+	 * `Block` draws an action row only for a text block with something in it, so
+	 * a user message that leads with an image has no row on its first block and
+	 * the control goes to the first block that does have one. A message with no
+	 * text at all gets none: there would be nothing to put in the composer.
+	 */
+	function editRowIndex(blocks: ContentBlock[]): number {
+		return blocks.findIndex((block) => block.type === "text" && block.text.trim() !== "");
 	}
 
 	/** A finished turn with something to report: the model, the accounting, or both. */
@@ -65,14 +81,23 @@
 </script>
 
 {#if message.role === "user"}
-	<article class="msg user" data-role="user" data-index={index}>
+	{@const blocks = userBlocks(message.content)}
+	{@const editRow = editRowIndex(blocks)}
+	<article class="msg user" class:editing class:dimmed data-role="user" data-index={index}>
 		<div class="body">
 			<!-- When the message happened is a fact about the *message*, but a user
 			     message is effectively one text block, so it rides the first block's
 			     action row (OW-63) rather than growing a meta row of its own. Only
-			     the first block is offered it, so it can never render twice. -->
-			{#each userBlocks(message.content) as block, i (i)}
-				<Block {block} {results} timestamp={i === 0 ? message.timestamp : undefined} />
+			     the first block is offered it, so it can never render twice. The
+			     edit control (OW-hezidi) is the same bargain and rides the same row,
+			     but it goes to the first block that *has* one. -->
+			{#each blocks as block, i (i)}
+				<Block
+					{block}
+					{results}
+					timestamp={i === 0 ? message.timestamp : undefined}
+					onedit={onedit && index !== undefined && i === editRow ? () => onedit(index) : undefined}
+				/>
 			{/each}
 		</div>
 	</article>
@@ -109,7 +134,7 @@
 			{/if}
 		</p>
 	{/snippet}
-	<article class="msg assistant" data-role="assistant" data-index={index}>
+	<article class="msg assistant" class:dimmed data-role="assistant" data-index={index}>
 		<div class="body">
 			{#each turn.content as block, i (i)}
 				<Block
@@ -140,7 +165,7 @@
 	</article>
 {:else if message.role === "toolResult"}
 	<!-- An orphan: the call it answers is not in this transcript slice. -->
-	<article class="msg tool-result" data-role="tool-result" data-index={index}>
+	<article class="msg tool-result" class:dimmed data-role="tool-result" data-index={index}>
 		<ToolCard
 			name={message.toolName}
 			summary={oneLine(resultText(message)) || "result"}
@@ -155,7 +180,7 @@
 	     text and token figure only when the backend supplied them. Codex's
 	     contextCompaction carries neither, so it draws as a bare marker -- the
 	     normal path, not a fallback -- while Pi's carries both. -->
-	<article class="msg compaction" data-role="compactionSummary" data-index={index}>
+	<article class="msg compaction" class:dimmed data-role="compactionSummary" data-index={index}>
 		<p class="compaction-marker">
 			<span class="compaction-rule" aria-hidden="true"></span>
 			<span class="compaction-label">
@@ -172,7 +197,7 @@
 		{/if}
 	</article>
 {:else}
-	<article class="msg unknown" data-role="unknown" data-index={index}>
+	<article class="msg unknown" class:dimmed data-role="unknown" data-index={index}>
 		<Output text={JSON.stringify(message, null, 2)} language="json" />
 	</article>
 {/if}
@@ -201,6 +226,22 @@
 		border: 1px solid var(--ap-border);
 		border-left: 2px solid var(--ap-accent);
 		border-radius: var(--ap-radius-lg);
+	}
+
+	/* The tail after the edit point, dimmed rather than hidden (OW-hezidi). CC,
+	   Codex and Pi Agent all drop it from view; keeping it readable is the point,
+	   because the usual reason to reword a message is that the reply misread it
+	   and you want that reply in front of you while you reword. */
+	.msg.dimmed {
+		opacity: 0.4;
+	}
+
+	/* The message the composer is currently editing. Composer state, not a
+	   property of the session: once the fork is submitted this is gone and the
+	   original session reads normal. */
+	.msg.user.editing {
+		border-color: var(--ap-accent);
+		box-shadow: 0 0 0 1px var(--ap-accent);
 	}
 
 	.banner {

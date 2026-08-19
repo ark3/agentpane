@@ -110,6 +110,29 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("lists a session's fork points and unwraps them (OW-hezidi)", async () => {
+		const points = [{ id: "entry-1", text: "first" }, { id: "entry-2", text: "second" }];
+		const fetch = fetchRecorder(response({ points }));
+		const api = createAgentpaneApi({ fetch });
+
+		expect(await api.forkPoints(ref)).toEqual(points);
+		expect(fetch).toHaveBeenCalledWith(ROUTES.forkPoints(ref), { method: "GET" });
+	});
+
+	it("forks a session with a JSON body and unwraps the new conversation's ref (OW-hezidi)", async () => {
+		const forked: SessionRef = { backend: "codex", id: "thread-2" };
+		const fetch = fetchRecorder(response({ ref: forked }, 201));
+		const api = createAgentpaneApi({ fetch });
+		const body = { entryId: "entry-2" };
+
+		expect(await api.fork(ref, body)).toEqual(forked);
+		expect(fetch).toHaveBeenCalledWith(ROUTES.fork(ref), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	});
+
 	it("turns a JSON API error into an ApiClientError", async () => {
 		const fetch = fetchRecorder(response({ error: "not_found", detail: "missing session" }, 404));
 		const api = createAgentpaneApi({ fetch });

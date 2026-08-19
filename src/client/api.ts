@@ -4,6 +4,10 @@ import {
 	type AttachSessionResponse,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
+	type ForkPoint,
+	type ForkPointsResponse,
+	type ForkRequest,
+	type ForkResponse,
 	type ListSessionsResponse,
 	type PromptRequest,
 	type ServerEvent,
@@ -51,6 +55,15 @@ export interface AgentpaneApi {
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
 	abort(ref: SessionRef): Promise<void>;
 	compact(ref: SessionRef): Promise<void>;
+	/**
+	 * The points a session can be forked at (OW-hezidi): one per user message,
+	 * in transcript order, on both backends. Position is the whole addressing
+	 * scheme -- `ForkPoint.id` is a Pi entry id or a Codex turn id, and
+	 * `PaneMessage` carries neither.
+	 */
+	forkPoints(ref: SessionRef): Promise<ForkPoint[]>;
+	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
+	fork(ref: SessionRef, body: ForkRequest): Promise<SessionRef>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -99,6 +112,14 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		compact(ref) {
 			return requestNoContent(ROUTES.compact(ref), { method: "POST" });
+		},
+		forkPoints(ref) {
+			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => {
+				return (body as ForkPointsResponse).points;
+			});
+		},
+		fork(ref, body) {
+			return request(ROUTES.fork(ref), jsonRequest(body), (response) => (response as ForkResponse).ref);
 		},
 		connect(handlers) {
 			return openEvents(ROUTES.events, handlers);

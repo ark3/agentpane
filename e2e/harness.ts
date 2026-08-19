@@ -17,8 +17,9 @@
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
  * It is the vehicle for the few claims that need a real browser -- follow mode,
- * the nav rail, the tools menu's light dismiss (OW-80), and the turn-done
- * favicon badge (OW-diyuwu) -- not a browser E2E suite.
+ * the nav rail, the tools menu's light dismiss (OW-80), the turn-done favicon
+ * badge (OW-diyuwu), and the edit-and-fork chrome (OW-hezidi) -- not a browser
+ * E2E suite.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -28,7 +29,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ServerEvent, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, ServerEvent, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 /**
  * Window focus, faked, for the turn-done badge (OW-diyuwu).
@@ -202,6 +203,27 @@ const api: AgentpaneApi = {
 	},
 	async abort() {},
 	async compact() {},
+	/**
+	 * One point per user message, in transcript order -- the shape both real
+	 * adapters answer with, and the whole of what the client's ordinal
+	 * addressing depends on (OW-hezidi).
+	 */
+	async forkPoints() {
+		const points: ForkPoint[] = [];
+		messages.forEach((message, index) => {
+			if (message.role === "user") points.push({ id: `entry-${index}`, text: "" });
+		});
+		return points;
+	},
+	/**
+	 * A self-fork: this harness drives one session, and what the browser is here
+	 * for is the composer's mode row and the edit control's place in the block
+	 * action row, not the two backends' asymmetry -- which is the server's, and
+	 * is settled live in MANUAL_TESTING.md.
+	 */
+	async fork() {
+		return REF;
+	},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());

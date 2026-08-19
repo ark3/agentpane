@@ -140,6 +140,19 @@ class FakeController implements AgentpaneController {
 		this.aborted += 1;
 	}
 
+	/** Every fork the shell asked for, in order, with the images it carried. */
+	forked: Array<{ ordinal: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
+	/** What `forkAndSubmit` resolves to -- false is "the fork never landed". */
+	forkResult = true;
+	/** Stands in for whatever the server does mid-fork, e.g. Pi's `renamed`. */
+	onForkAndSubmit: ((ordinal: number) => void) | null = null;
+
+	async forkAndSubmit(ordinal: number, images?: { mimeType: string; base64: string }[]) {
+		this.forked.push({ ordinal, images });
+		this.onForkAndSubmit?.(ordinal);
+		return this.forkResult;
+	}
+
 	async compact() {
 		this.compacted += 1;
 	}
@@ -475,9 +488,16 @@ describe("App", () => {
 			},
 		});
 		await tick();
+		const attachedEl = attached.container.querySelector(".transcript") as HTMLElement;
 
 		expect(previewDom).toBeTruthy();
-		expect(previewDom).toBe(attached.container.querySelector(".transcript")?.innerHTML);
+		// One deliberate difference, and only this one: a preview has no composer,
+		// so it offers no edit control (OW-hezidi). Strip those and the two paths
+		// have to be byte-identical again -- that is the "one renderer" claim.
+		expect(attachedEl.querySelectorAll("[data-edit]")).toHaveLength(1);
+		expect(previewed.container.querySelectorAll("[data-edit]")).toHaveLength(0);
+		for (const button of attachedEl.querySelectorAll("[data-edit]")) button.remove();
+		expect(previewDom).toBe(attachedEl.innerHTML);
 	});
 
 	it("labels a previewed turn like the transcript does (no role label) and attributes it to the backend", async () => {
@@ -1232,7 +1252,7 @@ describe("App", () => {
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
-	it("shows Abort only while the selected session is streaming", async () => {
+	it("shows Stop only while the selected session is streaming", async () => {
 		const controller = new FakeController(view({
 			state: state({
 				selected: piSession,
@@ -1250,12 +1270,224 @@ describe("App", () => {
 		}));
 		render(App, { props: { controller } });
 
-		await fireEvent.click(screen.getByRole("button", { name: "Abort" }));
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 		expect(controller.aborted).toBe(1);
 
 		controller.publish(view());
 		await tick();
-		expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+	});
+
+	// -- edit and fork (OW-hezidi) ------------------------------------------
+
+	/**
+	 * A session holding `messages`, selected and attached, as the composer's
+	 * edit path needs one.
+	 */
+	function attachedState(messages: AgentMessage[], ref: SessionRef = piSession, isStreaming = false) {
+		return state({
+			selected: ref,
+			summaries: [summary(ref, "P")],
+			sessions: {
+				[sessionKey(ref)]: { ref, messages, isStreaming, seq: 1, error: null, requests: [] },
+			},
+		});
+	}
+
+	const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+	it("filling the composer from an earlier user message asks the server for nothing, and marks it (OW-hezidi)", async () => {
+		const controller = new FakeController(view({
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }]), user("second draft")]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		const edits = screen.getAllByRole("button", { name: "Edit message" });
+		expect(edits).toHaveLength(2); // one per user message, none on the assistant turn
+		await fireEvent.click(edits[0]!);
+
+		// Free and abandonable: the click is not a request, and nothing has been sent.
+		expect(controller.forked).toEqual([]);
+		expect(controller.submitted).toBe(0);
+		expect(controller.selected).toEqual([]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+
+		const marked = container.querySelectorAll(".msg.editing");
+		expect(marked).toHaveLength(1);
+		expect(marked[0]).toHaveAttribute("data-index", "0");
+		// Everything after it dims -- readable, but visibly not where this will land.
+		expect([...container.querySelectorAll(".msg.dimmed")].map((el) => el.getAttribute("data-index")))
+			.toEqual(["1", "2"]);
+	});
+
+	it("names the consequence on the primary button, and follows a turn ending mid-compose (OW-hezidi)", async () => {
+		const messages = [user("first draft"), assistant([{ type: "text", text: "an answer" }])];
+		const controller = new FakeController(view({ state: attachedState(messages) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const primary = () => container.querySelector("button[type='submit']")!;
+
+		expect(primary()).toHaveTextContent("Send");
+
+		await fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]!);
+		expect(primary()).toHaveTextContent("Fork");
+
+		// Scrolled up and hit edit while a turn was running: submitting stops it first.
+		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, true) }));
+		await tick();
+		expect(primary()).toHaveTextContent("Stop and fork");
+		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+		// That turn finishes while the edit is still being typed: the label reverts.
+		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, false) }));
+		await tick();
+		expect(primary()).toHaveTextContent("Fork");
+	});
+
+	it("carries an edited message's images into the fork rather than silently dropping them (OW-hezidi)", async () => {
+		const withImages: AgentMessage = {
+			role: "user",
+			content: [
+				{ type: "text", text: "What is in these?" },
+				{ type: "image", mimeType: "image/png", data: PIXEL },
+				{ type: "image", mimeType: "image/jpeg", data: PIXEL },
+			],
+			timestamp: 1786419855000,
+		};
+		const controller = new FakeController(view({
+			state: attachedState([withImages, assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+
+		expect(controller.forked).toEqual([{
+			ordinal: 0,
+			images: [
+				{ mimeType: "image/png", base64: PIXEL },
+				{ mimeType: "image/jpeg", base64: PIXEL },
+			],
+		}]);
+	});
+
+	it("cancels an edit on a click, restoring the displaced draft and the transcript (OW-hezidi)", async () => {
+		const controller = new FakeController(view({
+			draft: "half-written note",
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(1);
+		expect(container.querySelectorAll(".msg.dimmed")).toHaveLength(1);
+
+		// A click, never a key: D14 -- an edit only a keyboard can abandon traps a
+		// pointer user in a mode this design leans on leaving cheaply.
+		await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
+		expect(container.querySelectorAll(".msg.dimmed")).toHaveLength(0);
+		expect(controller.forked).toEqual([]);
+	});
+
+	it("also cancels an edit on Escape, a second way out and never the only one (OW-hezidi)", async () => {
+		const controller = new FakeController(view({
+			draft: "half-written note",
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "Escape" });
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
+	});
+
+	it("a Pi-shaped fork ends on the renamed ref with the follow and scroll maps re-keyed (OW-hezidi)", async () => {
+		const forkRef: SessionRef = { backend: "pi", id: "pi-77" };
+		const controller = new FakeController(view({
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		// Pi's fork moves the live process onto a new file, and the server reports
+		// that as `renamed` -- which lands while the fork request is still in flight.
+		controller.onForkAndSubmit = () => controller.fireRename(piSession, forkRef);
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.forked).toEqual([{ ordinal: 0, images: [] }]);
+
+		// The fork's own transcript arrives under the new key: everything before the
+		// edited message, then the edited message itself.
+		const reworded = user("reworded");
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef) }));
+		await tick();
+		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef, true) }));
+		await tick();
+		await nextFrame();
+
+		// Keyed under "pi:pi-1" still, this reads 0 -- the fork's turn would stream
+		// off the bottom of a transcript nothing was following.
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
+		// And the edit mode is over: the original session reads normal afterwards.
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
+		expect(container.querySelector("button[type='submit']")).toHaveTextContent("Send");
+	});
+
+	/**
+	 * The Pi test above proves the `renamed` path. This one is the other half, and
+	 * the only thing that covers `send()`'s own re-key: Codex renames nothing, so
+	 * the follow armed under the parent's key before the fork has to be moved once
+	 * `forkAndSubmit` resolves, or it is stranded there -- follow never engages on
+	 * the fork, and the parent keeps a stale entry pointing at an earlier index.
+	 */
+	it("a Codex-shaped fork, which renames nothing, still ends following the fork's own turn (OW-hezidi)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "thread-2" };
+		const controller = new FakeController(view({
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+		const reworded = user("reworded");
+		// What the real `forkAndSubmit` does: it attaches the ref the fork returned
+		// and publishes that selection *before* it resolves. No `renamed` ever fires.
+		controller.onForkAndSubmit = () => {
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ draft: "", state: attachedState([reworded], forkRef) }));
+		};
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.forked).toEqual([{ ordinal: 0, images: [] }]);
+		expect(controller.getView().state.selected).toEqual(forkRef);
+
+		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef, true) }));
+		await tick();
+		await nextFrame();
+
+		// Stranded under "pi:pi-1" this reads 60 -- where the session switch parked
+		// it -- because nothing ever armed follow on the fork.
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
 	it("reports reconnection and unsupported pending agent requests", () => {

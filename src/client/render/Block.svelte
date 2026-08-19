@@ -20,6 +20,7 @@
 		streaming = false,
 		timestamp,
 		meta,
+		onedit,
 	}: {
 		block: ContentBlock;
 		results?: Map<string, ToolResultMessage>;
@@ -36,6 +37,8 @@
 		 * only to the block whose row is the turn's last.
 		 */
 		meta?: Snippet | undefined;
+		/** Take the owning user message into the composer (OW-hezidi). Passed by `Message.svelte` to one block only. */
+		onedit?: (() => void) | undefined;
 	} = $props();
 </script>
 
@@ -46,7 +49,7 @@
 	     nothing to copy. Images get no controls at all (OW-63): text actions
 	     act on text. -->
 	{#if block.text.trim()}
-		<BlockActions source={block.text} label="text" {timestamp} {meta} />
+		<BlockActions source={block.text} label="text" {timestamp} {meta} {onedit} />
 	{/if}
 {:else if block.type === "thinking"}
 	<Thinking text={block.thinking} redacted={block.redacted ?? false} {streaming} />

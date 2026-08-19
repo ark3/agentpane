@@ -167,6 +167,12 @@ const api: AgentpaneApi = {
 	async prompt() {},
 	async abort() {},
 	async compact() {},
+	async forkPoints() {
+		return [];
+	},
+	async fork(ref: SessionRef) {
+		return ref;
+	},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());

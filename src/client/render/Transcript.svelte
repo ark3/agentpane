@@ -8,11 +8,23 @@
 		messages = [],
 		isStreaming = false,
 		reading = false,
+		editingIndex = null,
+		onedit,
 	}: {
 		messages?: AgentMessage[];
 		isStreaming?: boolean;
 		/** Reading view (OW-51): elide tool calls, tool results and thinking. */
 		reading?: boolean;
+		/**
+		 * Index in `messages` of the user message the composer is editing
+		 * (OW-hezidi), or null. It marks that message and dims everything after
+		 * it: with the whole transcript undimmed there is nothing on screen
+		 * telling "this composer will fork at message 5" from "this composer will
+		 * append here", and those outcomes differ by a whole session.
+		 */
+		editingIndex?: number | null;
+		/** Offer an edit control on every user message. Omitted -- a read-only preview -- and none is drawn. */
+		onedit?: ((index: number) => void) | undefined;
 	} = $props();
 
 	const view = $derived(reading ? condense(buildTranscript(messages)) : buildTranscript(messages));
@@ -25,6 +37,9 @@
 			results={view.results}
 			streaming={isStreaming && entry.index === view.lastIndex}
 			index={entry.index}
+			editing={entry.index === editingIndex}
+			dimmed={editingIndex !== null && entry.index > editingIndex}
+			{onedit}
 		/>
 	{/each}
 

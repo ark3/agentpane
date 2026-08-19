@@ -243,6 +243,12 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 /* A read-only preview has no composer -- attaching is the one explicit action. */
 .attach button { width: 100%; border-color: var(--ap-accent); color: var(--ap-accent); }
 .abort { color: var(--ap-danger); }
+/* The edit mode banner (OW-hezidi). It sits above the composer and carries the
+   whole explanation, which is what lets the buttons beside Send stay short, and
+   it is where Cancel lives -- D14: an edit that can only be abandoned by knowing
+   a key traps a pointer user in a mode this design leans on leaving cheaply. */
+.edit-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--ap-space-3); margin: 0; padding: var(--ap-space-2) var(--ap-space-3); border: 1px solid var(--ap-accent); border-radius: var(--ap-radius-sm); background: var(--ap-surface-raised); color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+.edit-banner button { flex: 0 0 auto; }
 
 /* A preview's turns render through Transcript (OW-50), which brings its own
    styling; only the empty case is the preview's own. */

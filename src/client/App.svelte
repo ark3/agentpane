@@ -11,6 +11,7 @@
 		watchSubmit,
 	} from "./favicon.ts";
 	import Transcript from "./render/Transcript.svelte";
+	import { userBlocks } from "./render/types.ts";
 	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
 	import { formatTimestamp, recency } from "./time.ts";
@@ -50,6 +51,26 @@
 	 * not per-session -- it resets on reload like the selects above.
 	 */
 	let reading = $state(false);
+	/**
+	 * The earlier user message the composer is editing (OW-hezidi), or null.
+	 *
+	 * Nothing here has touched the server: clicking edit fills the composer and
+	 * marks the transcript, and that is all, so the click is free and
+	 * abandonable. The fork happens at submit. `stashedDraft` is whatever the
+	 * composer held when the edit displaced it, put back by Cancel.
+	 *
+	 * `ordinal` is the message's position *among user messages*, which is how
+	 * the fork point is addressed: `GET fork-points` answers one point per user
+	 * message in transcript order on both backends, while `PaneMessage` carries
+	 * no id of its own (D11 freezes `protocol.ts`, so it cannot grow one).
+	 * Matching on wording instead would break on two identical messages.
+	 */
+	let editing = $state<{
+		index: number;
+		ordinal: number;
+		images: { mimeType: string; base64: string }[];
+		stashedDraft: string;
+	} | null>(null);
 	let conversationEl: HTMLElement | undefined;
 	// $state because it is bound inside a conditional block -- Svelte updates the
 	// binding (element <-> undefined) as the composer swaps in and out.
@@ -158,6 +179,15 @@
 	);
 	const newSessionWorkspace = $derived(selectedSummary?.cwd ?? null);
 	const error = $derived(view.error ?? selectedSession?.error ?? null);
+	const streamingNow = $derived(selectedSession?.isStreaming ?? false);
+	/**
+	 * The primary button names every consequence it will have (OW-hezidi).
+	 * "Fork", not a plainer phrase: all three CLIs in play use that word for this
+	 * operation and for the new-session sense of it. Never "rewind" -- that is
+	 * Claude Code's word for the in-place operation, which agentpane does not
+	 * offer and Codex cannot do at all.
+	 */
+	const sendLabel = $derived(editing ? (streamingNow ? "Stop and fork" : "Fork") : "Send");
 	/** Advisory only (OW-73): a leading `/` is the whole trigger, deliberately imprecise -- Send still works either way. */
 	const looksLikeSlashCommand = $derived(view.draft.startsWith("/"));
 	const status = $derived.by(() => {
@@ -188,22 +218,9 @@
 		// publish above and thus ahead of the effects below that key off it --
 		// otherwise a session's own rename (D9: every new session gets one, on
 		// its first prompt) orphans its in-flight follow state under the old key.
-		const unsubscribeRename = controller.onRename((from, to) => {
-			const fromKey = sessionKey(from);
-			const toKey = sessionKey(to);
-			const scroll = sessionScroll.get(fromKey);
-			if (scroll) {
-				sessionScroll.delete(fromKey);
-				sessionScroll.set(toKey, scroll);
-			}
-			const pending = pendingFollow.get(fromKey);
-			if (pending !== undefined) {
-				pendingFollow.delete(fromKey);
-				pendingFollow.set(toKey, pending);
-			}
-			if (lastScrollKey === fromKey) lastScrollKey = toKey;
-			turnWatch = watchRename(turnWatch, fromKey, toKey);
-		});
+		const unsubscribeRename = controller.onRename((from, to) =>
+			rekeySession(sessionKey(from), sessionKey(to)),
+		);
 		void controller.start();
 
 		// A read-only preview polls itself, but the controller owns no DOM (OW-76),
@@ -249,6 +266,32 @@
 			observer?.disconnect();
 		};
 	});
+
+	/**
+	 * Move this tab's own per-session state -- follow, remembered scroll, the
+	 * badge's turn watch -- from one session key to another.
+	 *
+	 * Two things move a session's key under an in-flight turn. A `renamed` event
+	 * (D9: every new session gets one on its first prompt), and a fork, where
+	 * Pi renames but Codex answers with a brand-new ref it renames nothing to
+	 * (OW-hezidi). Orphaning this state under the old key strands follow mode
+	 * mid-turn, which is what OW-27 was.
+	 */
+	function rekeySession(fromKey: string, toKey: string): void {
+		if (fromKey === toKey) return;
+		const scroll = sessionScroll.get(fromKey);
+		if (scroll) {
+			sessionScroll.delete(fromKey);
+			sessionScroll.set(toKey, scroll);
+		}
+		const pending = pendingFollow.get(fromKey);
+		if (pending !== undefined) {
+			pendingFollow.delete(fromKey);
+			pendingFollow.set(toKey, pending);
+		}
+		if (lastScrollKey === fromKey) lastScrollKey = toKey;
+		turnWatch = watchRename(turnWatch, fromKey, toKey);
+	}
 
 	// jsdom is configured with rAF, but do not make this depend on it -- same
 	// fallback Markdown.svelte uses for its own throttle.
@@ -439,11 +482,19 @@
 		updateNavState(el);
 	}
 
-	/** On submit, arm follow-mode for whatever message this submission produces. */
-	function armFollow(): void {
+	/**
+	 * On submit, arm follow-mode for whatever message this submission produces.
+	 *
+	 * `from` is the index the produced message cannot land before. It defaults to
+	 * the transcript's current length, which is right for an ordinary prompt; a
+	 * fork's transcript is the parent truncated just before the edited message,
+	 * so there the caller passes that message's index instead -- the parent's
+	 * length would sit past the end of the fork and never arm (OW-hezidi).
+	 */
+	function armFollow(from?: number): void {
 		const ref = view.state.selected;
 		if (!ref) return;
-		pendingFollow.set(sessionKey(ref), selectedSession?.messages.length ?? 0);
+		pendingFollow.set(sessionKey(ref), from ?? selectedSession?.messages.length ?? 0);
 	}
 
 	/**
@@ -470,6 +521,12 @@
 		const key = ref ? sessionKey(ref) : null;
 		if (key === lastScrollKey) return;
 		lastScrollKey = key;
+		// An edit is anchored to one transcript by index, so it cannot survive the
+		// pane moving to another one: the mark would land on an unrelated message
+		// and the ordinal would address the wrong session's fork points. The
+		// displaced draft is not restored here -- switching sessions has never
+		// rewritten the composer, and this is a switch.
+		editing = null;
 
 		const el = conversationEl;
 		if (!el) return;
@@ -654,22 +711,86 @@
 		promptEl?.focus();
 	}
 
-	function submitPrompt(event: SubmitEvent): void {
-		event.preventDefault();
-		if (!view.draft) return;
-		armFollow();
-		armBadge();
-		void controller.submit();
+	/**
+	 * Take an earlier user message back into the composer (OW-hezidi). No request
+	 * is issued and no server state changes: this is the free, abandonable half
+	 * of the gesture, and everything else here exists to keep it that way.
+	 */
+	function startEdit(index: number): void {
+		const messages = selectedSession?.messages ?? [];
+		const message = messages[index];
+		if (!message || message.role !== "user") return;
+		let ordinal = 0;
+		for (let i = 0; i < index; i++) if (messages[i]?.role === "user") ordinal += 1;
+		const text: string[] = [];
+		// Carried, not dropped: `PromptRequest.images` takes them back, and a fork
+		// that quietly sent fewer images than the original held is exactly the
+		// surprise the button labels above exist to prevent.
+		const images: { mimeType: string; base64: string }[] = [];
+		for (const block of userBlocks(message.content)) {
+			if (block.type === "text") text.push(block.text);
+			else if (block.type === "image") images.push({ mimeType: block.mimeType, base64: block.data });
+		}
+		editing = { index, ordinal, images, stashedDraft: view.draft };
+		controller.setDraft(text.join("\n\n"));
+		promptEl?.focus();
 	}
 
-	/** Ctrl/Cmd-Enter submits; plain Enter inserts a newline (prompts are routinely multi-line). */
+	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
+	function cancelEdit(): void {
+		if (!editing) return;
+		controller.setDraft(editing.stashedDraft);
+		editing = null;
+	}
+
+	/**
+	 * The composer's one send path. Editing, it forks at the marked message and
+	 * sends into the fork; otherwise it prompts the selected session.
+	 *
+	 * The edit mode is cleared only once the fork has actually landed. A failed
+	 * fork leaves the draft as the edited text, and clearing the mark under it
+	 * would leave a composer saying nothing about where it is about to send.
+	 */
+	function send(): void {
+		if (!view.draft) return;
+		const edit = editing;
+		armFollow(edit?.index);
+		armBadge();
+		if (!edit) {
+			void controller.submit();
+			return;
+		}
+		const armedKey = view.state.selected ? sessionKey(view.state.selected) : null;
+		void controller.forkAndSubmit(edit.ordinal, edit.images).then((sent) => {
+			// Pi's fork renames, and `rekeySession` has already run off that event.
+			// Codex's does not -- it hands back a ref nothing was renamed to -- so
+			// this is where the follow armed above catches up with it. A no-op
+			// whenever the key did not move, including a fork that failed.
+			const now = view.state.selected;
+			if (armedKey && now) rekeySession(armedKey, sessionKey(now));
+			if (sent && editing === edit) editing = null;
+		});
+	}
+
+	function submitPrompt(event: SubmitEvent): void {
+		event.preventDefault();
+		send();
+	}
+
+	/**
+	 * Ctrl/Cmd-Enter submits; plain Enter inserts a newline (prompts are
+	 * routinely multi-line). Escape abandons an edit -- a second way out, never
+	 * the only one: D14 puts Cancel in the banner where a pointer can reach it.
+	 */
 	function handlePromptKeydown(event: KeyboardEvent): void {
+		if (event.key === "Escape" && editing) {
+			event.preventDefault();
+			cancelEdit();
+			return;
+		}
 		if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
 		event.preventDefault();
-		if (!view.draft) return;
-		armFollow();
-		armBadge();
-		void controller.submit();
+		send();
 	}
 </script>
 
@@ -783,6 +904,8 @@
 				messages={selectedSession?.messages ?? []}
 				isStreaming={selectedSession?.isStreaming ?? false}
 				{reading}
+				editingIndex={editing?.index ?? null}
+				onedit={startEdit}
 			/>
 		{/if}
 	</section>
@@ -812,6 +935,17 @@
 		</div>
 	{:else}
 		<form class="prompt" onsubmit={submitPrompt}>
+			<!-- The mode banner (OW-hezidi). It does the explaining, which is what
+			     lets the buttons stay short, and it is where the cancel control
+			     lives: a bare glyph reads as "dismiss this notice", not "abandon my
+			     edit". "conversation", not "session" -- the Tools menu already says
+			     "New conversation", and `session` is the protocol's word. -->
+			{#if editing}
+				<p class="edit-banner" role="status">
+					<span>Editing an earlier message. Forking starts a new conversation from here and keeps this one.</span>
+					<button type="button" onclick={cancelEdit}>Cancel</button>
+				</p>
+			{/if}
 			{#if looksLikeSlashCommand}
 				<p class="warning">Agentpane does not run slash commands — this will be sent to the agent as plain text.</p>
 			{/if}
@@ -849,9 +983,9 @@
 						disabled={view.state.selected === null || view.busy === "compacting"}
 					>Compact</button>
 				</div>
-				<button type="submit" disabled={!view.draft}>Send</button>
-				{#if selectedSession?.isStreaming}
-					<button type="button" class="abort" onclick={() => void controller.abort()}>Abort</button>
+				<button type="submit" disabled={!view.draft}>{sendLabel}</button>
+				{#if streamingNow}
+					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
 				{/if}
 			</div>
 		</form>

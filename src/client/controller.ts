@@ -1,5 +1,6 @@
 import type {
 	BackendId,
+	PromptRequest,
 	ServerEvent,
 	SessionPreviewTurn,
 	SessionRef,
@@ -47,6 +48,21 @@ export interface AgentpaneController {
 	preview(ref: SessionRef): Promise<void>;
 	select(ref: SessionRef): Promise<void>;
 	submit(): Promise<void>;
+	/**
+	 * Fork the selected session just before its `ordinal`-th user message and
+	 * send the current draft, plus `images`, into the fork (OW-hezidi). Always a
+	 * new session: neither backend is asked to rewind in place, and Codex cannot.
+	 *
+	 * The ordinal indexes `GET fork-points`, which answers one point per user
+	 * message in transcript order on both backends -- the caller counts user
+	 * messages and never matches on wording, which two identical messages break.
+	 *
+	 * Resolves **true** only when the prompt landed. The caller owns the compose
+	 * mode this drives, and a failed fork has to leave that mode standing: the
+	 * draft is still the edited text, and clearing the mark under it would leave
+	 * a composer that says nothing about where it is about to send.
+	 */
+	forkAndSubmit(ordinal: number, images?: PromptRequest["images"]): Promise<boolean>;
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
@@ -425,6 +441,57 @@ export function createController(
 				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
+			} finally {
+				renameListeners.delete(onRename);
+				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
+			}
+		},
+		async forkAndSubmit(ordinal, images) {
+			const selected = view.state.selected;
+			if (!selected) {
+				publish({ error: "Select a session before submitting a prompt." });
+				return false;
+			}
+			if (!view.draft) return false;
+			const text = view.draft;
+			// Same rename hazard `submit` above carries (D9), and the fork adds a
+			// second source of it: Pi's fork moves the live process onto a new file,
+			// which the server reports as `renamed`. So the ref this reads fork
+			// points from, and forks, is tracked through any rename in flight.
+			let ref = selected;
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) === sessionKey(ref)) ref = to;
+			};
+			renameListeners.add(onRename);
+			publish({ busy: "submitting", error: null });
+			try {
+				// Stop a running turn before forking it. A first cut, chosen because it
+				// is safe on both backends; Codex's parent thread genuinely keeps
+				// running, and not stopping it there is gated on OW-yudoni.
+				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
+				const points = await api.forkPoints(ref);
+				const point = points[ordinal];
+				if (!point) throw new Error("That message is no longer a fork point in this session.");
+				const forked = await api.fork(ref, { entryId: point.id });
+				if (disposed) return false;
+				// The two backends reach "attached to the fork" from opposite
+				// directions, and this one line covers both. Pi's fork moved the live
+				// process onto the new file, so the manager has already re-keyed and
+				// this attach finds it; Codex minted a thread nothing is driving, and
+				// this attach is what spawns it. A fork is a selection change, so the
+				// intent bumps -- a preview poll still in flight must not put its old
+				// transcript back over the fork.
+				selectionIntent += 1;
+				const attached = await api.attach(forked);
+				if (disposed) return false;
+				applyAttached(attached, true, forked);
+				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
+				if (disposed) return false;
+				publish({ draft: "", error: null });
+				return true;
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
+				return false;
 			} finally {
 				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });

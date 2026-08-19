@@ -13,7 +13,8 @@
 	 * than mounted once in the shell: it is `position: fixed`, so where it sits
 	 * in the tree has no bearing on where it draws, and this way a block needs
 	 * no store, no context and no plumbing through `App.svelte` to be
-	 * expandable. Read-only, deliberately -- edit and resubmit is OW-22.
+	 * expandable. Read-only apart from `onedit`, which takes the whole message
+	 * back into the composer -- edit and fork is OW-hezidi.
 	 */
 	import type { Snippet } from "svelte";
 	import { formatTimestamp, timestampIso } from "../time.ts";
@@ -27,6 +28,7 @@
 		label = "block",
 		timestamp,
 		meta,
+		onedit,
 	}: {
 		source: string;
 		kind?: "markdown" | "code";
@@ -45,6 +47,14 @@
 		 * still knows nothing about what a turn reports.
 		 */
 		meta?: Snippet | undefined;
+		/**
+		 * Take this message back into the composer (OW-hezidi). Passed only by the
+		 * user arm of `Message.svelte`, so the control's name says "message" rather
+		 * than `label`: it is the whole message that gets edited, not this block.
+		 * Absent -- every other caller, and every transcript with no composer --
+		 * and no control is drawn.
+		 */
+		onedit?: (() => void) | undefined;
 	} = $props();
 
 	let expanded = $state(false);
@@ -65,6 +75,12 @@
 		aria-label="Expand {label}"
 		onclick={() => (expanded = true)}>⤢</button
 	>
+	<!-- Last, so adding it moves neither of the controls that were already here. -->
+	{#if onedit}
+		<button class="ap-action" type="button" data-edit title="Edit message" aria-label="Edit message" onclick={onedit}
+			>✎</button
+		>
+	{/if}
 </div>
 
 {#if expanded}

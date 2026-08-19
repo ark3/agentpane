@@ -22,6 +22,17 @@ import type {
  */
 export type ContentBlock = TextContent | ThinkingContent | ToolCall | ImageContent;
 
+/**
+ * `UserMessage.content` is `string | blocks[]`; normalise so one code path
+ * handles both. Lives here rather than in `Message.svelte` because the composer
+ * reads a user message the same way when it fills itself from one (OW-hezidi),
+ * and two normalisations that drift would send different content than the
+ * transcript shows.
+ */
+export function userBlocks(content: string | (TextContent | ImageContent)[]): ContentBlock[] {
+	return typeof content === "string" ? [{ type: "text", text: content }] : content;
+}
+
 /** Props every tool renderer in the registry receives. */
 export interface ToolRenderProps {
 	/** The `toolCall` block from the assistant message. */

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
 	BackendId,
+	ForkPoint,
+	ForkRequest,
 	ServerEvent,
 	SessionPreviewResponse,
 	SessionPreviewTurn,
@@ -12,6 +14,8 @@ import { createController } from "./controller.ts";
 
 const ref: SessionRef = { backend: "pi", id: "virtual-a" };
 const attachedRef: SessionRef = { backend: "pi", id: "/sessions/a.jsonl" };
+/** A Codex-shaped fork: a brand-new thread this client is not driving yet. */
+const forkedRef: SessionRef = { backend: "codex", id: "thread-forked" };
 
 function summary(session: SessionRef, cwd = "/work"): SessionSummary {
 	return {
@@ -44,6 +48,8 @@ class FakeApi implements AgentpaneApi {
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
+	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
+	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
@@ -385,6 +391,81 @@ describe("client controller", () => {
 		await compacted;
 
 		expect(controller.getView().busy).toBe("idle");
+	});
+
+	/**
+	 * OW-hezidi. The fork point is addressed by *ordinal* among user messages --
+	 * `GET fork-points` returns one point per user message in transcript order --
+	 * so identical wording in two messages cannot confuse it.
+	 */
+	it("forks at the ordinal-th user message and only then prompts, into the ref the fork returned (OW-hezidi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([
+			{ id: "turn-1", text: "same words" },
+			{ id: "turn-2", text: "same words" },
+			{ id: "turn-3", text: "same words" },
+		]);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		await controller.forkAndSubmit(1);
+
+		expect(api.forkPoints).toHaveBeenCalledWith(ref);
+		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
+		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
+		// Order, not just occurrence: prompting the parent and then forking would
+		// leave the edited turn on the session the edit was supposed to spare.
+		expect(api.fork.mock.invocationCallOrder[0]!).toBeLessThan(api.prompt.mock.invocationCallOrder[0]!);
+		expect(controller.getView().draft).toBe("");
+	});
+
+	it("ends selected and attached to a Codex-shaped fork, which renames nothing (OW-hezidi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.attach.mockClear();
+		controller.setDraft("reworded");
+
+		await controller.forkAndSubmit(0);
+
+		// Codex leaves this client's adapter on the parent and the returned ref
+		// has no adapter at all, so the client is what attaches it.
+		expect(api.attach).toHaveBeenCalledWith(forkedRef);
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
+	});
+
+	it("stops a running turn before forking it (OW-hezidi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true });
+		controller.setDraft("reworded");
+
+		await controller.forkAndSubmit(0);
+
+		expect(api.abort).toHaveBeenCalledWith(ref);
+		expect(api.abort.mock.invocationCallOrder[0]!).toBeLessThan(api.fork.mock.invocationCallOrder[0]!);
+	});
+
+	it("keeps the draft, and reports, when there is no fork point at that ordinal (OW-hezidi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		expect(await controller.forkAndSubmit(4)).toBe(false);
+
+		expect(api.fork).not.toHaveBeenCalled();
+		expect(api.prompt).not.toHaveBeenCalled();
+		expect(controller.getView().draft).toBe("reworded");
+		expect(controller.getView().error).not.toBeNull();
 	});
 
 	it("closes SSE and ignores later events after disposal", async () => {

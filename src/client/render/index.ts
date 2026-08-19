@@ -44,6 +44,7 @@ export {
 	resultImages,
 	resultText,
 	toolState,
+	userBlocks,
 	type ContentBlock,
 	type ToolRenderProps,
 	type ToolState,
