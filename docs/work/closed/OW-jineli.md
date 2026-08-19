@@ -59,3 +59,19 @@ The same "depends on `view`, not on what it reads" shape is worth a look across
 the other deriveds in the file — `selectedSummary` runs a `find` over the same
 array on every event — but that is a smaller cost and not measured; do not widen
 this item into a sweep without numbers.
+
+**Fixed** in c95cbe9: a `summaries` derived sits between `view` and the sort in
+`src/client/App.svelte`, so the sort depends on the array and a token that
+recomputes it to the identical reference stops at `update_derived`'s equality
+check. The docblock at the site names the `$state.raw` dependency, since
+touching OW-detepa's line would otherwise undo this silently. `recency` moved to
+`src/client/time.ts` so `src/client/App.sort-cost.test.ts` can count the
+comparisons; it was watched red first, **308 -> 0** over 22 upserts across a
+selected and a background session, with a re-list still sorting (14 calls either
+way) so the memo is not suppressing a real refresh. Re-measured with
+`bun e2e/perf-probe.ts` against a production build, median of three runs per
+side, and recorded in `docs/MANUAL_TESTING.md`: at 180 messages and 400
+sessions, 7.8 -> 6.5ms selected and 3.4 -> 1.9ms background, with the
+2-session rows flat as the control. `e2e/perf-probe.ts`'s docblock gave the
+dev-server recipe, which OW-detepa showed roughly doubles every figure; it now
+gives the production one. `selectedSummary` is left alone, as the item asked.
