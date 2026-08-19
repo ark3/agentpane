@@ -52,20 +52,44 @@ Once the fork is submitted the original session reads **normal**: the mark is
 composer state, not a property of the session, and nothing records "you
 branched here" (owner, 2026-08-19).
 
-## What the button says
+## The words
 
-The primary button names every consequence it is about to have -- the owner's
-requirement, in his words, *"I don't want to be surprised by this"*:
+The user is the only user (owner, 2026-08-19), so jargon is not a problem to be
+designed around -- but the consequence of a click still has to be visible next
+to the click. A **mode banner** above the composer does the explaining, which is
+what lets the buttons stay short, and it is where the cancel control lives:
+
+> Editing an earlier message. Forking starts a new conversation from here and
+> keeps this one.
+
+`conversation`, not `session`: the Tools menu already says "New conversation"
+(`App.svelte:840`), and `session` is the protocol's word, which no user reads.
 
 | state | label |
 |---|---|
 | idle, not editing | Send |
-| streaming, not editing | Send, beside today's Abort (`App.svelte:853`) |
+| streaming, not editing | Send, beside Stop |
 | idle, editing | Fork |
-| streaming, editing | Abort and fork |
+| streaming, editing | Stop and fork |
 
-Submitting an edit while a turn runs aborts it first, on both backends. That is
-a first cut chosen because it is safe on both; not aborting on Codex, where the
+**"Fork" rather than a plainer phrase**, and it is not only the owner's
+tolerance for jargon that settles it: all three CLIs in play use the word for
+exactly this operation, and use it for the *new-session* sense. `codex --help`
+carries a top-level `fork` -- *"Fork a previous interactive session"*; `claude
+--help` carries `--fork-session`, *"When resuming, create a new session ID"*;
+Pi's TUI offers `/fork` (owner, recorded in closed OW-mewiga). Conversely,
+**never use "rewind" in this UI.** Claude Code's `/rewind` means the in-place
+operation, which agentpane deliberately does not offer and Codex cannot do at
+all (finding 46), so borrowing the word would name the one thing that will not
+happen.
+
+**Rename the existing Abort button to Stop** (`App.svelte:854`, `class="abort"`
+may keep its name). In scope here rather than left alone, because this item is
+what introduces "Stop and fork" beside it, and a composer showing both "Abort"
+and "Stop and fork" is the actual defect. Owner, 2026-08-19: *"Stop is fine."*
+
+Submitting an edit while a turn runs stops it first, on both backends. That is
+a first cut chosen because it is safe on both; not stopping on Codex, where the
 parent thread genuinely keeps running, is a later refinement gated on
 OW-yudoni.
 
@@ -78,12 +102,12 @@ killing a running turn, which destroys the free abandonable click above.
 
 ## Cancelling
 
-A **visible cancel control**, beside the primary button where the composer
-already says what it is about to do. Escape may cancel as well, but must never
-be the only way: the owner's rule, stated on 2026-08-19, is that nothing in
-this UI requires the keyboard except typing text into the composer. An edit
-that can only be abandoned by knowing a key is an edit that traps a mouse user
-in a mode, and this design leans on abandoning edits being cheap.
+A **visible control labelled `Cancel`**, in the banner above the composer
+where the mode announces itself. A bare glyph is not enough -- an `x` reads as
+"dismiss this notice", not "abandon my edit". Escape may cancel as well but
+must never be the only way, which is **D14**: an edit that can only be
+abandoned by knowing a key traps a pointer user in a mode, and this design
+leans on abandoning edits being cheap.
 
 Cancelling restores the transcript -- mark cleared, tail undimmed -- and puts
 back whatever draft the edit displaced.
@@ -111,6 +135,10 @@ needs the same shift is OW-yudoni, and settling it moves one line in
   carry them back. Restoring the text alone silently changes what is sent,
   which is the surprise the button labels above exist to prevent. Carry them,
   or say plainly that they are being dropped -- not silence.
+- **The edit control is `.ap-action`, like copy and expand.** That shared class
+  (`app.css:162`) fixes `min-width`, padding and font size, so an edit glyph
+  sitting in the same row is exactly the size of the buttons beside it and
+  needs no separate thought about its hit area.
 - **A user message leading with an image has no row to hang the button on.**
   `Block.svelte:49` draws `BlockActions` only for a text block with non-empty
   trimmed text, and `Message.svelte:74` offers message-level facts to the first
@@ -152,7 +180,7 @@ Each test watched red first.
    and attached to the returned ref.
 4. A Pi-shaped fork -- `renamed` arrives -- ends selected on the new ref with
    the scroll and follow maps re-keyed.
-5. The primary button reads "Fork" when editing and idle and "Abort and fork"
+5. The primary button reads "Fork" when editing and idle and "Stop and fork"
    when editing and streaming, and follows a turn completing mid-compose.
 6. Editing a message that carries an image does not silently send fewer images
    than the original held.
