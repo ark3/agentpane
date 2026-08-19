@@ -350,12 +350,25 @@ export class PiAdapter implements BackendAdapter {
 		if (forked.data.cancelled) {
 			throw new Error(`Pi fork from entry "${entryId}" was cancelled by an extension`);
 		}
-		// Pi's `fork` rewinds the active branch of the SAME session file in
-		// place (unlike Codex's `thread/fork`, which mints a new thread id --
-		// see rpc.md's `fork` vs `clone`, and this workstream's report). It
-		// emits no message events of its own, so our held transcript is now
-		// stale; re-fetch it wholesale -- the same cold-start path `start()`
-		// uses when resuming.
+		// Pi's `fork` is COPY-ON-WRITE, not the in-place rewind an earlier
+		// docblock claimed (settled live on 0.84.2, MANUAL_TESTING.md OW-pifowo).
+		// The original session file is left byte-identical; the process's active
+		// `sessionFile` MOVES to a new file at the fork call, and that new file
+		// materialises on disk only on the next prompt (it is not yet listed at
+		// fork time). So the id we hold has diverged from Pi's active file and
+		// must be re-adopted -- otherwise a later turn is keyed to the abandoned
+		// pre-fork branch and a listing indexes a stale id. Unlike
+		// `adoptSessionFile` (the one-time virtual->real materialisation, gated
+		// by `idResolved`), this is an already-resolved session whose active file
+		// genuinely moved, so re-query `get_state` and take the reported file
+		// unconditionally.
+		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
+			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
+		}
+		// `fork` emits no message events of its own, so our held transcript is now
+		// stale; re-fetch the rewound branch wholesale -- the same cold-start path
+		// `start()` uses when resuming.
 		this.state = { ...this.state, isStreaming: false };
 		await this.hydrateMessages();
 		return this.ref;

@@ -102,6 +102,14 @@ export interface FakeAdapterOptions {
 	 * teardown landing here has a live subprocess to reap.
 	 */
 	holdStart?: Promise<void>;
+	/**
+	 * How `fork()` behaves, so the two backends can be modelled distinctly:
+	 *  - "pi" (default): the process's active file MOVES, so the adapter adopts a
+	 *    new id (`${ref.id}#fork-${entryId}`) and returns it -- `#adoptRef` re-keys.
+	 *  - "codex": a new thread is minted that this adapter is NOT driving, so its
+	 *    own `ref` is left unchanged while `fork()` returns the new thread's ref.
+	 */
+	forkMode?: "pi" | "codex";
 }
 
 /** A promise a test resolves by hand, to park an adapter mid-`start()`. */
@@ -195,7 +203,12 @@ export class FakeAdapter implements BackendAdapter {
 
 	async fork(entryId: string): Promise<SessionRef> {
 		this.forks.push(entryId);
-		return { backend: this.ref.backend, id: `${this.ref.id}#fork-${entryId}` };
+		const forkedRef = { backend: this.ref.backend, id: `${this.ref.id}#fork-${entryId}` };
+		// Codex mints a new thread this adapter does not drive: its own ref is
+		// unchanged, and the returned ref is the fresh thread. Pi's active file
+		// moves, so the adapter adopts the new id and returns it.
+		if (this.options.forkMode !== "codex") this.#ref = forkedRef;
+		return forkedRef;
 	}
 
 	getState(): AdapterState {

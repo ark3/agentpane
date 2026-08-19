@@ -14,7 +14,10 @@ The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
                        not the in-place rewrite the adapter docblock describes
                        (pi/process.ts:343): the active file is left
                        byte-identical and the post-fork re-ask lands in a NEW
-                       file with a `parentSession` pointer. Either way the
+                       file with a `parentSession` pointer. The process's active
+                       `sessionFile` MOVES to that new file at the fork call
+                       itself (OW-pifowo), before any re-ask, and the moved-to
+                       file is not yet on disk at that moment. Either way the
                        abandoned tail SURVIVES on disk (also visible as in-file
                        sibling branches in 81/419 corpus files), so no
                        destructive-rewind warning is warranted. Proven by
@@ -263,10 +266,17 @@ class PiSession:
             self.proc.stdin.flush()
 
     def response(self, obj, command, timeout=20):
+        # Scan only lines that arrive AFTER this send -- the same shape `turn`
+        # uses. Scanning `self.raw` from the start returned the FIRST cached
+        # response to a command on a second call, so a re-query of get_state
+        # silently echoed the pre-fork state. The `pi_rewind` cell re-queries
+        # get_state right after the fork to observe the active file move, so
+        # this correctness is load-bearing (OW-pifowo).
+        mark = len(self.raw)
         self.send(obj)
         deadline = time.time() + timeout
         while time.time() < deadline:
-            for line in list(self.raw):
+            for line in self.raw[mark:]:
                 try:
                     e = json.loads(line)
                 except ValueError:
@@ -338,12 +348,29 @@ def run_pi(timeout, want_fixtures):
         #     the whole prior branch is preserved as its own intact file. The
         #     probe proves it three ways -- the original file's sha is unchanged,
         #     its last entry is still the abandoned BETA assistant reply, and a
-        #     new file appears whose header points back at it. ---
+        #     new file appears whose header points back at it.
+        #
+        #     It also settles OW-pifowo's ref question: the process's active
+        #     `sessionFile` MOVES to the new file at the fork call itself, BEFORE
+        #     any re-ask (`active_file_moves_at_fork`), and the moved-to file is
+        #     NOT yet on disk at that moment (`moved_file_on_disk_at_fork`:
+        #     False) -- it materialises only on the next prompt. So the adapter
+        #     must re-adopt the file `get_state` reports after a fork; returning
+        #     an unchanged ref keeps the server on the abandoned pre-fork branch
+        #     (fixed in pi/process.ts, this commit). ---
         alpha_entry = forks[0]["entryId"]
         orig_sha_before = hashlib.sha256(open(active, "rb").read()).hexdigest()
         orig_tail_before = pi_last_message_text(active)
         pre_fork_files = {p.name for p in sessdir.rglob("*.jsonl")}
         fork_resp = pi.response({"type": "fork", "entryId": alpha_entry}, "fork")
+        # OW-pifowo: re-query get_state the moment the fork returns, before any
+        # re-ask, to catch the active file moving and to check the moved-to file
+        # is not yet materialised on disk.
+        active_after_fork = pi.response({"type": "get_state"}, "get_state")["data"]["sessionFile"]
+        files_at_fork = {p.name for p in sessdir.rglob("*.jsonl")}
+        moved_on_disk_at_fork = (
+            active_after_fork is not None and Path(active_after_fork).name in files_at_fork
+        )
         # Re-ask from the rewound point so a new branch actually forms.
         pi.turn("Say exactly: DELTA")
         time.sleep(0.5)
@@ -364,6 +391,11 @@ def run_pi(timeout, want_fixtures):
             "original_abandoned_tail_text": orig_tail_after,
             "reask_wrote_new_file": new_file.name if new_file else None,
             "new_file_parentSession": new_header.get("parentSession"),
+            # OW-pifowo ref question: the active file moves at the fork call, and
+            # the moved-to file is not on disk until the next prompt.
+            "active_file_moves_at_fork": active_after_fork != active,
+            "active_file_after_fork": Path(active_after_fork).name if active_after_fork else None,
+            "moved_file_on_disk_at_fork": moved_on_disk_at_fork,
             "abandoned_tail_survives_on_disk": (orig_sha_before == orig_sha_after) and new_file is not None,
             "note": "The response cannot be trusted for the veto path (finding 30), "
                     "so survival is read off disk: the original file is untouched "
@@ -566,6 +598,20 @@ def run_codex(timeout, want_fixtures):
                            "cwd": str(work)})
         fthread = fork["result"]["thread"]
         forked_id = fthread["id"]
+        # OW-22: BEFORE driving any turn in the fork, is the forked rollout
+        # already flushed to disk and readable? The route once feared the index
+        # "may not see a thread the backend has not flushed". On 0.148.0 it is
+        # flushed immediately: the rollout exists with `forked_from_id` set and
+        # thread/read returns it before GAMMA. So the returned ref attaches
+        # fresh with no flush race.
+        time.sleep(0.5)
+        pre_turn_rollouts = {}
+        for f in sorted((home / "sessions").rglob("*.jsonl")):
+            h = json.loads(open(f).readline()).get("payload", {})
+            pre_turn_rollouts[h.get("id")] = h.get("forked_from_id")
+        forked_on_disk_before_turn = forked_id in pre_turn_rollouts
+        read_before = cx.request(9, "thread/read", {"threadId": forked_id, "includeTurns": True})
+        thread_read_forked_before_turn_ok = read_before is not None and "result" in read_before
         # Drive a real turn INSIDE the fork.
         turn_ok, mark = cx.turn(7, forked_id, "Say exactly: GAMMA", timeout)
         fork_reply = cx.agent_text_since(mark)
@@ -592,6 +638,10 @@ def run_codex(timeout, want_fixtures):
             "forked_through_turn": last_turn_id,
             "drove_turn_in_fork": turn_ok,
             "assistant_reply_in_fork": fork_reply,
+            # OW-22: the fork is flushed and readable before any turn is driven.
+            "forked_on_disk_before_turn": forked_on_disk_before_turn,
+            "forked_from_id_before_turn": pre_turn_rollouts.get(forked_id),
+            "thread_read_forked_before_turn_ok": thread_read_forked_before_turn_ok,
             "on_disk_forked_from_id": rollouts.get(forked_id, {}).get("forked_from_id"),
             "parent_untouched": rollouts.get(parent_id, {}).get("forked_from_id") is None,
             "rollout_files": rollouts,

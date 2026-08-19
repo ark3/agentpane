@@ -240,6 +240,32 @@ export class SessionManager {
 	}
 
 	/**
+	 * Fork a session from a past entry. Like `submit`, this goes through the
+	 * manager rather than straight at the adapter because fork is the THIRD point
+	 * at which a session's id can change under us (after `start()` and the first
+	 * `submit()` -- see `#adoptRef`). The two backends are asymmetric and
+	 * `#adoptRef` absorbs both:
+	 *
+	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
+	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table
+	 *    and emits `renamed`. The value the adapter returns IS its new ref.
+	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
+	 *    driving; its own `ref` is unchanged, so `#adoptRef` no-ops. The returned
+	 *    ref points at the freshly-flushed forked thread, which differs from
+	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
+	 *    `session.ref`.
+	 */
+	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
+		const session = this.#lookup(ref);
+		if (!session?.adapter) throw new UnknownSessionError(ref);
+		try {
+			return await session.adapter.fork(entryId);
+		} finally {
+			this.#adoptRef(session);
+		}
+	}
+
+	/**
 	 * Honour the adapter contract that `ref` is not stable: `PiAdapter` documents
 	 * that its id changes when `start()` resolves and when the first `submit()`
 	 * resolves, because Pi's session id IS its JSONL path (D9) and a `virtual`

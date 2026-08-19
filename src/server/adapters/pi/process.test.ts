@@ -511,18 +511,25 @@ describe("PiAdapter request/reply (D2a)", () => {
 });
 
 describe("PiAdapter.fork", () => {
-	it("refetches the whole transcript and signals a snapshot, not a tail upsert", async () => {
+	it("re-adopts the moved active file and refetches the whole transcript as a snapshot", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 		const seen: (number | undefined)[] = [];
 		h.adapter.onUpdate((_s, i) => seen.push(i));
 
+		// Pi's fork is copy-on-write: the process's active sessionFile moves to a
+		// new file at the fork call (settled live on 0.84.2, MANUAL_TESTING.md
+		// OW-pifowo). The adapter re-queries get_state and adopts that moved file.
+		const MOVED = "/home/u/.pi/agent/sessions/s-fork.jsonl";
 		const forked = h.adapter.fork("e1");
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: MOVED });
+		await Promise.resolve();
 		h.child.respondTo("get_messages", { messages: [assistantMessage("rewound")] });
 
-		expect(await forked).toEqual(REF); // Pi rewinds in place; same session file
+		expect(await forked).toEqual({ backend: "pi", id: MOVED }); // moved file, NOT REF
+		expect(h.adapter.ref).toEqual({ backend: "pi", id: MOVED });
 		expect(h.adapter.getState().messages).toHaveLength(1);
 		// changedIndex omitted: a fork touches the whole transcript (D3).
 		expect(seen).toEqual([undefined]);

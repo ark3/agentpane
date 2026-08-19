@@ -20,8 +20,9 @@ over literal adherence.
   repaint.
 - Fork a conversation from any past user message. This is two operations, not
   one, and they are not symmetric across backends (HANDOFF findings 43–46):
-  **rewind in place** (Pi `fork`, copy-on-write so the old branch survives;
-  Codex has no supported in-place rewind) and **fork into a new session** (Pi
+  **rewind in place** (Pi `fork`, copy-on-write: the active file is left
+  byte-identical and the process's active file moves to a new one, so the old
+  branch survives; Codex has no supported in-place rewind) and **fork into a new session** (Pi
   `clone`/`fork`+`clone`; Codex `thread/fork`). Both new-session paths leave
   lineage on disk.
 - Well-factored and well-tested from the start.

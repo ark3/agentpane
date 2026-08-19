@@ -165,6 +165,60 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	});
 });
 
+describe("fork (the third #adoptRef point)", () => {
+	// Fork is the third point at which a session's id can change under us, and
+	// the two backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
+	// / OW-22). SessionManager.fork must absorb both through #adoptRef.
+	it("re-keys and emits `renamed` when a Pi-style fork moves the active file", async () => {
+		await sessions.attach(REF);
+		const events: { from: SessionRef; to: SessionRef }[] = [];
+		const prevRenamed = broadcaster.renamed.bind(broadcaster);
+		broadcaster.renamed = (from, to) => {
+			events.push({ from, to });
+			prevRenamed(from, to);
+		};
+
+		const forked = await sessions.fork(REF, "e1");
+
+		// FakeAdapter's Pi fork adopts `${id}#fork-e1`; the manager returns that
+		// moved ref and re-keys the table to it.
+		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
+		expect(forked).toEqual(moved);
+		expect(sessions.canonicalRef(REF)).toEqual(moved);
+		expect(sessions.liveRefs()).toEqual([moved]);
+		expect(events).toEqual([{ from: REF, to: moved }]);
+	});
+
+	it("does NOT re-key when a Codex-style fork leaves the adapter's own ref unchanged", async () => {
+		const codexRef: SessionRef = { backend: "codex", id: "thread-parent" };
+		const codex = new FakeAdapterFactory({ forkMode: "codex" });
+		index = new FakeSessionIndex([storedSession(codexRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(codexRef);
+		const renamed: { from: SessionRef; to: SessionRef }[] = [];
+		const prevRenamed = broadcaster.renamed.bind(broadcaster);
+		broadcaster.renamed = (from, to) => {
+			renamed.push({ from, to });
+			prevRenamed(from, to);
+		};
+
+		const forked = await sessions.fork(codexRef, "e1");
+
+		// The returned ref is the new thread, distinct from the adapter's own ref.
+		expect(forked).toEqual({ backend: "codex", id: "thread-parent#fork-e1" });
+		// The parent session is still keyed by its original id -- no re-key, no rename.
+		expect(sessions.canonicalRef(codexRef)).toEqual(codexRef);
+		expect(sessions.liveRefs()).toEqual([codexRef]);
+		expect(renamed).toEqual([]);
+	});
+
+	it("rejects a fork on a session with no live adapter", async () => {
+		await expect(sessions.fork({ backend: "pi", id: "/nope" }, "e1")).rejects.toBeInstanceOf(
+			UnknownSessionError,
+		);
+	});
+});
+
 describe("lifecycle", () => {
 	it("keeps virtual sessions out of the backend store until prompted (D9)", async () => {
 		const ref = sessions.createVirtual(WORKSPACE, "pi", "pi-1");

@@ -452,6 +452,55 @@ scrubbed per `resources/fixtures/README.md`), and the two command-surface
 deltas as HANDOFF findings 47 (`rpc.md` 32 commands vs `PiCommand`'s 11) and 48
 (`ClientRequest.json` 133 methods vs the adapter's ~11).
 
+### Settling the fork's returned ref (OW-pifowo, OW-22)
+
+Run on the work laptop 2026-08-19, **pi 0.84.2 / codex-cli 0.148.0**, by the
+re-runnable `resources/probes/fork_probe.py` (the same vehicle as OW-mewiga
+above; the `pi_rewind` and `codex_new_session` cells now carry these checks).
+This closes the open concern the OW-mewiga cell flagged — what the adapter's
+`ref` should be after a fork.
+
+**Pi: the active `sessionFile` moves AT the fork call.** `active_file_moves_at_fork:
+true` — the process's active file moves F1→F2 at the `fork` call itself, before
+any re-ask, while `original_file_unchanged: true` (copy-on-write, F1 byte-
+identical). F2 is **not** on disk at fork time (`moved_file_on_disk_at_fork:
+false`); it materialises on the next prompt with header `parentSession`→F1
+(`new_file_parentSession`). So the adapter must re-adopt the moved file —
+returning an unchanged `ref` (the old defect) leaves the server keyed to the
+abandoned pre-fork branch.
+
+**Codex: the forked rollout is flushed to disk before any turn.**
+`forked_on_disk_before_turn: true`, `thread_read_forked_before_turn_ok: true`,
+`forked_from_id_before_turn` set — Codex mints a new thread the current adapter
+is NOT driving and flushes its rollout immediately, so a fresh attach on the
+returned ref finds it. The adapter therefore correctly returns the new thread's
+ref while leaving its own `currentRef`/`threadId` on the parent thread; nothing
+to re-key.
+
+**Correlator bug fixed in the probe.** `resources/probes/fork_probe.py`'s
+`PiSession.response()` scanned `self.raw` from the start on every call, so a
+*second* `get_state` returned the first cached response — the `pi_rewind` cell
+had survived only because it called `get_state` once, and could not have caught
+the active-file move above without this fix. Fixed to capture
+`mark = len(self.raw)` before the send and scan only `self.raw[mark:]`, the same
+shape `PiSession.turn` already uses.
+
+**Resume proof (one-off, not in the automated probe).** A separate throwaway
+run resumed each file with a fresh `pi --mode rpc --session <file>`: resuming F1
+(the untouched original) replays the abandoned pre-fork branch — the fork is
+LOST — while resuming F2 gives the forked+re-asked branch. This is what makes
+re-adopting F2 load-bearing rather than cosmetic, and it grounds the edge below.
+Not folded into `fork_probe.py` (a resume harness is more than the cell needs);
+recorded here as observed.
+
+**Edge not handled — filed separately.** On Pi, a detach-then-reattach *between*
+the fork and the next prompt cannot find F2 on disk, because F2 does not
+materialise until that next prompt. The adapter adopts F2 as its ref
+immediately, so the in-memory session keeps working; but if that adapter is
+disposed before prompting, a later attach on F2 goes through the on-disk index
+and finds nothing. This is not handled here and is being raised as its own work
+item rather than papered over.
+
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
 Recorded 2026-08-18. Two separate things: what headless Chromium refuses to

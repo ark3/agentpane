@@ -251,18 +251,25 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.entryId !== "string") {
 					return error(400, "bad_request", "entryId is required");
 				}
-				const adapter = await sessions.attach(ref);
-				const forked = await adapter.fork(body.value.entryId);
-				broadcaster.sessionsChanged();
-				// UNSETTLED, and it needs the Codex adapter to settle: the two
-				// backends' forks are different operations. Pi's rewinds the active
-				// branch of the *same* session file and returns the same ref, which
-				// works here -- the adapter re-hydrates and the resulting snapshot
-				// goes out on its own. Codex's `thread/fork` mints a *new* thread
-				// id, and a ref for a session this process table has never heard of
-				// and holds no adapter for. Opening it would go through the index,
-				// which may not see a thread the backend has not flushed. See
-				// DESIGN's open questions before implementing the Codex side.
+				// Attach first so the session has a live adapter, then fork through
+				// the manager (not straight at the adapter): fork is the third point
+				// at which a session's id can change under us, and the manager is what
+				// re-keys the process table (see SessionManager.fork).
+				await sessions.attach(ref);
+				const forked = await sessions.fork(ref, body.value.entryId);
+				// The two backends' forks are asymmetric, settled live (see
+				// docs/HANDOFF.md and docs/MANUAL_TESTING.md, OW-pifowo/OW-22):
+				//   * Pi's `fork` is copy-on-write. The same process's active
+				//     `sessionFile` MOVES to a new file (the old branch survives on
+				//     disk byte-identical), so `sessions.fork` re-keys the table and
+				//     broadcasts `renamed` + a snapshot through `#adoptRef`. The ref
+				//     it returns is the moved file.
+				//   * Codex's `thread/fork` mints a NEW thread this process is not
+				//     driving; Codex flushes that rollout to disk immediately, before
+				//     any turn, so a fresh attach on the returned ref finds it. The
+				//     current adapter's own ref is unchanged, so `#adoptRef` no-ops.
+				// `#adoptRef` already emits `sessionsChanged` when it re-keys (Pi), so
+				// no explicit broadcast here.
 				const response: ForkResponse = { ref: forked };
 				return json(response, 201);
 			}
