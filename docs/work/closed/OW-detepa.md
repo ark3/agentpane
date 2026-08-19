@@ -89,3 +89,20 @@ roughly doubles every figure above, which is also why the app feels worse under
 
 Leaves OW-jineli (the sidebar sort, the next cost down) and OW-luzipe (the wire)
 untouched; neither blocks this.
+
+**Fixed** in a73cd67: `view` at `src/client/App.svelte:19` is `$state.raw`, with
+a docblock saying the constraint is load-bearing and dies silently on any
+in-place mutation. `src/client/App.streaming-cost.test.ts` counts
+`renderMarkdownWithFences` through a `vi.mock`/`importOriginal` spy over ten
+deltas driven through the real `reduceServerEvent`, and was watched red first:
+**160 -> 0** for a non-selected session, and for the selected one **171 -> 11**
+at 8 turns against **491 -> 11** at 24 turns, which is the constancy claim.
+`FakeController` was not reusable (OW-42) since the publish is what is under
+test; the test carries its own `PublishingController` mirroring
+`controller.ts`'s `publish()`. Re-measured with `bun e2e/perf-probe.ts` against
+a production build and recorded in `docs/MANUAL_TESTING.md`: at 180 messages
+and 400 sessions, 92.6 -> 7.3ms selected and 91.2 -> 5.5ms background, with DOM
+mutation counts unchanged either side. D5 and `Markdown.svelte`'s docblock, both
+of which claimed the tail-block confinement the deep proxy was breaking, now say
+what makes it true. The derived-boundary question the item raises is left open,
+as the item asked.
