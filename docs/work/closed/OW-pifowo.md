@@ -30,3 +30,21 @@ evidence shows that premise was itself wrong, so OW-22's Pi assumption needs
 revisiting alongside this. Settle against the running CLI, not the docblock:
 `resources/probes/fork_probe.py`'s `pi_rewind` cell already reproduces the
 copy-on-write behaviour and is the place to prove what the adapter must do.
+
+**Fixed** in cfcfe0b: settled live on the work laptop (pi 0.84.2), the
+`fork_probe.py` `pi_rewind` cell now recording it — Pi's `fork` is copy-on-write
+and the process's active `sessionFile` moves to a new file *at the fork call
+itself* (`active_file_moves_at_fork: true`), before any re-ask, with the moved-to
+file not yet on disk (`moved_file_on_disk_at_fork: false`) until the next prompt.
+The docblock at `process.ts` fork() is rewritten to say so. The adapter now
+re-queries `get_state` after a non-vetoed fork and re-adopts the moved file
+(unconditionally, not gated by `idResolved`); resume proof showed the old
+unchanged-ref behaviour left the server keyed to the abandoned pre-fork branch.
+The re-key is driven through the new `SessionManager.fork`, fork being the third
+`#adoptRef` point after `start()` and the first `submit()`. Tests: the
+`PiAdapter.fork` unit test now drives the post-fork `get_state` and asserts the
+moved ref; `session-manager.test.ts` gains the Pi re-key/`renamed` case. Also
+fixed `fork_probe.py`'s `PiSession.response()` correlator, which returned the
+first cached response on a re-query and so could not have caught the move.
+See `docs/MANUAL_TESTING.md` "Settling the fork's returned ref". One edge is
+deferred (detach-then-reattach between fork and next prompt) — see OW-lefilo.
