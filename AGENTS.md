@@ -49,6 +49,13 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   either. Name the machine rather than writing "here": this file is checked in
   and read from both clones, so a sentence that resolves against the reader's
   location is false on one of them.
+- **A work-laptop item does all of its work in one visit.** The scarce resource
+  is trips, not minutes once you are there, so never rank such an item's
+  contents by urgency or name the half that matters most: that is an excuse to
+  do part of it and come back, and the second question usually costs almost
+  nothing while the CLI is already running. The triage hint that would help on
+  any other item is a defect on this one. Proposed for OW-yudoni on 2026-08-19
+  and declined by the owner for exactly this reason.
 - A test that has never failed has not been shown to test anything. For a fix,
   break it again and watch it go red first.
 - State the why only where there is a body behind it: an incident that happened
