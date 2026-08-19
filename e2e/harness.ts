@@ -17,8 +17,8 @@
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
  * It is the vehicle for the few claims that need a real browser -- follow mode,
- * the nav rail, and the tools menu's light dismiss (OW-80) -- not a browser E2E
- * suite.
+ * the nav rail, the tools menu's light dismiss (OW-80), and the turn-done
+ * favicon badge (OW-diyuwu) -- not a browser E2E suite.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -29,6 +29,28 @@ import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
 import type { ServerEvent, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+
+/**
+ * Window focus, faked, for the turn-done badge (OW-diyuwu).
+ *
+ * Headless Chromium cannot supply a genuine `document.hasFocus() === false`.
+ * Playwright drives `chromium-headless-shell`, which reports every page
+ * focused and visible unconditionally: probed on 2026-08-18, a second page in
+ * the same context brought to the front moved neither `hasFocus` nor
+ * `visibilityState`, and neither did `window.blur()` nor CDP
+ * `Emulation.setFocusEmulationEnabled(false)`. The full `chromium` build,
+ * which does model focus, does not launch on this machine (its crashpad
+ * handler aborts at startup).
+ *
+ * So the badge's *decision* is proven over the pure reducer in
+ * `src/client/favicon.test.ts`, and what the browser is here for is the rest
+ * of the chain: a real turn through the real controller and the real
+ * `App.svelte`, ending in a real `<link rel="icon">` the module had to create
+ * itself, because `harness.html` declares none. Exactly one thing below is
+ * stubbed, and it is the one thing the browser withholds.
+ */
+let focused = true;
+document.hasFocus = () => focused;
 
 const REF: SessionRef = { backend: "pi", id: "/tmp/agentpane-harness/session.jsonl" };
 const CWD = "/tmp/agentpane-harness";
@@ -199,6 +221,8 @@ export interface FollowHarness {
 	};
 	/** Index in `messages` of the last user message -- the anchor a submit arms. */
 	lastUserIndex(): number;
+	/** Move the faked window focus, and fire the event the move would fire. */
+	setFocused(next: boolean): void;
 }
 
 const harness: FollowHarness = {
@@ -234,6 +258,10 @@ const harness: FollowHarness = {
 	lastUserIndex() {
 		for (let i = messages.length - 1; i >= 0; i--) if (messages[i]?.role === "user") return i;
 		return -1;
+	},
+	setFocused(next) {
+		focused = next;
+		window.dispatchEvent(new Event(next ? "focus" : "blur"));
 	},
 };
 

@@ -452,6 +452,51 @@ scrubbed per `resources/fixtures/README.md`), and the two command-surface
 deltas as HANDOFF findings 47 (`rpc.md` 32 commands vs `PiCommand`'s 11) and 48
 (`ClientRequest.json` 133 methods vs the adapter's ~11).
 
+## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
+
+Recorded 2026-08-18. Two separate things: what headless Chromium refuses to
+give the badge, and a one-off check that Gecko does what Blink does. Neither is
+a second Playwright project — `playwright.config.ts` stays Chromium-only,
+because a second project doubles the runtime of every browser test to cover one
+claim.
+
+**Headless Chromium cannot report a page as unfocused.** Playwright drives the
+`chromium-headless-shell` build, which answers `document.hasFocus() === true`
+and `visibilityState === "visible"` on every page unconditionally. Four levers
+were probed and all four moved neither value:
+
+| Lever | Result |
+|---|---|
+| A second page in the same context, `bringToFront()` | `hasFocus` true, `visibilityState` visible, on both pages |
+| `window.blur()` from page script | unchanged |
+| CDP `Emulation.setFocusEmulationEnabled({enabled: false})` | accepted, no effect |
+| CDP `Page.setWebLifecycleState({state: "frozen"})` | accepted, no effect |
+
+The full `chromium` build does model focus, but does not launch on this
+machine: `chrome_crashpad_handler: --database is required`, then the browser
+dumps core. So `e2e/badge.spec.ts` stubs `document.hasFocus` in the harness and
+carries the rest of the chain, and the focus decision itself is proven over the
+pure reducer in `src/client/favicon.test.ts`.
+
+**Firefox 153.0, one-off, headless, against the same harness.** The static
+two-file swap is not a Blink-only trick:
+
+| Claim | Observed in Gecko |
+|---|---|
+| The module creates the `<link rel="icon">` `harness.html` does not declare | 1 element, `href=/favicon.svg` |
+| A turn ending unfocused swaps the href | `/favicon.svg` → `/favicon-badged.svg` |
+| Focus returning swaps it back | `/favicon-badged.svg` → `/favicon.svg` |
+| `public/favicon-badged.svg` parses in Gecko's SVG decoder | decodes 16x16 |
+| Gecko acts on the swap rather than ignoring it | a network request for `/favicon-badged.svg` fires on the change |
+
+Reproduce with `bunx playwright install firefox`, `bunx vite --port 5199`, and
+a script that drives `window.harness` the way `e2e/badge.spec.ts` does.
+
+**What is still not observed anywhere: the tab strip itself.** Every engine
+above is headless and has no tab strip to repaint. The request Gecko fires on
+the swap is the closest proxy available here, not the pixel. Tracked as
+OW-yiduso.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:

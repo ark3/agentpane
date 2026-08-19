@@ -8,6 +8,9 @@
 	  low-contrast blue. White panes competed with the letter and the whole
 	  tile went grey at 16px.
 
+	  public/favicon-badged.svg is a copy of this file plus a dot (OW-diyuwu);
+	  change one and change the other.
+
 	  No em dashes in here. XML forbids a double hyphen inside a comment, and
 	  a favicon that fails to parse renders as nothing at all, silently.
 	-->

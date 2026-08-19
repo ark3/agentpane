@@ -2,6 +2,14 @@
 	import { onMount, tick } from "svelte";
 	import { sessionKey, type BackendId, type SessionSummary } from "$shared/protocol.ts";
 	import type { AgentpaneController, ControllerView } from "./controller.ts";
+	import {
+		emptyTurnWatch,
+		setFaviconBadge,
+		watchFocus,
+		watchRename,
+		watchSessions,
+		watchSubmit,
+	} from "./favicon.ts";
 	import Transcript from "./render/Transcript.svelte";
 	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
@@ -64,6 +72,13 @@
 	 * assumed present the instant submit's promise resolves.
 	 */
 	const pendingFollow = new Map<string, number>();
+	/**
+	 * Which sessions this tab has a turn outstanding on, and whether one of
+	 * them has finished unnoticed (OW-diyuwu). A plain `let`, not `$state`: the
+	 * effect below both reads and writes it, and the only thing that ever
+	 * renders from it is the favicon, which is not part of this component.
+	 */
+	let turnWatch = emptyTurnWatch();
 	let lastScrollKey: string | null = null;
 	let suppressScrollHandling = false;
 	let followFrame: number | null = null;
@@ -165,6 +180,7 @@
 				pendingFollow.set(toKey, pending);
 			}
 			if (lastScrollKey === fromKey) lastScrollKey = toKey;
+			turnWatch = watchRename(turnWatch, fromKey, toKey);
 		});
 		void controller.start();
 
@@ -176,6 +192,16 @@
 		const onTabVisibility = () => void controller.refreshPreview();
 		document.addEventListener("visibilitychange", onTabVisibility);
 		window.addEventListener("focus", onTabVisibility);
+
+		// The badge clears the moment the window is focused (OW-diyuwu). Its own
+		// listener rather than a branch inside the one above: the two features
+		// share an event and nothing else, and this one has no business firing on
+		// `visibilitychange`, which moves without focus moving.
+		const onWindowFocus = () => {
+			turnWatch = watchFocus(turnWatch);
+			setFaviconBadge(turnWatch.badged);
+		};
+		window.addEventListener("focus", onWindowFocus);
 
 		// Belt-and-suspenders for the effects below: Block.svelte throttles
 		// re-parsing a streaming message's markdown to a frame (DESIGN D5), so
@@ -196,6 +222,7 @@
 			unsubscribeRename();
 			document.removeEventListener("visibilitychange", onTabVisibility);
 			window.removeEventListener("focus", onTabVisibility);
+			window.removeEventListener("focus", onWindowFocus);
 			controller.dispose();
 			observer?.disconnect();
 		};
@@ -398,6 +425,19 @@
 	}
 
 	/**
+	 * On submit, start waiting for this turn to end (OW-diyuwu). Here rather
+	 * than inside the controller, which owns no DOM and no window focus, and
+	 * beside `armFollow` because these two call sites are the app's only submit
+	 * path: a session that streams without passing through them is one this tab
+	 * did not ask for and must not be badged for.
+	 */
+	function armBadge(): void {
+		const ref = view.state.selected;
+		if (!ref) return;
+		turnWatch = watchSubmit(turnWatch, sessionKey(ref));
+	}
+
+	/**
 	 * Switching sessions restores that session's own scroll position -- or, if
 	 * it is mid-follow (submitted, then switched away before the turn ended),
 	 * re-anchors immediately against the freshly rendered DOM. A session never
@@ -467,6 +507,24 @@
 		}
 
 		scheduleFollow(streaming);
+	});
+
+	/**
+	 * The turn-done favicon badge (OW-diyuwu). Every session, not just the
+	 * selected one: you submit, switch away to read something else, and the
+	 * turn you are waiting for is the one you are no longer looking at.
+	 *
+	 * `document.hasFocus()` is read here, at the moment the turn ends, rather
+	 * than tracked through `focus`/`blur` events -- one read of the live answer
+	 * cannot drift out of step with the window the way a mirrored flag can.
+	 */
+	$effect(() => {
+		const streaming = new Map<string, boolean>();
+		for (const [key, session] of Object.entries(view.state.sessions)) {
+			streaming.set(key, session.isStreaming);
+		}
+		turnWatch = watchSessions(turnWatch, streaming, document.hasFocus());
+		setFaviconBadge(turnWatch.badged);
 	});
 
 	/**
@@ -583,6 +641,7 @@
 		event.preventDefault();
 		if (!view.draft) return;
 		armFollow();
+		armBadge();
 		void controller.submit();
 	}
 
@@ -592,6 +651,7 @@
 		event.preventDefault();
 		if (!view.draft) return;
 		armFollow();
+		armBadge();
 		void controller.submit();
 	}
 </script>
