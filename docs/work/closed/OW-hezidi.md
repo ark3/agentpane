@@ -191,3 +191,25 @@ Each test watched red first.
 `bun run check` passes, and so does **`bun run test:browser`**: this changes
 the message footer rows under `src/client/render/`, which AGENTS.md names as a
 case jsdom cannot see.
+
+**Fixed** in ae881b5: an edit control on every user message fills the composer,
+marks it and dims the tail without issuing a request; submitting calls
+`api.fork` at that message's ordinal among `GET fork-points` and only then
+prompts into the ref the fork returned. All seven "Done when" tests are in
+`src/client/App.test.ts`, `src/client/controller.test.ts` and
+`src/client/render/Transcript.svelte.test.ts`, each watched red first, plus
+`e2e/edit-fork.spec.ts` for the two claims that are about layout -- the edit
+glyph measuring the same box as copy in the shared `.ap-action` row, and the
+banner sitting above the composer with Cancel in it. `bun run check` 761 tests
+green; `bun run test:browser` 7 green.
+
+Three things the client needed that the item did not name, all in the same
+commit. `armFollow` takes the edited message's index, because a fork's
+transcript is the parent truncated and the parent's length sits past its end.
+The rename re-keying is now `rekeySession`, called from the fork path too:
+Codex renames nothing, so follow armed under the parent's key would be stranded
+there. And an edit clears when the selected session changes, since it is
+anchored to one transcript by index. Not live-verified on either backend -- the
+home server has no `pi` and Codex is not run unasked -- so a real Pi `renamed`
+racing the fork POST, and Codex's fresh-attach latency, remain unobserved from
+the client end.
