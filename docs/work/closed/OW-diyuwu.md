@@ -90,3 +90,18 @@ doubles the runtime of every browser test to cover one claim.
 
 Plus a screenshot of the tab in both states. Whether the dot is noticeable at
 16px is a verdict from use, not an assertion.
+
+**Fixed** in f146744: `src/client/favicon.ts` holds the decision as a pure
+reducer and `App.svelte` arms it at the two submit sites, beside `armFollow`.
+`e2e/badge.spec.ts` drives a real turn through the real controller with the
+window unfocused and asserts the `href` swaps to `/favicon-badged.svg`, then
+back on focus. Both traps the item named are pinned by a test that was watched
+to fail: deleting the transition guard in `watchSessions` reds exactly "does
+not badge on the `isStreaming:false` that still stands just after a submit",
+and dropping `watchRename` reds the D9 case. The probe the item asked for came
+back negative -- headless Chromium reports every page focused, so the focus
+decision is proven in jsdom and the harness stubs `document.hasFocus`; the four
+levers tried are tabulated in `docs/MANUAL_TESTING.md`, along with the Firefox
+153.0 one-off confirming Gecko swaps both ways and fetches the badged file.
+What is still unobserved is the tab strip itself, since no engine available
+here has one: `OW-yiduso` carries that and the 16px legibility verdict.
