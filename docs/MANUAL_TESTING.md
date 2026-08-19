@@ -489,17 +489,14 @@ shape `PiSession.turn` already uses.
 run resumed each file with a fresh `pi --mode rpc --session <file>`: resuming F1
 (the untouched original) replays the abandoned pre-fork branch — the fork is
 LOST — while resuming F2 gives the forked+re-asked branch. This is what makes
-re-adopting F2 load-bearing rather than cosmetic, and it grounds the edge below.
-Not folded into `fork_probe.py` (a resume harness is more than the cell needs);
-recorded here as observed.
+re-adopting F2 load-bearing rather than cosmetic. Not folded into
+`fork_probe.py` (a resume harness is more than the cell needs); recorded here as
+observed.
 
-**Edge not handled — filed separately.** On Pi, a detach-then-reattach *between*
-the fork and the next prompt cannot find F2 on disk, because F2 does not
-materialise until that next prompt. The adapter adopts F2 as its ref
-immediately, so the in-memory session keeps working; but if that adapter is
-disposed before prompting, a later attach on F2 goes through the on-disk index
-and finds nothing. This is not handled here and is being raised as its own work
-item rather than papered over.
+Note the fork itself persists nothing: F2 does not materialise until the next
+prompt, so a fork with no subsequent prompt writes no file and holds no
+conversation the abandoned F1 does not already carry. Discarding it before
+prompting loses nothing — there is no forked turn to lose.
 
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 

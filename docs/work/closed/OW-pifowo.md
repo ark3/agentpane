@@ -46,5 +46,4 @@ The re-key is driven through the new `SessionManager.fork`, fork being the third
 moved ref; `session-manager.test.ts` gains the Pi re-key/`renamed` case. Also
 fixed `fork_probe.py`'s `PiSession.response()` correlator, which returned the
 first cached response on a re-query and so could not have caught the move.
-See `docs/MANUAL_TESTING.md` "Settling the fork's returned ref". One edge is
-deferred (detach-then-reattach between fork and next prompt) — see OW-lefilo.
+See `docs/MANUAL_TESTING.md` "Settling the fork's returned ref".
