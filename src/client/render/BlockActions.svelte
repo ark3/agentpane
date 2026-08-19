@@ -15,6 +15,7 @@
 	 * no store, no context and no plumbing through `App.svelte` to be
 	 * expandable. Read-only, deliberately -- edit and resubmit is OW-22.
 	 */
+	import type { Snippet } from "svelte";
 	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Expanded from "./Expanded.svelte";
 	import CopyButton from "./CopyButton.svelte";
@@ -25,6 +26,7 @@
 		language,
 		label = "block",
 		timestamp,
+		meta,
 	}: {
 		source: string;
 		kind?: "markdown" | "code";
@@ -36,6 +38,13 @@
 		 * row is the only chrome it has. Unset for every other caller.
 		 */
 		timestamp?: number | undefined;
+		/**
+		 * The turn's meta facts (OW-75). Same bargain as `timestamp`: a
+		 * message-level fact rendered in a block-level row, because an assistant
+		 * turn's footer is one row and not two. Rendered by its owner, so this row
+		 * still knows nothing about what a turn reports.
+		 */
+		meta?: Snippet | undefined;
 	} = $props();
 
 	let expanded = $state(false);
@@ -43,6 +52,7 @@
 </script>
 
 <div class="actions" data-block-actions={label}>
+	{@render meta?.()}
 	{#if time}
 		<time class="time" datetime={timestampIso(timestamp)}>{time}</time>
 	{/if}

@@ -580,6 +580,46 @@ two sessions) with 8 summaries listed:
 per token, for a list that did not change. The second row is the guard: the
 memo must not stop the list re-sorting when it really is re-listed.
 
+## Observed assistant footer rows before and after merging them (OW-75)
+
+Captured 2026-08-19 from the browser vehicle, not from a backend: `page.goto`
+on `e2e/harness.html` at the config's 900×700 viewport, screenshotting the
+`.transcript` element. What is on screen is `App.svelte`'s auto-preview of the
+harness's stored session — one user turn and one completed assistant turn, both
+stamped, which is what `harness.ts`'s `preview()` now serves.
+
+Before, the assistant turn spends two rows: copy/expand on one, the timestamp
+and model on the next.
+
+![Assistant footer before OW-75: the buttons on one row, the timestamp and model on the row below](images/OW-75-before.png)
+
+After, one row — facts at the left, buttons at the right, the row a user turn
+already had.
+
+![Assistant footer after OW-75: timestamp, model and buttons all on a single row](images/OW-75-after.png)
+
+The captured `.transcript` is **228px** tall before and **203px** after. That
+25px is one text line and the gap above it, and it is spent once per assistant
+turn, so it compounds down a long transcript.
+
+Both captures came from a throwaway spec under `e2e/`, deleted afterwards
+rather than kept: a spec that writes files would write them on every
+`bun run test:browser`. To retake them:
+
+```ts
+// e2e/shot.spec.ts -- run `SHOT=before playwright test e2e/shot.spec.ts`, then delete
+import { test } from "@playwright/test";
+
+test("capture", async ({ page }) => {
+	await page.goto("/e2e/harness.html");
+	await page.locator("[data-role='assistant']").waitFor();
+	await page.locator(".transcript").screenshot({ path: `docs/images/OW-75-${process.env.SHOT}.png` });
+});
+```
+
+The layout claim itself is asserted, not just pictured: `e2e/footer-row.spec.ts`
+measures both boxes and fails if the meta is not centred on the buttons' line.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:

@@ -11,7 +11,7 @@
 	 * dead code even though today it is unreachable by type.
 	 */
 	import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
-	import type { PaneMessage } from "$shared/protocol.ts";
+	import type { AssistantTurn, PaneMessage } from "$shared/protocol.ts";
 	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
@@ -38,6 +38,29 @@
 		return typeof content === "string" ? [{ type: "text", text: content }] : content;
 	}
 
+	/** A finished turn with something to report: the model, the accounting, or both. */
+	function showsMeta(turn: AssistantTurn): boolean {
+		return turn.stopReason !== "pending" && (Boolean(turn.model) || turn.usage.totalTokens > 0);
+	}
+
+	/**
+	 * Which block's action row carries the turn's meta, or -1 for none (OW-75).
+	 *
+	 * The turn's footer facts and the trailing block's copy/expand buttons are
+	 * one row, the way a user turn's already are -- but only where there is a
+	 * row to merge with, so the change can never *add* a row. A turn ending in a
+	 * tool call, a thinking block or an image has no action row there and keeps
+	 * its meta standalone; a pending turn has no meta and keeps a bare button
+	 * row. An earlier text block in a multi-block turn keeps a bare row too:
+	 * good enough for now, not the end state.
+	 */
+	function metaRowIndex(turn: AssistantTurn): number {
+		if (!showsMeta(turn)) return -1;
+		const last = turn.content.at(-1);
+		// `Block` draws the row only once the block has something to copy.
+		return last?.type === "text" && last.text.trim() ? turn.content.length - 1 : -1;
+	}
+
 	const compact = new Intl.NumberFormat(undefined, { notation: "compact" });
 </script>
 
@@ -54,51 +77,65 @@
 		</div>
 	</article>
 {:else if message.role === "assistant"}
+	<!-- `turn` is `message`, narrowed, as a const: the narrowing has to survive
+	     into the `meta` snippet, and TypeScript drops it for a `let` inside a
+	     closure. -->
+	{@const turn = message}
+	{@const metaIndex = metaRowIndex(turn)}
+	<!-- The model and the accounting are separate facts: a finished turn can
+	     report no usage (a synthesised preview turn, or a provider that sends
+	     none) and still know which model answered. -->
+	{#snippet meta()}
+		{@const time = formatTimestamp(turn.timestamp)}
+		<p class="meta">
+			<!-- Absolute and UTC, byte-identical to the session list's (OW-67):
+			     the same formatter, so the two can never drift apart. -->
+			{#if time}
+				<time datetime={timestampIso(turn.timestamp)}>{time}</time>
+			{/if}
+			{#if turn.model}
+				<span>{turn.model}</span>
+			{/if}
+			<!-- Effort is a property of the model that answered, so it sits with
+			     the model. Only Codex reports one (OW-61); absent, nothing shows. -->
+			{#if turn.effort}
+				<span>{turn.effort}</span>
+			{/if}
+			{#if turn.usage.totalTokens > 0}
+				<span>{compact.format(turn.usage.totalTokens)} tok</span>
+				{#if turn.usage.cost.total > 0}
+					<span>${turn.usage.cost.total.toFixed(4)}</span>
+				{/if}
+			{/if}
+		</p>
+	{/snippet}
 	<article class="msg assistant" data-role="assistant" data-index={index}>
 		<div class="body">
-			{#each message.content as block, i (i)}
-				<Block {block} {results} streaming={streaming && i === message.content.length - 1} />
+			{#each turn.content as block, i (i)}
+				<Block
+					{block}
+					{results}
+					meta={i === metaIndex ? meta : undefined}
+					streaming={streaming && i === turn.content.length - 1}
+				/>
 			{/each}
 
-			{#if streaming && message.content.length === 0}
+			{#if streaming && turn.content.length === 0}
 				<span class="cursor" aria-label="thinking">●</span>
 			{/if}
 		</div>
 
-		{#if message.stopReason === "error"}
+		{#if turn.stopReason === "error"}
 			<p class="banner error" role="status">
-				{message.errorMessage || "The turn ended in an error."}
+				{turn.errorMessage || "The turn ended in an error."}
 			</p>
-		{:else if message.stopReason === "aborted"}
+		{:else if turn.stopReason === "aborted"}
 			<p class="banner aborted" role="status">Aborted.</p>
 		{/if}
 
-		<!-- The model and the accounting are separate facts: a finished turn can
-		     report no usage (a synthesised preview turn, or a provider that sends
-		     none) and still know which model answered. -->
-		{#if message.stopReason !== "pending" && (message.model || message.usage.totalTokens > 0)}
-			{@const time = formatTimestamp(message.timestamp)}
-			<p class="meta">
-				<!-- Absolute and UTC, byte-identical to the session list's (OW-67):
-				     the same formatter, so the two can never drift apart. -->
-				{#if time}
-					<time datetime={timestampIso(message.timestamp)}>{time}</time>
-				{/if}
-				{#if message.model}
-					<span>{message.model}</span>
-				{/if}
-				<!-- Effort is a property of the model that answered, so it sits with
-				     the model. Only Codex reports one (OW-61); absent, nothing shows. -->
-				{#if message.effort}
-					<span>{message.effort}</span>
-				{/if}
-				{#if message.usage.totalTokens > 0}
-					<span>{compact.format(message.usage.totalTokens)} tok</span>
-					{#if message.usage.cost.total > 0}
-						<span>${message.usage.cost.total.toFixed(4)}</span>
-					{/if}
-				{/if}
-			</p>
+		<!-- No trailing action row to ride, so the meta keeps a row of its own. -->
+		{#if metaIndex === -1 && showsMeta(turn)}
+			{@render meta()}
 		{/if}
 	</article>
 {:else if message.role === "toolResult"}
@@ -185,11 +222,22 @@
 
 	.meta {
 		display: flex;
+		/* Centred, not stretched: in a block action row this box is as tall as the
+		   buttons beside it, and the facts have to sit on their line. */
+		align-items: center;
 		gap: var(--ap-space-3);
 		margin: 0;
 		font-size: var(--ap-text-2xs);
 		color: var(--ap-fg-subtle);
 		font-variant-numeric: tabular-nums;
+		/* Takes the left end of the row and pushes the block's buttons right, the
+		   way `.time` does for a user turn. No effect standalone -- the facts are
+		   left-aligned either way. */
+		margin-right: auto;
+		/* The action row sets `user-select: none` so its button glyphs stay out of
+		   a copy of the block. The token count and the cost are facts a reader
+		   quotes, not chrome, so they opt back in. */
+		user-select: text;
 	}
 
 	/* A compaction marker reads as a divider, not a message: it is the seam the

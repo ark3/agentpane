@@ -120,13 +120,17 @@ describe("Message", () => {
 		expect(time?.textContent?.trim()).toBe(formatTimestamp(message.timestamp));
 	});
 
-	it("does not stamp an assistant's text block, which already has a meta row", () => {
-		// The action row is per-block and every role has one; only the user arm
-		// hands it a time, or a turn would carry the same stamp twice.
+	it("stamps an assistant turn exactly once, in the row the stamp now shares (OW-75)", () => {
+		// This used to read "no time in any block action row", which said what it
+		// meant while the meta was a row of its own. The meta moved into the block
+		// action row (OW-75) and took its <time> with it, so the wording no longer
+		// holds -- but the claim behind it does: a turn must not carry the same
+		// stamp twice, once per row.
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "done" }]) },
 		});
-		expect(container.querySelector("[data-block-actions] time")).toBeNull();
+		expect(container.querySelectorAll("time")).toHaveLength(1);
+		expect(container.querySelector("[data-block-actions='text'] time")).not.toBeNull();
 	});
 
 	it("shows no cost while the turn is still pending", () => {
@@ -188,6 +192,58 @@ describe("Message", () => {
 		expect(container.querySelector(".compaction-marker")).not.toBeNull();
 		expect(container.querySelector(".compaction-tokens")).toBeNull();
 		expect(container.querySelector(".body")).toBeNull();
+	});
+});
+
+describe("assistant footer row (OW-75)", () => {
+	/** A tool call, so a turn can end on a block that has no action row to merge with. */
+	const call = { type: "toolCall" as const, id: "call-1", name: "bash", arguments: { command: "ls" } };
+
+	it("spends one row on a finished turn's footer, meta inside the trailing action row", () => {
+		const { container } = render(Message, {
+			props: { message: assistant([{ type: "text", text: "done" }]) },
+		});
+		expect(container.querySelectorAll("[data-block-actions]")).toHaveLength(1);
+		expect(container.querySelector("[data-block-actions='text'] .meta")).not.toBeNull();
+		// Nothing left at message level: that standalone <p> was the second row.
+		expect(container.querySelector("article > .meta")).toBeNull();
+	});
+
+	it("leaves the meta standalone when the turn's last block has no action row", () => {
+		// Degrading to whichever half exists is what keeps the change from ever
+		// *adding* a row: a turn ending in a tool call renders exactly as before.
+		const { container } = render(Message, {
+			props: { message: assistant([{ type: "text", text: "listing" }, call]) },
+		});
+		expect(container.querySelector("article > .meta")).not.toBeNull();
+		expect(container.querySelector("[data-block-actions] .meta")).toBeNull();
+	});
+
+	it("renders the action row alone while the turn is still pending", () => {
+		// The other half of the same degradation: no meta exists yet, so the
+		// action row stands on its own -- still one row, not none and not two.
+		const { container } = render(Message, {
+			props: { message: assistant([{ type: "text", text: "partial" }], "pending") },
+		});
+		expect(container.querySelector("[data-block-actions='text']")).not.toBeNull();
+		expect(container.querySelector(".meta")).toBeNull();
+	});
+
+	it("puts the meta on the last text block's row, never an earlier one", () => {
+		const { container } = render(Message, {
+			props: {
+				message: assistant([
+					{ type: "text", text: "first" },
+					call,
+					{ type: "text", text: "second" },
+				]),
+			},
+		});
+		const rows = [...container.querySelectorAll("[data-block-actions='text']")];
+		expect(rows).toHaveLength(2);
+		expect(container.querySelectorAll(".meta")).toHaveLength(1);
+		expect(rows[0]?.querySelector(".meta")).toBeNull();
+		expect(rows[1]?.querySelector(".meta")).not.toBeNull();
 	});
 });
 

@@ -15,9 +15,10 @@ touching `src/`; say so explicitly when a commit is docs only.
 Chromium). It is **not** part of `bun run check` — it needs a browser, so
 nothing runs it for you (OW-49). Run it by hand when you touch follow-mode
 scrolling in `App.svelte`, `.conversation` in `app.css`, the composer's tools
-menu, or anything under `public/`; jsdom cannot see layout, scroll anchoring,
-real scroll-event timing, or the Popover API, none of which it implements, and
-nothing in the module graph imports the favicons at all.
+menu, the message footer rows in `src/client/render/`, or anything under
+`public/`; jsdom cannot see layout, scroll anchoring, real scroll-event timing,
+or the Popover API, none of which it implements, and nothing in the module
+graph imports the favicons at all.
 
 That vehicle cannot report a page as unfocused: it drives
 `chromium-headless-shell`, which answers `document.hasFocus() === true`

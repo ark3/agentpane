@@ -6,6 +6,7 @@
 	 * introduces something new.
 	 */
 	import type { ToolResultMessage } from "@earendil-works/pi-ai";
+	import type { Snippet } from "svelte";
 	import BlockActions from "./BlockActions.svelte";
 	import ImageBlock from "./ImageBlock.svelte";
 	import Markdown from "./Markdown.svelte";
@@ -18,6 +19,7 @@
 		results = new Map<string, ToolResultMessage>(),
 		streaming = false,
 		timestamp,
+		meta,
 	}: {
 		block: ContentBlock;
 		results?: Map<string, ToolResultMessage>;
@@ -28,6 +30,12 @@
 		 * an assistant block leaves it unset, its turn's `.meta` already says.
 		 */
 		timestamp?: number | undefined;
+		/**
+		 * The turn's footer facts (OW-75), to ride this block's action row rather
+		 * than a row of its own. Passed by `Message.svelte`'s assistant arm, and
+		 * only to the block whose row is the turn's last.
+		 */
+		meta?: Snippet | undefined;
 	} = $props();
 </script>
 
@@ -38,7 +46,7 @@
 	     nothing to copy. Images get no controls at all (OW-63): text actions
 	     act on text. -->
 	{#if block.text.trim()}
-		<BlockActions source={block.text} label="text" {timestamp} />
+		<BlockActions source={block.text} label="text" {timestamp} {meta} />
 	{/if}
 {:else if block.type === "thinking"}
 	<Thinking text={block.thinking} redacted={block.redacted ?? false} {streaming} />

@@ -185,7 +185,16 @@ const api: AgentpaneApi = {
 		return summary();
 	},
 	async preview() {
-		return { ref: REF, turns: [{ role: "user", text: "stored transcript" }] };
+		// A completed assistant turn, both turns stamped: the shape OW-75's footer
+		// row is a claim about. `App.svelte` auto-previews the top session, so
+		// this is what the pane shows before anything is clicked.
+		return {
+			ref: REF,
+			turns: [
+				{ role: "user", text: "stored transcript", timestamp: "2026-06-05T18:25:00.147Z" },
+				{ role: "assistant", text: "stored answer", timestamp: "2026-06-05T18:25:04.912Z" },
+			],
+		};
 	},
 	async prompt(_ref, body) {
 		// The route acknowledges (202) and the turn streams afterwards.
