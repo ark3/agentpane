@@ -52,3 +52,32 @@ Each test watched red first.
 `bun run check` passes. Run `bun run test:browser` too if these buttons change
 the composer row's layout rather than just adding to it -- jsdom cannot see
 layout, and that row already carries Send, Stop and the Tools popover.
+
+**Fixed** in c16816a: one button in the composer's action row, `"Edit last
+message"` when idle and `"Stop and edit"` while streaming, rendered only when
+`lastUserIndex` finds a user message to go back to -- absent rather than
+disabled, matching Stop in the same row. It calls OW-hezidi's `startEdit` and
+repeats none of it, so the two paths cannot drift; the anti-drift test snapshots
+composer value, mark, dimming and primary label through both and compares them,
+with the transcript path's snapshot pinned to a literal so the comparison
+cannot pass by both paths doing nothing. Three tests in `src/client/App.test.ts`
+watched red first, plus `e2e/composer-shortcut.spec.ts`. `bun run check` 764
+green; `bun run test:browser` 8 green.
+
+**The fill runs before the abort, and the abort is not awaited** -- a departure
+from this item's suggested sequencing, taken under its own "whichever order you
+choose" latitude and for the reason that rule names. `controller.abort()` never
+clears `isStreaming`; only a server event does. So awaiting it does not make the
+primary button read "Fork", and through the round trip the composer would hold
+the old draft under a button reading **"Send"**, where a Ctrl-Enter prompts the
+running session instead of forking it. Filling first, the label goes straight to
+"Stop and fork" -- which is true rather than stale, because `forkAndSubmit`
+re-checks `isStreaming` and aborts again before it forks.
+
+Two findings recorded rather than fixed. `e2e/tools-menu.spec.ts` measures this
+row but never seeds a transcript, so the shortcut does not render during it --
+which is why a new spec was warranted rather than optional. And its "inside the
+row" style of assertion does not bite: `.prompt-actions` sits in a content-sized
+grid column, so an oversized control widens the page instead of spilling out of
+a fixed box. The new spec asserts horizontal page overflow instead, verified by
+forcing a 40rem min-width on the shortcut.
