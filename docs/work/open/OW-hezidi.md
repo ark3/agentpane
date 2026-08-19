@@ -76,6 +76,18 @@ alternative, aborting at edit-*click* rather than at submit, was considered and
 rejected: it would mean clicking edit to re-read your own wording and thereby
 killing a running turn, which destroys the free abandonable click above.
 
+## Cancelling
+
+A **visible cancel control**, beside the primary button where the composer
+already says what it is about to do. Escape may cancel as well, but must never
+be the only way: the owner's rule, stated on 2026-08-19, is that nothing in
+this UI requires the keyboard except typing text into the composer. An edit
+that can only be abandoned by knowing a key is an edit that traps a mouse user
+in a mode, and this design leans on abandoning edits being cheap.
+
+Cancelling restores the transcript -- mark cleared, tail undimmed -- and puts
+back whatever draft the edit displaced.
+
 ## Addressing the fork point
 
 `ForkPoint.id` is a Pi entry id or a Codex turn id, and `PaneMessage` carries
@@ -117,12 +129,12 @@ needs the same shift is OW-yudoni, and settling it moves one line in
 
 Load-bearing, all settled by the owner on 2026-08-19: the edit click is free
 and abandonable, the fork happens at submit rather than at click, the outcome
-is always a new session, the button names every consequence it will have, and
-the original session reads normal afterwards.
+is always a new session, the button names every consequence it will have, the
+original session reads normal afterwards, and **cancelling is reachable by
+mouse**.
 
 Incidental, decide in flight: the button's glyph and wording, how the mark on
-the edited message is drawn, how the dimmed tail is styled, and whether cancel
-is a button or Escape.
+the edited message is drawn, and how the dimmed tail is styled.
 
 Out of scope: any view of a session's branches, and anything that hides or
 groups the sessions forking multiplies (OW-66, OW-vezipo).
@@ -144,6 +156,9 @@ Each test watched red first.
    when editing and streaming, and follows a turn completing mid-compose.
 6. Editing a message that carries an image does not silently send fewer images
    than the original held.
+7. A cancel control is present and, clicked, clears the mark, undims the tail
+   and restores the displaced draft -- driven by click, not by a key event, so
+   the test fails if cancelling is ever keyboard-only.
 
 `bun run check` passes, and so does **`bun run test:browser`**: this changes
 the message footer rows under `src/client/render/`, which AGENTS.md names as a
