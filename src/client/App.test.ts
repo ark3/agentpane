@@ -1490,6 +1490,114 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
+	// -- composer shortcuts to the last message (OW-relehi) ------------------
+
+	/**
+	 * Everything an edit is observable as, from outside: what the composer holds,
+	 * which message carries the mark, what dimmed behind it, and what the primary
+	 * button says it will do. Both shortcuts below are the transcript's own edit
+	 * gesture reached from elsewhere, so this is the shape the two get compared on.
+	 */
+	function editSnapshot(container: HTMLElement) {
+		return {
+			draft: (within(container).getByLabelText("Prompt") as HTMLTextAreaElement).value,
+			marked: [...container.querySelectorAll(".msg.editing")].map((el) => el.getAttribute("data-index")),
+			dimmed: [...container.querySelectorAll(".msg.dimmed")].map((el) => el.getAttribute("data-index")),
+			primary: container.querySelector("button[type='submit']")!.textContent,
+		};
+	}
+
+	it("stops the running turn and takes the last message back into the composer (OW-relehi)", async () => {
+		const messages = [user("first draft"), assistant([{ type: "text", text: "an answer" }])];
+		const controller = new FakeController(view({ state: attachedState(messages, piSession, true) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const primary = () => container.querySelector("button[type='submit']")!;
+
+		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
+
+		// It stops at the click, not at submit: that is what the name promises, and
+		// it is the one exception to OW-hezidi's rule that reaching for an edit is free.
+		expect(controller.aborted).toBe(1);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		expect([...container.querySelectorAll(".msg.editing")].map((el) => el.getAttribute("data-index")))
+			.toEqual(["0"]);
+		// Still "Stop and fork" here, and that is the truth rather than a stale label:
+		// `controller.abort()` does not clear `isStreaming` -- only a server event
+		// does -- and `forkAndSubmit` re-checks it and aborts again before forking.
+		expect(primary()).toHaveTextContent("Stop and fork");
+
+		// The server reporting the turn stopped, which is the only thing that ever
+		// clears `isStreaming`. Asserting "Fork" before this would assert a moment
+		// the real app cannot promise.
+		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, false) }));
+		await tick();
+		expect(primary()).toHaveTextContent("Fork");
+	});
+
+	it("edits the last message into exactly the state the transcript's own edit control leaves (OW-relehi)", async () => {
+		const messages = [
+			user("first draft"),
+			assistant([{ type: "text", text: "an answer" }]),
+			user("second draft"),
+			assistant([{ type: "text", text: "another answer" }]),
+		];
+
+		// Path one: scroll back and hit edit on the last user message.
+		const long = new FakeController(view({ state: attachedState(messages) }));
+		const longWay = render(App, { props: { controller: long } });
+		await tick();
+		const edits = within(longWay.container).getAllByRole("button", { name: "Edit message" });
+		await fireEvent.click(edits[edits.length - 1]!);
+		const viaTranscript = editSnapshot(longWay.container);
+		longWay.unmount();
+
+		// Path two: the composer's shortcut to the same message.
+		const short = new FakeController(view({ state: attachedState(messages) }));
+		const shortWay = render(App, { props: { controller: short } });
+		await tick();
+		await fireEvent.click(within(shortWay.container).getByRole("button", { name: "Edit last message" }));
+		const viaShortcut = editSnapshot(shortWay.container);
+
+		// Pinned, so the comparison cannot pass by both paths doing nothing.
+		expect(viaTranscript).toEqual({
+			draft: "second draft",
+			marked: ["2"],
+			dimmed: ["3"],
+			primary: "Fork",
+		});
+		expect(viaShortcut).toEqual(viaTranscript);
+		// The same operation, not a second implementation of it: neither path asks
+		// the server for anything, and idle there is nothing to stop.
+		expect(short.aborted).toBe(0);
+		expect(short.forked).toEqual([]);
+		expect(short.submitted).toBe(0);
+	});
+
+	it("offers neither shortcut without a user message to go back to (OW-relehi)", async () => {
+		const shortcut = () => [
+			...screen.queryAllByRole("button", { name: "Edit last message" }),
+			...screen.queryAllByRole("button", { name: "Stop and edit" }),
+		];
+
+		// Nothing selected: the composer is there, and the shortcuts are not.
+		const empty = new FakeController(view());
+		const { unmount } = render(App, { props: { controller: empty } });
+		await tick();
+		expect(screen.getByLabelText("Prompt")).toBeInTheDocument();
+		expect(shortcut()).toEqual([]);
+		unmount();
+
+		// Selected, streaming, but the transcript holds no user message yet.
+		const assistantOnly = new FakeController(view({
+			state: attachedState([assistant([{ type: "text", text: "an answer" }])], piSession, true),
+		}));
+		render(App, { props: { controller: assistantOnly } });
+		await tick();
+		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+		expect(shortcut()).toEqual([]);
+	});
+
 	it("reports reconnection and unsupported pending agent requests", () => {
 		const controller = new FakeController(view({
 			connection: "reconnecting",

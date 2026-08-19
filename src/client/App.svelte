@@ -188,6 +188,16 @@
 	 * offer and Codex cannot do at all.
 	 */
 	const sendLabel = $derived(editing ? (streamingNow ? "Stop and fork" : "Fork") : "Send");
+	/**
+	 * The last user message in the selected transcript, or null if there is none
+	 * to go back to (OW-relehi). The composer's shortcut renders only when this
+	 * is an index, matching how Stop behaves in that row: absent, not disabled.
+	 */
+	const lastUserIndex = $derived.by(() => {
+		const messages = selectedSession?.messages ?? [];
+		for (let i = messages.length - 1; i >= 0; i--) if (messages[i]?.role === "user") return i;
+		return null;
+	});
 	/** Advisory only (OW-73): a leading `/` is the whole trigger, deliberately imprecise -- Send still works either way. */
 	const looksLikeSlashCommand = $derived(view.draft.startsWith("/"));
 	const status = $derived.by(() => {
@@ -736,6 +746,30 @@
 		promptEl?.focus();
 	}
 
+	/**
+	 * Redoing the last thing you said, without scrolling back to find it
+	 * (OW-relehi). It is the transcript's own edit gesture reached from the
+	 * composer, so it goes through `startEdit` and repeats none of it: any
+	 * divergence between the two would be a defect, not a feature.
+	 *
+	 * Streaming, this stops the turn at the click rather than at submit -- the
+	 * one exception to OW-hezidi's free-and-abandonable rule, and it says so in
+	 * its own name. The fill runs first and the abort is not awaited. Awaiting it
+	 * would buy nothing: `controller.abort` never clears `isStreaming`, only a
+	 * server event does, so the primary button reads "Stop and fork" either way.
+	 * And it would cost something -- through that whole round trip the composer
+	 * would still hold the old draft under a button reading "Send", where a
+	 * Ctrl-Enter prompts the running session instead of forking it. Filled first,
+	 * "Stop and fork" is the truth: `forkAndSubmit` re-checks `isStreaming` and
+	 * aborts again before it forks.
+	 */
+	function editLastMessage(): void {
+		const index = lastUserIndex;
+		if (index === null) return;
+		startEdit(index);
+		if (streamingNow) void controller.abort();
+	}
+
 	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
 	function cancelEdit(): void {
 		if (!editing) return;
@@ -983,6 +1017,14 @@
 						disabled={view.state.selected === null || view.busy === "compacting"}
 					>Compact</button>
 				</div>
+				<!-- Beside Send and Stop, deliberately not in the Tools popover
+				     (OW-relehi): that menu holds the rare things, and going back to
+				     the last message is the frequent one. -->
+				{#if lastUserIndex !== null}
+					<button type="button" onclick={editLastMessage}>
+						{streamingNow ? "Stop and edit" : "Edit last message"}
+					</button>
+				{/if}
 				<button type="submit" disabled={!view.draft}>{sendLabel}</button>
 				{#if streamingNow}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>

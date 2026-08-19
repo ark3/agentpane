@@ -14,8 +14,8 @@ touching `src/`; say so explicitly when a commit is docs only.
 `bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless
 Chromium). It is **not** part of `bun run check` — it needs a browser, so
 nothing runs it for you (OW-49). Run it by hand when you touch follow-mode
-scrolling in `App.svelte`, `.conversation` in `app.css`, the composer's tools
-menu, the message footer rows in `src/client/render/`, or anything under
+scrolling in `App.svelte`, `.conversation` in `app.css`, the composer's action
+row, the message footer rows in `src/client/render/`, or anything under
 `public/`; jsdom cannot see layout, scroll anchoring, real scroll-event timing,
 or the Popover API, none of which it implements, and nothing in the module
 graph imports the favicons at all.
