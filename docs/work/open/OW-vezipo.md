@@ -34,3 +34,28 @@ OW-66 has landed and edit-and-fork has been used for long enough that the
 owner can say which forks he wants out of sight. Closing this means a decision
 recorded where decisions go -- `DESIGN.md` if it moves D13's storage, this
 file's close note otherwise -- not a UI tweak made in passing.
+
+**Nothing is being lost while this waits (checked 2026-08-19).** The worry that
+would argue for acting early -- that lineage has to be captured at fork time or
+not at all -- does not hold. Agentpane records no parentage of its own (no
+`parent`, `forkedFrom` or equivalent in `protocol.ts`, `src/server/sessions/`
+or `session-manager.ts`), but both backends already write it into the session
+file header, confirmed in the committed captures rather than from the type
+declarations:
+
+- **Codex**: `"forked_from_id"` inside `session_meta`
+  (`resources/fixtures/codex/fork.jsonl`, first line); `Thread.forkedFromId`
+  also exists in the vendored bindings.
+- **Pi**: `"parentSession"` in the session header line
+  (`resources/fixtures/pi/fork.jsonl`, first line).
+
+In both cases the recorded parent is already in the form agentpane uses as a
+ref -- a thread id for Codex, a JSONL path for Pi (D9) -- so no translation is
+implied either. All three alternatives named above need exactly this one input,
+and it is durably on disk for every fork already taken, retroactively readable
+by the walk `src/server/sessions/` already performs.
+
+So the work whenever the verdict arrives is to surface that field into
+`SessionSummary` from the existing parsers and then decide presentation.
+Waiting for use to say *which* forks deserve hiding costs nothing, which is
+what one wants to be true of a deferral.
