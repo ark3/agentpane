@@ -47,3 +47,21 @@ Choosing to map it instead is fine, but then it owes a captured fixture.
   re-synced on every `codex` upgrade is the same defect as the one OW-32
   describes in DESIGN's table, one file over.
 - `bun run check` passes.
+
+**Fixed** in a16a0b9: `collabAgentToolCall` joins `SILENT_ITEM_TYPES` with a
+comment recording that it is silent for want of a capture rather than by
+design, so the `default` arm now answers `unrendered item type:
+collabAgentToolCall` and `unknown` goes back to meaning *Codex moved*. The
+`mapItem` docblock stops naming a variant count instead of bumping 17 to 18 --
+a number re-synced on every `codex` upgrade drifts again. Pinned by
+`reducer.test.ts`'s "classifies collabAgentToolCall as unrendered rather than
+unknown", watched red against the pre-fix `mapping.ts` (`- "unrendered item
+type: collabAgentToolCall"` / `+ "unknown item type: collabAgentToolCall"`).
+Mapping it to a tool card was declined for the reason above: no capture exists.
+
+One thing the fix does not reach, and that this item did not claim it would:
+nothing in `src/` reads either `MappedItem.reason` or the reducer's
+`unmappedItemTypes`, and `remap` (`reducer.ts:293`) adds every `kind: "none"`
+type to that set regardless of which reason it carried. So the accurate string
+is currently only visible to a test. The registry is now honest, which is what
+was asked; surfacing it is not filed.
