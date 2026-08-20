@@ -45,3 +45,28 @@ being read off a generated type in the repo.
 
 Related: OW-32 records that these same arms are absent from DESIGN's mapping
 table, and OW-vefiso that one further variant reaches no arm at all.
+
+**Fixed** in d5793f9: seven cases in `reducer.test.ts`'s `item types with no
+fixture yet` block -- `imageGeneration` and `imageView` alongside its existing
+`mcpToolCall`/`webSearch` cases, and the five `UserInput` variants in a nested
+`user input variants no fixture carries` describe. Inputs are hand-built and
+pass through the block's `complete(item: ThreadItem)` helper, so the compiler
+checks every field against the vendored bindings; nothing was captured. Each
+arm was watched red by deleting it -- one test failing, the other 64 passing,
+seven times -- and the exact stand-in text is pinned, confirmed by mutating
+`[image: ` to `[img: ` with the arm intact and seeing only that one case go red.
+
+Two things the vendored types corrected about the description above.
+`imageGeneration` does not simply reference its `result`: `imageFromUrl` yields
+an image block and `blockAsAssistant` then degrades it, because an assistant
+turn carries no image block -- so a `data:` URL result renders as
+`[image: image/png]`, only the mime type, while a path result keeps the path.
+Both branches are asserted. And `skill` and `mention` each carry a `path`
+beside `name` that the mapping deliberately drops, which the case names now
+record so a later edit that starts emitting it reads as a change rather than a
+fix.
+
+Not filed, and noted here instead: `[image: image/png]` is a poor thing to show
+a user after a successful image generation. It is deliberate, it is now pinned
+as behaviour, and improving it is a rendering question rather than a mapping
+one.
