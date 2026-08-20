@@ -126,12 +126,10 @@ function imageFromUrl(url: string): ImageContent | TextContent {
 }
 
 /**
- * Codex `UserInput` -> Pi user content blocks.
- *
- * NOTE: DESIGN's content-block row ("`input_text`/`output_text` -> TextContent")
- * describes `ContentItem`, the *legacy* type. v2 `ThreadItem.userMessage`
+ * Codex `UserInput` -> Pi user content blocks. v2 `ThreadItem.userMessage`
  * carries `UserInput`, whose variants are `text`/`image`/`localImage`/`audio`/
- * `localAudio`/`skill`/`mention`. The fixtures confirm `{"type":"text"}`.
+ * `localAudio`/`skill`/`mention` -- not `ContentItem`, the legacy type. The
+ * fixtures confirm `{"type":"text"}`.
  *
  * `localImage`/`localAudio` reference a path the server can read but this
  * reducer cannot (it is pure), so they degrade to a text reference.

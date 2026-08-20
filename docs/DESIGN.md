@@ -637,8 +637,21 @@ for Pi):
 | `plan` | assistant text or a custom block | optional polish |
 | `contextCompaction` | compaction summary message | Pi has a compaction message type; mirror it |
 
-Content-block mapping (Codex `ContentItem` → Pi content):
-`input_text`/`output_text` → `TextContent`; `input_image` → `ImageContent`.
+**This table is a sketch, not a registry.** The registry is
+`src/server/adapters/codex/mapping.ts` — `mapItem`'s switch and the
+`SILENT_ITEM_TYPES` set above it, each arm carrying its own reasoning. Two
+mapped types are missing here, `imageGeneration` and `imageView`, both of which
+produce output. The table is deliberately not kept complete: Codex adds
+`ThreadItem` variants between releases, and `mapItem`'s doc comment says what
+happens to the ones nobody has taught it about.
+
+Content-block mapping (Codex `UserInput` → Pi content), done by
+`userInputToContent`: `text` → `TextContent`; `image` → `ImageContent` when the
+URL is a `data:` URL and a text reference otherwise; `localImage`, `audio`,
+`localAudio`, `skill` and `mention` → text references. Why the two local
+variants degrade rather than load is recorded at `userInputToContent`.
+(`ContentItem`, with its `input_text`/`input_image` variants, is the *legacy*
+type — v2's `userMessage` does not carry it.)
 
 **The table above is not the whole stream.** Captured turns also carry
 `turn/diff/updated` (a cumulative diff for the turn), `thread/tokenUsage/updated`,
@@ -649,9 +662,10 @@ some of these belong in the adapter even though they are not messages. Read a
 fixture before assuming this section is exhaustive.
 
 Fixtures currently cover `userMessage`, `reasoning`, `agentMessage`,
-`commandExecution`, and `fileChange`. The remaining rows — `mcpToolCall`,
-`dynamicToolCall`, `webSearch`, `plan`, `contextCompaction` — have no capture
-yet; add a scenario when implementing each.
+`commandExecution`, `fileChange`, and `contextCompaction`
+(`resources/fixtures/codex/compact.jsonl`). The remaining rows — `mcpToolCall`,
+`dynamicToolCall`, `webSearch`, `plan` — have no capture yet; add a scenario
+when implementing each.
 
 On the Pi side, note the fixtures show Pi choosing `bash` to perform a file
 edit rather than a dedicated edit tool. The tool vocabulary is not fixed, which
