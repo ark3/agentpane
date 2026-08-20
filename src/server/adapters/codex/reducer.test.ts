@@ -14,7 +14,12 @@ import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil
 import type { AssistantTurn } from "../../../shared/protocol.ts";
 import { CODEX_TOOL_NAMES, mapItem } from "./mapping.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
-import { isRecord, type CodexServerMessage, type ThreadItem } from "./protocol.ts";
+import {
+	isRecord,
+	type CodexServerMessage,
+	type ThreadItem,
+	type UserInput,
+} from "./protocol.ts";
 import {
 	byMethod,
 	itemOf,
@@ -860,6 +865,38 @@ describe("item types with no fixture yet", () => {
 		expect((messages[1] as ToolResultMessage).isError).toBe(false);
 	});
 
+	it("maps imageGeneration's result through the image reference", () => {
+		// An assistant turn carries no image block, so an inline data URL is
+		// degraded to its mime type and a plain result stays a reference.
+		const inline = complete({
+			type: "imageGeneration",
+			id: "g1",
+			status: "completed",
+			revisedPrompt: null,
+			result: "data:image/png;base64,QUJD",
+		});
+		expect((inline[0] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "[image: image/png]" },
+		]);
+		const referenced = complete({
+			type: "imageGeneration",
+			id: "g2",
+			status: "completed",
+			revisedPrompt: null,
+			result: "/tmp/generated.png",
+		});
+		expect((referenced[0] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "[image: /tmp/generated.png]" },
+		]);
+	});
+
+	it("maps imageView to a path reference", () => {
+		const messages = complete({ type: "imageView", id: "v1", path: "/tmp/screenshot.png" });
+		expect((messages[0] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "[image: /tmp/screenshot.png]" },
+		]);
+	});
+
 	it("maps plan to assistant text and streams its deltas", () => {
 		const r = reducer();
 		r.handle({
@@ -927,6 +964,55 @@ describe("item types with no fixture yet", () => {
 		const messages = complete({ type: "contextCompaction", id: "c1" });
 		expect(messages).toHaveLength(1);
 		expect(messages[0]).toMatchObject({ role: "compactionSummary", summary: "", tokensBefore: 0 });
+	});
+
+	// Every fixture carries `{"type":"text"}` user input and nothing else. The
+	// other variants degrade to a text stand-in that is the only thing a user
+	// sees for that input, and `userInputToContent`'s switch has no `default`:
+	// an arm dropped into the fall-through would contribute nothing at all
+	// rather than degrade visibly, and no assertion elsewhere would notice. So
+	// the stand-in text is asserted exactly -- here the string *is* the
+	// behaviour, and it is our wording, not the model's.
+	describe("user input variants no fixture carries", () => {
+		function userContent(input: UserInput) {
+			const messages = complete({
+				type: "userMessage",
+				id: "u1",
+				clientId: null,
+				content: [input],
+			});
+			return (messages[0] as UserMessage).content;
+		}
+
+		it("degrades localImage to a path reference", () => {
+			expect(userContent({ type: "localImage", path: "/tmp/shot.png" })).toEqual([
+				{ type: "text", text: "[image: /tmp/shot.png]" },
+			]);
+		});
+
+		it("degrades audio to a url reference", () => {
+			expect(userContent({ type: "audio", url: "https://example.test/clip.wav" })).toEqual([
+				{ type: "text", text: "[audio: https://example.test/clip.wav]" },
+			]);
+		});
+
+		it("degrades localAudio to a path reference", () => {
+			expect(userContent({ type: "localAudio", path: "/tmp/clip.wav" })).toEqual([
+				{ type: "text", text: "[audio: /tmp/clip.wav]" },
+			]);
+		});
+
+		it("names a skill, not the path it was loaded from", () => {
+			expect(userContent({ type: "skill", name: "brainstorm", path: "/skills/brainstorm" })).toEqual(
+				[{ type: "text", text: "[skill: brainstorm]" }],
+			);
+		});
+
+		it("re-spells a mention as the @name the user typed", () => {
+			expect(userContent({ type: "mention", name: "AGENTS.md", path: "/repo/AGENTS.md" })).toEqual([
+				{ type: "text", text: "@AGENTS.md" },
+			]);
+		});
 	});
 });
 
