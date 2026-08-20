@@ -56,6 +56,10 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   nothing while the CLI is already running. The triage hint that would help on
   any other item is a defect on this one. Proposed for OW-yudoni on 2026-08-19
   and declined by the owner for exactly this reason.
+- Pi fork behavior settled live on the work laptop (2026-08-20, `pi 0.84.2`):
+  forking at a user message is exclusive of that message, while forking during
+  a streaming turn succeeds but abandons the in-flight turn. See
+  `docs/MANUAL_TESTING.md` OW-yudoni.
 - A test that has never failed has not been shown to test anything. For a fix,
   break it again and watch it go red first.
 - State the why only where there is a body behind it: an incident that happened

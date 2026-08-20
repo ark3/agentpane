@@ -397,7 +397,9 @@ either backend — `DESIGN.md:21` and HANDOFF finding 7 asserted support from
 finding 7 and `DESIGN.md:21` landed with this work (HANDOFF findings 43–48).
 Every run used a throwaway workspace and a throwaway state dir
 (`PI_CODING_AGENT_DIR` / `CODEX_HOME`, credentials copied in) — no corpus
-session was ever forked, since Pi's fork could rewrite a file in place. Codex
+session was ever forked, since Pi's on-disk fork behavior was still unproven
+when the probe was first built and the throwaway setup made either outcome
+safe. Codex
 threads were **not** `ephemeral`, because the on-disk residue is the question.
 New-session cells end with a completed assistant turn *inside* the fork; rewind
 is proven against disk, not against the response (finding 30: a vetoed Pi fork
@@ -497,6 +499,39 @@ Note the fork itself persists nothing: F2 does not materialise until the next
 prompt, so a fork with no subsequent prompt writes no file and holds no
 conversation the abandoned F1 does not already carry. Discarding it before
 prompting loses nothing — there is no forked turn to lose.
+
+### Settling second-message semantics and mid-stream fork behavior (OW-yudoni)
+
+Run on the work laptop 2026-08-20, **pi 0.84.2**, by the same re-runnable
+`resources/probes/fork_probe.py` vehicle: `python3 resources/probes/fork_probe.py --backend pi --no-fixtures`.
+The existing `pi_rewind` cell now primes three turns, forks at the **second**
+user message, and then attempts a second fork while a long turn is already
+streaming.
+
+**Forking at the second user message is exclusive.** The fork response named
+`Say exactly: BETA`, but the proof was read from state, not trusted from that
+response: `get_messages` immediately after the fork contained only
+`ALPHA -> ALPHA`, with no `BETA`; after the re-ask it contained
+`ALPHA -> ALPHA -> DELTA -> DELTA`; and the new branch file on disk carried
+the same four messages and no `BETA`. Pi therefore already matches the edit
+contract "fork at message N, new branch ends just before it", so
+`src/server/adapters/pi/process.ts` needed no index shift.
+
+**Forking while a turn is streaming succeeds, but it kills that turn.** The
+probe started a long prompt, observed `get_state.isStreaming: true`, then sent
+`fork`. Pi returned `success: true` with `{ text: "Say exactly: ALPHA",
+cancelled: false }`. The immediate `get_state` after that fork reported a
+different active `sessionFile`, `isStreaming: false`, and `messageCount: 0`.
+`agent_settled` still arrived, but there was no assistant text and
+`get_messages` on the new branch stayed empty. On Pi, a mid-stream fork does
+not fail and does not preserve the running turn; it abandons it.
+
+**One older timing claim no longer holds load-bearingly.** The 2026-08-19
+OW-pifowo run observed `moved_file_on_disk_at_fork: false`; this 2026-08-20
+second-message run observed `true` on the immediate `get_state` re-query. The
+stable fact across both runs is the file move itself (`active_file_moves_at_fork:
+true`), not whether the new path is already listed by the time the next probe
+round-trip returns.
 
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 

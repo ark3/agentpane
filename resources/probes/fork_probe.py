@@ -16,13 +16,15 @@ The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
                        byte-identical and the post-fork re-ask lands in a NEW
                        file with a `parentSession` pointer. The process's active
                        `sessionFile` MOVES to that new file at the fork call
-                       itself (OW-pifowo), before any re-ask, and the moved-to
-                       file is not yet on disk at that moment. Either way the
-                       abandoned tail SURVIVES on disk (also visible as in-file
-                       sibling branches in 81/419 corpus files), so no
-                       destructive-rewind warning is warranted. Proven by
-                       inspection, not by the response -- an extension veto
-                       reports success:true with cancelled:true, finding 30.
+                       itself (OW-pifowo). On the 2026-08-20 second-message
+                       run, the rewound branch stops BEFORE the forked-at user
+                       message, matching Codex's edit contract, and the new
+                       active file is already listed on disk by the immediate
+                       `get_state` re-query. A mid-stream fork also succeeds,
+                       but it aborts the running turn and leaves the new branch
+                       empty/idle. Proven by inspection, not by the response --
+                       an extension veto reports success:true with
+                       cancelled:true, finding 30.
   Pi, new session   -> RPC `clone`. Takes NO entry id (rpc.md "clone"): it
                        duplicates the whole active branch into a NEW session
                        file at the current position, with a `parentSession`
@@ -43,8 +45,8 @@ The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
 Constraints honoured (OW-mewiga):
   * NEVER fork a corpus session -- everything here runs in throwaway workspaces
     with throwaway state dirs (PI_CODING_AGENT_DIR / CODEX_HOME), credentials
-    copied in by name. Pi's fork rewrites its file in place, so a corpus file
-    could be destroyed.
+    copied in by name. That was initially a safety hedge against the
+    possibility that Pi rewrote a session in place; the hedge remains cheap.
   * NOT `ephemeral: true` for Codex -- the on-disk residue IS the question here,
     so threads must materialise on disk (contrast capture_fixtures.py, which
     uses ephemeral to stay clean; finding 25).
@@ -205,6 +207,22 @@ def text_of(message):
     return ""
 
 
+def preview(text, limit=120):
+    """Bound recorded text so the probe output stays readable."""
+    if text is None or len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def summarize_messages(messages, limit=120):
+    """Project AgentMessage-like objects to compact role/text pairs."""
+    return [
+        {"role": message.get("role"), "text": preview(text_of(message), limit)}
+        for message in messages
+        if message.get("role") in {"user", "assistant"}
+    ]
+
+
 def pi_last_message_text(path):
     """Text of the last `message` entry in a Pi session file (for a tail check)."""
     last = None
@@ -216,6 +234,23 @@ def pi_last_message_text(path):
         if e.get("type") == "message":
             last = e
     return text_of(last.get("message", {})) if last else None
+
+
+def pi_file_messages(path, limit=120):
+    """Project on-disk Pi `message` entries to compact role/text pairs."""
+    out = []
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        entry = json.loads(line)
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message", {})
+        role = message.get("role")
+        if role in {"user", "assistant"}:
+            out.append({"role": role, "text": preview(text_of(message), limit)})
+    return out
 
 
 def pi_tree_summary(path):
@@ -311,6 +346,19 @@ class PiSession:
                 return text_of(e["message"])
         return None
 
+    def wait_for_event(self, event_type, since=0, timeout=20):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for line in self.raw[since:]:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("type") == event_type:
+                    return event
+            time.sleep(0.15)
+        return None
+
     def close(self):
         self.proc.terminate()
         try:
@@ -329,15 +377,17 @@ def run_pi(timeout, want_fixtures):
     try:
         st = pi.response({"type": "get_state"}, "get_state")
         version = cli_version("pi")
-        # Prime: two turns so there is a real branch to rewind to.
+        # Prime: three turns so a fork at the SECOND user message is distinct
+        # from both "keep nothing" and "keep the whole first turn".
         pi.turn("Say exactly: ALPHA")
         pi.turn("Say exactly: BETA")
+        pi.turn("Say exactly: GAMMA")
         active = pi.response({"type": "get_state"}, "get_state")["data"]["sessionFile"]
         forks = pi.response({"type": "get_fork_messages"}, "get_fork_messages")["data"]["messages"]
 
-        # --- Cell: Pi rewind (fork). Rewind to the FIRST user message (ALPHA),
-        #     then re-ask. The UNKNOWN this settles: does the abandoned BETA
-        #     tail survive on disk, or is it destroyed?
+        # --- Cell: Pi rewind (fork). Rewind to the SECOND user message (BETA),
+        #     then re-ask. The UNKNOWN this settles: does the rewound branch
+        #     keep the user message it forked at, or does it stop before it?
         #
         #     On 0.84.2 the answer is that `fork` is COPY-ON-WRITE, not an
         #     in-place rewrite of the active file (contra the adapter docblock
@@ -347,22 +397,23 @@ def run_pi(timeout, want_fixtures):
         #     a `parentSession` pointer back to it. Survival is therefore total:
         #     the whole prior branch is preserved as its own intact file. The
         #     probe proves it three ways -- the original file's sha is unchanged,
-        #     its last entry is still the abandoned BETA assistant reply, and a
-        #     new file appears whose header points back at it.
+        #     its last entry is still the abandoned GAMMA assistant reply, and
+        #     a new file appears whose header points back at it.
         #
         #     It also settles OW-pifowo's ref question: the process's active
-        #     `sessionFile` MOVES to the new file at the fork call itself, BEFORE
-        #     any re-ask (`active_file_moves_at_fork`), and the moved-to file is
-        #     NOT yet on disk at that moment (`moved_file_on_disk_at_fork`:
-        #     False) -- it materialises only on the next prompt. So the adapter
-        #     must re-adopt the file `get_state` reports after a fork; returning
-        #     an unchanged ref keeps the server on the abandoned pre-fork branch
-        #     (fixed in pi/process.ts, this commit). ---
-        alpha_entry = forks[0]["entryId"]
+        #     `sessionFile` MOVES to the new file at the fork call itself,
+        #     BEFORE any re-ask (`active_file_moves_at_fork`). On the
+        #     2026-08-20 run the moved-to file was already present on disk by
+        #     the immediate `get_state` re-query, so the adapter concern is
+        #     simply to re-adopt the file Pi reports after a fork rather than
+        #     keep steering the abandoned pre-fork branch. ---
+        beta_entry = forks[1]["entryId"]
+        beta_text = forks[1]["text"]
         orig_sha_before = hashlib.sha256(open(active, "rb").read()).hexdigest()
         orig_tail_before = pi_last_message_text(active)
         pre_fork_files = {p.name for p in sessdir.rglob("*.jsonl")}
-        fork_resp = pi.response({"type": "fork", "entryId": alpha_entry}, "fork")
+        fork_resp = pi.response({"type": "fork", "entryId": beta_entry}, "fork")
+        rewound_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
         # OW-pifowo: re-query get_state the moment the fork returns, before any
         # re-ask, to catch the active file moving and to check the moved-to file
         # is not yet materialised on disk.
@@ -374,16 +425,19 @@ def run_pi(timeout, want_fixtures):
         # Re-ask from the rewound point so a new branch actually forms.
         pi.turn("Say exactly: DELTA")
         time.sleep(0.5)
+        rewound_messages_after_reask = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
         orig_sha_after = hashlib.sha256(open(active, "rb").read()).hexdigest()
         orig_tail_after = pi_last_message_text(active)
         rewind_new_files = [p for p in sessdir.rglob("*.jsonl") if p.name not in pre_fork_files]
         new_file = rewind_new_files[0] if rewind_new_files else None
         new_header = json.loads(open(new_file).readline()) if new_file else {}
+        rewound_file_messages = pi_file_messages(new_file) if new_file else []
         cells["pi_rewind"] = {
             "operation": "fork (entryId)",
             "exists": fork_resp is not None and fork_resp.get("success") is True,
             "returned": fork_resp.get("data") if fork_resp else None,
-            "rewound_to_entry": alpha_entry,
+            "rewound_to_entry": beta_entry,
+            "rewound_to_text": beta_text,
             "in_place_rewrite_of_active_file": False,
             "copy_on_write": True,
             "original_file_unchanged": orig_sha_before == orig_sha_after,
@@ -391,6 +445,17 @@ def run_pi(timeout, want_fixtures):
             "original_abandoned_tail_text": orig_tail_after,
             "reask_wrote_new_file": new_file.name if new_file else None,
             "new_file_parentSession": new_header.get("parentSession"),
+            "rewound_messages_before_reask": summarize_messages(rewound_messages),
+            "forked_message_present_in_get_messages": any(
+                message.get("role") == "user" and text_of(message) == beta_text
+                for message in rewound_messages
+            ),
+            "rewound_messages_after_reask": summarize_messages(rewound_messages_after_reask),
+            "rewound_file_messages_after_reask": rewound_file_messages,
+            "forked_message_present_on_disk_after_reask": any(
+                message["role"] == "user" and message["text"] == beta_text
+                for message in rewound_file_messages
+            ),
             # OW-pifowo ref question: the active file moves at the fork call, and
             # the moved-to file is not on disk until the next prompt.
             "active_file_moves_at_fork": active_after_fork != active,
@@ -440,6 +505,37 @@ def run_pi(timeout, want_fixtures):
         }
         if want_fixtures and clone_file:
             fixture_src = clone_file
+
+        # Still inside the Pi rewind cell: fork while a turn is streaming from
+        # an already-completed branch, then record both the command result and
+        # what became of the in-flight turn.
+        stream_forks = pi.response({"type": "get_fork_messages"}, "get_fork_messages")["data"]["messages"]
+        stream_entry = stream_forks[0]["entryId"] if stream_forks else None
+        stream_prompt = "Write the numbers 1 through 400, one per line, with no prose."
+        stream_mark = len(pi.raw)
+        prompt_resp = pi.response({"type": "prompt", "message": stream_prompt}, "prompt")
+        agent_started = pi.wait_for_event("agent_start", since=stream_mark, timeout=10)
+        state_while_streaming = pi.response({"type": "get_state"}, "get_state")
+        stream_fork_resp = (
+            pi.response({"type": "fork", "entryId": stream_entry}, "fork", timeout=10)
+            if stream_entry else None
+        )
+        state_after_stream_fork = pi.response({"type": "get_state"}, "get_state")
+        settled_after_stream_fork = pi.wait_for_event("agent_settled", since=stream_mark, timeout=timeout) is not None
+        post_stream_state = pi.response({"type": "get_state"}, "get_state")
+        post_stream_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
+        cells["pi_rewind"].update({
+            "midstream_fork_entry": stream_entry,
+            "midstream_prompt_admitted": prompt_resp is not None and prompt_resp.get("success") is True,
+            "midstream_agent_start_seen": agent_started is not None,
+            "midstream_state_before_fork": state_while_streaming.get("data") if state_while_streaming else None,
+            "midstream_fork_return": stream_fork_resp,
+            "midstream_state_after_fork": state_after_stream_fork.get("data") if state_after_stream_fork else None,
+            "midstream_turn_settled": settled_after_stream_fork,
+            "midstream_state_after_turn": post_stream_state.get("data") if post_stream_state else None,
+            "midstream_assistant_reply_preview": preview(pi.last_assistant_text(stream_mark)),
+            "midstream_messages_tail": summarize_messages(post_stream_messages[-4:]),
+        })
     finally:
         pi.close()
 
