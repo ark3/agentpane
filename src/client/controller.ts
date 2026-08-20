@@ -466,8 +466,11 @@ export function createController(
 			publish({ busy: "submitting", error: null });
 			try {
 				// Stop a running turn before forking it. A first cut, chosen because it
-				// is safe on both backends; Codex's parent thread genuinely keeps
-				// running, and not stopping it there is gated on OW-yudoni.
+				// is safe on both backends. OW-yudoni since settled what Pi does if
+				// you don't: the fork succeeds and abandons the turn anyway, so this
+				// abort makes that loss deliberate rather than silent. Codex's parent
+				// thread genuinely keeps running; whether to stop stopping it there,
+				// and wear the asymmetry, is OW-zekuhe.
 				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
 				const points = await api.forkPoints(ref);
 				const point = points[ordinal];
