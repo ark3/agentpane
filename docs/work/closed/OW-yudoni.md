@@ -71,3 +71,12 @@ Then, conditionally: if Pi keeps the forked-at entry, `pi/process.ts` `fork()`
 shifts to the preceding entry the way `codex/adapter.ts:398` does, pinned by a
 test in `pi/process.test.ts` watched red first. If Pi cannot fork mid-turn,
 that is recorded in OW-hezidi's own file as settled rather than deferred.
+
+**Fixed** in f6aa0de: `resources/probes/fork_probe.py`'s `pi_rewind` cell now
+records both live answers on the work laptop (`pi 0.84.2`), and
+`docs/MANUAL_TESTING.md` records the results. A fork at the second user
+message is exclusive of that message in both `get_messages` and the on-disk
+branch file, so `src/server/adapters/pi/process.ts` needed no shift. A
+mid-stream fork returns `success: true`, moves the active file to a new
+session, and abandons the in-flight turn (idle, empty branch, no assistant
+reply).
