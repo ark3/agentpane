@@ -289,13 +289,18 @@ const SILENT_ITEM_TYPES = new Set<string>([
 	"exitedReviewMode",
 	"subAgentActivity",
 	"sleep",
+	// Silent for want of a capture, not by design: its shape (`tool`, `status`,
+	// the issuing thread id) is what `toolPair` handles, but no fixture drives a
+	// collab session, and this repo does not render a wire shape nobody has seen
+	// (OW-vefiso). Listing it here keeps "unknown" meaning *Codex moved*.
+	"collabAgentToolCall",
 ]);
 
 /**
  * The whole table, in one switch. Unknown item types return `kind: "none"`
- * rather than throwing: `ThreadItem` has 17 variants today and Codex adds them
- * between releases, so a reducer that crashes on an unrecognised item would
- * take the session down on a routine `codex` upgrade.
+ * rather than throwing: Codex adds `ThreadItem` variants between releases, so a
+ * reducer that crashes on an unrecognised item would take the session down on a
+ * routine `codex` upgrade.
  */
 export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 	switch (item.type) {

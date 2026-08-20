@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { AssistantTurn } from "../../../shared/protocol.ts";
-import { CODEX_TOOL_NAMES } from "./mapping.ts";
+import { CODEX_TOOL_NAMES, mapItem } from "./mapping.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import { isRecord, type CodexServerMessage, type ThreadItem } from "./protocol.ts";
 import {
@@ -676,6 +676,26 @@ describe("defensive handling", () => {
 		expect(effects).toEqual([]);
 		expect(r.getState().messages).toEqual([]);
 		expect(r.unmappedItemTypes.has("quantumEntanglement")).toBe(true);
+	});
+
+	it("classifies collabAgentToolCall as unrendered rather than unknown", () => {
+		// "unknown" is the signal for a variant Codex added after this code was
+		// written. `collabAgentToolCall` is in the bindings the repo vendors, so
+		// spending that string on it makes the one useful signal a lie -- it is
+		// unrendered for want of a capture, not for want of a Codex release. The
+		// reducer drops `reason`, so this asks `mapItem` directly; the case below
+		// already pins that the item reduces to nothing.
+		const item = { type: "collabAgentToolCall", id: "c1" } as unknown as ThreadItem;
+		expect(
+			mapItem(item, {
+				timestamp: 1,
+				api: "example-api",
+				provider: "example-provider",
+				model: "example-model",
+				effort: null,
+				completed: true,
+			}),
+		).toEqual({ kind: "none", reason: "unrendered item type: collabAgentToolCall" });
 	});
 
 	it.each([
