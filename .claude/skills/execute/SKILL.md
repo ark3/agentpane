@@ -67,6 +67,12 @@ Then wait.
    and append to that file, as its last body paragraph, `**Fixed** in <sha>:
    <evidence>` — the landed sha and what shows it works. No heading above it,
    no strikethrough anywhere, no `sha:` frontmatter field.
+
+   **The item's own conditionals fire at the close**, whichever way the answer
+   came out. A "then, conditionally" clause naming another item, a doc, or a
+   decision is part of landing this one. If the answer does not fit the branch
+   as written — the condition was phrased over a predicted outcome that did not
+   happen — that is a new item, never a skip.
 5. **Hand back.** Say what changed and how to see it — what to run, what to
    look at, what would count as working. Then stop.
 

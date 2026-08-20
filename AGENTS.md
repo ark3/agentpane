@@ -62,6 +62,13 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   `docs/MANUAL_TESTING.md` OW-yudoni.
 - A test that has never failed has not been shown to test anything. For a fix,
   break it again and watch it go red first.
+- When a run overturns a fact the repo already recorded, the same change retires
+  **every** copy of it. Grep the flag name or the phrase; the copies are not all
+  in docs. On 2026-08-20 a run flipped `moved_file_on_disk_at_fork` and left the
+  old answer standing in `docs/MANUAL_TESTING.md`, in the conclusion that
+  section had drawn from it, and in the `pi/process.ts` docblock a reader meets
+  at the code (034d7dd). A correction filed one section below the claim it
+  corrects reaches nobody who was not already reading it.
 - State the why only where there is a body behind it: an incident that happened
   or a default the reader will actually follow. Refuting something nobody would
   have tried costs the budget twice — it argues with no one, and it plants the
@@ -74,7 +81,10 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   it is on its own worktree's branch, so it commits there and the session agent
   cherry-picks that onto `main`. Never `git push` unless asked by name.
 - Work items live only in `docs/work/`, not in GitHub issues or any other
-  external tracker. One file per item, `docs/work/open/<id>.md`; closing it is
+  external tracker. One file per item; a bare id resolves against **both**
+  directories, `docs/work/{open,closed}/<id>.md`, because an item cited
+  somewhere may have closed since — on 2026-08-20 an agent given a bare id
+  looked only in `open/` and reported the item missing. Closing an item is
   a `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
   paragraph appended to the body. A closed item is kept rather than deleted,
   because its close note is sometimes the grounding a later one needs — what

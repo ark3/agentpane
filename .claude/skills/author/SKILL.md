@@ -27,6 +27,14 @@ named.
 **Intent — what done looks like**, what it is in service of, and which
 specifics are load-bearing versus incidental.
 
+**A conditional in "done when" is phrased over the decision it gates, not over
+the outcome you expect.** OW-yudoni asked for a live answer and then wrote *"if
+Pi cannot fork mid-turn, that is recorded in OW-hezidi's own file"*. The answer
+came back "it can, but it kills the turn" — so the condition read false, the
+follow-through never fired, and the decision it gated sat unmade until a review
+caught it. *"Whatever the answer, record what it means for OW-hezidi"* fires
+either way, and costs a word.
+
 ## The shape the file must have
 
 Mandated, and only this much: one-line `kind:` and `where:` frontmatter
