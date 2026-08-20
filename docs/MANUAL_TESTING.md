@@ -465,11 +465,14 @@ This closes the open concern the OW-mewiga cell flagged — what the adapter's
 **Pi: the active `sessionFile` moves AT the fork call.** `active_file_moves_at_fork:
 true` — the process's active file moves F1→F2 at the `fork` call itself, before
 any re-ask, while `original_file_unchanged: true` (copy-on-write, F1 byte-
-identical). F2 is **not** on disk at fork time (`moved_file_on_disk_at_fork:
-false`); it materialises on the next prompt with header `parentSession`→F1
-(`new_file_parentSession`). So the adapter must re-adopt the moved file —
-returning an unchanged `ref` (the old defect) leaves the server keyed to the
-abandoned pre-fork branch.
+identical). F2 carries header `parentSession`→F1 (`new_file_parentSession`).
+So the adapter must re-adopt the moved file — returning an unchanged `ref` (the
+old defect) leaves the server keyed to the abandoned pre-fork branch.
+
+This run also read `moved_file_on_disk_at_fork: false` and concluded F2
+materialises only on the next prompt. **That half did not survive** — the
+2026-08-20 run read `true`, and the two did not measure at the same point. It is
+open in OW-gajesu; take nothing below from it.
 
 **Codex: the forked rollout is flushed to disk before any turn.**
 `forked_on_disk_before_turn: true`, `thread_read_forked_before_turn_ok: true`,
@@ -495,10 +498,13 @@ re-adopting F2 load-bearing rather than cosmetic. Not folded into
 `fork_probe.py` (a resume harness is more than the cell needs); recorded here as
 observed.
 
-Note the fork itself persists nothing: F2 does not materialise until the next
-prompt, so a fork with no subsequent prompt writes no file and holds no
-conversation the abandoned F1 does not already carry. Discarding it before
-prompting loses nothing — there is no forked turn to lose.
+What a fork with no subsequent prompt costs therefore stands **unsettled**. On
+the `false` reading it costs nothing: no file is written, and the abandoned F1
+already carries every message F2 would. On the `true` reading it leaves an F2 in
+the sessions directory, which `src/server/sessions/walk.ts` readdir-walks to
+build the picker — so a user who opens an edit, forks, and changes their mind
+could be left with a phantom session listed. Which of those is real, and whether
+the listing filters it, is OW-gajesu.
 
 ### Settling second-message semantics and mid-stream fork behavior (OW-yudoni)
 
@@ -520,18 +526,30 @@ contract "fork at message N, new branch ends just before it", so
 **Forking while a turn is streaming succeeds, but it kills that turn.** The
 probe started a long prompt, observed `get_state.isStreaming: true`, then sent
 `fork`. Pi returned `success: true` with `{ text: "Say exactly: ALPHA",
-cancelled: false }`. The immediate `get_state` after that fork reported a
-different active `sessionFile`, `isStreaming: false`, and `messageCount: 0`.
-`agent_settled` still arrived, but there was no assistant text and
-`get_messages` on the new branch stayed empty. On Pi, a mid-stream fork does
-not fail and does not preserve the running turn; it abandons it.
+cancelled: false }`, and the `get_state` after that fork reported a different
+active `sessionFile` and `isStreaming: false`. `agent_settled` still arrived,
+but with no assistant text. On Pi, a mid-stream fork does not fail and does not
+preserve the running turn; it abandons it.
 
-**One older timing claim no longer holds load-bearingly.** The 2026-08-19
-OW-pifowo run observed `moved_file_on_disk_at_fork: false`; this 2026-08-20
-second-message run observed `true` on the immediate `get_state` re-query. The
-stable fact across both runs is the file move itself (`active_file_moves_at_fork:
-true`), not whether the new path is already listed by the time the next probe
-round-trip returns.
+**Two things that run recorded are not evidence for that**, and the cell has
+since been changed so the next one carries the weight the prose already claims
+(OW-gajesu). It forked at the **first** user message, where the exclusive
+semantics proven just above empty the new branch whatever became of the turn —
+so `messageCount: 0` and an empty `get_messages` were tautologies, not
+corroboration; the cell now forks at the second. And it read the new branch
+rather than the file the turn was streaming into, which is where a partial reply
+would have landed; the cell now reads that file too. What survives from this run
+is `isStreaming: false` plus a settle with no assistant text.
+
+**One older timing claim was contradicted, by a run that had moved the
+instrument.** The 2026-08-19 OW-pifowo run observed `moved_file_on_disk_at_fork:
+false`; this one observed `true`. But this cell had inserted a `get_messages`
+round-trip between the `fork` and the `get_state`, so the two were not measuring
+at the same moment and the added latency is itself a candidate explanation. The
+`get_state` is now back to being the first round-trip after the `fork`, as it
+was in 2026-08-19; **the flag is unsettled until a run at that point says
+otherwise** (OW-gajesu). The stable fact across both runs is the file move
+itself (`active_file_moves_at_fork: true`).
 
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 

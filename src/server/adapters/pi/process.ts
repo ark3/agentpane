@@ -353,11 +353,12 @@ export class PiAdapter implements BackendAdapter {
 		// Pi's `fork` is COPY-ON-WRITE, not the in-place rewind an earlier
 		// docblock claimed (settled live on 0.84.2, MANUAL_TESTING.md OW-pifowo).
 		// The original session file is left byte-identical; the process's active
-		// `sessionFile` MOVES to a new file at the fork call, and that new file
-		// materialises on disk only on the next prompt (it is not yet listed at
-		// fork time). So the id we hold has diverged from Pi's active file and
-		// must be re-adopted -- otherwise a later turn is keyed to the abandoned
-		// pre-fork branch and a listing indexes a stale id. Unlike
+		// `sessionFile` MOVES to a new file at the fork call. So the id we hold
+		// has diverged from Pi's active file and must be re-adopted -- otherwise
+		// a later turn is keyed to the abandoned pre-fork branch and a listing
+		// indexes a stale id. Whether that new file is on disk by the time the
+		// fork returns is NOT settled -- two runs read opposite answers
+		// (OW-gajesu) -- so do not build on either answer here. Unlike
 		// `adoptSessionFile` (the one-time virtual->real materialisation, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file

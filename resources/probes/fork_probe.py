@@ -17,12 +17,15 @@ The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
                        file with a `parentSession` pointer. The process's active
                        `sessionFile` MOVES to that new file at the fork call
                        itself (OW-pifowo). On the 2026-08-20 second-message
-                       run, the rewound branch stops BEFORE the forked-at user
-                       message, matching Codex's edit contract, and the new
-                       active file is already listed on disk by the immediate
-                       `get_state` re-query. A mid-stream fork also succeeds,
-                       but it aborts the running turn and leaves the new branch
-                       empty/idle. Proven by inspection, not by the response --
+                       run the rewound branch stops BEFORE the forked-at user
+                       message, matching Codex's edit contract. Whether the
+                       moved-to file is on disk AT the fork is UNSETTLED: the
+                       two runs read opposite answers and did not measure at
+                       the same point (OW-gajesu), so the get_state re-query is
+                       back ahead of get_messages where OW-pifowo took it. A
+                       mid-stream fork also succeeds, but it aborts the running
+                       turn and leaves the new branch empty/idle. Proven by
+                       inspection, not by the response --
                        an extension veto reports success:true with
                        cancelled:true, finding 30.
   Pi, new session   -> RPC `clone`. Takes NO entry id (rpc.md "clone"): it
@@ -372,7 +375,7 @@ def run_pi(timeout, want_fixtures):
     work = make_workspace("agentpane-fork-piwork-")
     home = make_state_home(Path.home() / ".pi" / "agent", PI_STATE_FILES, "agentpane-fork-pihome-")
     sessdir = work / "sessions"
-    fixture_src = None
+    fixture_lines = None
     pi = PiSession(work, home, sessdir)
     try:
         st = pi.response({"type": "get_state"}, "get_state")
@@ -413,14 +416,23 @@ def run_pi(timeout, want_fixtures):
         orig_tail_before = pi_last_message_text(active)
         pre_fork_files = {p.name for p in sessdir.rglob("*.jsonl")}
         fork_resp = pi.response({"type": "fork", "entryId": beta_entry}, "fork")
-        rewound_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
         # OW-pifowo: re-query get_state the moment the fork returns, before any
-        # re-ask, to catch the active file moving and to check the moved-to file
-        # is not yet materialised on disk.
+        # re-ask, to catch the active file moving and to see whether the moved-to
+        # file is on disk yet. This must stay the FIRST round-trip after `fork`:
+        # the 2026-08-20 run put a get_messages ahead of it and read the opposite
+        # answer from 2026-08-19, which leaves that extra latency as a candidate
+        # explanation and makes the two runs incomparable (OW-gajesu).
         active_after_fork = pi.response({"type": "get_state"}, "get_state")["data"]["sessionFile"]
         files_at_fork = {p.name for p in sessdir.rglob("*.jsonl")}
+        rewound_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
         moved_on_disk_at_fork = (
             active_after_fork is not None and Path(active_after_fork).name in files_at_fork
+        )
+        # If it IS there, what does it hold before any prompt? That is what a
+        # fork the user then discards would leave behind for the session picker
+        # to list (OW-gajesu).
+        moved_file_messages_at_fork = (
+            pi_file_messages(active_after_fork) if moved_on_disk_at_fork else None
         )
         # Re-ask from the rewound point so a new branch actually forms.
         pi.turn("Say exactly: DELTA")
@@ -456,11 +468,13 @@ def run_pi(timeout, want_fixtures):
                 message["role"] == "user" and message["text"] == beta_text
                 for message in rewound_file_messages
             ),
-            # OW-pifowo ref question: the active file moves at the fork call, and
-            # the moved-to file is not on disk until the next prompt.
+            # OW-pifowo ref question: the active file moves at the fork call.
+            # Whether it is on disk by then is unsettled -- the two runs disagree
+            # (OW-gajesu). The move itself is the stable fact the adapter needs.
             "active_file_moves_at_fork": active_after_fork != active,
             "active_file_after_fork": Path(active_after_fork).name if active_after_fork else None,
             "moved_file_on_disk_at_fork": moved_on_disk_at_fork,
+            "moved_file_messages_at_fork": moved_file_messages_at_fork,
             "abandoned_tail_survives_on_disk": (orig_sha_before == orig_sha_after) and new_file is not None,
             "note": "The response cannot be trusted for the veto path (finding 30), "
                     "so survival is read off disk: the original file is untouched "
@@ -504,13 +518,25 @@ def run_pi(timeout, want_fixtures):
             "clone_entry_count_after_turn": clone_after["entry_count"] if clone_after else None,
         }
         if want_fixtures and clone_file:
-            fixture_src = clone_file
+            # Scrub and keep the clone's lines HERE, not after the cells finish:
+            # the mid-stream cell below drives another turn into this same clone
+            # branch and then forks off it, so a read deferred to the end of
+            # run_pi would bake that abandoned turn into the fixture.
+            fixture_lines = scrub_lines([l for l in open(clone_file) if l.strip()])
 
         # Still inside the Pi rewind cell: fork while a turn is streaming from
         # an already-completed branch, then record both the command result and
         # what became of the in-flight turn.
+        #
+        # Fork at the SECOND user message, not the first. At the first, the
+        # exclusive semantics proved above leave the new branch empty whatever
+        # became of the running turn, so `messageCount: 0` after the fork says
+        # nothing -- which is how the 2026-08-20 run recorded it (OW-gajesu).
+        # Here the rewound branch should carry the first turn, so an empty one
+        # is a result rather than a tautology.
         stream_forks = pi.response({"type": "get_fork_messages"}, "get_fork_messages")["data"]["messages"]
-        stream_entry = stream_forks[0]["entryId"] if stream_forks else None
+        stream_entry = stream_forks[1]["entryId"] if len(stream_forks) > 1 else None
+        stream_expected_messages = 2 if stream_entry else None
         stream_prompt = "Write the numbers 1 through 400, one per line, with no prose."
         stream_mark = len(pi.raw)
         prompt_resp = pi.response({"type": "prompt", "message": stream_prompt}, "prompt")
@@ -524,8 +550,19 @@ def run_pi(timeout, want_fixtures):
         settled_after_stream_fork = pi.wait_for_event("agent_settled", since=stream_mark, timeout=timeout) is not None
         post_stream_state = pi.response({"type": "get_state"}, "get_state")
         post_stream_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
+        # What became of the turn, read off the file it was streaming into rather
+        # than off the branch the fork moved us to -- an empty NEW branch is what
+        # the fork produced, not what the abandoned turn left behind.
+        streaming_file = ((state_while_streaming or {}).get("data") or {}).get("sessionFile")
+        abandoned_messages = (
+            pi_file_messages(streaming_file)
+            if streaming_file and Path(streaming_file).exists() else None
+        )
         cells["pi_rewind"].update({
             "midstream_fork_entry": stream_entry,
+            "midstream_expected_message_count": stream_expected_messages,
+            "midstream_abandoned_file": Path(streaming_file).name if streaming_file else None,
+            "midstream_abandoned_file_messages": abandoned_messages,
             "midstream_prompt_admitted": prompt_resp is not None and prompt_resp.get("success") is True,
             "midstream_agent_start_seen": agent_started is not None,
             "midstream_state_before_fork": state_while_streaming.get("data") if state_while_streaming else None,
@@ -539,9 +576,6 @@ def run_pi(timeout, want_fixtures):
     finally:
         pi.close()
 
-    fixture_lines = None
-    if fixture_src:
-        fixture_lines = scrub_lines([l for l in open(fixture_src) if l.strip()])
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
     return version, cells, fixture_lines

@@ -80,3 +80,11 @@ branch file, so `src/server/adapters/pi/process.ts` needed no shift. A
 mid-stream fork returns `success: true`, moves the active file to a new
 session, and abandons the in-flight turn (idle, empty branch, no assistant
 reply).
+
+Two qualifications, from a review of that commit. The "empty branch" half of the
+mid-stream result was a tautology of where the probe forked and is not evidence;
+what carries it is `isStreaming: false` plus a settle with no assistant text.
+And the same run's contradiction of OW-pifowo's `moved_file_on_disk_at_fork` was
+measured at a moved instrument. Both are OW-gajesu. What this item was asked to
+settle — exclusive second-message semantics, and that a mid-stream fork does not
+preserve the turn — stands. The decision it was gating is OW-zekuhe.
