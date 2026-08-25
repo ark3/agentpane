@@ -56,3 +56,14 @@ Done when the run's evidence sits in `docs/MANUAL_TESTING.md` with the exact
 invocation, a fixture (`fork-at-message.jsonl` or the refusal capture) is
 committed under `resources/fixtures/claude/`, and the three sites plus
 OW-beripo's scope agree with the observed behavior.
+
+**Fixed** in `65dc3c3`: pre-tip fork verified live on 2.1.238/Haiku —
+`--resume <id> --resume-session-at <store-line uuid> --fork-session` truncates
+inclusively at the named entry, semantically (the dropped turn is out of
+context), with the parent file byte-identical and still no lineage marker.
+`--resume-drops-turn` refuses any cut whose discarded range does not start
+with the declared turn's prompt entry, so it cannot guard an arbitrary
+`fork(entryId)` and OW-beripo says to skip it. Fixture
+`fork-at-message.jsonl`; evidence in `docs/MANUAL_TESTING.md`'s OW-yilabe
+section; all three copies of the tip-only conclusion corrected in place, and
+OW-beripo's fork scope is now full `listForkPoints`/`fork`.
