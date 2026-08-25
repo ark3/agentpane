@@ -43,3 +43,5 @@ parser over synthetic store files and fails before the change; the
 `real-dirs.smoke.test.ts` pattern extended to the claude root lists this
 machine's real sessions; `GET /api/sessions` merges all three backends by
 recency.
+
+**Fixed** in ff6acda: `BackendId` gains `"claude"`, `sessions/claude.ts` parses the store, wired into `listSessions`/`getSession`/`readSessionPreview`; 16 new claude tests shown red before green, and the extended `real-dirs.smoke.test.ts` enumerates this machine's real store — 110 sessions, 107 with previews, none of the 149 subagent transcript files surfacing as phantoms. Two store facts the item had wrong, corrected in `claude.ts`'s docblock: subagent transcripts are separate all-sidechain files at `<munged-cwd>/<session-uuid>/subagents/agent-*.jsonl`, not inline lines; and the preview is first-human-message with wrapper filtering, not `ai-title`, because only 53 of 110 real sessions carry any title and the current one sits near EOF, outside the bounded enumeration read (first cut, iterate-from-use).
