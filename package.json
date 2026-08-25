@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Local web UI for coding agents, with pluggable sandboxed backends (Pi, Codex)",
+  "description": "Local web UI for coding agents, with pluggable sandboxed backends (Pi, Codex, Claude Code)",
   "license": "MIT",
   "author": "Abhay Saxena",
   "repository": {

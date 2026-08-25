@@ -1,3 +1,4 @@
+import { ClaudeAdapterFactory } from "./adapters/claude/index.ts";
 import { CodexAdapterFactory } from "./adapters/codex/index.ts";
 import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import type { AppDeps, SessionIndex } from "./http/deps.ts";
@@ -31,6 +32,7 @@ export function createProductionDeps(
 		adapters: options.adapters ?? {
 			pi: new PiAdapterFactory(),
 			codex: new CodexAdapterFactory(),
+			claude: new ClaudeAdapterFactory(),
 		},
 	};
 }

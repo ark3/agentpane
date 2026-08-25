@@ -61,7 +61,7 @@
 	 *
 	 * `ordinal` is the message's position *among user messages*, which is how
 	 * the fork point is addressed: `GET fork-points` answers one point per user
-	 * message in transcript order on both backends, while `PaneMessage` carries
+	 * message in transcript order on every backend, while `PaneMessage` carries
 	 * no id of its own (D11 freezes `protocol.ts`, so it cannot grow one).
 	 * Matching on wording instead would break on two identical messages.
 	 */
@@ -862,6 +862,7 @@
 				<select aria-label="Backend" bind:value={backend}>
 					<option value="pi">pi</option>
 					<option value="codex">codex</option>
+					<option value="claude">claude</option>
 				</select>
 			</label>
 			<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New</button>
