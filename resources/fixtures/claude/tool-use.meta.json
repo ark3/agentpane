@@ -1,0 +1,29 @@
+{
+  "backend": "claude",
+  "scenario": "tool-use",
+  "covers": "Bash + Read + Edit tool_use/tool_result pairs, input_json_delta streaming",
+  "prompt": "Use the Bash tool to run `date`. Then use the Edit tool to replace 'hello scratch' with 'hello fixture' in notes.txt. Then reply: done",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 97,
+  "terminated_cleanly": true,
+  "session_id": "c9b8d14d-e405-44e5-bca1-e6bf2222195a",
+  "event_census": {
+    "assistant": 7,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 36,
+    "stream_event:content_block_start": 7,
+    "stream_event:content_block_stop": 7,
+    "stream_event:message_delta": 3,
+    "stream_event:message_start": 3,
+    "stream_event:message_stop": 3,
+    "system:init": 1,
+    "system:status": 3,
+    "system:thinking_tokens": 22,
+    "user": 3
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}

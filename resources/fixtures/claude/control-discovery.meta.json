@@ -1,0 +1,29 @@
+{
+  "backend": "claude",
+  "scenario": "control-discovery",
+  "covers": "control_response error for unknown subtype; set_model and set_permission_mode success",
+  "prompt": "control_requests: definitely_not_a_real_subtype, set_model haiku, set_permission_mode bypassPermissions; then \"Reply with exactly: still here\"",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 25,
+  "terminated_cleanly": true,
+  "session_id": "3569686a-f58e-4ff1-a8bb-0870c4264d32",
+  "event_census": {
+    "assistant": 2,
+    "control_response": 3,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 5,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 2,
+    "stream_event:message_delta": 1,
+    "stream_event:message_start": 1,
+    "stream_event:message_stop": 1,
+    "system:init": 1,
+    "system:status": 1,
+    "system:thinking_tokens": 4
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}

@@ -1,0 +1,28 @@
+{
+  "backend": "claude",
+  "scenario": "text-turn",
+  "covers": "streaming text deltas, thinking block, no tools",
+  "prompt": "Reply with exactly: hello there friend",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 24,
+  "terminated_cleanly": true,
+  "session_id": "919cd270-8997-400d-bc1a-ea9d663f5153",
+  "event_census": {
+    "assistant": 2,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 6,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 2,
+    "stream_event:message_delta": 1,
+    "stream_event:message_start": 1,
+    "stream_event:message_stop": 1,
+    "system:init": 1,
+    "system:status": 1,
+    "system:thinking_tokens": 5
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}

@@ -1,0 +1,30 @@
+{
+  "backend": "claude",
+  "scenario": "permission-request",
+  "covers": "can_use_tool control_request in default mode, allow reply, Edit input shape",
+  "prompt": "Use the Edit tool to replace 'hello fixture' with 'hello permission' in notes.txt, then reply: done",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode default --permission-prompt-tool stdio",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 69,
+  "terminated_cleanly": true,
+  "session_id": "ff9e98b7-870d-4764-bd54-03aef239946c",
+  "event_census": {
+    "assistant": 6,
+    "control_request": 1,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 23,
+    "stream_event:content_block_start": 6,
+    "stream_event:content_block_stop": 6,
+    "stream_event:message_delta": 3,
+    "stream_event:message_start": 3,
+    "stream_event:message_stop": 3,
+    "system:init": 1,
+    "system:status": 3,
+    "system:thinking_tokens": 10,
+    "user": 2
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}

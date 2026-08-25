@@ -77,6 +77,25 @@ in the `text` scenario. Still uncovered, because they are hard to trigger
 deterministically: `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`.
 Add scenarios when you implement those mapping rows.
 
+## The claude/ directory (OW-yilabe, captured 2026-08-25)
+
+Claude Code stream-json captures, `claude 2.1.238`, Haiku only
+(`claude-haiku-4-5-20251001` — the owner's authorization condition for live
+turns on the home server). **Not** produced by `capture_fixtures.py`: each was
+driven by hand over `--input-format stream-json`; the exact invocation is in
+each `.meta.json` and the full evidence pass is the OW-yilabe section of
+`docs/MANUAL_TESTING.md`. Scenarios: `text-turn`, `thinking`, `tool-use`
+(Bash + Read + Edit, so Edit's `old_string`/`new_string` input is on record),
+`interrupt` (a `control_request` stopping a streaming turn — its result is
+`error_during_execution` and the exit code is 1, by design), `permission-request`
+(`--permission-mode default --permission-prompt-tool stdio`, a `can_use_tool`
+request answered with an allow), `compact` (`/compact` as a stream-json user
+message), `fork` (`--resume --fork-session`), `control-discovery` (`set_model`,
+`set_permission_mode`, and the unknown-subtype error), and `session-id`
+(caller-chosen uuid). The scrub here is textual, not key-based: the operator
+home-directory prefix became `/example-home`; model ids are kept because they
+are the evidence.
+
 ## The compact scenario (OW-72, captured 2026-08-18)
 
 `compact` primes the context with several long turns and then drives the

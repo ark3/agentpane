@@ -1,0 +1,30 @@
+{
+  "backend": "claude",
+  "scenario": "interrupt",
+  "covers": "control_request interrupt mid-stream; error_during_execution result",
+  "prompt": "Write out the integers from 1 to 500, one per line, in plain text, without using any tools. (interrupted after 8 content_block_delta events by a control_request subtype interrupt)",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 26,
+  "terminated_cleanly": false,
+  "session_id": "cfa96d98-791e-44ec-85d7-1c2e66137656",
+  "event_census": {
+    "assistant": 2,
+    "control_response": 1,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 8,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 1,
+    "stream_event:message_start": 1,
+    "system:init": 1,
+    "system:status": 1,
+    "system:thinking_tokens": 6,
+    "user": 1
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)",
+  "exit_code": 1,
+  "note": "the result event is subtype error_during_execution with is_error true, and the process exits 1 \u2014 that is the interrupt working, not a capture failure"
+}

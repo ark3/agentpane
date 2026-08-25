@@ -1,0 +1,28 @@
+{
+  "backend": "claude",
+  "scenario": "session-id",
+  "covers": "--session-id: caller-chosen uuid reported by init and used for the store file",
+  "prompt": "Reply with exactly: chosen id works",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions --session-id c5cbd2de-55b8-4788-918a-628fe951db1f",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T12:34-04:00 through 2026-08-25T12:47-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe)",
+  "lines": 22,
+  "terminated_cleanly": true,
+  "session_id": "c5cbd2de-55b8-4788-918a-628fe951db1f",
+  "event_census": {
+    "assistant": 2,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 5,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 2,
+    "stream_event:message_delta": 1,
+    "stream_event:message_start": 1,
+    "stream_event:message_stop": 1,
+    "system:init": 1,
+    "system:status": 1,
+    "system:thinking_tokens": 4
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}
