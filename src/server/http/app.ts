@@ -44,7 +44,7 @@ export interface App {
 	close(): Promise<void>;
 }
 
-const BACKENDS: readonly BackendId[] = ["pi", "codex"];
+const BACKENDS: readonly BackendId[] = ["pi", "codex", "claude"];
 
 export function createApp(deps: AppDeps): App {
 	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
@@ -405,7 +405,7 @@ function decodeSegment(segment: string): string {
 }
 
 function isBackendId(value: unknown): value is BackendId {
-	return value === "pi" || value === "codex";
+	return value === "pi" || value === "codex" || value === "claude";
 }
 
 /**

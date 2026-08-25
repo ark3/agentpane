@@ -7,7 +7,7 @@ import { CodexAdapterFactory } from "./adapters/codex/index.ts";
 import { PiAdapterFactory } from "./adapters/pi/index.ts";
 import { createProductionDeps, createSessionIndex } from "./composition.ts";
 
-const fixture = vi.hoisted(() => ({ codexRoot: "", piRoot: "" }));
+const fixture = vi.hoisted(() => ({ codexRoot: "", piRoot: "", claudeRoot: "" }));
 // Counts which files' content the parsers actually see, so a test can prove
 // `get` reads only the one matching file, not the whole corpus.
 const reads = vi.hoisted(() => ({ codex: [] as string[], pi: [] as string[] }));
@@ -17,9 +17,9 @@ vi.mock("./sessions/index.ts", async (importOriginal) => {
 	return {
 		...sessions,
 		listSessions: (options = {}) =>
-			sessions.listSessions({ ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot }),
+			sessions.listSessions({ ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot, claudeRoot: fixture.claudeRoot }),
 		getSession: (ref: Parameters<typeof sessions.getSession>[0], options = {}) =>
-			sessions.getSession(ref, { ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot }),
+			sessions.getSession(ref, { ...options, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot, claudeRoot: fixture.claudeRoot }),
 	};
 });
 
@@ -53,7 +53,7 @@ vi.mock("./sessions/preview.ts", async (importOriginal) => {
 	return {
 		...preview,
 		readSessionPreview: (ref: Parameters<typeof preview.readSessionPreview>[0], opts = {}) =>
-			preview.readSessionPreview(ref, { ...opts, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot }),
+			preview.readSessionPreview(ref, { ...opts, codexRoot: fixture.codexRoot, piRoot: fixture.piRoot, claudeRoot: fixture.claudeRoot }),
 	};
 });
 
@@ -111,6 +111,7 @@ describe("production composition", () => {
 		root = await mkdtemp(join(tmpdir(), "agentpane-composition-"));
 		fixture.codexRoot = join(root, "codex-sessions");
 		fixture.piRoot = join(root, "pi-sessions");
+		fixture.claudeRoot = join(root, "claude-projects");
 		reads.codex = [];
 		reads.pi = [];
 	});

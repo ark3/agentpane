@@ -33,6 +33,7 @@ import { SseTestClient } from "./testing/sse-client.ts";
 
 const PI_SESSION: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/one two.jsonl" };
 const CODEX_SESSION: SessionRef = { backend: "codex", id: "019feee5-cc20-7290-95fa-599abc243e55" };
+const CLAUDE_SESSION: SessionRef = { backend: "claude", id: "3af1e5da-9f22-4f34-9c2b-6b7e2f1c9d44" };
 const WORKSPACE = "/home/u/src/agentpane";
 
 let index: FakeSessionIndex;
@@ -41,8 +42,13 @@ let codex: FakeAdapterFactory;
 let app: App;
 
 beforeEach(() => {
+	// Seeded already recency-sorted, claude interleaved between the other two:
+	// the fake index returns them as-is (the sort itself is the real index's
+	// job, asserted in sessions/index.test.ts), and the route must pass all
+	// three backends through in that order.
 	index = new FakeSessionIndex([
 		storedSession(PI_SESSION, WORKSPACE, "2026-08-10T10:00:00.000Z"),
+		storedSession(CLAUDE_SESSION, "/home/u/src/other", "2026-08-09T12:00:00.000Z"),
 		storedSession(CODEX_SESSION, "/home/u/src/other", "2026-08-09T10:00:00.000Z"),
 	]);
 	pi = new FakeAdapterFactory({ models: [{ id: "pi-1", label: "Pi One" }] });
@@ -83,6 +89,7 @@ describe("sessions", () => {
 
 		expect(body.sessions.map((s) => sessionKey(s.ref))).toEqual([
 			sessionKey(PI_SESSION),
+			sessionKey(CLAUDE_SESSION),
 			sessionKey(CODEX_SESSION),
 		]);
 		expect(body.sessions.every((s) => s.status === "detached")).toBe(true);

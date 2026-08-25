@@ -11,7 +11,7 @@ import type { SessionSummary } from "../../shared/protocol.ts";
 
 function isValidSummary(s: SessionSummary): boolean {
 	return (
-		(s.ref.backend === "pi" || s.ref.backend === "codex") &&
+		(s.ref.backend === "pi" || s.ref.backend === "codex" || s.ref.backend === "claude") &&
 		typeof s.ref.id === "string" &&
 		s.ref.id.length > 0 &&
 		(s.cwd === null || typeof s.cwd === "string") &&
@@ -40,5 +40,14 @@ describe("listSessions against the real dirs (smoke)", () => {
 		// a real bug (two files mapping to the same SessionRef).
 		const keys = result.map((s) => `${s.ref.backend}:${s.ref.id}`);
 		expect(new Set(keys).size).toBe(keys.length);
+
+		// Claude ids are the session uuid the store file is named after. A
+		// non-uuid id here means the walk descended into per-session auxiliaries
+		// (subagents/agent-*.jsonl) and surfaced a phantom session (OW-votasi).
+		for (const s of result) {
+			if (s.ref.backend === "claude") {
+				expect(s.ref.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+			}
+		}
 	});
 });

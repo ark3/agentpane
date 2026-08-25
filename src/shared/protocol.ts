@@ -54,11 +54,13 @@ export type PaneMessage = Exclude<AgentMessage, AssistantMessage> | AssistantTur
 // Sessions (D9)
 // ---------------------------------------------------------------------------
 
-export type BackendId = "pi" | "codex";
+export type BackendId = "pi" | "codex" | "claude";
 
 /**
  * A session is identified by backend *and* id, because each backend has its
- * own store: Pi's id is a JSONL path, Codex's is a UUIDv7 thread id.
+ * own store: Pi's id is a JSONL path, Codex's is a UUIDv7 thread id, and
+ * Claude Code's is the session uuid its store file is named after (OW-votasi;
+ * enumeration only until OW-beripo lands an adapter).
  */
 export interface SessionRef {
 	backend: BackendId;

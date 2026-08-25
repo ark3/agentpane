@@ -35,6 +35,28 @@ function piMessage(role: "user" | "assistant", text: string, timestamp = "2026-0
 	};
 }
 
+function claudeUser(content: string | unknown[], timestamp = "2026-08-20T10:00:00.000Z") {
+	return {
+		type: "user",
+		sessionId: "sid",
+		timestamp,
+		cwd: "/ws/project",
+		isSidechain: false,
+		message: { role: "user", content },
+	};
+}
+
+function claudeAssistant(text: string, timestamp = "2026-08-20T10:00:05.000Z") {
+	return {
+		type: "assistant",
+		sessionId: "sid",
+		timestamp,
+		cwd: "/ws/project",
+		isSidechain: false,
+		message: { role: "assistant", content: [{ type: "text", text }] },
+	};
+}
+
 function codexHeader(id: string, cwd = "/ws/project") {
 	return {
 		type: "session_meta",
@@ -289,6 +311,62 @@ describe("readSessionPreview", () => {
 			expect(turns.length).toBe(messageCount);
 			const late = turns[250];
 			expect(late?.text).toContain("turn-250");
+		});
+	});
+
+	describe("Claude Code", () => {
+		const SID = "3af1e5da-9f22-4f34-9c2b-6b7e2f1c9d44";
+
+		it("finds the one file named after the session uuid and flattens its text turns", async () => {
+			const file = join(root, "-ws-project", `${SID}.jsonl`);
+			await writeJsonl(file, [
+				claudeUser("<command-name>/execute</command-name>"),
+				claudeUser([{ type: "text", text: "Fix the failing test." }]),
+				claudeAssistant("Done, it passes now."),
+			]);
+
+			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+
+			// The wrapper turn is dropped; the real turns survive in order, each
+			// carrying its record's own timestamp (OW-71).
+			expect(turns).toEqual<SessionPreviewTurn[]>([
+				{ role: "user", text: "Fix the failing test.", timestamp: "2026-08-20T10:00:00.000Z" },
+				{ role: "assistant", text: "Done, it passes now.", timestamp: "2026-08-20T10:00:05.000Z" },
+			]);
+		});
+
+		it("returns an empty preview when no file carries the session uuid, rather than throwing", async () => {
+			await writeJsonl(join(root, "-ws-project", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"), [
+				claudeUser([{ type: "text", text: "not the one you want" }]),
+			]);
+
+			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+			expect(turns).toEqual([]);
+		});
+
+		it("reads only the matching file, never the other seeded sessions", async () => {
+			const wanted = join(root, "-ws-project", `${SID}.jsonl`);
+			const others = [
+				join(root, "-ws-project", "11111111-1111-1111-1111-111111111111.jsonl"),
+				join(root, "-ws-other", "22222222-2222-2222-2222-222222222222.jsonl"),
+			];
+			await writeJsonl(wanted, [claudeUser([{ type: "text", text: "only me" }])]);
+			for (const o of others) await writeJsonl(o, [claudeUser([{ type: "text", text: "not me" }])]);
+
+			const reads: string[] = [];
+			const turns = await readSessionPreview(
+				{ backend: "claude", id: SID },
+				{
+					claudeRoot: root,
+					readClaudeTurns: async (filePath) => {
+						reads.push(filePath);
+						return [{ role: "user", text: "only me" }];
+					},
+				},
+			);
+
+			expect(turns).toEqual([{ role: "user", text: "only me" }]);
+			expect(reads).toEqual([wanted]);
 		});
 	});
 });
