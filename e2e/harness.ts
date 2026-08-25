@@ -218,7 +218,7 @@ const api: AgentpaneApi = {
 	/**
 	 * A self-fork: this harness drives one session, and what the browser is here
 	 * for is the composer's mode row and the edit control's place in the block
-	 * action row, not the two backends' asymmetry -- which is the server's, and
+	 * action row, not the backends' fork asymmetry -- which is the server's, and
 	 * is settled live in MANUAL_TESTING.md.
 	 */
 	async fork() {

@@ -167,8 +167,9 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 
 describe("fork (the third #adoptRef point)", () => {
 	// Fork is the third point at which a session's id can change under us, and
-	// the two backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
-	// / OW-22). SessionManager.fork must absorb both through #adoptRef.
+	// the backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
+	// / OW-22; Claude Code's respawn-fork re-keys like Pi's, OW-mayuza).
+	// SessionManager.fork must absorb every shape through #adoptRef.
 	it("re-keys and emits `renamed` when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
 		const events: { from: SessionRef; to: SessionRef }[] = [];

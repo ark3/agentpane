@@ -243,8 +243,8 @@ export class SessionManager {
 	 * Fork a session from a past entry. Like `submit`, this goes through the
 	 * manager rather than straight at the adapter because fork is the THIRD point
 	 * at which a session's id can change under us (after `start()` and the first
-	 * `submit()` -- see `#adoptRef`). The two backends are asymmetric and
-	 * `#adoptRef` absorbs both:
+	 * `submit()` -- see `#adoptRef`). The backends are asymmetric and
+	 * `#adoptRef` absorbs all of them:
 	 *
 	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
 	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table
@@ -254,6 +254,8 @@ export class SessionManager {
 	 *    ref points at the freshly-flushed forked thread, which differs from
 	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
 	 *    `session.ref`.
+	 *  - Claude Code's `fork` respawns its own child onto the forked session, so
+	 *    it takes Pi's path here: `adapter.ref` changes and `#adoptRef` re-keys.
 	 */
 	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
 		const session = this.#lookup(ref);

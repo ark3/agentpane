@@ -354,7 +354,7 @@ tell the subagent to fast-forward to `main` before starting and to report the
 sha it started at. Keeping `origin/main` fresh by pushing was rejected — the
 never-push rule forbids it.
 
-## Observed manual compaction, both backends (OW-72)
+## Observed manual compaction, Pi and Codex (OW-72)
 
 Captured 2026-08-18 while landing OW-72, through `resources/probes/
 capture_fixtures.py --scenario compact`, which primes a context with several
@@ -382,7 +382,7 @@ summary text and `firstKeptEntryId`. Pi does not re-emit that summary through
 message from `compaction_end` itself — verified by the fixture, whose only
 events after `compaction_start` are `compaction_end` and the command response.
 
-The two backends therefore differ in what a compaction can show: Pi has a
+Pi and Codex therefore differ in what a compaction can show: Pi has a
 summary and a real before/after figure; Codex has neither on the item and only
 a marker, with the token drop visible only via the separate token-usage
 stream. One `Message.svelte` renderer covers both — marker always, summary and

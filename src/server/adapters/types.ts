@@ -64,9 +64,10 @@ export interface BackendAdapter {
 	abort(): Promise<void>;
 	/**
 	 * Compact the session's context, summarising the history so far to reduce
-	 * the token count the next turn carries. Required (OW-72): both backends
-	 * have the capability -- Codex's `thread/compact/start`, Pi's `compact`
-	 * command -- so nothing is forced to fake it. What the transcript shows
+	 * the token count the next turn carries. Required (OW-72): every backend
+	 * has the capability -- Codex's `thread/compact/start`, Pi's `compact`
+	 * command, Claude Code's `/compact` message -- so nothing is forced to
+	 * fake it. What the transcript shows
 	 * afterwards is the adapter's own reducer's business, not this method's.
 	 */
 	compact(): Promise<void>;

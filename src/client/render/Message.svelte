@@ -176,7 +176,7 @@
 		</ToolCard>
 	</article>
 {:else if message.role === "compactionSummary"}
-	<!-- One renderer for both backends (OW-72): always a marker, plus the summary
+	<!-- One renderer for every backend (OW-72): always a marker, plus the summary
 	     text and token figure only when the backend supplied them. Codex's
 	     contextCompaction carries neither, so it draws as a bare marker -- the
 	     normal path, not a fallback -- while Pi's carries both. -->

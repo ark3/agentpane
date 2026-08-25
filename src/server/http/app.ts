@@ -257,8 +257,9 @@ export function createApp(deps: AppDeps): App {
 				// re-keys the process table (see SessionManager.fork).
 				await sessions.attach(ref);
 				const forked = await sessions.fork(ref, body.value.entryId);
-				// The two backends' forks are asymmetric, settled live (see
-				// docs/HANDOFF.md and docs/MANUAL_TESTING.md, OW-pifowo/OW-22):
+				// The backends' forks are asymmetric, settled live (see
+				// docs/HANDOFF.md and docs/MANUAL_TESTING.md, OW-pifowo/OW-22 for Pi
+				// and Codex, OW-yilabe/OW-mayuza for Claude Code):
 				//   * Pi's `fork` is copy-on-write. The same process's active
 				//     `sessionFile` MOVES to a new file (the old branch survives on
 				//     disk byte-identical), so `sessions.fork` re-keys the table and
@@ -268,8 +269,12 @@ export function createApp(deps: AppDeps): App {
 				//     driving; Codex flushes that rollout to disk immediately, before
 				//     any turn, so a fresh attach on the returned ref finds it. The
 				//     current adapter's own ref is unchanged, so `#adoptRef` no-ops.
-				// `#adoptRef` already emits `sessionsChanged` when it re-keys (Pi), so
-				// no explicit broadcast here.
+				//   * Claude Code's fork RESPAWNS the same adapter's child onto the
+				//     forked session (`--resume --resume-session-at --fork-session`,
+				//     truncation inclusive of the named entry), so like Pi its ref
+				//     changes and `#adoptRef` re-keys; the parent survives detached.
+				// `#adoptRef` already emits `sessionsChanged` when it re-keys, so no
+				// explicit broadcast here.
 				const response: ForkResponse = { ref: forked };
 				return json(response, 201);
 			}

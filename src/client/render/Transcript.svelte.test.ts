@@ -203,7 +203,7 @@ describe("Message", () => {
 	});
 
 	it("renders a compactionSummary as its own marker, not the unknown dump (OW-72)", () => {
-		// One renderer for both backends. The marker must not fall through to the
+		// One renderer for every backend. The marker must not fall through to the
 		// unknown JSON dump -- that is the whole point of the branch.
 		const { container } = render(Message, {
 			props: {

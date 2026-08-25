@@ -103,9 +103,11 @@ export interface FakeAdapterOptions {
 	 */
 	holdStart?: Promise<void>;
 	/**
-	 * How `fork()` behaves, so the two backends can be modelled distinctly:
+	 * How `fork()` behaves, so the backends' asymmetric forks can be modelled:
 	 *  - "pi" (default): the process's active file MOVES, so the adapter adopts a
-	 *    new id (`${ref.id}#fork-${entryId}`) and returns it -- `#adoptRef` re-keys.
+	 *    new id (`${ref.id}#fork-${entryId}`) and returns it -- `#adoptRef`
+	 *    re-keys. Claude Code's respawn-fork changes its own ref the same way,
+	 *    so this mode covers it too.
 	 *  - "codex": a new thread is minted that this adapter is NOT driving, so its
 	 *    own `ref` is left unchanged while `fork()` returns the new thread's ref.
 	 */

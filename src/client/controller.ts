@@ -51,10 +51,10 @@ export interface AgentpaneController {
 	/**
 	 * Fork the selected session just before its `ordinal`-th user message and
 	 * send the current draft, plus `images`, into the fork (OW-hezidi). Always a
-	 * new session: neither backend is asked to rewind in place, and Codex cannot.
+	 * new session: no backend is asked to rewind in place, and Codex cannot.
 	 *
 	 * The ordinal indexes `GET fork-points`, which answers one point per user
-	 * message in transcript order on both backends -- the caller counts user
+	 * message in transcript order on every backend -- the caller counts user
 	 * messages and never matches on wording, which two identical messages break.
 	 *
 	 * Resolves **true** only when the prompt landed. The caller owns the compose
@@ -466,7 +466,7 @@ export function createController(
 			publish({ busy: "submitting", error: null });
 			try {
 				// Stop a running turn before forking it. A first cut, chosen because it
-				// is safe on both backends. OW-yudoni since settled what Pi does if
+				// is safe on every backend. OW-yudoni since settled what Pi does if
 				// you don't: the fork succeeds and abandons the turn anyway, so this
 				// abort makes that loss deliberate rather than silent. Codex's parent
 				// thread genuinely keeps running; whether to stop stopping it there,
@@ -477,9 +477,10 @@ export function createController(
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
 				const forked = await api.fork(ref, { entryId: point.id });
 				if (disposed) return false;
-				// The two backends reach "attached to the fork" from opposite
-				// directions, and this one line covers both. Pi's fork moved the live
-				// process onto the new file, so the manager has already re-keyed and
+				// The backends reach "attached to the fork" from opposite directions,
+				// and this one line covers all of them. Pi's fork moved the live
+				// process onto the new file -- and Claude Code's respawned its child
+				// onto the forked session -- so the manager has already re-keyed and
 				// this attach finds it; Codex minted a thread nothing is driving, and
 				// this attach is what spawns it. A fork is a selection change, so the
 				// intent bumps -- a preview poll still in flight must not put its old

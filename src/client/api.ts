@@ -57,9 +57,9 @@ export interface AgentpaneApi {
 	compact(ref: SessionRef): Promise<void>;
 	/**
 	 * The points a session can be forked at (OW-hezidi): one per user message,
-	 * in transcript order, on both backends. Position is the whole addressing
-	 * scheme -- `ForkPoint.id` is a Pi entry id or a Codex turn id, and
-	 * `PaneMessage` carries neither.
+	 * in transcript order, on every backend. Position is the whole addressing
+	 * scheme -- `ForkPoint.id` is a Pi entry id, a Codex turn id, or a Claude
+	 * Code store-line uuid, and `PaneMessage` carries none of them.
 	 */
 	forkPoints(ref: SessionRef): Promise<ForkPoint[]>;
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */

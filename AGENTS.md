@@ -39,9 +39,11 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
 
 - Verify at the source. Where a claim about a CLI, a protocol, or a runtime is
   load-bearing, reproduce it and record how.
-- **Neither backend CLI runs on the home server.** It has no `pi` at all, and
+- **Neither Pi nor Codex runs on the home server.** It has no `pi` at all, and
   while Codex is installed there, running it is expensive enough that it is not
-  to be run without being asked. Both run on the work laptop, which is why an
+  to be run without being asked. (Claude Code is the exception: it is installed
+  on the home server, and live turns there have been authorized on Haiku only —
+  OW-yilabe, OW-beripo.) Pi and Codex both run on the work laptop, which is why an
   item whose evidence has to come from a live turn belongs there and carries
   the marker `docs/TRACKING.md` names. Collect them with
   `rg -l '^\*\*Work laptop:\*\*' docs/work/open | sort -V`. Reading a

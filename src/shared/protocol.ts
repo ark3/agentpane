@@ -59,8 +59,8 @@ export type BackendId = "pi" | "codex" | "claude";
 /**
  * A session is identified by backend *and* id, because each backend has its
  * own store: Pi's id is a JSONL path, Codex's is a UUIDv7 thread id, and
- * Claude Code's is the session uuid its store file is named after (OW-votasi;
- * enumeration only until OW-beripo lands an adapter).
+ * Claude Code's is the session uuid its store file is named after
+ * (enumeration via OW-votasi, adapter via OW-beripo).
  */
 export interface SessionRef {
 	backend: BackendId;

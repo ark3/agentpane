@@ -10,9 +10,10 @@ over literal adherence.
 
 - One clean web UI that renders coding-agent conversations well: streaming
   text, thinking, tool calls, diffs, images, token/cost.
-- **Two backends behind one adapter contract:** Pi (`pi --mode rpc`) and Codex
-  (`codex app-server`). Adding a third later should be a new adapter, not a
-  core change.
+- **Pluggable backends behind one adapter contract:** Pi (`pi --mode rpc`),
+  Codex (`codex app-server`), and Claude Code (`claude -p` over stream-json).
+  Adding a backend should be a new adapter, not a core change — the third,
+  OW-beripo, landed as exactly that.
 - **Per-workspace sandboxing:** every agent runs inside `sbox`, jailed to its
   workspace, with that workspace's credentials/env.
 - **One server, all sessions, one UI.** The server manages a set of agent
@@ -299,8 +300,9 @@ The requirement is pipane's: see every existing session in every workspace,
 create a new one in an existing or new workspace, and switch between recent
 sessions quickly.
 
-**Both backends store sessions as JSONL on disk, and both are enumerable with
-nothing running.** Measured on this machine:
+**Every backend stores sessions as JSONL on disk, and all are enumerable with
+nothing running** (Claude Code's `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`
+store joined via OW-votasi). Measured on this machine for the original two:
 
 | | Location | Header line | Files | Walk | Read line 1 |
 |---|---|---|---|---|---|
@@ -357,12 +359,13 @@ backend is the point of the adapter contract. Transcripts come from
 `thread/read` / `get_entries` on an attached session; since subprocesses
 outlive connections, switching back to a recent session is instant anyway.
 
-**Session identity is backend-qualified**: `{backend: "pi" | "codex", id}`.
-Pi's id is its JSONL path; Codex's is a UUIDv7 thread id. A listed session
-inherently belongs to whichever store it was found in.
+**Session identity is backend-qualified**: `{backend, id}` (`BackendId`).
+Pi's id is its JSONL path; Codex's is a UUIDv7 thread id; Claude Code's is the
+session uuid its store file is named after. A listed session inherently
+belongs to whichever store it was found in.
 
 **REST surface** that follows: `GET /api/sessions` returns the merged list
-across both backends, sorted by recency, with an optional `cwd` filter (so
+across every backend, sorted by recency, with an optional `cwd` filter (so
 workspace-first browsing is the same query pre-filtered); `POST /api/sessions`
 creates a `virtual` session from a workspace + backend + model.
 
@@ -721,7 +724,7 @@ capable of producing a bug that looks like something else entirely:
   of why a process died — `EROFS ... auth.json.lock` reaches you no other way.
 - **The agent is a grandchild, not the child.** The spawned process is
   `direnv`, which execs `sbox`, which runs `bwrap`, which runs the agent.
-  A signal to the child *does* reach it, **verified live on both backends**:
+  A signal to the child *does* reach it, **verified live on Pi and Codex**:
   `direnv` and the `sbox` wrapper exec into the chain rather than surviving
   beside it, so the server's own child is the `bwrap` chain. Re-provable with
   `resources/probes/agentpane_{codex,pi}_smoke.py`.
@@ -731,7 +734,7 @@ capable of producing a bug that looks like something else entirely:
 - **Unit (bun test / vitest):** the adapters, especially the Codex
   `ThreadItem` → `AgentMessage` mapping — table-driven over the captured
   protocol fixtures in `resources/fixtures/`, which already cover streaming
-  text, a tool call/result pair, and a file edit for both backends. Assert on
+  text, a tool call/result pair, and a file edit for all three backends. Assert on
   *structure* (event sequence, item types, block kinds, id correlation), never
   on exact model wording. D3 is what makes this possible without a DOM.
 - **Contract tests:** feed each adapter recorded protocol transcripts; assert
@@ -768,7 +771,7 @@ here as a decision, with its reasoning — that is what this document is for, an
 it is why the one below stayed.
 
 - ~~**Whether killing the spawned process actually stops the agent.**~~
-  **Settled, for both backends.** `direnv` and the sbox wrapper `exec` into the
+  **Settled, for Pi and Codex.** `direnv` and the sbox wrapper `exec` into the
   chain rather than surviving beside it, so the server's own child is the
   `bwrap` chain and a signal does reach the agent at the bottom of it. SIGTERM
   to the server left no run-scoped worker behind for either `codex app-server`

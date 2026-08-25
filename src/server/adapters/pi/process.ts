@@ -90,7 +90,7 @@ export interface PiAdapterDeps {
  * session.
  */
 const STDERR_TAIL_LIMIT = 8_192;
-/** Matches the Codex process shell, so both backends die on the same schedule. */
+/** Matches the Codex and Claude process shells, so every backend dies on the same schedule. */
 const TERMINATE_GRACE_MS = 2_000;
 const KILL_GRACE_MS = 1_000;
 
