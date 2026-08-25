@@ -719,6 +719,153 @@ test("capture", async ({ page }) => {
 The layout claim itself is asserted, not just pictured: `e2e/footer-row.spec.ts`
 measures both boxes and fails if the meta is not centred on the buttons' line.
 
+## Observed Claude Code stream-json surfaces (OW-yilabe)
+
+Run on the home server 2026-08-25, **claude 2.1.238**, every live turn on
+`--model haiku` (the owner's authorization condition; every turn came back on
+`claude-haiku-4-5-20251001`). Not under sbox — the sbox spawn shape was
+verified separately on 2026-08-25 and the protocol is sbox-independent. Every
+capture ran with cwd inside a throwaway git repo under `/tmp` (`mktemp -d`,
+`git init`, one `notes.txt`), so no project CLAUDE.md loaded and the project's
+own session store stayed clean. The raw NDJSON of each scenario is committed
+under `resources/fixtures/claude/`; each `.meta.json` carries the exact
+invocation. The base invocation for every capture below, with per-scenario
+flags appended as noted:
+
+```bash
+claude -p --model haiku --input-format stream-json \
+  --output-format stream-json --include-partial-messages
+```
+
+Input lines are `{"type":"user","message":{"role":"user","content":[{"type":
+"text","text":"..."}]}}`; closing stdin after the last message lets the CLI
+finish the turn and exit.
+
+| Checklist line | Observed |
+|---|---|
+| `--verbose` still required? | **No.** Expected to be required with `-p --output-format stream-json` (it used to be); on 2.1.238 both `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it. Never passed in any capture. |
+| `init` event | First line of every session; contents below. |
+| Control channel | Exists on stdin/stdout; envelope and verified subtypes below. |
+| `/compact` as a user message | Works; sequence below, fixture `compact.jsonl`. |
+| `--resume <id> --fork-session` | New session id, parent untouched, history **copied**, no lineage marker; fixture `fork.jsonl`. |
+| Pre-tip fork headless | **None found**; evidence below. |
+| Headless `-p` writes the store | **Yes** — every capture left `~/.claude/projects/-tmp-<munged-cwd>/<session-id>.jsonl`, plus a `memory/` dir. OW-votasi's enumeration will see adapter-driven sessions. |
+| `--session-id <uuid>` | **Caller picks the id.** A `uuidgen`-style uuid passed in came back verbatim as `init.session_id` and named the store file; fixture `session-id.jsonl`. |
+| Permission request shape | Captured under `--permission-mode default --permission-prompt-tool stdio`; shape below, fixture `permission-request.jsonl`. |
+| Thinking on Haiku headless | **Haiku emits real thinking blocks headless, unprompted** — even the trivial `text-turn` capture opens with a `thinking` content block (`thinking_delta` + `signature_delta` streaming, 688-char signature). There is no absent-thinking finding to carry; the reducer must handle thinking on every turn. |
+
+**The `init` system event.** The first stream line of every session. The
+scrubbed line from `text-turn.jsonl`, with the three long name arrays elided
+here (the fixtures carry them verbatim):
+
+```json
+{"type":"system","subtype":"init","cwd":"/tmp/ow-yilabe-scratch-2WnWbD",
+ "session_id":"919cd270-8997-400d-bc1a-ea9d663f5153",
+ "tools":["Task","Bash","Edit","Read","Write","WebFetch","WebSearch",…],
+ "mcp_servers":[],"model":"claude-haiku-4-5-20251001",
+ "permissionMode":"bypassPermissions","slash_commands":[…],
+ "terminal_slash_commands":["doctor","color"],"apiKeySource":"none",
+ "claude_code_version":"2.1.238","output_style":"default",
+ "agents":["claude","Explore","general-purpose","Plan","statusline-setup"],
+ "skills":[…],"plugins":[],
+ "capabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1",
+                 "msg_lifecycle_v1"],
+ "analytics_disabled":false,"product_feedback_disabled":false,
+ "uuid":"…","memory_paths":{"auto":"/example-home/.claude/projects/…/memory/"},
+ "fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required"}
+```
+
+So identity reporting gets session id, resolved model id, permission mode, and
+the tool list from line one. What `init` does **not** carry is a model *list*
+— that lives on the control channel: an `initialize` control request's
+response carries `models` (each with `value`, `resolvedModel`, `displayName`,
+`description`, `supportsEffort`, `supportedEffortLevels`), plus `commands`,
+`agents`, `account` (operator email — a fixture hazard, which is why the
+initialize probe is not committed), `current_permission_mode`, `pid`, and
+`session_state`.
+
+**The control channel.** Client-to-CLI requests are
+`{"type":"control_request","request_id":"<any string>","request":{"subtype":
+"...",…}}` on stdin; the CLI answers on stdout with
+`{"type":"control_response","response":{"subtype":"success"|"error",
+"request_id":"<echoed>",…}}`. An unknown subtype errors by name
+(`"Unsupported control request subtype: …"`), which is how the surface was
+probed. Verified live (fixtures `interrupt.jsonl`, `control-discovery.jsonl`):
+
+| Subtype | Observed |
+|---|---|
+| `interrupt` | Stops a streaming turn. Sent after 8 `content_block_delta`s of a count-to-500 turn; reply `{"subtype":"success","request_id":…,"response":{"still_queued":[]}}`, the partial assistant text still flushed, then `result` with subtype `error_during_execution`, `is_error:true`, and process exit 1. |
+| `set_model` | Exists mid-session. `{"subtype":"set_model","model":"haiku"}` → success; a bogus model name → `error` "Model \"…\" is not a recognized model id", so success is validated, not blind. (Effect on a subsequent turn not driven — that would have required a non-Haiku turn, which the authorization excludes.) |
+| `set_permission_mode` | Exists. `{"subtype":"set_permission_mode","mode":"bypassPermissions"}` → success echoing `{"mode":"bypassPermissions"}`. |
+| `initialize` | Exists; response contents above. |
+| `rewind`, `fork`, `checkpoint`, `list_checkpoints`, `resume`, `status` | All "Unsupported control request subtype" — probed for a pre-tip fork and found nothing. |
+
+**Permissions.** Three regimes observed under `--permission-mode default`
+(which the `--help` choices list omits — it lists `acceptEdits, auto,
+bypassPermissions, manual, dontAsk, plan` — yet the flag value is accepted and
+is also what `init` reports when the flag is absent):
+
+- `Bash(date)` **ran with no request and no denial** — surprising; the
+  expectation was headless default-mode would either ask or deny. No
+  allowlist exists in this operator's settings; the mechanism (presumably the
+  2.x auto-approval of safe commands — `claude auto-mode` exists) was not
+  identified, only the behavior recorded.
+- A write **outside cwd** (`touch /tmp/<file>` from the scratch repo) was
+  hard-blocked without asking: a `system`/`permission_denied` event, an
+  `is_error` tool_result, and the denial listed in `result.permission_denials`.
+- An **in-cwd Edit** with the undocumented `--permission-prompt-tool stdio`
+  flag (accepted on 2.1.238; the SDK's lever, absent from `--help` — without
+  it the request never appears) produced a real ask on the stream: a CLI-
+  initiated `control_request` with subtype `can_use_tool`, `tool_name`,
+  `display_name`, `input` (the full Edit input, `old_string`/`new_string`
+  included), `description`, `permission_suggestions` (e.g. `{"type":
+  "setMode","mode":"acceptEdits","destination":"session"}`), and
+  `tool_use_id`. Answered with `{"type":"control_response","response":
+  {"subtype":"success","request_id":…,"response":{"behavior":"allow",
+  "updatedInput":{…}}}}` — the edit then really ran (the file changed on
+  disk). Fixture `permission-request.jsonl`.
+
+**`/compact` as a stream-json user message**, on a session with two turns of
+history (fixture `compact.jsonl`): `system`/`status` with `status:
+"compacting"`, then `status: null` plus `compact_result: "success"`, a fresh
+`init` for the same session id, a `system`/`compact_boundary` event with
+`compact_metadata` (`trigger: "manual"`, `pre_tokens: 27614`, `post_tokens:
+1333`, `cumulative_dropped_tokens`, `duration_ms`, `preserved_segment`), the
+summary arriving as a **user** message ("This session is being continued from
+a previous conversation…"), a `<local-command-stdout>Compacted
+</local-command-stdout>` user line, and a final `result` with `num_turns: 0`
+and an empty `result`. The store file keeps a `system` entry with subtype
+`compact_boundary` ("Conversation compacted") plus the summary user message.
+
+**Fork.** `--resume 919cd270-… --fork-session` (fixture `fork.jsonl`) minted
+session id `471873f3-…`; the assistant correctly answered what the parent
+session's turn had asked ("hello there friend"), proving shared history. On
+disk the parent file is untouched and the new file carries a **full copy** of
+the parent's user/assistant entries re-stamped with the new `sessionId` —
+`grep` finds **zero** references to the parent id in the forked file: no
+`parentSession`/`forked_from_id` analogue exists. Lineage is unrecoverable
+from the store. And there is no pre-tip fork headless: `--resume` takes only
+a session id (no message index), the control probes above all came back
+unsupported, and `claude project --help` offers only `purge`.
+
+**Reducer-relevant stream shape**, from `text-turn.jsonl`/`tool-use.jsonl`:
+`assistant` events arrive **once per completed content block**, not once per
+message — two `assistant` events in the text turn carried `["thinking"]` then
+`["text"]` under the **same** API `message.id`, so the reducer must merge
+blocks by `message.id` rather than treat each event as a full message.
+Within one logical turn the stream restarts `message_start`/`message_stop`
+per API round-trip (three in `tool-use.jsonl`: Bash, then Read+Edit, then the
+reply). Tool results come back as `user` events wrapping `tool_result`
+blocks correlated by `tool_use_id`; tool inputs stream as `input_json_delta`.
+Observed tool inputs: Bash `{command, description}`, Read `{file_path}`, Edit
+`{replace_all, file_path, old_string, new_string}` — matching what
+`render/tools/args.ts` expects. Also on the stream, new relative to the
+mapping-table world: `system`/`thinking_tokens` (estimated-token ticks),
+`system`/`status` (`requesting`, `compacting`, null), `rate_limit_event`, and
+a terminal `result` event carrying `total_cost_usd`, `usage` (with
+`thinking_tokens` detail), `modelUsage`, `num_turns`, `permission_denials`,
+and `stop_reason`.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
