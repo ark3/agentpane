@@ -59,9 +59,14 @@ const SYNTHETIC_USER_PREFIXES = [
 	"[Request interrupted by user",
 ];
 
-function isSyntheticBlock(text: string): boolean {
+/** Exported for the Claude adapter's reducer, which meets the same wrapper lines live. */
+export function isSyntheticClaudeUserText(text: string): boolean {
 	const trimmed = text.trimStart();
 	return SYNTHETIC_USER_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+function isSyntheticBlock(text: string): boolean {
+	return isSyntheticClaudeUserText(text);
 }
 
 /**
@@ -207,6 +212,66 @@ export async function extractClaudePreviewTurns(filePath: string): Promise<Sessi
 		if (turn) turns.push(turn);
 	}
 	return turns;
+}
+
+// ---------------------------------------------------------------------------
+// Message-entry access for the Claude adapter (OW-beripo)
+// ---------------------------------------------------------------------------
+
+/**
+ * One user/assistant line of a session store file, uuid and all. The adapter
+ * needs these for `listForkPoints` (a fork point is a store-line `uuid`,
+ * MANUAL_TESTING OW-mayuza) and for cold-start hydration -- the store's
+ * message lines carry the same Anthropic-shaped `message` payload the live
+ * stream's `assistant`/`user` events do, so the adapter's reducer replays
+ * `record` directly.
+ */
+export interface ClaudeStoreMessageEntry {
+	uuid: string;
+	type: "user" | "assistant";
+	record: Record<string, unknown>;
+}
+
+/**
+ * The one store file for a session id, located the way `getSession` locates
+ * it (readdir walk + filename match): the directory name munges the cwd
+ * lossily, so deriving the path is not an option.
+ */
+export async function findClaudeSessionFile(root: string, sessionId: string): Promise<string | null> {
+	const files = await findClaudeSessionFiles(root);
+	const suffix = `/${sessionId}.jsonl`;
+	return files.find((file) => file.endsWith(suffix)) ?? null;
+}
+
+/**
+ * Every non-sidechain user/assistant message entry of a session store file, in
+ * file order. Lines without a `uuid` (queue-operation, mode, ai-title, ...) are
+ * not message entries and cannot be fork cut points; they are skipped.
+ */
+export async function readClaudeMessageEntries(filePath: string): Promise<ClaudeStoreMessageEntry[]> {
+	const entries: ClaudeStoreMessageEntry[] = [];
+	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
+		const rec = tryParseRecord(line);
+		if (!rec) continue;
+		if (rec.type !== "user" && rec.type !== "assistant") continue;
+		if (rec.isSidechain === true) continue;
+		if (typeof rec.uuid !== "string") continue;
+		entries.push({ uuid: rec.uuid, type: rec.type, record: rec });
+	}
+	return entries;
+}
+
+/**
+ * The human-typed text of a user store line, or null when the line is not a
+ * real prompt (tool_result wrapper, harness-injected content, assistant line).
+ * This is the fork-point label.
+ */
+export function claudePromptText(record: Record<string, unknown>): string | null {
+	const texts = extractMessageTexts(record, "user");
+	if (!texts) return null;
+	const kept = texts.filter((t) => t.trim().length > 0 && !isSyntheticBlock(t));
+	const joined = kept.join(" ").trim();
+	return joined.length > 0 ? joined : null;
 }
 
 /** One text turn from a Claude Code message line, or null if it carries no display text. */
