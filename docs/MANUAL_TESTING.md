@@ -914,6 +914,65 @@ a terminal `result` event carrying `total_cost_usd`, `usage` (with
 `thinking_tokens` detail), `modelUsage`, `num_turns`, `permission_denials`,
 and `stop_reason`.
 
+## Claude adapter live run (OW-beripo)
+
+Run on the home server 2026-08-25, **claude 2.1.238**, every live turn on
+`--model haiku` (the standing authorization condition). Two spawn-time facts
+were settled by zero-/one-turn probes before the adapter's design was frozen,
+then a full turn was driven through the running app.
+
+**Spawn-time probes.**
+
+- **`init` does not arrive at spawn.** A spawned `claude -p` stream-json
+  process sits silent for 20+ seconds with stdin open and nothing sent; the
+  `init` event arrives with the **first turn** (2.6s after the first user
+  message in the probe). The control channel, by contrast, is live
+  immediately: an `initialize` control_request sent with no turn ever run is
+  answered at once. Its response carries `models`, `commands`, `account`,
+  `pid`, `session_state` — and **no session id**, so a forked session's id
+  cannot be learned without running a turn.
+- **`--session-id` combines with `--resume --fork-session`.** One Haiku turn:
+  resuming the OW-yilabe text-turn session with `--fork-session --session-id
+  <fresh uuid>` came back with `init.session_id` and `result.session_id` both
+  equal to the chosen uuid, and the answer ("hello there friend") proved the
+  parent's history was carried. This is what lets the adapter mint every
+  session id — fresh and forked — at spawn, waiting on nothing.
+
+**The adapter-driven turn**, through the real server (`bun run start`, port
+4173): `POST /api/sessions {cwd, backend: "claude", model: "haiku"}` created a
+virtual session; `POST .../prompt` ("Use the Read tool to read notes.txt …
+then reply with exactly: done") attached and drove it. Observed over the real
+`/api/events` SSE stream (35 events, captured):
+
+- a `renamed` event re-keying the virtual id to the adapter-minted uuid
+  (`#adoptRef` taking Pi's path), then snapshots for the new ref;
+- the local user message as an upsert, then **23 assistant upserts** whose
+  joined content grew monotonically — live thinking and text deltas, not a
+  single end-of-turn repaint;
+- a `toolCall` (Read, `{file_path}`) and its correlated `toolResult` pair,
+  the call's `stopReason` mapped `toolUse`, the final message `stop`;
+- `isStreaming` true for the duration and false after the `result`;
+- the store file written at
+  `~/.claude/projects/-tmp-ow-beripo-probe/<minted-uuid>.jsonl`, so the
+  adapter-driven session is enumerable (OW-votasi) under the id the adapter
+  chose.
+
+**UI level too:** the built client (`bun run build`) served by the same
+process was driven in headless Chromium (playwright's chromium, a throwaway
+script — deliberately not a committed e2e scenario; OW-24 stands). Selecting
+the session rendered the full turn: user bubble, both thinking blocks, the
+Read call on the bespoke ReadTool card (the case-insensitive registry match
+working against Claude's `Read`), the tool result, the final `done` text, and
+the model/token footer.
+
+**Honest scope.** The home server has no `direnv`, so the spawn ran with a
+pass-through shim on PATH (`direnv exec <dir> <cmd…>` → `<cmd…>`); everything
+downstream was real — sbox ran, jailed the workspace, and injected
+`--permission-mode bypassPermissions` itself. Not driven live through the
+app: `abort`, `/compact`, `set_model`'s effect on a later turn (still
+unverified since OW-yilabe), and fork — fork mechanics rest on the probes
+above, OW-mayuza's live evidence, and the fixture-driven unit tests.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
