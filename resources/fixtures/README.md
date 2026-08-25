@@ -90,11 +90,13 @@ each `.meta.json` and the full evidence pass is the OW-yilabe section of
 `error_during_execution` and the exit code is 1, by design), `permission-request`
 (`--permission-mode default --permission-prompt-tool stdio`, a `can_use_tool`
 request answered with an allow), `compact` (`/compact` as a stream-json user
-message), `fork` (`--resume --fork-session`), `control-discovery` (`set_model`,
-`set_permission_mode`, and the unknown-subtype error), and `session-id`
-(caller-chosen uuid). The scrub here is textual, not key-based: the operator
-home-directory prefix became `/example-home`; model ids are kept because they
-are the evidence.
+message), `fork` (`--resume --fork-session`), `fork-at-message` (OW-mayuza,
+2026-08-25: the `--help`-hidden `--resume-session-at` — a pre-tip truncating
+fork at a store-line `uuid`, inclusive of the named entry), `control-discovery`
+(`set_model`, `set_permission_mode`, and the unknown-subtype error), and
+`session-id` (caller-chosen uuid). The scrub here is textual, not key-based:
+the operator home-directory prefix became `/example-home`; model ids are kept
+because they are the evidence.
 
 ## The compact scenario (OW-72, captured 2026-08-18)
 

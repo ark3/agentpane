@@ -1,0 +1,28 @@
+{
+  "backend": "claude",
+  "scenario": "fork-at-message",
+  "covers": "--resume --resume-session-at --fork-session: pre-tip truncating fork at a store-line uuid; answer proving the dropped turn left the context, not just the file",
+  "prompt": "Without using tools: quote exactly every instruction I have given you earlier in this conversation, in order, one per line. (resumed from session 471873f3-ef7b-4d41-b654-91d4ff0f3063, truncated at its first user message b56e3a52-37d4-4330-90f0-ff1017740867)",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions --resume 471873f3-ef7b-4d41-b654-91d4ff0f3063 --resume-session-at b56e3a52-37d4-4330-90f0-ff1017740867 --fork-session",
+  "cli_version": "2.1.238 (Claude Code)",
+  "captured_at": "2026-08-25T15:00-04:00",
+  "capture_cwd": "the surviving OW-yilabe throwaway git repo under /tmp (see docs/MANUAL_TESTING.md OW-yilabe/OW-mayuza)",
+  "lines": 31,
+  "terminated_cleanly": true,
+  "session_id": "01337c54-367c-4b04-8d41-e53ea4d67681",
+  "event_census": {
+    "assistant": 2,
+    "rate_limit_event": 1,
+    "result": 1,
+    "stream_event:content_block_delta": 10,
+    "stream_event:content_block_start": 2,
+    "stream_event:content_block_stop": 2,
+    "stream_event:message_delta": 1,
+    "stream_event:message_start": 1,
+    "stream_event:message_stop": 1,
+    "system:init": 1,
+    "system:status": 1,
+    "system:thinking_tokens": 8
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; no key-based scrub (model ids kept: they are the evidence)"
+}

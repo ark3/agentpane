@@ -48,9 +48,15 @@ side-effect-free construction (`AdapterFactory` docblock), idempotent
 
 First cuts, decided 2026-08-25:
 
-- Fork is tip-only or absent, per what OW-yilabe records about
-  `--fork-session`; `listForkPoints` may return only the tip. Whatever
-  residue this leaves becomes its own item at close.
+- Fork: the tip-only first cut is retired — OW-mayuza (2026-08-25) proved a
+  full pre-tip fork headless. Scope is full `listForkPoints`/`fork`:
+  `listForkPoints` reads message entries from the store file, and
+  `fork(entryId)` respawns with `--resume <id> --resume-session-at <entryId>
+  --fork-session`, where `entryId` is the store line's `uuid` (user and
+  assistant entries both accepted as the cut). Truncation is **inclusive** of
+  the named entry, where Pi's is exclusive — to fork "before user message X",
+  pass the entry preceding X; cutting at X leaves X pending and the fork's
+  first turn answers it alongside the new prompt.
 - `onRequest` is inert: sbox injects `bypassPermissions`, and the jail is the
   confinement boundary — the same rationale DESIGN records for Codex's
   `danger-full-access`. Surfacing `can_use_tool` as an `AgentRequest` is a
@@ -96,12 +102,18 @@ checklist item, stated as the consequence for this adapter:
   `pre_tokens`/`post_tokens`) to the `compactionSummary` marker; the summary
   text arrives as a user message, and the closing `result` has
   `num_turns: 0`. Fixture `compact.jsonl`.
-- `fork` / `listForkPoints`: tip-only, as the first cut assumed — respawn
-  with `--resume <id> --fork-session`. It mints a new session id and copies
-  the whole history into the new store file with **no lineage marker**, so if
-  the UI ever wants parentage the adapter must record it itself. No pre-tip
-  fork exists headless (no rewind/fork/checkpoint control subtypes;
-  `--resume` takes no message index). Fixture `fork.jsonl`.
+- `fork` / `listForkPoints`: pre-tip fork is real (corrected 2026-08-25 by
+  OW-mayuza; this bullet first said tip-only) — respawn with `--resume <id>
+  --resume-session-at <entryId> --fork-session`, `entryId` being a store-line
+  `uuid`, inclusive of the named entry (details in the first-cut bullet
+  above; live evidence in `docs/MANUAL_TESTING.md` OW-yilabe/OW-mayuza). A
+  fork mints a new session id and writes the surviving history into the new
+  store file with **no lineage marker**, parent untouched, so if the UI ever
+  wants parentage the adapter must record it itself. `--resume-drops-turn
+  <prompt uuid>` exists as a guard but only fits cuts landing immediately
+  before a user prompt entry — the discarded range must start with the
+  declared turn's prompt — so it cannot guard an arbitrary `fork(entryId)`;
+  skip it. Fixtures `fork.jsonl` (tip), `fork-at-message.jsonl` (pre-tip).
 - Enumeration (OW-votasi): headless `-p` turns do write
   `~/.claude/projects/<munged-cwd>/<session-id>.jsonl`, so adapter-driven
   sessions are enumerable; `--session-id <uuid>` lets the adapter choose the

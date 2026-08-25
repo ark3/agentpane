@@ -748,7 +748,7 @@ finish the turn and exit.
 | Control channel | Exists on stdin/stdout; envelope and verified subtypes below. |
 | `/compact` as a user message | Works; sequence below, fixture `compact.jsonl`. |
 | `--resume <id> --fork-session` | New session id, parent untouched, history **copied**, no lineage marker; fixture `fork.jsonl`. |
-| Pre-tip fork headless | **None found**; evidence below. |
+| Pre-tip fork headless | **Exists** — the spawn-time flag `--resume-session-at`, hidden from `--help`. This row first said "none found"; corrected 2026-08-25 (OW-mayuza), evidence in the pre-tip fork paragraph below, fixture `fork-at-message.jsonl`. |
 | Headless `-p` writes the store | **Yes** — every capture left `~/.claude/projects/-tmp-<munged-cwd>/<session-id>.jsonl`, plus a `memory/` dir. OW-votasi's enumeration will see adapter-driven sessions. |
 | `--session-id <uuid>` | **Caller picks the id.** A `uuidgen`-style uuid passed in came back verbatim as `init.session_id` and named the store file; fixture `session-id.jsonl`. |
 | Permission request shape | Captured under `--permission-mode default --permission-prompt-tool stdio`; shape below, fixture `permission-request.jsonl`. |
@@ -798,7 +798,7 @@ probed. Verified live (fixtures `interrupt.jsonl`, `control-discovery.jsonl`):
 | `set_model` | Exists mid-session. `{"subtype":"set_model","model":"haiku"}` → success; a bogus model name → `error` "Model \"…\" is not a recognized model id", so success is validated, not blind. (Effect on a subsequent turn not driven — that would have required a non-Haiku turn, which the authorization excludes.) |
 | `set_permission_mode` | Exists. `{"subtype":"set_permission_mode","mode":"bypassPermissions"}` → success echoing `{"mode":"bypassPermissions"}`. |
 | `initialize` | Exists; response contents above. |
-| `rewind`, `fork`, `checkpoint`, `list_checkpoints`, `resume`, `status` | All "Unsupported control request subtype" — probed for a pre-tip fork and found nothing. |
+| `rewind`, `fork`, `checkpoint`, `list_checkpoints`, `resume`, `status` | All "Unsupported control request subtype" — probed for a pre-tip fork and found nothing on the control channel. The pre-tip lever turned out to be spawn-time, not a control subtype: `--resume-session-at`, below (2026-08-25, OW-mayuza). |
 
 **Permissions.** Three regimes observed under `--permission-mode default`
 (which the `--help` choices list omits — it lists `acceptEdits, auto,
@@ -844,9 +844,57 @@ disk the parent file is untouched and the new file carries a **full copy** of
 the parent's user/assistant entries re-stamped with the new `sessionId` —
 `grep` finds **zero** references to the parent id in the forked file: no
 `parentSession`/`forked_from_id` analogue exists. Lineage is unrecoverable
-from the store. And there is no pre-tip fork headless: `--resume` takes only
-a session id (no message index), the control probes above all came back
-unsupported, and `claude project --help` offers only `purge`.
+from the store.
+
+**Pre-tip fork (2026-08-25, OW-mayuza — correcting the original finding).**
+This paragraph originally ended "there is no pre-tip fork headless", from
+accurate probes that looked in the wrong places: `--resume` takes only a
+session id, the control subtypes above all came back unsupported, and
+`claude project --help` offers only `purge`. The lever is a spawn-time flag
+`.hideHelp()`'d out of `--help` (the `--permission-prompt-tool` pattern),
+found by grepping the 2.1.238 bundle after the owner pointed out the VS Code
+extension forks at arbitrary points: `--resume-session-at <message id>`.
+Verified live on the home server, 2026-08-25, claude 2.1.238, Haiku (fixture
+`fork-at-message.jsonl`):
+
+```bash
+claude -p --model haiku --input-format stream-json \
+  --output-format stream-json --include-partial-messages \
+  --permission-mode bypassPermissions \
+  --resume 471873f3-… --resume-session-at b56e3a52-… --fork-session
+```
+
+- **It works headless**, and the identifier is the store line's `uuid` field
+  — the first candidate tried, accepted outright; both a `user` and an
+  `assistant` entry uuid were accepted as the cut point.
+- **Truncation is inclusive** of the named entry and positional: every entry
+  after it in the file is dropped, including the named user message's own
+  assistant reply. Pi's fork-at-user-message is **exclusive** (OW-yudoni), so
+  the adapter must state both semantics: to fork "before user message X"
+  here, name the entry *preceding* X. Cutting at X itself leaves X pending,
+  and the fork's first turn answers X together with the new prompt (observed:
+  the forked turn re-obeyed the retained "Reply with exactly: hello there
+  friend" before answering the new question).
+- **The drop is semantic, not cosmetic**: cut at the first user message of a
+  two-turn parent and asked to quote every earlier instruction, the forked
+  turn saw none — the dropped turn was out of context, not just out of the
+  new file.
+- **Store**: new session id, new file holding the truncated copy plus the new
+  turn, parent file byte-identical across every run (sha256 compared), and
+  still no lineage marker in the forked file.
+- **`--resume-drops-turn <prompt uuid>`** is the print-mode guard the bundled
+  SDK pairs with it. It demands that the discarded range be exactly the
+  declared turn, *starting with that turn's user prompt entry*: a mismatched
+  uuid — and even the cut turn's own prompt uuid, when cutting at a user
+  message, since the range then starts with the assistant reply — refuses
+  the resume before any model call (`total_cost_usd: 0`, no store file
+  written, exit 1, `result` subtype `error_during_execution` with the error
+  "Resume rejected by --resume-drops-turn: resuming at … would discard
+  entries not attributable to turn …: range does not start with the declared
+  turn prompt; first discarded entry 4 [type=assistant, uuid=…]"). The shape
+  it fits is cut-at-previous-assistant: `--resume-session-at <last assistant
+  entry of turn N-1> --resume-drops-turn <user prompt uuid of turn N>`
+  succeeded and dropped exactly turn N.
 
 **Reducer-relevant stream shape**, from `text-turn.jsonl`/`tool-use.jsonl`:
 `assistant` events arrive **once per completed content block**, not once per

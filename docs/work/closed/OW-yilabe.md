@@ -72,3 +72,16 @@ Haiku emits thinking headless, so the reducer handles thinking day-one. One
 finding overturned an OW-beripo assumption — `assistant` events are per
 content block, not per message — and `f956e46` retired that claim at its
 site.
+
+**Correction, 2026-08-25 (OW-mayuza):** "fork is tip-only" above is
+overturned — a pre-tip truncating fork works headless via
+`--resume-session-at <uuid>` (with `--resume --fork-session`), a spawn-time
+flag `.hideHelp()`'d out of `--help`. This item's probes were accurate but
+looked in the wrong places: `--help` (where `--resume` takes only a session
+id) and the control channel (rewind/fork/checkpoint subtypes all rejected by
+name) — a flag hidden from `--help` is invisible to both, and it surfaced
+only when the owner pointed at the VS Code extension's arbitrary-point forks
+and the 2.1.238 bundle was grepped. Evidence and semantics (inclusive of the
+named store-line `uuid`, unlike Pi's exclusive cut) in
+`docs/MANUAL_TESTING.md`'s OW-yilabe section, fixture
+`fork-at-message.jsonl`.
