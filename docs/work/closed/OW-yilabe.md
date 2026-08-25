@@ -57,3 +57,18 @@ answer, record what it means for OW-beripo, in OW-beripo's file.
 Done when the fixtures are committed and every checklist line has its answer
 in `docs/MANUAL_TESTING.md` plus its consequence written into OW-beripo's
 file.
+
+**Fixed** in `1d5db63` and `f956e46`: nine raw stream-json fixtures under
+`resources/fixtures/claude/` (text, thinking, tool-use with Bash/Read/Edit,
+interrupt, permission-request, compact, fork, control-discovery, session-id),
+and every checklist line answered in `docs/MANUAL_TESTING.md`'s OW-yilabe
+section with its consequence appended to OW-beripo. Headlines: `--verbose` is
+no longer needed; `interrupt` and `set_model` exist on the control channel;
+`/compact` works over stream-json; fork is tip-only with no lineage marker
+(the accepted first cut stands); headless turns write the store and
+`--session-id` picks the id; the permission ask needs the undocumented
+`--permission-prompt-tool stdio` and its `can_use_tool` shape is on record;
+Haiku emits thinking headless, so the reducer handles thinking day-one. One
+finding overturned an OW-beripo assumption — `assistant` events are per
+content block, not per message — and `f956e46` retired that claim at its
+site.
