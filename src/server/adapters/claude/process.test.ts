@@ -12,18 +12,19 @@ const BASE = [
 	"stream-json",
 	"--output-format",
 	"stream-json",
+	"--verbose",
 	"--include-partial-messages",
 ];
 
 describe("buildClaudeSpawnCommand", () => {
-	it("builds the sandboxed base invocation (D7), without --verbose or --permission-mode", () => {
+	it("builds the sandboxed base invocation (D7), with --verbose but without --permission-mode", () => {
 		const { command, args, cwd } = buildClaudeSpawnCommand({ cwd: "/workspace" });
 		expect(command).toBe("direnv");
 		expect(args).toEqual(BASE);
 		expect(cwd).toBe("/workspace");
 		// sbox injects bypassPermissions itself; passing it here would fight sbox.
 		expect(args).not.toContain("--permission-mode");
-		expect(args).not.toContain("--verbose");
+		expect(args).toContain("--verbose");
 	});
 
 	it("chooses the session id at spawn for a fresh session", () => {

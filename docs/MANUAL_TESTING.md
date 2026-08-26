@@ -743,7 +743,7 @@ finish the turn and exit.
 
 | Checklist line | Observed |
 |---|---|
-| `--verbose` still required? | **No.** Expected to be required with `-p --output-format stream-json` (it used to be); on 2.1.238 both `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it. Never passed in any capture. |
+| `--verbose` still required? | **No, on 2.1.238.** Expected to be required with `-p --output-format stream-json` (it used to be); on 2.1.238 both `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it. Never passed in any capture. Corrected 2026-08-26 (OW-misoru): on **2.1.246** the flag is required again under `-p --output-format stream-json`, so the adapter now passes it unconditionally. |
 | `init` event | First line of every session; contents below. |
 | Control channel | Exists on stdin/stdout; envelope and verified subtypes below. |
 | `/compact` as a user message | Works; sequence below, fixture `compact.jsonl`. |
@@ -972,6 +972,34 @@ downstream was real — sbox ran, jailed the workspace, and injected
 app: `abort`, `/compact`, `set_model`'s effect on a later turn (still
 unverified since OW-yilabe), and fork — fork mechanics rest on the probes
 above, OW-mayuza's live evidence, and the fixture-driven unit tests.
+
+## `--verbose` inert on 2.1.238, required again on 2.1.246 (OW-misoru)
+
+Probed live on the home server 2026-08-26 (Haiku, per the OW-yilabe /
+OW-beripo authorization), against the home server's installed **claude
+2.1.238**. The real invocation shape was run twice over the same one-line
+stream-json input, once with `--verbose` and once without. Both exited 0,
+both wrote pure JSONL to stdout (every line parses; no human-readable logging
+leaked into the stream, which was the failure mode worth fearing), both left
+stderr empty, and both produced an identical event sequence — `system/init`,
+`system/status`, `rate_limit_event`, `message_start`, a thinking block with
+`signature_delta`, `assistant`, a text block, `assistant`, `message_delta`,
+`message_stop`, `result/success` — with identical key sets on the `init` and
+`result` events. The runs differed only by one `thinking_delta` pair, which
+is model variance.
+
+So on 2.1.238 the flag is accepted and inert. That is the whole basis for
+the owner's decision (2026-08-26) to pass `--verbose` unconditionally rather
+than gate on a detected version: the owner separately reported that on
+**2.1.246** the flag is required again under `-p --output-format
+stream-json`, unreproduced on the home server since it cannot be updated off
+2.1.238 right now. The exact version where the requirement returned is
+unknown; 2.1.246 is only the earliest version known to require it. Left
+open: `--verbose`'s composition with `--resume-session-at`, `--fork-session`,
+and `--session-id` is unprobed (reasoning, not evidence, says a conflict is
+unlikely), and the 2.1.246 requirement itself wants confirming by whoever
+next drives a current CLI, with the observed failure recorded here without
+the flag.
 
 ## Still unverified
 

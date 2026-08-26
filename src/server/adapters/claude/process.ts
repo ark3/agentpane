@@ -53,12 +53,15 @@ export interface ClaudeSpawnOptions {
 
 /**
  * `direnv exec <cwd> sbox -- claude -p --input-format stream-json
- * --output-format stream-json --include-partial-messages` (D7).
+ * --output-format stream-json --verbose --include-partial-messages` (D7).
  *
  * sbox recognises the `claude` profile by command name: it mounts `~/.claude`
  * and injects `--permission-mode bypassPermissions` (verified 2026-08-25 via
  * `sbox --dry-run`). Neither is passed here; adding either by hand would fight
- * sbox. No `--verbose`: 2.1.238 streams without it (OW-yilabe).
+ * sbox. `--verbose` is passed unconditionally: 2.1.238 streams without it
+ * (OW-yilabe), but 2.1.246 requires it again under `-p --output-format
+ * stream-json`, and there is no version to branch on that we can name
+ * (OW-misoru).
  */
 export function buildClaudeSpawnCommand(opts: ClaudeSpawnOptions): {
 	command: string;
@@ -76,6 +79,7 @@ export function buildClaudeSpawnCommand(opts: ClaudeSpawnOptions): {
 		"stream-json",
 		"--output-format",
 		"stream-json",
+		"--verbose",
 		"--include-partial-messages",
 	];
 	if (opts.model) args.push("--model", opts.model);

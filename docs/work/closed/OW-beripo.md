@@ -80,7 +80,10 @@ checklist item, stated as the consequence for this adapter:
 
 - Spawn: drop `--verbose` from the invocation — 2.1.238 streams without it.
   The working shape is `claude -p --model haiku --input-format stream-json
-  --output-format stream-json --include-partial-messages`.
+  --output-format stream-json --include-partial-messages`. Corrected
+  2026-08-26 (OW-misoru): claude 2.1.246 requires `--verbose` again under
+  `-p --output-format stream-json`, so the adapter now passes it
+  unconditionally — inert on 2.1.238, required on 2.1.246.
 - `init` / identity: session id, resolved model id, permission mode, and the
   tool list all come from the first stream line; parse it, nothing to poll.
 - `listModels()`: send a `control_request` subtype `initialize` after spawn —
