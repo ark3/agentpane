@@ -81,3 +81,32 @@ cannot be updated right now (owner, 2026-08-26):
 Whatever those turn up, record it in `docs/MANUAL_TESTING.md`; if the first one
 turns up a narrower requirement than reported, say so there and revisit whether
 unconditional is still the right call.
+
+**Fixed** in `b8e4678`: `--verbose` sits in the static `args` array of
+`buildClaudeSpawnCommand`, between `--output-format stream-json` and
+`--include-partial-messages`, with no version gate. The handle named above
+went red first — with the code changed and the test untouched, all four
+`process.test.ts` cases failed on the `BASE` comparison, the diff showing
+`+ "--verbose"` against the expected array — then the test was inverted:
+`BASE` gained the flag, `not.toContain` became `toContain`, and the case is
+renamed "with --verbose but without --permission-mode". The `--permission-mode`
+half stands untouched, since sbox still injects that itself. `bun run check`
+passes, 865 tests.
+
+All three sites name both versions rather than flipping: the docblock at
+`process.ts:57`, the OW-yilabe table row in `docs/MANUAL_TESTING.md`, and
+OW-beripo's close note, the latter two following that file's existing
+"Corrected <date> (<id>)" convention. A fourth copy the item had not named was
+caught in review and retired in the same commit — the literal invocation on the
+docblock's own first line, which a reader meets before the paragraph three
+lines below it, and which would have contradicted it. The two copies in
+`docs/MANUAL_TESTING.md`'s capture sections were deliberately left alone: they
+record what was actually run on 2.1.238, and editing them would falsify the
+capture history rather than correct it.
+
+The 2.1.238 probe that licenses the unconditional choice is recorded in
+`docs/MANUAL_TESTING.md` under "`--verbose` inert on 2.1.238, required again on
+2.1.246 (OW-misoru)". The two things this item deliberately left open — the
+2.1.246 requirement unreproduced here, and the flag's composition with
+`--resume-session-at`/`--fork-session`/`--session-id` unprobed — carry forward
+as OW-bumota.
