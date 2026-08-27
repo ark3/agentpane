@@ -43,3 +43,25 @@ The observed behaviour of a current CLI without `--verbose`, pasted into
 `--verbose` together with `--resume-session-at <uuid> --fork-session` — showing
 whether the stream is unaffected. No code change is expected; if one turns out
 to be needed, that is a new item, not this one.
+
+**Fixed** in 55fcc9c: the item's own premise was stale — the home server was no
+longer pinned at 2.1.238 but running **claude 2.1.247**, so both questions were
+settled there on 2026-08-27 (Haiku, per OW-yilabe / OW-beripo), recorded in
+`docs/MANUAL_TESTING.md` under the OW-misoru section. The requirement does not
+reproduce: a current CLI streams stream-json under `-p` with **no `--verbose`
+at all**, exit 0 and empty stderr, in both the plain shape and the full adapter
+shape. There is no failure to record because the check is not in the binary —
+the CLI's flag-validation table greps out of the executable and holds no
+`--verbose` entry on either 2.1.247 or 2.1.238. Composition is clean: the fork
+shape (`--resume --resume-session-at --fork-session --session-id`) run with and
+without the flag produced **identical event sequences, event for event**, same
+session id echo, same truncated fork store file, parent file sha256 unchanged.
+No version boundary is claimed — 2.1.246 was not installed and was not probed,
+so the owner's report stands as reported and the honest reading is that the
+requirement, if it existed, was transient. Passing `--verbose` unconditionally
+still stands, but for a better reason: it is harmless, not needed. The same
+commit retires the falsified copy of the old rationale in the
+`buildClaudeSpawnCommand` docblock (`src/server/adapters/claude/process.ts`),
+which a reader meets at the code. Probes ran `claude` directly, not through
+`direnv exec <cwd> sbox --` (the home server has no `direnv`); that caveat is
+stated at the evidence.
