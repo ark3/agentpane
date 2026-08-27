@@ -58,10 +58,11 @@ export interface ClaudeSpawnOptions {
  * sbox recognises the `claude` profile by command name: it mounts `~/.claude`
  * and injects `--permission-mode bypassPermissions` (verified 2026-08-25 via
  * `sbox --dry-run`). Neither is passed here; adding either by hand would fight
- * sbox. `--verbose` is passed unconditionally: 2.1.238 streams without it
- * (OW-yilabe), but 2.1.246 requires it again under `-p --output-format
- * stream-json`, and there is no version to branch on that we can name
- * (OW-misoru).
+ * sbox. `--verbose` is passed unconditionally because it is harmless, not
+ * because it is needed: 2.1.238 and 2.1.247 both stream without it, against
+ * the base shape and the full resume/fork/session-id shape alike (OW-yilabe,
+ * OW-bumota). It is kept for the build reported to require it — 2.1.246,
+ * never probed (OW-misoru) — which passing it costs nothing to cover.
  */
 export function buildClaudeSpawnCommand(opts: ClaudeSpawnOptions): {
 	command: string;

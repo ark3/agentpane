@@ -743,7 +743,7 @@ finish the turn and exit.
 
 | Checklist line | Observed |
 |---|---|
-| `--verbose` still required? | **No, on 2.1.238.** Expected to be required with `-p --output-format stream-json` (it used to be); on 2.1.238 both `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it. Never passed in any capture. Corrected 2026-08-26 (OW-misoru): on **2.1.246** the flag is required again under `-p --output-format stream-json`, so the adapter now passes it unconditionally. |
+| `--verbose` still required? | **No — not on 2.1.238, not on 2.1.247.** Expected to be required with `-p --output-format stream-json` (it used to be); on both versions `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it, exit 0, empty stderr. Never passed in any capture. A 2026-08-26 correction (OW-misoru) recorded the owner's report that **2.1.246** requires it again; re-probed 2026-08-27 on 2.1.247 (OW-bumota) that requirement is absent, and the adapter passes the flag unconditionally because it is harmless, not because it is needed. |
 | `init` event | First line of every session; contents below. |
 | Control channel | Exists on stdin/stdout; envelope and verified subtypes below. |
 | `/compact` as a user message | Works; sequence below, fixture `compact.jsonl`. |
@@ -973,7 +973,7 @@ app: `abort`, `/compact`, `set_model`'s effect on a later turn (still
 unverified since OW-yilabe), and fork — fork mechanics rest on the probes
 above, OW-mayuza's live evidence, and the fixture-driven unit tests.
 
-## `--verbose` inert on 2.1.238, required again on 2.1.246 (OW-misoru)
+## `--verbose` inert on 2.1.238, and still inert on 2.1.247 (OW-misoru, OW-bumota)
 
 Probed live on the home server 2026-08-26 (Haiku, per the OW-yilabe /
 OW-beripo authorization), against the home server's installed **claude
@@ -988,18 +988,121 @@ stderr empty, and both produced an identical event sequence — `system/init`,
 `result` events. The runs differed only by one `thinking_delta` pair, which
 is model variance.
 
-So on 2.1.238 the flag is accepted and inert. That is the whole basis for
+So on 2.1.238 the flag is accepted and inert. That was the whole basis for
 the owner's decision (2026-08-26) to pass `--verbose` unconditionally rather
 than gate on a detected version: the owner separately reported that on
 **2.1.246** the flag is required again under `-p --output-format
-stream-json`, unreproduced on the home server since it cannot be updated off
-2.1.238 right now. The exact version where the requirement returned is
-unknown; 2.1.246 is only the earliest version known to require it. Left
-open: `--verbose`'s composition with `--resume-session-at`, `--fork-session`,
-and `--session-id` is unprobed (reasoning, not evidence, says a conflict is
-unlikely), and the 2.1.246 requirement itself wants confirming by whoever
-next drives a current CLI, with the observed failure recorded here without
-the flag.
+stream-json`. That report was unreproduced at the time, because the home
+server was pinned at 2.1.238.
+
+### The 2.1.246 requirement does not reproduce on 2.1.247 (2026-08-27, home server, claude 2.1.247, Haiku, OW-bumota)
+
+The home server is no longer pinned: `claude --version` reports `2.1.247
+(Claude Code)`, from `~/.local/share/claude/versions/2.1.247`. Every probe
+below ran there on Haiku. **Honest scope:** the home server still has no
+`direnv`, and these probes invoked `claude` directly rather than through
+`direnv exec <cwd> sbox --`, so the sandbox layer was not in the path. Where
+the adapter relies on sbox to inject `--permission-mode bypassPermissions`,
+the probes passed that flag by hand. cwd was `/tmp/ow-bumota` throughout.
+
+**Without `--verbose`, both shapes stream normally.** Plain shape:
+
+```bash
+echo hi | claude -p --model haiku --output-format stream-json
+```
+
+Exit **0**, stderr **empty** (0 bytes), 12 lines of clean JSONL:
+`system/init`, seven `system/thinking_tokens`, `assistant`, `assistant`,
+`rate_limit_event`, `result/success` — verbatim result line, keys elided:
+
+```json
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Hi Abhay! Ready to help. What are you working on?","session_id":"4713b81e-2bcd-47f7-86fa-c61a879c4639"}
+```
+
+The adapter's full shape, same treatment:
+
+```bash
+claude -p --model haiku --input-format stream-json \
+  --output-format stream-json --include-partial-messages \
+  --permission-mode bypassPermissions < in.jsonl
+```
+
+Exit **0**, stderr **empty**, 27 lines of clean JSONL:
+`system/init`, `system/status`, `rate_limit_event`,
+`stream_event/message_start`, a `thinking` block
+(`content_block_start` + five `thinking_delta` + `signature_delta`,
+interleaved with `system/thinking_tokens`), `assistant`,
+`content_block_stop`, a `text` block, `assistant`, `content_block_stop`,
+`message_delta`, `message_stop`, `rate_limit_event`, `result/success` with
+`"result":"hello there friend"`. Adding `--verbose` back as the control
+changed nothing but thinking-delta count and one stray trailing
+`rate_limit_event`; both control runs also exited 0 with empty stderr.
+
+**There is no refusal to observe, because the check is not in the binary.**
+`claude --help` on 2.1.247 documents `--verbose` as "Override verbose mode
+setting from config" — a config override, not a mode gate. The CLI's
+flag-validation table is greppable out of the executable, and it carries
+entries such as
+
+```
+Error: --input-format=stream-json requires output-format=stream-json.
+Error: --input-format=stream-json requires --print.
+Error: --include-partial-messages requires --print and --output-format=stream-json.
+Error: --forward-subagent-text requires --print and --output-format=stream-json.
+```
+
+`strings -n 8 ~/.local/share/claude/versions/2.1.247 | grep '^Error: --' |
+grep -ci verbose` returns **0**, as it does for 2.1.238. Nothing in either
+build refuses a stream-json print-mode invocation for want of `--verbose`.
+
+**`--verbose` composes with resume, fork, and `--session-id`.** A two-turn
+parent was minted with `--session-id`, then forked inclusive of the store
+line whose `uuid` is the first turn's final `assistant` entry (the cut-point
+identification is OW-mayuza's, above). The forked invocation, run once with
+`--verbose` and once without:
+
+```bash
+claude -p --model haiku --input-format stream-json \
+  --output-format stream-json --verbose --include-partial-messages \
+  --permission-mode bypassPermissions \
+  --resume 50f3adcf-… --resume-session-at 6bed0c2a-… --fork-session \
+  --session-id 3c093256-…
+```
+
+Both exited **0** with **empty stderr** and 20 stdout lines, and the two
+event sequences are **identical, event for event**: `system/init`,
+`system/status`, `message_start`, `content_block_start(thinking)`, three
+`thinking_delta`/`thinking_tokens` pairs, `signature_delta`, `assistant`,
+`content_block_stop`, `content_block_start(text)`, `text_delta`,
+`assistant`, `content_block_stop`, `message_delta`, `message_stop`,
+`rate_limit_event`, `result/success`. Every semantic property held in both:
+`init.session_id` came back as the caller's `--session-id` uuid verbatim,
+`result` was `success` / `is_error: false` / `num_turns: 1`, the fork's store
+file held the truncated parent (the second turn's "second turn ok" gone) plus
+the new turn, `grep` found **zero** references to the parent id in it, and
+the parent store file was byte-identical before and after both runs
+(sha256 `deaf393a…` unchanged). `--verbose` is an independent boolean; it
+neither perturbs the stream nor interacts with the resume/fork flags.
+
+**Conclusion.** The reported 2.1.246 requirement does not hold on 2.1.247:
+a current CLI streams stream-json under `-p` with no `--verbose` at all, in
+both the plain and the full adapter shape, and the requirement is narrower
+than "`-p --output-format stream-json` needs `--verbose`" — on the evidence
+here it is not present in that shape on 2.1.247 at all. This does **not**
+falsify the owner's 2.1.246 report; 2.1.246 is not installed on the home
+server and was not probed, so the honest reading is that the requirement, if
+it existed, was transient and is gone by 2.1.247. No version boundary is
+claimed in either direction beyond the two versions actually run here
+(2.1.238 and 2.1.247), and neither of those requires the flag.
+
+**Passing `--verbose` unconditionally remains the right call**, now for a
+better reason than "there is no version to branch on": the flag is *harmless*
+on both versions the repo has ever run — inert against the base shape and
+inert against the full resume/fork/session-id shape — so passing it costs
+nothing and covers whatever build the owner hit. Do not gate it on a version,
+and do not remove it: removing it would re-expose the adapter to the very
+build that was reported to need it, to buy nothing. Nothing about `--verbose`
+is open any more.
 
 ## Still unverified
 
