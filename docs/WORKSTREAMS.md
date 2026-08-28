@@ -23,7 +23,7 @@ here.
 | transport | **done, verified** offline and through the live REST/SSE path on both backends | main |
 | renderer | **done, offline verified** including edit, image-result, thinking, and sanitization paths | main |
 | codex-adapter | **done, fixture and live-smoke verified**; the final review's lifecycle findings are fixed | main |
-| client-shell | **offline verified, and hand-tested live in a browser** (open: OW-24, OW-42, OW-48, OW-49, OW-55, OW-56, OW-66 — also server-side, OW-75) | main |
+| client-shell | **offline verified, and hand-tested live in a browser** (open: OW-24, OW-42, OW-48, OW-55, OW-56, OW-66, OW-pezero — also server-side, OW-75) | main |
 
 **A green `bun run check` is not verification.** `wip/pi-adapter` passed on
 merge — and its largest file, the 293-line process shell, had no tests at all

@@ -749,6 +749,12 @@ capable of producing a bug that looks like something else entirely:
   to end, screenshots for the rendering you care about.
 - Keep protocol fixtures in the repo so tests do not require live model calls.
 
+`bun run test:browser` remains separate from `bun run check`: the latter is the
+fast browser-free gate, while browser provisioning and real layout belong to a
+separate run selected by the touch rules in `AGENTS.md`. A future CI setup
+should run both commands as separate jobs rather than hiding Playwright behind
+an environment flag in `check` (OW-49).
+
 ## Build order
 
 1. **Pi-only vertical slice**: one session, streaming text, one real tool

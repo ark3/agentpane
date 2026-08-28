@@ -222,6 +222,16 @@ one corpus, because they share a lifecycle:
   to rediscover it from. `feature` is not a sixth kind: it drifted into three
   items before a count caught it on 2026-08-17 (finding 3 below).
 
+Every card carries exactly one of those five kind labels. Two optional
+cross-cutting labels refine execution without becoming kinds:
+
+- **`work-laptop`** — the live evidence can only be gathered on the work
+  laptop, under the one-visit rule in `AGENTS.md`, "Evidence".
+- **`browser-testing`** — the card's done condition requires Playwright in a
+  real browser or a human browser observation, rather than only node/jsdom.
+  `card list --open --label browser-testing` is the queue; ordinary client
+  work whose observable is fully jsdom-visible does not carry it.
+
 ### The conversion spec, which has to be exact
 
 > ⚠️ **Executed 2026-08-17 in `7ece977`.** A spec for reading table cells that

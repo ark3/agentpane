@@ -121,9 +121,12 @@ payload for their form.
 Card treats labels as opaque strings and cannot know this repo's set. Every
 card carries exactly one kind, given to `card new --label`: `change`, `defect`,
 `deferral`, `question`, `unverified`. `docs/TRACKING.md`'s five-kind legend
-remains the definition of what each one means. `work-laptop` is the second
-label, for machine gating, and it is the only other one in use — see
-"Evidence".
+remains the definition of what each one means. Two cross-cutting labels may
+follow that kind. `work-laptop` gates live Pi evidence to the machine described
+under "Evidence". `browser-testing` marks work whose done condition needs
+`bun run test:browser` or a human observation in a real browser; it does not
+belong on ordinary client work that jsdom can settle. `card list --open --label
+browser-testing` is the browser-validation queue.
 
 ### Committing a card you authored
 

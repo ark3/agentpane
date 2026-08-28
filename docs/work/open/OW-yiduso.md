@@ -1,5 +1,5 @@
 ---
-labels: [question]
+labels: [question, browser-testing]
 ---
 
 # Nothing has watched a browser actually repaint the tab icon when the favicon href is swapped.
