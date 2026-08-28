@@ -1,9 +1,8 @@
 # agentpane
 
 Decisions D1–D14 in `docs/DESIGN.md`, the evidence behind the work in
-`docs/HANDOFF.md`. Work items are one file each under `docs/work/open/` and
-`docs/work/closed/` — **status is the directory**. `docs/TRACKING.md` specifies
-the file format and why it is shaped that way.
+`docs/HANDOFF.md`. Work items are cards, in the deck at `docs/work/`, read and
+written through the `card` CLI — see "Cards" below, and run `card status`.
 
 ## Commands
 
@@ -43,14 +42,16 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   while Codex is installed there, running it is expensive enough that it is not
   to be run without being asked. (Claude Code is the exception: it is installed
   on the home server, and live turns there have been authorized on Haiku only —
-  OW-yilabe, OW-beripo.) Pi and Codex both run on the work laptop, which is why an
-  item whose evidence has to come from a live turn belongs there and carries
-  the marker `docs/TRACKING.md` names. Collect them with
-  `rg -l '^\*\*Work laptop:\*\*' docs/work/open | sort -V`. Reading a
-  captured fixture under `resources/fixtures/` is not a live run and is fine on
-  either. Name the machine rather than writing "here": this file is checked in
-  and read from both clones, so a sentence that resolves against the reader's
-  location is false on one of them.
+  OW-yilabe, OW-beripo.) Pi and Codex both run on the work laptop, which is why
+  an item whose evidence has to come from a live turn belongs there. Such an
+  item carries the label `work-laptop`, and its body still opens with the line
+  `**Work laptop:**` naming which CLI the visit needs. The label is the filter:
+  `card list --open --label work-laptop` prints those cards with their
+  headlines, which is the intersection view the old two-command survey could
+  not produce. Reading a captured fixture under `resources/fixtures/` is not a
+  live run and is fine on either. Name the machine rather than writing "here":
+  this file is checked in and read from both clones, so a sentence that
+  resolves against the reader's location is false on one of them.
 - **A work-laptop item does all of its work in one visit.** The scarce resource
   is trips, not minutes once you are there, so never rank such an item's
   contents by urgency or name the half that matters most: that is an excuse to
@@ -82,32 +83,131 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
   single-purpose. No branch, no PR. A dispatched subagent that writes cannot —
   it is on its own worktree's branch, so it commits there and the session agent
   cherry-picks that onto `main`. Never `git push` unless asked by name.
-- Work items live only in `docs/work/`, not in GitHub issues or any other
-  external tracker. One file per item; a bare id resolves against **both**
-  directories, `docs/work/{open,closed}/<id>.md`, because an item cited
-  somewhere may have closed since — on 2026-08-20 an agent given a bare id
-  looked only in `open/` and reported the item missing. Closing an item is
-  a `git mv` into `docs/work/closed/` plus a `**Fixed** in <sha>: <evidence>`
-  paragraph appended to the body. A closed item is kept rather than deleted,
-  because its close note is sometimes the grounding a later one needs — what
-  was agreed, what was tried, what the evidence was.
-- A finding that lives only in a transcript dies with the session. A doc defect:
-  fix the doc in the same change. A fact you verified: the commit message, or
-  `docs/DESIGN.md` if it changes a decision. Live-run evidence:
-  `docs/MANUAL_TESTING.md`.
-- Anything left undone — defect, deferral, question, unproven claim — becomes
-  an open work item: a new file in `docs/work/open/`, its id **drawn, not
-  chosen** (`.claude/skills/author/SKILL.md`, and `docs/TRACKING.md` for why).
-  Cite ids elsewhere; never restate an item.
+- Where a finding goes. A doc defect: fix the doc in the same change. A fact
+  you verified: the commit message, or `docs/DESIGN.md` if it changes a
+  decision. Live-run evidence: `docs/MANUAL_TESTING.md`. Anything left undone
+  becomes a card.
 - Build-slice status lives in the Status table at the top of
-  `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not work
-  items; an item's own status is which directory its file sits in.
+  `docs/WORKSTREAMS.md` and nowhere else. That table tracks slices, not cards.
+
+## Cards
+
+Work items are cards. `card status` reports this repo's deck, `card workflow`
+is the contract, and `card author` and `card execute` carry the two procedures.
+Read those rather than a retelling; what follows is only what card cannot know
+about this repo.
+
+### Setting card up in a clone
+
+Card's config is per-clone and deliberately not synced, so a fresh clone has no
+deck until you write it — which is why the setup is documented here rather than
+left to whoever cloned. Every command below was run on the home server from a
+fresh clone on 2026-08-27:
+
+```
+git clone git@github.com:ark3/card.git ~/projects/card
+cd ~/projects/card && bun install
+ln -s ~/projects/card/src/card.ts ~/.local/bin/card
+```
+
+The symlink is how `card` gets onto `PATH`; point it wherever your `PATH`
+already reaches. Then, in the agentpane clone, hand-write
+`.git/card/card-config.toml` with exactly:
+
+```
+prefix = "OW"
+deck = "../../docs/work"
+public = true
+```
+
+`deck` resolves relative to `.git/card/`. `public = true` stands card's
+commit-lint gate down, which is what keeps citing `OW-` ids in commit subjects
+legal here. Verify with `card status`: it must name this clone's deck
+directory — `/home/ark3/projects/agentpane/docs/work` on the home server, the
+equivalent path elsewhere — and the open and closed counts.
+
+### Labels
+
+Card treats labels as opaque strings and cannot know this repo's set. Every
+card carries exactly one kind, given to `card new --label`: `change`, `defect`,
+`deferral`, `question`, `unverified`. `docs/TRACKING.md`'s five-kind legend
+remains the definition of what each one means. `work-laptop` is the second
+label, for machine gating, and it is the only other one in use — see
+"Evidence".
+
+### Close notes
+
+`card close <id> --done` is the mechanism, and the note this repo writes on
+stdin keeps its existing form: `**Fixed** in <sha>: <evidence>` — the landed
+sha and what shows it works. That is a deliberate override of `card workflow`'s
+close-note advice to name a public ticket key instead, on the grounds that "a
+commit sha dies at the next squash". This repo has no ticket system, never
+squashes, and its entire closed pile is sha-anchored, so the sha is the durable
+address here.
+The note is a plain last body paragraph: no heading above it and no
+strikethrough anywhere, which is how the whole closed pile reads.
+
+`--promoted` never applies in this repo: card's own text says so of a deck with
+no outside system beside it, and there is none. A legitimate close is not
+always a `**Fixed** in <sha>` — OW-74 is the precedent, closed unbuilt.
+
+### Two authoring rules this repo adds
+
+**Discuss each observation to agreement before writing its card**, and do not
+treat your own answers as agreement. This is an explicit override of
+`card author`, whose default is the opposite — "write each card as its
+observation settles; do not hold cards back waiting for the owner to approve
+each one". Neither is a mistake; the gate is repo-local, it comes from a real
+2026-08-18 incident, and it survives the skill that used to carry it.
+
+**A card you authored is committed unless the user asks not to.** Card never
+commits anything, and its author payload is silent on git.
+
+### Body shape
+
+Card's author payload shows a body one sentence per line. This corpus is
+wrapped at **eighty columns** instead, with `##` for subheadings and a headline
+that never wraps. Keep eighty columns: it is a deliberate repo convention, and
+the corpus reads as one thing only while every writer follows it.
+
+## Dispatching an implementer
+
+`card worktree <id>` cuts the tree — `.worktrees/<id>`, on branch `card/<id>`,
+from the branch the main checkout is on. It therefore starts at local `main`'s
+tip and there is **nothing to fast-forward**: the `git merge --ff-only main`
+step the old dispatch procedure carried is gone along with the staleness it
+existed to fix (`docs/MANUAL_TESTING.md`, "Observed worktree base for
+dispatched subagents").
+
+`.worktrees/<id>` inside the repo tree is not a preference. On the home server
+that tree is the only path mounted read-write, and a worktree anywhere outside
+it fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment
+gotchas"); `card worktree` satisfies that by construction.
+
+Three things card cannot know, so the dispatch prompt has to carry them:
+
+- **`bun install` in the fresh worktree** before any `src/` work.
+- A dispatched subagent does **not** inherit `CLAUDE.md` or `AGENTS.md`. Hand
+  them over: tell it to read them as files in its worktree.
+- **From inside a worktree the `card` CLI resolves to the main checkout's
+  deck**, not the worktree's copy, so a deck-mutating verb run there writes
+  outside the implementer's branch entirely. An implementer runs the read-only
+  verbs only; filing and closing are the dispatching session's job.
+
+Never `/code-review ultra` in an execution session — it has cost a full budget
+window. The old skill's blanket ban on review subagents does *not* survive with
+it: `card execute` positively requires dispatching an adversarial reader at
+finished work, and card wins there. Only the `/code-review ultra` ban is
+repo-local.
 
 ## Sessions
 
-Work happens in one of two modes. If the user has not invoked `/author`
-(writing work items) or `/execute` (landing them), ask which one before doing
-anything else — including in reply to an opening greeting.
+Ask which mode the session is in before doing anything else — including in
+reply to an opening greeting. There are three. Two are the procedures
+`card workflow` names in its "Onward" section: writing or sharpening cards,
+which is `card author`'s, and landing one, which is `card execute`'s. The third
+is the one `card status` names — "otherwise the deck needs nothing from this
+session" — which is work in the repo with no card in play.
 
-The slash-command skill definitions live in `.claude/skills/author/SKILL.md`
-and `.claude/skills/execute/SKILL.md`.
+Card's own entry rule holds in the first two: when cards come up, run
+`card workflow` first, then the payload for the mode you are in.

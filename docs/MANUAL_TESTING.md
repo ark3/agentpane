@@ -4,8 +4,10 @@
 
 **The evidence behind the live runs**, and the instructions for reproducing
 them. It does not state project status — `WORKSTREAMS.md`'s Status table does
-that, and `docs/work/open/` holds what is still outstanding. Record a run's
-results here; record what the run left undone as a new work item there.
+that, and the deck at `docs/work/` holds what is still outstanding. Record a
+run's results here; record what the run left undone as a card, filed with
+`card new` — never by hand-creating a file under `docs/work/open/`, which card
+forbids outright.
 
 Two substantial live-backend runs are recorded below, both on 2026-08-11
 (America/New_York): Codex with `codex-cli 0.147.0`, and Pi with `pi 0.84.1`,
@@ -353,6 +355,21 @@ The fix landed alongside: `/execute`'s dispatch step now requires the prompt to
 tell the subagent to fast-forward to `main` before starting and to report the
 sha it started at. Keeping `origin/main` fresh by pushing was rejected — the
 never-push rule forbids it.
+
+**Correction, 2026-08-27: this no longer describes how a dispatched tree is
+cut here, and the fix it names is retired.** Dispatched worktrees now come from
+`card worktree <id>`, which cuts `.worktrees/<id>` on branch `card/<id>` from
+the branch the main checkout is on. The base is therefore local `main`, the
+staleness gap measured above does not arise, and there is nothing to
+fast-forward — the `git merge --ff-only main` step went out with
+`.claude/skills/execute/SKILL.md`, deleted in the same change as this note.
+
+The measurement itself stands and is not superseded: it remains a true record
+of the Claude Code harness's own worktree cutter (`EnterWorktree`,
+`.claude/worktrees/`), which cut from the remote tracking ref when it was
+measured; nothing has re-measured it since, and this correction does not claim
+to. It is the evidence for why a tree cut that way must be checked before its
+base is trusted, should this repo ever be dispatched through that path again.
 
 ## Observed manual compaction, Pi and Codex (OW-72)
 

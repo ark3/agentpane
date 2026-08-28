@@ -208,7 +208,9 @@ unchanged as a record of what was believed; this round is its correction.
   dispatched worktree must live *inside* the repo tree (`.worktrees/<id>`,
   gitignored), because it is the only path mounted read-write — a worktree
   anywhere outside it (`~/src/`, `/tmp`, a sibling of the repo) fails with
-  `Read-only file system` (`.claude/skills/execute/SKILL.md`).
+  `Read-only file system`. `card worktree <id>` satisfies this by construction:
+  it puts the tree at `<main checkout>/.worktrees/<id>`. See `AGENTS.md`,
+  "Dispatching an implementer".
 - **Both agents need a writable state directory, and sbox will not give you
   one from inside this sandbox.** Codex initializes a sqlite state runtime
   under `~/.codex`; Pi takes a lock under `~/.pi/agent` merely to *read* its

@@ -3,22 +3,38 @@
 How agentpane's work items are stored, and the record of the migration that
 got them there.
 
-> ⚠️ **Parts of this document are outdated as of 2026-08-17.** The migration it
-> proposes **has happened**: work items are one file each under
-> `docs/work/open/` and `docs/work/closed/`, landed in `7ece977`, `d82885f` and
-> `5440377` and closed as OW-54 in `ef1403d`. The markdown tables in
-> `WORKSTREAMS.md` and `CLOSED.md` that several sections below describe in the
-> present tense **no longer exist**.
+> ⚠️ **Historical as of 2026-08-27**, which discharges the promise the last
+> paragraph of this block used to make. This document is no longer a procedure
+> anyone follows; it is the record of *why* the storage has the shape `card`
+> now reads. The format it specifies is read and written through the `card`
+> CLI: `AGENTS.md`, "Cards", is the loaded surface, and card's own
+> `card workflow`, `card author` and `card execute` payloads are the procedure.
+> Card's per-clone redirect config exists because the corpus stayed exactly
+> where this document put it.
 >
-> Still current: "The format: Maildir-shaped work items", "Staying greppable",
-> "Ids are drawn at random", "The `OW` prefix", and "Tooling" (OW-59 is
-> genuinely still open). Everything else is a record of how the decision was
-> reached and how the conversion was specified — accurate about the past, wrong
-> about today, and marked section by section below. "Two clones can mint the
-> same id" was superseded on 2026-08-18 by the id scheme that follows it.
+> What survives, and how. **`kind:` lives on as a label** — the five-kind
+> legend in "The format: Maildir-shaped work items" remains the definition of
+> the label set, and it is the one part of this document still normative.
+> **Superseded**: the survey commands in "Staying greppable" and the `python3`
+> id generator in "Ids are drawn at random", by `card list` and `card new`.
+> **Answered**: "Tooling, which is a separate item" — OW-59 closed, and the
+> tool was built as `card`, in its own repository rather than as `ow` in this
+> one.
 >
-> Expect this file to be retired or moved somewhere explicitly historical once
-> the new storage has baked in.
+> The dated blocks below stand as written. **Parts of this document were
+> already outdated as of 2026-08-17**: the migration it proposes **has
+> happened**, work items became one file each under `docs/work/open/` and
+> `docs/work/closed/`, landed in `7ece977`, `d82885f` and `5440377` and closed
+> as OW-54 in `ef1403d`, and the markdown tables in `WORKSTREAMS.md` and
+> `CLOSED.md` that several sections below describe in the present tense **no
+> longer exist**. "Two clones can mint the same id" was superseded on
+> 2026-08-18 by the id scheme that follows it.
+>
+> Those historical sections cite `/author`, `/execute` and
+> `.claude/skills/{author,execute}/SKILL.md`, deleted on 2026-08-27 with this
+> cutover. Read every such citation as history: it names the procedure in force
+> when that section was written, and it is not being kept current. Stated once
+> here rather than annotated in seventeen places.
 
 This is **a separate project from the agent UI** that happens to live in the
 same repo, because its subject is this repo's own bookkeeping. Nothing here
@@ -181,9 +197,11 @@ docs/work/
   closed/OW-23.md
 ```
 
-Closing is `git mv` plus appending the close note. Frontmatter carries the
-fields that vary (kind, where, `needs:` edges, and on close the sha); the body
-is prose with headings, lists and code blocks available.
+Closing moves the file into `closed/` and appends the close note; since
+2026-08-27 `card close` does both as one act. Frontmatter carries `labels:` and
+`blocked-by:` and nothing else — card's parser hard-rejects any other field, so
+`kind:` became a label and `where:` became a body paragraph under OW-pisape.
+The body is prose with headings, lists and code blocks available.
 
 **What `kind:` may hold**, carried here from the table this format replaces,
 with the pointers into that table rewritten and nothing else. Five kinds share
@@ -357,7 +375,15 @@ split (no analogue worth having).
 
 ### Staying greppable, which is what makes the interim survivable
 
-Until `ow list` exists the list *is* a `grep`, so the format has to earn that
+> ⚠️ **Superseded 2026-08-27.** The interim ended: `card list` and
+> `card list --label <kind>` print the two views the commands below were
+> written for, and the second and third of those commands match nothing today,
+> because `kind:` became the label `labels: [<kind>]` under OW-pisape. The
+> first still runs. What is kept is the reasoning — these constraints are why
+> the format stayed greppable at all, and `card cmd -- <command>` is what keeps
+> them exercisable now that a tool sits in front of the files.
+
+While no tool existed the list *was* a `grep`, so the format had to earn that
 rather than assume it. Three constraints, each measured against a throwaway
 prototype on 2026-08-16 rather than reasoned about:
 
@@ -474,9 +500,13 @@ pushes. That is not a discipline problem to be more careful about — it is the
 scheme working as specified, with every session an independent allocator
 reading a stale max. And the writers are not two machines, which is what the
 section above assumed: they are every session in this clone, every session in
-the other, and **every dispatched subagent, which works in its own worktree cut
-from `origin/main`** (`.claude/skills/execute/SKILL.md`). That last one is what
-rules out partitioning the id space. A worktree is created on demand, so there
+the other, and **every dispatched subagent, which works in its own worktree**.
+That last one is what rules out partitioning the id space, whatever the
+worktree is cut from — and what it is cut from has changed since this was
+written. It was `origin/main`, by the harness's own cutter
+(`docs/MANUAL_TESTING.md`, "Observed worktree base for dispatched subagents");
+since 2026-08-27 a dispatched tree comes from `card worktree`, which cuts from
+the branch the main checkout is on. A worktree is created on demand, so there
 is no moment at which a partition could be assigned to it, and a per-clone
 stride would not reach it anyway — its `docs/work/open/` is a different
 directory holding stale state.
@@ -505,7 +535,9 @@ original and nothing catches it.
 **The form is `OW-` and three consonant-vowel syllables.** Eighteen consonants
 — no `c`, `q` or `x`, ambiguous or awkward without a following `u` — times five
 vowels is ninety per syllable, 729,000 in three. All lowercase, no digits,
-nothing needing a shift key. Until `ow new` exists (OW-59), the generator is:
+nothing needing a shift key. **`card new` draws the id as of 2026-08-27**, and
+nobody runs a generator by hand any more; the one this document specified, kept
+because it is the definition of the form, was:
 
 ```
 python3 -c "
@@ -792,6 +824,15 @@ exist at all.
 
 ## Tooling, which is a separate item
 
+> ⚠️ **Answered 2026-08-27.** OW-59 closed and the tool exists, built as `card`
+> in its own repository rather than as `ow` in this one — so it is
+> cross-project by construction, which is the requirement OW-59 kept coming
+> back to. `card new`, `card close`, `card list`, `card show`, `card worktree`
+> and `card cmd` are the surface that landed; `ow check`'s two invariants went
+> unbuilt, and OW-59's own text records that both were mis-specified against
+> this corpus. Whether they are worth respecifying, and where they would run,
+> is OW-dafebo. Kept as the record of how the question was framed.
+
 The format above lands with none of this written. Closing becomes `git mv` plus
 an append to a short file — already fewer moves than today's string surgery
 against a 60KB file and a 76KB one — so the storage change collects most of the
@@ -826,6 +867,11 @@ The evidence text stays typed by hand. Deciding what counts as evidence is the
 part worth a human; placement is the part worth a script.
 
 ## What was open, and what settled it
+
+> ⚠️ **Historical** — five questions settled on 2026-08-17, answered against
+> the tables and the two slash-command skills as they then stood. Two of the
+> answers below name `/author` and `/execute`, deleted on 2026-08-27; read them
+> as the procedure in force at the time.
 
 All five questions this document carried settled on 2026-08-17, in the
 conversation that produced the two-machine finding above. Kept as findings

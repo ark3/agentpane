@@ -143,7 +143,9 @@ how far.
 
 ## How work gets done
 
-Process rules live where they load: `CLAUDE.md` for what applies to anyone
-touching the repo, `/author` for writing work items, `/execute` for landing
-them. This document holds slice status and the contracts, not the process and
-not the work items — those are one file each under `docs/work/`.
+Process rules live where they load: `CLAUDE.md` and the `AGENTS.md` it points
+at for what applies to anyone touching the repo, and card's own payloads for
+the tracking procedure — `card workflow` for the contract, `card author` for
+writing work items, `card execute` for landing them. This document holds slice
+status and the contracts, not the process and not the work items — those are
+cards in the deck at `docs/work/`.
