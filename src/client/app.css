@@ -68,6 +68,9 @@
 	--ap-backend-codex: #157f4b;
 	--ap-backend-claude: #3959d9;
 	--ap-backend-pi: #8b2fa0;
+
+	/* -- attached status (OW-lepoki) ---------------------------------- */
+	--ap-attached: #0f7f8f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -106,6 +109,8 @@
 		--ap-backend-codex: #57c98a;
 		--ap-backend-claude: #7f9dff;
 		--ap-backend-pi: #d08ce8;
+
+		--ap-attached: #4fbfd0;
 	}
 }
 
@@ -195,7 +200,15 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .session-meta { display: flex; min-width: 0; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
 .session-cwd { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-streaming { color: var(--ap-accent); }
-.session-backend-attached { font-weight: 700; }
+/* Attached is drawn as an inset shadow, never `border-left`: the global
+   `button[aria-pressed="true"]` rule owns `border-color`, so a border stripe
+   would vanish on the selected row -- the one row you are most likely looking
+   at. Its own token, because colour on the badge is backend identity
+   (OW-pizene), and --ap-accent is already selection and streaming. Width and
+   colour are a first cut, deliberately modest: D12's reclamation is unbuilt
+   (OW-33, OW-34), so attached is unbounded and this marker is on a growing
+   share of rows. It can get louder once attached is capped. */
+.session-attached { box-shadow: inset 3px 0 0 0 var(--ap-attached); }
 /* `overflow-anchor: none` because follow mode does this job itself, against a
    message it chose (App.svelte's anchorIndex/anchorTop). CSS scroll anchoring
    is the browser doing the same job with its own policy, and two anchoring

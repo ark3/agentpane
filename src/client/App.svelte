@@ -885,15 +885,15 @@
 			<button
 				type="button"
 				class="session-select"
+				class:session-attached={summary.status === "attached"}
 				aria-pressed={view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(summary.ref)}
-				aria-label={label}
+				aria-label={summary.status === "attached" ? `${label} (attached)` : label}
 				onclick={() => void controller.preview(summary.ref)}
 			>
 				<span class="session-preview">{label}</span>
 				<span class="session-meta">
 					<span
 						class="session-backend"
-						class:session-backend-attached={summary.status === "attached"}
 						style="color: {backendColor(summary.ref.backend)}"
 					>{summary.ref.backend}</span>
 					{#if formatTimestamp(summary.updatedAt)}

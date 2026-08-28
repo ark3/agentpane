@@ -342,11 +342,13 @@ describe("App", () => {
 		await tick();
 		controller.previewed.length = 0; // discard the startup auto-select
 
-		await fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
+		// Prefix match: an attached row's accessible name carries a trailing
+		// "(attached)" (OW-lepoki), and what this test is about is the label's text.
+		await fireEvent.click(screen.getByRole("button", { name: /^Review the patch/ }));
 
 		expect(controller.previewed).toEqual([piSession]);
 		expect(controller.selected).toEqual([]); // a row click never spawns via attach
-		expect(screen.getByRole("button", { name: "codex codex-1" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^codex codex-1/ })).toBeInTheDocument();
 	});
 
 	it("labels a just-prompted session by its own first user message while the server preview is still null", async () => {
@@ -376,9 +378,11 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		await tick();
 
-		const row = screen.getByRole("button", { name: "Explain the crash" });
+		const row = screen.getByRole("button", { name: /^Explain the crash/ });
 		expect(within(row).getByText("Explain the crash")).toHaveClass("session-preview");
-		expect(screen.queryByRole("button", { name: `pi ${realRef.id}` })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: (name) => name.startsWith(`pi ${realRef.id}`) }),
+		).not.toBeInTheDocument();
 	});
 
 	it("auto-selects the most recent session in scope on startup", async () => {
@@ -619,18 +623,23 @@ describe("App", () => {
 		expect(nav.getAllByLabelText("Streaming")).toHaveLength(1);
 	});
 
-	it("boldfaces the backend badge only for an attached session", () => {
+	it("stripes the row of an attached session, and says so in its accessible name", () => {
 		const attached = summary(piSession, "Attached turn", { status: "attached" });
 		const detached = summary(codexSession, "Detached turn", { status: "detached" });
 		const controller = new FakeController(view({ state: state({ summaries: [attached, detached] }) }));
 		const { container } = render(App, { props: { controller } });
-		const badges = Array.from(container.querySelectorAll<HTMLElement>(".session-backend"));
+		const rows = Array.from(container.querySelectorAll<HTMLElement>(".session-select"));
 
-		const attachedBadge = badges.find((badge) => badge.textContent === "pi");
-		const detachedBadge = badges.find((badge) => badge.textContent === "codex");
+		const attachedRow = rows.find((row) => row.textContent?.includes("Attached turn"));
+		const detachedRow = rows.find((row) => row.textContent?.includes("Detached turn"));
 
-		expect(attachedBadge?.classList.contains("session-backend-attached")).toBe(true);
-		expect(detachedBadge?.classList.contains("session-backend-attached")).toBe(false);
+		/* The class, not a computed style: jsdom resolves neither the token nor
+		   the inset shadow, and the stripe's look is a verdict for the owner. */
+		expect(attachedRow?.classList.contains("session-attached")).toBe(true);
+		expect(detachedRow?.classList.contains("session-attached")).toBe(false);
+
+		expect(attachedRow).toHaveAttribute("aria-label", "Attached turn (attached)");
+		expect(detachedRow).toHaveAttribute("aria-label", "Detached turn");
 	});
 
 	it("invokes refreshSessions from the sessions header refresh control", async () => {
