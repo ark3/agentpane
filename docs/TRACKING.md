@@ -262,14 +262,13 @@ where: '<the Where cell, verbatim, in single quotes>'
   value to put there, and the sha stays in the note text where its author put
   it. Both fields exist for whatever OW-59 wants; the migration does not
   populate them.
-- **An item needing a live backend says so in the body, not in a field.**
-  Neither CLI runs on the home server (`AGENTS.md`, "Evidence"), so an item
-  whose evidence has to come from a live turn opens its body with exactly
-  `**Work laptop:** needs a live Pi run.` — or Codex, or "Pi or Codex". One
-  spelling, because the point of it is one grep:
-  `rg -l '^\*\*Work laptop:\*\*' docs/work/open | sort -V`. It sits in the
-  body rather than in frontmatter for the reason above, and first in the body
-  because it decides whether to read the rest.
+- **An item needing a live backend says so in the body, not in a field.** Pi
+  does not run on the home server (`AGENTS.md`, "Evidence"), so an item whose
+  evidence has to come from a live Pi turn opens its body with exactly `**Work
+  laptop:** needs a live Pi run.` One spelling, because the point of it is one
+  grep: `rg -l '^\*\*Work laptop:\*\*' docs/work/open | sort -V`. It sits in
+  the body rather than in frontmatter for the reason above, and first in the
+  body because it decides whether to read the rest.
 - **The headline is promoted, not copied.** If the Item cell opens with a `**`
   span, the headline is that span with the markers dropped and **everything else
   inside it kept** — code spans, dates, the trailing period, a second sentence.

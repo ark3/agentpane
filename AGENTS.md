@@ -38,20 +38,23 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
 
 - Verify at the source. Where a claim about a CLI, a protocol, or a runtime is
   load-bearing, reproduce it and record how.
-- **Neither Pi nor Codex runs on the home server.** It has no `pi` at all, and
-  while Codex is installed there, running it is expensive enough that it is not
-  to be run without being asked. (Claude Code is the exception: it is installed
-  on the home server, and live turns there have been authorized on Haiku only —
-  OW-yilabe, OW-beripo.) Pi and Codex both run on the work laptop, which is why
-  an item whose evidence has to come from a live turn belongs there. Such an
-  item carries the label `work-laptop`, and its body still opens with the line
-  `**Work laptop:**` naming which CLI the visit needs. The label is the filter:
-  `card list --open --label work-laptop` prints those cards with their
-  headlines, which is the intersection view the old two-command survey could
-  not produce. Reading a captured fixture under `resources/fixtures/` is not a
-  live run and is fine on either. Name the machine rather than writing "here":
-  this file is checked in and read from both clones, so a sentence that
-  resolves against the reader's location is false on one of them.
+- **Only Pi is confined to the work laptop.** The home server has no `pi` at
+  all. Claude Code and Codex both run there, each pinned to one model: Claude
+  Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna. Neither is the default
+  the machine would pick — as of 2026-08-27 the home server's
+  `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml`
+  selects `gpt-5.4-mini` — so the flag is the whole of the constraint and is
+  never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`. Pi runs
+  only on the work laptop, which is why an item whose evidence has to come
+  from a live Pi turn belongs there. Such an item carries the label
+  `work-laptop`, and its body still opens with the line `**Work laptop:**`
+  naming which CLI the visit needs. The label is the filter: `card list --open
+  --label work-laptop` prints those cards with their headlines, which is the
+  intersection view the old two-command survey could not produce. Reading a
+  captured fixture under `resources/fixtures/` is not a live run and is fine
+  on either. Name the machine rather than writing "here": this file is checked
+  in and read from both clones, so a sentence that resolves against the
+  reader's location is false on one of them.
 - **A work-laptop item does all of its work in one visit.** The scarce resource
   is trips, not minutes once you are there, so never rank such an item's
   contents by urgency or name the half that matters most: that is an excuse to
