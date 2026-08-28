@@ -55,3 +55,14 @@ Run it before touching `App.svelte` and watch it fail on all three backend asser
 Grep `--ap-accent` and `--ap-success` afterwards to confirm the session list no longer appears among their consumers; the remaining hits should all be emphasis and status, which is the separation this card is buying.
 
 These are jsdom-visible style attributes, not layout, so `bun run test:browser` is not implicated.
+
+Added an identity scale of its own: `--ap-backend-codex` / `--ap-backend-claude` / `--ap-backend-pi` in `src/client/app.css`, in the `:root` block and its dark twin, as literal hex copies rather than `var()` aliases so the coupling this card existed to remove does not survive.
+`backendColors` in `src/client/App.svelte` now maps all three ids to their same-named tokens; `backendColor`'s `?? var(--ap-fg-subtle)` fallback is untouched and still covers only ids that do not exist yet.
+`claude` had been rendering in that unknown-id grey and now has a colour.
+Hues are the owner's green / blue / purple, seeded by copying what was on screen: `#157f4b`/`#57c98a`, `#3959d9`/`#7f9dff`, `#8b2fa0`/`#d08ce8`.
+
+The existing test "color-codes the backend badge per backend, with an unrecognised backend id falling back to grey" was amended, not joined: it gained a `claude` session, and the three backend assertions were shown red first against the old map — `var(--ap-accent)` for pi, `var(--ap-success)` for codex, `var(--ap-fg-subtle)` for claude — before the fix took them green. `future` still asserts `var(--ap-fg-subtle)`.
+`bun run check` passes (865 tests). Grepping `--ap-accent` and `--ap-success` afterwards, the session list no longer consumes either; the remaining hits are all emphasis and status, and `.session-streaming` is now the row's only accent user, which is the separation this card bought.
+
+The generic `--ap-cat-1…3` alternative did not look better on implementing: naming backends in CSS is what keeps the map a bare id-to-token lookup with nothing to interpret.
+Committed as 651185f on main.

@@ -65,3 +65,25 @@ Assert the class, not a computed style: jsdom does not lay out or resolve an ins
 For the same reason `bun run test:browser` is not implicated — this is a static style, not layout, scrolling or the Popover API.
 
 Confirm by hand with at least one attached and several detached sessions in view, including the case where the attached row is also the selected row, which is where a border-based implementation would silently lose the stripe.
+
+The boldface is gone — `.session-backend-attached` and its `class:` binding are both removed — and an attached row now carries a gutter stripe instead: `class:session-attached={summary.status === "attached"}` on the `.session-select` button, drawn in `app.css` as `.session-attached { box-shadow: inset 3px 0 0 0 var(--ap-attached); }`.
+Inset shadow, not `border-left`, for the reason the card gave, and the docblock at the rule records it: `button[aria-pressed="true"]` owns `border-color`, so a border stripe would vanish on the selected row.
+Hand-reasoned and confirmed in the source: the selected rule assigns only `border-color` and `background`, nothing else assigns `box-shadow` to `.session-select`, so a selected attached row keeps the accent border and soft fill *and* draws the stripe inside them.
+
+New token `--ap-attached`, its own status-shaped name rather than a borrowed one: `#0f7f8f` light, `#4fbfd0` dark.
+Teal because it collides with nothing already meaningful in the row — the backend hues are green/blue/purple (OW-pizene), `--ap-accent` is selection and streaming, `--ap-success` green, `--ap-warning` amber, `--ap-danger` red.
+Width, colour and inset are the first cut the card asked for and are deliberately quiet while attached is unbounded; the docblock says so and names OW-33/OW-34 as what would let it get louder.
+
+Announced as well as drawn, in the accessible name: `aria-label` becomes `${label} (attached)` on an attached row.
+Visually-hidden text inside the button would have been silent — `aria-label` wins over content — so the label is both the cheapest thing and the only one that works without re-rigging the row's naming.
+
+The test "boldfaces the backend badge only for an attached session" was rewritten, not joined, as "stripes the row of an attached session, and says so in its accessible name": same attached-`pi`/detached-`codex` setup, asserting the marker class on the `.session-select` and the two accessible names, class rather than computed style since jsdom resolves neither the token nor the inset shadow.
+Shown red first (`expected false to be true` on `classList.contains("session-attached")`).
+`bun run check` passes (865 tests); `test:browser` is not implicated.
+
+Collateral, and worth knowing: `App.test.ts`'s `summary()` helper defaults `status: "attached"`, so three unrelated lookups by row accessible name met the new "(attached)" suffix.
+They were made prefix matches that still say what they meant rather than freezing the suffix into tests about something else.
+Left undone deliberately: that helper's attached default now makes most fixtures attached without meaning to be, and a detached default would be truer to the corpus.
+
+The card's conditional was already discharged before this session (01c4fc8): OW-33 and OW-34 each carry the note that eviction must leave the client's `status` corrected, OW-33 by emitting for itself and OW-34 under `attach`'s existing emit.
+Committed as 19447d2 on main.
