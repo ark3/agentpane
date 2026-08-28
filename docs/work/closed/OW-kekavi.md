@@ -73,3 +73,50 @@ Done when:
   card's own procedure.
 - The work laptop paragraph is followable verbatim: every command in it was
   run on the home server before the item closes.
+
+**Fixed** in `24c9d83`: `AGENTS.md` keeps only what card cannot know, both
+skills are deleted, `docs/TRACKING.md` is marked historical, and the three
+other docs that stated retired procedure are corrected. OW-59 closed in
+`1d21bcd`.
+
+A completeness audit ran before any of it, as this item asked, and it found
+the item's own "stands except…" list wrong in two places. `docs/WORKSTREAMS.md`
+"How work gets done" named `/author` and `/execute` as where process rules
+load — the one statement outside `AGENTS.md` of the whole procedure surface,
+so the most likely thing to be read by someone who missed the cutover. And
+`docs/MANUAL_TESTING.md`'s OW-58 section concluded that a dispatched worktree
+is cut from the remote tracking ref, which `card worktree` falsifies as a
+statement about dispatch: it cuts from the branch the main checkout is on.
+That fact had three copies, in `MANUAL_TESTING.md`, `TRACKING.md` and
+`AGENTS.md`, and all three moved in the one change — the case AGENTS.md's own
+"retire **every** copy" rule exists for. The OW-58 measurement itself is kept:
+it still records the Claude Code harness's own cutter, and the correction is
+careful not to claim anything was re-measured.
+
+**Six places where the skills and card's payloads disagreed rather than merely
+differed**, decided rather than merged, and each written into `AGENTS.md` as a
+visible decision so a reader who has just read the payload is not left thinking
+one of the two is a mistake. To this repo: the authoring gate (discuss to
+agreement before writing a card, against card's write-then-flag default —
+the 2026-08-18 incident survives the skill that carried it); the close note's
+`**Fixed** in <sha>` shape, against card's ticket-key advice, because there is
+no ticket system here and the repo never squashes; and eighty-column bodies,
+against card's one-sentence-per-line. To card: the worktree base; the
+set-of-cards execution model, which lets a session close several unattended
+where the skill mandated one per invocation; and the adversarial reader, which
+card requires and the old skill's blanket ban on review subagents forbade —
+only the `/code-review ultra` budget ban survives as repo-local.
+
+The first done-condition was met by doing it rather than by asserting it. This
+session filed **OW-dafebo** with `card new`, which drew the id, and closed
+OW-59 with `card close --done` — both without the retired skills, the `python3`
+generator, or `docs/TRACKING.md`. `card show`, `card status` and
+`card list --open --label work-laptop` all serve correctly against the
+converted corpus.
+
+One gap, recorded rather than papered over: the setup paragraph's commands were
+all run on the home server from a fresh clone, but the clone itself went over
+HTTPS, because this sandbox remaps `/etc/ssh/ssh_config.d/` ownership to
+`nobody` and ssh refuses it. The `git@github.com:` URL in the paragraph is the
+form agentpane's own remote uses and is unexercised here. OW-gabemi is where
+that paragraph gets followed verbatim on the machine it was written for.
