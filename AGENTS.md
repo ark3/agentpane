@@ -137,38 +137,16 @@ label, for machine gating, and it is the only other one in use — see
 
 ### Close notes
 
-`card close <id> --done` is the mechanism, and the note this repo writes on
-stdin keeps its existing form: `**Fixed** in <sha>: <evidence>` — the landed
-sha and what shows it works. That is a deliberate override of `card workflow`'s
-close-note advice to name a public ticket key instead, on the grounds that "a
-commit sha dies at the next squash". This repo has no ticket system, never
-squashes, and its entire closed pile is sha-anchored, so the sha is the durable
-address here.
-The note is a plain last body paragraph: no heading above it and no
-strikethrough anywhere, which is how the whole closed pile reads.
+The close note this repo writes on stdin ends `**Fixed** in <sha>: <evidence>`
+— the landed sha and what shows it works — as a plain last body paragraph, no
+heading above it and no strikethrough. A legitimate close is not always that
+shape: OW-74 is the precedent, closed unbuilt, and OW-59 closed on evidence
+that lives in another repository.
 
-`--promoted` never applies in this repo: card's own text says so of a deck with
-no outside system beside it, and there is none. A legitimate close is not
-always a `**Fixed** in <sha>` — OW-74 is the precedent, closed unbuilt.
+### Committing a card you authored
 
-### Two authoring rules this repo adds
-
-**Discuss each observation to agreement before writing its card**, and do not
-treat your own answers as agreement. This is an explicit override of
-`card author`, whose default is the opposite — "write each card as its
-observation settles; do not hold cards back waiting for the owner to approve
-each one". Neither is a mistake; the gate is repo-local, it comes from a real
-2026-08-18 incident, and it survives the skill that used to carry it.
-
-**A card you authored is committed unless the user asks not to.** Card never
-commits anything, and its author payload is silent on git.
-
-### Body shape
-
-Card's author payload shows a body one sentence per line. This corpus is
-wrapped at **eighty columns** instead, with `##` for subheadings and a headline
-that never wraps. Keep eighty columns: it is a deliberate repo convention, and
-the corpus reads as one thing only while every writer follows it.
+Commit it unless the user asks not to. Card never commits anything, and its
+author payload is silent on git.
 
 ## Dispatching an implementer
 

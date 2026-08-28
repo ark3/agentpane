@@ -382,6 +382,17 @@ split (no analogue worth having).
 > first still runs. What is kept is the reasoning — these constraints are why
 > the format stayed greppable at all, and `card cmd -- <command>` is what keeps
 > them exercisable now that a tool sits in front of the files.
+>
+> One of the three constraints is **retired**, not merely superseded: bodies
+> are no longer wrapped at eighty columns. Card's prose rule is one sentence
+> per line — a break falls where a sentence ends, never at a column count, and
+> a long sentence stays one long line — and `card author` carries it, so this
+> repo states nothing about it. The eighty-column rule started as a de facto
+> habit and hardened into a rule that made writers count characters for no
+> reader's benefit; the reasoning recorded in the card repo is where that was
+> settled. The corpus predates the change and is wrapped throughout. The other
+> half of that bullet stands and is now structural rather than remembered: a
+> headline never wraps, because `card new` takes it as an argument.
 
 While no tool existed the list *was* a `grep`, so the format had to earn that
 rather than assume it. Three constraints, each measured against a throwaway
