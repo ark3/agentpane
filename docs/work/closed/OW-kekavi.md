@@ -120,3 +120,24 @@ HTTPS, because this sandbox remaps `/etc/ssh/ssh_config.d/` ownership to
 `nobody` and ssh refuses it. The `git@github.com:` URL in the paragraph is the
 form agentpane's own remote uses and is unexercised here. OW-gabemi is where
 that paragraph gets followed verbatim on the machine it was written for.
+
+**Correction, 2026-08-27, same day**, from the owner reviewing the six
+decisions above: two of the three that went to this repo were wrong, and the
+third was wrong in the other direction.
+The authoring gate is gone — `card author`'s write-then-flag default stands,
+because its "when the owner is present and still discovering what they want,
+authoring is a conversation" clause already covers the 2026-08-18 incident, and
+an override was a third copy of a rule that loads twice already.
+The close-note section kept its convention and lost its argument: card's
+ticket-key advice is conditional on the card having a ticket key, which none
+here do, so there was never a disagreement to override — writing a rebuttal to
+it broke the "refuting something nobody would have tried" rule two sections
+below the place that states it.
+The eighty-column body rule is **retired outright** rather than defended: card's
+one-sentence-per-line is the rule now, in this repo as in card's own.
+The owner's reason is that eighty columns began as a de facto habit and
+accreted into a rule that made writers count characters for no reader's
+benefit; it is recorded in the card repo, which is why a session reading only
+this repo could not see it and defended the rule instead.
+Landed in `953a25b`, which also retires the surviving copy in
+`docs/TRACKING.md`, "Staying greppable".
