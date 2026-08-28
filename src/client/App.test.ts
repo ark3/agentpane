@@ -623,6 +623,62 @@ describe("App", () => {
 		expect(nav.getAllByLabelText("Streaming")).toHaveLength(1);
 	});
 
+	/**
+	 * The summary's `isStreaming` dates from the last list read and no live event
+	 * updates it (OW-furinu). The live map does, so the row prefers it -- in both
+	 * directions, since a dot that latches on is the same defect wearing the
+	 * other sign.
+	 */
+	it("takes the row's dot from the live session map rather than the listed summary", () => {
+		const stale = summary(piSession, "Live turn", { isStreaming: false });
+		const controller = new FakeController(
+			view({
+				state: state({
+					summaries: [stale],
+					sessions: {
+						[sessionKey(piSession)]: {
+							ref: piSession,
+							messages: [],
+							isStreaming: true,
+							seq: 1,
+							error: null,
+							requests: [],
+						},
+					},
+				}),
+			}),
+		);
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		expect(nav.queryByLabelText("Streaming")).toBeInTheDocument();
+	});
+
+	it("clears the row's dot when the live session map says the turn ended", () => {
+		const stale = summary(piSession, "Ended turn", { isStreaming: true });
+		const controller = new FakeController(
+			view({
+				state: state({
+					summaries: [stale],
+					sessions: {
+						[sessionKey(piSession)]: {
+							ref: piSession,
+							messages: [],
+							isStreaming: false,
+							seq: 1,
+							error: null,
+							requests: [],
+						},
+					},
+				}),
+			}),
+		);
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		expect(nav.queryByLabelText("Streaming")).not.toBeInTheDocument();
+	});
+
 	it("stripes the row of an attached session, and says so in its accessible name", () => {
 		const attached = summary(piSession, "Attached turn", { status: "attached" });
 		const detached = summary(codexSession, "Detached turn", { status: "detached" });

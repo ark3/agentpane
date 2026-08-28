@@ -882,6 +882,13 @@
 	<nav class="sessions" aria-labelledby="sessions-heading">
 		{#each filteredSummaries as summary (sessionKey(summary.ref))}
 			{@const label = sessionLabel(summary)}
+			<!-- The summary's `isStreaming` is right only at the instant the list
+			     was read; `state.sessions` is the live map the transcript uses and
+			     is updated by every `status` event (OW-furinu). Prefer it where it
+			     has an entry. A per-row lookup deliberately, not a field on the
+			     summary: it leaves `sortedSummaries` out of the streaming path,
+			     which is OW-jineli's whole point. -->
+			{@const streaming = view.state.sessions[sessionKey(summary.ref)]?.isStreaming ?? summary.isStreaming}
 			<button
 				type="button"
 				class="session-select"
@@ -904,7 +911,7 @@
 					{#if summary.cwd}
 						<span class="session-cwd" title={summary.cwd}>{basename(summary.cwd)}</span>
 					{/if}
-					{#if summary.isStreaming}
+					{#if streaming}
 						<span class="session-streaming" aria-label="Streaming">●</span>
 					{/if}
 				</span>
