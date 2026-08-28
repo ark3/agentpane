@@ -1121,6 +1121,47 @@ and do not remove it: removing it would re-expose the adapter to the very
 build that was reported to need it, to buy nothing. Nothing about `--verbose`
 is open any more.
 
+## Observed `updatedAt` freshness at a turn's two boundaries (OW-furinu)
+
+**2026-08-28, home server, `claude --model haiku` (2.1.247), `-p
+--output-format stream-json --verbose`.**
+
+OW-furinu fixes the session list's order by emitting `sessions-changed` where
+`streamingChanged` is already computed in `SessionManager.#onUpdate` — at both
+ends of every turn. The card asked, before that was built, whether the
+start-side re-list can actually see a moved `updatedAt`: the field is the
+session file's mtime (`src/server/sessions/{pi,codex,claude}.ts` each take it
+from `stat.mtime`), and the backend writes that file itself, so a re-list fired
+at turn start may read a timestamp from before the turn.
+
+**Method.** A watcher polled the session JSONL's mtime and size while the CLI's
+own stream-json events were timestamped on the same clock, so the file's writes
+and the turn's announcements could be interleaved. Run against a *resumed*
+session, which is the second-and-later turn the defect is about — a first turn
+already relists via `markPrompted`.
+
+    [turn2] 4.46s FILE ...jsonl size=15338   (touched, size unchanged -- resume)
+    [turn2] 4.72s FILE ...jsonl size=15683   (+345 B: the user message)
+    [turn2] 4.77s EVENT system/init
+    [turn2] 4.90s FILE ...jsonl size=16883
+    [turn2] 6.39s EVENT result/success
+    [turn2] 6.41s FILE ...jsonl size=20399   (last write)
+
+**Result: usually yes, but not owed.** The backend appends the user message
+about 50 ms *before* it announces the turn, so by the time a start-side re-list
+reads the file, mtime has typically already moved. But these are concurrent
+writes by two processes with no ordering guarantee between them, and the margin
+is tens of milliseconds — a start-side re-list that loses that race reads the
+previous turn's timestamp and the row does not rise until the turn ends. A
+brand-new session shows the same fact in its starkest form: the file does not
+exist at all until roughly 2 s in.
+
+**Which is why the emit is at both boundaries and not only at the start.** The
+end-side re-list always reads the turn's last write, so the reorder is
+*guaranteed* by the turn's end and merely *likely* at its start. Anyone
+tempted to halve the emit should halve it the other way, or reorder on
+something other than the backend's mtime.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
