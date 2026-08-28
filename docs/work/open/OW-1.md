@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/shared/protocol.ts` (the `snapshot` arm of `ServerEvent`), `src/client/session-state.ts:72-83`, `src/client/session-state.test.ts`'
+labels: [change]
 ---
 
 # A snapshot preserves the session's `error` and its pending `requests`; the wire contract has to say so, and a test has to hold it.
+
+`src/shared/protocol.ts` (the `snapshot` arm of `ServerEvent`), `src/client/session-state.ts:72-83`, `src/client/session-state.test.ts`
 
 The contract says a snapshot resets the sequence and is silent on both fields.
 The client already preserves them -- `session-state.ts:72-83` spreads the

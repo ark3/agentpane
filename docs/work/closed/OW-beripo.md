@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/server/adapters/claude/` (new); template `src/server/adapters/codex/`'
+labels: [change]
 ---
 
 # A Claude Code adapter behind the frozen `BackendAdapter` contract, driving `claude -p` over stream-json in both directions.
+
+`src/server/adapters/claude/` (new); template `src/server/adapters/codex/`
 
 Decided 2026-08-25 by the owner: Claude Code becomes a third backend, and
 limited functionality is acceptable — the two first cuts below are decided,

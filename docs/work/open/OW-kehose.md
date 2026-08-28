@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/server/adapters/codex/mapping.ts` (`blockAsAssistant` `:499`, the `imageGeneration` arm `:457-464`), against `@earendil-works/pi-ai`''s `AssistantMessage` (`types.d.ts:295-297`)'
+labels: [defect]
 ---
 
 # A generated image renders as `[image: image/png]` -- its mime type and nothing else -- because an assistant message cannot hold an image block, though the same data URL renders as a picture when a user sends it.
+
+`src/server/adapters/codex/mapping.ts` (`blockAsAssistant` `:499`, the `imageGeneration` arm `:457-464`), against `@earendil-works/pi-ai`'s `AssistantMessage` (`types.d.ts:295-297`)
 
 `imageGeneration` carries its image in `result`, usually a `data:` URL.
 `imageFromUrl` decodes it into a real `ImageContent` with `data` and

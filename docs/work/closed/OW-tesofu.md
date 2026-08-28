@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/client/app.css` (`.tools-menu`, `.tools-menu-list`, `.tools-menu-list button` — lines 234, 236, 238; the token block, lines 18-40)'
+labels: [defect]
 ---
 
 # The tools menu asks for `--ap-radius-1` and `--ap-shadow-1`, neither of which is defined, so its corners have been square since OW-72.
+
+`src/client/app.css` (`.tools-menu`, `.tools-menu-list`, `.tools-menu-list button` — lines 234, 236, 238; the token block, lines 18-40)
 
 Found while landing OW-80 and left untouched there — the swap from `<details>`
 to a popover preserved the declarations verbatim rather than "fixing" adjacent

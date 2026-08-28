@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/server/adapters/codex/reducer.test.ts`, against `src/server/adapters/codex/mapping.ts` (`userInputToContent` `:139-166`, `imageGeneration` `:454-462`, `imageView` `:463-472`)'
+labels: [defect]
 ---
 
 # Seven arms of the Codex mapping have never been executed by a test, so their output is whatever was typed the day they were written.
+
+`src/server/adapters/codex/reducer.test.ts`, against `src/server/adapters/codex/mapping.ts` (`userInputToContent` `:139-166`, `imageGeneration` `:454-462`, `imageView` `:463-472`)
 
 Confirmed 2026-08-19: none of `imageGeneration`, `imageView`, `localImage`,
 `audio`, `localAudio`, `skill` or `mention` appears anywhere in

@@ -1,12 +1,13 @@
 ---
-kind: change
-where: 'the work laptop''s agentpane clone — its `.git/card/` and PATH, nothing in this repo'
+labels: [change, work-laptop]
 ---
 
 # Set the work laptop up for card: install the tool, write that clone's deck config, and verify the deck serves there.
 
 **Work laptop:** needs the machine itself — one visit, after the cutover
 lands there.
+
+the work laptop's agentpane clone — its `.git/card/` and PATH, nothing in this repo
 
 Filed 2026-08-27 alongside OW-pisape and OW-kekavi, for the half of the
 migration only that machine can do. Runs strictly after both have landed

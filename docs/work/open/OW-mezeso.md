@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/server/adapters/codex/reducer.ts` (`unmappedItemTypes` `:93`, `remap` `:293`), against `src/server/adapters/codex/mapping.ts` (`MappedItem.reason` `:61`)'
+labels: [defect]
 ---
 
 # `unmappedItemTypes` collects every item that produced no message, so it holds `reasoning` in every ordinary session and the silent/unknown distinction beside it is computed and thrown away.
+
+`src/server/adapters/codex/reducer.ts` (`unmappedItemTypes` `:93`, `remap` `:293`), against `src/server/adapters/codex/mapping.ts` (`MappedItem.reason` `:61`)
 
 `mapItem` returns `{ kind: "none", reason }` with three distinct reasons:
 `unknown item type: <t>` for a variant nobody has taught it about,

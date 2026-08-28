@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`docs/work/` — every file under `open/` and `closed/`'
+labels: [change]
 ---
 
 # Convert every work item to card's file schema in one scripted big-bang: `kind:` and the Work-laptop marker become labels, `where:` moves into the body.
+
+`docs/work/` — every file under `open/` and `closed/`
 
 Decided by the owner 2026-08-25 and finalized 2026-08-27, planning in the card
 repo: this repo's tracking moves onto `card`, the tool OW-59 waited for, built

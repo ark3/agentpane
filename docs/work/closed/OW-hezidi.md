@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/client/render/Message.svelte` user arm (`:67-78`), `src/client/render/Block.svelte`, `src/client/api.ts`, `src/client/controller.ts`, `src/client/App.svelte` composer (`:826-856`)'
+labels: [change]
 ---
 
 # A user message cannot be taken back, so a mis-sent prompt still costs a real turn in both directions and the server's fork has no caller at all.
+
+`src/client/render/Message.svelte` user arm (`:67-78`), `src/client/render/Block.svelte`, `src/client/api.ts`, `src/client/controller.ts`, `src/client/App.svelte` composer (`:826-856`)
 
 The server half is built and live-verified on both backends -- routes at
 `src/server/http/app.ts:247` and `:276`, `SessionManager.fork` absorbing the

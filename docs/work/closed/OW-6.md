@@ -1,9 +1,10 @@
 ---
-kind: deferral
-where: 'Codex reducer'
+labels: [deferral]
 ---
 
 # `contextCompaction` is dropped, because the generated item carries no summary.
+
+Codex reducer
 
 DESIGN's wording says otherwise; one of the two has to change.
 

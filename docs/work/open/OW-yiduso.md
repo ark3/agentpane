@@ -1,9 +1,10 @@
 ---
-kind: question
-where: '`public/favicon-badged.svg`, `src/client/favicon.ts`, `docs/MANUAL_TESTING.md`'
+labels: [question]
 ---
 
 # Nothing has watched a browser actually repaint the tab icon when the favicon href is swapped.
+
+`public/favicon-badged.svg`, `src/client/favicon.ts`, `docs/MANUAL_TESTING.md`
 
 `OW-diyuwu` shipped the turn-done badge as two served files with the `href` on
 `<link rel="icon">` swapped between them, on the reasoning that a static swap

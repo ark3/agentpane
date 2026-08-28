@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`resources/fixtures/`, and a new test beside `src/import-boundaries.test.ts`'
+labels: [change]
 ---
 
 # The fixture scrub is enforced only by a README asking you to grep, so nothing catches the next leak.
+
+`resources/fixtures/`, and a new test beside `src/import-boundaries.test.ts`
 
 `eaa5152` added the rule to both `resources/fixtures/README.md` ("Scrubbed
 values") and `resources/probes/README.md`: a scrub keyed on JSON field names

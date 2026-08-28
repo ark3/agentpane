@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`index.html`, and a new `public/favicon.svg`'
+labels: [change]
 ---
 
 # Every tab shows the same blank page icon, so agentpane is unfindable in a browser tab strip.
+
+`index.html`, and a new `public/favicon.svg`
 
 `index.html` sets `<title>agentpane</title>` and no `<link rel="icon">`, so the
 browser draws its generic placeholder. The title alone is not enough once the

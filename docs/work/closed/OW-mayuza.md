@@ -1,9 +1,10 @@
 ---
-kind: unverified
-where: '`docs/MANUAL_TESTING.md` OW-yilabe section; `resources/fixtures/claude/`; `docs/work/open/OW-beripo.md`'
+labels: [unverified]
 ---
 
 # Hidden `--resume-session-at` should make pre-tip fork real for Claude Code, overturning OW-yilabe's tip-only finding — one Haiku run settles it and every copy follows.
+
+`docs/MANUAL_TESTING.md` OW-yilabe section; `resources/fixtures/claude/`; `docs/work/open/OW-beripo.md`
 
 **Home server:** needs one live `claude` turn, Haiku only (`--model haiku`),
 under the standing authorization from OW-yilabe (owner, 2026-08-25).

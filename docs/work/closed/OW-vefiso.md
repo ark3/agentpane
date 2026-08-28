@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/server/adapters/codex/mapping.ts` (`SILENT_ITEM_TYPES` `:286-292`, the `mapItem` docblock `:294-299`, the `default` arm `:485-490`)'
+labels: [defect]
 ---
 
 # `collabAgentToolCall` is a known `ThreadItem` variant that lands in the unknown bucket, and the switch's docblock counts 17 variants where the bindings now carry 18.
+
+`src/server/adapters/codex/mapping.ts` (`SILENT_ITEM_TYPES` `:286-292`, the `mapItem` docblock `:294-299`, the `default` arm `:485-490`)
 
 `ThreadItem` has 18 variants (counted from
 `resources/codex-protocol/v2/ThreadItem.ts`, 2026-08-19). `mapItem` maps 12,

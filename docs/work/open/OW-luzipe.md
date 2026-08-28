@@ -1,11 +1,12 @@
 ---
-kind: deferral
-where: '`src/server/http/session-manager.ts:363-378`, `src/server/http/broadcaster.ts`, `docs/DESIGN.md` D3'
+labels: [deferral, work-laptop]
 ---
 
 # D3 calls the tail upsert "O(1) per token", but it re-sends the whole message, so a turn is quadratic in its own length.
 
 **Work laptop:** needs a live Pi run.
+
+`src/server/http/session-manager.ts:363-378`, `src/server/http/broadcaster.ts`, `docs/DESIGN.md` D3
 
 `#onUpdate` broadcasts `broadcaster.upsert(session.ref, changedIndex, message)`
 with the **entire** `AgentMessage`, and Pi emits one `message_update` per token

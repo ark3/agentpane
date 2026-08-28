@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/client/App.svelte:19`, `src/client/render/Markdown.svelte`, `src/client/render/Block.svelte`'
+labels: [defect]
 ---
 
 # One SSE event costs ~92ms because the deep `$state` proxy re-parses every settled markdown block in the transcript — for events belonging to a session that is not even on screen.
+
+`src/client/App.svelte:19`, `src/client/render/Markdown.svelte`, `src/client/render/Block.svelte`
 
 Reported live 2026-08-19: the UI goes sluggish while streaming, and *most*
 annoying when the session causing it is not the one being read. Measured the

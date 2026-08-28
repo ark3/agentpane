@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/client/App.svelte:106-108`'
+labels: [defect]
 ---
 
 # The sidebar re-sorts the whole session corpus on every SSE event, because the sort depends on `view` rather than on the array it sorts.
+
+`src/client/App.svelte:106-108`
 
 `sortedSummaries` reads `view.state.summaries`, so it is invalidated by every
 publish — and `publish()` fires per streaming token, for every session. Nothing

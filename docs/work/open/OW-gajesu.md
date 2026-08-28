@@ -1,11 +1,12 @@
 ---
-kind: unverified
-where: '`resources/probes/fork_probe.py` `pi_rewind` cell, `docs/MANUAL_TESTING.md` OW-pifowo and OW-yudoni sections'
+labels: [unverified, work-laptop]
 ---
 
 # Whether a fork Pi has not yet been prompted from exists on disk is unsettled, and a discarded fork may leave a phantom session in the picker.
 
 **Work laptop:** needs a live Pi run.
+
+`resources/probes/fork_probe.py` `pi_rewind` cell, `docs/MANUAL_TESTING.md` OW-pifowo and OW-yudoni sections
 
 Two runs of the same cell read opposite answers for
 `moved_file_on_disk_at_fork` — `false` on 2026-08-19 (OW-pifowo), `true` on

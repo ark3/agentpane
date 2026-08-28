@@ -1,9 +1,10 @@
 ---
-kind: unverified
-where: '`buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts`'
+labels: [unverified]
 ---
 
 # Confirm on a current claude CLI that `--verbose` is required and composes with the resume and fork flags; the home server cannot, at 2.1.238.
+
+`buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts`
 
 Filed at OW-misoru's close (2026-08-26), which shipped `--verbose` in the
 adapter's static spawn args on the owner's report that claude **2.1.246**

@@ -1,9 +1,10 @@
 ---
-kind: deferral
-where: 'Codex reducer'
+labels: [deferral]
 ---
 
 # Reset leaves `tokenUsage`, `threadId`, `turnId` and `unmappedItemTypes` in place.
+
+Codex reducer
 
 Whether those should survive a reset is unsettled.
 

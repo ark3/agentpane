@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/shared/protocol.ts:57` `BackendId`, `src/server/sessions/`'
+labels: [change]
 ---
 
 # Session enumeration learns Claude Code's store: `BackendId` gains `"claude"` and a `sessions/claude.ts` parser walks `~/.claude/projects/`.
+
+`src/shared/protocol.ts:57` `BackendId`, `src/server/sessions/`
 
 Decided 2026-08-25 by the owner: Claude Code becomes a third backend, limited
 functionality acceptable. This is the enumeration half; the adapter is

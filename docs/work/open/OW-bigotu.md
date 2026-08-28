@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`src/client/App.svelte` `startEdit` (`:719-737`) and `cancelEdit` (`:739-744`)'
+labels: [defect]
 ---
 
 # Clicking edit a second time stashes the first edit's text as your draft, so Cancel restores a message you never typed.
+
+`src/client/App.svelte` `startEdit` (`:719-737`) and `cancelEdit` (`:739-744`)
 
 `startEdit` records `stashedDraft: view.draft` unconditionally
 (`App.svelte:735`). Called a second time while an edit is already open,

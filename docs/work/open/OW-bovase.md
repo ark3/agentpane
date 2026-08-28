@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/server/adapters/claude/adapter.ts` `onRequest`/`reply`'
+labels: [change]
 ---
 
 # Surface Claude Code's `can_use_tool` control request as an `AgentRequest`, replacing the Claude adapter's inert `onRequest`.
+
+`src/server/adapters/claude/adapter.ts` `onRequest`/`reply`
 
 Filed at OW-beripo's close (2026-08-25), against a shape already captured, per
 that item's deferral: today the adapter never sees a permission ask because

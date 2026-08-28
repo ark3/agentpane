@@ -1,9 +1,10 @@
 ---
-kind: defect
-where: '`buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts`'
+labels: [defect]
 ---
 
 # Pass `--verbose` unconditionally: claude 2.1.246 requires it again under `-p --output-format stream-json`, and the adapter never passes it.
+
+`buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts`
 
 OW-yilabe found `--verbose` unnecessary on 2.1.238 and OW-beripo dropped it
 from the invocation. That finding was correct and stays correct for 2.1.238 —

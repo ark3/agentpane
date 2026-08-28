@@ -1,9 +1,10 @@
 ---
-kind: deferral
-where: 'client workspace input'
+labels: [deferral]
 ---
 
 # `setWorkspace` fires per keystroke, so typing an absolute path can enumerate every prefix of it.
+
+client workspace input
 
 Decide between debouncing and committing on blur.
 

@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/client/` (a new favicon module, wired from `App.svelte`), `public/`, `e2e/`'
+labels: [change]
 ---
 
 # A turn that finishes while the tab is in the background goes unnoticed until you happen to look at it.
+
+`src/client/` (a new favicon module, wired from `App.svelte`), `public/`, `e2e/`
 
 When a turn *this tab submitted* finishes while the tab is not focused, badge
 the favicon. Clear it the moment the tab regains focus.

@@ -1,9 +1,10 @@
 ---
-kind: deferral
-where: '`src/shared/protocol.ts` `SessionSummary.preview` (`:79-80`), the session list in `src/client/App.svelte` (`:750`)'
+labels: [deferral]
 ---
 
 # A forked session's row in the list is a character-for-character copy of its parent's, so the two cannot be told apart.
+
+`src/shared/protocol.ts` `SessionSummary.preview` (`:79-80`), the session list in `src/client/App.svelte` (`:750`)
 
 `SessionSummary.preview` is *"First user message, trimmed for display"*
 (`protocol.ts:79`). A fork carries the history up to the fork point, so a

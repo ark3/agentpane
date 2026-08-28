@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/server/adapters/codex/mapping.ts` (`compactionMarker`, `MapContext`), `src/server/adapters/codex/reducer.ts` (`tokenUsage`, `:85`/`:358`)'
+labels: [change]
 ---
 
 # Codex's compaction marker shows no token figure, and the usage payload that could supply one is already in the reducer, unread.
+
+`src/server/adapters/codex/mapping.ts` (`compactionMarker`, `MapContext`), `src/server/adapters/codex/reducer.ts` (`tokenUsage`, `:85`/`:358`)
 
 OW-72 built one compaction renderer for both backends: `Message.svelte` draws
 the marker always, and the summary text and token figure only when present.

@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`AGENTS.md`, `docs/TRACKING.md`, `.claude/skills/{author,execute}/`, plus whatever a procedure audit finds'
+labels: [change]
 ---
 
 # Cut the process prose over to card: retire both skills, rewrite AGENTS.md's tracking rules, mark TRACKING.md historical, and close OW-59.
+
+`AGENTS.md`, `docs/TRACKING.md`, `.claude/skills/{author,execute}/`, plus whatever a procedure audit finds
 
 Companion to OW-pisape, landing in the same visit — the owner chose a single
 big-bang cutover (2026-08-25), and deliberately no `blocked-by:` edge: this

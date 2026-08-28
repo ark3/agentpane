@@ -1,11 +1,12 @@
 ---
-kind: unverified
-where: '`resources/probes/fork_probe.py` `pi_rewind` cell (`:338-406`), `src/server/adapters/pi/process.ts` `fork()`'
+labels: [unverified, work-laptop]
 ---
 
 # Two things about Pi's fork that the edit gesture rests on are unproven: whether the rewound branch keeps the message you forked at, and what a fork does to a turn in flight.
 
 **Work laptop:** both need a live Pi run.
+
+`resources/probes/fork_probe.py` `pi_rewind` cell (`:338-406`), `src/server/adapters/pi/process.ts` `fork()`
 
 OW-hezidi builds edit-and-fork against the contract *"fork at message N, and
 the new session ends just before it"*. Codex already honours that --

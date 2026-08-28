@@ -1,9 +1,10 @@
 ---
-kind: question
-where: '`src/client/controller.ts:469-471` `forkAndSubmit`, `src/client/App.svelte:190` `sendLabel`, closed `docs/work/closed/OW-hezidi.md` and `docs/work/closed/OW-yudoni.md`'
+labels: [question]
 ---
 
 # Submitting an edit stops the running turn on both backends as a first cut gated on OW-yudoni, which has closed — so the gate is open and nobody has taken the decision.
+
+`src/client/controller.ts:469-471` `forkAndSubmit`, `src/client/App.svelte:190` `sendLabel`, closed `docs/work/closed/OW-hezidi.md` and `docs/work/closed/OW-yudoni.md`
 
 OW-hezidi shipped "Stop and fork": `forkAndSubmit` aborts a streaming turn
 before forking it, on Pi and Codex alike. Its own words are that this is *"a

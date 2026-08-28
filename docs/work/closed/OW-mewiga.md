@@ -1,9 +1,10 @@
 ---
-kind: unverified
-where: '`src/server/adapters/pi/protocol.ts` (`PiCommand`), `src/server/adapters/pi/process.ts:338-360`, `src/server/adapters/codex/adapter.ts:370-405`, `resources/probes/`'
+labels: [unverified]
 ---
 
 # Nothing here has ever run a fork on either backend, and only one of the two forking models is even wired.
+
+`src/server/adapters/pi/protocol.ts` (`PiCommand`), `src/server/adapters/pi/process.ts:338-360`, `src/server/adapters/codex/adapter.ts:370-405`, `resources/probes/`
 
 `DESIGN.md:21` makes forking a project goal and HANDOFF finding 7 backs it with
 *"both backends support fork-from-past natively"*. Neither has been reproduced.

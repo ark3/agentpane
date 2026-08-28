@@ -1,9 +1,10 @@
 ---
-kind: change
-where: '`src/client/App.svelte` composer (`:852-855`, beside Send and Stop)'
+labels: [change]
 ---
 
 # Redoing the last thing you said means scrolling back to find it, which is the common case reached the long way round.
+
+`src/client/App.svelte` composer (`:852-855`, beside Send and Stop)
 
 **Depends on OW-hezidi**, which builds the edit gesture and settles what
 clicking edit and submitting an edit each do. This item is only the two

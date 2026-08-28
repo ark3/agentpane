@@ -1,9 +1,10 @@
 ---
-kind: unverified
-where: '`resources/fixtures/claude/` (new), evidence into `docs/MANUAL_TESTING.md`'
+labels: [unverified]
 ---
 
 # Every stream-json surface the Claude Code adapter needs is believed from `--help`, never proven; one capture visit settles the list and leaves fixtures.
+
+`resources/fixtures/claude/` (new), evidence into `docs/MANUAL_TESTING.md`
 
 **Home server:** needs live `claude` turns — authorized by the owner
 2026-08-25, **Haiku only** (`--model haiku`). No work-laptop trip: unlike Pi

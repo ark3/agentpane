@@ -1,11 +1,12 @@
 ---
-kind: defect
-where: '`src/client/api.ts`, `src/client/App.svelte`, `src/client/session-state.ts`'
+labels: [defect, work-laptop]
 ---
 
 # Nothing in the client can answer an agent's approval request, so a `ServerRequest` hangs the turn forever behind one line of text.
 
 **Work laptop:** needs a live Pi or Codex run.
+
+`src/client/api.ts`, `src/client/App.svelte`, `src/client/session-state.ts`
 
 The server half is built and tested. `ROUTES.reply` (`src/shared/protocol.ts`)
 addresses `POST /api/requests/:requestId`, `replyToRequest`
