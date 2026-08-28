@@ -63,6 +63,11 @@
 	--ap-syn-function: #2b5fd0;
 	--ap-syn-type: #9a6700;
 	--ap-syn-attr: #b3462f;
+
+	/* -- backend identity (OW-pizene) --------------------------------- */
+	--ap-backend-codex: #157f4b;
+	--ap-backend-claude: #3959d9;
+	--ap-backend-pi: #8b2fa0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -97,6 +102,10 @@
 		--ap-syn-function: #86a9ff;
 		--ap-syn-type: #e0c07a;
 		--ap-syn-attr: #f0937c;
+
+		--ap-backend-codex: #57c98a;
+		--ap-backend-claude: #7f9dff;
+		--ap-backend-pi: #d08ce8;
 	}
 }
 

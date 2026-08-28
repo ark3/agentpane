@@ -682,8 +682,9 @@
 
 	/** Keyed lookup rather than if/else so an unrecognised future backend id falls through to grey instead of silently matching a branch. */
 	const backendColors: Partial<Record<BackendId, string>> = {
-		codex: "var(--ap-success)",
-		pi: "var(--ap-accent)",
+		codex: "var(--ap-backend-codex)",
+		claude: "var(--ap-backend-claude)",
+		pi: "var(--ap-backend-pi)",
 	};
 	function backendColor(id: BackendId): string {
 		return backendColors[id] ?? "var(--ap-fg-subtle)";

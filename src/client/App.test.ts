@@ -585,12 +585,14 @@ describe("App", () => {
 	});
 
 	it("color-codes the backend badge per backend, with an unrecognised backend id falling back to grey", () => {
+		const claudeSession: SessionRef = { backend: "claude", id: "claude-1" };
 		const unknownSession: SessionRef = { backend: "future" as BackendId, id: "future-1" };
 		const controller = new FakeController(view({
 			state: state({
 				summaries: [
 					summary(piSession, "Pi turn"),
 					summary(codexSession, "Codex turn"),
+					summary(claudeSession, "Claude turn"),
 					summary(unknownSession, "Future turn"),
 				],
 			}),
@@ -600,8 +602,9 @@ describe("App", () => {
 		const badges = Array.from(container.querySelectorAll<HTMLElement>(".session-backend"));
 		const colors = new Map(badges.map((badge) => [badge.textContent, badge.style.color]));
 
-		expect(colors.get("pi")).toBe("var(--ap-accent)");
-		expect(colors.get("codex")).toBe("var(--ap-success)");
+		expect(colors.get("pi")).toBe("var(--ap-backend-pi)");
+		expect(colors.get("codex")).toBe("var(--ap-backend-codex)");
+		expect(colors.get("claude")).toBe("var(--ap-backend-claude)");
 		expect(colors.get("future")).toBe("var(--ap-fg-subtle)");
 	});
 
