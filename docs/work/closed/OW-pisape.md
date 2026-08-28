@@ -78,3 +78,14 @@ Done when:
 OW-kekavi is the companion: it cuts the process prose over and lands in the
 same visit, because between this item landing and that one the `^kind:`
 survey commands in `AGENTS.md` and `docs/TRACKING.md` match nothing.
+
+**Fixed** in 9a39e06: 111 files converted, 44 open and 67 closed, by one
+throwaway script that validated the whole corpus before writing any of it.
+Per label — the old per-kind count, counted at run time — 24 change, 46
+defect, 22 deferral, 9 question, 10 unverified, and 8 `work-laptop`. The
+mechanical equivalence check passed on all 111 in the script and again
+re-derived independently against `git show HEAD:`; it went red first twice,
+on a strip that was off by one newline and on the five items whose body is
+a headline alone or the Work-laptop marker alone. `card show` exits zero for
+every id, numeric and drawn, and `card status` reports 44 open, 67 closed
+through this clone's hand-written `.git/card/card-config.toml`.
