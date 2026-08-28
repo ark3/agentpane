@@ -377,9 +377,10 @@ split (no analogue worth having).
 
 > ⚠️ **Superseded 2026-08-27.** The interim ended: `card list` and
 > `card list --label <kind>` print the two views the commands below were
-> written for, and the second and third of those commands match nothing today,
-> because `kind:` became the label `labels: [<kind>]` under OW-pisape. The
-> first still runs. What is kept is the reasoning — these constraints are why
+> written for, and the `kind:` half of the second and third of those commands
+> matches nothing today, because `kind:` became the label `labels: [<kind>]`
+> under OW-pisape — the third prints nothing, the second degrades into the
+> first. The first still runs. What is kept is the reasoning — these constraints are why
 > the format stayed greppable at all, and `card cmd -- <command>` is what keeps
 > them exercisable now that a tool sits in front of the files.
 >
