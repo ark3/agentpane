@@ -98,7 +98,9 @@ everywhere. `e2e/harness.ts` stubs `document.hasFocus` for that reason, and
 Work items are cards. `card status` reports this repo's deck, `card workflow`
 is the contract, and `card author` and `card execute` carry the two procedures.
 Read those rather than a retelling; what follows is only what card cannot know
-about this repo.
+about this repo. Run `card workflow` when cards come up in the session, and
+not before: there is no session-opening question to ask about which of card's
+procedures this session is going to be, and asking one was a defect.
 
 Card reads this deck through per-clone config that is deliberately not synced:
 `.git/card/card-config.toml`, exactly three lines — `prefix = "OW"`,
@@ -151,15 +153,3 @@ window. The old skill's blanket ban on review subagents does *not* survive with
 it: `card execute` positively requires dispatching an adversarial reader at
 finished work, and card wins there. Only the `/code-review ultra` ban is
 repo-local.
-
-## Sessions
-
-Ask which mode the session is in before doing anything else — including in
-reply to an opening greeting. There are three. Two are the procedures
-`card workflow` names in its "Onward" section: writing or sharpening cards,
-which is `card author`'s, and landing one, which is `card execute`'s. The third
-is the one `card status` names — "otherwise the deck needs nothing from this
-session" — which is work in the repo with no card in play.
-
-Card's own entry rule holds in the first two: when cards come up, run
-`card workflow` first, then the payload for the mode you are in.
