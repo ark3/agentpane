@@ -135,14 +135,6 @@ remains the definition of what each one means. `work-laptop` is the second
 label, for machine gating, and it is the only other one in use — see
 "Evidence".
 
-### Close notes
-
-The close note this repo writes on stdin ends `**Fixed** in <sha>: <evidence>`
-— the landed sha and what shows it works — as a plain last body paragraph, no
-heading above it and no strikethrough. A legitimate close is not always that
-shape: OW-74 is the precedent, closed unbuilt, and OW-59 closed on evidence
-that lives in another repository.
-
 ### Committing a card you authored
 
 Commit it unless the user asks not to. Card never commits anything, and its

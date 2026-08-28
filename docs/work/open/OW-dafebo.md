@@ -48,3 +48,25 @@ Done when the invariants are either respecified and given a home — a test
 under `src/` that goes red on a planted bad citation and green after, or a
 verb in the card repo — or declined, with the reason being the false-positive
 rate above rather than a prediction.
+
+**Amended 2026-08-27, hours after filing: the second invariant is retired, not
+respecified, and only the first is still live.**
+The owner dropped the `**Fixed** in <sha>: <evidence>` close-note rule the same
+day this card was written, so "every closed item carries a real sha" no longer
+has a rule behind it to check.
+The reason was the rule's cost against its benefit: writing the sha into the
+card duplicates a link git already computes in the other direction, because
+this repo's commit subjects cite card ids and `git log --grep=OW-59` resolves
+one from the other.
+The hand-written copy is also the one that goes stale, silently, on any amend
+or rebase — which is how the rule announced itself, when appending a
+sha-citing paragraph to a card needed a `git reset` and a two-commit split to
+name the commit that paragraph was going into.
+The 70 close notes already written keep their shas and are not reflowed
+(owner's call), so a checker would still be reading a convention that holds
+over the past and binds nothing going forward.
+That leaves this card carrying one invariant, *every cited id exists*, and its
+four-false-positives-out-of-four problem is unchanged.
+Whether one invariant still justifies a verb, a test, or neither is now the
+question, and it is a weaker case than the two-invariant version this card was
+filed on.
