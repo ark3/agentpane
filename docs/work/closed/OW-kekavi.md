@@ -141,3 +141,17 @@ benefit; it is recorded in the card repo, which is why a session reading only
 this repo could not see it and defended the rule instead.
 Landed in `953a25b`, which also retires the surviving copy in
 `docs/TRACKING.md`, "Staying greppable".
+
+**Second correction, 2026-08-27, later the same day**, from the owner reviewing
+the setup section itself: the "Setting card up in a clone" subsection this item
+landed in `AGENTS.md` is deleted, in `1c5789f`.
+The install walkthrough gave commands no reader of that file can run — a
+sandboxed session cannot clone into a home directory or write onto `PATH`, on
+the laptop as here — so it was provisioning addressed to agents, when
+provisioning is the owner's act, the same way nothing documents installing Bun.
+What survives is the one fact only this repo can state, the three required
+lines of `.git/card/card-config.toml`, as a paragraph in "Cards".
+The "one gap" above is therefore moot rather than resolved: the unexercised
+clone URL went with the walkthrough that carried it, and OW-gabemi no longer
+follows a paragraph verbatim — the owner installs and configures by hand, and a
+session's share of that card is verification and the close.
