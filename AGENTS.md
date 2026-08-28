@@ -110,6 +110,12 @@ citing `OW-` ids in commit subjects legal here. Writing that file, like
 installing card or Bun, is the owner's provisioning of a machine, not any
 session's work.
 
+Do not take formatting from the cards already in the deck. `card author` sets
+the body's shape — one sentence per line — and the existing cards are
+hard-wrapped instead, so a card read for prior art teaches the wrong house
+style while looking authoritative. Read those cards for their content and the
+payload for their form.
+
 ### Labels
 
 Card treats labels as opaque strings and cannot know this repo's set. Every
