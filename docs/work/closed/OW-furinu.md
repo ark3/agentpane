@@ -60,3 +60,24 @@ If the fix is server-side, `src/server/http/session-manager.ts`'s tests are wher
 
 Both are jsdom- and node-visible; `bun run test:browser` is not implicated.
 Confirm the whole thing by hand in `bun run dev` with two sessions, prompting the one that is not selected — the dot should light and the row should rise with no Refresh.
+
+Both symptoms fixed at the two seams the card named, and the two-events-per-turn ceiling holds: nothing re-sorts per token, so OW-jineli's `summaries` derived is untouched.
+
+**The dot — client, per-row.** `App.svelte`'s session `<nav>` now takes the row's streaming state from the live map, `{@const streaming = view.state.sessions[sessionKey(summary.ref)]?.isStreaming ?? summary.isStreaming}`, and the `{#if}` reads that.
+The lookup is per-row and deliberately not a field on the summary, so it never enters `sortedSummaries`.
+It adds no new per-publish work to a row either: `aria-pressed` on the same button already reads `view.state.selected`, so every row was already re-evaluating its attributes on every publish before this change.
+Two tests in `App.test.ts`, both directions, red first: "takes the row's dot from the live session map rather than the listed summary" (`queryByLabelText("Streaming")` was null) and "clears the row's dot when the live session map says the turn ended" (the `●` was still there).
+
+**The order — server, at the turn boundary.** `SessionManager.#onUpdate` now calls `broadcaster.sessionsChanged()` where `streamingChanged` is already computed, beside the existing `broadcaster.status(...)`.
+Server-side rather than making `reduceServerEvent` return `refreshSessions` for `status`: the manager is where the turn boundary is already known, and `status` is per-session while the staleness is a property of the whole list.
+`session-manager.test.ts` gained a "turn boundaries" describe asserting one `sessions-changed` at the streaming flip on and a second at the flip off, with two streamed tokens in between producing none; red first at `expected [] to have a length of 1`.
+
+**The `updatedAt`-freshness question the card asked to settle first: usually yes, but not owed.** Measured live on the home server with `claude --model haiku` (2.1.247), watching the session JSONL's mtime against the CLI's own stream-json events on one clock, for a resumed session. The backend appends the user message ~50 ms before it announces the turn, so a start-side re-list has typically already got a moved mtime — but they are concurrent writes by two processes with no ordering guarantee, and a lost race means the row does not rise until the turn ends. A brand-new session does not have the file at all until ~2 s in. That is why the emit is at both boundaries: the end-side re-list always reads the turn's last write, so the reorder is guaranteed at the end and merely likely at the start. Full trace and method in `docs/MANUAL_TESTING.md`, "Observed `updatedAt` freshness at a turn's two boundaries (OW-furinu)" (eafcacf); the docblock at the emit says the short version.
+
+Refresh is untouched and goes back to being OW-65's catch for sessions created outside the app.
+`bun run check` passes (868 tests); `test:browser` is not implicated.
+Committed as d37e2a4 (dot) and 1594740 (order) on main.
+
+**Outstanding and the owner's:** the card's by-hand confirmation at `bun run dev` — two sessions, prompt the one that is not selected, watch the dot light and the row rise with no Refresh. The automated observables are green; nobody has yet watched the real thing.
+
+Noticed and not done: `#liveOverlay` reports `isStreaming: false` for any detached session, so a session streaming under another agentpane process is still not represented in a list read. `App.test.ts` also carries a timezone-dependent assertion that passes only under the `TZ=Asia/Kolkata` the `test` script sets — pre-existing, confirmed on a stashed tree, unrelated.
