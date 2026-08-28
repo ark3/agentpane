@@ -203,7 +203,7 @@ export function createApp(deps: AppDeps): App {
 				// `sessions` (the process table): selecting a session to look at must
 				// not spawn one, and must not re-walk the corpus (D9). It reads the
 				// one stored file for this ref through the index seam and returns its
-				// flattened text turns. The attach-on-GET route is left untouched.
+				// mapped transcript messages. The attach-on-GET route is left untouched.
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
 				const turns = await deps.index.preview(ref);
 				const response: SessionPreviewResponse = { ref, turns };

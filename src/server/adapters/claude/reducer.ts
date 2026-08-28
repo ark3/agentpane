@@ -41,7 +41,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
-import { isSyntheticClaudeUserText } from "../../sessions/claude.ts";
+import { isSyntheticClaudeUserText } from "../../sessions/claude-user.ts";
 import {
 	assistantBlockToContent,
 	asContentBlock,
@@ -56,6 +56,7 @@ import {
 	isRecord,
 	type ClaudeApiMessage,
 	type ClaudeAssistantEvent,
+	type ClaudeCompactBoundaryEvent,
 	type ClaudeEvent,
 	type ClaudeStreamEventBody,
 	type ClaudeUserEvent,
@@ -198,14 +199,19 @@ export class ClaudeReducer {
 				return typeof status === "string" && status ? this.setStreaming(true) : [];
 			}
 			case "compact_boundary": {
-				const meta = (event as { compact_metadata?: unknown }).compact_metadata;
-				const preTokens =
-					isRecord(meta) && typeof meta.pre_tokens === "number" ? meta.pre_tokens : 0;
+				const boundary = event as ClaudeCompactBoundaryEvent;
+				const liveMeta = boundary.compact_metadata;
+				const storedMeta = boundary.compactMetadata;
+				const preTokens = typeof liveMeta?.pre_tokens === "number"
+					? liveMeta.pre_tokens
+					: typeof storedMeta?.preTokens === "number"
+						? storedMeta.preTokens
+						: 0;
 				this.messages.push({
 					role: "compactionSummary",
 					summary: "",
 					tokensBefore: preTokens,
-					timestamp: this.now(),
+					timestamp: parseTimestamp(boundary.timestamp) ?? this.now(),
 				});
 				this.pendingCompactionIndex = this.messages.length - 1;
 				return [{ type: "message", index: this.pendingCompactionIndex }];
@@ -390,7 +396,7 @@ export class ClaudeReducer {
 
 		// The post-compaction summary arrives as an isSynthetic user message; it
 		// belongs on the marker, not in the transcript as something a human said.
-		if (event.isSynthetic === true) {
+		if (event.isSynthetic === true || event.isCompactSummary === true) {
 			if (this.pendingCompactionIndex !== null && joined) {
 				const index = this.pendingCompactionIndex;
 				const marker = this.messages[index];

@@ -115,10 +115,18 @@ export interface ClaudeStatusEvent {
 export interface ClaudeCompactBoundaryEvent {
 	type: "system";
 	subtype: "compact_boundary";
+	timestamp?: string;
+	/** Live stream spelling. */
 	compact_metadata?: {
 		trigger?: string;
 		pre_tokens?: number;
 		post_tokens?: number;
+	};
+	/** Stored JSONL spelling. */
+	compactMetadata?: {
+		trigger?: string;
+		preTokens?: number;
+		postTokens?: number;
 	};
 }
 
@@ -135,6 +143,8 @@ export interface ClaudeUserEvent {
 	isReplay?: boolean;
 	/** Set on harness-fabricated lines (the post-compaction summary user message). */
 	isSynthetic?: boolean;
+	/** Stored JSONL marker for the same post-compaction summary. */
+	isCompactSummary?: boolean;
 	/** Structured result Claude Code attaches beside a tool_result block. */
 	tool_use_result?: unknown;
 	timestamp?: string;

@@ -23,7 +23,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController, type AgentpaneController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ServerEvent, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 const CWD = "/tmp/agentpane-perf";
 
@@ -162,7 +162,7 @@ const api: AgentpaneApi = {
 		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
 	},
 	async preview(ref: SessionRef) {
-		return { ref, turns: [{ role: "user" as const, text: "stored transcript" }] };
+		return { ref, turns: [previewTurn(user("stored transcript"))] };
 	},
 	async prompt() {},
 	async abort() {},
@@ -179,6 +179,11 @@ const api: AgentpaneApi = {
 		return { close() {} };
 	},
 };
+
+function previewTurn(message: AgentMessage): SessionPreviewTurn {
+	const { timestamp: _timestamp, ...rest } = message;
+	return rest as SessionPreviewTurn;
+}
 
 const target = document.getElementById("app");
 if (!target) throw new Error("missing #app");

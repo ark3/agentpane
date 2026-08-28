@@ -29,6 +29,25 @@ function summary(session: SessionRef, cwd = "/work"): SessionSummary {
 	};
 }
 
+function previewAssistant(text: string): SessionPreviewTurn {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: "openai-responses",
+		provider: "openai",
+		model: "codex",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+	};
+}
+
 function deferred<T>() {
 	let resolve: (value: T) => void;
 	let reject: (reason?: unknown) => void;
@@ -104,14 +123,14 @@ describe("client controller", () => {
 
 	it("previews a stored session read-only, selecting it without attaching or spawning", async () => {
 		const api = new FakeApi();
-		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 		const controller = createController(api);
 
 		await controller.preview(ref);
 
 		expect(api.preview).toHaveBeenCalledWith(ref);
 		expect(api.attach).not.toHaveBeenCalled();
-		expect(controller.getView().preview).toEqual({ ref, turns: [{ role: "user", text: "hi" }] });
+		expect(controller.getView().preview).toEqual({ ref, turns: [{ role: "user", content: "hi" }] });
 		expect(controller.getView().state.selected).toEqual(ref);
 	});
 
@@ -135,7 +154,7 @@ describe("client controller", () => {
 
 	it("clears the read-only preview once the session is attached", async () => {
 		const api = new FakeApi();
-		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 		api.attach.mockResolvedValue(summary(attachedRef));
 		const controller = createController(api);
 
@@ -497,7 +516,7 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				let turns: SessionPreviewTurn[] = [{ role: "user", content: "hi" }];
 				growingPreview(api, () => turns);
 				const controller = createController(api);
 				await controller.preview(ref);
@@ -506,13 +525,13 @@ describe("client controller", () => {
 				// Starts quiet: nothing until the 16s idle delay is actually up.
 				await vi.advanceTimersByTimeAsync(15_999);
 				expect(api.preview).not.toHaveBeenCalled();
-				turns = [...turns, { role: "assistant", text: "there" }];
+				turns = [...turns, previewAssistant("there")];
 				await vi.advanceTimersByTimeAsync(1);
 				expect(api.preview).toHaveBeenCalledTimes(1);
 				expect(controller.getView().preview?.turns).toHaveLength(2);
 
 				// Having found a change, the next fetch lands 1s later, not 16.
-				turns = [...turns, { role: "user", text: "more" }];
+				turns = [...turns, { role: "user", content: "more" }];
 				await vi.advanceTimersByTimeAsync(999);
 				expect(api.preview).toHaveBeenCalledTimes(1);
 				await vi.advanceTimersByTimeAsync(1);
@@ -540,12 +559,12 @@ describe("client controller", () => {
 
 		it("re-reads the preview when the sessions are refreshed, not just the sidebar", async () => {
 			const api = new FakeApi();
-			let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+			let turns: SessionPreviewTurn[] = [{ role: "user", content: "hi" }];
 			growingPreview(api, () => turns);
 			const controller = createController(api);
 			await controller.preview(ref);
 			api.preview.mockClear();
-			turns = [...turns, { role: "assistant", text: "there" }];
+			turns = [...turns, previewAssistant("there")];
 
 			await controller.refreshSessions();
 
@@ -560,14 +579,14 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				let turns: SessionPreviewTurn[] = [{ role: "user", content: "hi" }];
 				growingPreview(api, () => turns);
 				const controller = createController(api);
 				await controller.preview(ref);
 				api.preview.mockClear();
 
 				// What App.svelte's visibilitychange/focus listener calls.
-				turns = [...turns, { role: "assistant", text: "there" }];
+				turns = [...turns, previewAssistant("there")];
 				await controller.refreshPreview();
 				expect(api.preview).toHaveBeenCalledTimes(1);
 				expect(controller.getView().preview?.turns).toHaveLength(2);
@@ -594,7 +613,7 @@ describe("client controller", () => {
 			try {
 				const api = new FakeApi();
 				let visible = true;
-				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 				const controller = createController(api, () => visible);
 				await controller.preview(ref);
 				api.preview.mockClear();
@@ -620,7 +639,7 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 				api.attach.mockResolvedValue(summary(attachedRef));
 				const controller = createController(api);
 				await controller.preview(ref);
@@ -632,7 +651,7 @@ describe("client controller", () => {
 				await controller.select(ref);
 				expect(controller.getView().preview).toBeNull();
 
-				late.resolve({ ref, turns: [{ role: "user", text: "hi" }, { role: "assistant", text: "late" }] });
+				late.resolve({ ref, turns: [{ role: "user", content: "hi" }, previewAssistant("late")] });
 				await late.promise;
 				await vi.advanceTimersByTimeAsync(0);
 				expect(controller.getView().preview).toBeNull();
@@ -650,12 +669,12 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				let turns: SessionPreviewTurn[] = [{ role: "user", text: "hi" }];
+				let turns: SessionPreviewTurn[] = [{ role: "user", content: "hi" }];
 				growingPreview(api, () => turns);
 				const controller = createController(api);
 				await controller.preview(ref);
 				// Drive the first session's poll down to its fastest rate.
-				turns = [...turns, { role: "assistant", text: "there" }];
+				turns = [...turns, previewAssistant("there")];
 				await vi.advanceTimersByTimeAsync(16_000);
 
 				await controller.preview(otherRef);
@@ -677,7 +696,7 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 				const controller = createController(api);
 				await controller.preview(ref);
 
@@ -690,13 +709,13 @@ describe("client controller", () => {
 				// bumping it, or it would silently cancel the click.
 				await vi.advanceTimersByTimeAsync(16_000);
 
-				clicked.resolve({ ref: otherRef, turns: [{ role: "user", text: "other" }] });
+				clicked.resolve({ ref: otherRef, turns: [{ role: "user", content: "other" }] });
 				await clicking;
 
 				expect(controller.getView().state.selected).toEqual(otherRef);
 				expect(controller.getView().preview).toEqual({
 					ref: otherRef,
-					turns: [{ role: "user", text: "other" }],
+					turns: [{ role: "user", content: "other" }],
 				});
 				controller.dispose();
 			} finally {
@@ -708,7 +727,7 @@ describe("client controller", () => {
 			vi.useFakeTimers();
 			try {
 				const api = new FakeApi();
-				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", text: "hi" }] });
+				api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
 				const controller = createController(api);
 				await controller.preview(ref);
 				api.preview.mockClear();

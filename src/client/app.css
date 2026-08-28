@@ -272,9 +272,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .edit-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--ap-space-3); margin: 0; padding: var(--ap-space-2) var(--ap-space-3); border: 1px solid var(--ap-accent); border-radius: var(--ap-radius-sm); background: var(--ap-surface-raised); color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
 .edit-banner button { flex: 0 0 auto; }
 
-/* A preview's turns render through Transcript (OW-50), which brings its own
-   styling; only the empty case is the preview's own. */
-.preview-empty { margin: 0; color: var(--ap-fg-subtle); font-size: var(--ap-text-sm); padding: var(--ap-space-5) var(--ap-space-4); }
+/* Preview and attached turns both render through Transcript (OW-50). */
 .error {
 	display: flex;
 	align-items: center;

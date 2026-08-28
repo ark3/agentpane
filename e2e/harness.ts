@@ -29,7 +29,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ForkPoint, ServerEvent, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 /**
  * Window focus, faked, for the turn-done badge (OW-diyuwu).
@@ -192,8 +192,8 @@ const api: AgentpaneApi = {
 		return {
 			ref: REF,
 			turns: [
-				{ role: "user", text: "stored transcript", timestamp: "2026-06-05T18:25:00.147Z" },
-				{ role: "assistant", text: "stored answer", timestamp: "2026-06-05T18:25:04.912Z" },
+				previewTurn(user("stored transcript"), "2026-06-05T18:25:00.147Z"),
+				previewTurn(assistant([{ type: "text", text: "stored answer" }]), "2026-06-05T18:25:04.912Z"),
 			],
 		};
 	},
@@ -230,6 +230,11 @@ const api: AgentpaneApi = {
 		return { close() {} };
 	},
 };
+
+function previewTurn(message: AgentMessage, timestamp?: string): SessionPreviewTurn {
+	const { timestamp: _timestamp, ...rest } = message;
+	return { ...rest, ...(timestamp ? { timestamp } : {}) } as SessionPreviewTurn;
+}
 
 const target = document.getElementById("app");
 if (!target) throw new Error("missing #app");

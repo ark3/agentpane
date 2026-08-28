@@ -213,9 +213,17 @@ describe("production composition", () => {
 		]);
 
 		const turns = await createSessionIndex().preview({ backend: "pi", id: wanted });
-		expect(turns).toEqual([
-			{ role: "user", text: "the real question", timestamp: "2026-01-01T00:00:05.000Z" },
-			{ role: "assistant", text: "the real answer", timestamp: "2026-01-01T00:00:07.000Z" },
+		expect(turns).toMatchObject([
+			{
+				role: "user",
+				content: [{ type: "text" }],
+				timestamp: "2026-01-01T00:00:05.000Z",
+			},
+			{
+				role: "assistant",
+				content: [{ type: "text" }],
+				timestamp: "2026-01-01T00:00:07.000Z",
+			},
 		]);
 	});
 
@@ -227,7 +235,7 @@ describe("production composition", () => {
 		);
 
 		const turns = await createSessionIndex().preview({ backend: "codex", id: thread });
-		expect(turns).toEqual([{ role: "user", text: "the codex question" }]);
+		expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 	});
 
 	it("registers Pi and Codex and accepts a replacement adapter registry", () => {

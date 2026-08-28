@@ -31,7 +31,7 @@ function piMessage(role: "user" | "assistant", text: string, timestamp = "2026-0
 		id: "m",
 		parentId: null,
 		timestamp,
-		message: { role, content: [{ type: "text", text }] },
+		message: { role, content: [{ type: "text", text }], timestamp: Date.parse(timestamp) },
 	};
 }
 
@@ -80,6 +80,15 @@ function codexAssistant(text: string) {
 	};
 }
 
+function previewText(turn: SessionPreviewTurn | undefined): string {
+	if (!turn || (turn.role !== "user" && turn.role !== "assistant")) return "";
+	if (typeof turn.content === "string") return turn.content;
+	return turn.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text)
+		.join("");
+}
+
 describe("readSessionPreview", () => {
 	let root: string;
 
@@ -92,7 +101,7 @@ describe("readSessionPreview", () => {
 	});
 
 	describe("Pi", () => {
-		it("returns the flattened user/assistant text conversation from the ref's file (D9)", async () => {
+		it("returns the user/assistant conversation from the ref's file (D9)", async () => {
 			const file = join(root, "session.jsonl");
 			await writeJsonl(file, [
 				piHeader(),
@@ -106,11 +115,17 @@ describe("readSessionPreview", () => {
 			const turns = await readSessionPreview(ref, { piRoot: root });
 
 			// The record's own timestamp rides each turn (OW-71), not dropped.
-			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "First question.", timestamp: "2026-06-05T18:25:00.147Z" },
-				{ role: "assistant", text: "First answer.", timestamp: "2026-06-05T18:25:03.200Z" },
-				{ role: "user", text: "Second question.", timestamp: "2026-06-05T18:26:00.000Z" },
-				{ role: "assistant", text: "Second answer.", timestamp: "2026-06-05T18:26:07.500Z" },
+			expect(turns.map((turn) => ({ role: turn.role, timestamp: turn.timestamp }))).toEqual([
+				{ role: "user", timestamp: "2026-06-05T18:25:00.147Z" },
+				{ role: "assistant", timestamp: "2026-06-05T18:25:03.200Z" },
+				{ role: "user", timestamp: "2026-06-05T18:26:00.000Z" },
+				{ role: "assistant", timestamp: "2026-06-05T18:26:07.500Z" },
+			]);
+			expect(turns.map((turn) => previewText(turn))).toEqual([
+				"First question.",
+				"First answer.",
+				"Second question.",
+				"Second answer.",
 			]);
 		});
 
@@ -125,11 +140,11 @@ describe("readSessionPreview", () => {
 
 			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
 
-			expect(turns).toEqual<SessionPreviewTurn[]>([{ role: "user", text: "no time on me" }]);
+			expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 			expect(turns[0]).not.toHaveProperty("timestamp");
 		});
 
-		it("drops tool results and thinking, keeping only the text turns", async () => {
+		it("retains thinking, tool calls, and tool results in transcript order", async () => {
 			const file = join(root, "with-tools.jsonl");
 			await writeJsonl(file, [
 				piHeader(),
@@ -139,13 +154,17 @@ describe("readSessionPreview", () => {
 					id: "a",
 					parentId: null,
 					timestamp: "t",
-					// assistant turn that is only a tool call + thinking, no text
 					message: {
 						role: "assistant",
 						content: [
 							{ type: "thinking", thinking: "internal" },
-							{ type: "toolCall", toolName: "read", toolCallId: "c1" },
+							{ type: "toolCall", id: "c1", name: "read", arguments: { path: "file.txt" } },
 						],
+						api: "anthropic-messages",
+						provider: "anthropic",
+						model: "test-model",
+						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+						stopReason: "toolUse",
 					},
 				},
 				{
@@ -153,17 +172,27 @@ describe("readSessionPreview", () => {
 					id: "r",
 					parentId: null,
 					timestamp: "t",
-					message: { role: "toolResult", toolCallId: "c1", toolName: "read", content: [{ type: "text", text: "file body" }] },
+					message: { role: "toolResult", toolCallId: "c1", toolName: "read", content: [{ type: "text", text: "file body" }], isError: false },
 				},
 				piMessage("assistant", "It says hello."),
 			]);
 
 			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
 
-			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "Read the file.", timestamp: "2026-06-05T18:25:00.147Z" },
-				{ role: "assistant", text: "It says hello.", timestamp: "2026-06-05T18:25:00.147Z" },
+			expect(turns.map((turn) => turn.role)).toEqual([
+				"user",
+				"assistant",
+				"toolResult",
+				"assistant",
 			]);
+			expect(turns[1]).toMatchObject({
+				role: "assistant",
+				content: [
+					{ type: "thinking" },
+					{ type: "toolCall", id: "c1", name: "read" },
+				],
+			});
+			expect(turns[2]).toMatchObject({ role: "toolResult", toolCallId: "c1", toolName: "read" });
 		});
 
 		it("reads only the ref's file, never any sibling in the store", async () => {
@@ -181,12 +210,12 @@ describe("readSessionPreview", () => {
 					piRoot: root,
 					readPiTurns: async (filePath) => {
 						reads.push(filePath);
-						return [{ role: "user", text: "only me" }];
+						return [{ role: "user", content: "only me" }];
 					},
 				},
 			);
 
-			expect(turns).toEqual([{ role: "user", text: "only me" }]);
+			expect(turns).toEqual([{ role: "user", content: "only me" }]);
 			expect(reads).toEqual([wanted]);
 		});
 
@@ -210,14 +239,14 @@ describe("readSessionPreview", () => {
 			// This turn sits past both the 200-line cap and the 512KB cap (each
 			// ~3KB message line pushes bytesRead past 512KB by line ~170).
 			const late = turns[250];
-			expect(late?.text).toContain("turn-250");
+			expect(previewText(late)).toContain("turn-250");
 		});
 	});
 
 	describe("Codex", () => {
 		const THREAD = "019f1aae-2a5e-7173-a90a-aad3e2b17d0b";
 
-		it("finds the one file whose name carries the thread id and flattens its text turns", async () => {
+		it("finds the one file whose name carries the thread id and maps its transcript", async () => {
 			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
 			await writeJsonl(file, [
 				codexHeader(THREAD),
@@ -230,9 +259,13 @@ describe("readSessionPreview", () => {
 
 			// The synthetic wrapper turn is dropped; the real turns survive in order,
 			// each carrying its record's own timestamp (OW-71).
-			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "Fix the failing test.", timestamp: "2026-08-13T02:10:54.809Z" },
-				{ role: "assistant", text: "Done, it passes now.", timestamp: "2026-08-13T02:10:54.809Z" },
+			expect(turns.map((turn) => ({ role: turn.role, timestamp: turn.timestamp }))).toEqual([
+				{ role: "user", timestamp: "2026-08-13T02:10:54.809Z" },
+				{ role: "assistant", timestamp: "2026-08-13T02:10:54.809Z" },
+			]);
+			expect(turns.map((turn) => previewText(turn))).toEqual([
+				"Fix the failing test.",
+				"Done, it passes now.",
 			]);
 		});
 
@@ -245,8 +278,48 @@ describe("readSessionPreview", () => {
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
 
-			expect(turns).toEqual<SessionPreviewTurn[]>([{ role: "user", text: "no time on me" }]);
+			expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 			expect(turns[0]).not.toHaveProperty("timestamp");
+		});
+
+		it("retains response-item reasoning, tool calls, and tool results", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				codexUser("Inspect the file."),
+				{
+					type: "response_item",
+					timestamp: "2026-08-13T02:10:55.000Z",
+					payload: { type: "reasoning", summary: [{ type: "summary_text", text: "checking" }], content: [] },
+				},
+				{
+					type: "response_item",
+					timestamp: "2026-08-13T02:10:56.000Z",
+					payload: { type: "function_call", call_id: "c1", name: "read", arguments: "{\"path\":\"file.txt\"}" },
+				},
+				{
+					type: "response_item",
+					timestamp: "2026-08-13T02:10:57.000Z",
+					payload: { type: "function_call_output", call_id: "c1", output: "file body" },
+				},
+				codexAssistant("The file was inspected."),
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual([
+				"user",
+				"assistant",
+				"assistant",
+				"toolResult",
+				"assistant",
+			]);
+			expect(turns[1]).toMatchObject({ role: "assistant", content: [{ type: "thinking" }] });
+			expect(turns[2]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "toolCall", id: "c1", name: "read" }],
+			});
+			expect(turns[3]).toMatchObject({ role: "toolResult", toolCallId: "c1" });
 		});
 
 		it("returns an empty preview when no file carries the thread id, rather than throwing", async () => {
@@ -275,12 +348,12 @@ describe("readSessionPreview", () => {
 					codexRoot: root,
 					readCodexTurns: async (filePath) => {
 						reads.push(filePath);
-						return [{ role: "user", text: "only me" }];
+						return [{ role: "user", content: "only me" }];
 					},
 				},
 			);
 
-			expect(turns).toEqual([{ role: "user", text: "only me" }]);
+			expect(turns).toEqual([{ role: "user", content: "only me" }]);
 			// N files seeded, exactly one read: the N-1 others are never opened.
 			expect(reads).toEqual([wanted]);
 		});
@@ -310,14 +383,14 @@ describe("readSessionPreview", () => {
 
 			expect(turns.length).toBe(messageCount);
 			const late = turns[250];
-			expect(late?.text).toContain("turn-250");
+			expect(previewText(late)).toContain("turn-250");
 		});
 	});
 
 	describe("Claude Code", () => {
 		const SID = "3af1e5da-9f22-4f34-9c2b-6b7e2f1c9d44";
 
-		it("finds the one file named after the session uuid and flattens its text turns", async () => {
+		it("finds the one file named after the session uuid and maps its transcript", async () => {
 			const file = join(root, "-ws-project", `${SID}.jsonl`);
 			await writeJsonl(file, [
 				claudeUser("<command-name>/execute</command-name>"),
@@ -329,10 +402,93 @@ describe("readSessionPreview", () => {
 
 			// The wrapper turn is dropped; the real turns survive in order, each
 			// carrying its record's own timestamp (OW-71).
-			expect(turns).toEqual<SessionPreviewTurn[]>([
-				{ role: "user", text: "Fix the failing test.", timestamp: "2026-08-20T10:00:00.000Z" },
-				{ role: "assistant", text: "Done, it passes now.", timestamp: "2026-08-20T10:00:05.000Z" },
+			expect(turns.map((turn) => ({ role: turn.role, timestamp: turn.timestamp }))).toEqual([
+				{ role: "user", timestamp: "2026-08-20T10:00:00.000Z" },
+				{ role: "assistant", timestamp: "2026-08-20T10:00:05.000Z" },
 			]);
+			expect(turns.map((turn) => previewText(turn))).toEqual([
+				"Fix the failing test.",
+				"Done, it passes now.",
+			]);
+		});
+
+		it("retains thinking, tool use, and correlated tool results", async () => {
+			const file = join(root, "-ws-project", `${SID}.jsonl`);
+			await writeJsonl(file, [
+				claudeUser([{ type: "text", text: "Inspect the file." }]),
+				{
+					type: "assistant",
+					sessionId: SID,
+					timestamp: "2026-08-20T10:00:05.000Z",
+					isSidechain: false,
+					message: {
+						id: "msg-1",
+						role: "assistant",
+						model: "test-model",
+						content: [
+							{ type: "thinking", thinking: "checking" },
+							{ type: "tool_use", id: "c1", name: "Read", input: { file_path: "file.txt" } },
+						],
+					},
+				},
+				{
+					type: "user",
+					sessionId: SID,
+					timestamp: "2026-08-20T10:00:06.000Z",
+					isSidechain: false,
+					message: { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "file body" }] },
+				},
+				claudeAssistant("The file was inspected."),
+			]);
+
+			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual([
+				"user",
+				"assistant",
+				"toolResult",
+				"assistant",
+			]);
+			expect(turns[1]).toMatchObject({
+				role: "assistant",
+				content: [
+					{ type: "thinking" },
+					{ type: "toolCall", id: "c1", name: "Read" },
+				],
+			});
+			expect(turns[2]).toMatchObject({ role: "toolResult", toolCallId: "c1", toolName: "Read" });
+		});
+
+		it("maps stored compaction metadata and its continuation summary onto one marker", async () => {
+			const file = join(root, "-ws-project", `${SID}.jsonl`);
+			await writeJsonl(file, [
+				{
+					type: "system",
+					subtype: "compact_boundary",
+					timestamp: "2026-08-20T10:02:00.000Z",
+					compactMetadata: { trigger: "manual", preTokens: 12_345 },
+				},
+				{
+					type: "user",
+					timestamp: "2026-08-20T10:02:00.100Z",
+					isCompactSummary: true,
+					message: {
+						role: "user",
+						content: "This session is being continued from a compacted conversation.",
+					},
+				},
+			]);
+
+			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+
+			expect(turns).toHaveLength(1);
+			expect(turns[0]).toMatchObject({
+				role: "compactionSummary",
+				tokensBefore: 12_345,
+				timestamp: "2026-08-20T10:02:00.000Z",
+			});
+			if (turns[0]?.role !== "compactionSummary") throw new Error("missing compaction marker");
+			expect(turns[0].summary.length).toBeGreaterThan(0);
 		});
 
 		it("returns an empty preview when no file carries the session uuid, rather than throwing", async () => {
@@ -360,12 +516,12 @@ describe("readSessionPreview", () => {
 					claudeRoot: root,
 					readClaudeTurns: async (filePath) => {
 						reads.push(filePath);
-						return [{ role: "user", text: "only me" }];
+						return [{ role: "user", content: "only me" }];
 					},
 				},
 			);
 
-			expect(turns).toEqual([{ role: "user", text: "only me" }]);
+			expect(turns).toEqual([{ role: "user", content: "only me" }]);
 			expect(reads).toEqual([wanted]);
 		});
 	});

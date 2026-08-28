@@ -15,6 +15,7 @@
 import type { Stats } from "node:fs";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
+import { storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
 
 /**
@@ -179,19 +180,14 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 }
 
 /**
- * The full text conversation of a stored Codex session, flattened for the
- * read-only preview (OW-38). Sibling of `parseCodexSession`'s `preview`: same
- * file, same line reader, but it keeps every user and assistant *text* block in
- * order instead of stopping at the first real user message.
- *
- * The synthetic-block filtering (`isSyntheticBlock`) is reused so the
- * harness-injected wrappers -- `<environment_context>`, AGENTS.md dumps, and
- * the rest -- do not surface as conversation turns. Assistant text carries no
- * such wrappers, so it is kept verbatim. Reasoning, tool calls, and tool
- * results are dropped (see `SessionPreviewResponse`).
+ * The full transcript of a stored Codex session for the read-only preview
+ * (OW-38). Codex stores Responses API `response_item` payloads, not the live
+ * `ThreadItem` shape, so this module maps those store variants directly. The
+ * synthetic user filtering remains shared with enumeration.
  */
 export async function extractCodexPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
+	const toolNames = new Map<string, string>();
 	let lineNo = 0;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
@@ -199,19 +195,21 @@ export async function extractCodexPreviewTurns(filePath: string): Promise<Sessio
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
 		if (lineNo === 1) continue;
-		const turn = extractTextTurn(line);
+		const turn = extractStoreTurn(line, toolNames);
 		if (turn) turns.push(turn);
 	}
 	return turns;
 }
 
 /**
- * One text turn from a Codex message line, or null if it carries no display
- * text. Handles both the current `response_item`-wrapped shape and the drifted
- * flat `{type:"message"}` shape, in either the `text` or `input_text`/
- * `output_text` block flavours.
+ * One transcript message from a Codex store line. Current stores wrap a
+ * Responses API item in `response_item`; the drifted flat message form remains
+ * accepted for old sessions.
  */
-function extractTextTurn(line: string): SessionPreviewTurn | null {
+function extractStoreTurn(
+	line: string,
+	toolNames: Map<string, string>,
+): SessionPreviewTurn | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
@@ -221,38 +219,205 @@ function extractTextTurn(line: string): SessionPreviewTurn | null {
 	if (typeof parsed !== "object" || parsed === null) return null;
 	const rec = parsed as Record<string, unknown>;
 
-	let role: unknown;
-	let content: unknown;
+	let payload: Record<string, unknown> | null = null;
 	if (rec.type === "response_item" && typeof rec.payload === "object" && rec.payload !== null) {
-		const payload = rec.payload as Record<string, unknown>;
-		if (payload.type === "message") {
-			role = payload.role;
-			content = payload.content;
-		}
+		payload = rec.payload as Record<string, unknown>;
 	} else if (rec.type === "message") {
-		role = rec.role;
-		content = rec.content;
+		payload = rec;
 	}
-
-	if ((role !== "user" && role !== "assistant") || !Array.isArray(content)) return null;
-
-	const texts: string[] = [];
-	for (const block of content) {
-		if (block && typeof block === "object") {
-			const text = (block as Record<string, unknown>).text;
-			if (typeof text === "string") texts.push(text);
-		}
-	}
-
-	// A user turn that is entirely harness-injected wrapper content is not
-	// something a human said; drop it, matching the preview heuristic. Assistant
-	// text never carries these wrappers.
-	const kept = role === "user" ? texts.filter((t) => !isSyntheticBlock(t)) : texts;
-	const text = kept.join("").trim();
-	if (text.length === 0) return null;
-	// The record-level timestamp (OW-71), at the top level even though the
-	// message rides in `payload`. Optional: no string timestamp, no time -- the
-	// render path shows nothing rather than the epoch.
+	if (!payload) return null;
 	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
-	return { role, text, ...(timestamp ? { timestamp } : {}) };
+
+	if (payload.type === "message") {
+		const role = payload.role;
+		if ((role !== "user" && role !== "assistant") || !Array.isArray(payload.content)) return null;
+		const content = payload.content
+			.map(codexMessageBlock)
+			.filter((block): block is Record<string, unknown> => block !== null)
+			.filter((block) => role !== "user" || block.type !== "text" || !isSyntheticBlock(block.text as string));
+		if (content.length === 0) return null;
+		return storedAgentMessage(
+			{ role, content },
+			timestamp,
+			CODEX_PREVIEW_IDENTITY,
+		);
+	}
+
+	if (payload.type === "reasoning") {
+		const thinking = [...textParts(payload.summary), ...textParts(payload.content)]
+			.map((part) => part.trim())
+			.filter(Boolean)
+			.join("\n\n");
+		if (!thinking) return null;
+		return assistantPreview([{ type: "thinking", thinking }], timestamp);
+	}
+
+	if (payload.type === "function_call" || payload.type === "custom_tool_call") {
+		if (typeof payload.call_id !== "string" || typeof payload.name !== "string") return null;
+		const name = typeof payload.namespace === "string"
+			? `${payload.namespace}__${payload.name}`
+			: payload.name;
+		toolNames.set(payload.call_id, name);
+		const rawArguments = payload.type === "function_call" ? payload.arguments : payload.input;
+		return assistantPreview([
+			{
+				type: "toolCall",
+				id: payload.call_id,
+				name,
+				arguments: parseArguments(rawArguments),
+			},
+		], timestamp, "toolUse");
+	}
+
+	if (payload.type === "local_shell_call") {
+		const id = typeof payload.call_id === "string"
+			? payload.call_id
+			: typeof payload.id === "string"
+				? payload.id
+				: null;
+		if (!id) return null;
+		const action = typeof payload.action === "object" && payload.action !== null
+			? payload.action as Record<string, unknown>
+			: {};
+		const command = Array.isArray(action.command)
+			? action.command.filter((part): part is string => typeof part === "string").join(" ")
+			: "";
+		toolNames.set(id, "bash");
+		return assistantPreview([
+			{
+				type: "toolCall",
+				id,
+				name: "bash",
+				arguments: {
+					command,
+					cwd: typeof action.working_directory === "string" ? action.working_directory : null,
+				},
+			},
+		], timestamp, "toolUse");
+	}
+
+	if (payload.type === "web_search_call") {
+		if (typeof payload.id !== "string") return null;
+		toolNames.set(payload.id, "web_search");
+		return assistantPreview([
+			{
+				type: "toolCall",
+				id: payload.id,
+				name: "web_search",
+				arguments: typeof payload.action === "object" && payload.action !== null
+					? payload.action as Record<string, unknown>
+					: {},
+			},
+		], timestamp, "toolUse");
+	}
+
+	if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
+		if (typeof payload.call_id !== "string") return null;
+		const name = toolNames.get(payload.call_id) ??
+			(typeof payload.name === "string" ? payload.name : "");
+		return storedAgentMessage(
+			{
+				role: "toolResult",
+				toolCallId: payload.call_id,
+				toolName: name,
+				content: outputContent(payload.output),
+				isError: false,
+			},
+			timestamp,
+			CODEX_PREVIEW_IDENTITY,
+		);
+	}
+
+	if (payload.type === "context_compaction" || payload.type === "compaction") {
+		return {
+			role: "compactionSummary",
+			summary: "",
+			tokensBefore: 0,
+			...(timestamp ? { timestamp } : {}),
+		} as SessionPreviewTurn;
+	}
+
+	return null;
+}
+
+const CODEX_PREVIEW_IDENTITY = {
+	api: "openai-responses",
+	provider: "openai",
+	model: "codex",
+} as const;
+
+function assistantPreview(
+	content: Record<string, unknown>[],
+	timestamp: string | undefined,
+	stopReason: "stop" | "toolUse" = "stop",
+): SessionPreviewTurn | null {
+	return storedAgentMessage(
+		{ role: "assistant", content, stopReason },
+		timestamp,
+		CODEX_PREVIEW_IDENTITY,
+	);
+}
+
+function textParts(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((part) => {
+		if (typeof part === "string") return [part];
+		if (typeof part === "object" && part !== null && typeof (part as Record<string, unknown>).text === "string") {
+			return [(part as Record<string, unknown>).text as string];
+		}
+		return [];
+	});
+}
+
+function codexMessageBlock(value: unknown): Record<string, unknown> | null {
+	if (typeof value !== "object" || value === null) return null;
+	const block = value as Record<string, unknown>;
+	if (
+		(block.type === "input_text" || block.type === "output_text" || block.type === "text") &&
+		typeof block.text === "string"
+	) {
+		return { type: "text", text: block.text };
+	}
+	if (block.type === "input_image" && typeof block.image_url === "string") {
+		return imageBlock(block.image_url);
+	}
+	if (block.type === "input_audio" && typeof block.audio_url === "string") {
+		return { type: "text", text: `[audio: ${block.audio_url}]` };
+	}
+	return null;
+}
+
+function imageBlock(url: string): Record<string, unknown> {
+	const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+	return match?.[1] && match[2] !== undefined
+		? { type: "image", mimeType: match[1], data: match[2] }
+		: { type: "text", text: `[image: ${url}]` };
+}
+
+function parseArguments(value: unknown): Record<string, unknown> {
+	if (typeof value !== "string") return {};
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+			? parsed as Record<string, unknown>
+			: { value: parsed };
+	} catch {
+		return { value };
+	}
+}
+
+function outputContent(value: unknown): Record<string, unknown>[] {
+	if (typeof value === "string") return [{ type: "text", text: value }];
+	if (!Array.isArray(value)) return [{ type: "text", text: JSON.stringify(value) }];
+	return value.flatMap((part) => {
+		if (typeof part !== "object" || part === null) return [];
+		const block = part as Record<string, unknown>;
+		if (block.type === "input_text" && typeof block.text === "string") {
+			return [{ type: "text", text: block.text }];
+		}
+		if (block.type === "input_image" && typeof block.image_url === "string") {
+			return [imageBlock(block.image_url)];
+		}
+		return [{ type: "text", text: JSON.stringify(block) }];
+	});
 }

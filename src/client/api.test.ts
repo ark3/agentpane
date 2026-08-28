@@ -79,7 +79,7 @@ describe("agentpane API", () => {
 	});
 
 	it("fetches a read-only preview by ref without a request body", async () => {
-		const preview = { ref, turns: [{ role: "user" as const, text: "hi" }] };
+		const preview = { ref, turns: [{ role: "user" as const, content: "hi" }] };
 		const fetch = fetchRecorder(response(preview));
 		const api = createAgentpaneApi({ fetch });
 

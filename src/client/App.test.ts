@@ -51,6 +51,36 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 	};
 }
 
+function previewUser(text: string): SessionPreviewTurn {
+	return { role: "user", content: text };
+}
+
+function previewAssistant(text: string, backend: BackendId = "pi"): SessionPreviewTurn {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: backend === "codex" ? "openai-responses" : "anthropic-messages",
+		provider: backend === "codex" ? "openai" : "anthropic",
+		model: backend,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+	};
+}
+
+function storedTurns(messages: AgentMessage[]): SessionPreviewTurn[] {
+	return messages.map((message) => {
+		const { timestamp: _timestamp, ...stored } = message;
+		return { ...stored, timestamp: "2026-08-20T10:00:00.000Z" } as SessionPreviewTurn;
+	});
+}
+
 class FakeController implements AgentpaneController {
 	created: Array<{ cwd: string; backend: BackendId }> = [];
 	selected: SessionRef[] = [];
@@ -436,7 +466,7 @@ describe("App", () => {
 	it("swaps the composer for an Attach button while previewing, opens the live session, and focuses the prompt", async () => {
 		const controller = new FakeController(view({
 			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
-			preview: { ref: piSession, turns: [{ role: "user", text: "earlier question" }] },
+			preview: { ref: piSession, turns: [previewUser("earlier question")] },
 		}));
 		render(App, { props: { controller } });
 		await tick();
@@ -457,8 +487,8 @@ describe("App", () => {
 		// The point of mapping preview turns to messages (OW-50): one renderer,
 		// so the two paths cannot drift. Same content in, same DOM out.
 		const turns: SessionPreviewTurn[] = [
-			{ role: "user", text: "earlier question" },
-			{ role: "assistant", text: "earlier answer" },
+			previewUser("earlier question"),
+			previewAssistant("earlier answer"),
 		];
 		const previewed = render(App, {
 			props: {
@@ -480,7 +510,7 @@ describe("App", () => {
 						sessions: {
 							[sessionKey(piSession)]: {
 								ref: piSession,
-								messages: previewMessages(turns, piSession.backend),
+								messages: previewMessages(turns),
 								isStreaming: false,
 								seq: 1,
 								error: null,
@@ -510,8 +540,8 @@ describe("App", () => {
 			preview: {
 				ref: codexSession,
 				turns: [
-					{ role: "user", text: "earlier question" },
-					{ role: "assistant", text: "earlier answer" },
+					previewUser("earlier question"),
+					previewAssistant("earlier answer", "codex"),
 				],
 			},
 		}));
@@ -526,9 +556,7 @@ describe("App", () => {
 		expect(container.querySelector("[data-role='assistant'] .meta")?.textContent).toContain("codex");
 	});
 
-	it("keeps its own wording for a session with no readable transcript", async () => {
-		// More accurate than the transcript's "No messages yet": the server's
-		// text-only extraction can come up empty on a session with plenty in it.
+	it("uses the transcript empty state when the stored session has no messages", async () => {
 		const controller = new FakeController(view({
 			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
 			preview: { ref: piSession, turns: [] },
@@ -536,10 +564,8 @@ describe("App", () => {
 		const { container } = render(App, { props: { controller } });
 		await tick();
 
-		expect(container.querySelector(".preview-empty")?.textContent).toBe(
-			"This session has no readable transcript to preview.",
-		);
-		expect(container.querySelector(".transcript")).toBeNull();
+		expect(screen.getByText("No messages yet.")).toBeInTheDocument();
+		expect(container.querySelector(".transcript")).not.toBeNull();
 	});
 
 	it("orders sessions by recency, most recently updated first", () => {
@@ -786,16 +812,32 @@ describe("App", () => {
 	});
 
 	it("keeps the reading view toggle visible while previewing", async () => {
+		const turns = storedTurns(toolRead);
 		const controller = new FakeController(view({
 			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
-			preview: { ref: piSession, turns: [{ role: "user", text: "earlier question" }] },
+			preview: { ref: piSession, turns },
 		}));
-		render(App, { props: { controller } });
+		const { container } = render(App, { props: { controller } });
 		await tick();
 
-		// A preview has no tool chrome to elide, so the toggle is a no-op there --
-		// but a control that appears and disappears on attach is worse.
-		expect(screen.getByRole("button", { name: "Reading view" })).toBeInTheDocument();
+		const toggle = screen.getByRole("button", { name: "Reading view" });
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(container.querySelector("details.tool")).not.toBeNull();
+		expect(container.querySelector("details.thinking")).not.toBeNull();
+
+		await fireEvent.click(toggle);
+		await tick();
+
+		expect(toggle).toHaveAttribute("aria-pressed", "true");
+		expect(container.querySelector("details.tool")).toBeNull();
+		expect(container.querySelector("details.thinking")).toBeNull();
+
+		await fireEvent.click(toggle);
+		await tick();
+
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		expect(container.querySelector("details.tool")).not.toBeNull();
+		expect(container.querySelector("details.thinking")).not.toBeNull();
 	});
 
 	it("restores each session's own scroll position when switching, and scrolls a fresh one to the tail", async () => {
@@ -1720,7 +1762,7 @@ describe("App", () => {
 	 * wiring itself -- unconditional, on both events, and torn down on unmount.
 	 */
 	it("asks the controller to re-read the preview when the tab comes back", async () => {
-		const controller = new FakeController(view({ preview: { ref: piSession, turns: [{ role: "user", text: "hi" }] } }));
+		const controller = new FakeController(view({ preview: { ref: piSession, turns: [previewUser("hi")] } }));
 		const { unmount } = render(App, { props: { controller } });
 		await tick();
 		expect(controller.previewRefreshes).toBe(0);

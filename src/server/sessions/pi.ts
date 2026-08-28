@@ -15,6 +15,7 @@
 import type { Stats } from "node:fs";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
+import { storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
 
 interface ParsedHeader {
@@ -107,14 +108,11 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
 }
 
 /**
- * The full text conversation of a stored Pi session, flattened for the
- * read-only preview (OW-38). This is the sibling of `parsePiSession`'s
- * first-user-message `preview`: same file, same line reader, but it keeps every
- * user and assistant *text* block in order rather than stopping at the first.
- *
- * Deliberately narrow (see `SessionPreviewResponse`): thinking, tool calls, and
- * tool results are dropped, so an assistant turn that was only a tool call
- * contributes no turn at all. The header line is skipped like everywhere else.
+ * The full transcript of a stored Pi session for the read-only preview
+ * (OW-38). Pi stores message payloads in the same structural shape the live
+ * adapter renders, so this validates and retains user, assistant, and
+ * tool-result messages with their thinking, tool, and image blocks. The
+ * header is skipped.
  */
 export async function extractPiPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
@@ -125,14 +123,14 @@ export async function extractPiPreviewTurns(filePath: string): Promise<SessionPr
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
 		if (lineNo === 1) continue;
-		const turn = extractTextTurn(line);
+		const turn = extractPreviewTurn(line);
 		if (turn) turns.push(turn);
 	}
 	return turns;
 }
 
-/** One text turn from a Pi `message` line, or null if it carries no display text. */
-function extractTextTurn(line: string): SessionPreviewTurn | null {
+/** One transcript message from a Pi `message` line, or null for other records. */
+function extractPreviewTurn(line: string): SessionPreviewTurn | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
@@ -143,24 +141,10 @@ function extractTextTurn(line: string): SessionPreviewTurn | null {
 	const rec = parsed as Record<string, unknown>;
 	if (rec.type !== "message") return null;
 
-	const message = rec.message;
-	if (typeof message !== "object" || message === null) return null;
-	const msg = message as Record<string, unknown>;
-	// Only the two conversational roles; `toolResult` is not display text.
-	if ((msg.role !== "user" && msg.role !== "assistant") || !Array.isArray(msg.content)) return null;
-
-	const texts: string[] = [];
-	for (const block of msg.content) {
-		if (block && typeof block === "object") {
-			const b = block as Record<string, unknown>;
-			if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
-		}
-	}
-	const text = texts.join("").trim();
-	if (text.length === 0) return null;
-	// The record's own timestamp (OW-71), the same field read for the header's
-	// `createdAt`. Optional: a record without a string timestamp carries none,
-	// so the render path shows no time rather than the epoch.
 	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
-	return { role: msg.role, text, ...(timestamp ? { timestamp } : {}) };
+	return storedAgentMessage(rec.message, timestamp, {
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "pi",
+	});
 }

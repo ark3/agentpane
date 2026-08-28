@@ -167,9 +167,9 @@
 	);
 	/** Whether the pane is showing a read-only preview rather than a live/attached transcript. */
 	const previewing = $derived(view.preview !== null);
-	/** The preview's text turns as messages, so the one Transcript renders both (OW-50). */
+	/** The preview's store timestamps converted for the one Transcript both paths share. */
 	const previewMessageList = $derived(
-		view.preview ? previewMessages(view.preview.turns, view.preview.ref.backend) : [],
+		view.preview ? previewMessages(view.preview.turns) : [],
 	);
 	/** The summary for the currently selected session, for its workspace (New session inherits it). */
 	const selectedSummary = $derived(
@@ -868,9 +868,7 @@
 			</label>
 			<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New</button>
 		</div>
-		<!-- Stays visible, and inert, while previewing: a preview renders no tool
-		     chrome to elide, and a control that appears and disappears on attach
-		     is worse than one that is briefly a no-op. -->
+		<!-- The same control drives attached and stored transcripts. -->
 		<button type="button" aria-pressed={reading} onclick={() => (reading = !reading)}>Reading view</button>
 	</section>
 
@@ -932,16 +930,9 @@
 
 	<section class="conversation" aria-label="Conversation" bind:this={conversationEl} onscroll={handleConversationScroll}>
 		{#if previewing}
-			<!-- Read-only, non-attaching (OW-38/OW-39): text turns only, no streaming,
-			     no tool/thinking chrome -- deliberately not a claim of live parity.
-			     The empty case keeps its own wording rather than going through
-			     Transcript: the server's text-only extraction can come up empty on a
-			     session that has plenty in it, which "No messages yet" would misreport. -->
-			{#if previewMessageList.length === 0}
-				<p class="preview-empty">This session has no readable transcript to preview.</p>
-			{:else}
-				<Transcript messages={previewMessageList} />
-			{/if}
+			<!-- Read-only and non-attaching (OW-38/OW-39), but structurally the same
+			     transcript as the live path. No `onedit` keeps it read-only. -->
+			<Transcript messages={previewMessageList} {reading} />
 		{:else}
 			<Transcript
 				messages={selectedSession?.messages ?? []}

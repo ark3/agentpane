@@ -11,6 +11,7 @@ import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
 import { formatTimestamp } from "../time.ts";
 import { previewMessages } from "../preview.ts";
+import type { SessionPreviewTurn } from "$shared/protocol.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
 import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
@@ -20,6 +21,12 @@ const roles = (container: HTMLElement) =>
 
 /** What the session list renders: ISO to the second, UTC, no sub-second part. */
 const STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function previewAssistant(text: string, timestamp?: string): SessionPreviewTurn {
+	const message = assistant([{ type: "text", text }]);
+	const { timestamp: _timestamp, ...rest } = message;
+	return { ...rest, ...(timestamp ? { timestamp } : {}) };
+}
 
 describe("Message", () => {
 	it("gives each role its own chrome", () => {
@@ -290,7 +297,7 @@ describe("preview timestamps (OW-71)", () => {
 		// The turn carries the record's ISO string; `previewMessages` converts it
 		// to epoch-ms at the client edge, and the shared formatter renders it.
 		const iso = "2026-06-05T18:25:00.147Z";
-		const assistantMsg = previewMessages([{ role: "assistant", text: "hi", timestamp: iso }], "pi")[0]!;
+		const assistantMsg = previewMessages([previewAssistant("hi", iso)])[0]!;
 		const { container } = render(Message, { props: { message: assistantMsg } });
 		const time = container.querySelector(".meta time");
 		expect(time?.textContent?.trim()).toMatch(STAMP);
@@ -299,7 +306,7 @@ describe("preview timestamps (OW-71)", () => {
 
 	it("puts a preview user turn's real time in its block action row", () => {
 		const iso = "2026-06-05T18:25:00.147Z";
-		const userMsg = previewMessages([{ role: "user", text: "hi", timestamp: iso }], "pi")[0]!;
+		const userMsg = previewMessages([{ role: "user", content: "hi", timestamp: iso }])[0]!;
 		const { container } = render(Message, { props: { message: userMsg } });
 		const time = container.querySelector("[data-block-actions='text'] time");
 		expect(time?.textContent?.trim()).toMatch(STAMP);
@@ -309,14 +316,14 @@ describe("preview timestamps (OW-71)", () => {
 	it("renders no time at all for a preview turn that carries none", () => {
 		// The genuinely-absent case: no wire timestamp maps to NaN at the edge,
 		// which the formatter renders as empty -- no <time>, not the epoch.
-		const assistantMsg = previewMessages([{ role: "assistant", text: "hi" }], "pi")[0]!;
+		const assistantMsg = previewMessages([previewAssistant("hi")])[0]!;
 		const { container } = render(Message, { props: { message: assistantMsg } });
 		expect(container.querySelector(".meta time")).toBeNull();
 		expect(container.textContent).not.toContain("1970");
 	});
 
 	it("renders no time for an absent-timestamp user turn either", () => {
-		const userMsg = previewMessages([{ role: "user", text: "hi" }], "pi")[0]!;
+		const userMsg = previewMessages([{ role: "user", content: "hi" }])[0]!;
 		const { container } = render(Message, { props: { message: userMsg } });
 		expect(container.querySelector("[data-block-actions='text'] time")).toBeNull();
 		expect(container.textContent).not.toContain("1970");

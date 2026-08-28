@@ -38,7 +38,10 @@ import type { Dirent, Stats } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
+import { ClaudeReducer } from "../adapters/claude/reducer.ts";
+import { isSyntheticClaudeUserText } from "./claude-user.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
+import { previewTurnsFromMessages } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
 
 /**
@@ -49,22 +52,6 @@ import { trimPreview } from "./text.ts";
  * real user-role lines, and none is something a human typed. A heuristic,
  * not a contract; expect it to grow.
  */
-const SYNTHETIC_USER_PREFIXES = [
-	"<system-reminder>",
-	"<command-name>",
-	"<command-message>",
-	"<local-command-caveat>",
-	"<local-command-stdout>",
-	"<task-notification>",
-	"[Request interrupted by user",
-];
-
-/** Exported for the Claude adapter's reducer, which meets the same wrapper lines live. */
-export function isSyntheticClaudeUserText(text: string): boolean {
-	const trimmed = text.trimStart();
-	return SYNTHETIC_USER_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
-}
-
 function isSyntheticBlock(text: string): boolean {
 	return isSyntheticClaudeUserText(text);
 }
@@ -192,26 +179,35 @@ export async function parseClaudeSession(filePath: string, stat: Stats): Promise
 }
 
 /**
- * The full text conversation of a stored Claude Code session, flattened for
- * the read-only preview (OW-38). Sibling of `parseClaudeSession`'s `preview`:
- * same file, same line reader, but it keeps every non-sidechain user and
- * assistant *text* block in order instead of stopping at the first real user
- * message. Thinking, tool_use, and tool_result blocks are dropped (see
- * `SessionPreviewResponse`); wrapper-only user turns are dropped via
- * `isSyntheticBlock`, matching the enumeration heuristic.
+ * The full transcript of a stored Claude Code session for the read-only
+ * preview (OW-38). Store message lines carry the same Anthropic-shaped payloads
+ * as live events, so replay them through the reducer's hydration path: this
+ * preserves its block merging, tool correlation, compaction, and wrapper
+ * filtering without spawning Claude Code.
  */
 export async function extractClaudePreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
-	const turns: SessionPreviewTurn[] = [];
+	const records: Record<string, unknown>[] = [];
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
 	// stopping early at the enumeration caps would be a visible regression).
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		const rec = tryParseRecord(line);
-		if (!rec) continue;
-		const turn = extractTextTurn(rec);
-		if (turn) turns.push(turn);
+		if (!rec || rec.isSidechain === true) continue;
+		// Old/synthesised records can omit the API message id. Real store records
+		// carry it; a stable per-line fallback keeps drift tolerant and prevents
+		// unrelated assistant lines from merging.
+		if (rec.type === "assistant" && typeof rec.message === "object" && rec.message !== null) {
+			const message = rec.message as Record<string, unknown>;
+			if (typeof message.id !== "string") {
+				records.push({ ...rec, message: { ...message, id: `preview-${records.length}` } });
+				continue;
+			}
+		}
+		records.push(rec);
 	}
-	return turns;
+	const reducer = new ClaudeReducer({ now: () => Number.NaN });
+	reducer.hydrate(records);
+	return previewTurnsFromMessages(reducer.getState().messages);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,21 +268,4 @@ export function claudePromptText(record: Record<string, unknown>): string | null
 	const kept = texts.filter((t) => t.trim().length > 0 && !isSyntheticBlock(t));
 	const joined = kept.join(" ").trim();
 	return joined.length > 0 ? joined : null;
-}
-
-/** One text turn from a Claude Code message line, or null if it carries no display text. */
-function extractTextTurn(rec: Record<string, unknown>): SessionPreviewTurn | null {
-	const role = rec.type === "user" ? "user" : rec.type === "assistant" ? "assistant" : null;
-	if (!role) return null;
-	const texts = extractMessageTexts(rec, role);
-	if (!texts) return null;
-
-	// A user turn that is entirely harness-injected wrapper content is not
-	// something a human said; drop it, matching the preview heuristic. Assistant
-	// text never carries these wrappers.
-	const kept = role === "user" ? texts.filter((t) => !isSyntheticBlock(t)) : texts;
-	const text = kept.join("").trim();
-	if (text.length === 0) return null;
-	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
-	return { role, text, ...(timestamp ? { timestamp } : {}) };
 }

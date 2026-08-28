@@ -213,27 +213,21 @@ export interface AttachSessionResponse {
 /**
  * GET /api/sessions/:backend/:id/preview -- a read-only, non-attaching
  * transcript preview (OW-38). Unlike the attach route above, this spawns
- * nothing: it reads exactly one stored session file by ref and flattens it to
- * text turns for the main pane.
+ * nothing: it reads exactly one stored session file by ref and maps that
+ * backend's store records to the same transcript structure an attached
+ * session streams over SSE.
  *
- * Deliberately narrow. Only user and assistant *text* survives the flattening
- * -- tools, thinking, images, and approvals are dropped -- and this makes no
- * claim of parity with the `snapshot` an attached session streams over SSE.
- * Selecting a session to look at must stay as cheap as listing one (D9), so
- * this reads a single file and never the whole corpus.
+ * The wire keeps store timestamps as ISO strings, matching `SessionSummary`;
+ * the client edge performs the one conversion to the epoch-ms timestamps the
+ * renderer consumes. Selecting a session to look at must stay as cheap as
+ * listing one (D9), so this reads a single file and never the whole corpus.
  */
-export interface SessionPreviewTurn {
-	role: "user" | "assistant";
-	text: string;
-	/**
-	 * When the turn happened, the record's own ISO string (OW-71) -- the same
-	 * shape `SessionSummary.createdAt`/`updatedAt` carry, so the wire stays ISO
-	 * end to end and the client edge does the one conversion to epoch-ms a
-	 * message needs. Optional: a record with no parsable timestamp carries
-	 * none, and the render path shows no time rather than the epoch.
-	 */
-	timestamp?: string;
-}
+type PreviewTimestamp<T> = T extends { timestamp: number }
+	? Omit<T, "timestamp"> & { timestamp?: string }
+	: T;
+
+/** A transcript message with its store-native ISO timestamp on the wire. */
+export type SessionPreviewTurn = PreviewTimestamp<PaneMessage>;
 export interface SessionPreviewResponse {
 	/** The ref the preview was read for, echoed back so the client can key it. */
 	ref: SessionRef;

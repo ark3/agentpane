@@ -20,8 +20,8 @@
  *    same match-by-filename as Codex, over the readdir-only
  *    `findClaudeSessionFiles` walk.
  *
- * The flattening is deliberately narrow (see `SessionPreviewResponse`): only
- * user and assistant text turns survive.
+ * Each backend maps its store records to the shared transcript structure;
+ * locating and reading the single file remains this module's only job.
  */
 
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
@@ -44,11 +44,11 @@ export interface ReadPreviewOptions {
 	 * counter to prove no file beyond the match is opened.
 	 */
 	findFiles?: (root: string) => Promise<string[]>;
-	/** Pi text-turn extractor seam. Defaults to the real one. */
+	/** Pi transcript extractor seam. Defaults to the real one. */
 	readPiTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
-	/** Codex text-turn extractor seam. Defaults to the real one. */
+	/** Codex transcript extractor seam. Defaults to the real one. */
 	readCodexTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
-	/** Claude Code text-turn extractor seam. Defaults to the real one. */
+	/** Claude Code transcript extractor seam. Defaults to the real one. */
 	readClaudeTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
 }
 

@@ -18,6 +18,7 @@ import {
 	type ModelsResponse,
 	ROUTES,
 	type SessionPreviewResponse,
+	type SessionPreviewTurn,
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
@@ -61,6 +62,16 @@ beforeEach(() => {
 		now: () => "2026-08-11T00:00:00.000Z",
 	});
 });
+
+function previewUser(text: string): SessionPreviewTurn {
+	const { timestamp: _timestamp, ...message } = userMessage(text);
+	return message;
+}
+
+function previewAssistant(text: string): SessionPreviewTurn {
+	const { timestamp: _timestamp, ...message } = assistantMessage(text);
+	return message;
+}
 
 function get(path: string): Promise<Response> {
 	return app.fetch(new Request(`http://127.0.0.1${path}`));
@@ -157,41 +168,31 @@ describe("sessions", () => {
 });
 
 describe("preview (OW-38, read-only, non-attaching)", () => {
-	it("returns the flattened text turns for a stored Pi session without spawning", async () => {
-		index.previews.set(sessionKey(PI_SESSION), [
-			{ role: "user", text: "a pi question" },
-			{ role: "assistant", text: "a pi answer" },
-		]);
+	it("returns transcript messages for a stored Pi session without spawning", async () => {
+		const turns = [previewUser("a pi question"), previewAssistant("a pi answer")];
+		index.previews.set(sessionKey(PI_SESSION), turns);
 
 		const response = await get(ROUTES.preview(PI_SESSION));
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as SessionPreviewResponse;
 
 		expect(body.ref).toEqual(PI_SESSION);
-		expect(body.turns).toEqual([
-			{ role: "user", text: "a pi question" },
-			{ role: "assistant", text: "a pi answer" },
-		]);
+		expect(body.turns).toEqual(turns);
 		// The whole point of the route: no subprocess, no attach.
 		expect(pi.created).toHaveLength(0);
 		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
 	});
 
-	it("returns the flattened text turns for a stored Codex session without spawning", async () => {
-		index.previews.set(sessionKey(CODEX_SESSION), [
-			{ role: "user", text: "a codex question" },
-			{ role: "assistant", text: "a codex answer" },
-		]);
+	it("returns transcript messages for a stored Codex session without spawning", async () => {
+		const turns = [previewUser("a codex question"), previewAssistant("a codex answer")];
+		index.previews.set(sessionKey(CODEX_SESSION), turns);
 
 		const response = await get(ROUTES.preview(CODEX_SESSION));
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as SessionPreviewResponse;
 
 		expect(body.ref).toEqual(CODEX_SESSION);
-		expect(body.turns).toEqual([
-			{ role: "user", text: "a codex question" },
-			{ role: "assistant", text: "a codex answer" },
-		]);
+		expect(body.turns).toEqual(turns);
 		expect(codex.created).toHaveLength(0);
 		expect(app.sessions.isAttached(CODEX_SESSION)).toBe(false);
 	});

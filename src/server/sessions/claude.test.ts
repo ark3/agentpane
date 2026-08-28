@@ -53,6 +53,15 @@ function textBlock(text: string) {
 	return { type: "text", text };
 }
 
+function previewText(turn: SessionPreviewTurn | undefined): string {
+	if (!turn || (turn.role !== "user" && turn.role !== "assistant")) return "";
+	if (typeof turn.content === "string") return turn.content;
+	return turn.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text)
+		.join("");
+}
+
 describe("parseClaudeSession", () => {
 	let dir: string;
 
@@ -220,7 +229,7 @@ describe("extractClaudePreviewTurns", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	it("flattens non-sidechain user/assistant text turns in order, dropping wrappers, tool results, and title lines", async () => {
+	it("maps non-sidechain transcript messages in order, dropping wrappers and title lines", async () => {
 		const file = await write(dir, `${SID}.jsonl`, [
 			{ type: "ai-title", aiTitle: "A generated title", sessionId: SID },
 			userLine("<command-name>/execute</command-name>"),
@@ -233,14 +242,21 @@ describe("extractClaudePreviewTurns", () => {
 
 		const turns = await extractClaudePreviewTurns(file);
 
-		expect(turns).toEqual<SessionPreviewTurn[]>([
-			{ role: "user", text: "First question.", timestamp: "2026-08-20T10:00:00.000Z" },
-			{ role: "assistant", text: "First answer.", timestamp: "2026-08-20T10:00:05.000Z" },
-			{ role: "user", text: "Second question.", timestamp: "2026-08-20T10:01:00.000Z" },
+		expect(turns.map((turn) => ({ role: turn.role, timestamp: turn.timestamp }))).toEqual([
+			{ role: "user", timestamp: "2026-08-20T10:00:00.000Z" },
+			{ role: "assistant", timestamp: "2026-08-20T10:00:05.000Z" },
+			{ role: "toolResult", timestamp: "2026-08-20T10:00:00.000Z" },
+			{ role: "user", timestamp: "2026-08-20T10:01:00.000Z" },
+		]);
+		expect(turns.map((turn) => previewText(turn))).toEqual([
+			"First question.",
+			"First answer.",
+			"",
+			"Second question.",
 		]);
 	});
 
-	it("keeps only text blocks of an assistant turn, dropping thinking and tool_use", async () => {
+	it("retains thinking and tool-use blocks alongside assistant text", async () => {
 		const file = await write(dir, `${SID}.jsonl`, [
 			{
 				type: "assistant",
@@ -258,9 +274,16 @@ describe("extractClaudePreviewTurns", () => {
 
 		const turns = await extractClaudePreviewTurns(file);
 
-		expect(turns).toEqual<SessionPreviewTurn[]>([
-			{ role: "assistant", text: "The visible reply.", timestamp: "2026-08-20T10:00:05.000Z" },
-		]);
+		expect(turns).toHaveLength(1);
+		expect(turns[0]).toMatchObject({
+			role: "assistant",
+			content: [
+				{ type: "thinking" },
+				{ type: "toolCall", id: "t1", name: "Read" },
+				{ type: "text" },
+			],
+			timestamp: "2026-08-20T10:00:05.000Z",
+		});
 	});
 
 	it("carries no timestamp for a record without a string timestamp (OW-71)", async () => {
@@ -268,7 +291,7 @@ describe("extractClaudePreviewTurns", () => {
 
 		const turns = await extractClaudePreviewTurns(file);
 
-		expect(turns).toEqual<SessionPreviewTurn[]>([{ role: "user", text: "no time on me" }]);
+		expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 		expect(turns[0]).not.toHaveProperty("timestamp");
 	});
 
@@ -289,6 +312,6 @@ describe("extractClaudePreviewTurns", () => {
 
 		expect(turns.length).toBe(messageCount);
 		const late = turns[250];
-		expect(late?.text).toContain("turn-250");
+		expect(previewText(late)).toContain("turn-250");
 	});
 });

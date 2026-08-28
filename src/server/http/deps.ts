@@ -38,7 +38,7 @@ export interface SessionIndex {
 	/**
 	 * A read-only, non-attaching transcript preview for one stored session
 	 * (OW-38). Distinct from `get`: it reads the session's own JSONL and returns
-	 * its flattened text turns, spawning nothing. Like the rest of this seam it
+	 * its transcript messages, spawning nothing. Like the rest of this seam it
 	 * touches exactly the one session's file, never the whole corpus.
 	 */
 	preview(ref: SessionRef): Promise<SessionPreviewTurn[]>;
