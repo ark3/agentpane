@@ -97,34 +97,13 @@ is the contract, and `card author` and `card execute` carry the two procedures.
 Read those rather than a retelling; what follows is only what card cannot know
 about this repo.
 
-### Setting card up in a clone
-
-Card's config is per-clone and deliberately not synced, so a fresh clone has no
-deck until you write it — which is why the setup is documented here rather than
-left to whoever cloned. Every command below was run on the home server from a
-fresh clone on 2026-08-27:
-
-```
-git clone git@github.com:ark3/card.git ~/projects/card
-cd ~/projects/card && bun install
-ln -s ~/projects/card/src/card.ts ~/.local/bin/card
-```
-
-The symlink is how `card` gets onto `PATH`; point it wherever your `PATH`
-already reaches. Then, in the agentpane clone, hand-write
-`.git/card/card-config.toml` with exactly:
-
-```
-prefix = "OW"
-deck = "../../docs/work"
-public = true
-```
-
-`deck` resolves relative to `.git/card/`. `public = true` stands card's
-commit-lint gate down, which is what keeps citing `OW-` ids in commit subjects
-legal here. Verify with `card status`: it must name this clone's deck
-directory — `/home/ark3/projects/agentpane/docs/work` on the home server, the
-equivalent path elsewhere — and the open and closed counts.
+Card reads this deck through per-clone config that is deliberately not synced:
+`.git/card/card-config.toml`, exactly three lines — `prefix = "OW"`,
+`deck = "../../docs/work"` (resolved relative to `.git/card/`), and
+`public = true`, which stands card's commit-lint gate down and is what keeps
+citing `OW-` ids in commit subjects legal here. Writing that file, like
+installing card or Bun, is the owner's provisioning of a machine, not any
+session's work.
 
 ### Labels
 
