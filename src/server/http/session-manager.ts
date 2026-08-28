@@ -404,6 +404,15 @@ export class SessionManager {
 			// A snapshot carries isStreaming, so no separate status event.
 			this.broadcaster.broadcastSnapshot(session.ref);
 		}
+
+		// The session list sorts on `updatedAt`, which only a re-list carries, so
+		// without this the order never moves until someone presses Refresh
+		// (OW-furinu). Turn boundaries are the affordable place to say so: two
+		// events per turn, not one per token, which is what keeps the client's
+		// sort off the streaming path (OW-jineli). The backend writes its own
+		// file, so the start-side re-list may still read a timestamp from before
+		// the turn; the end-side one always sees the turn's last write.
+		if (streamingChanged) this.broadcaster.sessionsChanged();
 	}
 
 	/** Mark a virtual session as materialised. Called on the first prompt (D9). */

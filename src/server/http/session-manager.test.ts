@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { type SessionRef, sessionKey } from "../../shared/protocol.ts";
+import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
@@ -446,5 +446,41 @@ describe("teardown racing a startup", () => {
 		expect(flaky.created[0]?.disposals).toBe(1);
 		expect(sessions.isAttached(ref)).toBe(false);
 		expect(sessions.liveRefs()).toEqual([]);
+	});
+});
+
+/**
+ * OW-furinu. The list's order is `updatedAt`, which only a re-list carries, so
+ * the turn boundaries have to say so. Two per turn -- deliberately not one per
+ * token, which would put the whole corpus back through the sort on every
+ * streaming frame (OW-jineli).
+ */
+describe("turn boundaries", () => {
+	function collectEvents(): ServerEvent[] {
+		const events: ServerEvent[] = [];
+		broadcaster.addClient((chunk) => {
+			for (const line of chunk.split("\n")) {
+				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+			}
+		});
+		return events;
+	}
+
+	it("relist the session list at both ends of a turn, and not per token", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+
+		adapter.append(userMessage("hello"));
+		adapter.setStreaming(true);
+		adapter.streamToken("a");
+		adapter.streamToken("b");
+
+		expect(events.filter((event) => event.type === "sessions-changed")).toHaveLength(1);
+
+		adapter.setStreaming(false);
+
+		expect(events.filter((event) => event.type === "sessions-changed")).toHaveLength(2);
 	});
 });
