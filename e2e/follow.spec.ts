@@ -71,21 +71,24 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 	// a genuinely scrollable transcript, with a deliberately slow body phase
 	// that keeps the turn live through both reading-view toggles.
 	await page.evaluate(() => {
-		window.harness.seed(24);
+		window.harness.seed(24, true);
 		window.harness.pace(160, 12);
 	});
 	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
 
+	const lastSeededUser = await page.evaluate(() => window.harness.lastUserIndex());
 	await page.getByLabel("Prompt").fill("a paced turn keeps its landmark through reading view");
 	await page.getByRole("button", { name: "Send" }).click();
-	await expect(page.locator('[data-block="thinking"]')).toBeVisible();
-	await expect(page.locator('[data-tool="bash"]')).toBeVisible();
+	await page.waitForFunction((index) => window.harness.lastUserIndex() > index, lastSeededUser);
 
 	// `lastUserIndex` is the original message-array position, rather than a
 	// rendered-entry ordinal. Reading view removes several surrounding entries,
 	// so a rewritten index would select a different node (or none at all).
 	const anchorIndex = await page.evaluate(() => window.harness.lastUserIndex());
 	const anchor = page.locator(`[data-role="user"][data-index="${anchorIndex}"]`);
+	const streamedTurn = page.locator(`[data-role="assistant"][data-index="${anchorIndex + 1}"]`);
+	await expect(streamedTurn.locator('[data-block="thinking"]')).toBeVisible();
+	await expect(streamedTurn.locator('[data-tool="bash"]')).toBeVisible();
 	await expect(anchor).toBeVisible();
 
 	const reading = page.getByRole("button", { name: "Reading view", exact: true });
@@ -105,8 +108,8 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 	await expect(transcript).toHaveAttribute("aria-busy", "true");
 	await reading.click();
 	await expect(reading).toHaveAttribute("aria-pressed", "false");
-	await expect(page.locator('[data-block="thinking"]')).toBeVisible();
-	await expect(page.locator('[data-tool="bash"]')).toBeVisible();
+	await expect(streamedTurn.locator('[data-block="thinking"]')).toBeVisible();
+	await expect(streamedTurn.locator('[data-tool="bash"]')).toBeVisible();
 	await expect(anchor).toBeVisible();
 	const afterRestore = await page.evaluate(async (index) => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -119,6 +122,35 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 	expect(anchorOffset, "the submitted prompt disappeared after the reading-view toggles").not.toBeNull();
 	expect(Math.abs(anchorOffset!), "reading-view height changes disengaged follow")
 		.toBeLessThanOrEqual(LOCKED_PX);
+});
+
+/** A real, fine-grained reader scroll must still win over follow mode (OW-56). */
+test("a one-pixel manual scroll near the bottom disengages follow", async ({ page }) => {
+	test.setTimeout(120_000);
+	await page.goto("/e2e/harness.html");
+
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	await page.evaluate(() => {
+		window.harness.seed(24);
+		window.harness.pace(4, 1_000);
+	});
+
+	await page.getByLabel("Prompt").fill("a real reader scroll overrides follow");
+	await page.getByRole("button", { name: "Send" }).click();
+	await expect(page.locator('[data-tool="bash"]')).toBeVisible({ timeout: 10_000 });
+	await expect(page.locator('[role="log"]')).toHaveAttribute("aria-busy", "true");
+
+	const before = await page.evaluate(() => window.harness.metrics(window.harness.lastUserIndex()));
+	const manual = await page.evaluate(() => {
+		const pane = document.querySelector<HTMLElement>(".conversation")!;
+		pane.scrollTop -= 1;
+		return window.harness.metrics(window.harness.lastUserIndex());
+	});
+	expect(before.scrollTop - manual.scrollTop).toBe(1);
+	await page.evaluate(() => window.harness.settled());
+	const after = await page.evaluate(() => window.harness.metrics(window.harness.lastUserIndex()));
+	expect(after.scrollTop, "follow overrode the reader's small manual scroll").toBeCloseTo(manual.scrollTop, 0);
 });
 
 /**

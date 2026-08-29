@@ -84,6 +84,8 @@
 	interface SessionScroll {
 		/** Last scrollTop, restored when switching back to a session that is not following. */
 		top: number;
+		/** Scroll height from the last follow reconciliation. */
+		height: number;
 		anchorIndex: number | null;
 		/**
 		 * Whether `isStreaming` has read true at least once since `anchorIndex`
@@ -424,6 +426,7 @@
 				// Remember the position we selected, so a later height *shrink*
 				// can be distinguished from the reader scrolling by hand below.
 				state.top = el.scrollTop;
+				state.height = el.scrollHeight;
 			}
 		}
 		updateNavState(el);
@@ -456,15 +459,26 @@
 		const ref = view.state.selected;
 		if (!el || !ref) return;
 		const key = sessionKey(ref);
-		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
-		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NAV_SLACK_PX;
+		const state = sessionScroll.get(key) ?? {
+			top: 0,
+			height: el.scrollHeight,
+			anchorIndex: null,
+			hasStreamed: false,
+		};
+		const bottom = el.scrollHeight - el.clientHeight;
 		// A transcript can shrink while the stream is live: thinking collapses
 		// around a tool call, and Reading view elides that same chrome. Chromium
 		// clamps a too-large scrollTop to the new bottom and fires `scroll` for
 		// it. That is not a manual reading action, so keep following; later
 		// streamed content will grow the pane back past the saved landmark.
-		if (state.anchorIndex !== null && atBottom && el.scrollTop < state.top) {
+		if (
+			state.anchorIndex !== null &&
+			el.scrollHeight < state.height &&
+			state.top > bottom &&
+			el.scrollTop === bottom
+		) {
 			state.top = el.scrollTop;
+			state.height = el.scrollHeight;
 			sessionScroll.set(key, state);
 			updateNavState(el);
 			return;
@@ -495,7 +509,12 @@
 			target = anchorTop(el, node);
 		}
 		const key = sessionKey(ref);
-		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+		const state = sessionScroll.get(key) ?? {
+			top: 0,
+			height: el.scrollHeight,
+			anchorIndex: null,
+			hasStreamed: false,
+		};
 		state.anchorIndex = null;
 		applyScrollTop(el, target);
 		// `applyScrollTop` suppresses the scroll handler, so this is the only
@@ -600,7 +619,12 @@
 		if (pendingFrom !== undefined) {
 			for (let i = messages.length - 1; i >= pendingFrom; i--) {
 				if (messages[i]?.role === "user") {
-					const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+					const state = sessionScroll.get(key) ?? {
+						top: 0,
+						height: conversationEl?.scrollHeight ?? 0,
+						anchorIndex: null,
+						hasStreamed: false,
+					};
 					state.anchorIndex = i;
 					state.hasStreamed = streaming;
 					sessionScroll.set(key, state);
