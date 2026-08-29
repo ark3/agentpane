@@ -27,7 +27,7 @@ test("a long conversation autoscrolls on every turn the way its first few do", a
 	test.setTimeout(120_000);
 	await page.goto("/e2e/harness.html");
 
-	await page.getByRole("button", { name: "Attach" }).click();
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
 	await expect(page.getByLabel("Prompt")).toBeVisible();
 
 	// Long enough that every turn below starts far down a tall transcript.
@@ -68,7 +68,7 @@ test("the nav rail stays put while the transcript scrolls under it, and steps be
 	test.setTimeout(120_000);
 	await page.goto("/e2e/harness.html");
 
-	await page.getByRole("button", { name: "Attach" }).click();
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
 	await expect(page.getByLabel("Prompt")).toBeVisible();
 	// `seed(n)` writes user/assistant pairs, so user turns are the even indices.
 	await page.evaluate(() => window.harness.seed(20));

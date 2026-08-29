@@ -24,7 +24,7 @@ declare global {
 test("the edit control rides the block action row, and its banner sits above the composer", async ({ page }) => {
 	await page.goto("/e2e/harness.html");
 
-	await page.getByRole("button", { name: "Attach" }).click();
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
 	await expect(page.getByLabel("Prompt")).toBeVisible();
 	await page.evaluate(() => window.harness.seed(2));
 

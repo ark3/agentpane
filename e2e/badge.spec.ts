@@ -33,7 +33,7 @@ test("a turn finishing unfocused badges the icon, and focus clears it", async ({
 	await page.goto("/e2e/harness.html");
 	await page.evaluate(({ chunks, ms }) => window.harness.pace(chunks, ms), SLOW_TURN);
 
-	await page.getByRole("button", { name: "Attach" }).click();
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
 	await expect(page.getByLabel("Prompt")).toBeVisible();
 
 	// `harness.html` declares no icon at all, so this element exists only

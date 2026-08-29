@@ -18,7 +18,7 @@ import { expect, test } from "@playwright/test";
 test("the composer's tools menu light-dismisses and sits at the left of the action row", async ({ page }) => {
 	await page.goto("/e2e/harness.html");
 
-	await page.getByRole("button", { name: "Attach" }).click();
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
 	await expect(page.getByLabel("Prompt")).toBeVisible();
 
 	const tools = page.locator(".prompt-actions").getByText("Tools", { exact: true });
