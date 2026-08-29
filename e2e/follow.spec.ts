@@ -57,6 +57,71 @@ test("a long conversation autoscrolls on every turn the way its first few do", a
 });
 
 /**
+ * Reading view changes the mounted transcript while a follow-armed turn is
+ * still streaming. Its elisions must not renumber the submitted prompt or let
+ * the browser's resize/scroll sequence disarm the anchor (OW-56).
+ */
+test("reading view keeps a streaming turn's original follow anchor locked", async ({ page }) => {
+	test.setTimeout(120_000);
+	await page.goto("/e2e/harness.html");
+
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	// Enough completed turns that the submitted prompt has to be followed into
+	// a genuinely scrollable transcript, with a deliberately slow body phase
+	// that keeps the turn live through both reading-view toggles.
+	await page.evaluate(() => {
+		window.harness.seed(24);
+		window.harness.pace(160, 12);
+	});
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
+
+	await page.getByLabel("Prompt").fill("a paced turn keeps its landmark through reading view");
+	await page.getByRole("button", { name: "Send" }).click();
+	await expect(page.locator('[data-block="thinking"]')).toBeVisible();
+	await expect(page.locator('[data-tool="bash"]')).toBeVisible();
+
+	// `lastUserIndex` is the original message-array position, rather than a
+	// rendered-entry ordinal. Reading view removes several surrounding entries,
+	// so a rewritten index would select a different node (or none at all).
+	const anchorIndex = await page.evaluate(() => window.harness.lastUserIndex());
+	const anchor = page.locator(`[data-role="user"][data-index="${anchorIndex}"]`);
+	await expect(anchor).toBeVisible();
+
+	const reading = page.getByRole("button", { name: "Reading view", exact: true });
+	const transcript = page.locator('[role="log"]');
+	await expect(transcript).toHaveAttribute("aria-busy", "true");
+	await reading.click();
+	await expect(reading).toHaveAttribute("aria-pressed", "true");
+	await expect(page.locator('[data-block="thinking"]')).toHaveCount(0);
+	await expect(page.locator('[data-tool="bash"]')).toHaveCount(0);
+	await expect(anchor).toBeVisible();
+	const afterCondense = await page.evaluate(async (index) => {
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		return window.harness.metrics(index);
+	}, anchorIndex);
+	expect(afterCondense.anchorOffset).not.toBeNull();
+
+	await expect(transcript).toHaveAttribute("aria-busy", "true");
+	await reading.click();
+	await expect(reading).toHaveAttribute("aria-pressed", "false");
+	await expect(page.locator('[data-block="thinking"]')).toBeVisible();
+	await expect(page.locator('[data-tool="bash"]')).toBeVisible();
+	await expect(anchor).toBeVisible();
+	const afterRestore = await page.evaluate(async (index) => {
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		return window.harness.metrics(index);
+	}, anchorIndex);
+	expect(afterRestore.anchorOffset).not.toBeNull();
+
+	await page.evaluate(() => window.harness.settled());
+	const { anchorOffset } = await page.evaluate((index) => window.harness.metrics(index), anchorIndex);
+	expect(anchorOffset, "the submitted prompt disappeared after the reading-view toggles").not.toBeNull();
+	expect(Math.abs(anchorOffset!), "reading-view height changes disengaged follow")
+		.toBeLessThanOrEqual(LOCKED_PX);
+});
+
+/**
  * The nav rail (OW-60). Two of the three claims here are unavailable to jsdom:
  * that the control does not move when the transcript scrolls under it -- the
  * whole defect it replaces -- and that its jumps land a user turn flush on the

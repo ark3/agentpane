@@ -421,6 +421,9 @@
 			if (anchorEl) {
 				const bottom = el.scrollHeight - el.clientHeight;
 				applyScrollTop(el, Math.min(bottom, anchorTop(el, anchorEl)));
+				// Remember the position we selected, so a later height *shrink*
+				// can be distinguished from the reader scrolling by hand below.
+				state.top = el.scrollTop;
 			}
 		}
 		updateNavState(el);
@@ -454,6 +457,18 @@
 		if (!el || !ref) return;
 		const key = sessionKey(ref);
 		const state = sessionScroll.get(key) ?? { top: 0, anchorIndex: null, hasStreamed: false };
+		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NAV_SLACK_PX;
+		// A transcript can shrink while the stream is live: thinking collapses
+		// around a tool call, and Reading view elides that same chrome. Chromium
+		// clamps a too-large scrollTop to the new bottom and fires `scroll` for
+		// it. That is not a manual reading action, so keep following; later
+		// streamed content will grow the pane back past the saved landmark.
+		if (state.anchorIndex !== null && atBottom && el.scrollTop < state.top) {
+			state.top = el.scrollTop;
+			sessionScroll.set(key, state);
+			updateNavState(el);
+			return;
+		}
 		state.top = el.scrollTop;
 		state.anchorIndex = null; // a manual scroll always disengages follow
 		sessionScroll.set(key, state);
