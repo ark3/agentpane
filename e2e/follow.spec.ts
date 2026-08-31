@@ -56,6 +56,46 @@ test("a long conversation autoscrolls on every turn the way its first few do", a
 	}
 });
 
+test("rapid app-driven scrolls do not masquerade as a reader scroll", async ({ page }) => {
+	test.setTimeout(120_000);
+	await page.goto("/e2e/harness.html");
+
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	await page.evaluate(() => window.harness.seed(40));
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
+	await page.getByRole("button", { name: "Jump to end" }).click();
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeDisabled();
+	await page.evaluate(() => window.harness.pace(100, 1));
+	await page.getByLabel("Prompt").fill("overlapping scroll events keep following");
+
+	// Reproduce two app-driven assignments before the first native event reaches
+	// App's scroll handler. The capture listener runs at the start of the first
+	// event's delivery: its end jump performs the second assignment, then the
+	// submit arms follow, and only then does that first event reach App. A single
+	// suppression boolean consumes it and leaves the second event looking manual.
+	await page.evaluate(() => {
+		const pane = document.querySelector<HTMLElement>(".conversation")!;
+		pane.addEventListener(
+			"scroll",
+			() => {
+				(document.querySelector('button[aria-label="Jump to end"]') as HTMLButtonElement).click();
+				(document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+			},
+			{ capture: true, once: true },
+		);
+	});
+	await page.getByRole("button", { name: "Jump to start" }).click();
+	await expect(page.locator('[role="log"]')).toHaveAttribute("aria-busy", "true");
+	await page.evaluate(() => window.harness.settled());
+	const { anchorOffset } = await page.evaluate(() =>
+		window.harness.metrics(window.harness.lastUserIndex()),
+	);
+	expect(anchorOffset).not.toBeNull();
+	expect(Math.abs(anchorOffset!), "a delayed programmatic scroll event disengaged follow")
+		.toBeLessThanOrEqual(LOCKED_PX);
+});
+
 /**
  * Reading view changes the mounted transcript while a follow-armed turn is
  * still streaming. Its elisions must not renumber the submitted prompt or let

@@ -116,7 +116,8 @@
 	 */
 	let turnWatch = emptyTurnWatch();
 	let lastScrollKey: string | null = null;
-	let suppressScrollHandling = false;
+	/** Native scroll delivery is async, so more than one app-driven move can be outstanding at once. */
+	let pendingProgrammaticScrolls = 0;
 	let followFrame: number | null = null;
 	/**
 	 * Which right-rail segments are inert (OW-60). The rail itself is always
@@ -323,7 +324,7 @@
 		// no-op guard below is only sound if the assignment that follows it
 		// actually moves. The browser clamps to that range regardless, so an
 		// over-range value can pass the guard, change nothing, and fire no
-		// `scroll` event -- stranding `suppressScrollHandling` armed for an event
+		// `scroll` event -- stranding a pending suppression for an event
 		// that never comes, which then swallows the reader's next genuine scroll.
 		// Measured in a real browser (OW-60): the session-switch effect below
 		// runs `applyScrollTop(el, el.scrollHeight)`, which is always a full
@@ -333,10 +334,10 @@
 		const clamped = Math.max(0, Math.min(value, el.scrollHeight - el.clientHeight));
 		// No-op guard matters here: assigning scrollTop fires a native `scroll`
 		// event even when the value does not change, which would arm the
-		// suppress flag for an event that may never come (or that arrives late
+		// pending suppression for an event that may never come (or that arrives late
 		// and swallows a genuine later user scroll).
 		if (el.scrollTop === clamped) return;
-		suppressScrollHandling = true;
+		pendingProgrammaticScrolls += 1;
 		el.scrollTop = clamped;
 	}
 
@@ -451,8 +452,8 @@
 	}
 
 	function handleConversationScroll(): void {
-		if (suppressScrollHandling) {
-			suppressScrollHandling = false;
+		if (pendingProgrammaticScrolls > 0) {
+			pendingProgrammaticScrolls -= 1;
 			return;
 		}
 		const el = conversationEl;
