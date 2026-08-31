@@ -116,8 +116,13 @@
 	 */
 	let turnWatch = emptyTurnWatch();
 	let lastScrollKey: string | null = null;
-	/** Native scroll delivery is async, so more than one app-driven move can be outstanding at once. */
-	let pendingProgrammaticScrolls = 0;
+	/**
+	 * The last app-selected position awaiting native event delivery. Assignments
+	 * made before delivery coalesce to their final position in Chromium (OW-48).
+	 */
+	let pendingProgrammaticScrollTop: number | null = null;
+	/** Events classified before a later capture listener can move the pane again. */
+	const programmaticScrollEvents = new WeakSet<Event>();
 	let followFrame: number | null = null;
 	/**
 	 * Which right-rail segments are inert (OW-60). The rail itself is always
@@ -336,9 +341,12 @@
 		// event even when the value does not change, which would arm the
 		// pending suppression for an event that may never come (or that arrives late
 		// and swallows a genuine later user scroll).
-		if (el.scrollTop === clamped) return;
-		pendingProgrammaticScrolls += 1;
+		const before = el.scrollTop;
+		if (before === clamped) return;
 		el.scrollTop = clamped;
+		// Read back the browser's real (possibly sub-pixel-quantised) position.
+		// If it did not move, no event is owed and no suppression may be queued.
+		pendingProgrammaticScrollTop = el.scrollTop !== before ? el.scrollTop : null;
 	}
 
 	/**
@@ -451,11 +459,18 @@
 		}
 	}
 
-	function handleConversationScroll(): void {
-		if (pendingProgrammaticScrolls > 0) {
-			pendingProgrammaticScrolls -= 1;
-			return;
+	function classifyConversationScroll(event: Event): void {
+		const el = conversationEl;
+		if (!el) return;
+		const programmedTop = pendingProgrammaticScrollTop;
+		pendingProgrammaticScrollTop = null;
+		if (programmedTop !== null && el.scrollTop === programmedTop) {
+			programmaticScrollEvents.add(event);
 		}
+	}
+
+	function handleConversationScroll(event: Event): void {
+		if (programmaticScrollEvents.delete(event)) return;
 		const el = conversationEl;
 		const ref = view.state.selected;
 		if (!el || !ref) return;
@@ -968,7 +983,13 @@
 		<p class="warning">Unsupported agent request pending.</p>
 	{/if}
 
-	<section class="conversation" aria-label="Conversation" bind:this={conversationEl} onscroll={handleConversationScroll}>
+	<section
+		class="conversation"
+		aria-label="Conversation"
+		bind:this={conversationEl}
+		onscrollcapture={classifyConversationScroll}
+		onscroll={handleConversationScroll}
+	>
 		{#if previewing}
 			<!-- Read-only and non-attaching (OW-38/OW-39), but structurally the same
 			     transcript as the live path. No `onedit` keeps it read-only. -->
