@@ -11,13 +11,16 @@ written through the `card` CLI — see "Cards" below, and run `card status`.
 touching `src/`; say so explicitly when a commit is docs only.
 
 `bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless
-Chromium). It is **not** part of `bun run check` — it needs a browser, so
-nothing runs it for you (OW-49). Run it by hand when you touch follow-mode
-scrolling in `App.svelte`, `.conversation` in `app.css`, the composer's action
-row, the message footer rows in `src/client/render/`, or anything under
-`public/`; jsdom cannot see layout, scroll anchoring, real scroll-event timing,
-or the Popover API, none of which it implements, and nothing in the module
-graph imports the favicons at all.
+Chromium). It is **not** part of `bun run check`, which stays fast and
+browser-free (OW-49); `.github/workflows/ci.yml` runs it instead as a sibling
+job on every push to `main` and every pull request. That job is a backstop
+after the push, never a substitute for the local run: run it by hand before
+committing when you touch follow-mode scrolling in `App.svelte`,
+`.conversation` in `app.css`, the composer's action row, the message footer
+rows in `src/client/render/`, or anything under `public/`; jsdom cannot see
+layout, scroll anchoring, real scroll-event timing, or the Popover API, none of
+which it implements, and nothing in the module graph imports the favicons at
+all.
 
 That vehicle cannot report a page as unfocused: it drives
 `chromium-headless-shell`, which answers `document.hasFocus() === true`
