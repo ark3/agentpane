@@ -89,8 +89,14 @@ Read those cards for their content and the payload for their form.
 ### Labels
 
 Card treats labels as opaque strings and cannot know this repo's set.
-Every card carries exactly one kind, given to `card new --label`: `change`, `defect`, `deferral`, `question`, `unverified`.
-`docs/TRACKING.md`'s five-kind legend remains the definition of what each one means.
+Every card carries exactly one kind, given to `card new --label`:
+
+- `change` — a deliberate change to behaviour or presentation, including a new feature, that nobody considers broken today.
+- `defect` — behaviour observed or read as broken, with no dependency on leaving it that way.
+- `deferral` — a finding judged not worth blocking current work on.
+- `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
+- `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
+
 Two cross-cutting labels may follow that kind.
 `work-laptop` gates live Pi evidence to the machine described under "Evidence".
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.

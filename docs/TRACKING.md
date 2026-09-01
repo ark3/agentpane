@@ -12,14 +12,11 @@ got them there.
 > Card's per-clone redirect config exists because the corpus stayed exactly
 > where this document put it.
 >
-> What survives, and how. **`kind:` lives on as a label** — the five-kind
-> legend in "The format: Maildir-shaped work items" remains the definition of
-> the label set, and it is the one part of this document still normative.
-> **Superseded**: the survey commands in "Staying greppable" and the `python3`
-> id generator in "Ids are drawn at random", by `card list` and `card new`.
-> **Answered**: "Tooling, which is a separate item" — OW-59 closed, and the
-> tool was built as `card`, in its own repository rather than as `ow` in this
-> one.
+> No part of this document is normative now.
+> **`kind:` lives on as a label**, but the five-kind definitions have moved to `AGENTS.md`, "Labels", where authors load them.
+> The version in "The format: Maildir-shaped work items" remains as part of the migration record.
+> **Superseded**: the survey commands in "Staying greppable" and the `python3` id generator in "Ids are drawn at random", by `card list` and `card new`.
+> **Answered**: "Tooling, which is a separate item" — OW-59 closed, and the tool was built as `card`, in its own repository rather than as `ow` in this one.
 >
 > The dated blocks below stand as written. **Parts of this document were
 > already outdated as of 2026-08-17**: the migration it proposes **has
