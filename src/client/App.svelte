@@ -489,7 +489,7 @@
 		// streamed content will grow the pane back past the saved landmark.
 		if (
 			state.anchorIndex !== null &&
-			el.scrollHeight < state.height &&
+			el.scrollHeight > state.height && // SABOTAGE (OW-bafeja): inverted; revert before merge
 			state.top > bottom &&
 			el.scrollTop === bottom
 		) {
