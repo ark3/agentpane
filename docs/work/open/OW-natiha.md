@@ -17,8 +17,13 @@ Use the committed compact fixtures to ground the backend boundaries: Pi has `com
 A successful terminal transition must agree with the appearance of the `compactionSummary` marker rather than with the POST response.
 A backend error must terminate the state and continue through the existing visible error path.
 Carry the operation state through `AdapterState`, the session manager and the multiplexed server protocol so a reconnecting client receives the truth in a snapshot instead of reconstructing it from local timing.
-`src/server/adapters/types.ts` opens by calling the adapter contract a `FROZEN INTERFACE` and asking that a change be raised before it is made, and extending `AdapterState` is exactly that change.
-Settle its shape with the owner before dispatching an implementer.
+`src/server/adapters/types.ts` opens by calling the adapter contract a `FROZEN INTERFACE` and asking that a change be raised before it is made, and extending `AdapterState` is exactly that change; the owner settled its shape on 2026-09-01, as follows.
+`AdapterState` gains one field, `compaction: "requesting" | "running" | null` — a bare enum, not an object, because nothing consumes a payload and there is no cancel.
+Terminal is the return to `null`: success and failure already travel on the `compactionSummary` marker and the existing error event, so no terminal value is stored.
+The field is required, not optional, so every construction site in the three adapters gets a type error and must say something rather than defaulting to idle by omission.
+On the wire, `compaction` rides the two `ServerEvent` arms that already carry `isStreaming` — `snapshot` and `status` — and nowhere else; it does not join `SessionSummary`, because the gating concerns the selected session, not the session list.
+Each adapter's `compact()` sets `requesting` and fires `onUpdate` before sending the backend command, and clears it before rethrowing if the send fails, so the adapter stays the single owner of the state and the session manager stays a pure broadcaster.
+The reducers own `requesting → running` and the clear, and they clear `compaction` in the same update that appends the `compactionSummary` marker, which makes the terminal transition agree with the marker structurally rather than by timing.
 Keep the state per session because another attached session can update while the user is looking elsewhere.
 Do not represent compaction as ordinary `isStreaming`: compaction is not a user-stoppable generation turn, even where Codex or Claude exposes it through generic active-turn signals.
 The generic signals do make the composer offer Stop today, on two of the three backends; see the next section for where they come from.
@@ -31,6 +36,8 @@ Claude reaches the same place: `resources/fixtures/claude/compact.jsonl` carries
 Pi does not, because the arm of `src/server/adapters/pi/reducer.ts` commented `queue_update/compaction_start/auto_retry_start/summarization_* are` gives `compaction_start` no effect on `isStreaming`.
 So `App.svelte` shows both the `Stop` button and the `Stop and edit` label during a compaction on Codex and Claude and neither on Pi.
 Those reducers are reporting their backends' wire truth rather than misreading it, so the asymmetry is only removable once compaction is separately known, which is what this card builds.
+The owner settled how (2026-09-01): the reducers keep reporting wire truth on both fields, and the client gives `compaction` precedence in the action row — while it is non-null the composer shows the compacting status and no Stop, whatever `isStreaming` says.
+The asymmetry therefore survives on the wire and dies at the rendering; do not suppress the generic active-turn signals in the reducers, where an unseen event ordering could eat a real turn.
 OW-81 recorded the Codex half of this from a live run without the fixture behind it.
 
 ## Compaction the user did not invoke
