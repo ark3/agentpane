@@ -36,3 +36,10 @@ A controller test resolves `api.compact()` before any backend lifecycle update a
 An `App.test.ts` test asserts that the composer acknowledgment survives request resolution, Compact and Send or Fork cannot fire during it, no compaction Stop control appears, and the acknowledgment clears when the marker-backed terminal update arrives.
 The behavior-changing tests are watched red against the current request-scoped implementation before the fix.
 Because this changes the composer action row, `bun run test:browser` covers its visible placement without horizontal overflow and is run locally alongside `bun run check`.
+
+Implemented in e0bbc16 (composer half) and 09b3132 (review fix): the composer now renders the per-session `compaction` field the server feeds over `snapshot` and `status`, so the acknowledgment survives request admission, reconnection, and backend-initiated compactions.
+A `role="status"` live text ("Compaction requested…" then "Compacting context…") sits beside Tools in `.prompt-actions` until the marker-backed terminal update or error clears it; Compact, Send, Fork, and their keyboard paths cannot start work while compaction is requesting or running; and compaction takes precedence over `isStreaming`, so no Stop, "Stop and edit", or "Stop and fork" control appears during one.
+The controller marks the selected session "requesting" at the click, clears it only on a rejected POST — through a D9 rename tracker, after the adversarial review caught the click-time key going stale mid-flight — and otherwise lets server events own the field.
+Verified by two controller tests, three App tests, and a new e2e spec (popover-close survival, placement beside Tools, zero horizontal overflow), every behavior-changing one watched red first; `bun run check` (886 tests) and `bun run test:browser` (12 specs) green on main after landing.
+An implementation finding: a menu button disabled synchronously in its own click skips its declarative `popovertarget` hide in Chromium, so `compactSession` closes the Tools popover by hand — the why is in its docblock.
+Two accepted residual races around the optimistic requesting mark are OW-husivu.
