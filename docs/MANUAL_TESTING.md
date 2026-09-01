@@ -1162,6 +1162,52 @@ end-side re-list always reads the turn's last write, so the reorder is
 tempted to halve the emit should halve it the other way, or reorder on
 something other than the backend's mtime.
 
+## Observed the CI browser job gating what `check` cannot (OW-bafeja)
+
+`.github/workflows/ci.yml` gained a `browser` job running `bun run test:browser`
+as a sibling of `check`. Proved on PR #2 with a deliberate regression, because a
+Playwright job that cannot find its browser fails only on the runner and reading
+the YAML settles nothing.
+
+The sabotage inverted OW-56's shrink-correlation clause in
+`handleConversationScroll` (`src/client/App.svelte`), so a Chromium bottom clamp
+reads as a reader scroll again. It never reached `main`; it lived on
+`card/OW-bafeja` and was reverted there.
+
+| run | head | `check` | `browser` |
+| --- | --- | --- | --- |
+| [33522979724](https://github.com/ark3/agentpane/actions/runs/33522979724) | `1c51bde`, sabotaged | success, 42 s | **failure**, at `Run bun run test:browser` |
+| [33524663956](https://github.com/ark3/agentpane/actions/runs/33524663956) | `fcc7c53`, reverted | success, 42 s | success, 95 s |
+
+**The gate is real.** One commit, one runner, `check` green while `browser` went
+red. That is the whole claim the job exists to make, and no arrangement of unit
+tests can make it.
+
+**The runner reproduced the local run test-for-test.** Four failures — the three
+follow-mode specs plus the nav-rail spec — and seven passes, identical to
+`bun run test:browser` on the home server, with the same `turn 0 stopped
+247.8px from the top` deviation OW-56 recorded when it first found the defect.
+
+**Font metrics did not flake, though they were the thing to watch.**
+`e2e/composer-shortcut.spec.ts` and `e2e/footer-row.spec.ts` assert on
+glyph-driven layout at 900x700, and `ui-sans-serif` resolves through fontconfig
+differently on a bare `ubuntu-latest` than on Manjaro. Both passed on the
+runner, red run and green. `--with-deps` installs Playwright's font packages,
+which is apparently enough; anyone adding a layout assertion should still treat
+this as observed-once, not guaranteed.
+
+**Chromium is downloaded per run and that is fine.** The whole `browser` job is
+95 s including `bunx playwright install --with-deps chromium`, against 42 s for
+`check`. No `actions/cache` was added; at 11 tests it would buy nothing worth
+the staleness.
+
+Reading CI from an agent session needs no credentials: run and per-step
+conclusions come from `https://api.github.com/repos/ark3/agentpane/actions/runs`
+and `.../runs/<id>/jobs` unauthenticated, because the repo is public. Job *logs*
+do not — `/runs/<id>/logs` returns 403 without a token — so a surprising red
+still needs a human to paste the output. Unauthenticated calls are capped at 60
+per hour per IP, so check on a beat rather than polling.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
