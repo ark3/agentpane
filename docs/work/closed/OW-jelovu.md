@@ -40,3 +40,9 @@ An HTTP or protocol test demonstrates that an admitted compact POST does not mea
 A reducer test drives Pi's `compaction_start` with `reason: "threshold"` and asserts the same running transition a manual one produces, with no requesting state ahead of it.
 Any test whose assertion the current code could already satisfy is watched red against it first.
 `bun run check` passes; no browser run is needed here, because the composer changes stay in OW-natiha.
+
+Implemented required per-session compaction state for Pi, Claude, and Codex from request admission through backend running and terminal clear, and carried it through snapshots and status events without adding it to SessionSummary.
+Successful completion now broadcasts the compaction marker and idle state atomically, command-send failures clear before rejection, backend errors retain their visible error path, backend-initiated compactions enter running, and interrupted Codex compact turns cannot remain stuck.
+Fixture, adapter, HTTP reconnect, and terminal-edge tests were observed red before their fixes and pass afterward.
+`bun run check` passed on main with 47 test files and 880 tests; no browser run was needed because this card did not change the composer or browser layout.
+Landed in 2ee32d9 and e6e4ba7.
