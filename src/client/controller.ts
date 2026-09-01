@@ -523,6 +523,14 @@ export function createController(
 				publish({ error: "Select a session before compacting." });
 				return;
 			}
+			// Same rename hazard `submit` above carries (D9): the reducer moves the
+			// requesting mark to the re-keyed session, so the failure path below has
+			// to clear it there, not under the click-time key -- which is gone.
+			let ref = selected;
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) === sessionKey(ref)) ref = to;
+			};
+			renameListeners.add(onRename);
 			// The session reads "requesting" from the click itself rather than from
 			// the server: its own "requesting" status races the POST response (D2),
 			// and the composer needs the acknowledgment either way (OW-natiha).
@@ -539,13 +547,14 @@ export function createController(
 				if (!disposed) {
 					// Failed admission: nothing is running unless a server event has
 					// since said otherwise, so only a still-"requesting" mark clears.
-					const current = view.state.sessions[sessionKey(selected)]?.compaction;
+					const current = view.state.sessions[sessionKey(ref)]?.compaction;
 					const state = current === "requesting"
-						? setSessionCompaction(view.state, selected, null)
+						? setSessionCompaction(view.state, ref, null)
 						: view.state;
 					publish({ error: errorMessage(error), state });
 				}
 			} finally {
+				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
 			}
 		},

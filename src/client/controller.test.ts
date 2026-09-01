@@ -463,6 +463,29 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
 	});
 
+	it("clears the requesting mark on failure through a mid-flight rename (OW-natiha)", async () => {
+		const api = new FakeApi();
+		const compacting = deferred<void>();
+		api.compact.mockReturnValue(compacting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+
+		const compacted = controller.compact();
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+
+		// The server re-keys the session while the POST is in flight (D9): the
+		// reducer carries the requesting mark to the new key and drops the old.
+		api.emit({ type: "renamed", session: attachedRef, seq: 2, from: ref });
+
+		compacting.reject(new Error("compaction refused"));
+		await compacted;
+
+		expect(controller.getView().error).toBe("compaction refused");
+		expect(controller.getView().state.sessions["pi:/sessions/a.jsonl"]?.compaction).toBeNull();
+	});
+
 	/**
 	 * OW-hezidi. The fork point is addressed by *ordinal* among user messages --
 	 * `GET fork-points` returns one point per user message in transcript order --
