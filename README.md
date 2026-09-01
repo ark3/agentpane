@@ -53,14 +53,8 @@ Run the complete offline verification suite with:
 bun run check
 ```
 
-Live runs against both real backends are recorded in
-[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) and re-runnable from
-`resources/probes/agentpane_{codex,pi}_smoke.py`. They exercise the built
-client's reachability and the REST/SSE path with a real agent subprocess:
-create/attach, streaming, idle, reconnect, abort, and shutdown without an
-orphan.
+Live runs against Pi, Codex, and Claude Code are recorded in [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
+The Pi and Codex smoke runs are reproducible from `resources/probes/agentpane_{codex,pi}_smoke.py`; they exercise the built client's reachability and the REST/SSE path with a real agent subprocess: create/attach, streaming, idle, reconnect, abort, and shutdown without an orphan.
 
-**For what is done, read [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its
-Status table is the only statement of project status. **For what is left, read
-[`docs/work/open/`](docs/work/open/)**, one file per outstanding item and the
-only list of them. Both are deliberately not repeated here.
+**For what is done, read [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md)** — its Status table is the only statement of project status.
+**For what is left, run `card list --open`**; the list is deliberately not repeated here.
