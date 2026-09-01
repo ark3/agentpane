@@ -1086,7 +1086,8 @@
 				     gets outside-click and Escape for free, with no JS. The entries
 				     hide it declaratively because activating a control *inside* an
 				     auto popover does not dismiss it -- verified in Chromium, the
-				     menu stayed open -- so only a click outside would close it. -->
+				     menu stayed open -- so only a click outside would close it.
+				     Compact alone also hides it by hand; `compactSession` says why. -->
 				<button type="button" class="tools-menu" popovertarget="tools-menu">Tools</button>
 				<div id="tools-menu" popover class="tools-menu-list" role="menu">
 					<button
