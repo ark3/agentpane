@@ -13,8 +13,8 @@ It is intent, not orders: where it names a specific file or type, that is verifi
 - **One server, all sessions, one UI.**
   The server manages a set of agent subprocesses; the browser is a stateless view that can reconnect and repaint.
 - Fork a conversation from any past user message.
-  This is two operations, not one, and they are not symmetric across backends (HANDOFF findings 43–46): **rewind in place** (Pi `fork`, copy-on-write: the active file is left byte-identical and the process's active file moves to a new one, so the old branch survives; Codex has no supported in-place rewind) and **fork into a new session** (Pi `clone`/`fork`+`clone`; Codex `thread/fork`).
-  Both new-session paths leave lineage on disk.
+  This is two operations, not one, and they are not symmetric across backends (HANDOFF findings 43–48 and OW-mayuza): **rewind in place** (Pi `fork`, copy-on-write: the active file is left byte-identical and the process's active file moves to a new one, so the old branch survives; Codex and Claude Code have no supported in-place rewind) and **fork into a new session** (Pi `clone`/`fork`+`clone`; Codex `thread/fork`; Claude Code `--resume --resume-session-at <entry> --fork-session`).
+  Pi and Codex record lineage on disk; Claude Code does not.
 - Well-factored and well-tested from the start.
 
 ## Non-goals
@@ -41,20 +41,20 @@ Browser (SPA, Svelte 5 + Vite)
    │         server-initiated requests
    ▼
 One server process (Bun)
-   ├── SessionIndex:    walks ~/.pi/agent/sessions + ~/.codex/sessions
+   ├── SessionIndex:    walks the Pi, Codex, and Claude Code session stores
    │      • metadata only (id, cwd, timestamp, preview) — no process
    ├── SessionManager:  {backend, id} → { child: sbox subprocess, adapter }
    │      • spawn on attach (cwd = that session's workspace), not on list
    │      • subprocess outlives the connection; reaped on idle / LRU / shutdown (D12)
    │      • never killed by a dropped browser connection
-   ├── Backend adapter (per session):  Pi | Codex
+   ├── Backend adapter (per session):  Pi | Codex | Claude Code
    │      • owns the child's stdio
    │      • owns the transcript: maintains AgentMessage[] + isStreaming
    └── serves the SPA + SSE + REST on one loopback port
         │  (stdio pipes, sbox-transparent)
         ▼
-   sbox-wrapped agent:  `sbox pi --mode rpc`  |  `sbox codex app-server`
-        • own creds mounted (sbox pi/codex profiles), workspace writable
+   sbox-wrapped agent:  `sbox pi --mode rpc` | `sbox codex app-server` | `sbox claude -p ...`
+        • own creds mounted by the matching sbox profile, workspace writable
 ```
 
 ### Why the subprocess outlives the connection
@@ -310,7 +310,7 @@ The route stays: it is useful programmatically and shutdown-adjacent code leans 
 
 **Why this is safe at all.**
 Eviction is not a new capability — it is the `attached → detached` transition D9 already defines, fired automatically instead of by hand.
-The adapter's in-memory `AgentMessage[]` is lost on eviction, but D3/D9 already rehydrate a detached session from disk on the next attach (`get_messages` for Pi, `thread/read` for Codex), verified on both backends.
+The adapter's in-memory `AgentMessage[]` is lost on eviction, but D3/D9 already rehydrate a detached session from disk through each backend's resume path on the next attach.
 So an evicted session is a *detached* session, not a lost one; the next attach re-spawns and re-hydrates transparently.
 The "subprocess outlives the connection" invariant is untouched — it is now additionally *bounded*.
 
@@ -381,7 +381,7 @@ This file holds what the *user* authored, which cannot.
 
 **Shape**, all of it deliberately small:
 
-- `~/.agentpane/`, matching the `~/.pi` and `~/.codex` it already reads.
+- `~/.agentpane/`, matching the backend state under `~/.pi`, `~/.codex`, and `~/.claude` that it already reads.
   It is per-user state, not per-checkout.
   The path is injectable, or every server test writes into a real home directory.
 - One JSON object, `sessionKey(ref)` -> `"starred" | "hidden"`.
@@ -453,6 +453,8 @@ interface BackendAdapter {
   Commands: `prompt`, `abort`, `fork`, `get_fork_messages`, `get_entries`/`get_tree`, `set_model`.
   Protocol: `rpc.md`.
 - **Codex adapter** does the real translation work — see the mapping below.
+- **Claude Code adapter** maps Anthropic message content blocks nearly one-to-one, merges block-level `assistant` events by message id, and treats only `result` as the end of a turn.
+  Protocol: bidirectional stream-json over NDJSON.
 
 ## Codex `ThreadItem` → `AgentMessage` mapping
 
@@ -500,7 +502,7 @@ Streaming assembly: on `item/started` create the placeholder message; on each de
 Correlate by `itemId`.
 This state machine is the thing D3 keeps server-side.
 
-Fork: Codex `thread/fork` + `thread/rollback`; expose the same `listForkPoints`/`fork` contract by reading thread items for the fork points.
+Fork: Codex `thread/fork` exposes the same `listForkPoints`/`fork` contract by reading thread items for the fork points; deprecated `thread/rollback` is not an in-place rewind path.
 
 ## Spawning through sbox
 
@@ -511,6 +513,7 @@ Per D7 the server builds the command itself:
 - Codex: `direnv exec <workspace> sbox -- codex app-server` — sbox's `codex` profile mounts `~/.codex` rw (so the sqlite state runtime works) and injects `--sandbox danger-full-access`.
   That injection is keyed on the command name, so it applies to `codex` and not to the surrounding wrapper — but it is a **no-op for `app-server`**, which ignores the CLI flag and defaults each thread to `read-only`.
   The sandbox policy that actually takes effect is set per `thread/start` by the adapter (OW-37); `danger-full-access` there, since sbox's bwrap jail is already the confinement boundary.
+- Claude Code: `direnv exec <workspace> sbox -- claude -p --verbose --input-format stream-json --output-format stream-json --include-partial-messages` — sbox's `claude` profile mounts `~/.claude` and injects `--permission-mode bypassPermissions`.
 - **The server must spawn each subprocess with `cwd` = that session's workspace**, or sbox jails the wrong tree (or refuses if there is no git root), and `direnv` loads the wrong environment.
 
 stdio crosses the bwrap boundary transparently (proven), so the adapter reads the same pipes whether or not sbox is present.
@@ -538,7 +541,7 @@ Three subprocess facts, each verified while building the Pi adapter and each cap
 - **Unit (bun test / vitest):** the adapters, especially the Codex `ThreadItem` → `AgentMessage` mapping — table-driven over the captured protocol fixtures in `resources/fixtures/`, which already cover streaming text, a tool call/result pair, and a file edit for all three backends.
   Assert on *structure* (event sequence, item types, block kinds, id correlation), never on exact model wording.
   D3 is what makes this possible without a DOM.
-- **Contract tests:** feed each adapter recorded protocol transcripts; assert the common `BackendAdapter` behavior is identical in shape across Pi and Codex.
+- **Contract tests:** feed each adapter recorded protocol transcripts; assert the common `BackendAdapter` behaviour is identical in shape across all backends.
 - **Server:** SessionManager lifecycle (spawn/reap, subprocess outlives connection, reconnect→repaint), the snapshot/upsert protocol including a dropped `seq`, LF-only framing for Pi.
 - **Client (vitest + @testing-library/svelte):** block dispatch, the tool renderer registry and its fallback, markdown sanitization.
 - **E2E (Playwright):** a mock-LLM or scripted agent driving a real turn end to end, screenshots for the rendering you care about.
@@ -546,14 +549,6 @@ Three subprocess facts, each verified while building the Pi adapter and each cap
 
 `bun run test:browser` remains separate from `bun run check`: the latter is the fast browser-free gate, while browser provisioning and real layout belong to a separate run selected by the touch rules in `AGENTS.md`.
 `.github/workflows/ci.yml` runs both commands as sibling jobs rather than hiding Playwright behind an environment flag in `check` (OW-49, OW-bafeja).
-
-## Build order
-
-1. **Pi-only vertical slice**: one session, streaming text, one real tool renderer, end to end through sbox.
-   This proves the transport, the snapshot/upsert protocol, and the render loop while the backend is the identity mapping and cannot be the thing that is broken.
-2. **Codex adapter** against recorded fixtures, offline.
-   The mapping is the only genuine engineering here and deserves to land against a UI that already works and a harness that needs no live model.
-3. Multi-session, fork UI, model selection.
 
 ## Remaining open questions
 
