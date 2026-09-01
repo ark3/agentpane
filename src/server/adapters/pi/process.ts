@@ -330,7 +330,15 @@ export class PiAdapter implements BackendAdapter {
 	 * admission -- the transcript marker is the reducer's job.
 	 */
 	async compact(): Promise<void> {
-		await this.sendCommand<PiResponseFor<"compact">>({ type: "compact" });
+		this.state = { ...this.state, compaction: "requesting" };
+		this.emitUpdate();
+		try {
+			await this.sendCommand<PiResponseFor<"compact">>({ type: "compact" });
+		} catch (error) {
+			this.state = { ...this.state, compaction: null };
+			this.emitUpdate();
+			throw error;
+		}
 	}
 
 	// -- fork-from-past -----------------------------------------------------
@@ -378,7 +386,7 @@ export class PiAdapter implements BackendAdapter {
 	// -- state ----------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { messages: this.state.messages, isStreaming: this.state.isStreaming };
+		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction };
 	}
 
 	onUpdate(cb: UpdateListener): Unsubscribe {
@@ -516,7 +524,11 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	private emitUpdate(changedIndex?: number): void {
-		const snapshot: AdapterState = { messages: this.state.messages, isStreaming: this.state.isStreaming };
+		const snapshot: AdapterState = {
+			messages: this.state.messages,
+			isStreaming: this.state.isStreaming,
+			compaction: this.state.compaction,
+		};
 		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
 	}
 

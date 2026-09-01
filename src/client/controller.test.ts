@@ -141,7 +141,7 @@ describe("client controller", () => {
 		await controller.start();
 		await controller.select(ref);
 		// The snapshot a real attach produces gives this client live state for it.
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		api.preview.mockClear();
 
@@ -260,7 +260,7 @@ describe("client controller", () => {
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
 
 		api.emit({ type: "renamed", from: ref, session: renamed, seq: 1 });
-		api.emit({ type: "snapshot", session: renamed, seq: 2, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: renamed, seq: 2, messages: [], isStreaming: false, compaction: null });
 
 		expect(controller.getView().state.selected).toEqual(renamed);
 		expect(controller.getView().state.sessions["pi:/sessions/renamed.jsonl"]?.seq).toBe(2);
@@ -273,10 +273,10 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
 
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
 
 		expect(api.attach).toHaveBeenCalledTimes(2);
 		recovery.resolve(summary(ref));
@@ -288,8 +288,8 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
 		await Promise.resolve();
 
 		expect(controller.getView().state.selected).toBeNull();
@@ -327,7 +327,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("The turn ended in an error.");
 
@@ -344,7 +344,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "Stale error from a prior turn." });
 
 		controller.setDraft("try again");
@@ -366,7 +366,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
 
 		controller.setDraft("try again");
 		const submitted = controller.submit();
@@ -384,7 +384,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
 
 		controller.clearError();
@@ -463,7 +463,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null });
 		controller.setDraft("reworded");
 
 		await controller.forkAndSubmit(0);

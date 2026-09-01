@@ -160,6 +160,27 @@ describe("reducePiNotification: compact fixture (manual compaction, OW-72)", () 
 		expect(endResult?.error).toBeUndefined();
 		expect(endResult?.changedIndex).toBe(finalState.messages.length - 1);
 	});
+
+	it("enters running once and clears it in the update that appends the marker", () => {
+		const { results } = runThroughReducer(lines);
+		let previous: PiReducerState["compaction"] = null;
+		const transitions = results.filter((result) => {
+			const changed = result.state.compaction !== previous;
+			previous = result.state.compaction;
+			return changed;
+		}).map((result) => ({ compaction: result.state.compaction, changedIndex: result.changedIndex }));
+		expect(transitions).toEqual([
+			{ compaction: "running", changedIndex: undefined },
+			{ compaction: null, changedIndex: results.at(-1)?.changedIndex },
+		]);
+	});
+
+	it("an automatic threshold start enters running without a requesting phase", () => {
+		const initial = createInitialPiState();
+		const result = reducePiNotification(initial, { type: "compaction_start", reason: "threshold" });
+		expect(initial.compaction).toBeNull();
+		expect(result.state.compaction).toBe("running");
+	});
 });
 
 describe("reducePiNotification: tool-read fixture (tool call + result pair)", () => {
@@ -378,7 +399,6 @@ describe("reducePiNotification: unknown/no-op notifications never throw and don'
 			{ type: "tool_execution_end", toolCallId: "x", toolName: "bash", result: {}, isError: false },
 			{ type: "queue_update", steering: [], followUp: [] },
 			{ type: "bash_execution_update", delta: "output" },
-			{ type: "compaction_start", reason: "manual" },
 		];
 		for (const event of noopEvents) {
 			const result = reducePiNotification(state, event);

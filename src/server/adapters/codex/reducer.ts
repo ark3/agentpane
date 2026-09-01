@@ -45,6 +45,7 @@ export type CodexEffect =
 	/** The transcript changed wholesale; the server must re-snapshot. */
 	| { type: "reset" }
 	| { type: "streaming"; isStreaming: boolean }
+	| { type: "compaction"; compaction: "requesting" | "running" | null }
 	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a). */
 	| { type: "request"; requestId: RequestId; kind: string; payload: unknown }
 	/** Codex resolved a pending request itself (auto-approval, another client). */
@@ -76,6 +77,7 @@ export class CodexReducer {
 	private messages: AgentMessage[] = [];
 	private slots = new Map<string, Slot>();
 	private streaming = false;
+	private compaction: "requesting" | "running" | null = null;
 	private now: () => number;
 	private identity: { api: string; provider: string; model: string; effort: string | null };
 
@@ -104,8 +106,16 @@ export class CodexReducer {
 		};
 	}
 
-	getState(): { messages: AgentMessage[]; isStreaming: boolean } {
-		return { messages: this.messages, isStreaming: this.streaming };
+	getState(): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null } {
+		return { messages: this.messages, isStreaming: this.streaming, compaction: this.compaction };
+	}
+
+	requestCompaction(): CodexEffect[] {
+		return this.setCompaction("requesting");
+	}
+
+	cancelCompaction(): CodexEffect[] {
+		return this.setCompaction(null);
 	}
 
 	get model(): string {
@@ -131,6 +141,7 @@ export class CodexReducer {
 		this.messages = [];
 		this.slots.clear();
 		this.streaming = false;
+		this.compaction = null;
 		this.turnDiff = null;
 	}
 
@@ -184,6 +195,7 @@ export class CodexReducer {
 				// "summary"` in every fixture) -- only the final agent message.
 				// Rebuilding the transcript from it would delete the turn.
 				if (turn.status === "failed" && turn.error?.message) {
+					effects.push(...this.setCompaction(null));
 					effects.push({ type: "error", message: turn.error.message });
 				}
 				effects.push(...this.setStreaming(false));
@@ -204,6 +216,10 @@ export class CodexReducer {
 					completed
 						? message.params.completedAtMs
 						: message.params.startedAtMs;
+				if (message.params.item.type === "contextCompaction") {
+					if (!completed) return this.setCompaction("running");
+					this.compaction = null;
+				}
 				return this.applyItem(message.params.item, at, completed);
 			}
 
@@ -253,7 +269,7 @@ export class CodexReducer {
 				return [{ type: "request-resolved", requestId: message.params.requestId }];
 
 			case "error":
-				return [{ type: "error", message: message.params.error.message }];
+				return [...this.setCompaction(null), { type: "error", message: message.params.error.message }];
 
 			default:
 				// Everything else app-server emits -- account/rateLimits/updated,
@@ -347,6 +363,12 @@ export class CodexReducer {
 		if (this.streaming === isStreaming) return [];
 		this.streaming = isStreaming;
 		return [{ type: "streaming", isStreaming }];
+	}
+
+	private setCompaction(compaction: "requesting" | "running" | null): CodexEffect[] {
+		if (this.compaction === compaction) return [];
+		this.compaction = compaction;
+		return [{ type: "compaction", compaction }];
 	}
 
 	/**

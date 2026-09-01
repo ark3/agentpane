@@ -359,7 +359,13 @@ export class CodexAdapter implements BackendAdapter {
 		const threadId = this.requireThread();
 		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
 		if (this.turnBusy || this.turnId) throw new Error(TURN_ACTIVE_ERROR);
-		await client.request("thread/compact/start", { threadId });
+		this.applyEffects(this.reducer.requestCompaction());
+		try {
+			await client.request("thread/compact/start", { threadId });
+		} catch (error) {
+			this.applyEffects(this.reducer.cancelCompaction());
+			throw error;
+		}
 	}
 
 	// -- fork-from-past -----------------------------------------------------
@@ -408,8 +414,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		const { messages, isStreaming } = this.reducer.getState();
-		return { messages, isStreaming };
+		return this.reducer.getState();
 	}
 
 	getMessages(): AgentMessage[] {
@@ -536,6 +541,7 @@ export class CodexAdapter implements BackendAdapter {
 					break;
 				case "reset":
 				case "streaming":
+				case "compaction":
 					this.emitUpdate(undefined);
 					break;
 				case "request": {

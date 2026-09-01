@@ -602,8 +602,16 @@ describe("prompting", () => {
 	it("compacts only an attached session (OW-72)", async () => {
 		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(404);
 		await get(ROUTES.session(PI_SESSION));
+		const client = await openStream();
 		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.compactions).toBe(1);
+		await client.until(() => client.typed("snapshot").some((event) => event.compaction === "requesting"));
+		expect(client.typed("snapshot").at(-1)).toMatchObject({ isStreaming: false, compaction: "requesting" });
+		const reconnect = await openStream();
+		await reconnect.until(() => reconnect.typed("snapshot").length > 0);
+		expect(reconnect.typed("snapshot").at(-1)).toMatchObject({ session: PI_SESSION, compaction: "requesting" });
+		await reconnect.close();
+		await client.close();
 	});
 
 	it("rejects a non-POST compact with 405 (OW-72)", async () => {

@@ -92,7 +92,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -104,7 +104,7 @@ function upsert(index: number, message: AgentMessage): void {
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming });
+	emit({ type: "status", session: REF, seq, isStreaming, compaction: null });
 }
 
 function summary(): SessionSummary {

@@ -18,6 +18,7 @@ import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../share
 export interface AdapterState {
 	messages: AgentMessage[];
 	isStreaming: boolean;
+	compaction: "requesting" | "running" | null;
 }
 
 export type Unsubscribe = () => void;

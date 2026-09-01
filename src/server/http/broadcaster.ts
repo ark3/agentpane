@@ -42,7 +42,7 @@ export function formatSseFrame(event: ServerEvent): string {
 
 /** State the broadcaster needs to build a snapshot, supplied by the session manager. */
 export interface SnapshotSource {
-	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean } | null;
+	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null } | null;
 }
 
 export class Broadcaster {
@@ -91,6 +91,7 @@ export class Broadcaster {
 			seq: this.#seq.get(sessionKey(ref)) ?? 0,
 			messages: state.messages,
 			isStreaming: state.isStreaming,
+			compaction: state.compaction,
 		});
 	}
 
@@ -106,6 +107,7 @@ export class Broadcaster {
 			seq: 0,
 			messages: state.messages,
 			isStreaming: state.isStreaming,
+			compaction: state.compaction,
 		});
 	}
 
@@ -113,8 +115,8 @@ export class Broadcaster {
 		this.#fanout({ type: "upsert", session: ref, seq: this.#bump(ref), index, message });
 	}
 
-	status(ref: SessionRef, isStreaming: boolean): void {
-		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming });
+	status(ref: SessionRef, isStreaming: boolean, compaction: "requesting" | "running" | null): void {
+		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction });
 	}
 
 	request(ref: SessionRef, request: AgentRequest): void {

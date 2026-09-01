@@ -140,6 +140,7 @@ export class FakeAdapter implements BackendAdapter {
 	// -- state ---------------------------------------------------------------
 	messages: AgentMessage[] = [];
 	isStreaming = false;
+	compaction: "requesting" | "running" | null = null;
 
 	#updates = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	#requests = new Set<(request: AgentRequest) => void>();
@@ -197,6 +198,7 @@ export class FakeAdapter implements BackendAdapter {
 
 	async compact(): Promise<void> {
 		this.compactions++;
+		this.setCompaction("requesting");
 	}
 
 	async listForkPoints(): Promise<ForkPoint[]> {
@@ -214,7 +216,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	getState(): AdapterState {
-		return { messages: this.messages, isStreaming: this.isStreaming };
+		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -277,6 +279,11 @@ export class FakeAdapter implements BackendAdapter {
 	setStreaming(isStreaming: boolean, changedIndex?: number): void {
 		this.isStreaming = isStreaming;
 		this.#emit(changedIndex ?? this.messages.length - 1);
+	}
+
+	setCompaction(compaction: "requesting" | "running" | null, changedIndex?: number): void {
+		this.compaction = compaction;
+		this.#emit(changedIndex);
 	}
 
 	/** The agent blocks until this is answered (D2a). */

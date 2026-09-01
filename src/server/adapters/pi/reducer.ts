@@ -31,6 +31,7 @@ import { PI_DIALOG_METHODS, type PiCommand, type PiDialogMethod, type PiNotifica
 export interface PiReducerState {
 	readonly messages: AgentMessage[];
 	readonly isStreaming: boolean;
+	readonly compaction: "requesting" | "running" | null;
 	/** requestId -> dialog method, so `reply()` knows how to shape the response. */
 	readonly pendingUiRequests: Readonly<Record<string, PiDialogMethod>>;
 }
@@ -54,7 +55,7 @@ export interface PiReduceResult {
 }
 
 export function createInitialPiState(): PiReducerState {
-	return { messages: [], isStreaming: false, pendingUiRequests: {} };
+	return { messages: [], isStreaming: false, compaction: null, pendingUiRequests: {} };
 }
 
 export function reducePiNotification(state: PiReducerState, event: PiNotification): PiReduceResult {
@@ -115,9 +116,13 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			}
 			return { state };
 
-		case "compaction_end":
+		case "compaction_start":
+			return { state: { ...state, compaction: "running" } };
+
+		case "compaction_end": {
+			const terminalState: PiReducerState = state.compaction === null ? state : { ...state, compaction: null };
 			if (!event.aborted && event.errorMessage) {
-				return { state, error: event.errorMessage };
+				return { state: terminalState, error: event.errorMessage };
 			}
 			// A successful compaction reports its summary and the token count it
 			// shrank (OW-72). Pi does NOT push this through message_start/end --
@@ -134,17 +139,18 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 					tokensBefore: event.result.tokensBefore,
 					timestamp: Date.now(),
 				};
-				const messages = [...state.messages, summary];
-				return { state: { ...state, messages }, changedIndex: messages.length - 1 };
+				const messages = [...terminalState.messages, summary];
+				return { state: { ...terminalState, messages }, changedIndex: messages.length - 1 };
 			}
-			return { state };
+			return { state: terminalState };
+		}
 
 		// No structural effect on AgentMessage[] or isStreaming: turn boundaries
 		// are redundant with message_start/message_end (every message in
 		// turn_end already arrived via its own message_start/message_end pair);
 		// tool_execution_*/bash_execution_update are live-progress duplicates of
 		// what message_end's toolResult message already carries authoritatively;
-		// queue_update/compaction_start/auto_retry_start/summarization_* are
+		// queue_update/auto_retry_start/summarization_* are
 		// session bookkeeping outside the AgentMessage/isStreaming contract.
 		default:
 			return { state };

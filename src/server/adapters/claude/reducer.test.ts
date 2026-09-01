@@ -323,6 +323,20 @@ describe("compaction (compact fixture)", () => {
 		const { messages } = replay("compact");
 		expect(messages.length).toBeGreaterThan(1);
 	});
+
+	it("enters running once and clears it in the marker update", () => {
+		const reducer = new ClaudeReducer({ now: () => 1_000 });
+		const transitions: { compaction: string | null; effects: ClaudeEffect[] }[] = [];
+		let previous = reducer.getState().compaction;
+		for (const line of lines) {
+			const effects = reducer.handle(line);
+			const current = reducer.getState().compaction;
+			if (current !== previous) transitions.push({ compaction: current, effects });
+			previous = current;
+		}
+		expect(transitions.map(({ compaction }) => compaction)).toEqual(["running", null]);
+		expect(transitions[1]?.effects).toContainEqual({ type: "message", index: expect.any(Number) });
+	});
 });
 
 describe("local prompt and hydration", () => {

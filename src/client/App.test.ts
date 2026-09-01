@@ -402,6 +402,7 @@ describe("App", () => {
 			seq: 2,
 			messages: [user("Explain the crash")],
 			isStreaming: false,
+			compaction: null,
 		}).state;
 
 		const controller = new FakeController(view({ state: current }));

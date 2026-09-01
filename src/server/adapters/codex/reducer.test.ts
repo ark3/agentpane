@@ -28,9 +28,9 @@ import {
 	type FixtureName,
 } from "./test-support.ts";
 
-const FIXTURES: FixtureName[] = ["text", "tool-read", "tool-edit"];
+const FIXTURES = ["text", "tool-read", "tool-edit"] as const satisfies readonly FixtureName[];
 
-const EXPECTED_ROLES: Record<FixtureName, AgentMessage["role"][]> = {
+const EXPECTED_ROLES: Record<Exclude<FixtureName, "compact">, AgentMessage["role"][]> = {
 	text: ["user", "assistant"],
 	"tool-read": ["user", "assistant", "assistant", "toolResult", "assistant"],
 	"tool-edit": [
@@ -205,6 +205,23 @@ describe.each(FIXTURES)("replaying the %s fixture", (name) => {
 			.filter((block) => block.type === "text")
 			.map((block) => block.text);
 		for (const text of finals) expect(rendered).toContain(text);
+	});
+});
+
+describe("replaying the compact fixture", () => {
+	it("enters running once and clears it in the update that appends the marker", () => {
+		const reducer = new CodexReducer({ now: () => 1_000 });
+		const transitions: { compaction: string | null; effects: CodexEffect[] }[] = [];
+		let previous = reducer.getState().compaction;
+		for (const line of readFixture("compact")) {
+			const effects = reducer.handle(line);
+			const current = reducer.getState().compaction;
+			if (current !== previous) transitions.push({ compaction: current, effects });
+			previous = current;
+		}
+		expect(transitions.map(({ compaction }) => compaction)).toEqual(["running", null]);
+		expect(transitions[1]?.effects).toContainEqual({ type: "message", index: expect.any(Number) });
+		expect(reducer.getState().messages.filter((message) => message.role === "compactionSummary")).toHaveLength(1);
 	});
 });
 

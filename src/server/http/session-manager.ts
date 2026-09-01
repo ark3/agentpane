@@ -67,6 +67,7 @@ interface ManagedSession {
 	subscriptions: Unsubscribe[];
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
 	lastStreaming: boolean;
+	lastCompaction: "requesting" | "running" | null;
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
@@ -180,6 +181,7 @@ export class SessionManager {
 			fromStore: false,
 			subscriptions: [],
 			lastStreaming: false,
+			lastCompaction: null,
 			createdAt: this.#now(),
 		});
 		this.broadcaster.sessionsChanged();
@@ -325,6 +327,7 @@ export class SessionManager {
 				fromStore: true,
 				subscriptions: [],
 				lastStreaming: false,
+				lastCompaction: null,
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};
@@ -381,7 +384,9 @@ export class SessionManager {
 		// `session.adapter` and close's other branch disposes it. Moving this line
 		// after `#adoptRef` turns that key miss into a leaked subprocess.
 		bound.adapter = adapter;
-		bound.lastStreaming = adapter.getState().isStreaming;
+		const initialState = adapter.getState();
+		bound.lastStreaming = initialState.isStreaming;
+		bound.lastCompaction = initialState.compaction;
 		// The first of the two points at which the id can change (D9).
 		this.#adoptRef(bound);
 		return bound;
@@ -394,14 +399,16 @@ export class SessionManager {
 	 */
 	#onUpdate(session: ManagedSession, state: AdapterState, changedIndex?: number): void {
 		const streamingChanged = state.isStreaming !== session.lastStreaming;
+		const compactionChanged = state.compaction !== session.lastCompaction;
 		session.lastStreaming = state.isStreaming;
+		session.lastCompaction = state.compaction;
 
 		if (changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length) {
 			const message = state.messages[changedIndex];
 			if (message) this.broadcaster.upsert(session.ref, changedIndex, message);
-			if (streamingChanged) this.broadcaster.status(session.ref, state.isStreaming);
+			if (streamingChanged || compactionChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction);
 		} else {
-			// A snapshot carries isStreaming, so no separate status event.
+			// A snapshot carries isStreaming and compaction, so no separate status event.
 			this.broadcaster.broadcastSnapshot(session.ref);
 		}
 

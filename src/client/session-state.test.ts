@@ -49,6 +49,7 @@ function stateAtSequence(session: SessionRef, seq: number): ClientState {
 		seq,
 		messages: [userMessage("before")],
 		isStreaming: false,
+		compaction: null,
 	}).state;
 }
 
@@ -64,12 +65,14 @@ describe("client session state", () => {
 			seq: 7,
 			messages: [userMessage("hi")],
 			isStreaming: true,
+			compaction: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
 			seq: 7,
 			messages: [userMessage("hi")],
 			isStreaming: true,
+			compaction: null,
 			error: null,
 			requests: [],
 		});
@@ -84,6 +87,7 @@ describe("client session state", () => {
 			session: ref,
 			seq: 5,
 			isStreaming: false,
+			compaction: null,
 		});
 
 		expect(result.state).toBe(state);
@@ -115,6 +119,7 @@ describe("client session state", () => {
 			seq: 1,
 			messages: [first],
 			isStreaming: true,
+			compaction: null,
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -137,6 +142,7 @@ describe("client session state", () => {
 			seq: 1,
 			messages: [first],
 			isStreaming: true,
+			compaction: null,
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -156,12 +162,14 @@ describe("client session state", () => {
 			session: ref,
 			seq: 4,
 			isStreaming: true,
+			compaction: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
 			ref,
 			seq: 4,
 			isStreaming: true,
+			compaction: null,
 			messages: [],
 		});
 		expect(result.recover).toEqual([]);
@@ -173,12 +181,14 @@ describe("client session state", () => {
 			session: ref,
 			seq: 4,
 			isStreaming: true,
+			compaction: null,
 		}).state;
 		const result = reduceServerEvent(state, {
 			type: "status",
 			session: ref,
 			seq: 5,
 			isStreaming: false,
+			compaction: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({ seq: 5, isStreaming: false });
@@ -194,6 +204,7 @@ describe("client session state", () => {
 			seq: 1,
 			messages: [],
 			isStreaming: false,
+			compaction: null,
 		}).state;
 		const result = reduceServerEvent(withOther, {
 			type: "error",

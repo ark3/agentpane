@@ -82,6 +82,7 @@ interface HappyServerOptions {
 	holdTurnStart?: boolean;
 	holdTurnStartAt?: number;
 	holdThreadStart?: boolean;
+	failCompact?: string;
 }
 
 function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
@@ -116,7 +117,8 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				break;
 			case "thread/compact/start":
 				// OW-72: params `{ threadId }`, response an empty object.
-				proc.emit({ id, result: {} });
+				if (options.failCompact) proc.emit({ id, error: { code: -32603, message: options.failCompact } });
+				else proc.emit({ id, result: {} });
 				break;
 		}
 	});
@@ -360,7 +362,7 @@ describe("CodexAdapter lifecycle", () => {
 		});
 		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null });
 		expect(updates).not.toHaveBeenCalled();
 		expect(requests).not.toHaveBeenCalled();
 	});
@@ -393,7 +395,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null });
 		expect(requests).not.toHaveBeenCalled();
 		expect(proc.killCount).toBe(1);
 	});
@@ -627,10 +629,21 @@ describe("CodexAdapter turns", () => {
 
 	it("compacts an idle thread via thread/compact/start with just the thread id (OW-72)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact" });
+		const updates: ("requesting" | "running" | null)[] = [];
+		adapter.onUpdate((state) => updates.push(state.compaction));
 
 		await adapter.compact();
 
 		expect(request(proc, "thread/compact/start")["params"]).toEqual({ threadId: "thread-compact" });
+		expect(updates).toEqual(["requesting"]);
+	});
+
+	it("clears requesting when app-server rejects compaction", async () => {
+		const { adapter } = await startedAdapter({ threadId: "thread-compact-fail", failCompact: "no room" });
+		const updates: ("requesting" | "running" | null)[] = [];
+		adapter.onUpdate((state) => updates.push(state.compaction));
+		await expect(adapter.compact()).rejects.toThrow("no room");
+		expect(updates).toEqual(["requesting", null]);
 	});
 
 	it("refuses to compact while a turn is active, and sends nothing on the wire (OW-72)", async () => {
@@ -1262,7 +1275,7 @@ describe("CodexAdapter reducer effects", () => {
 			},
 		});
 
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true }, undefined);
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null }, undefined);
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

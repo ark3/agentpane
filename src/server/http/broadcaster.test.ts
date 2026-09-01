@@ -117,8 +117,8 @@ describe("keepalive", () => {
 describe("sequence bookkeeping", () => {
 	it("forgets a closed session's counter rather than growing with uptime", () => {
 		const broadcaster = new Broadcaster();
-		broadcaster.setSnapshotSource(() => ({ messages: [], isStreaming: false }));
-		broadcaster.status(REF, true);
+		broadcaster.setSnapshotSource(() => ({ messages: [], isStreaming: false, compaction: null }));
+		broadcaster.status(REF, true, null);
 		expect(broadcaster.seqOf(REF)).toBe(1);
 
 		broadcaster.forget(REF);

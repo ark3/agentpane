@@ -68,6 +68,7 @@ export type ClaudeEffect =
 	/** The transcript changed wholesale; the server must re-snapshot. */
 	| { type: "reset" }
 	| { type: "streaming"; isStreaming: boolean }
+	| { type: "compaction"; compaction: "requesting" | "running" | null }
 	| { type: "error"; message: string };
 
 export interface ClaudeReducerOptions {
@@ -106,6 +107,7 @@ export class ClaudeReducer {
 	/** Index of a compaction marker whose summary text has not arrived yet. */
 	private pendingCompactionIndex: number | null = null;
 	private streaming = false;
+	private compaction: "requesting" | "running" | null = null;
 	private model: string = DEFAULT_MODEL;
 	private readonly now: () => number;
 
@@ -113,8 +115,16 @@ export class ClaudeReducer {
 		this.now = options.now ?? (() => Date.now());
 	}
 
-	getState(): { messages: AgentMessage[]; isStreaming: boolean } {
-		return { messages: this.messages, isStreaming: this.streaming };
+	getState(): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null } {
+		return { messages: this.messages, isStreaming: this.streaming, compaction: this.compaction };
+	}
+
+	requestCompaction(): ClaudeEffect[] {
+		return this.setCompaction("requesting");
+	}
+
+	cancelCompaction(): ClaudeEffect[] {
+		return this.setCompaction(null);
 	}
 
 	reset(): void {
@@ -124,6 +134,7 @@ export class ClaudeReducer {
 		this.toolNames.clear();
 		this.pendingCompactionIndex = null;
 		this.streaming = false;
+		this.compaction = null;
 	}
 
 	/**
@@ -196,7 +207,9 @@ export class ClaudeReducer {
 				const status = (event as { status?: unknown }).status;
 				// "requesting", "compacting", ... mean a turn phase is running;
 				// null means the phase ended (the turn itself ends at `result`).
-				return typeof status === "string" && status ? this.setStreaming(true) : [];
+				const effects = typeof status === "string" && status ? this.setStreaming(true) : [];
+				if (status === "compacting") effects.push(...this.setCompaction("running"));
+				return effects;
 			}
 			case "compact_boundary": {
 				const boundary = event as ClaudeCompactBoundaryEvent;
@@ -214,6 +227,7 @@ export class ClaudeReducer {
 					timestamp: parseTimestamp(boundary.timestamp) ?? this.now(),
 				});
 				this.pendingCompactionIndex = this.messages.length - 1;
+				this.compaction = null;
 				return [{ type: "message", index: this.pendingCompactionIndex }];
 			}
 			default:
@@ -427,6 +441,7 @@ export class ClaudeReducer {
 
 	private handleResult(event: Extract<ClaudeEvent, { type: "result" }>): ClaudeEffect[] {
 		const effects: ClaudeEffect[] = [];
+		effects.push(...this.setCompaction(null));
 		// An interrupt's result is `error_during_execution` + `is_error: true`
 		// (and exit 1 on a lone -p turn): that is the abort WORKING. Mark the
 		// message it cut short rather than reporting a failure.
@@ -497,6 +512,12 @@ export class ClaudeReducer {
 		if (this.streaming === isStreaming) return [];
 		this.streaming = isStreaming;
 		return [{ type: "streaming", isStreaming }];
+	}
+
+	private setCompaction(compaction: "requesting" | "running" | null): ClaudeEffect[] {
+		if (this.compaction === compaction) return [];
+		this.compaction = compaction;
+		return [{ type: "compaction", compaction }];
 	}
 }
 

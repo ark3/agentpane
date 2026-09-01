@@ -208,8 +208,14 @@ export class ClaudeAdapter implements BackendAdapter {
 	 */
 	async compact(): Promise<void> {
 		const proc = this.requireProc();
-		proc.write(JSON.stringify(buildUserMessageLine([{ type: "text", text: "/compact" }])));
-		this.turnActive = true;
+		this.applyEffects(this.reducer.requestCompaction());
+		try {
+			proc.write(JSON.stringify(buildUserMessageLine([{ type: "text", text: "/compact" }])));
+			this.turnActive = true;
+		} catch (error) {
+			this.applyEffects(this.reducer.cancelCompaction());
+			throw error;
+		}
 	}
 
 	// -- fork-from-past -----------------------------------------------------
@@ -279,8 +285,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		const { messages, isStreaming } = this.reducer.getState();
-		return { messages, isStreaming };
+		return this.reducer.getState();
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -440,6 +445,7 @@ export class ClaudeAdapter implements BackendAdapter {
 					break;
 				case "reset":
 				case "streaming":
+				case "compaction":
 					this.emitUpdate(undefined);
 					break;
 				case "error":

@@ -366,6 +366,8 @@ describe("PiAdapter command correlation", () => {
 	it("sends a bare compact command and resolves on its response (OW-72)", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
+		const updates: ("requesting" | "running" | null)[] = [];
+		h.adapter.onUpdate((state) => updates.push(state.compaction));
 
 		const done = h.adapter.compact();
 		// Pi's manual-compaction command is `{ type: "compact" }` and nothing
@@ -382,6 +384,18 @@ describe("PiAdapter command correlation", () => {
 			estimatedTokensAfter: 4040,
 		});
 		await expect(done).resolves.toBeUndefined();
+		expect(updates).toEqual(["requesting"]);
+	});
+
+	it("clears requesting when Pi rejects the compact command", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const updates: ("requesting" | "running" | null)[] = [];
+		h.adapter.onUpdate((state) => updates.push(state.compaction));
+		const done = h.adapter.compact();
+		h.child.failCommand("compact", "Nothing to compact");
+		await expect(done).rejects.toThrow("Nothing to compact");
+		expect(updates).toEqual(["requesting", null]);
 	});
 });
 

@@ -217,6 +217,8 @@ describe("ClaudeAdapter turns", () => {
 	it("compacts by sending the literal /compact user message", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
+		const updates: ("requesting" | "running" | null)[] = [];
+		h.adapter.onUpdate((state) => updates.push(state.compaction));
 
 		await h.adapter.compact();
 
@@ -224,6 +226,17 @@ describe("ClaudeAdapter turns", () => {
 			type: "user",
 			message: { role: "user", content: [{ type: "text", text: "/compact" }] },
 		});
+		expect(updates).toEqual(["requesting"]);
+	});
+
+	it("clears requesting when writing the compact command fails", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const updates: ("requesting" | "running" | null)[] = [];
+		h.adapter.onUpdate((state) => updates.push(state.compaction));
+		await h.proc().kill();
+		await expect(h.adapter.compact()).rejects.toThrow("not running");
+		expect(updates).toEqual(["requesting", null]);
 	});
 });
 
