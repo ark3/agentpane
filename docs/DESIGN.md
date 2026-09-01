@@ -751,9 +751,9 @@ capable of producing a bug that looks like something else entirely:
 
 `bun run test:browser` remains separate from `bun run check`: the latter is the
 fast browser-free gate, while browser provisioning and real layout belong to a
-separate run selected by the touch rules in `AGENTS.md`. `.github/workflows/ci.yml` runs
-both commands as sibling jobs rather than hiding Playwright behind an
-environment flag in `check` (OW-49, OW-bafeja).
+separate run selected by the touch rules in `AGENTS.md`.
+`.github/workflows/ci.yml` runs both commands as sibling jobs rather than
+hiding Playwright behind an environment flag in `check` (OW-49, OW-bafeja).
 
 ## Build order
 
