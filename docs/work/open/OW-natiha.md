@@ -17,9 +17,29 @@ Use the committed compact fixtures to ground the backend boundaries: Pi has `com
 A successful terminal transition must agree with the appearance of the `compactionSummary` marker rather than with the POST response.
 A backend error must terminate the state and continue through the existing visible error path.
 Carry the operation state through `AdapterState`, the session manager and the multiplexed server protocol so a reconnecting client receives the truth in a snapshot instead of reconstructing it from local timing.
+`src/server/adapters/types.ts` opens by calling the adapter contract a `FROZEN INTERFACE` and asking that a change be raised before it is made, and extending `AdapterState` is exactly that change.
+Settle its shape with the owner before dispatching an implementer.
 Keep the state per session because another attached session can update while the user is looking elsewhere.
 Do not represent compaction as ordinary `isStreaming`: compaction is not a user-stoppable generation turn, even where Codex or Claude exposes it through generic active-turn signals.
-If those generic signals currently make the composer offer Stop during compaction, distinguish or mask them so the new feedback does not imply that Stop is the intended control.
+The generic signals do make the composer offer Stop today, on two of the three backends; see the next section for where they come from.
+
+## Where Stop comes from today
+
+Codex models manual compaction as an ordinary turn.
+`resources/fixtures/codex/compact.jsonl` wraps the `contextCompaction` item in a `turn/started`/`turn/completed` pair and drives `thread/status/changed` to `active` around it, which `src/server/adapters/codex/reducer.ts` turns straight into `isStreaming` through its `setStreaming(message.params.status.type === "active")` arm.
+Claude reaches the same place: `resources/fixtures/claude/compact.jsonl` carries `system` with `subtype: "status"` and `status: "compacting"`, and the `system/status` arm of `src/server/adapters/claude/reducer.ts` sets streaming for any non-null status.
+Pi does not, because the arm of `src/server/adapters/pi/reducer.ts` commented `queue_update/compaction_start/auto_retry_start/summarization_* are` gives `compaction_start` no effect on `isStreaming`.
+So `App.svelte` shows both the `Stop` button and the `Stop and edit` label during a compaction on Codex and Claude and neither on Pi.
+Those reducers are reporting their backends' wire truth rather than misreading it, so the asymmetry is only removable once compaction is separately known, which is what this card builds.
+OW-81 recorded the Codex half of this from a live run without the fixture behind it.
+
+## Compaction the user did not invoke
+
+Compaction that a backend starts on its own gets the same treatment as a click.
+Pi's `compaction_start` carries `reason: "manual" | "threshold" | "overflow"`; ignore it.
+The gating exists to keep a concurrent turn out of a backend that cannot admit one, and that does not depend on who asked.
+Blocking Send without showing why would be a dead composer, which is worse than the defect this card fixes, so the status appears for those too.
+Only requesting is user-initiated, so an auto-compaction enters at running and never shows the requesting text.
 
 ## What the user sees
 
@@ -36,5 +56,6 @@ A controller test resolves `api.compact()` before any backend lifecycle update a
 Reducer or adapter tests replay each committed compact fixture and assert one start and one terminal compaction transition around the existing marker, with a failure case clearing the state into the error path.
 An HTTP or protocol test demonstrates that an admitted POST does not mean completion and that a snapshot can recover an in-progress compaction state.
 An `App.test.ts` test asserts that the composer acknowledgment survives request resolution, Compact and Send or Fork cannot fire during it, no compaction Stop control appears, and the acknowledgment clears when the marker-backed terminal update arrives.
+A reducer test drives Pi's `compaction_start` with `reason: "threshold"` and asserts the same running transition a manual one produces, with no requesting state ahead of it.
 The behavior-changing tests are watched red against the current request-scoped implementation before the fix.
 Because this changes the composer action row, `bun run test:browser` covers its visible placement without horizontal overflow and is run locally alongside `bun run check`.
