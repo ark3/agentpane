@@ -27,3 +27,22 @@ OW-bafeja separately amends OW-24's last line about CI, so expect that file to b
 The three descriptions name the suite for what it now covers and keep the no-server boundary explicit, and no claim in them exceeds what `--list` reports.
 The OW-24 clause is struck and replaced by a pointer to this card.
 `bun run check` passes, since comment-only edits to `playwright.config.ts` and `e2e/harness.ts` are still inside the typecheck's reach; `bun run test:browser` is not implicated, because no test or fixture changes.
+
+The three descriptions now name what the `e2e/` suite covers and point at `bunx playwright test --list` for the current shape rather than carrying a count that rots.
+Landed on main as 4cd7a0b, 904dfc2 and 90bd09c.
+
+`playwright.config.ts` and `e2e/harness.ts` open by calling it the browser UI suite, and both keep the no-server boundary explicit — no backend, no subprocess, no production HTTP/SSE path, with OW-24 named as the card that crosses it.
+`docs/MANUAL_TESTING.md`'s "Still unverified" no longer calls it the follow-mode harness while leaving the OW-24 and OW-25 items intact.
+OW-24's "## Done" clause that gated this doc fix behind the production-server slice is struck and points here instead; nothing else in OW-24 moved.
+
+The card said three descriptions and there were four.
+`docs/WORKSTREAMS.md`'s client-shell paragraph carried the same falsehood in the same words — "only as OW-47's narrow Playwright vehicle" — and AGENTS.md's rule is that one change retires every copy, so it went in the same commit.
+Anyone filing a card of this shape should grep the phrase before fixing the sites they already know about.
+
+Two defects were found by review rather than by the implementer, and both were the same failure: reasoning about coverage from memory instead of from the specs.
+The first draft deleted "the nav rail" from both docblocks on the grounds that no spec covered it, when `e2e/follow.spec.ts:204` is entirely about the nav rail (OW-60) — an edit made to retire an understated description that understated it further.
+The second cited the composer pair as `(OW-80, OW-relehi)` where `e2e/tools-menu.spec.ts` is OW-80 and `e2e/composer-shortcut.spec.ts` is OW-relehi, so read positionally against the sentence's own other pairs the ids were reversed.
+Every id in the finished docblock was checked against the opening line of the spec it names.
+
+`bun run check` passes (871 tests).
+`bun run test:browser` was run despite the card ruling it out, because `playwright.config.ts` was touched: 11 passed, and `--list` still reports 11 tests in 7 files, so no comment edit disturbed collection.
