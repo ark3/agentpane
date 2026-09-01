@@ -15,8 +15,10 @@
  * ordering a live Pi turn was observed to produce -- see OW-27's close note.
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
- * This is the browser UI suite, but it has no server -- no backend, no
- * subprocess, and no production HTTP/SSE path; crossing that boundary is
+ * This is the harness under the browser UI suite -- follow mode, the nav rail,
+ * the composer's action row, the assistant footer row, the edit-and-fork
+ * chrome, and the turn-done favicon badge -- but it has no server: no backend,
+ * no subprocess, and no production HTTP/SSE path. Crossing that boundary is
  * OW-24's job. Run `bunx playwright test --list` for what the specs beside it
  * cover.
  */
