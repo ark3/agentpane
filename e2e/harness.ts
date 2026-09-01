@@ -204,7 +204,16 @@ const api: AgentpaneApi = {
 		turnSettled = runTurn(body.text);
 	},
 	async abort() {},
-	async compact() {},
+	async compact() {
+		// The lifecycle arrives over SSE, as the real one does (OW-natiha): the
+		// route acknowledges and the backend's "running" status follows. No
+		// terminal event -- what the specs ask of a compaction is the persistent
+		// acknowledgment in the action row, not its ending.
+		queueMicrotask(() => {
+			seq += 1;
+			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running" });
+		});
+	},
 	/**
 	 * One point per user message, in transcript order -- the shape both real
 	 * adapters answer with, and the whole of what the client's ordinal

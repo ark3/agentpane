@@ -189,13 +189,27 @@
 	const error = $derived(view.error ?? selectedSession?.error ?? null);
 	const streamingNow = $derived(selectedSession?.isStreaming ?? false);
 	/**
+	 * The selected session's live compaction phase (OW-natiha), per session and
+	 * server-fed, so it survives request admission, reconnection (snapshots carry
+	 * it), and shows a backend compacting on its own.
+	 */
+	const compaction = $derived(selectedSession?.compaction ?? null);
+	/**
+	 * The streaming truth the action row may *act* on. Codex and Claude expose a
+	 * compaction through their generic active-turn signals, so `isStreaming`
+	 * stays true on the wire while one runs -- but that turn is not
+	 * user-stoppable, so compaction takes precedence: no Stop control, and no
+	 * stop-first labels, whatever the wire says.
+	 */
+	const streamingAction = $derived(streamingNow && compaction === null);
+	/**
 	 * The primary button names every consequence it will have (OW-hezidi).
 	 * "Fork", not a plainer phrase: all three CLIs in play use that word for this
 	 * operation and for the new-session sense of it. Never "rewind" -- that is
 	 * Claude Code's word for the in-place operation, which agentpane does not
 	 * offer and Codex cannot do at all.
 	 */
-	const sendLabel = $derived(editing ? (streamingNow ? "Stop and fork" : "Fork") : "Send");
+	const sendLabel = $derived(editing ? (streamingAction ? "Stop and fork" : "Fork") : "Send");
 	/**
 	 * The last user message in the selected transcript, or null if there is none
 	 * to go back to (OW-relehi). The composer's shortcut renders only when this
@@ -763,8 +777,18 @@
 		void controller.create(newSessionWorkspace, ref.backend);
 	}
 
-	/** Compact the selected session's context (OW-72). */
+	/**
+	 * Compact the selected session's context (OW-72). The menu entry's own
+	 * declarative `popovertargetaction="hide"` cannot close the menu here
+	 * (OW-natiha): the "requesting" mark disables the entry synchronously in
+	 * this same click, and a button that is disabled by the time its activation
+	 * behavior runs skips that behavior -- observed in Chromium, the menu
+	 * stayed open. So this closes it by hand; jsdom has no Popover API, hence
+	 * the existence check.
+	 */
 	function compactSession(): void {
+		const menu = document.getElementById("tools-menu");
+		if (typeof menu?.hidePopover === "function") menu.hidePopover();
 		void controller.compact();
 	}
 
@@ -823,7 +847,7 @@
 		const index = lastUserIndex;
 		if (index === null) return;
 		startEdit(index);
-		if (streamingNow) void controller.abort();
+		if (streamingAction) void controller.abort();
 	}
 
 	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
@@ -842,6 +866,10 @@
 	 * would leave a composer saying nothing about where it is about to send.
 	 */
 	function send(): void {
+		// The buttons are disabled while a compaction runs, but Ctrl/Cmd-Enter
+		// reaches here directly: the backends cannot safely admit a concurrent
+		// turn, so neither Send nor Fork starts one (OW-natiha).
+		if (compaction) return;
 		if (!view.draft) return;
 		const edit = editing;
 		armFollow(edit?.index);
@@ -1075,19 +1103,29 @@
 						popovertarget="tools-menu"
 						popovertargetaction="hide"
 						onclick={compactSession}
-						disabled={view.state.selected === null || view.busy === "compacting"}
+						disabled={view.state.selected === null || view.busy === "compacting" || compaction !== null}
 					>Compact</button>
 				</div>
+				<!-- Acknowledges the whole backend operation, not just the request
+				     (OW-natiha): it stands beside Tools, where the click came from,
+				     from the click until the transcript marker or error lands, and
+				     it outlives the popover closing. `role="status"` makes the
+				     requested -> running text change an accessible live update. -->
+				{#if compaction}
+					<p class="compaction-status" role="status">
+						{compaction === "requesting" ? "Compaction requested…" : "Compacting context…"}
+					</p>
+				{/if}
 				<!-- Beside Send and Stop, deliberately not in the Tools popover
 				     (OW-relehi): that menu holds the rare things, and going back to
 				     the last message is the frequent one. -->
 				{#if lastUserIndex !== null}
 					<button type="button" onclick={editLastMessage}>
-						{streamingNow ? "Stop and edit" : "Edit last message"}
+						{streamingAction ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft}>{sendLabel}</button>
-				{#if streamingNow}
+				<button type="submit" disabled={!view.draft || compaction !== null}>{sendLabel}</button>
+				{#if streamingAction}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
 				{/if}
 			</div>

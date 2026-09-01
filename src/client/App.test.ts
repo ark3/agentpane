@@ -1389,6 +1389,84 @@ describe("App", () => {
 		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
 	});
 
+	// -- compaction feedback (OW-natiha) ------------------------------------
+
+	/** A selected, attached session whose backend is at `compaction` of a compaction. */
+	function compactingState(compaction: "requesting" | "running" | null, isStreaming = false) {
+		return state({
+			selected: piSession,
+			summaries: [summary(piSession, "P")],
+			sessions: {
+				"pi:pi-1": {
+					ref: piSession,
+					messages: [user("earlier")],
+					isStreaming,
+					compaction,
+					seq: 1,
+					error: null,
+					requests: [],
+				},
+			},
+		});
+	}
+
+	it("keeps the compaction acknowledgment in the action row until the terminal update (OW-natiha)", async () => {
+		const controller = new FakeController(view({ busy: "compacting", state: compactingState("requesting") }));
+		const { container } = render(App, { props: { controller } });
+
+		const status = () => container.querySelector(".prompt-actions [role='status']");
+		expect(status()).toHaveTextContent("Compaction requested…");
+
+		// The request has resolved -- busy is idle again -- but the backend is
+		// still working: the acknowledgment survives request admission.
+		controller.publish(view({ busy: "idle", state: compactingState("running") }));
+		await tick();
+		expect(status()).toHaveTextContent("Compacting context…");
+
+		// The terminal update, driven by the marker or the error, clears it.
+		controller.publish(view({ busy: "idle", state: compactingState(null) }));
+		await tick();
+		expect(status()).toBeNull();
+	});
+
+	it("blocks Compact, Send, and the fork path while a compaction is in flight (OW-natiha)", async () => {
+		const controller = new FakeController(view({ draft: "queued up", busy: "idle", state: compactingState("running") }));
+		render(App, { props: { controller } });
+
+		expect(screen.getByRole("menuitem", { name: "Compact", hidden: true })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+		// The keyboard path must not start work either.
+		const prompt = screen.getByLabelText("Prompt");
+		await fireEvent.keyDown(prompt, { key: "Enter", ctrlKey: true });
+		expect(controller.submitted).toBe(0);
+
+		// Nor the fork path: enter edit mode, then try the same shortcut.
+		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "Enter", ctrlKey: true });
+		expect(controller.forked).toEqual([]);
+		expect(controller.submitted).toBe(0);
+	});
+
+	it("gives compaction precedence over isStreaming: no Stop control while it runs (OW-natiha)", async () => {
+		// Codex and Claude keep `isStreaming` true on the wire through a
+		// compaction, but that turn is not user-stoppable.
+		const controller = new FakeController(view({ busy: "idle", state: compactingState("running", true) }));
+		render(App, { props: { controller } });
+
+		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+
+		// The edit shortcut neither reads as nor acts as a stop control.
+		expect(screen.queryByRole("button", { name: "Stop and edit" })).not.toBeInTheDocument();
+		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
+		expect(controller.aborted).toBe(0);
+
+		// Once the compaction ends, the wire's streaming truth shows again.
+		controller.publish(view({ busy: "idle", state: compactingState(null, true) }));
+		await tick();
+		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+	});
+
 	// -- edit and fork (OW-hezidi) ------------------------------------------
 
 	/**

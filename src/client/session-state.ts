@@ -68,6 +68,22 @@ export function clearSessionError(state: ClientState, ref: SessionRef): ClientSt
 	return updateSession(state, { ...view, error: null });
 }
 
+/**
+ * Write the client's own view of a session's compaction phase (OW-natiha):
+ * "requesting" at the request itself, since the server's own "requesting"
+ * status races the POST response (D2), and null again if that request fails.
+ * Server events overwrite this; the reducer above stays wire-truth only.
+ */
+export function setSessionCompaction(
+	state: ClientState,
+	ref: SessionRef,
+	compaction: "requesting" | null,
+): ClientState {
+	const view = state.sessions[sessionKey(ref)] ?? emptySession(ref);
+	if (view.compaction === compaction) return state;
+	return updateSession(state, { ...view, compaction });
+}
+
 export function reduceServerEvent(state: ClientState, event: ServerEvent): ReduceResult {
 	if (event.type === "sessions-changed") return result(state, [], true);
 

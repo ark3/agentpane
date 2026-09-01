@@ -262,6 +262,10 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .tools-menu-list button { text-align: left; background: none; border: none; padding: var(--ap-space-1) var(--ap-space-2); border-radius: var(--ap-radius-sm); color: var(--ap-fg); }
 .tools-menu-list button:hover:not(:disabled) { background: var(--ap-surface); }
 .tools-menu-list button:disabled { color: var(--ap-fg-subtle); }
+/* The compaction acknowledgment (OW-natiha) sits beside Tools, where the click
+   came from: it takes over the row's auto-margin spacer while it is present. */
+.compaction-status { margin: 0 auto 0 0; align-self: center; color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+.prompt-actions:has(.compaction-status) .tools-menu { margin-right: 0; }
 /* A read-only preview has no composer -- attaching is the one explicit action. */
 .attach button { width: 100%; border-color: var(--ap-accent); color: var(--ap-accent); }
 .abort { color: var(--ap-danger); }

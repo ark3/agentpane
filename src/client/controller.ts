@@ -13,6 +13,7 @@ import {
 	clearSessionError,
 	initialClientState,
 	reduceServerEvent,
+	setSessionCompaction,
 	type ClientState,
 } from "./session-state.ts";
 
@@ -522,11 +523,28 @@ export function createController(
 				publish({ error: "Select a session before compacting." });
 				return;
 			}
-			publish({ busy: "compacting", error: null });
+			// The session reads "requesting" from the click itself rather than from
+			// the server: its own "requesting" status races the POST response (D2),
+			// and the composer needs the acknowledgment either way (OW-natiha).
+			// Server status/snapshot events overwrite it from here on -- the request
+			// resolving is admission, not completion, so nothing here clears it.
+			publish({
+				busy: "compacting",
+				error: null,
+				state: setSessionCompaction(view.state, selected, "requesting"),
+			});
 			try {
 				await api.compact(selected);
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed) {
+					// Failed admission: nothing is running unless a server event has
+					// since said otherwise, so only a still-"requesting" mark clears.
+					const current = view.state.sessions[sessionKey(selected)]?.compaction;
+					const state = current === "requesting"
+						? setSessionCompaction(view.state, selected, null)
+						: view.state;
+					publish({ error: errorMessage(error), state });
+				}
 			} finally {
 				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
 			}

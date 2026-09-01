@@ -413,6 +413,57 @@ describe("client controller", () => {
 	});
 
 	/**
+	 * OW-natiha. `api.compact()` resolving is *admission*, not completion: the
+	 * backend's work is still running, and only its status/snapshot events end
+	 * it. The controller marks the session "requesting" at the request itself --
+	 * the server's own "requesting" status races the POST response (D2), and the
+	 * click needs feedback either way -- and server events overwrite that mark.
+	 */
+	it("keeps the session reading as compacting after the request resolves, until a terminal event (OW-natiha)", async () => {
+		const api = new FakeApi();
+		const compacting = deferred<void>();
+		api.compact.mockReturnValue(compacting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+
+		const compacted = controller.compact();
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+
+		compacting.resolve();
+		await compacted;
+
+		// The request resolved with no backend lifecycle update yet: still compacting.
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+
+		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: "running" });
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("running");
+
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: false, compaction: null });
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
+	});
+
+	it("clears its own requesting mark when the compaction request fails (OW-natiha)", async () => {
+		const api = new FakeApi();
+		const compacting = deferred<void>();
+		api.compact.mockReturnValue(compacting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+
+		const compacted = controller.compact();
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+
+		compacting.reject(new Error("compaction refused"));
+		await compacted;
+
+		expect(controller.getView().error).toBe("compaction refused");
+		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
+	});
+
+	/**
 	 * OW-hezidi. The fork point is addressed by *ordinal* among user messages --
 	 * `GET fork-points` returns one point per user message in transcript order --
 	 * so identical wording in two messages cannot confuse it.
