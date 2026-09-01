@@ -223,6 +223,32 @@ describe("replaying the compact fixture", () => {
 		expect(transitions[1]?.effects).toContainEqual({ type: "message", index: expect.any(Number) });
 		expect(reducer.getState().messages.filter((message) => message.role === "compactionSummary")).toHaveLength(1);
 	});
+
+	it("clears a running compaction when its turn is interrupted before item completion", () => {
+		const reducer = new CodexReducer({ now: () => 1_000 });
+		reducer.handle(startedItem({ type: "contextCompaction", id: "compact" }, 10));
+		expect(reducer.getState().compaction).toBe("running");
+
+		const effects = reducer.handle({
+			method: "turn/completed",
+			params: {
+				threadId: "t",
+				turn: {
+					id: "u",
+					items: [],
+					itemsView: "summary",
+					status: "interrupted",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1_000,
+				},
+			},
+		});
+
+		expect(reducer.getState().compaction).toBeNull();
+		expect(effects).toContainEqual({ type: "compaction", compaction: null });
+	});
 });
 
 describe("reasoning effort", () => {

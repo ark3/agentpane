@@ -403,10 +403,16 @@ export class SessionManager {
 		session.lastStreaming = state.isStreaming;
 		session.lastCompaction = state.compaction;
 
-		if (changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length) {
+		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
+		if (hasChangedMessage && compactionChanged) {
+			// Compaction completion changes the transcript marker and operation state
+			// together. Keep that reducer-level atomicity on the wire rather than let
+			// an upsert expose the marker while the client still holds `running`.
+			this.broadcaster.broadcastSnapshot(session.ref);
+		} else if (hasChangedMessage) {
 			const message = state.messages[changedIndex];
 			if (message) this.broadcaster.upsert(session.ref, changedIndex, message);
-			if (streamingChanged || compactionChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction);
+			if (streamingChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction);
 		} else {
 			// A snapshot carries isStreaming and compaction, so no separate status event.
 			this.broadcaster.broadcastSnapshot(session.ref);

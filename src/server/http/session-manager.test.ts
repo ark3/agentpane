@@ -483,4 +483,24 @@ describe("turn boundaries", () => {
 
 		expect(events.filter((event) => event.type === "sessions-changed")).toHaveLength(2);
 	});
+
+	it("broadcasts an atomic compaction marker and terminal state as one snapshot", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+
+		adapter.setCompaction("running");
+		events.length = 0;
+		adapter.messages = [{ role: "compactionSummary", summary: "", tokensBefore: 10, timestamp: 1 }];
+		adapter.setCompaction(null, 0);
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				type: "snapshot",
+				messages: [expect.objectContaining({ role: "compactionSummary" })],
+				compaction: null,
+			}),
+		]);
+	});
 });

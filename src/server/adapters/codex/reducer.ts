@@ -190,12 +190,11 @@ export class CodexReducer {
 
 			case "turn/completed": {
 				const turn = message.params.turn;
-				const effects: CodexEffect[] = [];
+				const effects: CodexEffect[] = this.setCompaction(null);
 				// NOTE: `turn.items` here is a *summary* view (`itemsView:
 				// "summary"` in every fixture) -- only the final agent message.
 				// Rebuilding the transcript from it would delete the turn.
 				if (turn.status === "failed" && turn.error?.message) {
-					effects.push(...this.setCompaction(null));
 					effects.push({ type: "error", message: turn.error.message });
 				}
 				effects.push(...this.setStreaming(false));
