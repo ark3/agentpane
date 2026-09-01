@@ -9,10 +9,11 @@
  *
  * The synthetic backend implements the `AgentpaneApi` port directly rather
  * than mocking `fetch`/`EventSource`. That layer is already covered by
- * `api.test.ts`; what matters is that the *controller* sees a real SSE-shaped
- * event sequence in real time, which it does. The event ordering below (echoed
- * user message, assistant placeholder, only then `status:true`) is the
- * ordering a live Pi turn was observed to produce -- see OW-27's close note.
+ * `api.test.ts` and is not what any of these specs are about; what matters is
+ * that the *controller* sees a real SSE-shaped event sequence in real time,
+ * which it does. The event ordering below (echoed user message, assistant
+ * placeholder, only then `status:true`) is the ordering a live Pi turn was
+ * observed to produce -- see OW-27's close note.
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
  * This is the harness under the browser UI suite -- follow mode, the nav rail,

@@ -40,7 +40,7 @@ has since been run live through the same composition** — the production
 without an orphan, which together settle DESIGN's third open question for both
 backends. Those two backend-backed runs served the built client and drove
 REST/SSE with a local harness rather than browser UI interaction. Browser
-automation now exists, but only as OW-47's narrow Playwright vehicle (`e2e/`)
+automation now exists as the `e2e/` browser UI suite, but it drives the client
 against a synthetic backend, so a real browser path through the production
 server and a real backend turn remains the largest unverified surface (OW-24).
 

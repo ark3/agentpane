@@ -6,7 +6,7 @@ const PORT = 5199;
  * The browser UI suite, for the claims jsdom cannot host: layout, scroll
  * anchoring, real scroll-event timing, the Popover API, and files nothing in
  * the module graph imports. Follow mode and the transcript nav rail (OW-47,
- * OW-60), the composer's action row and its tools menu (OW-80, OW-relehi), the
+ * OW-60), the composer's action row and its tools menu (OW-relehi, OW-80), the
  * assistant footer row (OW-75), the edit-and-fork chrome (OW-hezidi), and the
  * turn-done favicon badge and its icon (OW-diyuwu, OW-ropuwo) all live here;
  * `bunx playwright test --list` reports the current shape. It serves
