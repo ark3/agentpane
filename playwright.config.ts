@@ -3,11 +3,15 @@ import { defineConfig } from "@playwright/test";
 const PORT = 5199;
 
 /**
- * The browser test vehicle, for the claims jsdom cannot host -- follow mode
- * (OW-47) and the tools menu's light dismiss (OW-80). It serves
- * `e2e/harness.html` through the project's own Vite config, so the aliases and
- * the Svelte plugin are the real ones. No backend is involved -- see
- * `e2e/harness.ts`.
+ * The browser UI suite, for the claims jsdom cannot host: layout, scroll
+ * anchoring, real scroll-event timing, the Popover API, and files nothing in
+ * the module graph imports. Follow mode (OW-47), the composer's action row and
+ * its tools menu (OW-80, OW-relehi), the assistant footer row (OW-75), the
+ * edit-and-fork chrome (OW-hezidi), and the turn-done favicon badge and its
+ * icon (OW-diyuwu, OW-ropuwo) all live here; `bunx playwright test --list`
+ * reports the current shape. It serves `e2e/harness.html` through the
+ * project's own Vite config, so the aliases and the Svelte plugin are the real
+ * ones. No backend is involved -- see `e2e/harness.ts`.
  */
 export default defineConfig({
 	testDir: "e2e",

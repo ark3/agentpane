@@ -1,25 +1,24 @@
 /**
- * Browser harness for follow-mode (OW-47).
+ * The harness the browser UI suite mounts.
  *
  * The real `App.svelte` and the real `controller.ts`, mounted in a real
  * browser, driven by a synthetic backend. Nothing here is shipped: it exists
- * because jsdom cannot *discover* a follow-mode defect -- it has no layout, no
- * `ResizeObserver`, and no real scroll-event timing, which are exactly the
- * three things follow mode is built out of.
+ * because jsdom cannot *discover* a layout or timing defect -- it has no
+ * layout, no `ResizeObserver`, no real scroll-event timing, and no Popover
+ * API, and those are what the specs beside this file are claims about.
  *
  * The synthetic backend implements the `AgentpaneApi` port directly rather
  * than mocking `fetch`/`EventSource`. That layer is already covered by
- * `api.test.ts` and is not involved in this defect; what matters is that the
- * *controller* sees a real SSE-shaped event sequence in real time, which it
- * does. The event ordering below (echoed user message, assistant placeholder,
- * only then `status:true`) is the ordering a live Pi turn was observed to
- * produce -- see OW-27's close note.
+ * `api.test.ts`; what matters is that the *controller* sees a real SSE-shaped
+ * event sequence in real time, which it does. The event ordering below (echoed
+ * user message, assistant placeholder, only then `status:true`) is the
+ * ordering a live Pi turn was observed to produce -- see OW-27's close note.
  *
  * Deliberately narrow: one session, one turn shape, no rename, no error paths.
- * It is the vehicle for the few claims that need a real browser -- follow mode,
- * the nav rail, the tools menu's light dismiss (OW-80), the turn-done favicon
- * badge (OW-diyuwu), and the edit-and-fork chrome (OW-hezidi) -- not a browser
- * E2E suite.
+ * This is the browser UI suite, but it has no server -- no backend, no
+ * subprocess, and no production HTTP/SSE path; crossing that boundary is
+ * OW-24's job. Run `bunx playwright test --list` for what the specs beside it
+ * cover.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";

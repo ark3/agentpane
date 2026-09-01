@@ -1211,8 +1211,9 @@ per hour per IP, so check on a beat rather than polling.
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
-**OW-24** (no browser automation yet of a real backend-backed turn — the only
-browser vehicle is the synthetic `e2e/` follow-mode harness) and **OW-25**
+**OW-24** (no browser automation yet of a real backend-backed turn — the `e2e/`
+browser UI suite drives the real client against a synthetic `AgentpaneApi`
+port, with no server in the loop) and **OW-25**
 (whether Pi raises approval dialogs without a trusting `trust.json`).
 
 The application has since been opened by hand in a browser, on 2026-08-12. What
