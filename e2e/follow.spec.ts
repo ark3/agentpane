@@ -22,6 +22,73 @@ declare global {
 
 /** Flush-at-the-top, measured in real layout: the prompt's top edge on the pane's. */
 const LOCKED_PX = 2;
+const PRESERVED_PX = 4;
+
+async function afterLayout(page: import("@playwright/test").Page): Promise<void> {
+	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+test("reading view preserves a disengaged reader's user-turn landmark in both directions", async ({ page }) => {
+	await page.goto("/e2e/harness.html");
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	await page.evaluate(() => window.harness.seed(30, true, true));
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
+
+	const landmark = await page.evaluate(() => {
+		const pane = document.querySelector<HTMLElement>(".conversation")!;
+		const users = pane.querySelectorAll<HTMLElement>('[data-role="user"]');
+		const node = users[15]!;
+		const contentTop = node.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+		pane.scrollTop = contentTop - 73;
+		return Number(node.dataset.index);
+	});
+	await expect.poll(async () => (await page.evaluate((index) => window.harness.metrics(index), landmark)).anchorOffset)
+		.toBeCloseTo(73, 0);
+
+	const chromeSides = await page.evaluate(() => {
+		const pane = document.querySelector<HTMLElement>(".conversation")!;
+		const top = pane.getBoundingClientRect().top;
+		const bottom = pane.getBoundingClientRect().bottom;
+		const chrome = Array.from(pane.querySelectorAll<HTMLElement>('[data-block="thinking"], [data-tool]'));
+		return {
+			above: chrome.some((node) => node.getBoundingClientRect().bottom < top),
+			below: chrome.some((node) => node.getBoundingClientRect().top > bottom),
+		};
+	});
+	expect(chromeSides).toEqual({ above: true, below: true });
+
+	const reading = page.getByRole("button", { name: "Reading view", exact: true });
+	const before = (await page.evaluate((index) => window.harness.metrics(index), landmark)).anchorOffset!;
+	await reading.click();
+	await expect(reading).toHaveAttribute("aria-pressed", "true");
+	await afterLayout(page);
+	const condensed = (await page.evaluate((index) => window.harness.metrics(index), landmark)).anchorOffset!;
+	expect(condensed).toBeCloseTo(before, 0);
+	expect(Math.abs(condensed - before)).toBeLessThanOrEqual(PRESERVED_PX);
+
+	await reading.click();
+	await expect(reading).toHaveAttribute("aria-pressed", "false");
+	await afterLayout(page);
+	const expanded = (await page.evaluate((index) => window.harness.metrics(index), landmark)).anchorOffset!;
+	expect(Math.abs(expanded - before)).toBeLessThanOrEqual(PRESERVED_PX);
+});
+
+test("reading view leaves a disengaged transcript at the absolute top", async ({ page }) => {
+	await page.goto("/e2e/harness.html");
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	await page.evaluate(() => window.harness.seed(12, true));
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
+	const reading = page.getByRole("button", { name: "Reading view", exact: true });
+
+	for (const pressed of ["true", "false"]) {
+		await reading.click();
+		await expect(reading).toHaveAttribute("aria-pressed", pressed);
+		await afterLayout(page);
+		expect((await page.evaluate(() => window.harness.metrics(0))).scrollTop).toBe(0);
+	}
+});
 
 test("a long conversation autoscrolls on every turn the way its first few do", async ({ page }) => {
 	test.setTimeout(120_000);
@@ -130,6 +197,14 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 	await expect(streamedTurn.locator('[data-block="thinking"]')).toBeVisible();
 	await expect(streamedTurn.locator('[data-tool="bash"]')).toBeVisible();
 	await expect(anchor).toBeVisible();
+	await expect
+		.poll(async () => (await page.evaluate((index) => window.harness.metrics(index), anchorIndex)).anchorOffset)
+		.toBeCloseTo(0, 0);
+	// Pause the synthetic stream between chunks so only the toggle can restore
+	// the anchor in the assertions below. Otherwise a later SSE upsert can run
+	// the ordinary follow reconciliation and make the toggle path pass without
+	// doing anything of its own.
+	await page.evaluate(() => window.harness.pace(160, 1_000));
 
 	const reading = page.getByRole("button", { name: "Reading view", exact: true });
 	const transcript = page.locator('[role="log"]');
@@ -144,6 +219,8 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 		return window.harness.metrics(index);
 	}, anchorIndex);
 	expect(afterCondense.anchorOffset).not.toBeNull();
+	expect(Math.abs(afterCondense.anchorOffset!), "condensing did not immediately restore armed follow")
+		.toBeLessThanOrEqual(LOCKED_PX);
 
 	await expect(transcript).toHaveAttribute("aria-busy", "true");
 	await reading.click();
@@ -156,7 +233,10 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 		return window.harness.metrics(index);
 	}, anchorIndex);
 	expect(afterRestore.anchorOffset).not.toBeNull();
+	expect(Math.abs(afterRestore.anchorOffset!), "expanding did not immediately restore armed follow")
+		.toBeLessThanOrEqual(LOCKED_PX);
 
+	await page.evaluate(() => window.harness.pace(160, 12));
 	await page.evaluate(() => window.harness.settled());
 	const { anchorOffset } = await page.evaluate((index) => window.harness.metrics(index), anchorIndex);
 	expect(anchorOffset, "the submitted prompt disappeared after the reading-view toggles").not.toBeNull();

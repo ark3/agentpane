@@ -402,11 +402,83 @@
 	 * direction. When every user turn is above the viewport top there is no
 	 * pivot, and the last turn is the only place `prev` can go.
 	 */
-	function navTargets(el: HTMLElement): { prev: HTMLElement | null; next: HTMLElement | null } {
+	function navTargets(el: HTMLElement): {
+		pivot: HTMLElement | null;
+		prev: HTMLElement | null;
+		next: HTMLElement | null;
+	} {
 		const turns = userTurns(el);
-		const pivot = turns.findIndex((turn) => anchorTop(el, turn) >= el.scrollTop - NAV_SLACK_PX);
-		if (pivot === -1) return { prev: turns[turns.length - 1] ?? null, next: null };
-		return { prev: turns[pivot - 1] ?? null, next: turns[pivot + 1] ?? null };
+		const pivotIndex = turns.findIndex((turn) => anchorTop(el, turn) >= el.scrollTop - NAV_SLACK_PX);
+		if (pivotIndex === -1) {
+			return { pivot: null, prev: turns[turns.length - 1] ?? null, next: null };
+		}
+		return {
+			pivot: turns[pivotIndex] ?? null,
+			prev: turns[pivotIndex - 1] ?? null,
+			next: turns[pivotIndex + 1] ?? null,
+		};
+	}
+
+	/**
+	 * Flip Reading view without making the transcript jump under its reader.
+	 *
+	 * Follow mode owns its own landmark, so a render followed by `reconcile`
+	 * keeps that exact submitted-message anchor. Otherwise preserve the nav
+	 * rail's pivot -- the first user turn at or below the viewport top -- at the
+	 * same screen offset. Tool chrome cannot serve as the landmark because the
+	 * condensed transcript removes it. At the absolute top there is no earlier
+	 * user turn to orient the viewport, so preserving zero itself is the honest
+	 * result.
+	 */
+	async function toggleReading(): Promise<void> {
+		const el = conversationEl;
+		const ref = view.state.selected;
+		if (!el || !ref) {
+			reading = !reading;
+			return;
+		}
+
+		const key = sessionKey(ref);
+		const state = sessionScroll.get(key);
+		if (state?.anchorIndex != null) {
+			reading = !reading;
+			await tick();
+			if (conversationEl === el && view.state.selected && sessionKey(view.state.selected) === key) {
+				// Use follow's normal frame throttle while streaming. Reconciling in
+				// this tick would replace `state.height` before Chromium delivers the
+				// shrink-generated scroll event, so the handler could mistake that
+				// browser clamp for a reader scroll and clear the anchor.
+				scheduleFollow(selectedSession?.isStreaming ?? false);
+			}
+			return;
+		}
+
+		const top = el.scrollTop;
+		const { pivot, prev } = navTargets(el);
+		const landmark = top === 0 && prev === null ? null : pivot;
+		const landmarkIndex = landmark?.dataset.index;
+		const delta = landmark ? anchorTop(el, landmark) - top : null;
+
+		reading = !reading;
+		await tick();
+		if (conversationEl !== el || !view.state.selected || sessionKey(view.state.selected) !== key) return;
+
+		const restoredLandmark =
+			landmarkIndex === undefined
+				? null
+				: el.querySelector<HTMLElement>(`[data-role="user"][data-index="${landmarkIndex}"]`);
+		applyScrollTop(el, restoredLandmark && delta !== null ? anchorTop(el, restoredLandmark) - delta : top);
+
+		const remembered = sessionScroll.get(key) ?? {
+			top: 0,
+			height: el.scrollHeight,
+			anchorIndex: null,
+			hasStreamed: false,
+		};
+		remembered.top = el.scrollTop;
+		remembered.height = el.scrollHeight;
+		sessionScroll.set(key, remembered);
+		updateNavState(el);
 	}
 
 	/**
@@ -962,7 +1034,7 @@
 			<button type="button" onclick={createSession} disabled={!newSessionWorkspace}>New</button>
 		</div>
 		<!-- The same control drives attached and stored transcripts. -->
-		<button type="button" aria-pressed={reading} onclick={() => (reading = !reading)}>Reading view</button>
+		<button type="button" aria-pressed={reading} onclick={() => void toggleReading()}>Reading view</button>
 	</section>
 
 	<div class="sessions-header">

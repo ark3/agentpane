@@ -255,7 +255,7 @@ export interface FollowHarness {
 	/** Streaming shape of a synthetic turn: how many upserts, how far apart. */
 	pace(chunks: number, ms: number): void;
 	/** Replace the transcript with `turns` completed user/assistant pairs and snapshot it. */
-	seed(turns: number, withElidedChrome?: boolean): void;
+	seed(turns: number, withElidedChrome?: boolean, interleavedChrome?: boolean): void;
 	/** Resolves when the turn currently streaming has emitted its `status:false`. */
 	settled(): Promise<void>;
 	/** Live geometry of the transcript pane and the anchor the last submit armed. */
@@ -277,11 +277,24 @@ const harness: FollowHarness = {
 		CHUNKS = chunks;
 		CHUNK_MS = ms;
 	},
-	seed(turns, withElidedChrome = false) {
+	seed(turns, withElidedChrome = false, interleavedChrome = false) {
 		messages = [];
 		for (let i = 0; i < turns; i++) {
 			messages.push(user(`prompt ${i}: ${words(i, 12)}`));
 			messages.push(assistant([{ type: "text", text: paragraphs(i, 3) }], "stop"));
+			if (interleavedChrome && i % 4 === 1) {
+				const id = `seed-call-${messages.length}`;
+				messages.push(
+					assistant(
+						[
+							{ type: "thinking", thinking: words(i, 20) },
+							{ type: "toolCall", id, name: "bash", arguments: { command: "pwd" } },
+						],
+						"toolUse",
+					),
+				);
+				messages.push(toolResult(id, "bash", words(i + 1, 20)));
+			}
 		}
 		if (withElidedChrome) {
 			const id = `seed-call-${messages.length}`;
