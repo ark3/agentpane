@@ -48,3 +48,8 @@ Load-bearing: three states, the masthead, no persistence, the dark palette writt
 Incidental: whether the control is a select or a cycling button, and its exact label.
 
 OW-pofeto covers the unset `color-scheme` beside this; the two touch the same file and neither blocks the other.
+
+## Source check before execution
+
+OW-pofeto landed first on 2026-09-02 and added `color-scheme: light` to `:root` plus `color-scheme: dark` to the system dark media-query block.
+When this card flattens the palette into `data-theme` blocks, those declarations move with their matching palettes so browser-owned controls continue to follow the resolved theme.
