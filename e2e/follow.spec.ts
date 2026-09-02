@@ -244,6 +244,61 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 		.toBeLessThanOrEqual(LOCKED_PX);
 });
 
+test("reading view follows its compact live tail appearing and settling away", async ({ page }) => {
+	test.setTimeout(120_000);
+	await page.goto("/e2e/harness.html");
+
+	await page.getByRole("button", { name: "Attach", exact: true }).click();
+	await expect(page.getByLabel("Prompt")).toBeVisible();
+	await page.evaluate(() => {
+		window.harness.seed(24);
+		window.harness.pace(80, 250);
+	});
+	await expect(page.getByRole("button", { name: "Jump to end" })).toBeEnabled();
+	await page.getByRole("button", { name: "Reading view", exact: true }).click();
+
+	const lastSeededUser = await page.evaluate(() => window.harness.lastUserIndex());
+	await page.getByLabel("Prompt").fill("follow the compact reading-view tail");
+	await page.getByRole("button", { name: "Send" }).click();
+	await page.waitForFunction((index) => window.harness.lastUserIndex() > index, lastSeededUser);
+	const anchorIndex = await page.evaluate(() => window.harness.lastUserIndex());
+	const status = page.locator("[data-reading-tail]");
+
+	await expect(status).toHaveAttribute("data-reading-tail", "tool");
+	await expect(status).toContainText("bash");
+	// Hold the next body chunk far enough away that the geometry immediately
+	// after visible prose replaces this status cannot be repaired by a later
+	// streaming upsert before it is measured.
+	await page.evaluate(() => window.harness.pace(80, 1_000));
+	const appeared = await page.evaluate((index) => window.harness.metrics(index), anchorIndex);
+	expect(appeared.anchorOffset).not.toBeNull();
+	const appearedBottom = appeared.scrollHeight - appeared.scrollTop - appeared.clientHeight;
+	expect(
+		Math.min(Math.abs(appeared.anchorOffset!), appearedBottom),
+		"the status appearance lost both bottom-follow and the locked prompt",
+	).toBeLessThanOrEqual(LOCKED_PX);
+
+	await expect(status).toHaveCount(0, { timeout: 10_000 });
+	const disappeared = await page.evaluate(async (index) => {
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		return window.harness.metrics(index);
+	}, anchorIndex);
+	expect(disappeared.anchorOffset).not.toBeNull();
+	const disappearedBottom = disappeared.scrollHeight - disappeared.scrollTop - disappeared.clientHeight;
+	expect(
+		Math.min(Math.abs(disappeared.anchorOffset!), disappearedBottom),
+		"the status disappearance lost both bottom-follow and the locked prompt",
+	).toBeLessThanOrEqual(LOCKED_PX);
+
+	await page.evaluate(() => window.harness.pace(80, 12));
+	await page.evaluate(() => window.harness.settled());
+	await expect(page.locator('[role="log"]')).toHaveAttribute("aria-busy", "false");
+	const settled = await page.evaluate((index) => window.harness.metrics(index), anchorIndex);
+	expect(settled.anchorOffset).not.toBeNull();
+	expect(Math.abs(settled.anchorOffset!), "settling the status away disengaged follow")
+		.toBeLessThanOrEqual(LOCKED_PX);
+});
+
 /** A real, fine-grained reader scroll must still win over follow mode (OW-56). */
 test("a one-pixel manual scroll near the bottom disengages follow", async ({ page }) => {
 	test.setTimeout(120_000);

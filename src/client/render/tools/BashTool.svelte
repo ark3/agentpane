@@ -5,11 +5,12 @@
 	 * output, the way a terminal would show it.
 	 */
 	import type { ToolRenderProps } from "../types.ts";
-	import { oneLine, toolState } from "../types.ts";
+	import { toolState } from "../types.ts";
 	import { argString } from "./args.ts";
 	import Output from "./Output.svelte";
 	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
+	import { toolSummary } from "./summary.ts";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
@@ -17,7 +18,7 @@
 	const state = $derived(toolState({ call, result, streaming }));
 </script>
 
-<ToolCard name={call.name} summary={oneLine(command) || "shell"} {state} timestamp={result?.timestamp}>
+<ToolCard name={call.name} summary={toolSummary(call)} {state} timestamp={result?.timestamp}>
 	{#if command}
 		<Output text={command} language="bash" />
 	{/if}

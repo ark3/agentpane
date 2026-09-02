@@ -2,7 +2,7 @@
 	/** The transcript is a keyed list of messages. */
 	import type { AgentMessage } from "@earendil-works/pi-agent-core";
 	import Message from "./Message.svelte";
-	import { buildTranscript, condense } from "./transcript.ts";
+	import { buildTranscript, condense, readingTailStatus } from "./transcript.ts";
 
 	let {
 		messages = [],
@@ -27,7 +27,9 @@
 		onedit?: ((index: number) => void) | undefined;
 	} = $props();
 
-	const view = $derived(reading ? condense(buildTranscript(messages)) : buildTranscript(messages));
+	const fullView = $derived(buildTranscript(messages));
+	const view = $derived(reading ? condense(fullView) : fullView);
+	const tailStatus = $derived(reading ? readingTailStatus(fullView, isStreaming) : undefined);
 </script>
 
 <div class="transcript" role="log" aria-busy={isStreaming}>
@@ -43,7 +45,15 @@
 		/>
 	{/each}
 
-	{#if isStreaming && view.entries.length === 0}
+	{#if tailStatus}
+		<p class="reading-tail" data-reading-tail={tailStatus.kind} role="status">
+			<span class="tail-name">{tailStatus.name}</span>
+			{#if tailStatus.summary}<span class="tail-summary" title={tailStatus.summary}>{tailStatus.summary}</span>{/if}
+			<span class="tail-state">running</span>
+		</p>
+	{/if}
+
+	{#if isStreaming && view.entries.length === 0 && !tailStatus}
 		<p class="waiting">Waiting for the agent…</p>
 	{/if}
 	{#if !isStreaming && view.entries.length === 0}
@@ -69,5 +79,43 @@
 		margin: 0;
 		color: var(--ap-fg-subtle);
 		font-size: var(--ap-text-sm);
+	}
+
+	.reading-tail {
+		display: flex;
+		align-items: baseline;
+		gap: var(--ap-space-2);
+		min-width: 0;
+		margin: 0;
+		padding: var(--ap-space-2) var(--ap-space-3);
+		border: 1px solid var(--ap-border);
+		border-radius: var(--ap-radius-md);
+		background: var(--ap-surface);
+		font-family: var(--ap-font-mono);
+		font-size: var(--ap-text-sm);
+	}
+
+	.tail-name {
+		flex: none;
+		font-weight: 600;
+		color: var(--ap-fg-muted);
+	}
+
+	.tail-summary {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--ap-fg-subtle);
+	}
+
+	.tail-state {
+		flex: none;
+		color: var(--ap-warning);
+		font-family: var(--ap-font-sans);
+		font-size: var(--ap-text-2xs);
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
 	}
 </style>

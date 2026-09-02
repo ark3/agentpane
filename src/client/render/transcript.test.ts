@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assistant, errors, orphanResult, streamingTurn, toolRead, toolResult, user } from "./samples.ts";
-import { buildTranscript, condense } from "./transcript.ts";
+import { buildTranscript, condense, readingTailStatus } from "./transcript.ts";
 
 describe("buildTranscript", () => {
 	it("indexes tool results by the call they answer", () => {
@@ -81,6 +81,33 @@ describe("condense", () => {
 		expect(view.lastIndex).toBe(3);
 	});
 
+	it("exposes the last elided tool call to streaming reading view without renumbering", () => {
+		const full = buildTranscript(toolRead.slice(0, 3));
+		const view = condense(full);
+
+		expect(readingTailStatus(full, true)).toEqual({
+			kind: "tool",
+			name: "read",
+			summary: "greeting.txt",
+		});
+		expect(view.entries.map((entry) => entry.index)).toEqual([0]);
+	});
+
+	it("exposes no elided-tail status when settled or when visible assistant text is live", () => {
+		expect(readingTailStatus(buildTranscript(toolRead.slice(0, 3)), false)).toBeUndefined();
+		const textTail = [
+			user("go"),
+			assistant(
+				[
+					{ type: "toolCall" as const, id: "call", name: "bash", arguments: { command: "pwd" } },
+					{ type: "text" as const, text: "Visible answer" },
+				],
+				"pending",
+			),
+		];
+		expect(readingTailStatus(buildTranscript(textTail), true)).toBeUndefined();
+	});
+
 	it("never elides the user message follow mode anchors to", () => {
 		const view = reading(toolRead);
 		const anchor = view.entries.find((e) => e.message.role === "user");
@@ -100,8 +127,6 @@ describe("condense", () => {
 	});
 
 	it("drops the empty placeholder of a turn that is still starting", () => {
-		// Reading view carries no liveness cue -- the Abort button is the one
-		// that matters, and it is not in the transcript.
 		const view = reading([user("go"), assistant([], "pending")]);
 		expect(view.entries.map((e) => e.index)).toEqual([0]);
 		expect(view.lastIndex).toBe(0);

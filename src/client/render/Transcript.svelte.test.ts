@@ -358,6 +358,38 @@ describe("Transcript", () => {
 		expect(container.querySelector(".cursor")).not.toBeNull();
 	});
 
+	it("shows the last elided tool call only while reading view is streaming", async () => {
+		const liveTool = toolRead.slice(0, 3);
+		const { container, rerender } = render(Transcript, {
+			props: { messages: liveTool, isStreaming: true, reading: true },
+		});
+		const status = container.querySelector("[data-reading-tail]");
+		expect(status?.textContent).toContain("read");
+		expect(status?.textContent).toContain("greeting.txt");
+		expect(container.querySelector('[data-index="0"]')).not.toBeNull();
+
+		await rerender({ messages: liveTool, isStreaming: false, reading: true });
+		await tick();
+		expect(container.querySelector("[data-reading-tail]")).toBeNull();
+	});
+
+	it("shows no reading-tail line when the live tail is visible assistant text", () => {
+		const messages: AgentMessage[] = [
+			user("go"),
+			assistant(
+				[
+					{ type: "toolCall", id: "call", name: "bash", arguments: { command: "pwd" } },
+					{ type: "text", text: "Visible answer" },
+				],
+				"pending",
+			),
+		];
+		const { container } = render(Transcript, {
+			props: { messages, isStreaming: true, reading: true },
+		});
+		expect(container.querySelector("[data-reading-tail]")).toBeNull();
+	});
+
 	it("says something sensible when there is nothing to show", () => {
 		const { container } = render(Transcript, { props: { messages: [] } });
 		expect(container.querySelector(".empty")).not.toBeNull();

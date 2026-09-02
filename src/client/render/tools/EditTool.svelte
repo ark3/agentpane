@@ -4,11 +4,12 @@
 	 * the size of a change is legible without expanding it.
 	 */
 	import type { ToolRenderProps } from "../types.ts";
-	import { basename, toolState } from "../types.ts";
+	import { toolState } from "../types.ts";
 	import { argString, editHunks } from "./args.ts";
-	import { buildDiff, diffStats } from "./diff.ts";
+	import { buildDiff } from "./diff.ts";
 	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
+	import { toolSummary } from "./summary.ts";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
@@ -17,12 +18,7 @@
 
 	/** One diff per replacement -- Pi's `edit` carries an array of them. */
 	const diffs = $derived(editHunks(call.arguments).map((h) => buildDiff(h.oldText, h.newText)));
-	const stats = $derived(diffStats(diffs.flat()));
-	const summary = $derived(
-		[basename(path), diffs.length ? `+${stats.added} −${stats.removed}` : ""]
-			.filter(Boolean)
-			.join(" · "),
-	);
+	const summary = $derived(toolSummary(call));
 </script>
 
 <ToolCard name={call.name} {summary} {state} timestamp={result?.timestamp}>

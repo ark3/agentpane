@@ -5,11 +5,12 @@
 	 */
 	import { languageFromPath } from "../markdown.ts";
 	import type { ToolRenderProps } from "../types.ts";
-	import { basename, toolState } from "../types.ts";
+	import { toolState } from "../types.ts";
 	import { argString } from "./args.ts";
 	import Output from "./Output.svelte";
 	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
+	import { toolSummary } from "./summary.ts";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
@@ -17,11 +18,7 @@
 	const content = $derived(argString(call.arguments, "content", "text", "newText"));
 	const state = $derived(toolState({ call, result, streaming }));
 
-	const summary = $derived(
-		[basename(path), content ? `${content.split("\n").length} lines` : ""]
-			.filter(Boolean)
-			.join(" · "),
-	);
+	const summary = $derived(toolSummary(call));
 </script>
 
 <ToolCard name={call.name} {summary} {state} timestamp={result?.timestamp}>
