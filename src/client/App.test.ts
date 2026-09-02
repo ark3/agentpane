@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { tick } from "svelte";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	sessionKey,
 	type BackendId,
@@ -275,7 +275,69 @@ function placeUserTurns(el: HTMLElement, tops: number[]): HTMLElement[] {
 /** App.svelte's follow-mode reconciliation is rAF-throttled while streaming (same pattern as Block.test.ts). */
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
 
+let setSystemDark: (matches: boolean) => void;
+
+beforeEach(() => {
+	document.documentElement.removeAttribute("data-theme");
+	let matches = false;
+	const events = new EventTarget();
+	const media = {
+		get matches() { return matches; },
+		media: "(prefers-color-scheme: dark)",
+		onchange: null,
+		addListener(listener) { events.addEventListener("change", listener as EventListener); },
+		removeListener(listener) { events.removeEventListener("change", listener as EventListener); },
+		addEventListener: events.addEventListener.bind(events),
+		removeEventListener: events.removeEventListener.bind(events),
+		dispatchEvent: events.dispatchEvent.bind(events),
+	} satisfies MediaQueryList;
+	window.matchMedia = () => media;
+	setSystemDark = (next) => {
+		matches = next;
+		const event = new Event("change") as MediaQueryListEvent;
+		Object.defineProperties(event, {
+			matches: { value: matches },
+			media: { value: media.media },
+		});
+		media.dispatchEvent(event);
+	};
+});
+
 describe("App", () => {
+	it("offers system, light, and dark themes and writes the resolved theme on the document", async () => {
+		setSystemDark(true);
+		render(App, { props: { controller: new FakeController() } });
+		const theme = screen.getByLabelText("Theme");
+
+		expect(theme).toHaveValue("system");
+		expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+		await fireEvent.change(theme, { target: { value: "light" } });
+		expect(document.documentElement).toHaveAttribute("data-theme", "light");
+		await fireEvent.change(theme, { target: { value: "dark" } });
+		expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+		await fireEvent.change(theme, { target: { value: "system" } });
+		expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+	});
+
+	it("tracks system palette changes only while the theme choice is system", async () => {
+		render(App, { props: { controller: new FakeController() } });
+		const theme = screen.getByLabelText("Theme");
+
+		expect(document.documentElement).toHaveAttribute("data-theme", "light");
+		setSystemDark(true);
+		expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+		await fireEvent.change(theme, { target: { value: "light" } });
+		setSystemDark(false);
+		expect(document.documentElement).toHaveAttribute("data-theme", "light");
+		setSystemDark(true);
+		expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+		await fireEvent.change(theme, { target: { value: "dark" } });
+		setSystemDark(false);
+		expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+	});
+
 	it("starts once, disposes once, and stops observing the controller when unmounted", () => {
 		const controller = new FakeController();
 		const { unmount } = render(App, { props: { controller } });

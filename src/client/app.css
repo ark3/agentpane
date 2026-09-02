@@ -1,6 +1,4 @@
 :root {
-	color-scheme: light;
-
 	/* -- type ------------------------------------------------------- */
 	--ap-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
 		"Helvetica Neue", sans-serif;
@@ -32,7 +30,11 @@
 	--ap-radius-lg: 11px;
 
 	--ap-shadow-1: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
 
+
+:root[data-theme="light"] {
+	color-scheme: light;
 	/* -- semantic colour (light) ------------------------------------ */
 	--ap-bg: #ffffff;
 	--ap-bg-sunken: #f5f6f8;
@@ -77,8 +79,54 @@
 	--ap-attached: #0f7f8f;
 }
 
+:root[data-theme="dark"] {
+	color-scheme: dark;
+
+	--ap-bg: #15171b;
+	--ap-bg-sunken: #101216;
+	--ap-surface: #191c21;
+	--ap-surface-raised: #21252c;
+	--ap-border: #2a2f37;
+	--ap-border-strong: #3b414b;
+
+	--ap-fg: #e4e8ee;
+	--ap-fg-muted: #9aa4b1;
+	--ap-fg-subtle: #6c7683;
+
+	--ap-accent: #7f9dff;
+	--ap-accent-soft: #1d2436;
+	--ap-success: #57c98a;
+	--ap-danger: #f2707c;
+	--ap-danger-soft: #2c1a1d;
+	--ap-warning: #d8a33a;
+	--ap-turn-finished: #ff6b75;
+
+	--ap-add-bg: #102a1c;
+	--ap-add-fg: #63cf94;
+	--ap-del-bg: #2c1a1d;
+	--ap-del-fg: #f2707c;
+
+	--ap-syn-keyword: #d08ce8;
+	--ap-syn-string: #77d1a3;
+	--ap-syn-number: #e5a26a;
+	--ap-syn-comment: #6c7683;
+	--ap-syn-function: #86a9ff;
+	--ap-syn-type: #e0c07a;
+	--ap-syn-attr: #f0937c;
+
+	--ap-backend-codex: #57c98a;
+	--ap-backend-claude: #7f9dff;
+	--ap-backend-pi: #d08ce8;
+
+	--ap-attached: #4fbfd0;
+}
+
+/* A production cold-load capture under a dark system preference painted a
+   white frame before main.ts could write data-theme (OW-hilufa). Keep this
+   no-attribute system default even though it duplicates the dark palette: it
+   is the only interval the media query owns, and pays for avoiding that flash. */
 @media (prefers-color-scheme: dark) {
-	:root {
+	:root:not([data-theme]) {
 		color-scheme: dark;
 
 		--ap-bg: #15171b;
@@ -155,9 +203,11 @@ button, input, select, textarea { font: inherit; }
 	padding: var(--ap-space-4);
 }
 
-.masthead { grid-area: masthead; display: flex; justify-content: space-between; align-items: baseline; }
+.masthead { grid-area: masthead; display: flex; align-items: baseline; gap: var(--ap-space-3); }
 .masthead h1 { margin: 0; font-size: var(--ap-text-xl); }
-.masthead p { margin: 0; color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+.masthead p { margin: 0 0 0 auto; color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+.theme-control { display: flex; align-items: baseline; gap: var(--ap-space-1); color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
+.theme-control select { width: auto; padding: 0 var(--ap-space-2); }
 
 .session-controls { grid-area: controls; display: grid; gap: var(--ap-space-3); align-content: start; }
 .session-controls label { display: grid; gap: var(--ap-space-1); font-size: var(--ap-text-sm); }

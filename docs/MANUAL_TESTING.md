@@ -1222,6 +1222,21 @@ After `:root` declared the palette in force, both select menus used Chromium's d
 
 The browser spec emulates light and dark separately and reads `getComputedStyle(document.documentElement).colorScheme`; before the declaration both cases returned `normal`, and afterwards they returned `light` and `dark` respectively.
 
+## Observed the theme control's dark cold load (OW-hilufa)
+
+**2026-09-02, home server, Playwright's headless Chromium 151.0.7922.34, emulated dark system palette.**
+
+The production build was served by `vite preview`, and a CDP screencast captured every painted frame across five fresh browser contexts while ImageMagick read the centre pixel of each frame.
+
+With only the two `data-theme` palette blocks, every run painted a white `rgb(255,255,255)` frame before the dark `--ap-bg-sunken` frame appeared 156–180 ms later.
+That is a visible light-theme flash, so the card's fallback applies.
+
+The stylesheet now carries a dark `prefers-color-scheme` block restricted to `:root:not([data-theme])`, duplicating the dark palette only for the interval before `main.ts` resolves system to a concrete attribute.
+After that fallback, the same five-run capture contained no white frame: the first application frame was `rgb(16,18,22)`, with some runs preceded only by Chromium's own dark navigation canvas at `rgb(18,18,18)`.
+
+The control itself remains non-persistent.
+A fresh page starts at System, `main.ts` writes the resolved `data-theme` before mounting, and the component follows later system changes only while System remains selected.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:

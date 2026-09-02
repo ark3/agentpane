@@ -50,6 +50,24 @@
 	const ALL_WORKSPACES = "__all__";
 	let workspace = $state(ALL_WORKSPACES);
 	let backend = $state<BackendId>("pi");
+	type ThemeChoice = "system" | "light" | "dark";
+	let theme = $state<ThemeChoice>("system");
+	// jsdom has no matchMedia; the no-op branch keeps component-only tests at
+	// the same light default while production always takes the browser branch.
+	const systemTheme = typeof window.matchMedia === "function"
+		? window.matchMedia("(prefers-color-scheme: dark)")
+		: { matches: false, addEventListener() {}, removeEventListener() {} };
+
+	function writeTheme(): void {
+		document.documentElement.dataset.theme = theme === "system"
+			? (systemTheme.matches ? "dark" : "light")
+			: theme;
+	}
+
+	function chooseTheme(event: Event): void {
+		theme = (event.currentTarget as HTMLSelectElement).value as ThemeChoice;
+		writeTheme();
+	}
 	/**
 	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
 	 * while a session runs. One global boolean, deliberately not persisted and
@@ -249,6 +267,12 @@
 	});
 
 	onMount(() => {
+		writeTheme();
+		const onSystemTheme = () => {
+			if (theme === "system") writeTheme();
+		};
+		systemTheme.addEventListener("change", onSystemTheme);
+
 		view = controller.getView();
 		const unsubscribe = controller.subscribe((next) => {
 			view = next;
@@ -296,6 +320,7 @@
 		}
 
 		return () => {
+			systemTheme.removeEventListener("change", onSystemTheme);
 			unsubscribe();
 			unsubscribeRename();
 			document.removeEventListener("visibilitychange", onTabVisibility);
@@ -1009,6 +1034,14 @@
 <main class="shell">
 	<header class="masthead">
 		<h1>agentpane</h1>
+		<label class="theme-control">
+			Theme
+			<select aria-label="Theme" value={theme} onchange={chooseTheme}>
+				<option value="system">System</option>
+				<option value="light">Light</option>
+				<option value="dark">Dark</option>
+			</select>
+		</label>
 		<p role="status">{status}</p>
 	</header>
 
