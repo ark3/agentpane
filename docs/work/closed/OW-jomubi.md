@@ -56,3 +56,8 @@ Load-bearing: a user turn as the landmark, the delta rather than an absolute pos
 Incidental: where the landmark capture lives, and the pixel tolerance the browser test allows.
 
 Independent of OW-nuzipo, which adds a streaming tail line to the same view and touches the same scroll handler; neither blocks the other.
+
+Reading view now carries the nav pivot user turn and its viewport delta across condensed and expanded renders, preserves absolute top, and explicitly reconciles an armed follow through the programmatic-scroll path.
+Chromium coverage holds removable tool and thinking chrome on both sides of a disengaged viewport, checks both toggle directions and absolute top, and pauses streaming to prove each armed-follow toggle restores its anchor itself.
+The regressions failed red at 481.3125px without landmark restoration, 120.25px without toggle reconciliation, and 344.078125px when restoration bypassed `applyScrollTop`.
+`bun run check` passed 893 tests across 48 files, and `bun run test:browser` passed all 14 Chromium tests.
