@@ -49,6 +49,8 @@
 	--ap-danger: #c22f3a;
 	--ap-danger-soft: #fdecee;
 	--ap-warning: #9a6700;
+	/* The exact finished-turn red is a first cut to judge from use. */
+	--ap-turn-finished: #d63b45;
 
 	--ap-add-bg: #e6f6ec;
 	--ap-add-fg: #10693f;
@@ -92,6 +94,7 @@
 		--ap-danger: #f2707c;
 		--ap-danger-soft: #2c1a1d;
 		--ap-warning: #d8a33a;
+		--ap-turn-finished: #ff6b75;
 
 		--ap-add-bg: #102a1c;
 		--ap-add-fg: #63cf94;
@@ -200,6 +203,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .session-meta { display: flex; min-width: 0; gap: var(--ap-space-2); font-size: var(--ap-text-2xs); color: var(--ap-fg-subtle); }
 .session-cwd { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-streaming { color: var(--ap-accent); }
+.session-finished { color: var(--ap-turn-finished); }
 /* Attached is drawn as an inset shadow, never `border-left`: the global
    `button[aria-pressed="true"]` rule owns `border-color`, so a border stripe
    would vanish on the selected row -- the one row you are most likely looking

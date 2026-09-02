@@ -14,6 +14,11 @@
 	import { userBlocks } from "./render/types.ts";
 	import { previewMessages } from "./preview.ts";
 	import { initialClientState } from "./session-state.ts";
+	import {
+		emptySessionTurnMarks,
+		foldSessionTurns,
+		renameSessionTurnMarks,
+	} from "./session-turns.ts";
 	import { formatTimestamp, recency } from "./time.ts";
 
 	let { controller }: { controller: AgentpaneController } = $props();
@@ -115,6 +120,8 @@
 	 * renders from it is the favicon, which is not part of this component.
 	 */
 	let turnWatch = emptyTurnWatch();
+	/** Every live session's transition guard and retained per-row completion mark. */
+	let sessionTurnMarks = $state.raw(emptySessionTurnMarks());
 	let lastScrollKey: string | null = null;
 	/**
 	 * The last app-selected position awaiting native event delivery. Assignments
@@ -323,6 +330,7 @@
 		}
 		if (lastScrollKey === fromKey) lastScrollKey = toKey;
 		turnWatch = watchRename(turnWatch, fromKey, toKey);
+		sessionTurnMarks = renameSessionTurnMarks(sessionTurnMarks, fromKey, toKey);
 	}
 
 	// jsdom is configured with rAF, but do not make this depend on it -- same
@@ -681,6 +689,8 @@
 		for (const [key, session] of Object.entries(view.state.sessions)) {
 			streaming.set(key, session.isStreaming);
 		}
+		const selectedKey = view.state.selected === null ? null : sessionKey(view.state.selected);
+		sessionTurnMarks = foldSessionTurns(sessionTurnMarks, streaming, selectedKey);
 		turnWatch = watchSessions(turnWatch, streaming, document.hasFocus());
 		setFaviconBadge(turnWatch.badged);
 	});
@@ -970,6 +980,7 @@
 			     summary: it leaves `sortedSummaries` out of the streaming path,
 			     which is OW-jineli's whole point. -->
 			{@const streaming = view.state.sessions[sessionKey(summary.ref)]?.isStreaming ?? summary.isStreaming}
+			{@const turnFinished = sessionTurnMarks.finished.has(sessionKey(summary.ref))}
 			<button
 				type="button"
 				class="session-select"
@@ -994,6 +1005,8 @@
 					{/if}
 					{#if streaming}
 						<span class="session-streaming" aria-label="Streaming">●</span>
+					{:else if turnFinished}
+						<span class="session-finished" aria-label="Turn finished">●</span>
 					{/if}
 				</span>
 			</button>

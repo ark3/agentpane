@@ -706,6 +706,121 @@ describe("App", () => {
 		expect(nav.queryByLabelText("Streaming")).not.toBeInTheDocument();
 	});
 
+	it("retains a finished-turn marker on an unselected session until it becomes selected", async () => {
+		const summaries = [summary(piSession, "Selected turn"), summary(codexSession, "Other turn")];
+		const sessions = {
+			[sessionKey(piSession)]: {
+				ref: piSession,
+				messages: [],
+				isStreaming: false,
+				seq: 1,
+				error: null,
+				requests: [],
+			},
+			[sessionKey(codexSession)]: {
+				ref: codexSession,
+				messages: [],
+				isStreaming: true,
+				seq: 1,
+				error: null,
+				requests: [],
+			},
+		};
+		const controller = new FakeController(
+			view({ state: state({ selected: piSession, summaries, sessions }) }),
+		);
+		render(App, { props: { controller } });
+
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				summaries,
+				sessions: {
+					...sessions,
+					[sessionKey(codexSession)]: { ...sessions[sessionKey(codexSession)]!, isStreaming: false },
+				},
+			}),
+		}));
+		await tick();
+
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+		const finished = nav.getByLabelText("Turn finished");
+		expect(finished.closest("button")).toHaveTextContent("Other turn");
+
+		controller.publish(view({
+			state: state({
+				selected: codexSession,
+				summaries,
+				sessions: {
+					...sessions,
+					[sessionKey(codexSession)]: { ...sessions[sessionKey(codexSession)]!, isStreaming: false },
+				},
+			}),
+		}));
+		await tick();
+		expect(nav.queryByLabelText("Turn finished")).not.toBeInTheDocument();
+
+		controller.publish(view({
+			state: state({ selected: codexSession, summaries, sessions }),
+		}));
+		await tick();
+		controller.publish(view({
+			state: state({
+				selected: codexSession,
+				summaries,
+				sessions: {
+					...sessions,
+					[sessionKey(codexSession)]: { ...sessions[sessionKey(codexSession)]!, isStreaming: false },
+				},
+			}),
+		}));
+		await tick();
+		expect(nav.queryByLabelText("Turn finished")).not.toBeInTheDocument();
+	});
+
+	it("does not mistake an unselected idle level for a finished turn", async () => {
+		const summaries = [summary(piSession, "Selected turn"), summary(codexSession, "Other turn")];
+		const live = {
+			[sessionKey(piSession)]: {
+				ref: piSession,
+				messages: [],
+				isStreaming: false,
+				seq: 1,
+				error: null,
+				requests: [],
+			},
+			[sessionKey(codexSession)]: {
+				ref: codexSession,
+				messages: [],
+				isStreaming: false,
+				seq: 1,
+				error: null,
+				requests: [],
+			},
+		};
+		const controller = new FakeController(
+			view({ state: state({ selected: piSession, summaries, sessions: live }) }),
+		);
+		render(App, { props: { controller } });
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+		expect(nav.queryByLabelText("Turn finished")).not.toBeInTheDocument();
+
+		controller.publish(view({
+			state: state({
+				selected: piSession,
+				summaries,
+				sessions: {
+					...live,
+					[sessionKey(codexSession)]: { ...live[sessionKey(codexSession)]!, isStreaming: true },
+				},
+			}),
+		}));
+		await tick();
+		controller.publish(view({ state: state({ selected: piSession, summaries, sessions: live }) }));
+		await tick();
+		expect(nav.getByLabelText("Turn finished")).toBeInTheDocument();
+	});
+
 	it("stripes the row of an attached session, and says so in its accessible name", () => {
 		const attached = summary(piSession, "Attached turn", { status: "attached" });
 		const detached = summary(codexSession, "Detached turn", { status: "detached" });
