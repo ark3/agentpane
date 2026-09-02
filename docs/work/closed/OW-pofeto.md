@@ -22,3 +22,5 @@ The card is not the size of the fix: what is actually wrong is unmeasured, becau
 
 Independent of OW-hilufa, which adds a manual theme control to the same file: this is wrong today with no toggle at all, and it stays wrong afterwards if left alone.
 Whichever lands second inherits the other's shape -- if OW-hilufa has already moved the palette onto `data-theme`, the declaration goes in those blocks rather than the media query.
+
+Declared the active system palette through `color-scheme` on the document root, added a red-first Playwright assertion for both light and dark computed schemes, and recorded the observed Chromium native-select mismatch and corrected treatment in `docs/MANUAL_TESTING.md`. `bun run check` passed 897 tests. The new assertions passed in the full 17-test `bun run test:browser` suite; an unrelated follow-mode timing test failed once, then passed targeted and in the complete rerun.
