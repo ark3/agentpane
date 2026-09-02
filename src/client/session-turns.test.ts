@@ -27,6 +27,13 @@ describe("session finished-turn marks", () => {
 		expect(marks.finished.has("pi:selected")).toBe(false);
 	});
 
+	it("does not mark a session when no other session is selected", () => {
+		let marks = emptySessionTurnMarks();
+		marks = foldSessionTurns(marks, streaming([["pi:unselected", true]]), null);
+		marks = foldSessionTurns(marks, streaming([["pi:unselected", false]]), null);
+		expect(marks.finished.has("pi:unselected")).toBe(false);
+	});
+
 	it("clears a retained mark when its session becomes selected", () => {
 		let marks = emptySessionTurnMarks();
 		marks = foldSessionTurns(marks, streaming([["pi:other", true]]), "pi:selected");

@@ -37,7 +37,7 @@ export function foldSessionTurns(
 			observed ??= new Map(marks.streaming);
 			observed.set(key, isStreaming);
 		}
-		if (previous === true && !isStreaming && key !== selectedKey && !marks.finished.has(key)) {
+		if (selectedKey !== null && previous === true && !isStreaming && key !== selectedKey && !marks.finished.has(key)) {
 			finished ??= new Set(marks.finished);
 			finished.add(key);
 		}
