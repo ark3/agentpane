@@ -59,3 +59,5 @@ Retire them in the same change.
 
 Load-bearing: streaming-only, index preservation, and that follow survives both height changes.
 Incidental: the line's wording, its placement within the pane, and where the fact is computed.
+
+Added a streaming-only compact reading-view tail for the last elided thinking or tool call, using the same pure tool-summary vocabulary as the full cards while keeping the cue outside TranscriptEntry so indices and keys remain unchanged. Retired both source comments that said reading view had no liveness cue. Unit/jsdom tests failed first on the missing status seam and DOM line, then passed; the Chromium follow test failed with a 12,841px anchor error under deliberate scheduleFollow sabotage, then passed restored. Adversarial review tightened the browser test to assert the anchor exists and measure status disappearance before later upserts can repair follow. Verified bun run check (48 files, 897 tests) and bun run test:browser (15 tests).
