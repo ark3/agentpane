@@ -57,3 +57,5 @@ Colour cannot be the only carrier: the `aria-label` on the span is `"Streaming"`
 
 Load-bearing: the transition guard, the rename carry, the background-only rule, and that the accessible name distinguishes the two dots.
 Incidental: where the state lives, and the exact red.
+
+Added a client-side per-session transition watch that retains an accessible red Turn finished marker for turns that complete while another session is selected, clears it on selection, ignores idle levels and selected/no-selection completions, and carries both observed and retained state across D9 renames. Added dedicated light/dark colour tokens and pure plus App-level coverage. New tests were observed red before implementation; the adversarial-review null-selection regression was also observed red before its guard. Verified with bun run check: 48 test files and 893 tests passed with zero TypeScript or Svelte diagnostics. Two adversarial reads found the null-selection gap and then confirmed the amended result had no blocking findings.
