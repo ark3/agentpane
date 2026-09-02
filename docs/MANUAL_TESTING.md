@@ -1208,6 +1208,20 @@ do not — `/runs/<id>/logs` returns 403 without a token — so a surprising red
 still needs a human to paste the output. Unauthenticated calls are capped at 60
 per hour per IP, so check on a beat rather than polling.
 
+## Observed browser-owned controls under the dark palette (OW-pofeto)
+
+**2026-09-02, home server, Playwright's headless Chromium 151.0.7922.34, emulated dark system palette.**
+
+The harness was opened before the fix with its real `App.svelte` and stylesheet, then the Workspace and Backend selectors were opened and the attached composer's textarea and overflowing conversation were inspected.
+
+The visible mismatch was in both native select menus: their selected rows used Chromium's saturated light-palette blue with white text against the app's dark popup surface.
+
+The textarea resize handle did not show a visible mismatch, and this Chromium build used overlay scrollbars that were not painted in the captured state.
+
+After `:root` declared the palette in force, both select menus used Chromium's dark-palette selected-row treatment, a pale system blue with dark text, while the app's own token colors were unchanged.
+
+The browser spec emulates light and dark separately and reads `getComputedStyle(document.documentElement).colorScheme`; before the declaration both cases returned `normal`, and afterwards they returned `light` and `dark` respectively.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
