@@ -256,6 +256,8 @@ export interface FollowHarness {
 	pace(chunks: number, ms: number): void;
 	/** Replace the transcript with `turns` completed user/assistant pairs and snapshot it. */
 	seed(turns: number, withElidedChrome?: boolean, interleavedChrome?: boolean): void;
+	/** Show one running default tool whose summary is either present or absent. */
+	seedAlignmentTool(withSummary: boolean): void;
 	/** Resolves when the turn currently streaming has emitted its `status:false`. */
 	settled(): Promise<void>;
 	/** Live geometry of the transcript pane and the anchor the last submit armed. */
@@ -311,6 +313,23 @@ const harness: FollowHarness = {
 		}
 		seq = 0;
 		snapshot(false);
+	},
+	seedAlignmentTool(withSummary) {
+		messages = [
+			assistant(
+				[
+					{
+						type: "toolCall",
+						id: "alignment-call",
+						name: "inspect",
+						arguments: withSummary ? { target: "workspace" } : {},
+					},
+				],
+				"toolUse",
+			),
+		];
+		seq = 0;
+		snapshot(true);
 	},
 	settled() {
 		return turnSettled;

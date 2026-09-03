@@ -114,6 +114,7 @@
 
 	.status {
 		flex: none;
+		margin-left: auto;
 		font-size: var(--ap-text-2xs);
 		text-transform: uppercase;
 		letter-spacing: 0.06em;

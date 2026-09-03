@@ -112,6 +112,7 @@
 
 	.tail-state {
 		flex: none;
+		margin-left: auto;
 		color: var(--ap-warning);
 		font-family: var(--ap-font-sans);
 		font-size: var(--ap-text-2xs);
