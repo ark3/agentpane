@@ -261,6 +261,8 @@
 				return "Aborting turn…";
 			case "compacting":
 				return "Compacting context…";
+			case "editing-externally":
+				return "Editing draft…";
 			default:
 				return "Connected";
 		}
@@ -1008,6 +1010,12 @@
 	 * the only one: D14 puts Cancel in the banner where a pointer can reach it.
 	 */
 	function handlePromptKeydown(event: KeyboardEvent): void {
+		if (event.ctrlKey && event.key === "g") {
+			if (view.busy !== "idle") return;
+			event.preventDefault();
+			void controller.editDraft();
+			return;
+		}
 		if (event.key === "Escape" && editing) {
 			event.preventDefault();
 			cancelEdit();
@@ -1207,6 +1215,11 @@
 				     menu stayed open -- so only a click outside would close it.
 				     Compact alone also hides it by hand; `compactSession` says why. -->
 				<button type="button" class="tools-menu" popovertarget="tools-menu">Tools</button>
+				<button
+					type="button"
+					onclick={() => view.busy === "idle" && void controller.editDraft()}
+					disabled={view.busy === "editing-externally"}
+				>External Editor</button>
 				<div id="tools-menu" popover class="tools-menu-list" role="menu">
 					<button
 						type="button"

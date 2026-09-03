@@ -241,6 +241,14 @@ export interface PromptRequest {
 	images?: { mimeType: string; base64: string }[];
 }
 
+/** POST /api/edit-draft */
+export interface EditDraftRequest {
+	text: string;
+}
+export interface EditDraftResponse {
+	text: string;
+}
+
 /** POST /api/sessions/:backend/:id/fork */
 export interface ForkRequest {
 	entryId: string;
@@ -290,6 +298,7 @@ export const ROUTES = {
 	events: "/api/events",
 	sessions: "/api/sessions",
 	models: "/api/models",
+	editDraft: "/api/edit-draft",
 	session: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}`,
 	preview: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/preview`,

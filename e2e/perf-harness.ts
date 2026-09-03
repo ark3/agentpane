@@ -166,6 +166,9 @@ const api: AgentpaneApi = {
 		return { ref, turns: [previewTurn(user("stored transcript"))] };
 	},
 	async prompt() {},
+	async editDraft(body) {
+		return body;
+	},
 	async abort() {},
 	async compact() {},
 	async forkPoints() {

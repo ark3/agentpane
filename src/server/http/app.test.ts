@@ -12,6 +12,7 @@ import {
 	type ApiError,
 	type AttachSessionResponse,
 	type CreateSessionResponse,
+	type EditDraftResponse,
 	type ForkPointsResponse,
 	type ForkResponse,
 	type ListSessionsResponse,
@@ -86,6 +87,33 @@ function post(path: string, body?: unknown): Promise<Response> {
 		}),
 	);
 }
+
+describe("external draft editor", () => {
+	it("round-trips the draft through EDITOR, including editor flags", async () => {
+		const priorEditor = process.env.EDITOR;
+		process.env.EDITOR = `sh ${new URL("./testing/editor-fixture.sh", import.meta.url).pathname} --replace`;
+		try {
+			const response = await post(ROUTES.editDraft, { text: "original draft" });
+			expect(response.status).toBe(200);
+			expect((await response.json()) as EditDraftResponse).toEqual({ text: "edited by fixture" });
+		} finally {
+			if (priorEditor === undefined) delete process.env.EDITOR;
+			else process.env.EDITOR = priorEditor;
+		}
+	});
+
+	it("returns the established error shape when EDITOR is missing", async () => {
+		const priorEditor = process.env.EDITOR;
+		delete process.env.EDITOR;
+		try {
+			const response = await post(ROUTES.editDraft, { text: "unchanged" });
+			expect(response.status).toBe(500);
+			expect((await response.json()) as ApiError).toMatchObject({ error: "editor_failed" });
+		} finally {
+			if (priorEditor !== undefined) process.env.EDITOR = priorEditor;
+		}
+	});
+});
 
 async function openStream(): Promise<SseTestClient> {
 	const response = await get(ROUTES.events);

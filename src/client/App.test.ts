@@ -88,6 +88,8 @@ class FakeController implements AgentpaneController {
 	submitted = 0;
 	aborted = 0;
 	compacted = 0;
+	externalEdits: string[] = [];
+	externalEditResult = "edited externally";
 	clearErrorCalls = 0;
 	refreshCalls = 0;
 	previewRefreshes = 0;
@@ -185,6 +187,11 @@ class FakeController implements AgentpaneController {
 
 	async compact() {
 		this.compacted += 1;
+	}
+
+	async editDraft() {
+		this.externalEdits.push(this.current.draft);
+		this.publish({ ...this.current, draft: this.externalEditResult });
 	}
 
 	async refreshSessions() {
@@ -1512,6 +1519,45 @@ describe("App", () => {
 
 		await fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 		expect(controller.submitted).toBe(2);
+	});
+
+	it("opens the current draft in the external editor from the composer button", async () => {
+		const controller = new FakeController(view({ draft: "current draft" }));
+		render(App, { props: { controller } });
+		const tools = screen.getByRole("button", { name: "Tools" });
+		const externalEditor = screen.getByRole("button", { name: "External Editor" });
+		expect(tools.nextElementSibling).toBe(externalEditor);
+		expect(externalEditor.parentElement).toHaveClass("prompt-actions");
+
+		await fireEvent.click(externalEditor);
+
+		expect(controller.externalEdits).toEqual(["current draft"]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("edited externally");
+	});
+
+	it("uses the external editor on Ctrl-g only from the prompt", async () => {
+		const controller = new FakeController(view({ draft: "keyboard draft" }));
+		render(App, { props: { controller } });
+		const textarea = screen.getByLabelText("Prompt");
+
+		await fireEvent.keyDown(document.body, { key: "g", ctrlKey: true });
+		expect(controller.externalEdits).toEqual([]);
+		await fireEvent.keyDown(textarea, { key: "g", metaKey: true });
+		expect(controller.externalEdits).toEqual([]);
+		await fireEvent.keyDown(textarea, { key: "g", ctrlKey: true });
+
+		expect(controller.externalEdits).toEqual(["keyboard draft"]);
+	});
+
+	it("does not start the external editor unless idle and disables its button while editing", async () => {
+		const controller = new FakeController(view({ draft: "busy draft", busy: "editing-externally" }));
+		render(App, { props: { controller } });
+		const button = screen.getByRole("button", { name: "External Editor" });
+		const textarea = screen.getByLabelText("Prompt");
+
+		expect(button).toBeDisabled();
+		await fireEvent.keyDown(textarea, { key: "g", ctrlKey: true });
+		expect(controller.externalEdits).toEqual([]);
 	});
 
 	it("preserves the typed draft when form submission fails", async () => {

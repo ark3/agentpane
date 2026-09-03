@@ -65,6 +65,7 @@ class FakeApi implements AgentpaneApi {
 		async (session: SessionRef): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
 	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
+	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
@@ -227,6 +228,34 @@ describe("client controller", () => {
 
 		expect(controller.getView().draft).toBe("keep me");
 		expect(controller.getView().error).toBe("offline");
+	});
+
+	it("replaces the current draft with the external editor result", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		controller.setDraft("current draft");
+
+		await controller.editDraft();
+
+		expect(api.editDraft).toHaveBeenCalledWith({ text: "current draft" });
+		expect(controller.getView()).toMatchObject({ draft: "edited draft", busy: "idle", error: null });
+	});
+
+	it("surfaces an external editor failure and gates re-entry while it is open", async () => {
+		const api = new FakeApi();
+		const editing = deferred<{ text: string }>();
+		api.editDraft.mockReturnValue(editing.promise);
+		const controller = createController(api);
+		controller.setDraft("keep me");
+
+		const first = controller.editDraft();
+		const second = controller.editDraft();
+		expect(controller.getView().busy).toBe("editing-externally");
+		expect(api.editDraft).toHaveBeenCalledTimes(1);
+		editing.reject(new Error("editor exited 1"));
+		await Promise.all([first, second]);
+
+		expect(controller.getView()).toMatchObject({ draft: "keep me", busy: "idle", error: "editor exited 1" });
 	});
 
 	it("clears the draft only after the prompt is accepted", async () => {

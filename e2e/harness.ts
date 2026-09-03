@@ -203,6 +203,9 @@ const api: AgentpaneApi = {
 		// The route acknowledges (202) and the turn streams afterwards.
 		turnSettled = runTurn(body.text);
 	},
+	async editDraft(body) {
+		return body;
+	},
 	async abort() {},
 	async compact() {
 		// The lifecycle arrives over SSE, as the real one does (OW-natiha): the

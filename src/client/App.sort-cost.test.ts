@@ -102,6 +102,7 @@ class PublishingController implements AgentpaneController {
 	async start() {}
 	dispose() {}
 	setDraft() {}
+	async editDraft() {}
 	async create(_cwd: string, _backend: BackendId) {}
 	async preview(_ref: SessionRef) {}
 	async select(_ref: SessionRef) {}

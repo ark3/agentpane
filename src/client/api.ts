@@ -4,6 +4,8 @@ import {
 	type AttachSessionResponse,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
+	type EditDraftRequest,
+	type EditDraftResponse,
 	type ForkPoint,
 	type ForkPointsResponse,
 	type ForkRequest,
@@ -53,6 +55,7 @@ export interface AgentpaneApi {
 	/** Read-only, non-attaching transcript preview (OW-38): spawns nothing. */
 	preview(ref: SessionRef): Promise<SessionPreviewResponse>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
+	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	abort(ref: SessionRef): Promise<void>;
 	compact(ref: SessionRef): Promise<void>;
 	/**
@@ -106,6 +109,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		prompt(ref, body) {
 			return requestNoContent(ROUTES.prompt(ref), jsonRequest(body));
+		},
+		editDraft(body) {
+			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);
 		},
 		abort(ref) {
 			return requestNoContent(ROUTES.abort(ref), { method: "POST" });

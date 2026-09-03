@@ -12,6 +12,11 @@
  * events may well have reached the browser first.
  */
 
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
 	type AgentRequestReply,
 	type ApiError,
@@ -19,6 +24,8 @@ import {
 	type BackendId,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
+	type EditDraftRequest,
+	type EditDraftResponse,
 	type ForkRequest,
 	type ForkResponse,
 	type ForkPointsResponse,
@@ -73,6 +80,12 @@ export function createApp(deps: AppDeps): App {
 		if (segments.length === 2 && segments[1] === "models") {
 			if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
 			return listModels(url.searchParams.get("backend"));
+		}
+
+		// /api/edit-draft
+		if (segments.length === 2 && segments[1] === "edit-draft") {
+			if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+			return editDraft(request);
 		}
 
 		// /api/requests/:requestId
@@ -148,6 +161,40 @@ export function createApp(deps: AppDeps): App {
 				"x-accel-buffering": "no",
 			},
 		});
+	}
+
+	async function editDraft(request: Request): Promise<Response> {
+		const body = await readJson<EditDraftRequest>(request);
+		if (!body.ok) return body.response;
+		if (typeof body.value.text !== "string") {
+			return error(400, "bad_request", "text is required and must be a string");
+		}
+		const editor = process.env.EDITOR;
+		if (!editor) return error(500, "editor_failed", "$EDITOR is not set");
+
+		const directory = await mkdtemp(join(tmpdir(), "agentpane-draft-"));
+		// Markdown gave multiline prompts useful editor mode in practice; there is no format setting to maintain.
+		const filename = join(directory, "draft.md");
+		try {
+			await writeFile(filename, body.value.text, "utf8");
+			// Deliberately outside D7's agent sandbox: this is the trusted operator's own editor.
+			const exitCode = await new Promise<number>((resolve, reject) => {
+				const child = spawn("sh", ["-c", 'exec $EDITOR "$1"', "agentpane-edit-draft", filename], {
+					stdio: "inherit",
+				});
+				child.once("error", reject);
+				child.once("close", (code) => resolve(code ?? 1));
+			});
+			if (exitCode !== 0) {
+				return error(500, "editor_failed", `external editor exited with status ${exitCode}`);
+			}
+			const response: EditDraftResponse = { text: await readFile(filename, "utf8") };
+			return json(response);
+		} catch (err: unknown) {
+			return error(500, "editor_failed", describe(err));
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
 	}
 
 	// -- sessions ------------------------------------------------------------

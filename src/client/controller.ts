@@ -21,7 +21,7 @@ export interface ControllerView {
 	state: ClientState;
 	draft: string;
 	connection: "connecting" | "connected" | "reconnecting";
-	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting";
+	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
 	error: string | null;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
@@ -40,6 +40,8 @@ export interface AgentpaneController {
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
+	/** Round-trip the current draft through the server process's external editor. */
+	editDraft(): Promise<void>;
 	create(cwd: string, backend: BackendId): Promise<void>;
 	/**
 	 * Cheap, read-only selection (OW-39): load OW-38's non-attaching preview for
@@ -119,6 +121,10 @@ export function createController(
 
 	function errorMessage(error: unknown): string {
 		return error instanceof Error ? error.message : String(error);
+	}
+
+	function busyIs(value: ControllerView["busy"]): boolean {
+		return view.busy === value;
 	}
 
 	function replaceSummary(summary: SessionSummary, requested: SessionRef): ClientState {
@@ -445,6 +451,19 @@ export function createController(
 			} finally {
 				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
+			}
+		},
+		async editDraft() {
+			if (view.busy !== "idle") return;
+			const text = view.draft;
+			publish({ busy: "editing-externally", error: null });
+			try {
+				const edited = await api.editDraft({ text });
+				if (!disposed) publish({ draft: edited.text });
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
+			} finally {
+				if (!disposed && busyIs("editing-externally")) publish({ busy: "idle" });
 			}
 		},
 		async forkAndSubmit(ordinal, images) {

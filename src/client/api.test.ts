@@ -100,6 +100,18 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("round-trips a draft through the external editor", async () => {
+		const fetch = fetchRecorder(response({ text: "edited" }));
+		const api = createAgentpaneApi({ fetch });
+
+		expect(await api.editDraft({ text: "original" })).toEqual({ text: "edited" });
+		expect(fetch).toHaveBeenCalledWith(ROUTES.editDraft, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ text: "original" }),
+		});
+	});
+
 	it("aborts a session without a request body or content type", async () => {
 		const fetch = fetchRecorder(new Response(null, { status: 204 }));
 		const api = createAgentpaneApi({ fetch });
