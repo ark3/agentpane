@@ -1,9 +1,9 @@
 /**
  * The composer's shortcut to the last message, in a real browser (OW-relehi).
  *
- * The claim is about the action row, which now carries four controls at its
- * busiest -- Tools, "Stop and edit", the primary button and Stop -- and one of
- * them is a three-word label. Whether they still sit on one line is a statement
+ * The claim is about the action row, which now carries five controls at its
+ * busiest -- Tools, External Editor, "Stop and edit", the primary button and
+ * Stop -- and one of them is a three-word label. Whether they still sit on one line is a statement
  * about boxes, and jsdom has none; `.prompt-actions` does not wrap, so the
  * failure mode is buttons squeezed or pushed past the row's right edge rather
  * than a second line appearing.
@@ -30,6 +30,7 @@ test("the last-message shortcut shares the action row rather than crowding it of
 
 	const row = page.locator(".prompt-actions");
 	const tools = row.getByText("Tools", { exact: true });
+	const externalEditor = page.getByRole("button", { name: "External Editor" });
 	const shortcut = page.getByRole("button", { name: "Edit last message" });
 	const send = page.getByRole("button", { name: "Send" });
 
@@ -60,19 +61,28 @@ test("the last-message shortcut shares the action row rather than crowding it of
 			.toBeLessThanOrEqual(page_.clientWidth);
 	}
 
-	// Idle: Tools still at the left, the shortcut between it and the primary button.
-	await expectOnOneRow(tools, shortcut, send);
+	// Idle: Tools still at the left, then External Editor and the shortcut before the primary button.
+	await expectOnOneRow(tools, externalEditor, shortcut, send);
+	const externalEditorBox = (await externalEditor.boundingBox())!;
 	const shortcutBox = (await shortcut.boundingBox())!;
-	expect(shortcutBox.x, "the shortcut is not to the right of Tools")
+	expect(externalEditorBox.x, "External Editor is not to the right of Tools")
 		.toBeGreaterThan((await tools.boundingBox())!.x);
+	expect(shortcutBox.x, "the shortcut is not to the right of External Editor")
+		.toBeGreaterThan(externalEditorBox.x);
 	expect((await send.boundingBox())!.x, "the primary button is not to the right of the shortcut")
 		.toBeGreaterThan(shortcutBox.x);
 
 	// Streaming is the busiest the row ever gets: the shortcut takes its longer
-	// label and Stop appears beside it, which is where a fifth box would show.
+	// label and Stop appears beside it, bringing the row to five controls.
 	await page.getByLabel("Prompt").fill("another prompt");
 	await send.click();
 	const stop = page.getByRole("button", { name: "Stop", exact: true });
 	await expect(stop).toBeVisible();
-	await expectOnOneRow(tools, page.getByRole("button", { name: "Stop and edit" }), stop);
+	await expectOnOneRow(
+		tools,
+		externalEditor,
+		page.getByRole("button", { name: "Stop and edit" }),
+		send,
+		stop,
+	);
 });
