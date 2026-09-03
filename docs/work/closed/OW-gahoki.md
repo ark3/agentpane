@@ -51,3 +51,10 @@ Establish it rather than assuming it, and if the shrink event turns out to arriv
 - The existing test or a narrower structural regression test is shown failing before the change and passing afterwards.
 - The affected test is run repeatedly in its ordered-file context, not only alone, because isolation is the shape that already passes.
 - `bun run check` and `bun run test:browser` both pass.
+
+Refuted the card's leading explanation and fixed the flake on the test side (commit bea8968 on main as 0ec1f2a).
+Instrumented Playwright probes showed a borrowed followFrame always fires after the microtask that flushes the condensed DOM -- even when the coalesced path was deliberately forced -- and that Chromium's shrink-clamp scroll event precedes the frame in every run, so the OW-56 guard holds and no reconcile is ever swallowed.
+The real cause is reconcile's designed bottom cap: condensing removes 241px of live-turn chrome from below the anchor, and until the streamed body fills a viewport the pane pins at the scroller's bottom, clientHeight - contentBelow = 59.75px short of flush, matching the recorded miss exactly; the 12.75/36.75/59.75px spread is whole-text-line chunk-count variance.
+The two-frame window asserted flush, a promise reconcile never made, so the condense-side assertion now takes the Math.min(offset, bottomGap) form the compact-tail test already uses; expand-side and settled assertions stay strict, and a sabotaged toggle still fails at 120.25px.
+Verified: pre-change 2/5 ordered-file failures reproduced, corrected test 8/8 ordered runs green, bun run check and bun run test:browser green.
+The card's file records the verdict in full; the assertion's bottom-pinned blind spot is deferred to OW-yorita.
