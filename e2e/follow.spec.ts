@@ -219,8 +219,19 @@ test("reading view keeps a streaming turn's original follow anchor locked", asyn
 		return window.harness.metrics(index);
 	}, anchorIndex);
 	expect(afterCondense.anchorOffset).not.toBeNull();
-	expect(Math.abs(afterCondense.anchorOffset!), "condensing did not immediately restore armed follow")
-		.toBeLessThanOrEqual(LOCKED_PX);
+	// Flush at the top is not always attainable here: condensing removes the
+	// live turn's thinking and tool chrome from below the prompt, and until the
+	// streamed body alone fills a viewport `reconcile`'s cap stops at the
+	// scroller's bottom -- the same designed pin the compact-tail test below
+	// accepts. The shortfall quantizes to whole text lines (12.75/36.75/59.75px
+	// observed), set by how many chunks landed before the pause (OW-gahoki).
+	// A dead toggle path still fails: the settled assertion at the end catches
+	// a cleared anchor, and the expand side asserts flush outright.
+	const condensedBottom = afterCondense.scrollHeight - afterCondense.scrollTop - afterCondense.clientHeight;
+	expect(
+		Math.min(Math.abs(afterCondense.anchorOffset!), condensedBottom),
+		"condensing did not immediately restore armed follow",
+	).toBeLessThanOrEqual(LOCKED_PX);
 
 	await expect(transcript).toHaveAttribute("aria-busy", "true");
 	await reading.click();
