@@ -11,12 +11,16 @@ While executing OW-hilufa on 2026-09-02, `bunx playwright test e2e/follow.spec.t
 The miss was repeatable at the clean parent commit `4a6a731` as well as with OW-hilufa present and with its theme control hidden, so the theme change did not cause it.
 Observed anchor misses were 12.75px at the parent, 36.75px in the ordered follow file, and 59.75px in the full browser suite, against the 2px tolerance.
 
-The leading explanation from source inspection is that `toggleReading` awaits `tick()` and calls `scheduleFollow`, but `scheduleFollow` does nothing while `followFrame` is non-null.
-Whether the older scheduled callback runs before or after the condensed layout then decides whether the anchor is reconciled inside the test's two-frame window.
-That explanation is a finding to verify, not an established root cause.
+## Verdict (2026-09-02): the frame-race explanation is REFUTED; the miss is `reconcile`'s designed bottom cap
 
-The three recorded magnitudes support it: 12.75 -> 36.75 -> 59.75px as the surrounding load grows is the shape of an anchor pinned against a layout that is then discarded and never re-pinned, not of one that is merely late.
-That reading is inference from the numbers already in this card, not a fresh measurement.
+The leading explanation from source inspection was that `toggleReading` awaits `tick()` and calls `scheduleFollow`, but `scheduleFollow` does nothing while `followFrame` is non-null, so a borrowed in-flight frame could reconcile against a discarded layout.
+Instrumented Playwright runs refuted it: a pending requestAnimationFrame always fires after the microtask that flushes the condensed DOM, so even a deliberately forced coalesced frame reconciled against the layout actually on screen.
+The same probes settled the OW-56 ordering question: Chromium's shrink-clamp scroll event arrived before the followFrame callback in every run, and the handler took the keep-anchor branch, so the guard holds on the throttled path.
+
+The actual cause is geometry.
+Condensing removes the live turn's thinking and tool chrome (241px in the fixture) from below the anchor, and until the streamed body alone fills a viewport, `reconcile`'s cap `Math.min(bottom, anchorTop)` pins the pane at the scroller's bottom, leaving the anchor `clientHeight - contentBelow` short of flush -- 470 - 410.25 = 59.75px, the recorded miss to the hundredth.
+The 12.75 -> 36.75 -> 59.75px spread quantizes to whole text lines, set by how many 12ms chunks landed before the pause: chunk-count variance, not layout-race jitter.
+The anchor stays armed and reconciled throughout; the test's two-frame window was asserting flush, a promise `reconcile` never made, so the test moved (commit `bea8968`, cherry-picked to main): the condense-side assertion takes the `Math.min(offset, bottomGap)` form the compact-tail test in the same file already uses, and the expand-side and settled assertions stay strict.
 
 ## Why it bites the test and not a reader
 
