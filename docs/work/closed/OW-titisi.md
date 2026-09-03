@@ -34,3 +34,5 @@ It also makes the alignment a property of the marker rather than of another elem
 
 Load-bearing: both files, and that the assertion is a real computed position rather than a class or style-attribute check.
 Incidental: the pixel tolerance.
+
+Added explicit auto margins to the reading-tail and tool-card status markers so their right alignment no longer depends on an optional summary sibling. Added Chromium geometry coverage for empty and non-empty summaries in both rows. The focused test failed with the declarations removed (marker edge 482.59375px versus content edge 804px), then passed after restoration; bun run check passed 899 tests with no Svelte diagnostics, bun run test:browser passed 19 tests, and adversarial review repeated the focused test five times plus both full suites with no findings.
