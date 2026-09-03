@@ -53,3 +53,5 @@ Each test watched red first.
 5. `bun run check` passes.
 
 No browser-testing label: nothing here touches scroll, follow mode, or layout that jsdom can't see -- a focused-element keydown and a button click are both real in jsdom.
+
+Added the External Editor composer button and textarea-scoped Ctrl-g shortcut, a controller/API round trip with busy and existing error-state handling, and a top-level server route that runs the operator EDITOR against a temporary Markdown file outside the agent sandbox and always cleans it up. Added server, API, controller, component, and browser layout coverage. The tests were observed red before implementation; after landing, bun run check passed 48 files and 907 tests, and bun run test:browser passed 19 tests.
