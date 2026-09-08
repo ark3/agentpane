@@ -41,6 +41,8 @@
 		connection: "connecting",
 		busy: "idle",
 		error: null,
+		models: [],
+		model: "",
 		preview: null,
 	});
 	/**
@@ -67,6 +69,10 @@
 	function chooseTheme(event: Event): void {
 		theme = (event.currentTarget as HTMLSelectElement).value as ThemeChoice;
 		writeTheme();
+	}
+
+	function chooseModel(event: Event): void {
+		void controller.setModel((event.currentTarget as HTMLSelectElement).value);
 	}
 	/**
 	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
@@ -1207,6 +1213,18 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
+				<select
+					class="model-select"
+					aria-label="Conversation model"
+					value={view.model}
+					onchange={chooseModel}
+					disabled={!selectedSession || selectedSession.messages.length > 0}
+				>
+					<option value="">Backend default</option>
+					{#each view.models as model (model.id)}
+						<option value={model.id}>{model.label}</option>
+					{/each}
+				</select>
 				<!-- A popover, not the <details> OW-72 first reached for (OW-80): a
 				     disclosure widget never light-dismisses, while an auto popover
 				     gets outside-click and Escape for free, with no JS. The entries

@@ -1,5 +1,6 @@
 import type {
 	BackendId,
+	ModelInfo,
 	PromptRequest,
 	ServerEvent,
 	SessionPreviewTurn,
@@ -23,6 +24,9 @@ export interface ControllerView {
 	connection: "connecting" | "connected" | "reconnecting";
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
 	error: string | null;
+	/** Models offered for the selected empty conversation; an empty id means the backend default. */
+	models: ModelInfo[];
+	model: string;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
 	 * *previewed* rather than attached. Null once the session is attached (a
@@ -69,6 +73,8 @@ export interface AgentpaneController {
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
+	/** Select a model for the current empty conversation; an empty id keeps the backend default. */
+	setModel(model: string): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
 	/**
@@ -100,6 +106,8 @@ export function createController(
 		connection: "connecting",
 		busy: "idle",
 		error: null,
+		models: [],
+		model: "",
 		preview: null,
 	};
 	let connection: EventConnection | undefined;
@@ -109,7 +117,10 @@ export function createController(
 	let refreshInFlight: Promise<void> | undefined;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
+	let pendingModelLoad: { key: string; intent: number } | null = null;
 	const recoveries = new Map<string, Promise<void>>();
+	const selectedModels = new Map<string, string>();
+	const modelsBySession = new Map<string, ModelInfo[]>();
 	const listeners = new Set<(next: ControllerView) => void>();
 	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
@@ -142,6 +153,43 @@ export function createController(
 			: view.state.selected;
 		// An explicit attach replaces any read-only preview with the live transcript.
 		publish({ state: { ...replaceSummary(summary, requested), selected }, error: null, ...(select ? { preview: null } : {}) });
+	}
+
+	/**
+	 * Populate the picker once per explicit selection gesture. The transcript is
+	 * checked on both sides of the request: a snapshot can add the first message
+	 * while enumeration is in flight, and that must not revive an editable picker.
+	 */
+	async function loadModels(ref: SessionRef, intent: number): Promise<void> {
+		const key = sessionKey(ref);
+		const session = view.state.sessions[key];
+		if (!session || session.messages.length > 0) return;
+		publish({ models: modelsBySession.get(key) ?? [], model: selectedModels.get(key) ?? "", error: null });
+		try {
+			const models = await api.listModels(ref.backend);
+			const current = view.state.sessions[key];
+			if (!disposed && intent === selectionIntent && current?.messages.length === 0) {
+				modelsBySession.set(key, models);
+				publish({ models, error: null });
+			}
+		} catch (error: unknown) {
+			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
+		}
+	}
+
+	async function requestModelsForSelection(ref: SessionRef, intent: number): Promise<void> {
+		pendingModelLoad = { key: sessionKey(ref), intent };
+		await continueModelLoad();
+	}
+
+	async function continueModelLoad(): Promise<void> {
+		const pending = pendingModelLoad;
+		if (!pending || pending.intent !== selectionIntent) return;
+		const session = view.state.sessions[pending.key];
+		if (!session) return;
+		pendingModelLoad = null;
+		if (session.messages.length > 0) return;
+		await loadModels(session.ref, pending.intent);
 	}
 
 	function validWorkspace(cwd: string): boolean {
@@ -308,6 +356,7 @@ export function createController(
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
 				applyAttached(attached, true, ref);
+				await requestModelsForSelection(attached.ref, intent);
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
 				// selection after a newer user intent.
@@ -327,9 +376,23 @@ export function createController(
 			if (disposed) return;
 			const result = reduceServerEvent(view.state, event);
 			if (event.type === "renamed") {
+				const chosen = selectedModels.get(sessionKey(event.from));
+				if (chosen !== undefined) {
+					selectedModels.delete(sessionKey(event.from));
+					selectedModels.set(sessionKey(event.session), chosen);
+				}
+				const models = modelsBySession.get(sessionKey(event.from));
+				if (models !== undefined) {
+					modelsBySession.delete(sessionKey(event.from));
+					modelsBySession.set(sessionKey(event.session), models);
+				}
+				if (pendingModelLoad?.key === sessionKey(event.from)) {
+					pendingModelLoad = { ...pendingModelLoad, key: sessionKey(event.session) };
+				}
 				for (const listener of renameListeners) listener(event.from, event.session);
 			}
 			if (result.state !== view.state) publish({ state: result.state });
+			void continueModelLoad();
 			for (const ref of result.recover) void recover(ref);
 			if (result.refreshSessions) void refreshSessions();
 		},
@@ -376,10 +439,18 @@ export function createController(
 		},
 		async preview(ref) {
 			const intent = ++selectionIntent;
+			pendingModelLoad = null;
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
 			if (view.state.sessions[sessionKey(ref)]) {
-				publish({ state: { ...view.state, selected: ref }, preview: null, error: null });
+				publish({
+					state: { ...view.state, selected: ref },
+					preview: null,
+					error: null,
+					models: modelsBySession.get(sessionKey(ref)) ?? [],
+					model: selectedModels.get(sessionKey(ref)) ?? "",
+				});
+				await requestModelsForSelection(ref, intent);
 				return;
 			}
 			publish({ error: null });
@@ -403,6 +474,7 @@ export function createController(
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
 			const intent = ++selectionIntent;
+			pendingModelLoad = null;
 			publish({ busy: "attaching", error: null });
 			try {
 				const created = await api.createSession({ cwd, backend });
@@ -416,7 +488,33 @@ export function createController(
 			}
 		},
 		async select(ref) {
-			await attachAndSelect(ref, ++selectionIntent);
+			const intent = ++selectionIntent;
+			pendingModelLoad = null;
+			publish({
+				models: modelsBySession.get(sessionKey(ref)) ?? [],
+				model: selectedModels.get(sessionKey(ref)) ?? "",
+			});
+			await attachAndSelect(ref, intent);
+		},
+		async setModel(model) {
+			const selected = view.state.selected;
+			if (!selected) return;
+			const key = sessionKey(selected);
+			if (view.state.sessions[key]?.messages.length !== 0) return;
+			if (model === "") {
+				selectedModels.set(key, model);
+				publish({ model, error: null });
+				return;
+			}
+			try {
+				await api.setModel(selected, model);
+				if (!disposed && view.state.sessions[key]?.messages.length === 0) {
+					selectedModels.set(key, model);
+					publish({ model, error: null });
+				}
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
+			}
 		},
 		async submit() {
 			const selected = view.state.selected;

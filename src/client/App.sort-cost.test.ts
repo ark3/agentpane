@@ -112,6 +112,7 @@ class PublishingController implements AgentpaneController {
 	}
 	async abort() {}
 	async compact() {}
+	async setModel(_model: string) {}
 	async refreshSessions() {}
 	async refreshPreview() {}
 	clearError() {}
@@ -154,6 +155,8 @@ async function mounted(): Promise<PublishingController> {
 		connection: "connected",
 		busy: "idle",
 		error: null,
+		models: [],
+		model: "",
 		preview: null,
 	});
 	render(App, { props: { controller } });

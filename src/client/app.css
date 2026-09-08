@@ -306,6 +306,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .prompt { grid-area: prompt; display: grid; gap: var(--ap-space-2); }
 .prompt textarea { min-height: 6rem; resize: vertical; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: var(--ap-space-2); }
+.model-select { min-width: 0; max-width: 12rem; }
 /* The tools popup sits at the left of the action row (OW-72); margin-right:auto
    pushes Send/Abort to the right. The list is a popover (OW-80), so it renders
    in the top layer, which the composer does not position: anchor positioning is

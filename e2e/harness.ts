@@ -217,6 +217,10 @@ const api: AgentpaneApi = {
 			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running" });
 		});
 	},
+	async listModels() {
+		return [{ id: "harness/model", label: "Harness Model" }];
+	},
+	async setModel() {},
 	/**
 	 * One point per user message, in transcript order -- the shape both real
 	 * adapters answer with, and the whole of what the client's ordinal

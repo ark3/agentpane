@@ -46,6 +46,8 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		error: null,
+		models: [],
+		model: "",
 		preview: null,
 		...overrides,
 	};
@@ -88,6 +90,7 @@ class FakeController implements AgentpaneController {
 	submitted = 0;
 	aborted = 0;
 	compacted = 0;
+	models: string[] = [];
 	externalEdits: string[] = [];
 	externalEditResult = "edited externally";
 	clearErrorCalls = 0;
@@ -187,6 +190,11 @@ class FakeController implements AgentpaneController {
 
 	async compact() {
 		this.compacted += 1;
+	}
+
+	async setModel(model: string) {
+		this.models.push(model);
+		this.publish({ ...this.current, model });
 	}
 
 	async editDraft() {
@@ -1504,6 +1512,38 @@ describe("App", () => {
 		controller.publish(view({ draft: "" }));
 		await tick();
 		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+	});
+
+	it("sets a model only for an empty conversation and keeps it as the disabled label after a message", async () => {
+		const empty = {
+			ref: piSession,
+			messages: [],
+			isStreaming: false,
+			seq: 1,
+			error: null,
+			requests: [],
+		};
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, sessions: { "pi:pi-1": empty } }),
+			models: [{ id: "opaque/id:one", label: "Model One" }],
+		}));
+		render(App, { props: { controller } });
+		const select = screen.getByLabelText("Conversation model");
+
+		expect(select).toBeEnabled();
+		await fireEvent.change(select, { target: { value: "opaque/id:one" } });
+		expect(controller.models).toEqual(["opaque/id:one"]);
+
+		controller.publish({
+			...controller.getView(),
+			state: state({
+				selected: piSession,
+				sessions: { "pi:pi-1": { ...empty, messages: [user("sent")] } },
+			}),
+		});
+		await tick();
+		expect(select).toBeDisabled();
+		expect(select).toHaveValue("opaque/id:one");
 	});
 
 	it("submits on Ctrl-Enter and Cmd-Enter but inserts a newline on plain Enter", async () => {

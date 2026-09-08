@@ -3,6 +3,7 @@ import type {
 	BackendId,
 	ForkPoint,
 	ForkRequest,
+	ModelInfo,
 	ServerEvent,
 	SessionPreviewResponse,
 	SessionPreviewTurn,
@@ -68,6 +69,8 @@ class FakeApi implements AgentpaneApi {
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
+	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
+	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
@@ -151,6 +154,57 @@ describe("client controller", () => {
 		expect(api.preview).not.toHaveBeenCalled();
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		expect(controller.getView().preview).toBeNull();
+	});
+
+	it("lists and sets an opaque model id when an empty live session is selected", async () => {
+		const api = new FakeApi();
+		api.listModels.mockResolvedValue([{ id: "opaque/id:one", label: "One" }]);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+
+		await controller.preview(ref);
+		expect(api.listModels).toHaveBeenCalledTimes(1);
+		expect(api.listModels).toHaveBeenCalledWith("pi");
+		expect(controller.getView().models).toEqual([{ id: "opaque/id:one", label: "One" }]);
+
+		await controller.setModel("");
+		expect(api.setModel).not.toHaveBeenCalled();
+		await controller.setModel("opaque/id:one");
+		expect(api.setModel).toHaveBeenCalledWith(ref, "opaque/id:one");
+		expect(controller.getView().model).toBe("opaque/id:one");
+	});
+
+	it("waits for the selected session snapshot before listing models", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+
+		await controller.select(ref);
+		expect(api.listModels).not.toHaveBeenCalled();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await Promise.resolve();
+
+		expect(api.listModels).toHaveBeenCalledWith("pi");
+	});
+
+	it("does not list or set models for a session that already has a message", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.emit({
+			type: "snapshot",
+			session: ref,
+			seq: 1,
+			messages: [{ role: "user", content: "already sent", timestamp: Date.now() }],
+			isStreaming: false,
+			compaction: null,
+		});
+
+		await controller.preview(ref);
+		await controller.setModel("opaque/id:one");
+		expect(api.listModels).not.toHaveBeenCalled();
+		expect(api.setModel).not.toHaveBeenCalled();
 	});
 
 	it("clears the read-only preview once the session is attached", async () => {

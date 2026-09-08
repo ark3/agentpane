@@ -756,8 +756,8 @@ describe("fork, model, and enumeration routes", () => {
 		});
 		app = createApp({ index, adapters: { pi: offline } });
 
-		const before = (await (await get(`${ROUTES.models}?backend=pi`)).json()) as ModelsResponse;
-		expect(before.models).toEqual([]);
+		const before = await get(`${ROUTES.models}?backend=pi`);
+		expect(before.status).toBe(500);
 
 		await get(ROUTES.session(PI_SESSION));
 
@@ -790,6 +790,8 @@ describe("fork, model, and enumeration routes", () => {
 		const response = await get(ROUTES.models);
 		expect(response.status).toBe(200);
 		expect(((await response.json()) as ModelsResponse).models).toHaveLength(1);
+
+		expect((await get(`${ROUTES.models}?backend=pi`)).status).toBe(500);
 	});
 });
 
