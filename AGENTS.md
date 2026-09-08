@@ -38,6 +38,8 @@ Markdown prose uses one sentence per line and never wraps at a column count.
   The home server has no `pi` at all.
   Claude Code and Codex both run there, each pinned to one model: Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna.
   Neither is the default the machine would pick — as of 2026-08-27 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` selects `gpt-5.4-mini` — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`.
+  The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
+  A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
   Pi runs only on the work laptop, which is why an item whose evidence has to come from a live Pi turn belongs there.
   Such an item carries the label `work-laptop`, and its body still opens with the line `**Work laptop:**` naming which CLI the visit needs.
   The label is the filter: `card list --open --label work-laptop` prints those cards with their headlines, which is the intersection view the old two-command survey could not produce.
