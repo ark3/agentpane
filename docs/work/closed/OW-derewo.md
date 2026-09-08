@@ -66,3 +66,11 @@ Do not add anything for it.
 - `bun run check` passes.
 - `bun run test:browser` passes, with a new spec in `e2e/` modelled on `e2e/composer-shortcut.spec.ts`, asserting the row's controls still share one line and the page has no horizontal overflow with the select present; `.prompt-actions` does not wrap, so the failure mode is crowding, not a second line.
 - OW-21 carries a note saying what this card's outcome means for the cache it sketches.
+
+Implemented the composer model selector across 99e21dc..67d77ad: empty attached conversations fetch their backend's live model list, concrete opaque ids are set before the first prompt, and the chosen label locks with the transcript.
+Backend default remains the truthful initial no-op and cannot be reselected after a concrete model because the adapters expose no reset-to-default operation.
+Filtered model enumeration now exposes construction and enumeration failures with their detail while the merged listing remains tolerant, and temporary adapters are disposed on failure.
+Selection, rename, listing, setting, and prompt-admission races are ordered and covered by focused regression tests.
+OW-21 records that the intended attached-conversation flow needs no cache and leaves caching deferred until a detached listing flow demonstrates a need.
+Red evidence covered the former silent 200 response, selector locking, stale selection completions, prompt/model admission in both orders, rename/reselection, and older list/set error races.
+Verified on main with `bun run check` (48 files, 927 tests) and `bun run test:browser` (20 tests).
