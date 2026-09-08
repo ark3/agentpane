@@ -48,6 +48,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		error: null,
 		models: [],
 		model: "",
+		modelSetting: false,
 		preview: null,
 		...overrides,
 	};
@@ -1551,6 +1552,7 @@ describe("App", () => {
 		const controller = new FakeController(view({
 			draft: "first prompt",
 			busy: "setting-model",
+			modelSetting: true,
 			state: state({
 				selected: piSession,
 				sessions: {

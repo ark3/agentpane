@@ -150,6 +150,7 @@ function initialView(selectedTurns: number): ControllerView {
 		error: null,
 		models: [],
 		model: "",
+		modelSetting: false,
 		preview: null,
 	};
 }

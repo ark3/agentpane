@@ -27,6 +27,8 @@ export interface ControllerView {
 	/** Models offered for the selected empty conversation; an empty id means the backend default. */
 	models: ModelInfo[];
 	model: string;
+	/** A model change must settle before any conversation can admit its first prompt. */
+	modelSetting: boolean;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
 	 * *previewed* rather than attached. Null once the session is attached (a
@@ -108,6 +110,7 @@ export function createController(
 		error: null,
 		models: [],
 		model: "",
+		modelSetting: false,
 		preview: null,
 	};
 	let connection: EventConnection | undefined;
@@ -169,7 +172,7 @@ export function createController(
 		let key = sessionKey(ref);
 		const session = view.state.sessions[key];
 		if (!session || session.messages.length > 0) return;
-		const actionIntent = modelActionIntent;
+		const actionIntent = ++modelActionIntent;
 		const onRename = (from: SessionRef, to: SessionRef) => {
 			if (sessionKey(from) === key) key = sessionKey(to);
 		};
@@ -518,33 +521,37 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) return;
 			let key = sessionKey(selected);
-			if (view.busy !== "idle" || view.state.sessions[key]?.messages.length !== 0) return;
+			if (view.modelSetting || view.busy !== "idle" || view.state.sessions[key]?.messages.length !== 0) return;
 			// Empty means "leave the backend on its default" and deliberately has
 			// no wire operation. Once a concrete choice has succeeded there is no
 			// reset-to-default operation, so accepting empty again would make the
 			// visible label disagree with the adapter.
 			if (model === "") return;
-			modelActionIntent += 1;
+			const actionIntent = ++modelActionIntent;
 			const onRename = (from: SessionRef, to: SessionRef) => {
 				if (sessionKey(from) === key) key = sessionKey(to);
 			};
 			renameListeners.add(onRename);
-			publish({ busy: "setting-model", error: null });
+			publish({ busy: "setting-model", modelSetting: true, error: null });
 			try {
 				await api.setModel(selected, model);
 				if (!disposed) {
 					selectedModels.set(key, model);
-					if (selectionIs(key)) publish({ model, error: null });
+					if (selectionIs(key)) {
+						publish(actionIntent === modelActionIntent ? { model, error: null } : { model });
+					}
 				}
 			} catch (error: unknown) {
-				if (!disposed && selectionIs(key)) publish({ error: errorMessage(error) });
+				if (!disposed && actionIntent === modelActionIntent && selectionIs(key)) {
+					publish({ error: errorMessage(error) });
+				}
 			} finally {
 				renameListeners.delete(onRename);
-				if (!disposed && busyIs("setting-model")) publish({ busy: "idle" });
+				if (!disposed) publish({ modelSetting: false, ...(busyIs("setting-model") ? { busy: "idle" } : {}) });
 			}
 		},
 		async submit() {
-			if (view.busy === "setting-model") return;
+			if (view.modelSetting) return;
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });

@@ -239,6 +239,73 @@ describe("client controller", () => {
 		expect(controller.getView().model).toBe("model-for-a");
 	});
 
+	it("keeps a model change blocking prompt and another choice after a different conversation attaches", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.select(forkedRef);
+		expect(controller.getView().busy).toBe("idle");
+		await controller.setModel("model-for-b");
+		controller.setDraft("first prompt for b");
+		await controller.submit();
+
+		expect(api.setModel).toHaveBeenCalledTimes(1);
+		expect(api.prompt).not.toHaveBeenCalled();
+		setting.resolve(undefined);
+		await selectingModel;
+		expect(controller.getView().modelSetting).toBe(false);
+	});
+
+	it("does not let an older set-model success clear a newer model-list failure", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.preview(forkedRef);
+		api.listModels.mockRejectedValueOnce(new Error("newer list failure"));
+		await controller.preview(ref);
+		expect(controller.getView().error).toBe("newer list failure");
+
+		setting.resolve(undefined);
+		await selectingModel;
+		expect(controller.getView().model).toBe("model-for-a");
+		expect(controller.getView().error).toBe("newer list failure");
+	});
+
+	it("does not let an older set-model failure replace a newer model-list failure", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.preview(forkedRef);
+		api.listModels.mockRejectedValueOnce(new Error("newer list failure"));
+		await controller.preview(ref);
+		expect(controller.getView().error).toBe("newer list failure");
+
+		setting.reject(new Error("older set failure"));
+		await selectingModel;
+		expect(controller.getView().error).toBe("newer list failure");
+	});
+
 	it("keeps an in-flight model list when its selected conversation is renamed", async () => {
 		const api = new FakeApi();
 		const listing = deferred<ModelInfo[]>();
