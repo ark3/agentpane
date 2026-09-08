@@ -4,7 +4,23 @@ labels: [change, browser-testing]
 
 # A fresh conversation can choose its model from the composer before its first prompt, and the choice locks once the transcript has a message
 
-`src/client/api.ts` (`AgentpaneApi`), `src/client/App.svelte` (the `.prompt-actions` row), `src/client/controller.ts`, `src/server/http/app.ts` (`listModels`), `src/shared/protocol.ts` (`ROUTES.models`, `ROUTES.model`, `ModelInfo`, `SetModelRequest`).
+`src/server/adapters/types.ts` (`AdapterState`), the three adapters' state reporting, `src/server/http/broadcaster.ts` (`broadcastSnapshot`), `src/shared/protocol.ts` (`ServerEvent` `snapshot` and `status`, `ROUTES.models`, `ROUTES.model`), `src/client/session-state.ts` (`SessionView`), `src/client/api.ts` (`AgentpaneApi`), `src/client/controller.ts`, `src/client/App.svelte` (the `.prompt-actions` row).
+
+## Second attempt
+
+This card landed once as 99e21dc..0f83315 and was reverted in 86ba61f on 2026-09-08.
+Read the revert's message and the reverted diff before starting; the small parts are correct and are meant to be lifted rather than rewritten: the two `AgentpaneApi` methods, the `<select>` markup in the action row, `e2e/model-select.spec.ts`, the `listModels` route change that surfaces a filtered backend's failure while the merged listing stays tolerant, and the `listModels`/`setModel` stubs in `e2e/harness.ts` and `e2e/perf-harness.ts`.
+
+What was wrong is one decision, and everything else followed from it.
+The first landing kept the chosen model as client state, in two maps inside the controller keyed by session.
+So the locked select read "Backend default" for any conversation not chosen in that tab: every conversation that predated the page load, every fresh one after a reload, every one in a second tab.
+The owner attached to an older conversation and saw exactly that.
+And about a hundred and forty controller lines plus fifteen race tests existed only to keep those maps consistent across renames, stale selections, and interleaved list and set requests.
+
+**The model is server state.**
+The client never remembers a choice; it reads the session's current model from the server and renders it.
+`setModel` is a request whose effect arrives on the next server event, the same way every other mutation in this client works.
+That removes the maps, the rename bookkeeping, the intent guards around list and set, and the rule that a pending model change blocked sending on every conversation.
 
 ## Why now
 
@@ -16,53 +32,65 @@ Pi does not object, but the first cut locks all three the same way; relaxing Pi 
 
 ## What is already built
 
-Everything server-side.
+Everything server-side except reporting the current model.
 `BackendAdapter.setModel` and `listModels` exist on all three adapters (`src/server/adapters/types.ts`; Pi in `pi/process.ts`, Claude in `claude/adapter.ts`, Codex in `codex/adapter.ts`).
 `GET /api/models?backend=` and `POST /api/sessions/:backend/:id/model` are served by `src/server/http/app.ts` and typed in `src/shared/protocol.ts`.
-Nothing under `src/client/` calls either route; OW-72 and OW-74 both name that gap and explicitly declined to fill it.
 
-## Why the empty-list deferral does not bite here
+## Report the current model
 
-OW-21 accepted that `GET /api/models` returns nothing when no adapter of that backend is live, because every adapter enumerates only from its running subprocess and D9 forbids spawning to answer a listing.
-This picker never meets that case.
-`controller.create` creates the virtual session and attaches it in one motion (`src/client/controller.ts`, `create` calling `attachAndSelect`), and attaching spawns the agent under the backend's default model.
-So by the time the composer shows for a new conversation there is a live adapter of the selected backend, and the route's "prefer a live adapter" branch answers authoritatively.
-Set-model before the first prompt costs nothing: no tokens have been sent.
-The cache OW-21 sketches is therefore not needed for this card; whatever you find, record in OW-21 what this card's outcome means for it.
+Every adapter already knows it and none of them says so.
+The Claude reducer takes the model from the `init` system event (`claude/reducer.ts`, `case "init"`) and the adapter records a successful `setModel`.
+The Codex adapter takes it from the `thread/start` response and feeds it to its reducer's identity, and `setModel` stores the value that the next `turn/start` will carry.
+The Pi adapter round-trips `get_state` during `start()` (`pi/process.ts`, the call that adopts `sessionFile`), and that response's `data.model` is the current model; `set_model`'s response is the new `Model`.
 
-## What to build
+Follow compaction exactly, because it is the same kind of fact: a per-session value the adapter owns, reported on every snapshot and on every status change.
+`AdapterState` in `src/server/adapters/types.ts` gains a `model: string | null` beside `compaction`; each adapter's `getState()` returns it and its `onUpdate` fires when it changes, including on a successful `setModel`.
+The `snapshot` and `status` events in `src/shared/protocol.ts` carry it, `broadcastSnapshot` in `src/server/http/broadcaster.ts` copies it from state the way it copies `compaction`, and `SessionView` in `src/client/session-state.ts` stores it the way the `status` case stores `compaction`.
+Null means the adapter has not learned it yet, which is a transient state during `start()`, not a "default" the client should name.
 
-A `<select>` in the `.prompt-actions` row of `src/client/App.svelte`, beside the existing controls, labelled for the accessibility tree the way the Theme and Backend selects are.
-It carries a first entry meaning "backend default" that sends nothing, followed by the live list for the selected session's backend fetched through a new `listModels(backend)` on `AgentpaneApi`.
-Changing it calls a new `setModel(ref, model)` on `AgentpaneApi` that posts `SetModelRequest` to `ROUTES.model(ref)`.
-It is enabled only while the selected session's `messages` is empty (`src/client/session-state.ts`); once any message exists it renders disabled, still showing the chosen value, so it doubles as the "this conversation is on X" label.
-Fetch the list when the selection changes, not on every render, and not for a session that already has messages.
-A failed listing or a rejected set-model surfaces through the controller's existing `error` path, the same one attach and prompt failures use.
+Report the id the backend uses, in the shape `ModelInfo.id` uses for that backend, so the select can match the current value against its options: Pi as `provider/modelId` (see `modelToInfo` in `pi/protocol.ts`), Claude and Codex as the bare id they answer with.
+Where a backend reports an alias on `init` and a resolved name on turns, such as Claude's `haiku`, report what `setModel` would accept.
+
+OW-9 records that the Codex reducer's identity may still say the previous model after `setModel` until the next turn.
+With the model reported from the adapter's own record of a successful `setModel`, rather than from the reducer, that card's gap does not reach the picker; say so in OW-9 when you are done.
+
+## The picker
+
+A `<select>` in the `.prompt-actions` row of `src/client/App.svelte`, labelled "Conversation model" for the accessibility tree, as in the reverted markup.
+Its value is the selected session's reported model, nothing else.
+Its options are that backend's live list, fetched through `AgentpaneApi.listModels(backend)` when a session with no messages becomes selected, and never for a session that already has messages.
+While the current model is null, or is not among the options, the select shows one extra entry naming the reported id, so the value on screen is always what the adapter has.
+Changing it calls `AgentpaneApi.setModel(ref, id)` and does nothing else; the new value arrives on the `status` event.
+There is no "backend default" entry: the backend's default is whatever the adapter reported at start, and it is shown by name.
+
+The select is enabled only while the selected session's `messages` is empty.
+Once the transcript has a message the control renders as a plain label carrying the model's name, not as a disabled select.
+The owner said on 2026-09-08 that a forever-locked selector is silly; it stays a select while it can be changed because mid-conversation switching is expected to come later, and reads as a label the rest of the time.
+That label is also what an older conversation shows on attach, and it must be the model that conversation is actually running.
 
 Placement was decided with the owner on 2026-09-03: the action row, not a header above the transcript.
 The grid in `src/client/app.css` has no header row, so one would take height from the transcript; the action row already exists.
-The masthead and the New controls were considered and rejected because a per-conversation control does not belong beside app-global or next-session controls.
 
-## The route's silent failures
+A failed listing or a rejected `setModel` surfaces through the controller's existing `error` path, the one attach and prompt failures use.
+No controller busy state and no send block.
+Disable the select itself while its own request is in flight, so a second choice cannot overtake the first; a prompt sent in that window is the ordinary case of the server handling two requests in arrival order, and the reported model tells the user which one won.
 
-OW-21, section "One thing to fix whenever a picker is built": `listModels` in `src/server/http/app.ts` swallows both a factory that will not construct and a backend that cannot enumerate with bare `catch` blocks, so an empty list and a failed ask look identical to the client.
-Fix that in this card so the select can show an error rather than an empty list.
-Keep the merged unfiltered listing working; `src/server/http/app.test.ts` "lists models per backend, and merged when unfiltered" and the `modelsNeedStart` case beside it are the existing coverage to extend.
+## The empty-list deferral
 
-## Id shapes
-
-`ModelInfo.id` is opaque to the client.
-Pi ids are `provider/modelId` (see `modelToInfo` and `splitModelRef` in `src/server/adapters/pi/protocol.ts`), Claude ids are aliases such as `haiku`, Codex ids are bare names.
-The select only ever sends an id it received, so no client-side validation is needed.
+OW-21 accepted that `GET /api/models` returns nothing when no adapter of that backend is live.
+This picker never meets that case: `controller.create` creates the virtual session and attaches it in one motion (`src/client/controller.ts`, `create` calling `attachAndSelect`), so a live adapter of that backend exists before the list is asked for.
+OW-21 already carries the outcome note from the first landing; it still holds.
 
 ## Fork
 
 A fork inherits the model without new work: the Claude adapter remembers `this.model` for its respawn, Codex reapplies `this.model` on the next `turn/start`, and a Pi fork stays inside the same process.
-Do not add anything for it.
+The forked session's reported model must say so; assert it in whichever adapter test already covers fork.
 
 ## Done when
 
-- A jsdom test in `src/client/` (beside `App.test.ts` or `controller.test.ts`, whichever holds the seam you use; `controller.test.ts` has a `FakeApi implements AgentpaneApi` to extend) fails before the change and passes after, asserting that selecting a model on a session with no messages calls `setModel` with that ref and id, and that the select is disabled once a message exists.
+- A node test per adapter fails before and passes after, asserting `getState().model` after `start()` from the fixture the adapter already starts from, and after a `setModel`.
+- A jsdom test in `src/client/` fails before and passes after, asserting that a selected empty session renders the reported model as the select's value, that choosing an option calls `setModel` with that ref and id and changes nothing locally, that a `status` event carrying a new model changes the value, and that a session with a message renders the model as a label and no select.
+- A jsdom test asserts that attaching a session whose snapshot reports a model and carries messages shows that model, which is the case the first landing got wrong.
 - `bun run check` passes.
-- `bun run test:browser` passes, with a new spec in `e2e/` modelled on `e2e/composer-shortcut.spec.ts`, asserting the row's controls still share one line and the page has no horizontal overflow with the select present; `.prompt-actions` does not wrap, so the failure mode is crowding, not a second line.
-- OW-21 carries a note saying what this card's outcome means for the cache it sketches.
+- `bun run test:browser` passes, with `e2e/model-select.spec.ts` lifted from the reverted change and adjusted to the new default handling, asserting the row's controls still share one line and the page has no horizontal overflow with the select present.
+- OW-9 carries a note saying what this card's reporting path means for its gap.
