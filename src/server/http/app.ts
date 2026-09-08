@@ -371,10 +371,12 @@ export function createApp(deps: AppDeps): App {
 			// spawns nothing.
 			//
 			// Known limitation, verified against the real `PiAdapter`: asking one
-			// that has not been started rejects with "Pi process is not running".
-			// A filtered request surfaces that failure to its caller; the merged
-			// request still omits Pi so another backend's useful answer survives.
-			// Spawning to answer a *listing* question is exactly what D9 rules out.
+			// that has not been started rejects with "Pi process is not running",
+			// so with no Pi session open this route reports zero Pi models rather
+			// than the real list. It degrades quietly and it is not a crash, but a
+			// model picker cannot be built on it alone -- see DESIGN's open
+			// questions. Spawning to answer a *listing* question is exactly what
+			// D9 rules out.
 			const live = sessions
 				.liveRefs()
 				.filter((ref) => ref.backend === id)
@@ -383,17 +385,15 @@ export function createApp(deps: AppDeps): App {
 			let adapter: BackendAdapter;
 			try {
 				adapter = live ?? factory.create({ backend: id, id: "" });
-			} catch (cause) {
+			} catch {
 				// A factory that will not construct without a real id is still not
 				// grounds for failing the other backend's list.
-				if (backend !== null) throw cause;
 				continue;
 			}
 			try {
 				models.push(...(await adapter.listModels()));
-			} catch (cause) {
+			} catch {
 				// Ditto for a backend that cannot enumerate without a subprocess.
-				if (backend !== null) throw cause;
 			} finally {
 				if (!live) await Promise.resolve(adapter.dispose()).catch(() => {});
 			}

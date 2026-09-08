@@ -41,9 +41,6 @@
 		connection: "connecting",
 		busy: "idle",
 		error: null,
-		models: [],
-		model: "",
-		modelSetting: false,
 		preview: null,
 	});
 	/**
@@ -70,10 +67,6 @@
 	function chooseTheme(event: Event): void {
 		theme = (event.currentTarget as HTMLSelectElement).value as ThemeChoice;
 		writeTheme();
-	}
-
-	function chooseModel(event: Event): void {
-		void controller.setModel((event.currentTarget as HTMLSelectElement).value);
 	}
 	/**
 	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
@@ -270,8 +263,6 @@
 				return "Compacting context…";
 			case "editing-externally":
 				return "Editing draft…";
-			case "setting-model":
-				return "Setting model…";
 			default:
 				return "Connected";
 		}
@@ -987,7 +978,7 @@
 		// The buttons are disabled while a compaction runs, but Ctrl/Cmd-Enter
 		// reaches here directly: the backends cannot safely admit a concurrent
 		// turn, so neither Send nor Fork starts one (OW-natiha).
-		if (compaction || view.modelSetting) return;
+		if (compaction) return;
 		if (!view.draft) return;
 		const edit = editing;
 		armFollow(edit?.index);
@@ -1216,18 +1207,6 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
-				<select
-					class="model-select"
-					aria-label="Conversation model"
-					value={view.model}
-					onchange={chooseModel}
-					disabled={!selectedSession || selectedSession.messages.length > 0 || view.modelSetting || view.busy !== "idle"}
-				>
-					<option value="" disabled={view.model !== ""}>Backend default</option>
-					{#each view.models as model (model.id)}
-						<option value={model.id}>{model.label}</option>
-					{/each}
-				</select>
 				<!-- A popover, not the <details> OW-72 first reached for (OW-80): a
 				     disclosure widget never light-dismisses, while an auto popover
 				     gets outside-click and Escape for free, with no JS. The entries
@@ -1277,7 +1256,7 @@
 						{streamingAction ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft || compaction !== null || view.modelSetting}>{sendLabel}</button>
+				<button type="submit" disabled={!view.draft || compaction !== null}>{sendLabel}</button>
 				{#if streamingAction}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
 				{/if}

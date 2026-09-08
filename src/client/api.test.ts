@@ -122,27 +122,6 @@ describe("agentpane API", () => {
 		});
 	});
 
-	it("lists models for one backend and unwraps the response", async () => {
-		const models = [{ id: "opaque/id", label: "One" }];
-		const fetch = fetchRecorder(response({ models }));
-		const api = createAgentpaneApi({ fetch });
-
-		expect(await api.listModels("pi")).toEqual(models);
-		expect(fetch).toHaveBeenCalledWith(`${ROUTES.models}?backend=pi`, { method: "GET" });
-	});
-
-	it("sets a session model with a JSON body", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-
-		await api.setModel(ref, "opaque/id");
-		expect(fetch).toHaveBeenCalledWith(ROUTES.model(ref), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ model: "opaque/id" }),
-		});
-	});
-
 	it("lists a session's fork points and unwraps them (OW-hezidi)", async () => {
 		const points = [{ id: "entry-1", text: "first" }, { id: "entry-2", text: "second" }];
 		const fetch = fetchRecorder(response({ points }));

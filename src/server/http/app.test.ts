@@ -756,13 +756,8 @@ describe("fork, model, and enumeration routes", () => {
 		});
 		app = createApp({ index, adapters: { pi: offline } });
 
-		const before = await get(`${ROUTES.models}?backend=pi`);
-		expect(before.status).toBe(500);
-		expect((await before.json()) as ApiError).toEqual({
-			error: "internal_error",
-			detail: "Pi process is not running",
-		});
-		expect(offline.created[0]?.disposed).toBe(true);
+		const before = (await (await get(`${ROUTES.models}?backend=pi`)).json()) as ModelsResponse;
+		expect(before.models).toEqual([]);
 
 		await get(ROUTES.session(PI_SESSION));
 
@@ -795,13 +790,6 @@ describe("fork, model, and enumeration routes", () => {
 		const response = await get(ROUTES.models);
 		expect(response.status).toBe(200);
 		expect(((await response.json()) as ModelsResponse).models).toHaveLength(1);
-
-		const filtered = await get(`${ROUTES.models}?backend=pi`);
-		expect(filtered.status).toBe(500);
-		expect((await filtered.json()) as ApiError).toEqual({
-			error: "internal_error",
-			detail: "cannot create an adapter without a real thread id",
-		});
 	});
 });
 

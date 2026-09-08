@@ -90,7 +90,6 @@ class PublishingController implements AgentpaneController {
 	}
 	async abort() {}
 	async compact() {}
-	async setModel(_model: string) {}
 	async refreshSessions() {}
 	async refreshPreview() {}
 	clearError() {}
@@ -148,9 +147,6 @@ function initialView(selectedTurns: number): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		error: null,
-		models: [],
-		model: "",
-		modelSetting: false,
 		preview: null,
 	};
 }
