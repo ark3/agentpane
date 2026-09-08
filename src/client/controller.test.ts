@@ -245,6 +245,49 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBeNull();
 	});
 
+	it("does not submit a first prompt while its model change is pending", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+		controller.setDraft("first prompt");
+
+		const selectingModel = controller.setModel("model-for-first-prompt");
+		expect(controller.getView().busy).toBe("setting-model");
+		await controller.submit();
+		expect(api.prompt).not.toHaveBeenCalled();
+		setting.resolve(undefined);
+		await selectingModel;
+		expect(controller.getView().busy).toBe("idle");
+	});
+
+	it("keeps an accepted model label when the first message arrives before set-model resolves", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("accepted-model");
+		api.emit({
+			type: "snapshot",
+			session: ref,
+			seq: 2,
+			messages: [{ role: "user", content: "first prompt", timestamp: Date.now() }],
+			isStreaming: false,
+			compaction: null,
+		});
+		setting.resolve(undefined);
+		await selectingModel;
+
+		expect(controller.getView().model).toBe("accepted-model");
+	});
+
 	it("clears the read-only preview once the session is attached", async () => {
 		const api = new FakeApi();
 		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });

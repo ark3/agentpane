@@ -22,7 +22,7 @@ export interface ControllerView {
 	state: ClientState;
 	draft: string;
 	connection: "connecting" | "connected" | "reconnecting";
-	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
+	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally" | "setting-model";
 	error: string | null;
 	/** Models offered for the selected empty conversation; an empty id means the backend default. */
 	models: ModelInfo[];
@@ -503,25 +503,34 @@ export function createController(
 		async setModel(model) {
 			const selected = view.state.selected;
 			if (!selected) return;
-			const key = sessionKey(selected);
+			let key = sessionKey(selected);
 			const intent = selectionIntent;
-			if (view.state.sessions[key]?.messages.length !== 0) return;
+			if (view.busy === "setting-model" || view.state.sessions[key]?.messages.length !== 0) return;
 			if (model === "") {
 				selectedModels.set(key, model);
 				publish({ model, error: null });
 				return;
 			}
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) === key) key = sessionKey(to);
+			};
+			renameListeners.add(onRename);
+			publish({ busy: "setting-model", error: null });
 			try {
 				await api.setModel(selected, model);
-				if (!disposed && view.state.sessions[key]?.messages.length === 0) {
+				if (!disposed) {
 					selectedModels.set(key, model);
 					if (selectionOwns(intent, key)) publish({ model, error: null });
 				}
 			} catch (error: unknown) {
 				if (!disposed && selectionOwns(intent, key)) publish({ error: errorMessage(error) });
+			} finally {
+				renameListeners.delete(onRename);
+				if (!disposed && busyIs("setting-model")) publish({ busy: "idle" });
 			}
 		},
 		async submit() {
+			if (view.busy === "setting-model") return;
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });

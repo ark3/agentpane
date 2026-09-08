@@ -1546,6 +1546,35 @@ describe("App", () => {
 		expect(select).toHaveValue("opaque/id:one");
 	});
 
+	it("blocks every send path and another model choice while setting the first-prompt model", async () => {
+		const controller = new FakeController(view({
+			draft: "first prompt",
+			busy: "setting-model",
+			state: state({
+				selected: piSession,
+				sessions: {
+					"pi:pi-1": {
+						ref: piSession,
+						messages: [],
+						isStreaming: false,
+						seq: 1,
+						error: null,
+						requests: [],
+					},
+				},
+			}),
+			models: [{ id: "opaque/id:one", label: "Model One" }],
+		}));
+		render(App, { props: { controller } });
+		const prompt = screen.getByLabelText("Prompt");
+
+		expect(screen.getByLabelText("Conversation model")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+		await fireEvent.submit(prompt.closest("form")!);
+		await fireEvent.keyDown(prompt, { key: "Enter", ctrlKey: true });
+		expect(controller.submitted).toBe(0);
+	});
+
 	it("submits on Ctrl-Enter and Cmd-Enter but inserts a newline on plain Enter", async () => {
 		const controller = new FakeController(view({ draft: "Summarize the diff" }));
 		render(App, { props: { controller } });

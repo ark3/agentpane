@@ -269,6 +269,8 @@
 				return "Compacting context…";
 			case "editing-externally":
 				return "Editing draft…";
+			case "setting-model":
+				return "Setting model…";
 			default:
 				return "Connected";
 		}
@@ -984,7 +986,7 @@
 		// The buttons are disabled while a compaction runs, but Ctrl/Cmd-Enter
 		// reaches here directly: the backends cannot safely admit a concurrent
 		// turn, so neither Send nor Fork starts one (OW-natiha).
-		if (compaction) return;
+		if (compaction || view.busy === "setting-model") return;
 		if (!view.draft) return;
 		const edit = editing;
 		armFollow(edit?.index);
@@ -1218,7 +1220,7 @@
 					aria-label="Conversation model"
 					value={view.model}
 					onchange={chooseModel}
-					disabled={!selectedSession || selectedSession.messages.length > 0}
+					disabled={!selectedSession || selectedSession.messages.length > 0 || view.busy === "setting-model"}
 				>
 					<option value="">Backend default</option>
 					{#each view.models as model (model.id)}
@@ -1274,7 +1276,7 @@
 						{streamingAction ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft || compaction !== null}>{sendLabel}</button>
+				<button type="submit" disabled={!view.draft || compaction !== null || view.busy === "setting-model"}>{sendLabel}</button>
 				{#if streamingAction}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
 				{/if}
