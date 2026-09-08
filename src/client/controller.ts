@@ -118,6 +118,7 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	let pendingModelLoad: { key: string; intent: number } | null = null;
+	let modelActionIntent = 0;
 	const recoveries = new Map<string, Promise<void>>();
 	const selectedModels = new Map<string, string>();
 	const modelsBySession = new Map<string, ModelInfo[]>();
@@ -138,8 +139,8 @@ export function createController(
 		return view.busy === value;
 	}
 
-	function selectionOwns(intent: number, key: string): boolean {
-		return intent === selectionIntent && view.state.selected !== null && sessionKey(view.state.selected) === key;
+	function selectionIs(key: string): boolean {
+		return view.state.selected !== null && sessionKey(view.state.selected) === key;
 	}
 
 	function replaceSummary(summary: SessionSummary, requested: SessionRef): ClientState {
@@ -165,9 +166,14 @@ export function createController(
 	 * while enumeration is in flight, and that must not revive an editable picker.
 	 */
 	async function loadModels(ref: SessionRef, intent: number): Promise<void> {
-		const key = sessionKey(ref);
+		let key = sessionKey(ref);
 		const session = view.state.sessions[key];
 		if (!session || session.messages.length > 0) return;
+		const actionIntent = modelActionIntent;
+		const onRename = (from: SessionRef, to: SessionRef) => {
+			if (sessionKey(from) === key) key = sessionKey(to);
+		};
+		renameListeners.add(onRename);
 		publish({ models: modelsBySession.get(key) ?? [], model: selectedModels.get(key) ?? "", error: null });
 		try {
 			const models = await api.listModels(ref.backend);
@@ -180,7 +186,12 @@ export function createController(
 				publish({ models });
 			}
 		} catch (error: unknown) {
-			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
+			const current = view.state.sessions[key];
+			if (!disposed && intent === selectionIntent && actionIntent === modelActionIntent && current?.messages.length === 0) {
+				publish({ error: errorMessage(error) });
+			}
+		} finally {
+			renameListeners.delete(onRename);
 		}
 	}
 
@@ -507,13 +518,13 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) return;
 			let key = sessionKey(selected);
-			const intent = selectionIntent;
-			if (view.busy === "setting-model" || view.state.sessions[key]?.messages.length !== 0) return;
+			if (view.busy !== "idle" || view.state.sessions[key]?.messages.length !== 0) return;
 			// Empty means "leave the backend on its default" and deliberately has
 			// no wire operation. Once a concrete choice has succeeded there is no
 			// reset-to-default operation, so accepting empty again would make the
 			// visible label disagree with the adapter.
 			if (model === "") return;
+			modelActionIntent += 1;
 			const onRename = (from: SessionRef, to: SessionRef) => {
 				if (sessionKey(from) === key) key = sessionKey(to);
 			};
@@ -523,10 +534,10 @@ export function createController(
 				await api.setModel(selected, model);
 				if (!disposed) {
 					selectedModels.set(key, model);
-					if (selectionOwns(intent, key)) publish({ model, error: null });
+					if (selectionIs(key)) publish({ model, error: null });
 				}
 			} catch (error: unknown) {
-				if (!disposed && selectionOwns(intent, key)) publish({ error: errorMessage(error) });
+				if (!disposed && selectionIs(key)) publish({ error: errorMessage(error) });
 			} finally {
 				renameListeners.delete(onRename);
 				if (!disposed && busyIs("setting-model")) publish({ busy: "idle" });

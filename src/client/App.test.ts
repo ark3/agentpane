@@ -1576,6 +1576,28 @@ describe("App", () => {
 		expect(controller.submitted).toBe(0);
 	});
 
+	it("locks the model selector while the first prompt is being admitted", () => {
+		const controller = new FakeController(view({
+			busy: "submitting",
+			state: state({
+				selected: piSession,
+				sessions: {
+					"pi:pi-1": {
+						ref: piSession,
+						messages: [],
+						isStreaming: false,
+						seq: 1,
+						error: null,
+						requests: [],
+					},
+				},
+			}),
+		}));
+		render(App, { props: { controller } });
+
+		expect(screen.getByLabelText("Conversation model")).toBeDisabled();
+	});
+
 	it("submits on Ctrl-Enter and Cmd-Enter but inserts a newline on plain Enter", async () => {
 		const controller = new FakeController(view({ draft: "Summarize the diff" }));
 		render(App, { props: { controller } });

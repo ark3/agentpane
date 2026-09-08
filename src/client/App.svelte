@@ -1220,7 +1220,7 @@
 					aria-label="Conversation model"
 					value={view.model}
 					onchange={chooseModel}
-					disabled={!selectedSession || selectedSession.messages.length > 0 || view.busy === "setting-model"}
+					disabled={!selectedSession || selectedSession.messages.length > 0 || view.busy !== "idle"}
 				>
 					<option value="" disabled={view.model !== ""}>Backend default</option>
 					{#each view.models as model (model.id)}

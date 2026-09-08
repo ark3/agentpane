@@ -199,6 +199,63 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBe("model rejected");
 	});
 
+	it("does not let a late model-list failure replace a newer set-model failure", async () => {
+		const api = new FakeApi();
+		api.listModels.mockResolvedValueOnce([{ id: "cached-model", label: "Cached" }]);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const listing = deferred<ModelInfo[]>();
+		api.listModels.mockReturnValueOnce(listing.promise);
+		const reselection = controller.preview(ref);
+		api.setModel.mockRejectedValueOnce(new Error("model rejected"));
+		await controller.setModel("cached-model");
+		expect(controller.getView().error).toBe("model rejected");
+
+		listing.reject(new Error("list failed"));
+		await reselection;
+		expect(controller.getView().error).toBe("model rejected");
+	});
+
+	it("keeps a pending model choice visible after switching away and back to its conversation", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.preview(forkedRef);
+		await controller.preview(ref);
+		setting.resolve(undefined);
+		await selectingModel;
+
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().model).toBe("model-for-a");
+	});
+
+	it("keeps an in-flight model list when its selected conversation is renamed", async () => {
+		const api = new FakeApi();
+		const listing = deferred<ModelInfo[]>();
+		api.listModels.mockReturnValue(listing.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+
+		const selecting = controller.preview(ref);
+		api.emit({ type: "renamed", from: ref, session: attachedRef, seq: 2 });
+		listing.resolve([{ id: "renamed-model", label: "Renamed" }]);
+		await selecting;
+
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(controller.getView().models).toEqual([{ id: "renamed-model", label: "Renamed" }]);
+	});
+
 	it("waits for the selected session snapshot before listing models", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
@@ -286,6 +343,24 @@ describe("client controller", () => {
 		setting.resolve(undefined);
 		await selectingModel;
 		expect(controller.getView().busy).toBe("idle");
+	});
+
+	it("does not change the model while first-prompt admission is pending", async () => {
+		const api = new FakeApi();
+		const prompting = deferred<void>();
+		api.prompt.mockReturnValue(prompting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+		controller.setDraft("first prompt");
+
+		const submission = controller.submit();
+		expect(controller.getView().busy).toBe("submitting");
+		await controller.setModel("too-late-model");
+		expect(api.setModel).not.toHaveBeenCalled();
+		prompting.resolve(undefined);
+		await submission;
 	});
 
 	it("keeps an accepted model label when the first message arrives before set-model resolves", async () => {
