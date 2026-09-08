@@ -1222,7 +1222,7 @@
 					onchange={chooseModel}
 					disabled={!selectedSession || selectedSession.messages.length > 0 || view.busy === "setting-model"}
 				>
-					<option value="">Backend default</option>
+					<option value="" disabled={view.model !== ""}>Backend default</option>
 					{#each view.models as model (model.id)}
 						<option value={model.id}>{model.label}</option>
 					{/each}

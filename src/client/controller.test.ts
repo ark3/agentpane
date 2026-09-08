@@ -173,6 +173,30 @@ describe("client controller", () => {
 		await controller.setModel("opaque/id:one");
 		expect(api.setModel).toHaveBeenCalledWith(ref, "opaque/id:one");
 		expect(controller.getView().model).toBe("opaque/id:one");
+
+		await controller.setModel("");
+		expect(api.setModel).toHaveBeenCalledTimes(1);
+		expect(controller.getView().model).toBe("opaque/id:one");
+	});
+
+	it("does not let a late model-list success clear a newer set-model failure", async () => {
+		const api = new FakeApi();
+		api.listModels.mockResolvedValueOnce([{ id: "cached-model", label: "Cached" }]);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const listing = deferred<ModelInfo[]>();
+		api.listModels.mockReturnValueOnce(listing.promise);
+		const reselection = controller.preview(ref);
+		api.setModel.mockRejectedValueOnce(new Error("model rejected"));
+		await controller.setModel("cached-model");
+		expect(controller.getView().error).toBe("model rejected");
+
+		listing.resolve([{ id: "fresh-model", label: "Fresh" }]);
+		await reselection;
+		expect(controller.getView().error).toBe("model rejected");
 	});
 
 	it("waits for the selected session snapshot before listing models", async () => {

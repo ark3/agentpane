@@ -174,7 +174,10 @@ export function createController(
 			const current = view.state.sessions[key];
 			if (!disposed && intent === selectionIntent && current?.messages.length === 0) {
 				modelsBySession.set(key, models);
-				publish({ models, error: null });
+				// The list began at selection time, but the cached options can let a
+				// newer set-model request finish before it. Its success does not own
+				// the error slot and must not erase that newer request's failure.
+				publish({ models });
 			}
 		} catch (error: unknown) {
 			if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
@@ -506,11 +509,11 @@ export function createController(
 			let key = sessionKey(selected);
 			const intent = selectionIntent;
 			if (view.busy === "setting-model" || view.state.sessions[key]?.messages.length !== 0) return;
-			if (model === "") {
-				selectedModels.set(key, model);
-				publish({ model, error: null });
-				return;
-			}
+			// Empty means "leave the backend on its default" and deliberately has
+			// no wire operation. Once a concrete choice has succeeded there is no
+			// reset-to-default operation, so accepting empty again would make the
+			// visible label disagree with the adapter.
+			if (model === "") return;
 			const onRename = (from: SessionRef, to: SessionRef) => {
 				if (sessionKey(from) === key) key = sessionKey(to);
 			};

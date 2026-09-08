@@ -1533,6 +1533,7 @@ describe("App", () => {
 		expect(select).toBeEnabled();
 		await fireEvent.change(select, { target: { value: "opaque/id:one" } });
 		expect(controller.models).toEqual(["opaque/id:one"]);
+		expect(screen.getByRole("option", { name: "Backend default" })).toBeDisabled();
 
 		controller.publish({
 			...controller.getView(),
