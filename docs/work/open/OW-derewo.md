@@ -94,3 +94,6 @@ The forked session's reported model must say so; assert it in whichever adapter 
 - `bun run check` passes.
 - `bun run test:browser` passes, with `e2e/model-select.spec.ts` lifted from the reverted change and adjusted to the new default handling, asserting the row's controls still share one line and the page has no horizontal overflow with the select present.
 - OW-9 carries a note saying what this card's reporting path means for its gap.
+- One real turn per backend available on the home server, driven through the running app: choose the pinned model from the picker (`haiku` for Claude, `gpt-5.6-luna` for Codex; AGENTS.md "Evidence" says why those), send one prompt, and confirm the turn footer names that model.
+  Record the run in `docs/MANUAL_TESTING.md`, and retire that log's standing line that `set_model`'s effect on a later turn is "still unverified since OW-yilabe" (in the "Honest scope" paragraph and the Claude control-request table's `set_model` row), since this is the run that verifies it.
+  The owner drove this path by hand on 2026-09-08 and it worked; this criterion exists so the evidence outlives that session.
