@@ -138,6 +138,10 @@ export function createController(
 		return view.busy === value;
 	}
 
+	function selectionOwns(intent: number, key: string): boolean {
+		return intent === selectionIntent && view.state.selected !== null && sessionKey(view.state.selected) === key;
+	}
+
 	function replaceSummary(summary: SessionSummary, requested: SessionRef): ClientState {
 		const summaries = view.state.summaries.filter((item) => {
 			const key = sessionKey(item.ref);
@@ -500,6 +504,7 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) return;
 			const key = sessionKey(selected);
+			const intent = selectionIntent;
 			if (view.state.sessions[key]?.messages.length !== 0) return;
 			if (model === "") {
 				selectedModels.set(key, model);
@@ -510,10 +515,10 @@ export function createController(
 				await api.setModel(selected, model);
 				if (!disposed && view.state.sessions[key]?.messages.length === 0) {
 					selectedModels.set(key, model);
-					publish({ model, error: null });
+					if (selectionOwns(intent, key)) publish({ model, error: null });
 				}
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed && selectionOwns(intent, key)) publish({ error: errorMessage(error) });
 			}
 		},
 		async submit() {

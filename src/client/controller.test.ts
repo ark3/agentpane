@@ -207,6 +207,44 @@ describe("client controller", () => {
 		expect(api.setModel).not.toHaveBeenCalled();
 	});
 
+	it("does not let a model-setting success overwrite a newer selection", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.preview(forkedRef);
+		setting.resolve(undefined);
+		await selectingModel;
+
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+		expect(controller.getView().model).toBe("");
+	});
+
+	it("does not let a model-setting failure seize a newer selection's error", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		await controller.preview(ref);
+
+		const selectingModel = controller.setModel("model-for-a");
+		await controller.preview(forkedRef);
+		setting.reject(new Error("stale model failure"));
+		await selectingModel;
+
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+		expect(controller.getView().error).toBeNull();
+	});
+
 	it("clears the read-only preview once the session is attached", async () => {
 		const api = new FakeApi();
 		api.preview.mockResolvedValue({ ref, turns: [{ role: "user", content: "hi" }] });
