@@ -285,7 +285,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return this.reducer.getState();
+		return { ...this.reducer.getState(), model: this.model };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -313,6 +313,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		// Only on success (a bogus id rejects above): remembered so a fork's
 		// respawn keeps it.
 		this.model = model;
+		this.emitUpdate();
 	}
 
 	/**
@@ -397,6 +398,11 @@ export class ClaudeAdapter implements BackendAdapter {
 			// authoritative about its own store.
 			if (typeof sessionId === "string" && sessionId && sessionId !== this.currentRef.id) {
 				this.currentRef = { backend: "claude", id: sessionId };
+			}
+			const model = (event as { model?: unknown }).model;
+			if (typeof model === "string" && model && model !== this.model) {
+				this.model = model;
+				this.emitUpdate();
 			}
 		}
 		if (event.type === "result") this.turnActive = false;

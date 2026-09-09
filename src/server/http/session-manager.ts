@@ -68,6 +68,7 @@ interface ManagedSession {
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
 	lastStreaming: boolean;
 	lastCompaction: "requesting" | "running" | null;
+	lastModel: string | null;
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
@@ -182,6 +183,7 @@ export class SessionManager {
 			subscriptions: [],
 			lastStreaming: false,
 			lastCompaction: null,
+			lastModel: null,
 			createdAt: this.#now(),
 		});
 		this.broadcaster.sessionsChanged();
@@ -328,6 +330,7 @@ export class SessionManager {
 				subscriptions: [],
 				lastStreaming: false,
 				lastCompaction: null,
+				lastModel: null,
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};
@@ -387,6 +390,7 @@ export class SessionManager {
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
 		bound.lastCompaction = initialState.compaction;
+		bound.lastModel = initialState.model;
 		// The first of the two points at which the id can change (D9).
 		this.#adoptRef(bound);
 		return bound;
@@ -400,11 +404,15 @@ export class SessionManager {
 	#onUpdate(session: ManagedSession, state: AdapterState, changedIndex?: number): void {
 		const streamingChanged = state.isStreaming !== session.lastStreaming;
 		const compactionChanged = state.compaction !== session.lastCompaction;
+		const modelChanged = state.model !== session.lastModel;
 		session.lastStreaming = state.isStreaming;
 		session.lastCompaction = state.compaction;
+		session.lastModel = state.model;
 
 		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
-		if (hasChangedMessage && compactionChanged) {
+		if (modelChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
+			this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model);
+		} else if (hasChangedMessage && compactionChanged) {
 			// Compaction completion changes the transcript marker and operation state
 			// together. Keep that reducer-level atomicity on the wire rather than let
 			// an upsert expose the marker while the client still holds `running`.
@@ -412,7 +420,7 @@ export class SessionManager {
 		} else if (hasChangedMessage) {
 			const message = state.messages[changedIndex];
 			if (message) this.broadcaster.upsert(session.ref, changedIndex, message);
-			if (streamingChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction);
+			if (streamingChanged || modelChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model);
 		} else {
 			// A snapshot carries isStreaming and compaction, so no separate status event.
 			this.broadcaster.broadcastSnapshot(session.ref);

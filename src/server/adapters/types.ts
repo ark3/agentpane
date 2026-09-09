@@ -19,6 +19,8 @@ export interface AdapterState {
 	messages: AgentMessage[];
 	isStreaming: boolean;
 	compaction: "requesting" | "running" | null;
+	/** The backend-accepted model id currently governing this conversation. */
+	model: string | null;
 }
 
 export type Unsubscribe = () => void;

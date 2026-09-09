@@ -216,7 +216,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	getState(): AdapterState {
-		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction };
+		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -236,6 +236,7 @@ export class FakeAdapter implements BackendAdapter {
 
 	async setModel(model: string): Promise<void> {
 		this.model = model;
+		this.#emit(undefined);
 	}
 
 	async listModels(): Promise<ModelInfo[]> {

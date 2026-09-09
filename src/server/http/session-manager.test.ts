@@ -503,4 +503,20 @@ describe("turn boundaries", () => {
 			}),
 		]);
 	});
+
+	it("broadcasts a successful model change as status without repainting the transcript", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+
+		await adapter.setModel("opaque/accepted");
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				type: "status",
+				model: "opaque/accepted",
+			}),
+		]);
+	});
 });

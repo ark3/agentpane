@@ -180,6 +180,7 @@ describe("CodexAdapter lifecycle", () => {
 			ephemeral: true,
 			sandbox: "danger-full-access",
 		});
+		expect(adapter.getState().model).toBe("gpt-started");
 	});
 
 	it("resumes a stored thread and hydrates its returned transcript", async () => {
@@ -362,7 +363,7 @@ describe("CodexAdapter lifecycle", () => {
 		});
 		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started" });
 		expect(updates).not.toHaveBeenCalled();
 		expect(requests).not.toHaveBeenCalled();
 	});
@@ -395,7 +396,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null });
 		expect(requests).not.toHaveBeenCalled();
 		expect(proc.killCount).toBe(1);
 	});
@@ -1231,6 +1232,7 @@ describe("CodexAdapter turns", () => {
 		const { adapter, proc } = await startedAdapter();
 
 		await adapter.setModel("gpt-selected");
+		expect(adapter.getState().model).toBe("gpt-selected");
 		await adapter.submit("use it");
 
 		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-selected" });
@@ -1275,7 +1277,7 @@ describe("CodexAdapter reducer effects", () => {
 			},
 		});
 
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null }, undefined);
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started" }, undefined);
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

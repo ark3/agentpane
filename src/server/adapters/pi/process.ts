@@ -121,6 +121,7 @@ export class PiAdapter implements BackendAdapter {
 	private child?: PiChild;
 	private readonly splitter = new LfLineSplitter();
 	private state: PiReducerState = createInitialPiState();
+	private model: string | null = null;
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
@@ -195,6 +196,7 @@ export class PiAdapter implements BackendAdapter {
 		// same fix: `start()` doesn't resolve until Pi has actually answered.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		this.adoptSessionFile(state.data.sessionFile);
+		this.model = state.data.model ? modelToInfo(state.data.model).id : null;
 
 		// Cold start (D3): the transcript of a session that predates this
 		// adapter has to be re-queried, because nothing replays the events that
@@ -372,6 +374,7 @@ export class PiAdapter implements BackendAdapter {
 		// genuinely moved, so re-query `get_state` and take the reported file
 		// unconditionally.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
 		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
 			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
 		}
@@ -386,7 +389,7 @@ export class PiAdapter implements BackendAdapter {
 	// -- state ----------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction };
+		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model };
 	}
 
 	onUpdate(cb: UpdateListener): Unsubscribe {
@@ -418,7 +421,9 @@ export class PiAdapter implements BackendAdapter {
 
 	async setModel(model: string): Promise<void> {
 		const { provider, modelId } = splitModelRef(model);
-		await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId });
+		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId });
+		this.model = modelToInfo(response.data).id;
+		this.emitUpdate();
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
@@ -528,6 +533,7 @@ export class PiAdapter implements BackendAdapter {
 			messages: this.state.messages,
 			isStreaming: this.state.isStreaming,
 			compaction: this.state.compaction,
+			model: this.model,
 		};
 		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
 	}

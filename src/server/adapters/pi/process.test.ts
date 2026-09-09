@@ -150,6 +150,13 @@ describe("PiAdapter.start", () => {
 		expect(spawned?.cwd).toBe(WORKSPACE);
 	});
 
+	it("reports the model accepted by the startup state probe", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: { provider: "anthropic", id: "claude-haiku", name: "Haiku" } });
+
+		expect(h.adapter.getState().model).toBe("anthropic/claude-haiku");
+	});
+
 	it("does not resolve until Pi answers the get_state probe", async () => {
 		const h = makeHarness();
 		let resolved = false;
@@ -361,6 +368,7 @@ describe("PiAdapter command correlation", () => {
 		expect(h.child.lastSent("set_model")).toMatchObject({ provider: "anthropic", modelId: "claude-opus-5" });
 		h.child.respondTo("set_model", { provider: "anthropic", id: "claude-opus-5", name: "Opus 5" });
 		await done;
+		expect(h.adapter.getState().model).toBe("anthropic/claude-opus-5");
 	});
 
 	it("sends a bare compact command and resolves on its response (OW-72)", async () => {
@@ -527,7 +535,7 @@ describe("PiAdapter request/reply (D2a)", () => {
 describe("PiAdapter.fork", () => {
 	it("re-adopts the moved active file and refetches the whole transcript as a snapshot", async () => {
 		const h = makeHarness();
-		await startAdapter(h);
+		await startAdapter(h, { model: { provider: "anthropic", id: "claude-haiku", name: "Haiku" } });
 		const seen: (number | undefined)[] = [];
 		h.adapter.onUpdate((_s, i) => seen.push(i));
 
@@ -545,6 +553,7 @@ describe("PiAdapter.fork", () => {
 		expect(await forked).toEqual({ backend: "pi", id: MOVED }); // moved file, NOT REF
 		expect(h.adapter.ref).toEqual({ backend: "pi", id: MOVED });
 		expect(h.adapter.getState().messages).toHaveLength(1);
+		expect(h.adapter.getState().model).toBe("anthropic/claude-haiku");
 		// changedIndex omitted: a fork touches the whole transcript (D3).
 		expect(seen).toEqual([undefined]);
 	});

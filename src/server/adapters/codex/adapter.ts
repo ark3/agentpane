@@ -414,7 +414,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return this.reducer.getState();
+		return { ...this.reducer.getState(), model: this.model };
 	}
 
 	getMessages(): AgentMessage[] {
@@ -464,6 +464,7 @@ export class CodexAdapter implements BackendAdapter {
 	/** Takes effect on the next `turn/start`; Codex has no standalone set-model call. */
 	async setModel(model: string): Promise<void> {
 		this.model = model;
+		this.emitUpdate();
 	}
 
 	async listModels(): Promise<ModelInfo[]> {

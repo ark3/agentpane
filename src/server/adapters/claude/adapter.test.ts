@@ -107,9 +107,10 @@ describe("ClaudeAdapter lifecycle", () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
 
-		h.proc().emit({ type: "system", subtype: "init", session_id: "cli-chosen" });
+		h.proc().emit({ type: "system", subtype: "init", session_id: "cli-chosen", model: "claude-haiku-accepted" });
 
 		expect(h.adapter.ref).toEqual({ backend: "claude", id: "cli-chosen" });
+		expect(h.adapter.getState().model).toBe("claude-haiku-accepted");
 	});
 
 	it("disposes idempotently, killing the child once and rejecting pending controls", async () => {
@@ -282,9 +283,11 @@ describe("ClaudeAdapter session controls", () => {
 			response: { subtype: "success", request_id: request?.request_id },
 		});
 		await setting;
+		expect(h.adapter.getState().model).toBe("haiku");
 
 		await h.adapter.fork("u1");
 		expect(h.spawns.at(-1)?.model).toBe("haiku");
+		expect(h.adapter.getState().model).toBe("haiku");
 	});
 
 	it("rejects setModel when the CLI rejects the model id", async () => {
