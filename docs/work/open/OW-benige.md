@@ -29,6 +29,7 @@ Claude Code's adapter already keeps subagent transcripts out of the parent for t
 
 Whether `sessions/codex.ts` should list `thread_source: subagent` rollouts in the session picker at all, or only reach them through the parent's block, is a decision this card has to take and record in `docs/DESIGN.md`.
 Listing them makes the picker noisy for a session that spawned five; hiding them makes the block the only door.
+The owner has no preference either way (2026-09-09): pick whichever is easiest to implement cleanly, and say in the DESIGN entry that ease decided it.
 
 ## Done when
 
