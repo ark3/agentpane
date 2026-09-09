@@ -12,7 +12,7 @@ import {
 import App from "./App.svelte";
 import type { AgentpaneController, ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
-import { initialClientState, reduceServerEvent, type ClientState } from "./session-state.ts";
+import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
 import { assistant, toolRead, toolResult, user } from "./render/samples.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
@@ -35,8 +35,19 @@ function summary(
 	};
 }
 
-function state(overrides: Partial<ClientState> = {}): ClientState {
-	return { ...initialClientState(), ...overrides };
+type TestSessionView = Omit<SessionView, "model"> & { model?: string | null };
+
+function state(
+	overrides: Omit<Partial<ClientState>, "sessions"> & { sessions?: Record<string, TestSessionView> } = {},
+): ClientState {
+	const { sessions: suppliedSessions, ...rest } = overrides;
+	const sessions: Record<string, SessionView> = Object.fromEntries(
+		Object.entries(suppliedSessions ?? {}).map(([key, session]) => [
+			key,
+			{ ...session, model: session.model ?? null } satisfies SessionView,
+		]),
+	);
+	return { ...initialClientState(), ...rest, ...(suppliedSessions ? { sessions } : {}) };
 }
 
 function view(overrides: Partial<ControllerView> = {}): ControllerView {
@@ -157,7 +168,7 @@ class FakeController implements AgentpaneController {
 				selected: ref,
 				sessions: {
 					...this.current.state.sessions,
-					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, seq: 1, error: null, requests: [] },
 				},
 			},
 		});
@@ -572,6 +583,7 @@ describe("App", () => {
 			messages: [user("Explain the crash")],
 			isStreaming: false,
 			compaction: null,
+			model: null,
 		}).state;
 
 		const controller = new FakeController(view({ state: current }));

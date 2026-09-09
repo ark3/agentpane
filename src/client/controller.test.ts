@@ -89,6 +89,84 @@ class FakeApi implements AgentpaneApi {
 }
 
 describe("client controller", () => {
+	it("lists models when an attach response arrives before its empty snapshot", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+
+		await controller.select(ref);
+		expect(api.listModels).not.toHaveBeenCalled();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current" });
+		await Promise.resolve();
+
+		expect(api.listModels).toHaveBeenCalledOnce();
+		expect(api.listModels).toHaveBeenCalledWith("pi");
+	});
+
+	it("does not let an older A list overwrite a newer A list after A to B to A selection", async () => {
+		const api = new FakeApi();
+		const oldA = deferred<ModelInfo[]>();
+		const newA = deferred<ModelInfo[]>();
+		api.listModels.mockReturnValueOnce(oldA.promise).mockReturnValueOnce(newA.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current" });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b" });
+
+		const first = controller.preview(ref);
+		await controller.preview(attachedRef);
+		const third = controller.preview(ref);
+		newA.resolve([{ id: "new", label: "New" }]);
+		await third;
+		oldA.resolve([{ id: "old", label: "Old" }]);
+		await first;
+
+		expect(controller.getView().models).toEqual([{ id: "new", label: "New" }]);
+	});
+
+	it("does not surface an obsolete A list failure after A to B to A selection", async () => {
+		const api = new FakeApi();
+		const oldA = deferred<ModelInfo[]>();
+		const newA = deferred<ModelInfo[]>();
+		api.listModels.mockReturnValueOnce(oldA.promise).mockReturnValueOnce(newA.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current" });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b" });
+
+		const first = controller.preview(ref);
+		await controller.preview(attachedRef);
+		const third = controller.preview(ref);
+		newA.resolve([{ id: "new", label: "New" }]);
+		await third;
+		oldA.reject(new Error("obsolete list failure"));
+		await first;
+
+		expect(controller.getView().error).toBeNull();
+		expect(controller.getView().models).toEqual([{ id: "new", label: "New" }]);
+	});
+
+	it("does not let A's pending set disable B or surface A's failure over B", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a" });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b" });
+		await controller.preview(ref);
+
+		const selecting = controller.setModel("opaque/next");
+		expect(controller.getView().modelSetting).toBe(true);
+		await controller.preview(attachedRef);
+		expect(controller.getView().modelSetting).toBe(false);
+		setting.reject(new Error("A set failed"));
+		await selecting;
+
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(controller.getView().error).toBeNull();
+	});
+
 	it("lists only for an empty selection and leaves model truth to server status", async () => {
 		const api = new FakeApi();
 		api.listModels.mockResolvedValue([{ id: "opaque/next", label: "Next" }]);
@@ -192,7 +270,7 @@ describe("client controller", () => {
 		await controller.start();
 		await controller.select(ref);
 		// The snapshot a real attach produces gives this client live state for it.
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		api.preview.mockClear();
 
@@ -339,7 +417,7 @@ describe("client controller", () => {
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
 
 		api.emit({ type: "renamed", from: ref, session: renamed, seq: 1 });
-		api.emit({ type: "snapshot", session: renamed, seq: 2, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: renamed, seq: 2, messages: [], isStreaming: false, compaction: null, model: null });
 
 		expect(controller.getView().state.selected).toEqual(renamed);
 		expect(controller.getView().state.sessions["pi:/sessions/renamed.jsonl"]?.seq).toBe(2);
@@ -352,10 +430,10 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null });
 
 		expect(api.attach).toHaveBeenCalledTimes(2);
 		recovery.resolve(summary(ref));
@@ -367,8 +445,8 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null });
 		await Promise.resolve();
 
 		expect(controller.getView().state.selected).toBeNull();
@@ -406,7 +484,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("The turn ended in an error.");
 
@@ -423,7 +501,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "Stale error from a prior turn." });
 
 		controller.setDraft("try again");
@@ -445,7 +523,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 
 		controller.setDraft("try again");
 		const submitted = controller.submit();
@@ -463,7 +541,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
 
 		controller.clearError();
@@ -505,7 +583,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 
 		const compacted = controller.compact();
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
@@ -516,10 +594,10 @@ describe("client controller", () => {
 		// The request resolved with no backend lifecycle update yet: still compacting.
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
 
-		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: "running" });
+		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: "running", model: null });
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("running");
 
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: false, compaction: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: false, compaction: null, model: null });
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
 	});
 
@@ -530,7 +608,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 
 		const compacted = controller.compact();
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
@@ -549,7 +627,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 
 		const compacted = controller.compact();
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
@@ -616,7 +694,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null });
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
 		controller.setDraft("reworded");
 
 		await controller.forkAndSubmit(0);

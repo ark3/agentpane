@@ -114,6 +114,9 @@ export function createController(
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
+	let modelLoadStartedForSelection: number | null = null;
+	let nextModelSetRequest = 0;
+	const pendingModelSets = new Map<number, number>();
 	let refreshInFlight: Promise<void> | undefined;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
@@ -158,21 +161,27 @@ export function createController(
 		return false;
 	}
 
-	async function loadModelsForSelected(): Promise<void> {
+	function modelSettingForSelection(intent: number): boolean {
+		return [...pendingModelSets.values()].some((selection) => selection === intent);
+	}
+
+	async function loadModelsForSelected(intent: number): Promise<void> {
 		const selected = view.state.selected;
 		if (!selected) return;
 		const key = sessionKey(selected);
 		if (view.state.sessions[key]?.messages.length !== 0) return;
+		if (modelLoadStartedForSelection === intent) return;
+		modelLoadStartedForSelection = intent;
 		publish({ models: [], error: null });
 		try {
 			const models = await api.listModels(selected.backend);
 			const current = view.state.selected;
-			if (!disposed && current && sessionKey(current) === key && view.state.sessions[key]?.messages.length === 0) {
+			if (!disposed && selectionIntent === intent && current && sessionKey(current) === key && view.state.sessions[key]?.messages.length === 0) {
 				publish({ models });
 			}
 		} catch (error: unknown) {
 			const current = view.state.selected;
-			if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+			if (!disposed && selectionIntent === intent && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
 		}
 	}
 
@@ -329,12 +338,12 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
-		publish({ busy: "attaching", error: null, models: [] });
+		publish({ busy: "attaching", error: null, models: [], modelSetting: modelSettingForSelection(intent) });
 		try {
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
 				applyAttached(attached, true, ref);
-				await loadModelsForSelected();
+				await loadModelsForSelected(intent);
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
 				// selection after a newer user intent.
@@ -357,6 +366,9 @@ export function createController(
 				for (const listener of renameListeners) listener(event.from, event.session);
 			}
 			if (result.state !== view.state) publish({ state: result.state });
+			if (event.type === "snapshot" && result.state.selected && sessionKey(result.state.selected) === sessionKey(event.session)) {
+				void loadModelsForSelected(selectionIntent);
+			}
 			for (const ref of result.recover) void recover(ref);
 			if (result.refreshSessions) void refreshSessions();
 		},
@@ -406,8 +418,14 @@ export function createController(
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
 			if (view.state.sessions[sessionKey(ref)]) {
-				publish({ state: { ...view.state, selected: ref }, preview: null, error: null, models: [] });
-				await loadModelsForSelected();
+				publish({
+					state: { ...view.state, selected: ref },
+					preview: null,
+					error: null,
+					models: [],
+					modelSetting: modelSettingForSelection(intent),
+				});
+				await loadModelsForSelected(intent);
 				return;
 			}
 			publish({ error: null });
@@ -448,14 +466,18 @@ export function createController(
 		},
 		async setModel(model) {
 			const selected = view.state.selected;
-			if (!selected || view.modelSetting || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
+			if (!selected || modelSettingForSelection(selectionIntent) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
+			const intent = selectionIntent;
+			const request = ++nextModelSetRequest;
+			pendingModelSets.set(request, intent);
 			publish({ modelSetting: true, error: null });
 			try {
 				await api.setModel(selected, model);
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed && selectionIntent === intent) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed) publish({ modelSetting: false });
+				pendingModelSets.delete(request);
+				if (!disposed) publish({ modelSetting: modelSettingForSelection(selectionIntent) });
 			}
 		},
 		async submit() {

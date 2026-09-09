@@ -215,7 +215,7 @@ const api: AgentpaneApi = {
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {
 			seq += 1;
-			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running" });
+			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model });
 		});
 	},
 	async listModels() {

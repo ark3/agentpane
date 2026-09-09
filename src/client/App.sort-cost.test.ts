@@ -136,6 +136,7 @@ function state(): ClientState {
 		ref,
 		messages: [],
 		isStreaming: false,
+		model: null,
 		seq: 1,
 		error: null,
 		requests: [],

@@ -135,7 +135,7 @@ export type ServerEvent =
 			messages: PaneMessage[];
 			isStreaming: boolean;
 			compaction: "requesting" | "running" | null;
-			model?: string | null;
+			model: string | null;
 	  }
 	| {
 			/**
@@ -149,7 +149,7 @@ export type ServerEvent =
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model?: string | null }
+	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null }
 	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }
 	| {
 			/** A turn ended in an error the transcript alone would not convey. */

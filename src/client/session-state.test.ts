@@ -50,10 +50,35 @@ function stateAtSequence(session: SessionRef, seq: number): ClientState {
 		messages: [userMessage("before")],
 		isStreaming: false,
 		compaction: null,
+		model: null,
 	}).state;
 }
 
 describe("client session state", () => {
+	it("replaces a prior model with an authoritative null snapshot", () => {
+		const withModel = reduceServerEvent(stateWithSelected(ref), {
+			type: "snapshot",
+			session: ref,
+			seq: 1,
+			messages: [],
+			isStreaming: false,
+			compaction: null,
+			model: "opaque/current",
+		}).state;
+
+		const result = reduceServerEvent(withModel, {
+			type: "snapshot",
+			session: ref,
+			seq: 2,
+			messages: [],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+		});
+
+		expect(result.state.sessions[sessionKey(ref)]?.model).toBeNull();
+	});
+
 	it("starts with no summaries, selection, or session views", () => {
 		expect(initialClientState()).toEqual({ summaries: [], selected: null, sessions: {} });
 	});
@@ -66,6 +91,7 @@ describe("client session state", () => {
 			messages: [userMessage("hi")],
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
@@ -73,6 +99,7 @@ describe("client session state", () => {
 			messages: [userMessage("hi")],
 			isStreaming: true,
 			compaction: null,
+			model: null,
 			error: null,
 			requests: [],
 		});
@@ -88,6 +115,7 @@ describe("client session state", () => {
 			seq: 5,
 			isStreaming: false,
 			compaction: null,
+			model: null,
 		});
 
 		expect(result.state).toBe(state);
@@ -120,6 +148,7 @@ describe("client session state", () => {
 			messages: [first],
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -143,6 +172,7 @@ describe("client session state", () => {
 			messages: [first],
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -163,6 +193,7 @@ describe("client session state", () => {
 			seq: 4,
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
@@ -170,6 +201,7 @@ describe("client session state", () => {
 			seq: 4,
 			isStreaming: true,
 			compaction: null,
+			model: null,
 			messages: [],
 		});
 		expect(result.recover).toEqual([]);
@@ -182,6 +214,7 @@ describe("client session state", () => {
 			seq: 4,
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		}).state;
 		const result = reduceServerEvent(state, {
 			type: "status",
@@ -189,6 +222,7 @@ describe("client session state", () => {
 			seq: 5,
 			isStreaming: false,
 			compaction: null,
+			model: null,
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({ seq: 5, isStreaming: false });
@@ -205,6 +239,7 @@ describe("client session state", () => {
 			messages: [],
 			isStreaming: false,
 			compaction: null,
+			model: null,
 		}).state;
 		const result = reduceServerEvent(withOther, {
 			type: "error",

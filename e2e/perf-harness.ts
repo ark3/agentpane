@@ -158,6 +158,7 @@ const api: AgentpaneApi = {
 				messages: [...entry.messages],
 				isStreaming: false,
 				compaction: null,
+				model: null,
 			});
 		});
 		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
@@ -296,6 +297,7 @@ const harness: PerfHarness = {
 			messages: [...b.messages],
 			isStreaming: true,
 			compaction: null,
+			model: null,
 		});
 		await controller!.select(refFor("a"));
 		// The attach snapshot arrives in a microtask; let it, and let layout settle.
@@ -318,7 +320,7 @@ const harness: PerfHarness = {
 			index,
 			message: entry.messages[index]!,
 		});
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: true, compaction: null });
+		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: true, compaction: null, model: null });
 
 		const samples: number[] = [];
 		let body = "";
@@ -336,7 +338,7 @@ const harness: PerfHarness = {
 				timed({ type: "upsert", session: entry.ref, seq: ++entry.seq, index, message }),
 			);
 		}
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: false, compaction: null });
+		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: false, compaction: null, model: null });
 		// `MutationObserver` delivers its records in a microtask, which `flushSync`
 		// does not wait for, so the queue is drained by hand rather than trusted to
 		// have been delivered by the time this returns.

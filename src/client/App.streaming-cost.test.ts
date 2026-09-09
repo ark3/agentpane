@@ -123,6 +123,7 @@ function state(selectedTurns: number): ClientState {
 		ref,
 		messages,
 		isStreaming: false,
+		model: null,
 		seq: 1,
 		error: null,
 		requests: [],
