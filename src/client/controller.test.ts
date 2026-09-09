@@ -191,6 +191,30 @@ describe("client controller", () => {
 		expect(controller.getView().modelSetting).toBe(false);
 	});
 
+	it("carries a pending set through a virtual session rename", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValueOnce(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a" });
+		await controller.preview(ref);
+
+		const first = controller.setModel("opaque/next");
+		const renamed: SessionRef = { backend: "pi", id: "/sessions/real-a.jsonl" };
+		api.emit({ type: "renamed", from: ref, session: renamed, seq: 2 });
+		expect(controller.getView().state.selected).toEqual(renamed);
+		expect(controller.getView().modelSetting).toBe(true);
+
+		await controller.setModel("opaque/later");
+		expect(api.setModel).toHaveBeenCalledOnce();
+		setting.reject(new Error("renamed A set failed"));
+		await first;
+
+		expect(controller.getView().error).toBe("renamed A set failed");
+		expect(controller.getView().modelSetting).toBe(false);
+	});
+
 	it("lists only for an empty selection and leaves model truth to server status", async () => {
 		const api = new FakeApi();
 		api.listModels.mockResolvedValue([{ id: "opaque/next", label: "Next" }]);

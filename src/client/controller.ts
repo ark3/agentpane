@@ -467,7 +467,14 @@ export function createController(
 		async setModel(model) {
 			const selected = view.state.selected;
 			if (!selected || modelSettingForSession(selected) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
-			const key = sessionKey(selected);
+			let key = sessionKey(selected);
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) !== key) return;
+				pendingModelSets.delete(key);
+				key = sessionKey(to);
+				pendingModelSets.add(key);
+			};
+			renameListeners.add(onRename);
 			pendingModelSets.add(key);
 			publish({ modelSetting: true, error: null });
 			try {
@@ -476,6 +483,7 @@ export function createController(
 				const current = view.state.selected;
 				if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
 			} finally {
+				renameListeners.delete(onRename);
 				pendingModelSets.delete(key);
 				if (!disposed) publish({ modelSetting: modelSettingForSession(view.state.selected) });
 			}
