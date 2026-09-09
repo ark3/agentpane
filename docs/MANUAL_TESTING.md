@@ -812,7 +812,7 @@ probed. Verified live (fixtures `interrupt.jsonl`, `control-discovery.jsonl`):
 | Subtype | Observed |
 |---|---|
 | `interrupt` | Stops a streaming turn. Sent after 8 `content_block_delta`s of a count-to-500 turn; reply `{"subtype":"success","request_id":…,"response":{"still_queued":[]}}`, the partial assistant text still flushed, then `result` with subtype `error_during_execution`, `is_error:true`, and process exit 1. |
-| `set_model` | Exists mid-session. `{"subtype":"set_model","model":"haiku"}` → success; a bogus model name → `error` "Model \"…\" is not a recognized model id", so success is validated, not blind. (Effect on a subsequent turn not driven — that would have required a non-Haiku turn, which the authorization excludes.) |
+| `set_model` | Exists mid-session. `{"subtype":"set_model","model":"haiku"}` → success; a bogus model name → `error` "Model \"…\" is not a recognized model id", so success is validated, not blind. The later OW-derewo browser run below selected Haiku through this control and the subsequent turn and footer both reported `claude-haiku-4-5-20251001`. |
 | `set_permission_mode` | Exists. `{"subtype":"set_permission_mode","mode":"bypassPermissions"}` → success echoing `{"mode":"bypassPermissions"}`. |
 | `initialize` | Exists; response contents above. |
 | `rewind`, `fork`, `checkpoint`, `list_checkpoints`, `resume`, `status` | All "Unsupported control request subtype" — probed for a pre-tip fork and found nothing on the control channel. The pre-tip lever turned out to be spawn-time, not a control subtype: `--resume-session-at`, below (2026-08-25, OW-mayuza). |
@@ -986,8 +986,7 @@ the model/token footer.
 pass-through shim on PATH (`direnv exec <dir> <cmd…>` → `<cmd…>`); everything
 downstream was real — sbox ran, jailed the workspace, and injected
 `--permission-mode bypassPermissions` itself. Not driven live through the
-app: `abort`, `/compact`, `set_model`'s effect on a later turn (still
-unverified since OW-yilabe), and fork — fork mechanics rest on the probes
+app: `abort`, `/compact`, and fork — fork mechanics rest on the probes
 above, OW-mayuza's live evidence, and the fixture-driven unit tests.
 
 ## `--verbose` inert on 2.1.238, and still inert on 2.1.247 (OW-misoru, OW-bumota)
@@ -1236,6 +1235,24 @@ After that fallback, the same five-run capture contained no white frame: the fir
 
 The control itself remains non-persistent.
 A fresh page starts at System, `main.ts` writes the resolved `data-theme` before mounting, and the component follows later system changes only while System remains selected.
+
+## Observed model selection through real backend turns (OW-derewo)
+
+**2026-09-08, home server, Claude Code 2.1.265 on Haiku and Codex CLI 0.153.4 on `gpt-5.6-luna`.**
+
+The production client was built with `bun run build` and served on port 4197 with `PATH=/tmp/ow-derewo-bin:$PATH PORT=4197 bun run start`.
+The home server still has no `direnv`, so `/tmp/ow-derewo-bin/direnv` was the same pass-through shim used by the earlier adapter run: it consumed `exec <cwd>` and executed the remaining real `sbox -- <agent>` command unchanged.
+
+A throwaway Playwright script created and attached one empty conversation per backend over the real HTTP server, opened the built UI, clicked each conversation row, selected the required model through the visible `Conversation model` picker, sent one prompt, waited for the real turn to settle, and read both the locked composer label and assistant footer from the rendered DOM.
+
+For Claude, the empty conversation initially reported `null`, so the picker truthfully showed its transient loading option rather than claiming a backend default.
+Selecting the `haiku` alias through the picker admitted the next turn; after Claude's init resolved that alias, the locked label and assistant footer both named `claude-haiku-4-5-20251001`.
+
+For Codex, `thread/start` reported `gpt-5.6-luna` before the turn.
+Selecting `gpt-5.6-luna` through the picker admitted the next turn; the locked label rendered the model list's `GPT-5.6-Luna` display name and the assistant footer named the exact backend id `gpt-5.6-luna` with medium effort.
+
+Both prompts received their requested exact reply, so these were complete backend turns rather than model-list or control-channel probes.
+The observations retire the earlier `set_model` qualification and its Honest scope copy: Claude's successful control request now has a subsequent-turn observation through agentpane itself.
 
 ## Still unverified
 
