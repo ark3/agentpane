@@ -167,6 +167,30 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBeNull();
 	});
 
+	it("keeps A's pending set authoritative across A to B to A selection", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a" });
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b" });
+		await controller.preview(ref);
+
+		const first = controller.setModel("opaque/next");
+		await controller.preview(attachedRef);
+		await controller.preview(ref);
+		expect(controller.getView().modelSetting).toBe(true);
+
+		const second = controller.setModel("opaque/later");
+		expect(api.setModel).toHaveBeenCalledOnce();
+		setting.reject(new Error("A set failed"));
+		await Promise.all([first, second]);
+
+		expect(controller.getView().error).toBe("A set failed");
+		expect(controller.getView().modelSetting).toBe(false);
+	});
+
 	it("lists only for an empty selection and leaves model truth to server status", async () => {
 		const api = new FakeApi();
 		api.listModels.mockResolvedValue([{ id: "opaque/next", label: "Next" }]);

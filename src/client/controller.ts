@@ -115,8 +115,7 @@ export function createController(
 	let started = false;
 	let selectionIntent = 0;
 	let modelLoadStartedForSelection: number | null = null;
-	let nextModelSetRequest = 0;
-	const pendingModelSets = new Map<number, number>();
+	const pendingModelSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
@@ -161,8 +160,8 @@ export function createController(
 		return false;
 	}
 
-	function modelSettingForSelection(intent: number): boolean {
-		return [...pendingModelSets.values()].some((selection) => selection === intent);
+	function modelSettingForSession(ref: SessionRef | null): boolean {
+		return ref !== null && pendingModelSets.has(sessionKey(ref));
 	}
 
 	async function loadModelsForSelected(intent: number): Promise<void> {
@@ -338,11 +337,12 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
-		publish({ busy: "attaching", error: null, models: [], modelSetting: modelSettingForSelection(intent) });
+		publish({ busy: "attaching", error: null, models: [], modelSetting: modelSettingForSession(ref) });
 		try {
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
 				applyAttached(attached, true, ref);
+				publish({ modelSetting: modelSettingForSession(view.state.selected) });
 				await loadModelsForSelected(intent);
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
@@ -423,7 +423,7 @@ export function createController(
 					preview: null,
 					error: null,
 					models: [],
-					modelSetting: modelSettingForSelection(intent),
+					modelSetting: modelSettingForSession(ref),
 				});
 				await loadModelsForSelected(intent);
 				return;
@@ -466,18 +466,18 @@ export function createController(
 		},
 		async setModel(model) {
 			const selected = view.state.selected;
-			if (!selected || modelSettingForSelection(selectionIntent) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
-			const intent = selectionIntent;
-			const request = ++nextModelSetRequest;
-			pendingModelSets.set(request, intent);
+			if (!selected || modelSettingForSession(selected) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
+			const key = sessionKey(selected);
+			pendingModelSets.add(key);
 			publish({ modelSetting: true, error: null });
 			try {
 				await api.setModel(selected, model);
 			} catch (error: unknown) {
-				if (!disposed && selectionIntent === intent) publish({ error: errorMessage(error) });
+				const current = view.state.selected;
+				if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
 			} finally {
-				pendingModelSets.delete(request);
-				if (!disposed) publish({ modelSetting: modelSettingForSelection(selectionIntent) });
+				pendingModelSets.delete(key);
+				if (!disposed) publish({ modelSetting: modelSettingForSession(view.state.selected) });
 			}
 		},
 		async submit() {
