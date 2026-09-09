@@ -1,4 +1,8 @@
-/** Throwaway: a production build of the streaming-cost harness (e2e/perf.html). */
+/**
+ * A production build of the streaming-cost harness (e2e/perf.html). Not run
+ * by any script; the recipe is in docs/MANUAL_TESTING.md (OW-detepa) and
+ * OW-luzipe re-measures with it.
+ */
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";

@@ -221,7 +221,7 @@ This is still not auth, and it is not meant to be; it is the missing half of "no
 The requirement is pipane's: see every existing session in every workspace, create a new one in an existing or new workspace, and switch between recent sessions quickly.
 
 **Every backend stores sessions as JSONL on disk, and all are enumerable with nothing running** (Claude Code's `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` store joined via OW-votasi).
-Measured on this machine for the original two:
+Measured on the work laptop for the original two:
 
 | | Location | Header line | Files | Walk | Read line 1 |
 |---|---|---|---|---|---|
@@ -255,7 +255,7 @@ A session becomes `attached` when the user prompts it or opens its transcript.
 Two corrections from building this, both verified:
 
 - **The Codex layout is not uniformly `YYYY/MM/DD/`.**
-  Three files on this machine sit flat at `~/.codex/sessions/` with no date nesting (580 are nested).
+  Three files on the work laptop sit flat at `~/.codex/sessions/` with no date nesting (580 are nested).
   Walk to arbitrary depth; do not pattern-match the path.
 - **"Preview = first user message" is wrong for Codex.**
   In a 20-session sample, only *one* had genuine human text as its first user-role block.
@@ -497,7 +497,7 @@ Captured turns also carry `turn/diff/updated` (a cumulative diff for the turn), 
 Token usage feeds the cost display and status changes feed the streaming signal, so some of these belong in the adapter even though they are not messages.
 Read a fixture before assuming this section is exhaustive.
 
-Fixtures currently cover `userMessage`, `reasoning`, `agentMessage`, `commandExecution`, `fileChange`, and `contextCompaction` (`resources/fixtures/codex/compact.jsonl`).
+Fixtures currently cover `userMessage`, `reasoning`, `agentMessage`, `commandExecution`, `fileChange`, `contextCompaction` (`resources/fixtures/codex/compact.jsonl`), and `collabAgentToolCall` (`resources/fixtures/codex/subagent.jsonl`, HANDOFF finding 49).
 The remaining rows — `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan` — have no capture yet; add a scenario when implementing each.
 
 On the Pi side, note the fixtures show Pi choosing `bash` to perform a file edit rather than a dedicated edit tool.
@@ -543,7 +543,7 @@ Three subprocess facts, each verified while building the Pi adapter and each cap
 
 ## Testing strategy
 
-- **Unit (bun test / vitest):** the adapters, especially the Codex `ThreadItem` → `AgentMessage` mapping — table-driven over the captured protocol fixtures in `resources/fixtures/`, which already cover streaming text, a tool call/result pair, and a file edit for all three backends.
+- **Unit (vitest):** the adapters, especially the Codex `ThreadItem` → `AgentMessage` mapping — table-driven over the captured protocol fixtures in `resources/fixtures/`, which already cover streaming text, a tool call/result pair, and a file edit for all three backends.
   Assert on *structure* (event sequence, item types, block kinds, id correlation), never on exact model wording.
   D3 is what makes this possible without a DOM.
 - **Contract tests:** feed each adapter recorded protocol transcripts; assert the common `BackendAdapter` behaviour is identical in shape across all backends.
