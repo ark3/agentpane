@@ -1,9 +1,9 @@
 /**
  * The backend adapter contract.
  *
- * FROZEN INTERFACE (DESIGN "The backend adapter contract"). The Pi and Codex
- * adapters are built in parallel against this; changing it breaks work in
- * flight -- raise it before editing.
+ * FROZEN INTERFACE (DESIGN "The backend adapter contract"). The Pi, Codex,
+ * and Claude Code adapters all implement it; changing it changes all three --
+ * raise it before editing.
  *
  * An adapter owns one sandboxed subprocess's stdio and is responsible for one
  * thing above all: producing and maintaining an `AgentMessage[]` plus a

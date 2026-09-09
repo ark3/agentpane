@@ -31,7 +31,6 @@ import {
 	type CodexServerMessage,
 	type RequestId,
 	type ThreadItem,
-	type ThreadStartResponse,
 	type ThreadTokenUsage,
 	type Thread,
 } from "./protocol.ts";
@@ -413,9 +412,3 @@ function threadIdOf(message: CodexNotification): string | null {
 	const params: unknown = message.params;
 	return isRecord(params) && typeof params.threadId === "string" ? params.threadId : null;
 }
-
-/** The `thread/start` response shape we care about, minus the 12 fields we do not. */
-export type ThreadIdentityResponse = Pick<
-	ThreadStartResponse,
-	"model" | "modelProvider" | "reasoningEffort"
->;

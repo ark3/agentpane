@@ -8,7 +8,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import type {
 	AdapterState,
@@ -416,10 +415,6 @@ export class CodexAdapter implements BackendAdapter {
 
 	getState(): AdapterState {
 		return { ...this.reducer.getState(), model: this.model };
-	}
-
-	getMessages(): AgentMessage[] {
-		return this.reducer.getState().messages;
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
