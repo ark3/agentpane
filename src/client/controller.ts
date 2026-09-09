@@ -514,7 +514,9 @@ export function createController(
 				if (!disposed) {
 					const currentError = view.state.sessions[sessionKey(ref)]?.error ?? null;
 					const state = currentError === priorError ? clearSessionError(view.state, ref) : view.state;
-					publish({ draft: "", error: null, state });
+					// The request cleared the global error before starting. Leaving it
+					// untouched here preserves any newer failure from concurrent work.
+					publish({ draft: "", state });
 				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });

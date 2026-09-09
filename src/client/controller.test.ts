@@ -584,6 +584,30 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("This turn just failed.");
 	});
 
+	it("does not clear a model failure that lands before the prompt POST resolves", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		const prompt = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a" });
+		await controller.preview(ref);
+		controller.setDraft("start while setting");
+
+		const set = controller.setModel("opaque/next");
+		const submitted = controller.submit();
+		expect(api.prompt).toHaveBeenCalledOnce();
+		setting.reject(new Error("Model selection failed"));
+		await set;
+		expect(controller.getView().error).toBe("Model selection failed");
+
+		prompt.resolve();
+		await submitted;
+		expect(controller.getView().error).toBe("Model selection failed");
+	});
+
 	it("dismisses the view error and the selected session's persisted error", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
