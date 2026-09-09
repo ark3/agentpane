@@ -128,10 +128,12 @@ export class CodexReducer {
 
 	/** From the `thread/start` / `thread/resume` / `thread/fork` response. */
 	setIdentity(id: {
+		threadId?: string | null;
 		model?: string | null;
 		modelProvider?: string | null;
 		reasoningEffort?: string | null;
 	}): void {
+		if (id.threadId) this.threadId = id.threadId;
 		if (id.model) this.identity.model = id.model;
 		if (id.modelProvider) this.identity.provider = id.modelProvider;
 		if (id.reasoningEffort) this.identity.effort = id.reasoningEffort;
@@ -172,6 +174,9 @@ export class CodexReducer {
 	}
 
 	private handleNotification(message: CodexNotification): CodexEffect[] {
+		const notificationThreadId = threadIdOf(message);
+		if (this.threadId && notificationThreadId && notificationThreadId !== this.threadId) return [];
+
 		switch (message.method) {
 			case "thread/started": {
 				this.threadId = message.params.thread.id;
@@ -400,6 +405,13 @@ export class CodexReducer {
 function appendAt(parts: string[], index: number, delta: string): void {
 	while (parts.length <= index) parts.push("");
 	parts[index] = (parts[index] ?? "") + delta;
+}
+
+/** Thread-scoped notifications for spawned agents share the parent's connection. */
+function threadIdOf(message: CodexNotification): string | null {
+	if (message.method === "thread/started") return message.params.thread.id;
+	const params: unknown = message.params;
+	return isRecord(params) && typeof params.threadId === "string" ? params.threadId : null;
 }
 
 /** The `thread/start` response shape we care about, minus the 12 fields we do not. */

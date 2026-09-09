@@ -287,10 +287,9 @@ const SILENT_ITEM_TYPES = new Set<string>([
 	"exitedReviewMode",
 	"subAgentActivity",
 	"sleep",
-	// Silent for want of a capture, not by design: its shape (`tool`, `status`,
-	// the issuing thread id) is what `toolPair` handles, but no fixture drives a
-	// collab session, and this repo does not render a wire shape nobody has seen
-	// (OW-vefiso). Listing it here keeps "unknown" meaning *Codex moved*.
+	// A live collab session now drives this shape in subagent.jsonl. Rendering
+	// the parent-visible lifecycle honestly is separate work (OW-benige);
+	// listing it here keeps "unknown" meaning *Codex moved* until then.
 	"collabAgentToolCall",
 ]);
 

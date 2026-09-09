@@ -16,7 +16,7 @@ import {
 	type ThreadItem,
 } from "./protocol.ts";
 
-export type FixtureName = "text" | "tool-read" | "tool-edit" | "compact";
+export type FixtureName = "text" | "tool-read" | "tool-edit" | "compact" | "subagent";
 
 const FIXTURE_DIR = fileURLToPath(new URL("../../../../resources/fixtures/codex/", import.meta.url));
 
@@ -24,6 +24,7 @@ export interface FixtureMeta {
 	lines: number;
 	event_census: Record<string, number>;
 	server_requests_seen: string[];
+	thread_id?: string;
 }
 
 type ServerPushedMessage = Exclude<CodexServerMessage, CodexResponse>;

@@ -120,6 +120,21 @@ SCENARIOS: dict[str, dict] = {
         # command and record the compaction request/response and events.
         "compact": True,
     },
+    "subagent": {
+        "prompt": (
+            "Use the collaboration tool to spawn exactly one subagent. Ask it to reply "
+            "with a short greeting, wait for it to finish, then reply with one short sentence."
+        ),
+        "files": {},
+        "covers": "one parent turn spawning and waiting for a child-thread agent",
+        "note": (
+            "The parent and spawned child share one app-server connection. The child emits "
+            "thread status, turn lifecycle, item lifecycle, agent-message delta, token-usage, "
+            "and MCP-startup notifications alongside the parent's events. This capture did not "
+            "emit thread/started for the child."
+        ),
+        "backends": ("codex",),
+    },
 }
 
 
@@ -376,7 +391,7 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
     want_compact = bool(spec.get("compact"))
 
     proc = subprocess.Popen(
-        ["codex", "app-server"],
+        ["codex", "-m", "gpt-5.6-luna", "app-server"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         cwd=work, env=dict(os.environ, CODEX_HOME=str(home)),
     )
@@ -404,7 +419,9 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
         if method.startswith(("item/", "turn/")):
             if not method.endswith(("Delta", "delta", "textDelta", "outputDelta")):
                 print(f"  << {method}")
-        if method == "turn/completed" or method == "turn/failed":
+        if (method == "turn/completed" or method == "turn/failed") and (
+            event.get("params", {}).get("threadId") == state["thread_id"]
+        ):
             rec.done.set()
 
     rec = Recorder(proc, on_event)
@@ -469,6 +486,7 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
             if line.startswith("{")
         ),
         "extra": {"thread_id": state["thread_id"],
+                  "command": "codex -m gpt-5.6-luna app-server",
                   "server_requests_seen": state["approvals"]},
     }
 
@@ -505,6 +523,8 @@ def main() -> int:
 
         for scenario in scenarios:
             spec = SCENARIOS[scenario]
+            if backend not in spec.get("backends", backends):
+                continue
             print(f"\n=== {backend} / {scenario} ({version}) ===")
             started = time.time()
             result = capture(scenario, spec, args.timeout)
@@ -529,6 +549,7 @@ def main() -> int:
                 "lines": len(result["raw"]),
                 "terminated_cleanly": result["terminated_cleanly"],
                 "event_census": dict(sorted(result["census"].items())),
+                **({"note": spec["note"]} if "note" in spec else {}),
                 **result["extra"],
             }
             (outdir / f"{scenario}.meta.json").write_text(

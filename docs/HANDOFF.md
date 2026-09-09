@@ -157,6 +157,14 @@ On finding 7's correction: "both backends support fork-from-past natively" was t
 **In-place rewind** is not symmetric: Pi's `fork` does it (as copy-on-write, preserving the old branch), Codex has no supported command for it and expresses it as a new-session fork instead.
 The table's finding-7 row is unchanged as a record of what was believed; this round is its correction.
 
+## Eighth round: spawned Codex agents share one connection (OW-fafeja)
+
+Finding 49 came from a live parent turn that spawned one child and waited for it on the home server with the required Luna model pin.
+
+| # | Finding | How it was verified |
+|---|---------|---------------------|
+| 49 | **A spawned Codex agent is a separate thread on the parent's app-server connection.** Its thread status, turn lifecycle, item lifecycle, agent-message deltas, token usage, and MCP startup notifications interleave with the parent turn, so transcript reduction must reject notifications whose `threadId` is not the attached parent. The parent receives `collabAgentToolCall` spawn/wait lifecycle items that identify the child and eventually carry its terminal message. Codex-cli 0.153.4 emitted no child `thread/started` in this run | `resources/fixtures/codex/subagent.{jsonl,meta.json}`; captured with `codex -m gpt-5.6-luna app-server` |
+
 ## Environment gotchas (learned the hard way)
 
 - **Home server sandbox.**

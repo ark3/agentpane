@@ -30,7 +30,7 @@ import {
 
 const FIXTURES = ["text", "tool-read", "tool-edit"] as const satisfies readonly FixtureName[];
 
-const EXPECTED_ROLES: Record<Exclude<FixtureName, "compact">, AgentMessage["role"][]> = {
+const EXPECTED_ROLES: Record<Exclude<FixtureName, "compact" | "subagent">, AgentMessage["role"][]> = {
 	text: ["user", "assistant"],
 	"tool-read": ["user", "assistant", "assistant", "toolResult", "assistant"],
 	"tool-edit": [
@@ -47,6 +47,42 @@ const EXPECTED_ROLES: Record<Exclude<FixtureName, "compact">, AgentMessage["role
 		"assistant",
 	],
 };
+
+describe("replaying the subagent fixture", () => {
+	it("keeps child-thread notifications out of the parent transcript", () => {
+		const lines = readFixture("subagent");
+		const parentThreadId = readFixtureMeta("subagent").thread_id;
+		if (!parentThreadId) throw new Error("subagent fixture has no parent thread id");
+		const childStarted = byMethod(lines, "turn/started").find(
+			(line) => line.params.threadId !== parentThreadId,
+		);
+		if (!childStarted) throw new Error("subagent fixture has no child turn");
+		const childThreadId = childStarted.params.threadId;
+		const parentThreadStarted = byMethod(lines, "thread/started")[0];
+		if (!parentThreadStarted) throw new Error("subagent fixture has no parent thread/started");
+
+		const reducer = new CodexReducer({ now: () => 1_000 });
+		let injectedChildStart = false;
+		for (const line of lines) {
+			if (!injectedChildStart && "method" in line && "threadId" in line.params && line.params.threadId === childThreadId) {
+				const childThreadStarted = structuredClone(parentThreadStarted);
+				childThreadStarted.params.thread.id = childThreadId;
+				reducer.handle(childThreadStarted);
+				injectedChildStart = true;
+			}
+			reducer.handle(line);
+		}
+
+		expect(injectedChildStart).toBe(true);
+		expect(reducer.threadId).toBe(parentThreadId);
+		const parentMessageRoles = byMethod(lines, "item/completed")
+			.filter((line) => line.params.threadId === parentThreadId)
+			.map(itemOf)
+			.filter((item) => item.type === "userMessage" || item.type === "agentMessage")
+			.map((item) => item.type === "userMessage" ? "user" : "assistant");
+		expect(reducer.getState().messages.map((message) => message.role)).toEqual(parentMessageRoles);
+	});
+});
 
 const ANCILLARY_METHODS = new Set([
 	"account/rateLimits/updated",
@@ -729,10 +765,10 @@ describe("defensive handling", () => {
 	it("classifies collabAgentToolCall as unrendered rather than unknown", () => {
 		// "unknown" is the signal for a variant Codex added after this code was
 		// written. `collabAgentToolCall` is in the bindings the repo vendors, so
-		// spending that string on it makes the one useful signal a lie -- it is
-		// unrendered for want of a capture, not for want of a Codex release. The
-		// reducer drops `reason`, so this asks `mapItem` directly; the case below
-		// already pins that the item reduces to nothing.
+		// spending that string on it makes the one useful signal a lie. Rendering
+		// the now-captured item is separate work; the reducer drops `reason`, so
+		// this asks `mapItem` directly and the case below pins that it reduces to
+		// nothing in the meantime.
 		const item = { type: "collabAgentToolCall", id: "c1" } as unknown as ThreadItem;
 		expect(
 			mapItem(item, {
@@ -751,7 +787,7 @@ describe("defensive handling", () => {
 		"subAgentActivity",
 		"hookPrompt",
 		"enteredReviewMode",
-	])("does not crash on the uncaptured item type %s", (type) => {
+	])("does not crash on the silently ignored item type %s", (type) => {
 		const r = reducer();
 		expect(() =>
 			r.handle(

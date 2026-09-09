@@ -10,6 +10,7 @@ Regenerate with:
 ```bash
 python3 ../probes/capture_fixtures.py                  # everything
 python3 ../probes/capture_fixtures.py --backend codex --scenario tool-edit
+python3 ../probes/capture_fixtures.py --backend codex --scenario subagent
 ```
 
 Each capture writes two files:
@@ -57,6 +58,7 @@ locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 | `tool-read` | read a file and summarise it | tool call + tool result pair |
 | `tool-edit` | append a line to a file | file change / diff path |
 | `compact` | prime the context, then compact it | manual compaction command + its events (OW-72) |
+| `subagent` | spawn one child and wait for it | parent and child notifications sharing one Codex connection (OW-fafeja) |
 | `fork` | fork/clone from a past point, then take a turn | fork-from-past on-disk residue and lineage (OW-mewiga) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
@@ -139,6 +141,14 @@ cumulative turn diff, 4x during `tool-edit`), `thread/tokenUsage/updated`,
 are directly useful — token usage for cost display, status changes for the
 streaming signal. Read a fixture before assuming the mapping table is
 exhaustive.
+
+## The subagent scenario (OW-fafeja, captured 2026-09-09)
+
+`subagent` runs `codex -m gpt-5.6-luna app-server`, drives one parent turn that spawns exactly one child, waits for it, and records both turns through completion.
+The spawned agent is a separate thread on the parent's app-server connection.
+Its `thread/status/changed`, `turn/started|completed`, `item/started|completed`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, and `mcpServer/startupStatus/updated` notifications are interleaved with the parent turn.
+Codex-cli 0.153.4 did not emit a child `thread/started` in this capture; the only `thread/started` belongs to the parent.
+The parent still receives `collabAgentToolCall` lifecycle items for both spawn and wait, including the child thread id and terminal child message.
 
 ## The fork scenario (OW-mewiga, captured 2026-08-18)
 

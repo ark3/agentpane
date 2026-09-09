@@ -206,6 +206,7 @@ export class CodexAdapter implements BackendAdapter {
 			// `ThreadResumeResponse` carries `reasoningEffort` identically, so this
 			// one line covers both branches above.
 			this.reducer.setIdentity({
+				threadId: started.thread.id,
 				model: started.model,
 				modelProvider: started.modelProvider,
 				reasoningEffort: started.reasoningEffort,
