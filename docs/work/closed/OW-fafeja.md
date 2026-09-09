@@ -36,3 +36,10 @@ No fixture under `resources/fixtures/codex/` drives a collab session; OW-vefiso 
 - `bun run check` passes.
 
 The rendering of the subagent as something honest in the parent transcript is OW-benige, which waits on this fixture.
+
+Captured a real Codex 0.153.4 parent turn spawning and waiting for one child with `codex -m gpt-5.6-luna app-server`, and committed the scrubbed stream plus provenance and finding 49 in `docs/HANDOFF.md`.
+The capture proves child status, turn, item, delta, token-usage, and MCP notifications interleave on the parent's connection, while this version emitted no child `thread/started`.
+Bound the reducer to the thread returned by start/resume and rejected foreign-thread notifications before reduction, with fixture-driven coverage that was watched red against the old reducer and production-path adapter coverage added in review.
+Review also removed private account telemetry from the fixture, taught the capture scrubber to null it on future captures, and added a repository scrub guard.
+`bun run check` passed with 48 test files and 935 tests.
+The adjacent foreign-thread `ServerRequest` gap found in adversarial review is preserved as OW-futewo.
