@@ -152,6 +152,7 @@ export class ClaudeAdapter implements BackendAdapter {
 					const message = messages[i];
 					if (message?.role !== "assistant") continue;
 					this.model = message.model;
+					this.emitUpdate();
 					break;
 				}
 			}

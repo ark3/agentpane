@@ -102,7 +102,10 @@ describe("ClaudeAdapter lifecycle", () => {
 			"user",
 			"assistant",
 		]);
-		expect(updates).toHaveBeenCalled();
+		expect(updates).toHaveBeenLastCalledWith(
+			expect.objectContaining({ model: "last-model" }),
+			undefined,
+		);
 	});
 
 	it("exposes the last stored assistant model immediately when resuming", async () => {
