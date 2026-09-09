@@ -11,8 +11,11 @@ import {
 	type ForkRequest,
 	type ForkResponse,
 	type ListSessionsResponse,
+	type ModelInfo,
+	type ModelsResponse,
 	type PromptRequest,
 	type ServerEvent,
+	type SetModelRequest,
 	type SessionPreviewResponse,
 	type SessionRef,
 	type SessionSummary,
@@ -58,6 +61,8 @@ export interface AgentpaneApi {
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	abort(ref: SessionRef): Promise<void>;
 	compact(ref: SessionRef): Promise<void>;
+	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
+	setModel(ref: SessionRef, model: string): Promise<void>;
 	/**
 	 * The points a session can be forked at (OW-hezidi): one per user message,
 	 * in transcript order, on every backend. Position is the whole addressing
@@ -118,6 +123,15 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		compact(ref) {
 			return requestNoContent(ROUTES.compact(ref), { method: "POST" });
+		},
+		listModels(backend) {
+			return request(`${ROUTES.models}?backend=${encodeURIComponent(backend)}`, { method: "GET" }, (body) => {
+				return (body as ModelsResponse).models;
+			});
+		},
+		setModel(ref, model) {
+			const body: SetModelRequest = { model };
+			return requestNoContent(ROUTES.model(ref), jsonRequest(body));
 		},
 		forkPoints(ref) {
 			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => {

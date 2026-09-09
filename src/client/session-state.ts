@@ -12,6 +12,7 @@ export interface SessionView {
 	messages: AgentMessage[];
 	isStreaming: boolean;
 	compaction?: "requesting" | "running" | null;
+	model?: string | null;
 	seq: number | null;
 	error: string | null;
 	requests: AgentRequest[];
@@ -39,6 +40,7 @@ function emptySession(ref: SessionRef): SessionView {
 		messages: [],
 		isStreaming: false,
 		compaction: null,
+		model: null,
 		seq: null,
 		error: null,
 		requests: [],
@@ -96,6 +98,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			messages: [...event.messages],
 			isStreaming: event.isStreaming,
 			compaction: event.compaction,
+			model: event.model ?? previous?.model ?? null,
 			seq: event.seq,
 		};
 		return result(updateSession(state, view));
@@ -148,6 +151,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 		case "status":
 			view.isStreaming = event.isStreaming;
 			view.compaction = event.compaction;
+			if (event.model !== undefined) view.model = event.model;
 			break;
 		case "error":
 			view.error = event.message;

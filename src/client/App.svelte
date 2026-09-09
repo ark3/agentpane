@@ -41,6 +41,8 @@
 		connection: "connecting",
 		busy: "idle",
 		error: null,
+		models: [],
+		modelSetting: false,
 		preview: null,
 	});
 	/**
@@ -67,6 +69,14 @@
 	function chooseTheme(event: Event): void {
 		theme = (event.currentTarget as HTMLSelectElement).value as ThemeChoice;
 		writeTheme();
+	}
+
+	function chooseModel(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		void controller.setModel(select.value);
+		// The request changes no client model state. Put the DOM back on the
+		// server-reported value until the adapter's status event accepts it.
+		select.value = selectedSession?.model ?? "";
 	}
 	/**
 	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
@@ -168,6 +178,11 @@
 
 	const selectedSession = $derived(
 		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
+	);
+	const selectedModelLabel = $derived(
+		selectedSession?.model === null || selectedSession?.model === undefined
+			? "Loading model…"
+			: (view.models.find((option) => option.id === selectedSession.model)?.label ?? selectedSession.model),
 	);
 	/**
 	 * Most-recently-updated first -- the ordering cue the list otherwise has none of.
@@ -1207,6 +1222,28 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
+				{#if selectedSession?.messages.length === 0}
+					{#key selectedSession.model}
+					<select
+						class="model-select"
+						aria-label="Conversation model"
+						value={selectedSession.model ?? ""}
+						onchange={chooseModel}
+						disabled={view.modelSetting}
+					>
+						{#if selectedSession.model === null || selectedSession.model === undefined}
+							<option value="">Loading model…</option>
+						{:else if !view.models.some((option) => option.id === selectedSession.model)}
+							<option value={selectedSession.model}>{selectedSession.model}</option>
+						{/if}
+						{#each view.models as model (model.id)}
+							<option value={model.id}>{model.label}</option>
+						{/each}
+					</select>
+					{/key}
+				{:else if selectedSession}
+					<span class="model-label">{selectedModelLabel}</span>
+				{/if}
 				<!-- A popover, not the <details> OW-72 first reached for (OW-80): a
 				     disclosure widget never light-dismisses, while an auto popover
 				     gets outside-click and Escape for free, with no JS. The entries

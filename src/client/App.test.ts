@@ -46,6 +46,8 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		error: null,
+		models: [],
+		modelSetting: false,
 		preview: null,
 		...overrides,
 	};
@@ -88,6 +90,7 @@ class FakeController implements AgentpaneController {
 	submitted = 0;
 	aborted = 0;
 	compacted = 0;
+	modelSets: string[] = [];
 	externalEdits: string[] = [];
 	externalEditResult = "edited externally";
 	clearErrorCalls = 0;
@@ -187,6 +190,13 @@ class FakeController implements AgentpaneController {
 
 	async compact() {
 		this.compacted += 1;
+	}
+
+	async setModel(model: string) {
+		this.modelSets.push(model);
+		this.publish({ ...this.current, modelSetting: true });
+		await Promise.resolve();
+		this.publish({ ...this.current, modelSetting: false });
 	}
 
 	async editDraft() {
@@ -311,6 +321,96 @@ beforeEach(() => {
 });
 
 describe("App", () => {
+	it("shows the server-reported model in the selected empty conversation's picker", () => {
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			models: [{ id: "opaque/current", label: "Current Model" }],
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		}));
+
+		render(App, { props: { controller } });
+
+		expect(screen.getByLabelText("Conversation model")).toHaveValue("opaque/current");
+	});
+
+	it("names a transient null model without inventing a backend default", () => {
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		})) } });
+
+		expect(screen.getByLabelText("Conversation model")).toHaveDisplayValue("Loading model…");
+		expect(screen.queryByText("Backend default")).not.toBeInTheDocument();
+	});
+
+	it("disables only the picker while its model request is in flight", () => {
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			draft: "still sendable",
+			modelSetting: true,
+			models: [{ id: "opaque/current", label: "Current" }],
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		})) } });
+
+		expect(screen.getByLabelText("Conversation model")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+		expect(screen.getByRole("button", { name: "External Editor" })).toBeEnabled();
+	});
+
+	it("requests an exact model id and waits for server status before changing the picker value", async () => {
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			models: [
+				{ id: "opaque/current", label: "Current Model" },
+				{ id: "opaque/next", label: "Next Model" },
+			],
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		}));
+		render(App, { props: { controller } });
+		const picker = screen.getByLabelText("Conversation model");
+
+		await fireEvent.change(picker, { target: { value: "opaque/next" } });
+
+		expect(controller.modelSets).toEqual(["opaque/next"]);
+		expect(picker).toHaveValue("opaque/current");
+		controller.publish(view({
+			models: controller.getView().models,
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: { ...session, model: "opaque/next", seq: 2 } } }),
+		}));
+		await tick();
+		expect(screen.getByLabelText("Conversation model")).toHaveValue("opaque/next");
+	});
+
+	it("locks a messaged conversation to a plain model label", () => {
+		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			models: [{ id: "opaque/current", label: "Current Model" }],
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		}));
+
+		render(App, { props: { controller } });
+
+		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
+		expect(screen.getByText("Current Model")).toHaveClass("model-label");
+	});
+
+	it("shows the reported model when an older messaged snapshot attaches", () => {
+		const attached = reduceServerEvent(state({ selected: piSession }), {
+			type: "snapshot",
+			session: piSession,
+			seq: 1,
+			messages: [user("stored")],
+			isStreaming: false,
+			compaction: null,
+			model: "backend/reported",
+		}).state;
+
+		render(App, { props: { controller: new FakeController(view({ state: attached })) } });
+
+		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
+		expect(screen.getByText("backend/reported")).toHaveClass("model-label");
+	});
+
 	it("offers system, light, and dark themes and writes the resolved theme on the document", async () => {
 		setSystemDark(true);
 		render(App, { props: { controller: new FakeController() } });

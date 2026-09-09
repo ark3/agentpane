@@ -171,6 +171,10 @@ const api: AgentpaneApi = {
 	},
 	async abort() {},
 	async compact() {},
+	async listModels() {
+		return [];
+	},
+	async setModel() {},
 	async forkPoints() {
 		return [];
 	},

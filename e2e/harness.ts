@@ -79,6 +79,7 @@ function paragraphs(seed: number, count: number): string {
 
 let seq = 0;
 let messages: AgentMessage[] = [];
+let model = "harness/default";
 let handlers: EventHandlers | undefined;
 /** Resolves when the in-flight turn emits its `status:false`. */
 let turnSettled: Promise<void> = Promise.resolve();
@@ -92,7 +93,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -104,7 +105,7 @@ function upsert(index: number, message: AgentMessage): void {
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming, compaction: null });
+	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model });
 }
 
 function summary(): SessionSummary {
@@ -216,6 +217,16 @@ const api: AgentpaneApi = {
 			seq += 1;
 			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running" });
 		});
+	},
+	async listModels() {
+		return [
+			{ id: "harness/default", label: "Harness Default" },
+			{ id: "harness/model", label: "Harness Model" },
+		];
+	},
+	async setModel(_ref, next) {
+		model = next;
+		queueMicrotask(() => status(false));
 	},
 	/**
 	 * One point per user message, in transcript order -- the shape both real

@@ -3,6 +3,7 @@ import type {
 	BackendId,
 	ForkPoint,
 	ForkRequest,
+	ModelInfo,
 	ServerEvent,
 	SessionPreviewResponse,
 	SessionPreviewTurn,
@@ -11,6 +12,7 @@ import type {
 } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
 import { createController } from "./controller.ts";
+import { sessionKey } from "$shared/protocol.ts";
 
 const ref: SessionRef = { backend: "pi", id: "virtual-a" };
 const attachedRef: SessionRef = { backend: "pi", id: "/sessions/a.jsonl" };
@@ -68,6 +70,8 @@ class FakeApi implements AgentpaneApi {
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
+	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
+	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
@@ -85,6 +89,52 @@ class FakeApi implements AgentpaneApi {
 }
 
 describe("client controller", () => {
+	it("lists only for an empty selection and leaves model truth to server status", async () => {
+		const api = new FakeApi();
+		api.listModels.mockResolvedValue([{ id: "opaque/next", label: "Next" }]);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current" });
+
+		await controller.preview(ref);
+		expect(api.listModels).toHaveBeenCalledWith(ref.backend);
+		await controller.setModel("opaque/next");
+		expect(api.setModel).toHaveBeenCalledWith(ref, "opaque/next");
+		expect(controller.getView().state.sessions[sessionKey(ref)]?.model).toBe("opaque/current");
+
+		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: null, model: "opaque/next" });
+		expect(controller.getView().state.sessions[sessionKey(ref)]?.model).toBe("opaque/next");
+	});
+
+	it("never lists models when selecting a conversation that already has messages", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current" });
+
+		await controller.preview(ref);
+
+		expect(api.listModels).not.toHaveBeenCalled();
+	});
+
+	it("disables only model selection while setting and does not block the first prompt", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setModel.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current" });
+		await controller.preview(ref);
+		controller.setDraft("send while setting");
+
+		const selecting = controller.setModel("opaque/next");
+		expect(controller.getView()).toMatchObject({ busy: "idle", modelSetting: true });
+		await controller.submit();
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send while setting" });
+		setting.resolve();
+		await selecting;
+	});
+
 	it("connects SSE and loads summaries when started", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

@@ -1,5 +1,6 @@
 import type {
 	BackendId,
+	ModelInfo,
 	PromptRequest,
 	ServerEvent,
 	SessionPreviewTurn,
@@ -23,6 +24,10 @@ export interface ControllerView {
 	connection: "connecting" | "connected" | "reconnecting";
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
 	error: string | null;
+	/** Live options for the selected empty conversation only. */
+	models: ModelInfo[];
+	/** Only the picker is disabled while this request is in flight. */
+	modelSetting: boolean;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
 	 * *previewed* rather than attached. Null once the session is attached (a
@@ -69,6 +74,7 @@ export interface AgentpaneController {
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
+	setModel(model: string): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
 	/**
@@ -100,6 +106,8 @@ export function createController(
 		connection: "connecting",
 		busy: "idle",
 		error: null,
+		models: [],
+		modelSetting: false,
 		preview: null,
 	};
 	let connection: EventConnection | undefined;
@@ -148,6 +156,24 @@ export function createController(
 		if (cwd.startsWith("/")) return true;
 		publish({ error: "Workspace must be an absolute path." });
 		return false;
+	}
+
+	async function loadModelsForSelected(): Promise<void> {
+		const selected = view.state.selected;
+		if (!selected) return;
+		const key = sessionKey(selected);
+		if (view.state.sessions[key]?.messages.length !== 0) return;
+		publish({ models: [], error: null });
+		try {
+			const models = await api.listModels(selected.backend);
+			const current = view.state.selected;
+			if (!disposed && current && sessionKey(current) === key && view.state.sessions[key]?.messages.length === 0) {
+				publish({ models });
+			}
+		} catch (error: unknown) {
+			const current = view.state.selected;
+			if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+		}
 	}
 
 	// Always lists the whole corpus: the workspace filter is a client-side view
@@ -303,11 +329,12 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
-		publish({ busy: "attaching", error: null });
+		publish({ busy: "attaching", error: null, models: [] });
 		try {
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
 				applyAttached(attached, true, ref);
+				await loadModelsForSelected();
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
 				// selection after a newer user intent.
@@ -379,7 +406,8 @@ export function createController(
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
 			if (view.state.sessions[sessionKey(ref)]) {
-				publish({ state: { ...view.state, selected: ref }, preview: null, error: null });
+				publish({ state: { ...view.state, selected: ref }, preview: null, error: null, models: [] });
+				await loadModelsForSelected();
 				return;
 			}
 			publish({ error: null });
@@ -417,6 +445,18 @@ export function createController(
 		},
 		async select(ref) {
 			await attachAndSelect(ref, ++selectionIntent);
+		},
+		async setModel(model) {
+			const selected = view.state.selected;
+			if (!selected || view.modelSetting || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
+			publish({ modelSetting: true, error: null });
+			try {
+				await api.setModel(selected, model);
+			} catch (error: unknown) {
+				if (!disposed) publish({ error: errorMessage(error) });
+			} finally {
+				if (!disposed) publish({ modelSetting: false });
+			}
 		},
 		async submit() {
 			const selected = view.state.selected;
