@@ -45,7 +45,7 @@ One server process (Bun)
    │      • metadata only (id, cwd, timestamp, preview) — no process
    ├── SessionManager:  {backend, id} → { child: sbox subprocess, adapter }
    │      • spawn on attach (cwd = that session's workspace), not on list
-   │      • subprocess outlives the connection; reaped on idle / LRU / shutdown (D12)
+   │      • subprocess outlives the connection; reaped on shutdown (idle / LRU per D12 is decided, not built)
    │      • never killed by a dropped browser connection
    ├── Backend adapter (per session):  Pi | Codex | Claude Code
    │      • owns the child's stdio
@@ -63,8 +63,8 @@ A browser refresh drops the event stream but must not kill the agent.
 A subprocess's lifetime is decoupled from any connection: the server, not the client, decides when it dies.
 Because the server owns the transcript (D3), reconnect is a *repaint*, not a lifecycle event — the client re-subscribes and receives a fresh snapshot.
 
-The subprocess is *not*, however, tied to the server's whole lifetime: it is bounded by idleness and by a count cap, and reclaimed automatically.
-That is D12, which supersedes the original "lives as long as the server" rule.
+The subprocess is *not*, however, meant to be tied to the server's whole lifetime: D12 bounds it by idleness and by a count cap, reclaimed automatically, and supersedes the original "lives as long as the server" rule.
+D12 is decided but not yet built (OW-33, OW-34, OW-35); today only shutdown reaps.
 
 ## Decisions
 
@@ -138,7 +138,7 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.
 
-Re-querying the agent (Pi `get_entries`/`get_tree`, Codex `thread/read`) remains the **cold-start** path — server restarted, or attaching to a session that predates it.
+Re-querying the agent (Pi `get_messages`, Codex `thread/read`, Claude Code's own store file) remains the **cold-start** path — server restarted, or attaching to a session that predates it.
 That is not an alternative to the above; it is how the server populates a transcript it does not yet have.
 
 ### D4. Client framework: Svelte 5
@@ -302,6 +302,9 @@ This is the one place worth being concrete rather than leaving to implementation
 
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
 
+**Decided on 2026-08-15, not yet built.**
+The reaper is OW-33, the cap OW-34, and the transparent re-attach that makes eviction invisible OW-35; the prose below is written as the design reads once they land.
+
 The first draft tied a subprocess's life to the *server's*: killed only on an explicit close or on shutdown, never otherwise.
 That does not bound resource use — a day of browsing leaves a sandboxed agent alive per session touched, each holding its workspace.
 This decision reverses that: subprocesses are reclaimed automatically, on two triggers.
@@ -361,6 +364,8 @@ Note that a `cwd` filter would not have helped — `listSessions` applies it onl
 Single-user, no config file: `idleTimeoutMs` and `maxSessions` are named constants at the top of the manager module, not env or file.
 
 ### D13. Agentpane owns one small state file, and its marks are server state
+
+**Decided, not yet built**: OW-66 carries it, and nothing under `src/server/` writes a file today.
 
 Agentpane has never written anything of its own.
 D9 enumerates sessions from the backends' stores, and every server-side fact is derived from a file some other program wrote.

@@ -169,7 +169,7 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
 
 - **Home server sandbox.**
   The home server's session environment runs inside a bubblewrap sandbox (`~/bin/sbox`); most of the filesystem is read-only.
-  `~/src/agentpane` was granted write access specifically for this work.
+  `~/projects/agentpane` was granted write access specifically for this work.
   If you can write elsewhere in `$HOME`, the sandbox is off — warn the user.
   One consequence bites dispatch: a dispatched worktree must live *inside* the repo tree (`.worktrees/<id>`, gitignored), because it is the only path mounted read-write — a worktree anywhere outside it (`~/src/`, `/tmp`, a sibling of the repo) fails with `Read-only file system`.
   `card worktree <id>` satisfies this by construction: it puts the tree at `<main checkout>/.worktrees/<id>`.

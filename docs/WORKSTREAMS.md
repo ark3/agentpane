@@ -51,11 +51,11 @@ If you write another adapter, `ref` is not stable — say where it changes, and 
 ### What the renderer expects of its callers
 
 - **Mount `Transcript` and nothing else.**
-  `src/client/render/index.ts` is the whole surface: `Transcript` takes `{ messages, isStreaming, reading }`, and `registerToolRenderer(name, component)` teaches it a backend-specific tool.
+  `src/client/render/index.ts` is the whole surface: `Transcript` takes `{ messages, isStreaming, reading, editingIndex, onedit }`, and `registerToolRenderer(name, component)` teaches it a backend-specific tool.
   `reading` (OW-51) elides tool and thinking chrome; it changes what renders, never what the caller passes in.
-- **The design tokens live in `Transcript.svelte`'s `:global(:root)` block.**
-  That keeps the package importable with nothing to wire up, but it also means the palette only exists while a transcript is mounted.
-  A shell that wants the same tokens for its own chrome should lift that block into `src/client/app.css` and import it once — the note is in the component.
+  `editingIndex` and `onedit` (OW-hezidi) mark the user message being edited and offer the edit control; omit `onedit` for a read-only preview.
+- **The design tokens live in `src/client/app.css`**, in its `:root` block and the theme variants beside it, so the shell and the transcript share one palette.
+  `Transcript.svelte` defines none of its own; a renderer mounted without `app.css` renders unstyled.
 - **An edit-shaped tool call must carry its replacements as either an `edits[]` array or a flat `oldText`/`newText` (or `old_string`/`new_string`) pair**, or the card renders no diff.
   Pi's own shape is the array (HANDOFF 31).
   This is the one place the renderer cares what an adapter puts in `ToolCall.arguments`; everything else degrades to the default card.

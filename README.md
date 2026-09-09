@@ -1,9 +1,7 @@
 # agentpane
 
-A clean, modern web UI for coding agents — chat rendering, streaming tool
-calls, session management, and fork-from-any-past-point — with a
-**pluggable backend** so it can drive either **Pi** (`pi --mode rpc`) or
-**Codex** (`codex app-server`), each sandboxed per workspace.
+A clean, modern web UI for coding agents — chat rendering, streaming tool calls, session management, and fork-from-any-past-point — with a **pluggable backend**.
+It drives **Pi** (`pi --mode rpc`), **Codex** (`codex app-server`), and **Claude Code** (`claude -p` over stream-json), each sandboxed per workspace.
 
 Spiritually: [pipane](https://github.com/mike-heunher/pipane) — same
 architecture (sandboxed subprocess per session, browser as a repaintable
@@ -11,12 +9,8 @@ view), but multi-backend and with its own client stack.
 
 ## Start here
 
-1. **`docs/HANDOFF.md`** — read first. What is already validated (with
-   re-runnable evidence), reference material by absolute path, and the
-   workflow for the fresh agent picking this up.
-2. **`docs/DESIGN.md`** — the design: goals/non-goals, architecture, the
-   settled decisions and their reasoning, the backend adapter contract, the
-   Codex→`AgentMessage` mapping, and the test strategy.
+1. **`docs/DESIGN.md`** — read first: goals/non-goals, architecture, the settled decisions and their reasoning, the backend adapter contract, the Codex→`AgentMessage` mapping, and the test strategy.
+2. **`docs/HANDOFF.md`** — the evidence behind those decisions, with re-runnable probes, reference material by absolute path, and the environment gotchas.
 3. **`resources/`** — validated Codex protocol bindings, reproducible probe
    scripts, and captured protocol fixtures for offline adapter tests.
 

@@ -8,6 +8,7 @@ Work items are cards, in the deck at `docs/work/`, read and written through the 
 `bun install` first.
 Runtime is Bun, tests are vitest.
 `bun run check` (typecheck + svelte-check + all tests, ~25s) must pass before any commit touching `src/`; say so explicitly when a commit is docs only.
+The `test` script pins `TZ=Asia/Kolkata`, a half-hour-offset zone that makes both the clock and the offset arithmetic visible in time assertions (OW-70); running `vitest` directly, without the pin, fails those tests.
 
 `bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless Chromium).
 It is **not** part of `bun run check`, which stays fast and browser-free (OW-49); `.github/workflows/ci.yml` runs it instead as a sibling job on every push to `main` and every pull request targeting it.
@@ -37,7 +38,7 @@ Markdown prose uses one sentence per line and never wraps at a column count.
 - **Only Pi is confined to the work laptop.**
   The home server has no `pi` at all.
   Claude Code and Codex both run there, each pinned to one model: Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna.
-  Neither is the default the machine would pick — as of 2026-08-27 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` selects `gpt-5.4-mini` — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`.
+  Do not trust the machine's defaults to enforce it: as of 2026-09-09 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` happens to select `gpt-5.6-luna`, and either can change — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`.
   The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
   A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
   Pi runs only on the work laptop, which is why an item whose evidence has to come from a live Pi turn belongs there.
