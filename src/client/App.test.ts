@@ -341,7 +341,9 @@ describe("App", () => {
 
 		render(App, { props: { controller } });
 
-		expect(screen.getByLabelText("Conversation model")).toHaveValue("opaque/current");
+		const picker = screen.getByLabelText("Conversation model");
+		expect(picker).toHaveValue("opaque/current");
+		expect(within(picker).queryByRole("option", { name: "Backend default" })).not.toBeInTheDocument();
 	});
 
 	it("offers the backend default for an empty conversation with no reported model", () => {
