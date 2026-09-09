@@ -183,12 +183,13 @@ def collect_sensitive(obj, found: dict[str, str]) -> None:
 
 
 def scrub(raw: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Replace identifying values, preserving every other byte.
+    """Replace identifying values and private account telemetry.
 
     We find the exact values by key (precise), then substitute them as quoted
-    JSON strings in the raw text (so formatting stays byte-identical to what
-    the agent actually emitted). Distinct real values collapsing onto one
-    placeholder is fine -- nothing asserts on them.
+    JSON strings in the raw text. Account rate-limit events retain their wire
+    shape but not the operator's subscription, utilization, reset times, or
+    credit state. Distinct real values collapsing onto one placeholder is fine
+    -- nothing asserts on them.
     """
     found: dict[str, str] = {}
     for line in raw:
@@ -196,12 +197,21 @@ def scrub(raw: list[str]) -> tuple[list[str], dict[str, str]]:
             collect_sensitive(json.loads(line), found)
         except ValueError:
             continue
-    if not found:
-        return raw, {}
     out = []
     for line in raw:
         for real, placeholder in found.items():
             line = line.replace(f'"{real}"', f'"{placeholder}"')
+        try:
+            event = json.loads(line)
+            if event.get("method") == "account/rateLimits/updated":
+                rate_limits = event["params"]["rateLimits"]
+                event["params"]["rateLimits"] = {
+                    key: value if key == "limitId" else None
+                    for key, value in rate_limits.items()
+                }
+                line = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+        except (KeyError, TypeError, ValueError):
+            pass
         out.append(line)
     return out, found
 

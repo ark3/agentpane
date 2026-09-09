@@ -1240,6 +1240,35 @@ describe("CodexAdapter turns", () => {
 });
 
 describe("CodexAdapter reducer effects", () => {
+	it("binds reduction to the thread returned by thread/start", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-parent" });
+		const updates = vi.fn();
+		adapter.onUpdate(updates);
+
+		proc.emit({
+			method: "thread/started",
+			params: { thread: { id: "thread-child" } },
+		});
+		proc.emit({
+			method: "item/started",
+			params: {
+				threadId: "thread-child",
+				turnId: "turn-child",
+				item: {
+					type: "agentMessage",
+					id: "message-child",
+					text: "",
+					phase: null,
+					memoryCitation: null,
+				},
+				startedAtMs: 10,
+			},
+		});
+
+		expect(updates).not.toHaveBeenCalled();
+		expect(adapter.getState().messages).toEqual([]);
+	});
+
 	it("publishes streaming and message changes with the reducer's changed index", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-events" });
 		const updates = vi.fn();

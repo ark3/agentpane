@@ -50,6 +50,9 @@ those two are still yours to grep for.
 Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 
+Codex `account/rateLimits/updated` events keep their field shape, but the scrubber nulls subscription, utilization, reset-time, and credit values because those describe the operator's account rather than the protocol behavior under test.
+`src/fixture-scrub.test.ts` rejects committed live values in those fields.
+
 ## Scenarios
 
 | Scenario | Prompt intent | Covers |

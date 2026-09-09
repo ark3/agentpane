@@ -154,4 +154,30 @@ describe("fixture scrub", () => {
 			`operator home path in a committed fixture -- scrub it and recapture, see resources/fixtures/README.md:\n${violations.join("\n")}`,
 		).toEqual([]);
 	});
+
+	it("no Codex capture carries live account telemetry", () => {
+		const violations: string[] = [];
+		for (const file of files.filter((path) => path.endsWith(".jsonl"))) {
+			for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
+				if (!line) continue;
+				const event = JSON.parse(line) as {
+					method?: string;
+					params?: { rateLimits?: Record<string, unknown> };
+				};
+				if (event.method !== "account/rateLimits/updated") continue;
+				const privateValues = Object.entries(event.params?.rateLimits ?? {})
+					.filter(([key, value]) => key !== "limitId" && value !== null)
+					.map(([key]) => key);
+				if (privateValues.length > 0) {
+					violations.push(
+						`${file.replace(FIXTURES, "resources/fixtures/")}:${index + 1}: ${privateValues.join(", ")}`,
+					);
+				}
+			}
+		}
+		expect(
+			violations,
+			`private account telemetry in a committed fixture:\n${violations.join("\n")}`,
+		).toEqual([]);
+	});
 });
