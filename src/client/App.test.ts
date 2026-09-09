@@ -344,14 +344,13 @@ describe("App", () => {
 		expect(screen.getByLabelText("Conversation model")).toHaveValue("opaque/current");
 	});
 
-	it("names a transient null model without inventing a backend default", () => {
+	it("offers the backend default for an empty conversation with no reported model", () => {
 		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		})) } });
 
-		expect(screen.getByLabelText("Conversation model")).toHaveDisplayValue("Loading model…");
-		expect(screen.queryByText("Backend default")).not.toBeInTheDocument();
+		expect(screen.getByLabelText("Conversation model")).toHaveDisplayValue("Backend default");
 	});
 
 	it("disables only the picker while its model request is in flight", () => {
@@ -403,6 +402,16 @@ describe("App", () => {
 
 		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
 		expect(screen.getByText("Current Model")).toHaveClass("model-label");
+	});
+
+	it("shows the backend default as a plain label for a messaged conversation with no model", () => {
+		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		})) } });
+
+		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
+		expect(screen.getByText("Backend default")).toHaveClass("model-label");
 	});
 
 	it("shows the reported model when an older messaged snapshot attaches", () => {

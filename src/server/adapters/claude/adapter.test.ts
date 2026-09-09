@@ -39,7 +39,7 @@ function storedEntries(): ClaudeStoreMessageEntry[] {
 		make("a3", "assistant", {
 			id: "msg_b",
 			role: "assistant",
-			model: "m",
+			model: "last-model",
 			content: [{ type: "text", text: "second answer" }],
 		}),
 	];
@@ -92,7 +92,9 @@ describe("ClaudeAdapter lifecycle", () => {
 
 		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
 
-		expect(h.spawns).toEqual([{ cwd: "/workspace", resumeId: "stored-id" }]);
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model" },
+		]);
 		expect(h.adapter.ref).toEqual({ backend: "claude", id: "stored-id" });
 		expect(h.adapter.getState().messages.map((m) => m.role)).toEqual([
 			"user",
@@ -101,6 +103,37 @@ describe("ClaudeAdapter lifecycle", () => {
 			"assistant",
 		]);
 		expect(updates).toHaveBeenCalled();
+	});
+
+	it("exposes the last stored assistant model immediately when resuming", async () => {
+		const h = harness({ entries: storedEntries() });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+
+		expect(h.adapter.getState().model).toBe("last-model");
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model" },
+		]);
+	});
+
+	it("keeps an explicit model when resuming a stored session", async () => {
+		const h = harness({ entries: storedEntries() });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id", model: "explicit-model" });
+
+		expect(h.adapter.getState().model).toBe("explicit-model");
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "stored-id", model: "explicit-model" },
+		]);
+	});
+
+	it("keeps the model null when a resumed transcript has no assistant", async () => {
+		const h = harness({ entries: storedEntries().slice(0, 1) });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+
+		expect(h.adapter.getState().model).toBeNull();
+		expect(h.spawns).toEqual([{ cwd: "/workspace", resumeId: "stored-id" }]);
 	});
 
 	it("adopts the session id the init event reports", async () => {
@@ -339,6 +372,7 @@ describe("ClaudeAdapter fork", () => {
 			resumeId: "parent",
 			forkAtEntryId: "a2",
 			sessionId: "forked-1",
+			model: "last-model",
 		});
 		// Everything through a2 survives; the second turn is gone. The cut is
 		// INCLUSIVE of the named entry (OW-mayuza): a2's text block must be here.
@@ -355,7 +389,7 @@ describe("ClaudeAdapter fork", () => {
 		const forked = await h.adapter.fork(CLAUDE_FORK_SESSION_START);
 
 		expect(forked).toEqual({ backend: "claude", id: "forked-1" });
-		expect(h.spawns.at(-1)).toEqual({ cwd: "/workspace", sessionId: "forked-1" });
+		expect(h.spawns.at(-1)).toEqual({ cwd: "/workspace", sessionId: "forked-1", model: "last-model" });
 		expect(h.adapter.getState().messages).toEqual([]);
 	});
 

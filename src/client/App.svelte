@@ -181,7 +181,7 @@
 	);
 	const selectedModelLabel = $derived(
 		selectedSession?.model === null || selectedSession?.model === undefined
-			? "Loading model…"
+			? "Backend default"
 			: (view.models.find((option) => option.id === selectedSession.model)?.label ?? selectedSession.model),
 	);
 	/**
@@ -1232,7 +1232,7 @@
 						disabled={view.modelSetting}
 					>
 						{#if selectedSession.model === null || selectedSession.model === undefined}
-							<option value="">Loading model…</option>
+							<option value="">Backend default</option>
 						{:else if !view.models.some((option) => option.id === selectedSession.model)}
 							<option value={selectedSession.model}>{selectedSession.model}</option>
 						{/if}

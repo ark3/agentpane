@@ -146,6 +146,15 @@ export class ClaudeAdapter implements BackendAdapter {
 			const entries = await this.readStore(opts.resumeId);
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 			this.applyEffects(this.reducer.hydrate(entries.map((entry) => entry.record)));
+			if (this.model === null) {
+				const messages = this.reducer.getState().messages;
+				for (let i = messages.length - 1; i >= 0; i -= 1) {
+					const message = messages[i];
+					if (message?.role !== "assistant") continue;
+					this.model = message.model;
+					break;
+				}
+			}
 			this.currentRef = { backend: "claude", id: opts.resumeId };
 			this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
 		} else {
