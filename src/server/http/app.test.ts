@@ -932,10 +932,31 @@ describe("origin", () => {
 		expect(pi.created).toHaveLength(0);
 	});
 
+	it("refuses same-site metadata because the client itself is same-origin", async () => {
+		const response = await app.fetch(
+			new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, {
+				headers: { "sec-fetch-site": "same-site" },
+			}),
+		);
+
+		expect(response.status).toBe(403);
+		expect(pi.created).toHaveLength(0);
+	});
+
 	it("allows same-origin browser metadata", async () => {
 		const response = await app.fetch(
 			new Request(`http://127.0.0.1${ROUTES.sessions}`, {
 				headers: { "sec-fetch-site": "same-origin" },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+	});
+
+	it("allows browser navigation metadata", async () => {
+		const response = await app.fetch(
+			new Request(`http://127.0.0.1${ROUTES.sessions}`, {
+				headers: { "sec-fetch-site": "none" },
 			}),
 		);
 

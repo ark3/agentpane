@@ -100,6 +100,60 @@ describe("attach", () => {
 			UnknownSessionError,
 		);
 	});
+
+	it("uses the index's canonical ref while keeping the requested ref as an alias", async () => {
+		const requested: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async (ref) => (sessionKey(ref) === sessionKey(requested) ? summary : null),
+			preview: async () => [],
+		};
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi } },
+			broadcaster,
+		);
+
+		const adapter = await sessions.attach(requested);
+
+		expect(pi.createdFor).toEqual([canonical]);
+		expect(pi.created[0]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: canonical.id });
+		expect(sessions.canonicalRef(requested)).toEqual(canonical);
+		expect(sessions.adapterFor(requested)).toBe(adapter);
+		expect(sessions.summaryOf(requested)?.ref).toEqual(canonical);
+	});
+
+	it("removes the canonical table entry and requested alias when startup fails", async () => {
+		const requested: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/subdir/../a.jsonl",
+		};
+		const summary = storedSession(REF, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		const failing = new FakeAdapterFactory({ failStart: "startup failed" });
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi: failing } },
+			broadcaster,
+		);
+
+		await expect(sessions.attach(requested)).rejects.toThrow("startup failed");
+
+		expect(failing.createdFor).toEqual([REF]);
+		expect(sessions.canonicalRef(requested)).toEqual(requested);
+		expect(sessions.adapterFor(REF)).toBeUndefined();
+		expect(sessions.liveRefs()).toEqual([]);
+	});
 });
 
 describe("an adapter that renames itself (the Pi contract)", () => {

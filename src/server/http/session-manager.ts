@@ -242,7 +242,9 @@ export class SessionManager {
 			this.broadcaster.broadcastSnapshot(session.ref);
 			return session.adapter as BackendAdapter;
 		} finally {
-			this.#attaching.delete(key);
+			for (const [pendingKey, attached] of this.#attaching) {
+				if (attached === pending) this.#attaching.delete(pendingKey);
+			}
 		}
 	}
 
@@ -327,10 +329,9 @@ export class SessionManager {
 		existing: ManagedSession | undefined,
 		pending: PendingStart,
 	): Promise<ManagedSession> {
-		const factory = this.#adapters[ref.backend];
-		if (!factory) throw new UnknownBackendError(ref.backend);
-
+		if (!this.#adapters[ref.backend]) throw new UnknownBackendError(ref.backend);
 		let session = existing;
+		let addedAlias: [string, string] | undefined;
 		if (!session) {
 			// Not one of ours yet -- it must exist in the backend's store, and we
 			// need its workspace before we can spawn anything (D7).
@@ -342,7 +343,7 @@ export class SessionManager {
 				);
 			}
 			session = {
-				ref,
+				ref: summary.ref,
 				cwd: summary.cwd,
 				virtual: false,
 				fromStore: true,
@@ -354,34 +355,45 @@ export class SessionManager {
 				stored: summary,
 			};
 		}
+		const factory = this.#adapters[session.ref.backend];
+		if (!factory) throw new UnknownBackendError(session.ref.backend);
 
 		// Asking the index where this session lives is the one await before an
 		// adapter exists, so a teardown can land with nothing yet to dispose.
 		// Everything from here to `pending.adapter` below is synchronous: either
 		// teardown sees the adapter, or this sees the flag and never spawns.
 		if (pending.torndown) throw new UnknownSessionError(ref);
-		if (!existing) this.#sessions.set(sessionKey(ref), session);
+		if (!existing) {
+			const requestedKey = sessionKey(ref);
+			const canonicalKey = sessionKey(session.ref);
+			if (requestedKey !== canonicalKey) {
+				this.#aliases.set(requestedKey, canonicalKey);
+				this.#attaching.set(canonicalKey, pending);
+				addedAlias = [requestedKey, canonicalKey];
+			}
+			this.#sessions.set(canonicalKey, session);
+		}
 
-		const adapter = factory.create(ref);
-		pending.adapter = adapter;
-		// Subscribe *before* start(): a backend can emit its first state during
-		// startup and we would otherwise miss it.
 		const bound = session;
-		bound.subscriptions.push(
-			adapter.onUpdate((state, changedIndex) => this.#onUpdate(bound, state, changedIndex)),
-			adapter.onRequest((request) => {
-				this.#pendingRequests.set(request.requestId, sessionKey(bound.ref));
-				this.broadcaster.request(bound.ref, request);
-			}),
-			adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
-		);
-
+		let adapter: BackendAdapter;
 		try {
+			adapter = factory.create(session.ref);
+			pending.adapter = adapter;
+			// Subscribe *before* start(): a backend can emit its first state during
+			// startup and we would otherwise miss it.
+			bound.subscriptions.push(
+				adapter.onUpdate((state, changedIndex) => this.#onUpdate(bound, state, changedIndex)),
+				adapter.onRequest((request) => {
+					this.#pendingRequests.set(request.requestId, sessionKey(bound.ref));
+					this.broadcaster.request(bound.ref, request);
+				}),
+				adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
+			);
 			await adapter.start({
 				cwd: bound.cwd,
 				// Only a session the backend itself stored can be resumed; a
 				// `virtual:` id means nothing to Pi or Codex.
-				...(bound.fromStore ? { resumeId: ref.id } : {}),
+				...(bound.fromStore ? { resumeId: bound.ref.id } : {}),
 				...(bound.model ? { model: bound.model } : {}),
 			});
 			// Teardown ran while we were starting. Publishing the adapter now
@@ -391,7 +403,10 @@ export class SessionManager {
 			if (pending.torndown) throw new UnknownSessionError(ref);
 		} catch (err) {
 			for (const off of bound.subscriptions.splice(0)) off();
-			if (!existing) this.#sessions.delete(sessionKey(ref));
+			if (!existing) this.#sessions.delete(sessionKey(bound.ref));
+			if (addedAlias && this.#aliases.get(addedAlias[0]) === addedAlias[1]) {
+				this.#aliases.delete(addedAlias[0]);
+			}
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can
 			// leave a live sandboxed agent behind. Nothing else will ever reap it.

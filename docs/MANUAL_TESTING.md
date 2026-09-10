@@ -1266,6 +1266,15 @@ This proves both halves needed by D16: ordinary stdin queues a mid-turn prompt f
 The adapter must therefore reject a mid-turn `submit()` rather than writing it, and `/compact` uses the same active-turn gate so it cannot reopen a queue window.
 The scrubbed 340-line stream and its invocation, timing, and event census are `resources/fixtures/claude/mid-turn.jsonl` and `mid-turn.meta.json`.
 
+## Observed Fetch Metadata on cross-site loopback requests (OW-fumegi)
+
+**2026-09-09, headless Chromium.**
+
+A page at `http://localhost:4798` targeted `http://127.0.0.1:4799`.
+A cross-site image/no-cors GET omitted `Origin` and carried `Sec-Fetch-Site: cross-site`.
+A cross-site POST carried `Origin: http://localhost:4798`.
+A typed navigation omitted `Origin` and carried `Sec-Fetch-Site: none`.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
