@@ -41,6 +41,7 @@
 		draft: "",
 		connection: "connecting",
 		busy: "idle",
+		sending: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -1009,14 +1010,15 @@
 		if (compaction) return;
 		if (!view.draft) return;
 		const edit = editing;
-		// A second Ctrl/Cmd-Enter while the first prompt is still in flight is
-		// refused by the controller and issues nothing (OW-nasofa), so returning
-		// here rather than arming for it is not just tidier: the disarm below
-		// would fire on that refusal and take down the *first* submit's arming,
-		// which is live and about to stream. Only the plain path: the controller
-		// refuses nothing on the fork path, so a guard here would be inventing a
-		// re-entrancy rule the controller does not have (OW-kelede).
-		if (!edit && view.busy === "submitting") return;
+		// A second Ctrl/Cmd-Enter while the first send is still in flight is
+		// refused by the controller and issues nothing (OW-nasofa on the plain
+		// path, OW-kelede on the fork), so returning here rather than arming for
+		// it is not just tidier: the disarm below would fire on that refusal and
+		// take down the *first* send's arming, which is live and about to stream.
+		// Both paths, and off the controller's own `sending` flag rather than
+		// `busy` -- which an abort or an attach clears while the POST it described
+		// is still outstanding (OW-kelede).
+		if (view.sending) return;
 		armFollow(edit?.index);
 		armBadge();
 		// Both arms above are keyed on the session as it stands now, and D9

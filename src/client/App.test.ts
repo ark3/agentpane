@@ -58,6 +58,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		draft: "",
 		connection: "connected",
 		busy: "idle",
+		sending: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -179,9 +180,10 @@ class FakeController implements AgentpaneController {
 	async submit() {
 		this.submitted += 1;
 		this.publish({ ...this.current, busy: "submitting", error: null });
-		// The real `submit` drops back to idle in a `finally`, whichever way it
-		// went, and the shell reads that: a second Ctrl-Enter is only refused
-		// while a prompt is actually in flight (OW-nasofa, OW-mifuki).
+		// The real `submit` lowers `sending` in a `finally`, whichever way it went,
+		// and the shell reads that: a second Ctrl-Enter is only refused while a
+		// prompt is actually in flight (OW-nasofa, OW-mifuki, OW-kelede). This
+		// fake never raises it, so every press here gets through.
 		this.publish({ ...this.current, busy: "idle", ...(this.submissionError ? { error: this.submissionError } : {}) });
 		return this.submissionError === null;
 	}
@@ -2106,6 +2108,78 @@ describe("App", () => {
 			await tick();
 
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * Driven by the real controller, not the fake: the re-entrancy rule lives in
+	 * `forkAndSubmit`, and what makes the second press safe is that the composer
+	 * never reaches the controller with it at all (OW-kelede). Reaching it and
+	 * being *refused* would not do -- a refusal resolves null, `send()` reads that
+	 * as "nothing was sent" and disarms, and on this path the key it disarms is
+	 * still the first press's, which is live and about to stream.
+	 */
+	it("keeps the first fork's follow and badge when send is pressed twice in edit mode (OW-kelede)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
+		let resolveFork = (_ref: SessionRef) => {};
+		let forks = 0;
+		let emit: (event: ServerEvent) => void = () => {};
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession)],
+			createSession: async () => piSession,
+			attach: async (ref) => summary(ref),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft" }],
+			fork: async () => {
+				forks += 1;
+				if (forks > 1) throw new Error("fork refused");
+				return new Promise<SessionRef>((resolve) => {
+					resolveFork = resolve;
+				});
+			},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null });
+			await controller.select(piSession);
+			await tick();
+
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			const form = screen.getByLabelText("Prompt").closest("form")!;
+			await fireEvent.submit(form);
+			await fireEvent.submit(form);
+			await tick();
+
+			resolveFork(forkRef);
+			await tick();
+			await tick();
+
+			// The fork's own turn, start to finish, with the tab in the background.
+			const turn = (isStreaming: boolean) =>
+				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null });
+			turn(true);
+			await tick();
+			turn(false);
+			await tick();
+
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+			expect(forks).toBe(1);
 		} finally {
 			document.hasFocus = hasFocus;
 		}

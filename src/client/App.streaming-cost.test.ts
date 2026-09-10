@@ -150,6 +150,7 @@ function initialView(selectedTurns: number): ControllerView {
 		draft: "",
 		connection: "connected",
 		busy: "idle",
+		sending: false,
 		error: null,
 		models: [],
 		modelSetting: false,

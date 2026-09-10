@@ -24,6 +24,20 @@ export interface ControllerView {
 	draft: string;
 	connection: "connecting" | "connected" | "reconnecting";
 	busy: "idle" | "listing" | "attaching" | "submitting" | "aborting" | "compacting" | "editing-externally";
+	/**
+	 * A prompt this controller sent is still in flight: `submit`'s single POST,
+	 * or `forkAndSubmit`'s whole abort/fork-points/fork/attach/prompt round trip.
+	 * Those two own it between them, and both re-entrancy guards -- the one in
+	 * each of them, and `send()`'s in `App.svelte` -- read it (OW-kelede).
+	 *
+	 * `busy` cannot serve: it is one global slot every operation writes, and two
+	 * of them clear it out from under a live POST. `abort` publishes `"aborting"`
+	 * and then `"idle"` in its `finally`, and `attachAndSelect` does the same with
+	 * `"attaching"` -- so pressing Stop on a turn that is already streaming (D2
+	 * lets SSE precede the POST response) left `busy: "idle"` with the prompt
+	 * still outstanding, and a second press went through.
+	 */
+	sending: boolean;
 	error: string | null;
 	/** Live options for the selected empty conversation only. */
 	models: ModelInfo[];
@@ -121,6 +135,7 @@ export function createController(
 		draft: "",
 		connection: "connecting",
 		busy: "idle",
+		sending: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -536,8 +551,9 @@ export function createController(
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
-			// with it is nobody's intent.
-			if (busyIs("submitting")) return false;
+			// with it is nobody's intent. Read off `sending` rather than `busy`,
+			// which an abort or an attach clears mid-POST (OW-kelede).
+			if (view.sending) return false;
 			if (!view.draft) return false;
 			const text = view.draft;
 			// Track the target session through a possible rename (D9) while the
@@ -552,7 +568,7 @@ export function createController(
 				if (sessionKey(from) === sessionKey(ref)) ref = to;
 			};
 			renameListeners.add(onRename);
-			publish({ busy: "submitting", error: null });
+			publish({ busy: "submitting", sending: true, error: null });
 			try {
 				await api.prompt(selected, { text });
 				if (!disposed) {
@@ -571,7 +587,7 @@ export function createController(
 				return false;
 			} finally {
 				renameListeners.delete(onRename);
-				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
+				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
 		},
 		async editDraft() {
@@ -593,6 +609,14 @@ export function createController(
 				publish({ error: "Select a session before submitting a prompt." });
 				return null;
 			}
+			// One send at a time, the rule `submit` above states and this path did
+			// not have (OW-kelede). Two fast presses in edit mode started two whole
+			// forks -- two aborts against the parent, two forks, two attaches and
+			// two identical prompts -- and worse: the second one's failure took the
+			// *first* fork's follow and badge arming back down with it, because on
+			// a renaming backend both presses' armed keys had followed onto the
+			// same fork.
+			if (view.sending) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
 			// Same rename hazard `submit` above carries (D9), and the fork adds a
@@ -610,7 +634,7 @@ export function createController(
 			// selection back onto itself (OW-mifuki). Reassigned at the bump below,
 			// where this call becomes the newest intent itself.
 			let intent = selectionIntent;
-			publish({ busy: "submitting", error: null });
+			publish({ busy: "submitting", sending: true, error: null });
 			try {
 				// Stop a running turn before forking it, on every backend. Not a
 				// first cut any more -- the owner took it deliberately (D15,
@@ -643,19 +667,30 @@ export function createController(
 				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
 				// The prompt landed, so the composer must stop offering text that has
-				// already been sent -- unconditionally, because the draft is global
-				// and a user who clicked away mid-POST would otherwise be looking at
-				// another session with this text under a Send button. Only the error
-				// clear is gated: a session clicked to in that window may have raised
-				// one of its own, and this fork has no claim on that slot.
-				publish({ draft: "", ...(intent === selectionIntent ? { error: null } : {}) });
+				// already been sent -- but only if it is still that text. The
+				// textarea stays live through a round trip four requests deep, so
+				// anything typed while waiting is the next prompt, not this one
+				// (OW-nasofa's rule, brought to this path by OW-kelede). It still
+				// covers the reason the clear used to be unconditional: the draft is
+				// global, and a user who clicked away mid-POST would otherwise be
+				// looking at another session with already-sent text under a Send
+				// button -- clicking away does not change the draft, so that case
+				// still clears.
+				//
+				// The error clear is gated on the intent instead: a session clicked
+				// to in that window may have raised one of its own, and this fork has
+				// no claim on that slot.
+				publish({
+					...(view.draft === text ? { draft: "" } : {}),
+					...(intent === selectionIntent ? { error: null } : {}),
+				});
 				return attached.ref;
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 				return null;
 			} finally {
 				renameListeners.delete(onRename);
-				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
+				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
 		},
 		async abort() {

@@ -988,6 +988,93 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(other);
 	});
 
+	/**
+	 * The rule `submit` has always had, brought to the fork path (OW-kelede).
+	 * Two fast presses in edit mode -- Ctrl-Enter twice, or Enter then a click on
+	 * the fork button -- used to start two whole forks, each one an abort against
+	 * the parent, a `fork-points`, a `fork`, an `attach` and a `prompt`.
+	 */
+	it("forks once when the fork path is entered twice while the first is still in flight (OW-kelede)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const forking = deferred<SessionRef>();
+		api.fork.mockReturnValue(forking.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const first = controller.forkAndSubmit(0);
+		const second = controller.forkAndSubmit(0);
+		await settle();
+
+		expect(api.forkPoints).toHaveBeenCalledOnce();
+		expect(api.fork).toHaveBeenCalledOnce();
+		forking.resolve(forkedRef);
+		expect(await second).toBeNull();
+		expect(await first).toEqual(forkedRef);
+		expect(api.prompt).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
+	/**
+	 * The fork's round trip is four requests deep where a plain submit is one, so
+	 * the window in which the user types the next prompt into a live textarea is
+	 * that much wider -- and the clear used to be unconditional and wipe it
+	 * (OW-kelede). `submit`'s rule covers both cases at once: a click away does
+	 * not change the draft, so that one still clears.
+	 */
+	it("keeps a draft typed while the fork was in flight (OW-kelede)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		expect(api.prompt).toHaveBeenCalledOnce();
+		controller.setDraft("and the next thing");
+		prompt.resolve();
+
+		expect(await submitted).toEqual(forkedRef);
+		expect(controller.getView().draft).toBe("and the next thing");
+		controller.dispose();
+	});
+
+	/**
+	 * `busy` is one global slot, so it never was a sound in-flight signal
+	 * (OW-kelede): prompt a session, watch the turn start streaming ahead of the
+	 * POST's own response (D2), press Stop, and `abort`'s `finally` publishes
+	 * `"idle"` over the `"submitting"` of a prompt that is still outstanding.
+	 * The guards read the flag the two send paths own instead.
+	 */
+	it("refuses a second submit after an abort cleared busy under the first (OW-kelede)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("hello");
+		const first = controller.submit();
+		await settle();
+
+		await controller.abort();
+		expect(controller.getView().busy).toBe("idle");
+		const second = controller.submit();
+
+		expect(api.prompt).toHaveBeenCalledOnce();
+		prompt.resolve();
+		expect(await second).toBe(false);
+		await first;
+		controller.dispose();
+	});
+
 	it("keeps the draft, and reports, when there is no fork point at that ordinal (OW-hezidi)", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
