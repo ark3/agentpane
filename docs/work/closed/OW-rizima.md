@@ -17,3 +17,5 @@ Reflowing them is mechanical and makes every line of those files show up in `git
 ## Done when
 
 The decision on each is recorded: TRACKING's fate in its own header or in the commit that removes it, and the reflow either done or the exemption named in the AGENTS.md sentence that states the rule.
+
+**Done** in `4d8b390`: reduced `docs/TRACKING.md` from the 993-line migration record to a 78-line historical rationale that preserves the storage, identifier, migration, and tooling decisions while leaving the full procedural history in git. Added a narrow `AGENTS.md` exemption for untouched hard-wrapped legacy prose; new prose and substantively edited paragraphs remain sentence-per-line. A cold reader grounded the choices, an adversarial reader checked the finished wording and its corrections were incorporated, and `git diff --check` passed. Documentation only, so `bun run check` was not required or run.
