@@ -550,6 +550,78 @@ describe("lifecycle", () => {
 		expect(sessions.liveRefs()).toEqual([canonical]);
 	});
 
+	it("rechecks canonical disposal after a refreshed metadata lookup crosses a second close", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const alias: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const refreshedLookupEntered = deferred();
+		const releaseRefreshedLookup = deferred();
+		let gets = 0;
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => {
+				gets++;
+				if (gets === 3) {
+					refreshedLookupEntered.resolve();
+					await releaseRefreshedLookup.promise;
+				}
+				return summary;
+			},
+			preview: async () => [],
+		};
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi } },
+			broadcaster,
+		);
+		await sessions.attach(canonical);
+		const first = pi.created[0];
+		if (!first) throw new Error("no first adapter");
+		const firstDisposal = deferred();
+		const disposeFirst = first.dispose.bind(first);
+		first.dispose = async () => {
+			await firstDisposal.promise;
+			await disposeFirst();
+		};
+
+		const closingFirst = sessions.close(canonical);
+		const throughAlias = sessions.attach(alias);
+		firstDisposal.resolve();
+		await closingFirst;
+		await refreshedLookupEntered.promise;
+
+		await sessions.attach(canonical);
+		const second = pi.created[1];
+		if (!second) throw new Error("no second adapter");
+		const secondDisposal = deferred();
+		const disposeSecond = second.dispose.bind(second);
+		second.dispose = async () => {
+			await secondDisposal.promise;
+			await disposeSecond();
+		};
+		const closingSecond = sessions.close(canonical);
+
+		releaseRefreshedLookup.resolve();
+		for (let i = 0; i < 4; i++) await Promise.resolve();
+
+		expect(pi.created).toHaveLength(2);
+
+		secondDisposal.resolve();
+		await closingSecond;
+		const replacement = await throughAlias;
+
+		expect(pi.created).toHaveLength(3);
+		expect(replacement).toBe(pi.created[2]);
+		expect(sessions.canonicalRef(alias)).toEqual(canonical);
+		expect(sessions.adapterFor(canonical)).toBe(replacement);
+		expect(sessions.liveRefs()).toEqual([canonical]);
+	});
+
 	it("disposes an adapter whose start() failed, rather than leaking the subprocess", async () => {
 		// PiAdapter.start() spawns first and only then round-trips a readiness
 		// probe, so a rejection can leave a live agent behind. Dropping the

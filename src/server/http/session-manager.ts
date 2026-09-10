@@ -335,21 +335,26 @@ export class SessionManager {
 		if (!session) {
 			// Not one of ours yet -- it must exist in the backend's store, and we
 			// need its workspace before we can spawn anything (D7).
-			let summary = await this.#index.get(ref);
-			if (!summary) throw new UnknownSessionError(ref);
-			if (pending.torndown) throw new UnknownSessionError(ref);
-			const canonicalDisposal = this.#disposing.get(sessionKey(summary.ref));
-			if (canonicalDisposal) {
+			let lookupRef = ref;
+			let summary: SessionSummary;
+			for (;;) {
+				const found = await this.#index.get(lookupRef);
+				if (!found) throw new UnknownSessionError(lookupRef);
+				summary = found;
+				if (this.#shuttingDown) throw new ServerShuttingDownError();
+				if (pending.torndown) throw new UnknownSessionError(ref);
+
+				// A lookup can canonicalize an unseen spelling onto a session already
+				// closing. Wait for that owner, then look up its authoritative ref and
+				// repeat: the lookup itself is asynchronous, so another disposal may
+				// have begun (or it may return a different canonical identity) before
+				// it completes. Only a disposal-free result may reach arbitration.
+				const canonicalDisposal = this.#disposing.get(sessionKey(summary.ref));
+				if (!canonicalDisposal) break;
 				await canonicalDisposal.promise;
 				if (this.#shuttingDown) throw new ServerShuttingDownError();
 				if (pending.torndown) throw new UnknownSessionError(ref);
-				// Match attach's pre-index disposal path: the disposed session's own
-				// ref is authoritative, and a fresh lookup supplies the metadata for
-				// whatever identity replaces it. The awaits above and here also let
-				// every alias waiting on this disposal reach the arbitration below.
-				summary = await this.#index.get(canonicalDisposal.ref);
-				if (!summary) throw new UnknownSessionError(canonicalDisposal.ref);
-				if (pending.torndown) throw new UnknownSessionError(ref);
+				lookupRef = canonicalDisposal.ref;
 			}
 			if (!summary.cwd) {
 				throw new Error(
