@@ -109,12 +109,18 @@ export class FakeClaudeProcess {
 	private exitHandlers: ((code: number | null, signal: string | null, error?: Error) => void)[] =
 		[];
 
-	constructor(private readonly spawned = true) {}
+	constructor(private spawned = true) {}
 
 	/** Register for the child's successful spawn; failed-spawn fakes never call this. */
 	onSpawn(cb: () => void): void {
 		this.spawnHandlers.push(cb);
 		if (this.spawned) queueMicrotask(cb);
+	}
+
+	spawn(): void {
+		if (this.spawned) return;
+		this.spawned = true;
+		for (const handler of [...this.spawnHandlers]) handler();
 	}
 
 	write(line: string): void {

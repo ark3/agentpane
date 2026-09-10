@@ -204,6 +204,20 @@ describe("ClaudeAdapter lifecycle", () => {
 		);
 	});
 
+	it("rejects start when disposed before the child finishes spawning", async () => {
+		const proc = new FakeClaudeProcess(false);
+		const adapter = new ClaudeAdapter(VIRTUAL_REF, {
+			spawn: () => proc,
+			newSessionId: () => "minted-1",
+		});
+		const starting = adapter.start({ cwd: "/workspace" });
+
+		await adapter.dispose();
+		proc.spawn();
+
+		await expect(starting).rejects.toThrow("disposed during startup");
+	});
+
 	it("surfaces a child exit as an error", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });

@@ -162,10 +162,12 @@ export class ClaudeAdapter implements BackendAdapter {
 			}
 			this.currentRef = { backend: "claude", id: opts.resumeId };
 			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
+			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		} else {
 			const sessionId = this.mintSessionId();
 			this.currentRef = { backend: "claude", id: sessionId };
 			await this.attachProcess({ cwd: opts.cwd, sessionId });
+			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		}
 	}
 
@@ -413,7 +415,10 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.rejectPendingControls(new Error("claude adapter forked; control channel replaced"));
 		await previous.proc.kill();
 		if (this.disposed) throw new Error("claude adapter disposed");
-		await this.attachProcess(spawnOpts);
+		// Initial startup is gated on OS-level spawn, but a fork has already
+		// published this adapter. Preserve its existing asynchronous error path
+		// rather than changing fork failure semantics as part of startup readiness.
+		void this.attachProcess(spawnOpts).catch(() => {});
 	}
 
 	private handleLine(line: string): void {
