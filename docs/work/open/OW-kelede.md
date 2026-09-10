@@ -17,8 +17,10 @@ The dispatched reader drove the real controller against a fake api and got two f
 This is the same defect OW-nasofa named, on the path OW-nasofa did not cover.
 
 **The draft is wiped.**
-`forkAndSubmit`'s success path publishes `publish({ draft: "", error: null })` unconditionally.
-`submit()` now clears the draft only when `view.draft` still equals the text that was sent.
+`forkAndSubmit`'s success path publishes `publish({ draft: "", ...(intent === selectionIntent ? { error: null } : {}) })`.
+OW-mifuki gated the error clear on the intent and left the draft clear unconditional, with a docblock above it giving the reason: the draft is global, so a user who clicked away mid-POST would otherwise be looking at another session with already-sent text under a Send button.
+That reason survives the fix this card wants, and the docblock has to move with the code rather than be left standing against it.
+`submit()`'s rule — clear only when `view.draft` still equals the text that was sent — covers the click-away case too, because clicking away does not change the draft; what it stops is the *typed* replacement being wiped.
 The fork's round trip is four requests deep where a plain submit is one, so the window in which a user can type the next prompt and lose it is far wider here.
 
 **It is now destructive, not just wasteful.**
