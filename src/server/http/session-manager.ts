@@ -342,6 +342,29 @@ export class SessionManager {
 					`session ${sessionKey(ref)} has no recorded workspace; cannot spawn a sandboxed agent for it`,
 				);
 			}
+			// The lookup above can reveal that a spelling the manager has never seen
+			// is really a canonical session another request already owns. Arbitrate
+			// on that identity before inserting anything: overwriting either table
+			// would orphan the winner's adapter or let two startups share one file.
+			if (pending.torndown) throw new UnknownSessionError(ref);
+			const requestedKey = sessionKey(ref);
+			const canonicalKey = sessionKey(summary.ref);
+			const canonicalSession = this.#lookup(summary.ref);
+			if (canonicalSession?.adapter) {
+				if (requestedKey !== sessionKey(canonicalSession.ref)) {
+					this.#aliases.set(requestedKey, sessionKey(canonicalSession.ref));
+				}
+				return canonicalSession;
+			}
+			const canonicalPending = this.#attaching.get(canonicalKey);
+			if (canonicalPending && canonicalPending !== pending) {
+				const winner = await canonicalPending.promise;
+				if (pending.torndown) throw new UnknownSessionError(ref);
+				if (requestedKey !== sessionKey(winner.ref)) {
+					this.#aliases.set(requestedKey, sessionKey(winner.ref));
+				}
+				return winner;
+			}
 			session = {
 				ref: summary.ref,
 				cwd: summary.cwd,
@@ -368,9 +391,11 @@ export class SessionManager {
 			const canonicalKey = sessionKey(session.ref);
 			if (requestedKey !== canonicalKey) {
 				this.#aliases.set(requestedKey, canonicalKey);
-				this.#attaching.set(canonicalKey, pending);
 				addedAlias = [requestedKey, canonicalKey];
 			}
+			// No await separates the arbitration above from this claim, so set()
+			// cannot replace a competing owner of the canonical identity.
+			this.#attaching.set(canonicalKey, pending);
 			this.#sessions.set(canonicalKey, session);
 		}
 
@@ -403,7 +428,9 @@ export class SessionManager {
 			if (pending.torndown) throw new UnknownSessionError(ref);
 		} catch (err) {
 			for (const off of bound.subscriptions.splice(0)) off();
-			if (!existing) this.#sessions.delete(sessionKey(bound.ref));
+			if (!existing && this.#sessions.get(sessionKey(bound.ref)) === bound) {
+				this.#sessions.delete(sessionKey(bound.ref));
+			}
 			if (addedAlias && this.#aliases.get(addedAlias[0]) === addedAlias[1]) {
 				this.#aliases.delete(addedAlias[0]);
 			}

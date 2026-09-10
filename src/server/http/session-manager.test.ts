@@ -154,6 +154,111 @@ describe("attach", () => {
 		expect(sessions.adapterFor(REF)).toBeUndefined();
 		expect(sessions.liveRefs()).toEqual([]);
 	});
+
+	it("reuses an attached canonical session reached later through another spelling", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const alias: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi } },
+			broadcaster,
+		);
+
+		const first = await sessions.attach(canonical);
+		const throughAlias = await sessions.attach(alias);
+
+		expect(throughAlias).toBe(first);
+		expect(pi.created).toHaveLength(1);
+		expect(sessions.canonicalRef(alias)).toEqual(canonical);
+		expect(sessions.liveRefs()).toEqual([canonical]);
+		expect(sessions.adapterFor(canonical)).toBe(first);
+	});
+
+	it("collapses concurrent distinct aliases after the index canonicalizes them", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const aliasA: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const aliasB: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi } },
+			broadcaster,
+		);
+
+		const [first, second] = await Promise.all([
+			sessions.attach(aliasA),
+			sessions.attach(aliasB),
+		]);
+
+		expect(second).toBe(first);
+		expect(pi.created).toHaveLength(1);
+		expect(sessions.canonicalRef(aliasA)).toEqual(canonical);
+		expect(sessions.canonicalRef(aliasB)).toEqual(canonical);
+		expect(sessions.liveRefs()).toEqual([canonical]);
+		expect(sessions.adapterFor(canonical)).toBe(first);
+	});
+
+	it("a failed canonical winner leaves no state owned by either concurrent alias", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const aliasA: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const aliasB: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		const failing = new FakeAdapterFactory({ failStart: "canonical startup failed" });
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi: failing } },
+			broadcaster,
+		);
+
+		const results = await Promise.allSettled([
+			sessions.attach(aliasA),
+			sessions.attach(aliasB),
+		]);
+
+		expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+		expect(failing.created).toHaveLength(1);
+		expect(sessions.canonicalRef(aliasA)).toEqual(aliasA);
+		expect(sessions.canonicalRef(aliasB)).toEqual(aliasB);
+		expect(sessions.adapterFor(canonical)).toBeUndefined();
+		expect(sessions.liveRefs()).toEqual([]);
+	});
 });
 
 describe("an adapter that renames itself (the Pi contract)", () => {
