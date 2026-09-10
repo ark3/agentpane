@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # A session closed server-side never leaves the client's state, so the list keeps drawing it live and preview short-circuits into a stale view

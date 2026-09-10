@@ -1,5 +1,5 @@
 ---
-labels: [change, unverified]
+labels: [change, unverified, now]
 ---
 
 # What Claude Code does with a mid-turn prompt has never been observed, and D16 needs it settled before the adapter is changed either way

@@ -100,10 +100,16 @@ Every card carries exactly one kind, given to `card new --label`:
 - `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
 - `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
 
-Two cross-cutting labels may follow that kind.
+Three cross-cutting labels may follow that kind.
 `work-laptop` gates live Pi evidence to the machine described under "Evidence".
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
+
+`now` marks the cards to execute next, and `card list --open --label now` is that queue.
+It is the deck's only priority signal: card has no priority axis, and `--ready` cannot serve as one here because nearly every open card is unblocked, so a listing that selects everything selects nothing.
+Roughly five cards carry `now` at a time, restocked when it empties; the cost of the label falls on those five rather than on every card written, which is the whole reason it is a label and not a field on all of them.
+It rides on top of the kind and overrides it: a `deferral` carrying `now` is deliberate, and says this particular deferral has become worth doing ahead of the queue.
+Cards without it are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
 
 ### Committing a card you authored
 

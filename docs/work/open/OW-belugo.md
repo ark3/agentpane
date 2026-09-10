@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [deferral, now]
 ---
 
 # `real-dirs.smoke.test.ts` walks the developer's home directory inside `bun run check`, so the gate's result depends on machine state

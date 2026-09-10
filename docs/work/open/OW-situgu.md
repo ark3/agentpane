@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # Opening the fork picker on a Claude Code session that has not taken a turn is a 500, where Pi answers an empty list and Codex answers from the thread

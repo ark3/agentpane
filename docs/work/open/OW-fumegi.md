@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # A cross-site page can attach and spawn agents through GET routes, because the origin check trusts a missing `Origin` and a Pi id is opened wherever it points

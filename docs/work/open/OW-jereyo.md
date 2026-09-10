@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # Closing a session and re-attaching it before dispose settles spawns a second agent on the same session file

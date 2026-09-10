@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # A server-side failure reaches nobody: nothing under `src/server/http/` logs, `ServerShuttingDownError` maps to a 500, and a bad `cwd` is accepted and fails later

@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # The Claude Code adapter resolves `start()` before its child has proven it is alive, so a failed spawn becomes an attached session that cannot take a prompt
