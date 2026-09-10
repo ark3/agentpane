@@ -50,6 +50,11 @@ function previewAssistant(text: string): SessionPreviewTurn {
 	};
 }
 
+/** Let every microtask and the timer-free tail of an in-flight refresh run out. */
+function settle(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function deferred<T>() {
 	let resolve: (value: T) => void;
 	let reject: (reason?: unknown) => void;
@@ -461,6 +466,82 @@ describe("client controller", () => {
 		prompt.resolve();
 		await Promise.all([first, second]);
 		expect(controller.getView()).toMatchObject({ draft: "", busy: "idle" });
+	});
+
+	it("keeps the view error through a broadcast-driven re-list (OW-dinuwu)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.submit();
+		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
+
+		api.emit({ type: "sessions-changed" });
+		await settle();
+
+		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
+		controller.dispose();
+	});
+
+	it("leaves busy at submitting across a broadcast-driven re-list (OW-dinuwu)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("hello");
+		const submitted = controller.submit();
+
+		api.emit({ type: "sessions-changed" });
+		await settle();
+
+		expect(controller.getView().busy).toBe("submitting");
+		prompt.resolve();
+		await submitted;
+		expect(controller.getView().busy).toBe("idle");
+		controller.dispose();
+	});
+
+	// The server broadcasts `sessions-changed` at every turn boundary (OW-furinu),
+	// so one lands inside every prompt's round trip -- and the re-list it triggers
+	// used to clear `busy` under the guard above and let the second press through
+	// (OW-dinuwu).
+	it("ignores a second submit after the in-flight prompt's own re-list (OW-dinuwu)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("hello");
+		const first = controller.submit();
+
+		api.emit({ type: "sessions-changed" });
+		await settle();
+		const second = controller.submit();
+
+		expect(api.prompt).toHaveBeenCalledOnce();
+		prompt.resolve();
+		await Promise.all([first, second]);
+		controller.dispose();
+	});
+
+	it("surfaces a failure to a Refresh that joined a broadcast-driven re-list (OW-dinuwu)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		const listed = deferred<SessionSummary[]>();
+		api.listSessions.mockReturnValueOnce(listed.promise);
+		api.emit({ type: "sessions-changed" });
+
+		// The press joins the silent listing rather than starting its own, so this
+		// is the only thing that can report the failure to the user.
+		const pressed = controller.refreshSessions();
+		listed.reject(new Error("list is down"));
+		await pressed;
+
+		expect(controller.getView().error).toBe("list is down");
+		controller.dispose();
 	});
 
 	it("keeps a draft typed while the prompt is in flight", async () => {

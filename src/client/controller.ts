@@ -118,6 +118,7 @@ export function createController(
 	let modelLoadStartedForSelection: number | null = null;
 	const pendingModelSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
+	let refreshSurfacing = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const recoveries = new Map<string, Promise<void>>();
@@ -188,10 +189,29 @@ export function createController(
 	// Always lists the whole corpus: the workspace filter is a client-side view
 	// over these summaries now (OW-39), not a server round-trip -- which also
 	// retires OW-3's per-keystroke enumeration at the source.
-	async function refreshSessions(): Promise<void> {
-		if (refreshInFlight) return refreshInFlight;
+	//
+	// `surface` separates the two callers (OW-dinuwu). A gesture -- the Refresh
+	// button, or the startup list -- owns the status line and the error slot and
+	// says so. A `sessions-changed` broadcast owns neither, and it is far more
+	// frequent than it looks: the server fires it at every turn boundary to keep
+	// the `updatedAt` sort moving (OW-furinu), so one lands inside the
+	// `"submitting"` of every prompt, not just the first one's rename. Surfacing
+	// that wiped errors the user had not read yet and wrote `busy: "listing"`
+	// over the `"attaching"` or `"submitting"` of the very operation that caused
+	// the broadcast -- which defeated `submit`'s one-prompt-at-a-time guard
+	// (OW-nasofa) outright.
+	async function refreshSessions(surface: boolean): Promise<void> {
+		if (refreshInFlight) {
+			// A press that joins a listing already in flight still owns the error
+			// slot; silence is only for the listings nobody asked for. Without this
+			// a Refresh during a broadcast re-list -- likely, since turns broadcast
+			// -- would report nothing at all when the listing fails.
+			if (surface) refreshSurfacing = true;
+			return refreshInFlight;
+		}
+		refreshSurfacing = surface;
 		const request = (async () => {
-			publish({ busy: "listing", error: null });
+			if (refreshSurfacing) publish({ busy: "listing", error: null });
 			// Refresh has to move the transcript too, not just the sidebar (OW-76):
 			// before this, pressing it left a stale preview under a freshened list.
 			// Concurrent with the listing -- two independent reads -- and awaited so
@@ -201,12 +221,12 @@ export function createController(
 				const sessionsWhenListed = view.state.sessions;
 				const summaries = await api.listSessions(undefined);
 				if (!disposed) {
-					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed), error: null });
+					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed) });
 				}
 			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
+				if (!disposed && refreshSurfacing) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && view.busy === "listing") publish({ busy: "idle" });
+				if (!disposed && refreshSurfacing && view.busy === "listing") publish({ busy: "idle" });
 			}
 			await previewRefresh;
 		})();
@@ -374,7 +394,7 @@ export function createController(
 				void loadModelsForSelected(selectionIntent);
 			}
 			for (const ref of result.recover) void recover(ref);
-			if (result.refreshSessions) void refreshSessions();
+			if (result.refreshSessions) void refreshSessions(false);
 		},
 		onOpen() {
 			publish({ connection: "connected" });
@@ -399,13 +419,13 @@ export function createController(
 			renameListeners.add(listener);
 			return () => renameListeners.delete(listener);
 		},
-		refreshSessions,
+		refreshSessions: () => refreshSessions(true),
 		refreshPreview,
 		async start() {
 			if (disposed || started) return;
 			started = true;
 			connection = api.connect(handlers);
-			await refreshSessions();
+			await refreshSessions(true);
 		},
 		dispose() {
 			if (disposed) return;
