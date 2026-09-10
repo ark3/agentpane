@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # The Claude Code adapter resolves `start()` before its child has proven it is alive, so a failed spawn becomes an attached session that cannot take a prompt
@@ -20,3 +21,7 @@ If nothing arrives before the first prompt, a bounded wait on the child's `spawn
 
 - A test in `src/server/adapters/claude/adapter.test.ts` starts the adapter against a process whose spawn fails, and asserts `start()` rejects; it fails before the change.
 - A session-manager-level test, or an extension of the existing "teardown racing a startup" cases in `src/server/http/session-manager.test.ts`, shows the failed Claude startup leaves nothing in the session table.
+
+## Close note
+
+ClaudeAdapter now waits for the child process OS spawn event before start() resolves, so asynchronous direnv/sbox/ENOENT spawn failures reject startup and SessionManager unwinds without registering a live session. Added adapter-level and real-Claude-factory SessionManager regressions; both failed before the production change because start/attach resolved, then passed after it. Review added and verified disposal-during-spawn rejection while preserving the pre-existing asynchronous fork replacement contract. `bun run check` passed with clean typecheck/Svelte diagnostics and 967 tests.
