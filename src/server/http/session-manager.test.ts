@@ -498,6 +498,58 @@ describe("lifecycle", () => {
 		expect(aliasAdapter).toBe(canonicalAdapter);
 	});
 
+	it("canonicalizes unseen aliases before replacing a session that is still disposing", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/a.jsonl",
+		};
+		const aliasA: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl",
+		};
+		const aliasB: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl",
+		};
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		sessions = new SessionManager(
+			{ index: canonicalizingIndex, adapters: { pi } },
+			broadcaster,
+		);
+		await sessions.attach(canonical);
+		const first = pi.created[0];
+		if (!first) throw new Error("no adapter");
+		const gate = deferred();
+		const dispose = first.dispose.bind(first);
+		first.dispose = async () => {
+			await gate.promise;
+			await dispose();
+		};
+
+		const closing = sessions.close(canonical);
+		const throughAliasA = sessions.attach(aliasA);
+		const throughAliasB = sessions.attach(aliasB);
+		for (let i = 0; i < 4; i++) await Promise.resolve();
+
+		expect(pi.created).toHaveLength(1);
+
+		gate.resolve();
+		await closing;
+		const [replacementA, replacementB] = await Promise.all([throughAliasA, throughAliasB]);
+
+		expect(first.disposed).toBe(true);
+		expect(replacementB).toBe(replacementA);
+		expect(pi.created).toHaveLength(2);
+		expect(sessions.canonicalRef(aliasA)).toEqual(canonical);
+		expect(sessions.canonicalRef(aliasB)).toEqual(canonical);
+		expect(sessions.liveRefs()).toEqual([canonical]);
+	});
+
 	it("disposes an adapter whose start() failed, rather than leaking the subprocess", async () => {
 		// PiAdapter.start() spawns first and only then round-trips a readiness
 		// probe, so a rejection can leave a live agent behind. Dropping the

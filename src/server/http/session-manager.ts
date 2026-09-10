@@ -335,8 +335,22 @@ export class SessionManager {
 		if (!session) {
 			// Not one of ours yet -- it must exist in the backend's store, and we
 			// need its workspace before we can spawn anything (D7).
-			const summary = await this.#index.get(ref);
+			let summary = await this.#index.get(ref);
 			if (!summary) throw new UnknownSessionError(ref);
+			if (pending.torndown) throw new UnknownSessionError(ref);
+			const canonicalDisposal = this.#disposing.get(sessionKey(summary.ref));
+			if (canonicalDisposal) {
+				await canonicalDisposal.promise;
+				if (this.#shuttingDown) throw new ServerShuttingDownError();
+				if (pending.torndown) throw new UnknownSessionError(ref);
+				// Match attach's pre-index disposal path: the disposed session's own
+				// ref is authoritative, and a fresh lookup supplies the metadata for
+				// whatever identity replaces it. The awaits above and here also let
+				// every alias waiting on this disposal reach the arbitration below.
+				summary = await this.#index.get(canonicalDisposal.ref);
+				if (!summary) throw new UnknownSessionError(canonicalDisposal.ref);
+				if (pending.torndown) throw new UnknownSessionError(ref);
+			}
 			if (!summary.cwd) {
 				throw new Error(
 					`session ${sessionKey(ref)} has no recorded workspace; cannot spawn a sandboxed agent for it`,
@@ -346,7 +360,6 @@ export class SessionManager {
 			// is really a canonical session another request already owns. Arbitrate
 			// on that identity before inserting anything: overwriting either table
 			// would orphan the winner's adapter or let two startups share one file.
-			if (pending.torndown) throw new UnknownSessionError(ref);
 			const requestedKey = sessionKey(ref);
 			const canonicalKey = sessionKey(summary.ref);
 			const canonicalSession = this.#lookup(summary.ref);
