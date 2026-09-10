@@ -34,6 +34,34 @@ export function initialClientState(): ClientState {
 	return { summaries: [], selected: null, sessions: {} };
 }
 
+/** Replace the disk listing and forget unchanged live views the server now reports as closed. */
+export function replaceSessionSummaries(
+	state: ClientState,
+	summaries: SessionSummary[],
+	sessionsWhenListed: Readonly<Record<string, SessionView>>,
+): ClientState {
+	let sessions = state.sessions;
+	let nextSummaries = summaries;
+	for (const [index, summary] of summaries.entries()) {
+		const key = sessionKey(summary.ref);
+		const listedView = sessionsWhenListed[key];
+		const currentView = sessions[key];
+		if (summary.status !== "detached") continue;
+		if (currentView !== undefined && currentView !== listedView) {
+			const current = state.summaries.find((item) => sessionKey(item.ref) === key);
+			if (current !== undefined) {
+				if (nextSummaries === summaries) nextSummaries = [...summaries];
+				nextSummaries[index] = current;
+			}
+			continue;
+		}
+		if (listedView === undefined) continue;
+		if (sessions === state.sessions) sessions = { ...sessions };
+		delete sessions[key];
+	}
+	return { ...state, summaries: nextSummaries, sessions };
+}
+
 function emptySession(ref: SessionRef): SessionView {
 	return {
 		ref,

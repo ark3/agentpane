@@ -517,6 +517,47 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
 	});
 
+	it("forgets a cached live session when a fresh listing reports it detached", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
+		api.listSessions.mockResolvedValueOnce([detached]);
+
+		api.emit({ type: "sessions-changed" });
+		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([detached]));
+
+		expect(controller.getView().state.sessions[sessionKey(ref)]).toBeUndefined();
+		expect(controller.getView().state.summaries[0]?.isStreaming).toBe(false);
+		api.preview.mockClear();
+		await controller.preview(ref);
+		expect(api.preview).toHaveBeenCalledWith(ref);
+	});
+
+	it("does not forget or demote a session updated while a detached listing is in flight", async () => {
+		const api = new FakeApi();
+		const listed = deferred<SessionSummary[]>();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+		api.listSessions.mockClear();
+		api.listSessions.mockReturnValueOnce(listed.promise);
+
+		api.emit({ type: "sessions-changed" });
+		api.emit({ type: "sessions-changed" });
+		api.emit({ type: "snapshot", session: ref, seq: 2, messages: [], isStreaming: false, compaction: null, model: null });
+		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
+		listed.resolve([detached]);
+		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([summary(ref)]));
+
+		expect(api.listSessions).toHaveBeenCalledTimes(1);
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+		expect(controller.getView().state.sessions[sessionKey(ref)]?.seq).toBe(2);
+	});
+
 	it("rejects a relative workspace before creating a session", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

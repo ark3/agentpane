@@ -14,6 +14,7 @@ import {
 	clearSessionError,
 	initialClientState,
 	reduceServerEvent,
+	replaceSessionSummaries,
 	setSessionCompaction,
 	type ClientState,
 } from "./session-state.ts";
@@ -197,8 +198,11 @@ export function createController(
 			// the button's promise covers both.
 			const previewRefresh = refreshPreview();
 			try {
+				const sessionsWhenListed = view.state.sessions;
 				const summaries = await api.listSessions(undefined);
-				if (!disposed) publish({ state: { ...view.state, summaries }, error: null });
+				if (!disposed) {
+					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed), error: null });
+				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
