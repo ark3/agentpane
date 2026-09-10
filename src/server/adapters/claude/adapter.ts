@@ -11,10 +11,12 @@
  * - There is no request/response RPC for turns: a turn is admitted by writing
  *   a user-message line to stdin, and only the `result` event ends it. The
  *   CLI queues stdin messages sent mid-turn, so `submit()` does not gate.
- *   **D16 overturns the clause after "so"**: a mid-turn submit must steer or
- *   be rejected, never be queued silently, and Claude cannot steer. Gating
- *   this is OW-jihete. The queueing itself is inferred from this comment and
- *   never observed live -- no run in MANUAL_TESTING sends a mid-turn prompt.
+ *   **Do not trust the clause after "so"** -- D16 requires a mid-turn submit
+ *   to steer or be rejected, never queued silently, and whether Claude can
+ *   steer is unknown. The queueing here is inferred from this comment alone
+ *   and never observed: no run in MANUAL_TESTING sends a mid-turn prompt, and
+ *   the control-subtype probe never tried a steering one. OW-jihete observes
+ *   it first and then changes this or retires the claim.
  * - The session id is chosen by US at spawn (`--session-id`, settled live
  *   2026-08-25): a fresh session and a fork both know their id synchronously,
  *   so nothing waits on the `init` event (which only arrives with the first

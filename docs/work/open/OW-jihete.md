@@ -1,26 +1,50 @@
 ---
-labels: [change]
+labels: [change, unverified]
 ---
 
-# A mid-turn Claude prompt is queued silently, which D16 requires be a rejection instead
+# What Claude Code does with a mid-turn prompt has never been observed, and D16 needs it settled before the adapter is changed either way
 
-`src/server/adapters/claude/adapter.ts` — the module docblock's "CLI queues stdin messages sent mid-turn, so `submit()` does not gate", and `submit` at `:188-202` ("Admission is the stdin write; the CLI queues messages sent mid-turn"); `src/server/adapters/claude/reducer.ts`, `beginTurn`.
+`src/server/adapters/claude/adapter.ts` — the module docblock's "CLI queues stdin messages sent mid-turn, so `submit()` does not gate", and `submit` at `:188-202` ("Admission is the stdin write; the CLI queues messages sent mid-turn"); `src/server/adapters/claude/reducer.ts`, `beginTurn` at `:144`; `docs/MANUAL_TESTING.md`, the OW-yilabe control-channel table.
 
 D16 makes a mid-turn `submit()` mean *steer*, and requires an adapter whose backend cannot steer to reject rather than do something else.
-Claude Code has no steer primitive — the prompt is a line written to stdin — and what it does instead is the thing D16 names as the one unacceptable answer: it silently downgrades to a follow-up.
-The write succeeds, `submit()` resolves, and the prompt lands after the running turn without anything at the wire distinguishing that from having been accepted into it.
+Which side of that Claude falls on is **not known**, and this card was first filed asserting it was the rejecting side.
+That assertion is withdrawn; establishing the fact is now the card's first job.
 
-So this adapter should throw when `this.turnActive`, the way Codex's `TURN_ACTIVE_ERROR` guard does, and the module docblock's claim that `submit()` "does not gate" becomes false and must go with it.
-The route already turns the throw into a 500 and `controller.ts`'s `submit` clears the draft only on success, so the user keeps their text.
+Two stacked inferences sit under the original claim, and neither has ever been observed.
 
-**This likely moots OW-toyeru**, which is the transcript-ordering defect of exactly the queued mid-turn prompt this change stops producing — its echo lands at write time, before the running turn's remaining assistant messages. If nothing can be queued mid-turn, nothing is misordered. Do not assume it: OW-toyeru also records that the first `result` drops `isStreaming` to false while a queued turn is pending, and whether that second half survives depends on whether any path still reaches the CLI's queue. Settle it explicitly and close OW-toyeru `--moot` with this card's id, or leave it open having said which half survives. OW-toyeru has been re-pointed to wait on this card rather than on OW-rifezo.
+**That a stdin message sent mid-turn is queued at all.**
+The only sources are two comments in this one file, `:13` and `:198`, which is the repo quoting itself.
+No run in `docs/MANUAL_TESTING.md` sends Claude a mid-turn prompt — not the OW-yilabe surface probe, not the OW-beripo live run.
+
+**That Claude Code has no steer primitive.**
+The control channel *was* enumerated, by sending unknown subtypes and reading `"Unsupported control request subtype: …"` back, and the probe covered `rewind`, `fork`, `checkpoint`, `list_checkpoints`, `resume` and `status`.
+It never tried a steering one.
+So a missing steer subtype is untested rather than observed, and the CLI models queued messages explicitly enough to make the question live: `init` advertises `interrupt_receipt_v1`, `interrupt_cancel_queued_v1` and `msg_lifecycle_v1`, and the `interrupt` reply carries `still_queued`.
+A queue whose entries can be individually cancelled is a richer surface than "writes land after the turn".
+
+Nothing about this needs the work laptop: only Pi is confined there, and Claude Code runs on the home server pinned to Haiku (`AGENTS.md`, "Evidence" — `claude --model haiku`).
 
 ## Done when
 
-- An adapter test in `claude/adapter.test.ts` submits while `turnActive` and asserts it rejects; it fails before the change.
-- The module docblock no longer says `submit()` does not gate, and says why it now does, citing D16.
-- OW-toyeru is explicitly settled, in either direction, with the reasoning recorded rather than inferred.
+First, the observation, recorded in `docs/MANUAL_TESTING.md`:
 
-**Added 2026-09-09 by the adversarial read of D16:** the gate proposed above tests `this.turnActive`, and that is the same flag `adapter.ts:418` clears on the first `result` — which is precisely the accuracy OW-toyeru's second half puts in question.
-So the gate inherits that question rather than standing clear of it: if `turnActive` goes false while a queued turn is still pending, a prompt sent in that window passes the gate and is queued after all.
-Settle the flag's accuracy as part of this card, not after it.
+- A run drives a long turn, writes a user message to stdin while it is streaming, and records **where that text lands** — inside the running turn, or in a new turn after it — and **when** it is delivered relative to the first `result`.
+- The same run tries a steering-shaped control subtype and records whether the CLI answers `"Unsupported control request subtype"` by name, the way the OW-yilabe probe established the rest of the surface.
+- A fixture for the mid-turn prompt lands under `resources/fixtures/claude/` with its `.meta.json`, scrubbed per `resources/fixtures/README.md`. None exists today.
+
+Then, and only then, one of two changes — phrased over the finding, not over the outcome expected:
+
+- **If the prompt is queued and no steer exists**, the adapter throws when a turn is active, the way Codex's `TURN_ACTIVE_ERROR` guard does, with a test in `claude/adapter.test.ts` that goes red first; the module docblock's "so `submit()` does not gate" and the D16-overturns note now beside it both go, replaced by what was observed.
+- **If the prompt reaches the running turn**, Claude already honours D16, nothing in the adapter changes, and the work is to say so: retire the same two comments, and amend D16's line naming this card, which currently reads Claude as a backend that must be made to reject.
+
+Either way the gate question below is answered, and OW-toyeru is settled.
+
+**The `turnActive` flag is not a reliable gate and this is where that gets checked.**
+`adapter.ts:418` clears it on the first `result`, which is precisely what OW-toyeru's second half puts in question: if it goes false while a queued turn is still pending, a prompt sent in that window passes any gate built on it and is queued after all.
+Settle the flag's accuracy here, not after.
+
+**OW-toyeru waits on this card** (re-pointed from OW-rifezo) and its fate follows the finding.
+It is the transcript-ordering defect of a queued mid-turn prompt — `beginTurn` pushes the local user echo at write time, before the running turn's remaining assistant messages.
+If mid-turn queueing stops, nothing is misordered and it is moot; close it `--moot` naming this card.
+If Claude turns out to steer already, the echo ordering is a live defect that this card does not fix, and OW-toyeru stays open on its own terms.
+Say which, with the reasoning, rather than letting it lapse.

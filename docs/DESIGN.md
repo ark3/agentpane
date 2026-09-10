@@ -458,8 +458,10 @@ Rejection is a real answer here, not a failure mode.
 The route already turns an adapter throw into a 500, and `controller.ts`'s `submit` clears the draft only on success, so a rejected mid-turn prompt leaves the user's text where they typed it.
 What an adapter must not do is silently downgrade to a follow-up, which is indistinguishable from success at the wire and puts the prompt after the turn without saying so.
 
-Two adapters do not honour this yet and each has a card: Codex rejects today though `turn/steer` is in the generated bindings and unused (OW-tifuha), and Claude queues silently and must reject instead (OW-jihete).
-Pi is already correct.
+Pi is already correct, and neither of the other two is known to be.
+Codex rejects today though `turn/steer` sits in the generated bindings, unused and never run live (OW-tifuha).
+Which side of this rule Claude falls on has never been observed at all (OW-jihete): that a stdin message sent mid-turn is queued rests on that adapter's own comments and no run, and the control-channel probe that enumerated `rewind`, `fork`, `checkpoint` and the rest by name never tried a steering subtype.
+Both cards therefore require the observation before the change, and both name what to do if it comes back the other way — including amending this entry.
 
 The effect on the accidental double-submit OW-nasofa describes — a second Ctrl-Enter during the round trip, which `App.svelte`'s `send()` and `controller.ts`'s `submit()` both fail to guard — runs in both directions, per backend.
 On Claude it is an improvement once OW-jihete lands: a silently queued duplicate becomes a rejection with the draft intact.
