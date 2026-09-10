@@ -237,6 +237,136 @@ describe("file references", () => {
 	});
 });
 
+/**
+ * OW-holabo: remote media must not fetch itself.
+ *
+ * DOMPurify is not the control here -- it strips `onerror` and every script
+ * vector, and none of these are XSS. The problem is the *automatic outbound
+ * request*: a transcript from a repository we do not control could name a host
+ * of its author's choosing and learn the reader's IP address and the moment
+ * they opened it, with nothing clicked. D5 answers that by refusing to load
+ * remote media at all: it renders as a link instead.
+ */
+
+/** Every attribute in a fragment that would make the browser fetch a remote URL. */
+function remoteFetches(html: string): string[] {
+	const found: string[] = [];
+	for (const el of parse(html).querySelectorAll("img, video, audio, source, track, picture")) {
+		for (const attr of el.attributes) {
+			if (!["src", "srcset", "poster"].includes(attr.name)) continue;
+			for (const candidate of attr.value.split(",")) {
+				const url = candidate.trim().split(/\s+/)[0] ?? "";
+				if (/^\/\//.test(url) || /^[a-z][a-z0-9+.-]*:/i.test(url.replace(/^data:.*/i, ""))) {
+					found.push(`${el.tagName.toLowerCase()}[${attr.name}]=${url}`);
+				}
+			}
+		}
+	}
+	return found;
+}
+
+describe("remote media", () => {
+	it.each([
+		["a markdown image", "![](https://example.invalid/x.png)"],
+		["a markdown image with alt text", "![a chart](https://example.invalid/x.png)"],
+		["raw html img", '<img src="https://example.invalid/z.png">'],
+		["an img srcset", '<img srcset="https://example.invalid/a.png 1x, https://example.invalid/b.png 2x">'],
+		["a video with a poster", '<video src="https://example.invalid/v.mp4" poster="https://example.invalid/p.png">'],
+		["an audio element", '<audio src="https://example.invalid/a.mp3">'],
+		["a picture source", '<picture><source srcset="https://example.invalid/s.png"></picture>'],
+		["a protocol-relative image", '<img src="//example.invalid/x.png">'],
+		["an http image", "![](http://example.invalid/x.png)"],
+	])("makes no outbound request for %s", (_name, source) => {
+		expect(remoteFetches(renderMarkdown(source))).toEqual([]);
+	});
+
+	it("renders a remote image as a link to it", () => {
+		const host = parse(renderMarkdown("![](https://example.invalid/x.png)"));
+		expect(host.querySelector("img")).toBeNull();
+		const anchor = host.querySelector("a");
+		expect(anchor?.getAttribute("href")).toBe("https://example.invalid/x.png");
+		// No alt text to stand in for the image, so the destination is the label.
+		expect(anchor?.textContent).toBe("https://example.invalid/x.png");
+	});
+
+	it("uses the alt text as the link text, keeping the url reachable", () => {
+		const anchor = parse(renderMarkdown("![a chart](https://example.invalid/x.png)")).querySelector("a");
+		expect(anchor?.textContent).toBe("a chart");
+		expect(anchor?.getAttribute("title")).toBe("https://example.invalid/x.png");
+	});
+
+	it("says what the media was, so an unlabelled image does not read as a bare link", () => {
+		const kinds = (source: string) =>
+			[...parse(renderMarkdown(source)).querySelectorAll(".ap-remote-media")].map((e) =>
+				e.getAttribute("data-media"),
+			);
+		expect(kinds("![](https://example.invalid/x.png)")).toEqual(["image"]);
+		expect(kinds('<video src="https://example.invalid/v.mp4">')).toEqual(["video"]);
+		expect(kinds('<audio src="https://example.invalid/a.mp3">')).toEqual(["audio"]);
+	});
+
+	it("keeps every url a video would have fetched, poster included", () => {
+		const hrefs = [
+			...parse(
+				renderMarkdown('<video src="https://example.invalid/v.mp4" poster="https://example.invalid/p.png">'),
+			).querySelectorAll("a"),
+		].map((a) => a.getAttribute("href"));
+		expect(hrefs).toEqual(["https://example.invalid/v.mp4", "https://example.invalid/p.png"]);
+	});
+
+	it("keeps every srcset candidate", () => {
+		const hrefs = [
+			...parse(
+				renderMarkdown('<img srcset="https://example.invalid/a.png 1x, https://example.invalid/b.png 2x">'),
+			).querySelectorAll("a"),
+		].map((a) => a.getAttribute("href"));
+		expect(hrefs).toEqual(["https://example.invalid/a.png", "https://example.invalid/b.png"]);
+	});
+
+	it("keeps the fallback content the author wrote inside the element", () => {
+		const host = parse(renderMarkdown('<video src="https://example.invalid/v.mp4">no video <b>here</b></video>'));
+		expect(host.querySelector(".ap-remote-media b")?.textContent).toBe("here");
+		expect(host.textContent).toContain("no video");
+	});
+
+	it("keeps a data: sibling an image while linking the remote one", () => {
+		const host = parse(
+			renderMarkdown(
+				'<picture><source srcset="https://example.invalid/s.png"><img src="data:image/gif;base64,R0lGODlh" alt="d"></picture>',
+			),
+		);
+		expect(host.querySelector("a")?.getAttribute("href")).toBe("https://example.invalid/s.png");
+		expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/gif;base64,R0lGODlh");
+	});
+
+	it("hardens the links it creates like any other outbound link", () => {
+		const anchor = parse(renderMarkdown("![](https://example.invalid/x.png)")).querySelector("a");
+		expect(anchor?.getAttribute("target")).toBe("_blank");
+		expect(anchor?.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+	});
+
+	it("keeps a data: image an image -- it has no network side", () => {
+		const src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+		const img = parse(renderMarkdown(`![dot](${src})`)).querySelector("img");
+		expect(img?.getAttribute("src")).toBe(src);
+	});
+
+	it("keeps a same-origin image an image", () => {
+		const img = parse(renderMarkdown("![logo](/assets/logo.png)")).querySelector("img");
+		expect(img?.getAttribute("src")).toBe("/assets/logo.png");
+		expect(parse(renderMarkdown('<img src="assets/logo.png">')).querySelector("img")).not.toBeNull();
+	});
+
+	it("leaves ordinary links exactly as they were", () => {
+		const host = parse(renderMarkdown("[docs](https://example.invalid/x)"));
+		expect(host.querySelector(".ap-remote-media")).toBeNull();
+		const anchor = host.querySelector("a");
+		expect(anchor?.getAttribute("href")).toBe("https://example.invalid/x");
+		expect(anchor?.getAttribute("target")).toBe("_blank");
+		expect(anchor?.textContent).toBe("docs");
+	});
+});
+
 describe("highlightCode", () => {
 	it("escapes when no language is given", () => {
 		expect(highlightCode("<script>", undefined)).toBe("&lt;script&gt;");

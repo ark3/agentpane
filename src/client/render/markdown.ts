@@ -197,6 +197,109 @@ const parser = new Marked({
 // Sanitization
 // ---------------------------------------------------------------------------
 
+/**
+ * The media elements that fetch a URL of the document's choosing as soon as
+ * the page renders, and the word a reader should see in place of one (D5,
+ * OW-holabo).
+ *
+ * `<picture>` is deliberately absent: it names no URL itself, so it is left
+ * standing and its `<source>` and `<img>` children are handled on their own.
+ * `<input type=image>` is absent because `input` is in `FORBID_TAGS` and never
+ * reaches the page at all.
+ */
+const REMOTE_MEDIA_KIND: Record<string, string> = {
+	IMG: "image",
+	VIDEO: "video",
+	AUDIO: "audio",
+	SOURCE: "media",
+};
+
+/**
+ * Whether loading this URL would reach a host the document names, rather than
+ * us or the bytes themselves.
+ *
+ * Scheme-based and negative on purpose: a URL with **no scheme** is a relative
+ * or root-relative path, which is our own origin and tells an outsider
+ * nothing, and `data:` is the payload inline with no network side at all
+ * (agent-generated images arrive that way). Everything else that survived
+ * DOMPurify's URI allow-list is somebody else's host, including the
+ * protocol-relative `//host/x.png` that a `startsWith("http")` test misses.
+ */
+function isRemoteUrl(url: string): boolean {
+	const trimmed = url.trim();
+	if (trimmed.startsWith("//")) return true;
+	const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(trimmed)?.[0]?.toLowerCase();
+	return scheme !== undefined && scheme !== "data:";
+}
+
+/**
+ * Every remote URL a media element would have fetched, in the order a reader
+ * meets them: the primary source first, then `poster` -- which `<video>`
+ * fetches immediately, before anything is played -- then each `srcset`
+ * candidate.
+ *
+ * The `srcset` split is the plain comma-then-whitespace one rather than the
+ * spec's parser. It can only mis-split on a URL containing a comma, which for
+ * a candidate we would keep means a remote URL with a comma in it: the pieces
+ * still each carry the host, so the link list gets longer, never quieter.
+ */
+function remoteMediaUrls(node: Element): string[] {
+	const urls: string[] = [];
+	for (const name of ["src", "poster"]) {
+		const value = node.getAttribute(name);
+		if (value) urls.push(value.trim());
+	}
+	const srcset = node.getAttribute("srcset");
+	if (srcset) {
+		for (const candidate of srcset.split(",")) {
+			const url = candidate.trim().split(/\s+/)[0];
+			if (url) urls.push(url);
+		}
+	}
+	return urls.filter(isRemoteUrl);
+}
+
+/**
+ * Replace a media element with links to what it would have loaded.
+ *
+ * The reader loses nothing but the automatic request: every URL is still here
+ * and still one click away, and the `data-media` word says what it would have
+ * been, so an image with an empty `alt` and a fifty-character URL still reads
+ * as an image rather than as a link the author wrote.
+ *
+ * `alt` labels only the first link. It describes the image, and the first URL
+ * is the primary source; the rest are alternate encodings, and showing them by
+ * URL is what keeps two links from carrying the same words. Where the label
+ * wins, `title` carries the destination, because a link the reader did not ask
+ * for should say where it goes before it is clicked.
+ *
+ * Children move across rather than dying with the element: a `<video>` holds
+ * `<source>` elements and fallback prose that the author wrote, and each
+ * surviving media child is visited by this same hook in turn.
+ */
+function linkRemoteMedia(node: Element, kind: string, urls: string[]): void {
+	const doc = node.ownerDocument;
+	const holder = doc.createElement("span");
+	holder.setAttribute("class", "ap-remote-media");
+	holder.setAttribute("data-media", kind);
+	const label = (node.getAttribute("alt") ?? "").trim();
+	for (const [index, url] of urls.entries()) {
+		if (index > 0) holder.appendChild(doc.createTextNode(" "));
+		const link = doc.createElement("a");
+		link.setAttribute("href", url);
+		const labelled = index === 0 && label !== "";
+		if (labelled) link.setAttribute("title", url);
+		link.textContent = labelled ? label : url;
+		holder.appendChild(link);
+	}
+	if (node.firstChild) holder.appendChild(doc.createTextNode(" "));
+	while (node.firstChild) holder.appendChild(node.firstChild);
+	node.replaceWith(holder);
+	// The anchors are new nodes in the tree, so DOMPurify walks them next and
+	// this same hook hardens them like any other outbound link -- one rule for
+	// `target`/`rel`, not two.
+}
+
 let hooksInstalled = false;
 
 function installHooks(): void {
@@ -204,6 +307,18 @@ function installHooks(): void {
 	hooksInstalled = true;
 	DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 		if (!("getAttribute" in node)) return;
+		// Remote media does not load itself (D5): DOMPurify strips every script
+		// vector from an `<img>`, but the fetch it makes on render is not a
+		// script -- it is a transcript author learning the reader's IP address
+		// and the moment they opened it. This hook is the only place that sees
+		// all of it: raw html, `srcset` and `<video poster>` never pass through
+		// marked's image renderer.
+		const kind = REMOTE_MEDIA_KIND[node.nodeName];
+		if (kind !== undefined) {
+			const urls = remoteMediaUrls(node);
+			if (urls.length > 0) linkRemoteMedia(node, kind, urls);
+			return;
+		}
 		if (node.nodeName !== "A") return;
 		const href = node.getAttribute("href") ?? "";
 		// Same-document anchors stay in place; anything else leaves the app,

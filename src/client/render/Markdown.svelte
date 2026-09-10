@@ -191,6 +191,22 @@
 		border-bottom: 1px dotted var(--ap-border-strong);
 	}
 
+	/* Remote media renders as a link rather than loading itself (D5, OW-holabo).
+	   The badge is what stops an image with an empty alt from reading as a link
+	   the author wrote, and long urls wrap instead of widening the column.
+	   First cut -- the verdict comes from looking at it. */
+	.markdown :global(.ap-remote-media)::before {
+		content: attr(data-media);
+		margin-right: 0.4em;
+		font-size: 0.75em;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--ap-fg-muted);
+	}
+	.markdown :global(.ap-remote-media a) {
+		overflow-wrap: anywhere;
+	}
+
 	.markdown :global(blockquote) {
 		padding-left: var(--ap-space-3);
 		border-left: 2px solid var(--ap-border-strong);
