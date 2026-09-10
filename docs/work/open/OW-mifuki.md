@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # `forkAndSubmit` ignores a selection made during its round trip, and a failed send leaves follow and the badge armed on the parent

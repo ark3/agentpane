@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 blocked-by: [OW-fafeja]
 ---
 

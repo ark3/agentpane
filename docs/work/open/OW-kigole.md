@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, now]
 ---
 
 # agentpane serves no Content-Security-Policy, so the sanitizer is the only thing standing between a hostile transcript and an outbound request

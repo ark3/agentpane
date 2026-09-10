@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # The composer sends the same prompt twice on a second Ctrl-Enter during the round trip, and discards anything typed while it waits

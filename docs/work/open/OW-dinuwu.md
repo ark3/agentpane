@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # Any `sessions-changed` broadcast wipes the view-level error and stomps `busy`, which is why every `finally` in the controller has to re-check it
