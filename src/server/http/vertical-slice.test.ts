@@ -23,7 +23,7 @@ import {
 } from "./testing/fakes.ts";
 import { SseTestClient } from "./testing/sse-client.ts";
 
-const WORKSPACE = "/workspace/offline-proof";
+const WORKSPACE = process.cwd();
 
 let app: App | undefined;
 

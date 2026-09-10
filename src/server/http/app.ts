@@ -13,9 +13,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import {
 	type AgentRequestReply,
@@ -41,7 +41,12 @@ import {
 import type { BackendAdapter } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
-import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
+import {
+	ServerShuttingDownError,
+	SessionManager,
+	UnknownBackendError,
+	UnknownSessionError,
+} from "./session-manager.ts";
 
 export interface App {
 	fetch(request: Request): Promise<Response>;
@@ -56,6 +61,7 @@ const BACKENDS: readonly BackendId[] = ["pi", "codex", "claude"];
 export function createApp(deps: AppDeps): App {
 	const broadcaster = new Broadcaster(deps.heartbeatMs ?? 0);
 	const sessions = new SessionManager(deps, broadcaster);
+	const logError = deps.logError ?? ((message: string) => console.error(message));
 
 	async function handle(request: Request): Promise<Response> {
 		const url = new URL(request.url);
@@ -210,8 +216,15 @@ export function createApp(deps: AppDeps): App {
 		const body = await readJson<CreateSessionRequest>(request);
 		if (!body.ok) return body.response;
 		const { cwd, backend, model } = body.value;
-		if (typeof cwd !== "string" || cwd.length === 0) {
+		if (typeof cwd !== "string" || !isAbsolute(cwd)) {
 			return error(400, "bad_request", "cwd is required and must be an absolute path");
+		}
+		try {
+			if (!(await stat(cwd)).isDirectory()) {
+				return error(400, "bad_request", "cwd must name an existing directory");
+			}
+		} catch {
+			return error(400, "bad_request", "cwd must name an existing directory");
 		}
 		if (!isBackendId(backend)) return error(400, "bad_backend", `unknown backend "${backend}"`);
 		const ref = sessions.createVirtual(cwd, backend, model);
@@ -431,6 +444,11 @@ export function createApp(deps: AppDeps): App {
 			} catch (err) {
 				if (err instanceof UnknownSessionError) return error(404, "not_found", err.message);
 				if (err instanceof UnknownBackendError) return error(501, "no_backend", err.message);
+				if (err instanceof ServerShuttingDownError) {
+					return error(503, "server_shutting_down", err.message);
+				}
+				const ref = sessionRefFromRequest(request);
+				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
 				return error(500, "internal_error", describe(err));
 			}
 		},
@@ -458,6 +476,19 @@ function decodeSegment(segment: string): string {
 
 function isBackendId(value: unknown): value is BackendId {
 	return value === "pi" || value === "codex" || value === "claude";
+}
+
+function sessionRefFromRequest(request: Request): SessionRef | undefined {
+	const segments = new URL(request.url).pathname
+		.split("/")
+		.filter((segment) => segment.length > 0)
+		.map(decodeSegment);
+	if (segments[0] !== "api" || segments[1] !== "sessions" || segments.length < 4) {
+		return undefined;
+	}
+	const backend = segments[2];
+	const id = segments[3];
+	return isBackendId(backend) && id !== undefined ? { backend, id } : undefined;
 }
 
 /**

@@ -74,6 +74,8 @@ export interface AppDeps {
 	newId?: () => string;
 	/** ISO clock, injectable for the same reason. */
 	now?: () => string;
+	/** Unexpected request failures. Defaults to stderr in production. */
+	logError?: (message: string) => void;
 	/**
 	 * Anything not under `/api`. The SPA bundle, in practice. Returning null
 	 * falls through to a 404. Kept out of here so the API is testable without a

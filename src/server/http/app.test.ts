@@ -36,7 +36,7 @@ import { SseTestClient } from "./testing/sse-client.ts";
 const PI_SESSION: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/one two.jsonl" };
 const CODEX_SESSION: SessionRef = { backend: "codex", id: "019feee5-cc20-7290-95fa-599abc243e55" };
 const CLAUDE_SESSION: SessionRef = { backend: "claude", id: "3af1e5da-9f22-4f34-9c2b-6b7e2f1c9d44" };
-const WORKSPACE = "/home/u/src/agentpane";
+const WORKSPACE = process.cwd();
 
 let index: FakeSessionIndex;
 let pi: FakeAdapterFactory;
@@ -157,6 +157,15 @@ describe("sessions", () => {
 		expect(created?.cwd).toBe(WORKSPACE);
 	});
 
+	it("rejects a relative or nonexistent workspace", async () => {
+		for (const cwd of ["relative/workspace", `${WORKSPACE}/no-such-agentpane-workspace`]) {
+			const response = await post(ROUTES.sessions, { cwd, backend: "pi" });
+			expect(response.status, cwd).toBe(400);
+			expect((await response.json()) as ApiError).toMatchObject({ error: "bad_request" });
+		}
+		expect(pi.created).toHaveLength(0);
+	});
+
 	it("spawns on attach, in the session's own workspace (D7)", async () => {
 		const response = await get(ROUTES.session(PI_SESSION));
 		const body = (await response.json()) as AttachSessionResponse;
@@ -167,6 +176,31 @@ describe("sessions", () => {
 		expect(adapter?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: PI_SESSION.id });
 		// Attaching a Pi session must not spawn Codex.
 		expect(codex.created).toHaveLength(0);
+	});
+
+	it("logs an attach failure with its session ref", async () => {
+		const failing = new FakeAdapterFactory({ failStart: "sbox: no git root" });
+		const logError = vi.fn();
+		app = createApp({ index, adapters: { pi: failing }, logError });
+
+		const response = await get(ROUTES.session(PI_SESSION));
+
+		expect(response.status).toBe(500);
+		expect(logError).toHaveBeenCalledWith(
+			`session ${sessionKey(PI_SESSION)}: sbox: no git root`,
+		);
+	});
+
+	it("returns 503 when an attach arrives during shutdown", async () => {
+		await app.close();
+
+		const response = await get(ROUTES.session(PI_SESSION));
+
+		expect(response.status).toBe(503);
+		expect((await response.json()) as ApiError).toEqual({
+			error: "server_shutting_down",
+			detail: "server is shutting down; not spawning a new agent",
+		});
 	});
 
 	it("attaching twice reuses the subprocess", async () => {
