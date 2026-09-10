@@ -16,3 +16,7 @@ Move it behind an explicit script, `bun run test:smoke` or a vitest `--project`,
 ## Done when
 
 The test is either excluded from `bun run check` and reachable by a named script recorded in AGENTS.md, or this card closes `--declined` with the acceptance in its close note.
+
+The owner accepts this machine-dependent gate because automatic coverage against live CLI stores is more valuable than an opt-in smoke test that is likely not to run.
+The test remains in bun run check: it costs little, does not surface transcript content, tolerates absent stores, and can expose real format or layout drift that repository-controlled fixtures do not contain.
+Deterministic fixture tests remain the reproducible path for diagnosis when the live-store smoke finds a new case.
