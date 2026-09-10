@@ -18,3 +18,5 @@ The client can learn a session is gone from the re-list a `sessions-changed` tri
 ## Done when
 
 A test in `controller.test.ts` attaches a session, delivers a `sessions-changed` whose re-list reports it `detached`, and asserts `preview()` fetches rather than short-circuiting and `isStreaming` is false; it fails before the change.
+
+Reconciled fresh session listings with cached client views so a summary reported detached evicts the unchanged live view, clears stale streaming UI, and makes the next preview fetch the stored transcript. Preserved a session and its attached summary when a newer snapshot lands while an older detached listing is in flight. The original regression and the review-found race each failed before their fix; `bun run test -- src/client/controller.test.ts` passed 51 tests, and `bun run check` passed 48 files and 962 tests with zero TypeScript or Svelte diagnostics.
