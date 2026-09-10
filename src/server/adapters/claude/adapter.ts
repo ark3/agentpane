@@ -499,7 +499,7 @@ async function defaultReadStoreEntries(
 	sessionId: string,
 ): Promise<ClaudeStoreMessageEntry[]> {
 	const file = await findClaudeSessionFile(root, sessionId);
-	if (!file) throw new Error(`no Claude Code store file for session ${sessionId}`);
+	if (!file) return [];
 	return readClaudeMessageEntries(file);
 }
 

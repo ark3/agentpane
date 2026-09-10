@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRef } from "../../../shared/protocol.ts";
 import type { ClaudeStoreMessageEntry } from "../../sessions/claude.ts";
@@ -386,6 +389,23 @@ describe("ClaudeAdapter session controls", () => {
 });
 
 describe("ClaudeAdapter fork", () => {
+	it("returns no fork points for a started session with no store file yet", async () => {
+		const claudeRoot = await mkdtemp(join(tmpdir(), "agentpane-claude-adapter-"));
+		const adapter = new ClaudeAdapter(VIRTUAL_REF, {
+			spawn: () => new FakeClaudeProcess(),
+			newSessionId: () => "never-prompted",
+			claudeRoot,
+		});
+		try {
+			await adapter.start({ cwd: "/workspace" });
+
+			expect(await adapter.listForkPoints()).toEqual([]);
+		} finally {
+			await adapter.dispose();
+			await rm(claudeRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("offers one fork point per human prompt, carrying the PRECEDING entry uuid", async () => {
 		const h = harness({ entries: storedEntries() });
 		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
