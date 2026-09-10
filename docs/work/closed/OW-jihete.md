@@ -48,3 +48,5 @@ It is the transcript-ordering defect of a queued mid-turn prompt — `beginTurn`
 If mid-turn queueing stops, nothing is misordered and it is moot; close it `--moot` naming this card.
 If Claude turns out to steer already, the echo ordering is a live defect that this card does not fix, and OW-toyeru stays open on its own terms.
 Say which, with the reasoning, rather than letting it lapse.
+
+Claude Code 2.1.267 on explicit --model haiku queued a mid-turn stdin prompt until after the first result and rejected a steer control request as an unsupported subtype. The live stream and timing provenance are recorded in resources/fixtures/claude/mid-turn.jsonl and its metadata, with host configuration replaced by structural placeholders and account telemetry nulled after adversarial review. ClaudeAdapter now rejects submit and compact while a turn is active; focused adapter tests went red before the guard and green after it, and bun run check passed 48 files and 960 tests. D16, MANUAL_TESTING, fixture guidance, and source comments now carry the observed result. The queued-prompt ordering premise was eliminated, so OW-toyeru was closed moot.
