@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	emptyTurnWatch,
 	setFaviconBadge,
+	watchAbandon,
 	watchFocus,
 	watchRename,
 	watchSessions,
@@ -95,6 +96,20 @@ describe("the turn-done watch", () => {
 		// status:false under the new key still reads as done.
 		watch = watchSessions(watch, streaming("pi:named", false), UNFOCUSED);
 		expect(watch.badged).toBe(true);
+	});
+
+	it("drops a submit that never reached the backend (OW-mifuki)", () => {
+		let watch = watchAbandon(watchSubmit(emptyTurnWatch(), "pi:a"), "pi:a");
+		expect(watch.waiting.size).toBe(0);
+		// So a stream that turns up on it anyway -- another tab's prompt, or a
+		// turn that was already running -- is not this tab's to be told about.
+		watch = runTurn(watch, "pi:a", UNFOCUSED);
+		expect(watch.badged).toBe(false);
+	});
+
+	it("leaves a session it is not watching alone when a submit is abandoned", () => {
+		const watch = watchSubmit(emptyTurnWatch(), "pi:a");
+		expect(watchAbandon(watch, "pi:b")).toBe(watch);
 	});
 
 	it("leaves a rename of a session it is not watching alone", () => {

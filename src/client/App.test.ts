@@ -179,9 +179,11 @@ class FakeController implements AgentpaneController {
 	async submit() {
 		this.submitted += 1;
 		this.publish({ ...this.current, busy: "submitting", error: null });
-		if (this.submissionError) {
-			this.publish({ ...this.current, busy: "idle", error: this.submissionError });
-		}
+		// The real `submit` drops back to idle in a `finally`, whichever way it
+		// went, and the shell reads that: a second Ctrl-Enter is only refused
+		// while a prompt is actually in flight (OW-nasofa, OW-mifuki).
+		this.publish({ ...this.current, busy: "idle", ...(this.submissionError ? { error: this.submissionError } : {}) });
+		return this.submissionError === null;
 	}
 
 	async abort() {
@@ -190,8 +192,12 @@ class FakeController implements AgentpaneController {
 
 	/** Every fork the shell asked for, in order, with the images it carried. */
 	forked: Array<{ ordinal: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
-	/** What `forkAndSubmit` resolves to -- false is "the fork never landed". */
-	forkResult = true;
+	/**
+	 * The ref `forkAndSubmit` resolves to -- the one the prompt landed on, or
+	 * null for "the fork never landed". The real one hands back the ref rather
+	 * than reading `state.selected` back, so the fake must too (OW-mifuki).
+	 */
+	forkResult: SessionRef | null = null;
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's `renamed`. */
 	onForkAndSubmit: ((ordinal: number) => void) | null = null;
 
@@ -1295,6 +1301,66 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
+	/**
+	 * Follow and the badge are armed before the request goes out, because the
+	 * echoed message can land ahead of the POST's own response (D2). A prompt
+	 * that then fails leaves both armed for a turn that was never sent, and the
+	 * next stream on that session -- another tab's prompt, or a turn that was
+	 * already running -- would collect them (OW-mifuki).
+	 */
+	it("disarms follow and the badge when the prompt fails, so a later stream from elsewhere collects neither (OW-mifuki)", async () => {
+		const old = user("old message");
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+		};
+		const controller = new FakeController(
+			view({ draft: "New prompt", state: state({ selected: piSession, sessions }) }),
+			"prompt refused",
+		);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			const { container } = render(App, { props: { controller } });
+			await tick();
+			const el = container.querySelector(".conversation") as HTMLElement;
+
+			// The reader is parked away from the tail, so any movement below is follow.
+			mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+			el.scrollTop = 50;
+			await fireEvent.scroll(el);
+
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			expect(controller.submitted).toBe(1);
+			expect(screen.getByText("prompt refused")).toBeInTheDocument();
+			await tick();
+
+			// Another tab prompts the same session: its message lands here and streams.
+			const elsewhere = user("someone else's prompt");
+			const streamed = { ...sessions["pi:pi-1"], messages: [old, elsewhere], isStreaming: true };
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			await nextFrame();
+
+			// Still armed, follow would have chased the tail to 60.
+			expect(el.scrollTop).toBe(50);
+
+			// And that turn ending unfocused is not this tab's to be told about.
+			controller.publish(view({
+				state: state({ selected: piSession, sessions: { "pi:pi-1": { ...streamed, isStreaming: false } } }),
+			}));
+			await tick();
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
 	it("re-arms follow on submit even after the reader had scrolled away, tracks growth, and locks once the submitted message would be pushed off the top", async () => {
 		const old = user("old message");
 		const sessions = {
@@ -1995,6 +2061,56 @@ describe("App", () => {
 		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
 	});
 
+	/**
+	 * The badge marks turns this viewer started, and a fork is one of them. The
+	 * arming is laid down on the parent before the fork exists, so it has to move
+	 * onto the fork -- and onto the *fork*, not onto whatever `state.selected`
+	 * happens to be when the fork resolves. A click mid-fork moves the selection
+	 * and the controller now honours it, so the ref `forkAndSubmit` hands back is
+	 * the only thing that names the right session (OW-mifuki).
+	 */
+	it("badges the fork it landed on, not a session clicked mid-fork (OW-mifuki)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
+		const other: SessionRef = { backend: "pi", id: "pi-2" };
+		const parent = { ref: piSession, messages: [user("first draft")], isStreaming: false, seq: 1, error: null, requests: [] };
+		const fork = { ref: forkRef, messages: [user("reworded")], isStreaming: false, seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": parent } }) }));
+		controller.forkResult = forkRef;
+		// The click lands while the fork's prompt is in flight, so the selection
+		// the controller publishes is the other session and never the fork.
+		controller.onForkAndSubmit = () => {
+			controller.publish(view({
+				state: state({ selected: other, sessions: { "pi:pi-1": parent, "codex:thread-fork": fork } }),
+			}));
+		};
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			await tick();
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+
+			const turn = (isStreaming: boolean) => controller.publish(view({
+				state: state({
+					selected: other,
+					sessions: { "pi:pi-1": parent, "codex:thread-fork": { ...fork, isStreaming } },
+				}),
+			}));
+			turn(true);
+			await tick();
+			turn(false);
+			await tick();
+
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
 	it("a Pi-shaped fork ends on the renamed ref with the follow and scroll maps re-keyed (OW-hezidi)", async () => {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-77" };
 		const controller = new FakeController(view({
@@ -2002,7 +2118,15 @@ describe("App", () => {
 		}));
 		// Pi's fork moves the live process onto a new file, and the server reports
 		// that as `renamed` -- which lands while the fork request is still in flight.
-		controller.onForkAndSubmit = () => controller.fireRename(piSession, forkRef);
+		// The real `forkAndSubmit` then attaches that ref and publishes the
+		// selection *before* it resolves, so the fake does both: the shell's own
+		// re-key reads that selection, and a fake that renames without moving it
+		// hands the shell a selection one step behind the fork (OW-mifuki).
+		controller.forkResult = forkRef;
+		controller.onForkAndSubmit = () => {
+			controller.fireRename(piSession, forkRef);
+			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef) }));
+		};
 		const { container } = render(App, { props: { controller } });
 		await tick();
 		const el = container.querySelector(".conversation") as HTMLElement;
@@ -2051,6 +2175,7 @@ describe("App", () => {
 		const reworded = user("reworded");
 		// What the real `forkAndSubmit` does: it attaches the ref the fork returned
 		// and publishes that selection *before* it resolves. No `renamed` ever fires.
+		controller.forkResult = forkRef;
 		controller.onForkAndSubmit = () => {
 			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
 			controller.publish(view({ draft: "", state: attachedState([reworded], forkRef) }));

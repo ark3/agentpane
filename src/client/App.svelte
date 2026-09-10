@@ -5,6 +5,7 @@
 	import {
 		emptyTurnWatch,
 		setFaviconBadge,
+		watchAbandon,
 		watchFocus,
 		watchRename,
 		watchSessions,
@@ -707,6 +708,18 @@
 	}
 
 	/**
+	 * The submit those two armed never reached the backend (OW-mifuki). Both
+	 * arms come off together: left standing, the next stream on that session --
+	 * another tab prompting it, or a turn that was already running -- would
+	 * engage follow here and badge this tab for a turn it never sent, which is
+	 * the one thing `favicon.ts` says the badge means.
+	 */
+	function disarmSubmit(key: string): void {
+		pendingFollow.delete(key);
+		turnWatch = watchAbandon(turnWatch, key);
+	}
+
+	/**
 	 * Switching sessions restores that session's own scroll position -- or, if
 	 * it is mid-follow (submitted, then switched away before the turn ended),
 	 * re-anchors immediately against the freshly rendered DOM. A session never
@@ -996,21 +1009,49 @@
 		if (compaction) return;
 		if (!view.draft) return;
 		const edit = editing;
+		// A second Ctrl/Cmd-Enter while the first prompt is still in flight is
+		// refused by the controller and issues nothing (OW-nasofa), so returning
+		// here rather than arming for it is not just tidier: the disarm below
+		// would fire on that refusal and take down the *first* submit's arming,
+		// which is live and about to stream. Only the plain path: the controller
+		// refuses nothing on the fork path, so a guard here would be inventing a
+		// re-entrancy rule the controller does not have (OW-kelede).
+		if (!edit && view.busy === "submitting") return;
 		armFollow(edit?.index);
 		armBadge();
+		// Both arms above are keyed on the session as it stands now, and D9
+		// renames it on its first prompt -- so the key to disarm, or to re-key the
+		// fork from, is tracked through any rename that lands while the request is
+		// in flight, the way the controller tracks its own ref.
+		let armedKey = view.state.selected ? sessionKey(view.state.selected) : null;
+		const unsubscribeRename = controller.onRename((from, to) => {
+			if (armedKey === sessionKey(from)) armedKey = sessionKey(to);
+		});
 		if (!edit) {
-			void controller.submit();
+			void controller.submit().then((sent) => {
+				unsubscribeRename();
+				if (!sent && armedKey) disarmSubmit(armedKey);
+			});
 			return;
 		}
-		const armedKey = view.state.selected ? sessionKey(view.state.selected) : null;
-		void controller.forkAndSubmit(edit.ordinal, edit.images).then((sent) => {
+		void controller.forkAndSubmit(edit.ordinal, edit.images).then((landed) => {
+			unsubscribeRename();
+			if (!landed) {
+				// Nothing was sent, so nothing will stream for this tab to follow or
+				// be badged about. `armedKey` has tracked any rename that landed
+				// meanwhile, so it names wherever the arming actually sits now.
+				if (armedKey) disarmSubmit(armedKey);
+				return;
+			}
 			// Pi's fork renames, and `rekeySession` has already run off that event.
 			// Codex's does not -- it hands back a ref nothing was renamed to -- so
 			// this is where the follow armed above catches up with it. A no-op
-			// whenever the key did not move, including a fork that failed.
-			const now = view.state.selected;
-			if (armedKey && now) rekeySession(armedKey, sessionKey(now));
-			if (sent && editing === edit) editing = null;
+			// whenever the key did not move. The *landed* ref, never
+			// `state.selected`: a click mid-fork moves the selection and the
+			// controller now honours it, so reading the selection back here would
+			// move this tab's arming onto a session it never submitted to.
+			if (armedKey) rekeySession(armedKey, sessionKey(landed));
+			if (editing === edit) editing = null;
 		});
 	}
 

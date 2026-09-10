@@ -84,9 +84,11 @@ class PublishingController implements AgentpaneController {
 	async create(_cwd: string, _backend: BackendId) {}
 	async preview(_ref: SessionRef) {}
 	async select(_ref: SessionRef) {}
-	async submit() {}
+	async submit() {
+		return true;
+	}
 	async forkAndSubmit() {
-		return false;
+		return null;
 	}
 	async abort() {}
 	async compact() {}

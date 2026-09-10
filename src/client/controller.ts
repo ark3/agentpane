@@ -56,7 +56,16 @@ export interface AgentpaneController {
 	 */
 	preview(ref: SessionRef): Promise<void>;
 	select(ref: SessionRef): Promise<void>;
-	submit(): Promise<void>;
+	/**
+	 * Send the current draft to the selected session.
+	 *
+	 * Resolves **true** only when the prompt landed, the way `forkAndSubmit`
+	 * below does, because there are three ways for it not to -- nothing
+	 * selected, an empty draft or a prompt already in flight, and a rejected
+	 * POST -- and the caller arms per-tab state on a submit that only the answer
+	 * here can tell it to take back down (OW-mifuki).
+	 */
+	submit(): Promise<boolean>;
 	/**
 	 * Fork the selected session just before its `ordinal`-th user message and
 	 * send the current draft, plus `images`, into the fork (OW-hezidi). Always a
@@ -66,12 +75,18 @@ export interface AgentpaneController {
 	 * message in transcript order on every backend -- the caller counts user
 	 * messages and never matches on wording, which two identical messages break.
 	 *
-	 * Resolves **true** only when the prompt landed. The caller owns the compose
-	 * mode this drives, and a failed fork has to leave that mode standing: the
-	 * draft is still the edited text, and clearing the mark under it would leave
-	 * a composer that says nothing about where it is about to send.
+	 * Resolves to **the ref the prompt landed on**, or null if it never landed.
+	 * The ref rather than a boolean because the caller has per-tab state keyed on
+	 * the session it armed before the fork -- scroll, follow, the badge -- and has
+	 * to move it onto the fork; reading `state.selected` back instead would move
+	 * it onto whatever the user clicked mid-fork (OW-mifuki).
+	 *
+	 * The caller owns the compose mode this drives, and a failed fork has to
+	 * leave that mode standing: the draft is still the edited text, and clearing
+	 * the mark under it would leave a composer that says nothing about where it
+	 * is about to send.
 	 */
-	forkAndSubmit(ordinal: number, images?: PromptRequest["images"]): Promise<boolean>;
+	forkAndSubmit(ordinal: number, images?: PromptRequest["images"]): Promise<SessionRef | null>;
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
@@ -516,14 +531,14 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
-				return;
+				return false;
 			}
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
 			// with it is nobody's intent.
-			if (busyIs("submitting")) return;
-			if (!view.draft) return;
+			if (busyIs("submitting")) return false;
+			if (!view.draft) return false;
 			const text = view.draft;
 			// Track the target session through a possible rename (D9) while the
 			// request is in flight, and remember its error so success only clears
@@ -550,8 +565,10 @@ export function createController(
 					// while waiting is the next prompt, not this one (OW-nasofa).
 					publish({ ...(view.draft === text ? { draft: "" } : {}), state });
 				}
+				return true;
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
+				return false;
 			} finally {
 				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });
@@ -574,9 +591,9 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
-				return false;
+				return null;
 			}
-			if (!view.draft) return false;
+			if (!view.draft) return null;
 			const text = view.draft;
 			// Same rename hazard `submit` above carries (D9), and the fork adds a
 			// second source of it: Pi's fork moves the live process onto a new file,
@@ -587,6 +604,12 @@ export function createController(
 				if (sessionKey(from) === sessionKey(ref)) ref = to;
 			};
 			renameListeners.add(onRename);
+			// Captured first, the way `refetchPreview` captures it: every await
+			// below is a window in which the user can click another session, and
+			// a fork that reaches its attach after that click must not yank the
+			// selection back onto itself (OW-mifuki). Reassigned at the bump below,
+			// where this call becomes the newest intent itself.
+			let intent = selectionIntent;
 			publish({ busy: "submitting", error: null });
 			try {
 				// Stop a running turn before forking it, on every backend. Not a
@@ -598,11 +621,13 @@ export function createController(
 				// thread (OW-mewiga, OW-pifowo); probing it mid-stream is OW-gojado.
 				// A turn that survives streams into a session the user has left.
 				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
+				if (disposed || intent !== selectionIntent) return null;
 				const points = await api.forkPoints(ref);
+				if (disposed || intent !== selectionIntent) return null;
 				const point = points[ordinal];
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
 				const forked = await api.fork(ref, { entryId: point.id });
-				if (disposed) return false;
+				if (disposed || intent !== selectionIntent) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
 				// process onto the new file -- and Claude Code's respawned its child
@@ -611,17 +636,23 @@ export function createController(
 				// this attach is what spawns it. A fork is a selection change, so the
 				// intent bumps -- a preview poll still in flight must not put its old
 				// transcript back over the fork.
-				selectionIntent += 1;
+				intent = ++selectionIntent;
 				const attached = await api.attach(forked);
-				if (disposed) return false;
+				if (disposed || intent !== selectionIntent) return null;
 				applyAttached(attached, true, forked);
 				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
-				if (disposed) return false;
-				publish({ draft: "", error: null });
-				return true;
+				if (disposed) return null;
+				// The prompt landed, so the composer must stop offering text that has
+				// already been sent -- unconditionally, because the draft is global
+				// and a user who clicked away mid-POST would otherwise be looking at
+				// another session with this text under a Send button. Only the error
+				// clear is gated: a session clicked to in that window may have raised
+				// one of its own, and this fork has no claim on that slot.
+				publish({ draft: "", ...(intent === selectionIntent ? { error: null } : {}) });
+				return attached.ref;
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
-				return false;
+				return null;
 			} finally {
 				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "submitting") publish({ busy: "idle" });

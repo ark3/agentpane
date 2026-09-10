@@ -44,6 +44,19 @@ export function watchSubmit(watch: TurnWatch, key: string): TurnWatch {
 }
 
 /**
+ * The submit `watchSubmit` armed never reached the backend -- it was refused
+ * before it was issued, or its POST failed (OW-mifuki). Stop waiting: the next
+ * stream on that session, from another tab or a turn that was already running,
+ * is not one this tab asked for and must not badge.
+ */
+export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
+	if (!watch.waiting.has(key)) return watch;
+	const waiting = new Map(watch.waiting);
+	waiting.delete(key);
+	return { ...watch, waiting };
+}
+
+/**
  * Carry a watched session across its rename (D9: every new session gets one, on
  * its first prompt). Without this the set is orphaned under the old key and the
  * badge misses the one turn it was armed for.

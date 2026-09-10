@@ -931,6 +931,63 @@ describe("client controller", () => {
 		expect(api.abort.mock.invocationCallOrder[0]!).toBeLessThan(api.fork.mock.invocationCallOrder[0]!);
 	});
 
+	/**
+	 * A fork is a selection change, but not one that outranks a click that
+	 * happened while it was in flight (OW-mifuki). The user gave up on the fork
+	 * and went somewhere else; landing it would yank the view back.
+	 */
+	it("abandons a fork whose selection was overtaken by a click mid-flight (OW-mifuki)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const forking = deferred<SessionRef>();
+		api.fork.mockReturnValueOnce(forking.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await controller.select(other);
+		forking.resolve(forkedRef);
+
+		expect(await submitted).toBeNull();
+		expect(api.attach).not.toHaveBeenCalledWith(forkedRef);
+		expect(api.prompt).not.toHaveBeenCalled();
+		expect(controller.getView().state.selected).toEqual(other);
+	});
+
+	/**
+	 * The other side of the guard above: once the prompt has landed there is no
+	 * abandoning it, whatever the user clicked. The fork is reported back so the
+	 * caller can move its per-tab state onto the right session, and the draft is
+	 * cleared even though the selection has moved -- one draft, one composer, and
+	 * it must not go on offering text that was already sent (OW-mifuki).
+	 */
+	it("reports the fork it landed on, and clears the draft, when the click comes after the prompt (OW-mifuki)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.fork.mockResolvedValue(forkedRef);
+		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		expect(api.prompt).toHaveBeenCalledOnce();
+		await controller.select(other);
+		prompt.resolve();
+
+		expect(await submitted).toEqual(forkedRef);
+		expect(controller.getView().draft).toBe("");
+		expect(controller.getView().state.selected).toEqual(other);
+	});
+
 	it("keeps the draft, and reports, when there is no fork point at that ordinal (OW-hezidi)", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
@@ -938,7 +995,7 @@ describe("client controller", () => {
 		await controller.select(ref);
 		controller.setDraft("reworded");
 
-		expect(await controller.forkAndSubmit(4)).toBe(false);
+		expect(await controller.forkAndSubmit(4)).toBeNull();
 
 		expect(api.fork).not.toHaveBeenCalled();
 		expect(api.prompt).not.toHaveBeenCalled();
