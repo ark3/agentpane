@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # A cross-site page can attach and spawn agents through GET routes, because the origin check trusts a missing `Origin` and a Pi id is opened wherever it points
@@ -46,3 +47,12 @@ Whether Pi itself does anything useful with a non-Pi file was not verified and d
 - The `isLoopbackOrigin` docblock and D8 in `docs/DESIGN.md` no longer say a page cannot omit `Origin`; the reproduction above is the evidence to cite.
 
 Closed OW-2 mentions the origin check only in passing; D8's own text is the prior art.
+
+## Close note
+
+The API now rejects browser requests whose `Sec-Fetch-Site` is present and is neither `same-origin` nor `none`, while preserving loopback-Origin checks, headerless non-browser clients, and static routes.
+Pi session attach and preview now resolve requested files beneath the configured Pi store, reject traversal and symlink escapes, and pass the canonical path through adapter creation and resume.
+SessionManager arbitrates canonical aliases across concurrent startup and disposal windows so alternate path spellings cannot duplicate or orphan an adapter.
+The 2026-09-09 Chromium reproduction is recorded in `docs/MANUAL_TESTING.md`, and D8 no longer claims that cross-site pages cannot omit `Origin`.
+Both original security regressions and the canonical startup/disposal races were observed red before their fixes.
+Verified with `bun run check`: zero TypeScript or Svelte diagnostics, 48 test files passed, and 982 tests passed.
