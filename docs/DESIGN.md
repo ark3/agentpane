@@ -419,6 +419,26 @@ Escape as well is right; Escape only is the failure.
 
 So: when an interaction introduces a mode, the control that leaves it is visible and clickable, and it is drawn where the mode announces itself rather than somewhere the user has to go looking.
 
+### D15. Forking a streaming turn stops that turn, on every backend
+
+Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first, identically on Pi and on Codex.
+The owner took this on 2026-09-09, replacing the "first cut, safe on both" that OW-hezidi shipped it as.
+
+Pi leaves no choice: a mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and `agent_settled` arrives carrying no assistant text (`docs/MANUAL_TESTING.md`, OW-yudoni).
+That section retired a third observation from the same run as a tautology, and the two above are what it says survives; nobody has yet read the file the abandoned turn was streaming into, so the conclusion rests on the settle rather than on a search for a partial reply.
+The abort does not cause that loss; it makes it deliberate and visible instead of silent.
+
+Codex is the side where a choice exists, and the case for taking it did not survive being looked at.
+`thread/fork` mints a separate thread and leaves the parent standing, so the parent turn plausibly keeps streaming — but every cell that established this forked an **idle** thread (`docs/MANUAL_TESTING.md`, OW-mewiga and OW-pifowo), and no run has ever forked Codex mid-stream.
+The parent check there is weaker than the Pi one it reads like: `fork_probe.py`'s `parent_untouched` asserts only that the parent's own header carries no `forked_from_id`, where the Pi cell hashes the file before and after.
+The asymmetry would therefore have been bought with an inference.
+It would also have been bought against a user who has just forked away: a parent turn that keeps running streams its reply into a session nobody is looking at, which spends tokens to produce an orphan.
+Uniform behaviour is worth more than a surviving turn nobody reads, and OW-hezidi's own worry — that the split "reads as a bug" — is now known to be permanent rather than pending, because Pi cannot be brought to match.
+
+What would reopen this is evidence, not preference: a probe that forks a Codex thread while a turn is streaming and records whether the parent survives and what it produces.
+That probe is cheap and belongs on any machine with `codex`, the home server included; it is OW-gojado.
+If the surviving turn turns out to be worth keeping, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.

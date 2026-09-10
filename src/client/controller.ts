@@ -557,12 +557,14 @@ export function createController(
 			renameListeners.add(onRename);
 			publish({ busy: "submitting", error: null });
 			try {
-				// Stop a running turn before forking it. A first cut, chosen because it
-				// is safe on every backend. OW-yudoni since settled what Pi does if
-				// you don't: the fork succeeds and abandons the turn anyway, so this
-				// abort makes that loss deliberate rather than silent. Codex's parent
-				// thread genuinely keeps running; whether to stop stopping it there,
-				// and wear the asymmetry, is OW-zekuhe.
+				// Stop a running turn before forking it, on every backend. Not a
+				// first cut any more -- the owner took it deliberately (D15,
+				// OW-zekuhe). On Pi there is nothing to choose: the fork abandons
+				// the turn whether or not we abort (OW-yudoni), so the abort only
+				// makes that loss visible. Codex's parent thread is *believed* to
+				// keep streaming, but every observation behind that forked an idle
+				// thread (OW-mewiga, OW-pifowo); probing it mid-stream is OW-gojado.
+				// A turn that survives streams into a session the user has left.
 				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
 				const points = await api.forkPoints(ref);
 				const point = points[ordinal];
