@@ -187,6 +187,23 @@ describe("ClaudeAdapter lifecycle", () => {
 		expect(h.procs).toHaveLength(0);
 	});
 
+	it("rejects start when the child fails to spawn", async () => {
+		const proc = new FakeClaudeProcess(false);
+		const adapter = new ClaudeAdapter(VIRTUAL_REF, {
+			spawn: () => {
+				queueMicrotask(() =>
+					proc.exit(null, null, new Error("Failed to spawn Claude Code (direnv): ENOENT")),
+				);
+				return proc;
+			},
+			newSessionId: () => "minted-1",
+		});
+
+		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow(
+			"Failed to spawn Claude Code (direnv): ENOENT",
+		);
+	});
+
 	it("surfaces a child exit as an error", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });

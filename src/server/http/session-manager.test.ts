@@ -6,6 +6,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
+import { ClaudeAdapterFactory } from "../adapters/claude/adapter.ts";
+import { FakeClaudeProcess } from "../adapters/claude/test-support.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
@@ -62,6 +64,28 @@ describe("attach", () => {
 
 		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
 		await expect(sessions.attach(REF)).resolves.toBeDefined();
+	});
+
+	it("leaves no live session when Claude reports an asynchronous spawn failure", async () => {
+		const ref: SessionRef = { backend: "claude", id: "stored-claude-id" };
+		index = new FakeSessionIndex([storedSession(ref, WORKSPACE)]);
+		const proc = new FakeClaudeProcess(false);
+		const claude = new ClaudeAdapterFactory({
+			spawn: () => {
+				queueMicrotask(() =>
+					proc.exit(null, null, new Error("Failed to spawn Claude Code (direnv): ENOENT")),
+				);
+				return proc;
+			},
+			readStoreEntries: async () => [],
+		});
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+
+		await expect(sessions.attach(ref)).rejects.toThrow(
+			"Failed to spawn Claude Code (direnv): ENOENT",
+		);
+		expect(sessions.isAttached(ref)).toBe(false);
+		expect(sessions.liveRefs()).toEqual([]);
 	});
 
 	it("rejects a backend with no factory", async () => {

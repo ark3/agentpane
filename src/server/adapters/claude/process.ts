@@ -18,6 +18,8 @@ const KILL_GRACE_MS = 1_000;
 export interface ClaudeProcess {
 	/** Write one message. The implementation appends the LF. */
 	write(line: string): void;
+	/** Observe successful OS-level process creation. Never fires after a spawn failure. */
+	onSpawn(cb: () => void): void;
 	onLine(cb: (line: string) => void): void;
 	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void;
 	/** Signal termination and settle after close or bounded SIGKILL escalation. */
@@ -131,6 +133,7 @@ export const spawnClaude: ClaudeSpawner = (options) => {
 
 class ChildClaudeProcess implements ClaudeProcess {
 	private splitter = new LineSplitter();
+	private spawnHandlers: (() => void)[] = [];
 	private lineHandlers: ((line: string) => void)[] = [];
 	private exitHandlers: ((code: number | null, signal: string | null, error?: Error) => void)[] = [];
 	private stderrTail = "";
@@ -138,6 +141,7 @@ class ChildClaudeProcess implements ClaudeProcess {
 	private stdinError: string | undefined;
 	private closed = false;
 	private killed = false;
+	private spawned = false;
 	private readonly closedPromise: Promise<void>;
 	private resolveClosed!: () => void;
 	private killPromise: Promise<void> | null = null;
@@ -163,6 +167,7 @@ class ChildClaudeProcess implements ClaudeProcess {
 			this.stdinError = `claude stdin failed: ${error.message}`;
 		});
 
+		child.on("spawn", () => this.handleSpawn());
 		child.on("error", (error: Error) => {
 			this.spawnError = `Failed to spawn Claude Code (${this.command}): ${error.message}`;
 		});
@@ -178,6 +183,14 @@ class ChildClaudeProcess implements ClaudeProcess {
 			throw new Error("Claude Code process is not running");
 		}
 		this.child.stdin.write(`${line}\n`);
+	}
+
+	onSpawn(cb: () => void): void {
+		if (this.spawned) {
+			cb();
+			return;
+		}
+		this.spawnHandlers.push(cb);
 	}
 
 	onLine(cb: (line: string) => void): void {
@@ -228,5 +241,12 @@ class ChildClaudeProcess implements ClaudeProcess {
 		const detail = this.stderrTail.trim();
 		const error = new Error(detail ? `${reason}\n${detail}` : reason);
 		for (const handler of this.exitHandlers) handler(code, signal, error);
+	}
+
+	private handleSpawn(): void {
+		if (this.spawned || this.closed) return;
+		this.spawned = true;
+		const handlers = this.spawnHandlers.splice(0);
+		for (const handler of handlers) handler();
 	}
 }

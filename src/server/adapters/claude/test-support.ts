@@ -105,8 +105,17 @@ export class FakeClaudeProcess {
 	killCount = 0;
 
 	private lineHandlers: ((line: string) => void)[] = [];
+	private spawnHandlers: (() => void)[] = [];
 	private exitHandlers: ((code: number | null, signal: string | null, error?: Error) => void)[] =
 		[];
+
+	constructor(private readonly spawned = true) {}
+
+	/** Register for the child's successful spawn; failed-spawn fakes never call this. */
+	onSpawn(cb: () => void): void {
+		this.spawnHandlers.push(cb);
+		if (this.spawned) queueMicrotask(cb);
+	}
 
 	write(line: string): void {
 		if (this.killed) throw new Error("Claude Code process is not running");

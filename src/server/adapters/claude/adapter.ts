@@ -161,11 +161,11 @@ export class ClaudeAdapter implements BackendAdapter {
 				}
 			}
 			this.currentRef = { backend: "claude", id: opts.resumeId };
-			this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
+			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
 		} else {
 			const sessionId = this.mintSessionId();
 			this.currentRef = { backend: "claude", id: sessionId };
-			this.attachProcess({ cwd: opts.cwd, sessionId });
+			await this.attachProcess({ cwd: opts.cwd, sessionId });
 		}
 	}
 
@@ -366,7 +366,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		resumeId?: string;
 		sessionId?: string;
 		forkAtEntryId?: string;
-	}): void {
+	}): Promise<void> {
 		const spawner = this.options.spawn ?? spawnClaude;
 		const proc = spawner({
 			...spawnOpts,
@@ -375,20 +375,33 @@ export class ClaudeAdapter implements BackendAdapter {
 		});
 		const ownership: Ownership = { proc, live: true };
 		this.ownership = ownership;
+		let spawned = false;
+		let resolveSpawn!: () => void;
+		let rejectSpawn!: (error: Error) => void;
+		const spawnResult = new Promise<void>((resolve, reject) => {
+			resolveSpawn = resolve;
+			rejectSpawn = reject;
+		});
+		proc.onSpawn(() => {
+			spawned = true;
+			resolveSpawn();
+		});
 		proc.onLine((line) => {
 			if (!ownership.live) return;
 			this.handleLine(line);
 		});
 		proc.onExit((code, signal, error) => {
+			const exitError =
+				error ?? new Error(`claude exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+			if (!spawned) rejectSpawn(exitError);
 			if (!ownership.live) return;
 			this.turnActive = false;
-			this.rejectPendingControls(
-				error ?? new Error(`claude exited (code=${code ?? "null"}, signal=${signal ?? "null"})`),
-			);
+			this.rejectPendingControls(exitError);
 			this.emitError(
 				error?.message ?? `claude exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
 			);
 		});
+		return spawnResult;
 	}
 
 	/** Swap the child under this adapter (fork): retire the old one first. */
@@ -400,7 +413,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.rejectPendingControls(new Error("claude adapter forked; control channel replaced"));
 		await previous.proc.kill();
 		if (this.disposed) throw new Error("claude adapter disposed");
-		this.attachProcess(spawnOpts);
+		await this.attachProcess(spawnOpts);
 	}
 
 	private handleLine(line: string): void {
