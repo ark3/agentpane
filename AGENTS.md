@@ -30,6 +30,7 @@ That vehicle cannot report a page as unfocused: it drives `chromium-headless-she
 ## Documentation
 
 Markdown prose uses one sentence per line and never wraps at a column count.
+Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md` written before 2026-08-27, and `resources/fixtures/README.md` and `resources/probes/README.md` may remain wrapped; new prose and any paragraph substantively edited follow the current rule.
 
 ## Evidence
 
