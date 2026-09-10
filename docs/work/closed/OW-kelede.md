@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # `forkAndSubmit` has no re-entrancy guard and still wipes a draft typed during its round trip
@@ -46,3 +47,24 @@ So this card wants a flag `submit` and `forkAndSubmit` own between them, not ano
 
 The guard OW-nasofa put in `submit()` reads `busyIs("submitting")`, and `forkAndSubmit` publishes that same `"submitting"`.
 Whatever mechanism OW-dinuwu leaves behind for keeping `busy` from being stomped by a `sessions-changed` re-list is the mechanism this card should reuse, rather than inventing a second one.
+
+## Close note
+
+Landed as 4c6ec5b, `fix: one send at a time on the fork path, off a flag busy could not carry`.
+
+`ControllerView` grew `sending: boolean`, a flag `submit` and `forkAndSubmit` own between them — raised before the first await in each, lowered in each `finally`.
+All three re-entrancy guards read it: `submit`'s (was `busyIs("submitting")`, OW-nasofa's), a new one in `forkAndSubmit`, and `send()`'s in `App.svelte`, which now covers both paths instead of only the plain one.
+`busy` is untouched and stays the status line's signal; the card's diagnosis that it could not carry the guard held up — `abort`'s and `attachAndSelect`'s `finally` both publish `"idle"` over a live POST.
+
+The flag is on the view rather than private to the controller because `send()` needs it too: a `forkAndSubmit` that returns null from a refusal is indistinguishable at the call site from one that failed, so `send()` would arm and then take `if (!landed) disarmSubmit(armedKey)` on the refusal, stripping the *first* press's arming — the destructive shape this card named.
+Guarding in `send()` ahead of `armFollow`/`armBadge` means the second press arms nothing.
+`publish` is synchronous and `App.svelte`'s subscriber assigns `view` synchronously, so a second press in the same tick sees `sending: true`.
+
+`forkAndSubmit`'s draft clear is now gated on `view.draft === text`, matching `submit`.
+The docblock OW-mifuki left arguing for the unconditional clear moved with the code rather than being left standing against it: the click-away case it protects still clears, because clicking away does not change the draft.
+
+All four done-when tests were confirmed red against `ba3905f~1`'s `controller.ts` and `App.svelte` by the dispatching session, not just by the implementer — four failures, no others.
+The App.test.ts one drives the real controller, and its red is the badge loss (`expected '/favicon.svg' to be '/favicon-badged.svg'`), asserted ahead of the fork count so the duplicate fork cannot hide it.
+`bun run check` green: 0 type errors, 999 tests.
+
+Not done, filed separately: the Send button's disabled condition still ignores `sending`, so a second pointer press is refused silently rather than shown as disabled.
