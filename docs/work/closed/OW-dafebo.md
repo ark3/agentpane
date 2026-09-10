@@ -70,3 +70,12 @@ four-false-positives-out-of-four problem is unchanged.
 Whether one invariant still justifies a verb, a test, or neither is now the
 question, and it is a weaker case than the two-invariant version this card was
 filed on.
+
+Declined the remaining “every cited id exists” invariant after reproducing its scan on 2026-09-09, immediately before moving this card and appending this note.
+Across `docs/`, `src/`, `e2e/`, and root Markdown, that pre-close snapshot contained 1,305 matches for the proposed pattern and 136 unique candidates; 132 resolved to one of 164 defined cards.
+The four unmatched ids were OW-007, OW-77, OW-keraha, and OW-kerata, appearing fourteen times in example or explanatory prose.
+All four are the same historical examples recorded in OW-59, with three also appearing in `docs/TRACKING.md`.
+There were zero genuine citation defects, so every problem reported by the observed scan was a false positive.
+With the sole remaining invariant still producing only the same documented noise as the earlier hand run, the observed benefit does not justify respecifying it as either a repo-local test or a cross-project `card` verb.
+The earlier closed-card-SHA invariant was already retired by this card’s amendment and was not reconsidered.
+No checker or test was built.
