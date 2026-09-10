@@ -5,12 +5,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	sessionKey,
 	type BackendId,
+	type ServerEvent,
 	type SessionPreviewTurn,
 	type SessionRef,
 	type SessionSummary,
 } from "$shared/protocol.ts";
 import App from "./App.svelte";
-import type { AgentpaneController, ControllerView } from "./controller.ts";
+import type { AgentpaneApi, EventHandlers } from "./api.ts";
+import { createController, type AgentpaneController, type ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
 import { assistant, toolRead, toolResult, user } from "./render/samples.ts";
@@ -1642,6 +1644,53 @@ describe("App", () => {
 
 		await fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 		expect(controller.submitted).toBe(2);
+	});
+
+	it("sends one prompt when Ctrl-Enter repeats while the first is still in flight", async () => {
+		// Driven by the real controller, not the fake: the guard lives in
+		// `submit()`, and the keyboard is the path that reaches it twice --
+		// nothing in the composer stops a second Ctrl-Enter (OW-nasofa).
+		let resolvePrompt = () => {};
+		const prompts: string[] = [];
+		let emit: (event: ServerEvent) => void = () => {};
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession)],
+			createSession: async () => piSession,
+			attach: async () => summary(piSession),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async (_ref, body) => {
+				prompts.push(body.text);
+				await new Promise<void>((resolve) => {
+					resolvePrompt = resolve;
+				});
+			},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			forkPoints: async () => [],
+			fork: async () => piSession,
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		// The composer only replaces the Attach button once the session is live,
+		// which is a snapshot's job, not the attach response's.
+		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		await controller.select(piSession);
+		await tick();
+		const textarea = screen.getByLabelText("Prompt");
+		await fireEvent.input(textarea, { target: { value: "Summarize the diff" } });
+
+		await fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+		await fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+		expect(prompts).toEqual(["Summarize the diff"]);
+		resolvePrompt();
 	});
 
 	it("opens the current draft in the external editor from the composer button", async () => {

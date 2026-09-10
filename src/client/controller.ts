@@ -498,6 +498,11 @@ export function createController(
 				publish({ error: "Select a session before submitting a prompt." });
 				return;
 			}
+			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
+			// click on Send, while the POST is in flight would issue a second
+			// identical prompt -- the server admits it and what the backend does
+			// with it is nobody's intent.
+			if (busyIs("submitting")) return;
 			if (!view.draft) return;
 			const text = view.draft;
 			// Track the target session through a possible rename (D9) while the
@@ -520,7 +525,10 @@ export function createController(
 					const state = currentError === priorError ? clearSessionError(view.state, ref) : view.state;
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
-					publish({ draft: "", state });
+					// The draft clears only if it is still the text that was sent: the
+					// textarea stays live through the round trip, so anything typed
+					// while waiting is the next prompt, not this one (OW-nasofa).
+					publish({ ...(view.draft === text ? { draft: "" } : {}), state });
 				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });

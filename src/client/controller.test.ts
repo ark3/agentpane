@@ -446,6 +446,40 @@ describe("client controller", () => {
 		expect(controller.getView().draft).toBe("");
 	});
 
+	it("ignores a second submit while the first prompt is still in flight", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("send me once");
+
+		const first = controller.submit();
+		const second = controller.submit();
+
+		expect(api.prompt).toHaveBeenCalledOnce();
+		prompt.resolve();
+		await Promise.all([first, second]);
+		expect(controller.getView()).toMatchObject({ draft: "", busy: "idle" });
+	});
+
+	it("keeps a draft typed while the prompt is in flight", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("send me");
+
+		const submitted = controller.submit();
+		controller.setDraft("the next thing I want to say");
+		prompt.resolve();
+		await submitted;
+
+		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me" });
+		expect(controller.getView().draft).toBe("the next thing I want to say");
+	});
+
 	it("aborts the current authoritative selected ref", async () => {
 		const api = new FakeApi();
 		api.attach.mockResolvedValue(summary(attachedRef));
