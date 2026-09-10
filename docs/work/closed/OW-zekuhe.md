@@ -56,3 +56,19 @@ Probing it is *not* a work-laptop job — only Pi is confined there, and `codex`
 So the asymmetric option rests on an architectural inference, and taking it means either accepting that inference or gating the change on a probe.
 
 `sendLabel` is not the only label site: `App.svelte:1293` draws "Stop and edit" / "Edit last message" on the same condition, and any label change follows through both.
+
+The owner took the decision on 2026-09-09: the abort stays symmetric, and it is recorded as D15 in `docs/DESIGN.md` (4333139).
+
+The trade this card laid out came apart on inspection rather than being weighed evenly.
+Pi allows no choice at all — OW-yudoni established that a mid-stream fork abandons the turn whether or not the client aborts first — so the whole decision was about Codex, and the case for the asymmetry rested on a premise nobody had observed.
+"The parent thread keeps running" came from cells (OW-mewiga, OW-pifowo) that every one of them forked an **idle** thread; no run has ever forked Codex mid-stream.
+A second argument the card had not made settled it: if the Codex parent does survive, it streams its reply into a session the user has just forked away from, spending tokens on an orphan nobody reads.
+So the asymmetry would have been bought with an inference, against a benefit that may be negative, at the cost of a permanent user-visible split — permanent because Pi cannot be brought to match.
+
+The unrun probe is filed as **OW-gojado**: fork a Codex thread mid-turn and record from the parent whether the turn survives. It carries D15's reopening clause, and it needs no work laptop — only Pi is confined there, and `codex` runs on the home server. My dispatch of this card initially asserted the opposite; that was wrong and is corrected in both the card and D15.
+
+The card's own conditional — a Codex-side label if the answer came out asymmetric — did not fire, so no label card. Had it fired it would have needed two sites, not the one this card named: `sendLabel` at `App.svelte:252` and the "Stop and edit" button at `:1293`.
+
+Amended at execution for drift: every line number this card cited had moved, and half the done-when was already satisfied, the `forkAndSubmit` comment having been rewritten at some earlier point to read OW-yudoni as settled.
+
+An adversarial reader dispatched at the writeup found three overstatements in it, all confirmed at the source and corrected before the commit: OW-yudoni had explicitly retired "the new branch is idle and empty" from that run as a tautology and I had cited it as evidence; `fork_probe.py`'s Codex `parent_untouched` is a `forked_from_id is None` header check, not the before/after sha256 the Pi cell does, so "byte-untouched" carried Pi-strength wording onto Codex; and the code comment cited the unrun OW-gojado for observations belonging to OW-mewiga and OW-pifowo. It also caught `AGENTS.md`'s opening line still reading "Decisions D1–D14", the index a new reader meets first.
