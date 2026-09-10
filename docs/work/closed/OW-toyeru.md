@@ -28,3 +28,5 @@ Claude cannot steer, so it must reject — OW-jihete — and this card's blocker
 If nothing reaches the CLI's queue mid-turn, nothing is misordered and this card is moot.
 That is not to be assumed: the second half of this card, the first `result` dropping `isStreaming` to false while a queued turn is pending, needs someone to confirm no path still reaches that queue.
 OW-jihete carries the instruction to settle this explicitly rather than let it lapse.
+
+OW-jihete proved on Claude Code 2.1.267 that a mid-turn stdin prompt queues as a separate turn and that the steer control subtype is unsupported, then changed the adapter to reject submit and compact while a turn is active. No adapter path now produces the queued mid-turn prompt whose local echo and first-result transition caused this ordering defect, so the premise of OW-toyeru is gone.
