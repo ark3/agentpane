@@ -25,3 +25,5 @@ Check `isAbsolute` and existence at create time, where the 400 can name the prob
 - A test in `app.test.ts` drives an adapter whose `start()` throws and asserts the failure was written to the injected log sink, whatever shape the implementer gives it; it fails before the change.
 - A test asserts an attach during shutdown answers 503 and not 500.
 - A test asserts `POST /api/sessions` with a relative `cwd` answers 400.
+
+Added an injectable HTTP error log sink with a stderr default, including the session ref for session-route failures; mapped shutdown-time attaches to 503; and rejected relative, missing, or non-directory workspaces during session creation. Red-first HTTP tests observed the previous 201, unlogged start failure, and 500 shutdown response before the implementation. `bun run check` passed with 48 test files and 958 tests. Landed in 1eb66d4.
