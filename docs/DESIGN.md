@@ -439,6 +439,34 @@ What would reopen this is evidence, not preference: a probe that forks a Codex t
 That probe is cheap and belongs on any machine with `codex`, the home server included; it is OW-gojado.
 If the surviving turn turns out to be worth keeping, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.
 
+### D16. A prompt submitted mid-turn steers that turn, and a backend that cannot steer rejects
+
+`submit()` during a running turn means *steer*: the text joins the turn already in flight, delivered at the backend's next safe point.
+An adapter whose backend cannot do that rejects the submission rather than doing something else with it.
+The owner took this on 2026-09-09 (OW-rifezo).
+
+Before this, the same user action did three different things and the composer drew one Send button over all of them: Codex threw `TURN_ACTIVE_ERROR` (`codex/adapter.ts:68`), Pi sent `streamingBehavior: "steer"` (`pi/process.ts:295`), and Claude wrote to stdin, which its own comments say the CLI queues (`claude/adapter.ts:13` and `:198`).
+That last is the repo quoting itself: no run in `docs/MANUAL_TESTING.md` has ever sent Claude a mid-turn prompt, and nothing anywhere records *when* a queued one is delivered.
+The `init` capability list carries `interrupt_cancel_queued_v1` and an `interrupt` reply carries `still_queued`, so a queue exists; that a mid-turn prompt enters it is inference, and it is held to the same standard as Codex's unrun `turn/steer` below.
+The contract said only "resolves once the backend admits the turn", which all three honoured.
+
+Steer is the pick because it is what a person typing mid-turn is asking for, and a follow-up delivers the text somewhere the user did not aim it.
+Pi's own default for a message typed mid-turn is steer (`pi/process.ts:291-294`), which is corroboration and not the reason.
+The alternative, standardising on follow-up, was the reachable-everywhere option and was declined: reaching it everywhere would have meant holding prompts server-side for Codex to simulate a primitive it does not have, in order to give every backend the weaker semantic.
+
+Rejection is a real answer here, not a failure mode.
+The route already turns an adapter throw into a 500, and `controller.ts`'s `submit` clears the draft only on success, so a rejected mid-turn prompt leaves the user's text where they typed it.
+What an adapter must not do is silently downgrade to a follow-up, which is indistinguishable from success at the wire and puts the prompt after the turn without saying so.
+
+Two adapters do not honour this yet and each has a card: Codex rejects today though `turn/steer` is in the generated bindings and unused (OW-tifuha), and Claude queues silently and must reject instead (OW-jihete).
+Pi is already correct.
+
+The effect on the accidental double-submit OW-nasofa describes — a second Ctrl-Enter during the round trip, which `App.svelte`'s `send()` and `controller.ts`'s `submit()` both fail to guard — runs in both directions, per backend.
+On Claude it is an improvement once OW-jihete lands: a silently queued duplicate becomes a rejection with the draft intact.
+On Codex it is a regression once OW-tifuha lands: today's clean rejection becomes a duplicate steered into the running turn.
+On Pi nothing changes, because Pi already steers it.
+So this decision does not remove the need for OW-nasofa's in-flight guard, and on one backend it is what will make that guard load-bearing.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.

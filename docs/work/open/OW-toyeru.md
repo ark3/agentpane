@@ -1,6 +1,6 @@
 ---
 labels: [defect]
-blocked-by: [OW-rifezo]
+blocked-by: [OW-jihete]
 ---
 
 # A Claude Code prompt sent mid-turn is echoed into the transcript at write time, so it appears before the running turn's remaining assistant messages
@@ -21,3 +21,10 @@ Whether Claude should queue, steer, or reject mid-turn is OW-rifezo; whatever it
 - A reducer test in `claude/reducer.test.ts` submits during `turnActive`, replays the rest of the first turn, and asserts the echo's index is after the first turn's last assistant message; it fails before the change.
 - A test asserts `isStreaming` stays true across the first `result` when a second prompt is queued.
 - A captured fixture for the mid-turn prompt sits under `resources/fixtures/claude/` with its `.meta.json`, scrubbed per `resources/fixtures/README.md`.
+
+**Amended 2026-09-09: OW-rifezo answered, and the answer may moot this card.**
+D16 makes a mid-turn `submit()` mean steer, and requires a backend that cannot steer to reject rather than queue.
+Claude cannot steer, so it must reject — OW-jihete — and this card's blocker is re-pointed there, because the ordering defect described above is a property of the queued mid-turn prompt that OW-jihete stops producing.
+If nothing reaches the CLI's queue mid-turn, nothing is misordered and this card is moot.
+That is not to be assumed: the second half of this card, the first `result` dropping `isStreaming` to false while a queued turn is pending, needs someone to confirm no path still reaches that queue.
+OW-jihete carries the instruction to settle this explicitly rather than let it lapse.

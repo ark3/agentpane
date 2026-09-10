@@ -11,6 +11,10 @@
  * - There is no request/response RPC for turns: a turn is admitted by writing
  *   a user-message line to stdin, and only the `result` event ends it. The
  *   CLI queues stdin messages sent mid-turn, so `submit()` does not gate.
+ *   **D16 overturns the clause after "so"**: a mid-turn submit must steer or
+ *   be rejected, never be queued silently, and Claude cannot steer. Gating
+ *   this is OW-jihete. The queueing itself is inferred from this comment and
+ *   never observed live -- no run in MANUAL_TESTING sends a mid-turn prompt.
  * - The session id is chosen by US at spawn (`--session-id`, settled live
  *   2026-08-25): a fresh session and a fork both know their id synchronously,
  *   so nothing waits on the `init` event (which only arrives with the first

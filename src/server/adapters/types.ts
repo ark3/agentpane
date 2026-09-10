@@ -62,7 +62,16 @@ export interface BackendAdapter {
 	dispose(): Promise<void>;
 
 	// -- driving a turn -----------------------------------------------------
-	/** Resolves once the backend admits the turn, not when the turn completes. */
+	/**
+	 * Resolves once the backend admits the turn, not when the turn completes.
+	 *
+	 * Submitted *during* a running turn, the promise is **steer** (D16): the
+	 * text joins the turn already in flight, delivered at the backend's next
+	 * safe point rather than after the turn ends. An adapter whose backend
+	 * cannot steer rejects instead, so the route can 500 and the client can
+	 * say so with the draft intact -- never silently downgrades to a follow-up,
+	 * which would land the prompt somewhere the user did not ask for.
+	 */
 	submit(text: string, images?: ImageInput[]): Promise<void>;
 	abort(): Promise<void>;
 	/**
