@@ -281,6 +281,40 @@ describe("lifecycle", () => {
 		expect(sessions.isAttached(REF)).toBe(false);
 	});
 
+	it("waits for a closing adapter to be disposed before attaching its replacement", async () => {
+		const canonical: SessionRef = {
+			backend: "pi",
+			id: "/home/u/.pi/agent/sessions/materialised.jsonl",
+		};
+		pi = new FakeAdapterFactory({ materialiseOnStart: canonical.id });
+		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+		await sessions.attach(REF);
+		const first = pi.created[0];
+		if (!first) throw new Error("no adapter");
+		index.summaries = [storedSession(REF, WORKSPACE), storedSession(canonical, WORKSPACE)];
+		const gate = deferred();
+		const dispose = first.dispose.bind(first);
+		first.dispose = async () => {
+			await gate.promise;
+			await dispose();
+		};
+
+		const closing = sessions.close(REF);
+		const throughAlias = sessions.attach(REF);
+		const throughCanonical = sessions.attach(canonical);
+		// Give an unguarded attach enough turns to reach the synchronous create().
+		for (let i = 0; i < 4; i++) await Promise.resolve();
+
+		expect(pi.created).toHaveLength(1);
+
+		gate.resolve();
+		await closing;
+		const [aliasAdapter, canonicalAdapter] = await Promise.all([throughAlias, throughCanonical]);
+		expect(first.disposed).toBe(true);
+		expect(pi.created).toHaveLength(2);
+		expect(aliasAdapter).toBe(canonicalAdapter);
+	});
+
 	it("disposes an adapter whose start() failed, rather than leaking the subprocess", async () => {
 		// PiAdapter.start() spawns first and only then round-trips a readiness
 		// probe, so a rejection can leave a live agent behind. Dropping the

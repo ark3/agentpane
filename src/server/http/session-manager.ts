@@ -92,6 +92,12 @@ interface PendingStart {
 	disposal?: Promise<void>;
 }
 
+interface PendingDisposal {
+	promise: Promise<void>;
+	/** Canonical identity all refs covered by this disposal must resume under. */
+	ref: SessionRef;
+}
+
 export class SessionManager {
 	readonly #sessions = new Map<string, ManagedSession>();
 	/**
@@ -113,6 +119,12 @@ export class SessionManager {
 	 * and is the only handle teardown has on an adapter that is still starting.
 	 */
 	readonly #attaching = new Map<string, PendingStart>();
+	/**
+	 * Guards against replacing an adapter before its predecessor has finished
+	 * disposing. Like `#attaching`, this is keyed by every ref that could reach
+	 * the session so a stale client id cannot bypass the guard.
+	 */
+	readonly #disposing = new Map<string, PendingDisposal>();
 	/**
 	 * Set by `disposeAll()`. The HTTP server is still serving for the whole of
 	 * shutdown -- `src/server/index.ts` stops the socket *after* closing the app,
@@ -197,7 +209,14 @@ export class SessionManager {
 	 */
 	async attach(ref: SessionRef): Promise<BackendAdapter> {
 		if (this.#shuttingDown) throw new ServerShuttingDownError();
-		const existing = this.#lookup(ref);
+		const disposing = this.#disposing.get(sessionKey(ref));
+		let effectiveRef = ref;
+		if (disposing) {
+			await disposing.promise;
+			if (this.#shuttingDown) throw new ServerShuttingDownError();
+			effectiveRef = disposing.ref;
+		}
+		const existing = this.#lookup(effectiveRef);
 		if (existing?.adapter) {
 			this.broadcaster.broadcastSnapshot(existing.ref);
 			return existing.adapter;
@@ -205,7 +224,7 @@ export class SessionManager {
 
 		// Key the in-flight guard by whatever the caller said, so two concurrent
 		// attaches on the same (possibly superseded) id still collapse into one.
-		const key = sessionKey(existing?.ref ?? ref);
+		const key = sessionKey(existing?.ref ?? effectiveRef);
 		const inFlight = this.#attaching.get(key);
 		if (inFlight) return (await inFlight.promise).adapter as BackendAdapter;
 
@@ -214,7 +233,7 @@ export class SessionManager {
 			// Deferred by one microtask so this record is registered below -- and
 			// so reachable by close()/disposeAll() -- before `#start` can spawn
 			// anything. A startup teardown cannot see is a startup it cannot stop.
-			promise: Promise.resolve().then(() => this.#start(ref, existing, pending)),
+			promise: Promise.resolve().then(() => this.#start(effectiveRef, existing, pending)),
 		};
 		this.#attaching.set(key, pending);
 		try {
@@ -469,7 +488,12 @@ export class SessionManager {
 		return pending.disposal;
 	}
 
-	/** Explicit close: this is the only thing besides shutdown that kills an agent. */
+	/**
+	 * Explicit close: this is the only thing besides shutdown that kills an agent.
+	 * D12's reaper (OW-33) inherits this path, including the disposal guard that
+	 * prevents a transparent re-attach from sharing a session file with the
+	 * adapter being evicted.
+	 */
 	async close(ref: SessionRef): Promise<void> {
 		const session = this.#lookup(ref);
 		// Flag the startup before anything else: an adapter that does not exist
@@ -483,9 +507,13 @@ export class SessionManager {
 			return;
 		}
 		const key = sessionKey(session.ref);
+		const disposalKeys = [key];
 		this.#sessions.delete(key);
 		for (const [alias, target] of [...this.#aliases]) {
-			if (target === key || alias === key) this.#aliases.delete(alias);
+			if (target === key || alias === key) {
+				disposalKeys.push(alias);
+				this.#aliases.delete(alias);
+			}
 		}
 		for (const [requestId, owner] of [...this.#pendingRequests]) {
 			if (owner === key) this.#pendingRequests.delete(requestId);
@@ -498,8 +526,21 @@ export class SessionManager {
 		// already happened. What a throw here can still mean is a subprocess that
 		// outlived its kill -- DESIGN's third open question, which needs a live
 		// spawn to settle and has no honest answer from in here.
-		if (pending) await this.#terminate(pending);
-		else await Promise.resolve(session.adapter?.dispose()).catch(() => {});
+		const disposal: PendingDisposal = {
+			ref: session.ref,
+			promise: Promise.resolve().then(async () => {
+				if (pending) await this.#terminate(pending);
+				else await Promise.resolve(session.adapter?.dispose()).catch(() => {});
+			}),
+		};
+		for (const disposalKey of disposalKeys) this.#disposing.set(disposalKey, disposal);
+		try {
+			await disposal.promise;
+		} finally {
+			for (const disposalKey of disposalKeys) {
+				if (this.#disposing.get(disposalKey) === disposal) this.#disposing.delete(disposalKey);
+			}
+		}
 		this.broadcaster.sessionsChanged();
 	}
 
