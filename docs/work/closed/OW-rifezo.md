@@ -44,3 +44,26 @@ A gate would need that fixed first.
 
 **OW-zekuhe has since closed** (2026-09-09, D15): submitting an edit stops the running turn on every backend, deliberately and no longer as a first cut.
 So option three's consequence — that the edit path becomes the only mid-turn route — is now a statement about settled behaviour rather than about a provisional one.
+
+The owner took the decision on 2026-09-09: a prompt submitted mid-turn means **steer**, and a backend that cannot steer **rejects**. Recorded as D16 in `docs/DESIGN.md` and in `types.ts`'s `submit` docblock (973a3d6).
+
+The three-way split this card described was real and re-verified at every site before the decision.
+What the card did not know is that it was partly an artefact of the contract's arity rather than of backend capability: `pi/protocol.ts:31` types `streamingBehavior?: "steer" | "followUp"`, and the Pi adapter's own comment says it picks `"steer"` only because `submit()` "has no way for the caller to express steer-vs-follow-up".
+Widening `submit` to carry the choice was therefore a fourth option this card had not listed, and it was declined with the others: it pushes onto the user a choice they should not have to make.
+
+Standardising on **follow-up** was the reachable-everywhere option — Claude already does it, Pi flips one string — and was declined because reaching it on Codex would mean holding prompts server-side to simulate a primitive Codex does not have, in order to give every backend the weaker semantic. Steer is what a person typing mid-turn is asking for.
+
+The **client gate** option is not currently buildable and the card assumed it was: OW-7 records that only the tail entry is marked streaming, and OW-toyeru that Claude drops `isStreaming` to false while a queued turn is still pending, so the composer already offers Send on a session about to stream again.
+
+Cards filed for the two adapters that do not honour D16, as this card's done-when required:
+
+- **OW-tifuha** — Codex rejects though `turn/steer` is in the generated bindings and unused. The card requires a live probe *before* wiring, because nothing has ever run `turn/steer`, and specifies what to do in either outcome including amending D16 if steer does not work.
+- **OW-jihete** — Claude queues silently, which D16 names as the one unacceptable answer, and must reject.
+
+**OW-toyeru** was blocked on this card and is now re-pointed at OW-jihete instead of being freed by this close: it is the transcript-ordering defect of exactly the queued mid-turn prompt OW-jihete stops producing, so it is likely moot, and OW-jihete carries the instruction to settle that explicitly rather than let it lapse. Its second half — `isStreaming` dropping false while a queued turn is pending — may survive.
+
+**OW-nasofa** is unaffected and its in-flight guard becomes more necessary, not less: post-D16 an accidental double Ctrl-Enter is a regression on Codex (a clean rejection becomes a duplicate steered into the running turn), an improvement on Claude, and unchanged on Pi.
+
+An adversarial reader dispatched at the writeup found four defects in it, all confirmed at the source and corrected before the commit. D16 asserted Claude's mid-turn queueing as fact when the repo's only source for it is that file's own comment and no run in `docs/MANUAL_TESTING.md` has ever sent a mid-turn Claude prompt — it is now hedged to the same standard as Codex's unrun `turn/steer`. It attributed to Pi a motive no source states. Its double-submit paragraph claimed two backends of three reject today, when only Codex does. And OW-tifuha as first filed claimed a second `TURN_ACTIVE_ERROR` throw site inside `submit` at `:361` and told the implementer to weigh it: `:361` is `compact`'s guard, `compact` is one of the two `NonSteerableTurnKind`s, and steering it is protocol-impossible — the card now says leave it, and names the four tests that flipping the real guard will turn red.
+
+Per this repo's rule that a correction retires every copy, the overturned clause at `claude/adapter.ts:13` — "so `submit()` does not gate" — is marked at the code rather than only in DESIGN, since that docblock is where a reader meets it and OW-jihete has not landed yet.
