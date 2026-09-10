@@ -183,6 +183,23 @@ DOMPurify is not optional: the primary use case is rendering the contents of rep
 Sanitize the parsed output.
 Prefer `shiki` over `highlight.js` only once streaming is settled — it is async, which complicates token-by-token rendering.
 
+**Remote media does not load automatically (2026-09-09, OW-holabo).**
+Sanitizing the output stops script, and it was never meant to stop a fetch.
+`![](https://host/x.png)` in assistant text or a tool result rendered an `<img>` that requested that URL the moment the transcript was opened, handing the host the reader's IP address and the time they read it.
+That is not XSS — DOMPurify strips `onerror` and every script vector, and did here — but it is a channel out of a page whose whole stated purpose is "rendering the contents of repositories we do not control", and the author of a hostile repository chooses the host.
+
+So remote media renders as a link the reader clicks, not as media that loads.
+The information survives, the automatic request does not.
+`data:` sources keep rendering as images: they carry their own bytes and have no network side.
+
+The vector list is wider than markdown image syntax, which is why this is enforced in `sanitize()` rather than in a marked renderer override.
+Raw `<img>` written as HTML, `img srcset`, `<video src>` and its `poster`, `<audio src>`, `<picture><source srcset>`, and a protocol-relative `//host/x.png` all reached the page before this change; `<input type=image>` did not, because `input` is already forbidden.
+Enumerating that list is exactly why it should not be the only defence: it is only as good as whoever last thought about it.
+The browser-enforced half — a `Content-Security-Policy` restricting `img-src` and `media-src`, which agentpane does not serve at all today — is OW-kigole.
+The two overlap deliberately: the header is the boundary, and the renderer is the only place that can turn a blocked image into something a reader can click.
+
+Loopback-only (D8) does not answer this. D8 bounds who can reach the server; it says nothing about where the page can send a request once hostile content is inside it.
+
 Known hot spot: re-parsing markdown per token on a long message.
 Only the tail block changes; re-parse just that block and throttle to a frame.
 What confines it to the tail block is `App.svelte`'s `view` being `$state.raw` (OW-detepa) — an unchanged block's `text` prop then reads `===` and its effect is not re-run.
