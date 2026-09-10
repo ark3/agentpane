@@ -15,16 +15,29 @@ Both mean the client dropped an SSE event, so the trigger is a sequence gap afte
 
 Three things a user loses:
 
-- **The one-prompt-at-a-time guard.** Mid-prompt `busy` is `"submitting"`; a gapped event fires `recover`, which overwrites it with `"attaching"`, and the next Ctrl-Enter walks past `if (busyIs("submitting")) return;` in `submit()` and issues a duplicate prompt.
-  This is exactly what OW-dinuwu closed for the re-list, reopened.
-  `submit`'s own `finally` guard stops matching too, so `recover`'s `finally` is what restores `"idle"`.
+- **The one-prompt-at-a-time guard.** *Already fixed elsewhere, 2026-09-10 — see the amendment note below.*
+  Mid-prompt `busy` was `"submitting"`; a gapped event fired `recover`, which overwrote it with `"attaching"`, and the next Ctrl-Enter walked past `if (busyIs("submitting")) return;` in `submit()` and issued a duplicate prompt.
+  `submit`'s own `finally` guard stopped matching too, so `recover`'s `finally` was what restored `"idle"`.
 - **An unread error.** A failed compact or abort message is wiped by `error: null` with no gesture behind it.
 - **Cross-session bleed.** `busy` is one global slot and `recover` is per-session, so recovering session B writes "Opening session…" over what the user is doing in session A.
 
 ## Done when
 
 - A test in `src/client/controller.test.ts` publishes an error, delivers a sequence-gapped event that drives `recover`, and asserts the error survives; it fails before the change.
-- A sibling holds a prompt open, drives `recover` the same way, and asserts a second `submit()` still issues no second `POST prompt`; it fails before the change.
+- A sibling holds a prompt open, drives `recover` the same way, and asserts a second `submit()` still issues no second `POST prompt`.
+  This one **passes before the change** and is a regression guard, not a red-first test — see the amendment note.
+  Write it anyway: nothing else pins `recover` against the send guard, and the guard moved once already.
+- `recover`'s `finally` still publishes `busy: "idle"` when it finds `"attaching"`, which is how it can also cut short a real `attachAndSelect`'s status.
+  Whatever the fix is, it covers the `finally` as well as the opening publish.
+
+## Amended 2026-09-10, executing
+
+OW-kelede landed `sending: boolean` on `ControllerView` — a flag `submit` and `forkAndSubmit` own between them, raised before the first await in each and lowered in each `finally`.
+All three re-entrancy guards now read that flag instead of `busy`, precisely because `busy` is one global slot that other operations clear out from under a live POST.
+So `recover`'s stomp can no longer let a duplicate prompt through: the first of the three losses above is closed, by a different door than this card expected.
+
+What is left is real and untouched: the unread error wiped by `error: null`, and the cross-session status-line bleed.
+Neither depends on the guard.
 
 ## Load-bearing
 
