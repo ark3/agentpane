@@ -760,7 +760,7 @@ finish the turn and exit.
 
 | Checklist line | Observed |
 |---|---|
-| `--verbose` still required? | **No — not on 2.1.238, not on 2.1.247.** Expected to be required with `-p --output-format stream-json` (it used to be); on both versions `echo hi \| claude -p --model haiku --output-format stream-json` and the full stream-json-input shape stream fine without it, exit 0, empty stderr. Never passed in any capture. A 2026-08-26 correction (OW-misoru) recorded the owner's report that **2.1.246** requires it again; re-probed 2026-08-27 on 2.1.247 (OW-bumota) that requirement is absent, and the adapter passes the flag unconditionally because it is harmless, not because it is needed. |
+| `--verbose` still required? | **Version-dependent.** It was not required on 2.1.238 or 2.1.247, but 2.1.267 rejects the full stream-json-input shape without it (`Error: When using --print, --output-format=stream-json requires --verbose`). The adapter passes it unconditionally. |
 | `init` event | First line of every session; contents below. |
 | Control channel | Exists on stdin/stdout; envelope and verified subtypes below. |
 | `/compact` as a user message | Works; sequence below, fixture `compact.jsonl`. |
@@ -989,7 +989,7 @@ downstream was real — sbox ran, jailed the workspace, and injected
 app: `abort`, `/compact`, and fork — fork mechanics rest on the probes
 above, OW-mayuza's live evidence, and the fixture-driven unit tests.
 
-## `--verbose` inert on 2.1.238, and still inert on 2.1.247 (OW-misoru, OW-bumota)
+## `--verbose` across Claude Code versions (OW-misoru, OW-bumota, OW-jihete)
 
 Probed live on the home server 2026-08-26 (Haiku, per the OW-yilabe /
 OW-beripo authorization), against the home server's installed **claude
@@ -1111,14 +1111,8 @@ it existed, was transient and is gone by 2.1.247. No version boundary is
 claimed in either direction beyond the two versions actually run here
 (2.1.238 and 2.1.247), and neither of those requires the flag.
 
-**Passing `--verbose` unconditionally remains the right call**, now for a
-better reason than "there is no version to branch on": the flag is *harmless*
-on both versions the repo has ever run — inert against the base shape and
-inert against the full resume/fork/session-id shape — so passing it costs
-nothing and covers whatever build the owner hit. Do not gate it on a version,
-and do not remove it: removing it would re-expose the adapter to the very
-build that was reported to need it, to buy nothing. Nothing about `--verbose`
-is open any more.
+Those conclusions are historical for 2.1.238 and 2.1.247 rather than a promise about later builds.
+The 2.1.267 observation under OW-jihete below confirms that the requirement returned, while the always-present flag kept the adapter compatible without a version branch.
 
 ## Observed `updatedAt` freshness at a turn's two boundaries (OW-furinu)
 
@@ -1253,6 +1247,24 @@ Selecting `gpt-5.6-luna` through the picker admitted the next turn; the locked l
 
 Both prompts received their requested exact reply, so these were complete backend turns rather than model-list or control-channel probes.
 The observations retire the earlier `set_model` qualification and its Honest scope copy: Claude's successful control request now has a subsequent-turn observation through agentpane itself.
+
+## Observed Claude Code mid-turn prompt handling (OW-jihete)
+
+**2026-09-10, home server, Claude Code 2.1.267 on explicit `--model haiku`, resolved as `claude-haiku-4-5-20251001`.**
+
+One `claude -p` process ran with stream-json in both directions, partial messages, `--verbose`, and `--replay-user-messages` in a throwaway git repository under `/tmp`.
+The first attempt omitted `--verbose`; before reading the prompt or starting a turn, 2.1.267 exited with `Error: When using --print, --output-format=stream-json requires --verbose`, so the successful capture includes the flag the adapter already passes.
+The first prompt asked for the integers 1 through 600, one per line, to keep the response streaming long enough for a deterministic mid-turn write.
+After the first text delta arrived at 3,484 ms, the harness wrote a second user message and a `control_request` with subtype `steer` on the same stdin stream.
+
+The `steer` request returned `Unsupported control request subtype: steer` one millisecond later, while the first turn remained active.
+The first answer continued through all 600 integers and its `result` arrived at 11,516 ms, 8,032 ms after the second user line was written.
+The CLI did not replay or otherwise acknowledge the second user message until 12,228 ms, 712 ms after that first `result`.
+It then answered the marker prompt as a separate second turn, whose `result` arrived at 12,700 ms.
+
+This proves both halves needed by D16: ordinary stdin queues a mid-turn prompt for a subsequent turn, and the control channel has no subtype named `steer` on 2.1.267.
+The adapter must therefore reject a mid-turn `submit()` rather than writing it, and `/compact` uses the same active-turn gate so it cannot reopen a queue window.
+The scrubbed 340-line stream and its invocation, timing, and event census are `resources/fixtures/claude/mid-turn.jsonl` and `mid-turn.meta.json`.
 
 ## Still unverified
 

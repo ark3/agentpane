@@ -462,9 +462,9 @@ If the surviving turn turns out to be worth keeping, the label follows the behav
 An adapter whose backend cannot do that rejects the submission rather than doing something else with it.
 The owner took this on 2026-09-09 (OW-rifezo).
 
-Before this, the same user action did three different things and the composer drew one Send button over all of them: Codex threw `TURN_ACTIVE_ERROR` (`codex/adapter.ts:68`), Pi sent `streamingBehavior: "steer"` (`pi/process.ts:295`), and Claude wrote to stdin, which its own comments say the CLI queues (`claude/adapter.ts:13` and `:198`).
-That last is the repo quoting itself: no run in `docs/MANUAL_TESTING.md` has ever sent Claude a mid-turn prompt, and nothing anywhere records *when* a queued one is delivered.
-The `init` capability list carries `interrupt_cancel_queued_v1` and an `interrupt` reply carries `still_queued`, so a queue exists; that a mid-turn prompt enters it is inference, and it is held to the same standard as Codex's unrun `turn/steer` below.
+Before this, the same user action did three different things and the composer drew one Send button over all of them: Codex threw `TURN_ACTIVE_ERROR`, Pi sent `streamingBehavior: "steer"`, and Claude wrote another user line to stdin.
+Claude Code 2.1.267 settled that last behavior live on the home server (OW-jihete): a user line written after the first text delta was not acknowledged until after the first `result`, then ran as a separate second turn, while a `steer` control request returned `Unsupported control request subtype: steer` immediately.
+The Claude adapter now rejects `submit()` while a turn is active, and applies the same single-flight gate to `/compact`, so no adapter path knowingly enters the CLI's queue.
 The contract said only "resolves once the backend admits the turn", which all three honoured.
 
 Steer is the pick because it is what a person typing mid-turn is asking for, and a follow-up delivers the text somewhere the user did not aim it.
@@ -475,13 +475,12 @@ Rejection is a real answer here, not a failure mode.
 The route already turns an adapter throw into a 500, and `controller.ts`'s `submit` clears the draft only on success, so a rejected mid-turn prompt leaves the user's text where they typed it.
 What an adapter must not do is silently downgrade to a follow-up, which is indistinguishable from success at the wire and puts the prompt after the turn without saying so.
 
-Pi is already correct, and neither of the other two is known to be.
+Pi is already correct, Claude now rejects because its backend cannot steer, and Codex still rejects pending its live steer probe.
 Codex rejects today though `turn/steer` sits in the generated bindings, unused and never run live (OW-tifuha).
-Which side of this rule Claude falls on has never been observed at all (OW-jihete): that a stdin message sent mid-turn is queued rests on that adapter's own comments and no run, and the control-channel probe that enumerated `rewind`, `fork`, `checkpoint` and the rest by name never tried a steering subtype.
-Both cards therefore require the observation before the change, and both name what to do if it comes back the other way — including amending this entry.
+OW-jihete's fixture and the matching section in `docs/MANUAL_TESTING.md` preserve Claude's observation; OW-tifuha still requires its observation before any Codex change.
 
 The effect on the accidental double-submit OW-nasofa describes — a second Ctrl-Enter during the round trip, which `App.svelte`'s `send()` and `controller.ts`'s `submit()` both fail to guard — runs in both directions, per backend.
-On Claude it is an improvement once OW-jihete lands: a silently queued duplicate becomes a rejection with the draft intact.
+On Claude it is an improvement: a silently queued duplicate becomes a rejection with the draft intact.
 On Codex it is a regression once OW-tifuha lands: today's clean rejection becomes a duplicate steered into the running turn.
 On Pi nothing changes, because Pi already steers it.
 So this decision does not remove the need for OW-nasofa's in-flight guard, and on one backend it is what will make that guard load-bearing.

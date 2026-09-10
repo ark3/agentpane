@@ -1,0 +1,38 @@
+{
+  "backend": "claude",
+  "scenario": "mid-turn",
+  "covers": "stdin user message queued behind an active turn; unsupported steer control subtype",
+  "prompt": "count from 1 through 600; after the first text delta, send a second marker prompt and a steer control request",
+  "invocation": "claude -p --model haiku --input-format stream-json --output-format stream-json --include-partial-messages --verbose --replay-user-messages --permission-mode bypassPermissions",
+  "cli_version": "2.1.267 (Claude Code)",
+  "captured_at": "2026-09-10T09:08-04:00 through 2026-09-10T09:09-04:00",
+  "capture_cwd": "a throwaway git repo under /tmp/ow-jihete-probe-20260910",
+  "lines": 340,
+  "terminated_cleanly": true,
+  "session_id": "a54fadaf-3e70-4d63-ac15-e7ca39a134b8",
+  "injection_timing": {
+    "first_text_delta_ms": 3484,
+    "second_prompt_written_ms": 3484,
+    "steer_error_received_ms": 3485,
+    "first_result_ms": 11516,
+    "second_prompt_replayed_ms": 12228,
+    "second_result_ms": 12700
+  },
+  "event_census": {
+    "assistant": 4,
+    "control_response": 1,
+    "rate_limit_event": 2,
+    "result": 2,
+    "stream_event:content_block_delta": 309,
+    "stream_event:content_block_start": 4,
+    "stream_event:content_block_stop": 4,
+    "stream_event:message_delta": 2,
+    "stream_event:message_start": 2,
+    "stream_event:message_stop": 2,
+    "system:init": 2,
+    "system:status": 2,
+    "system:thinking_tokens": 2,
+    "user": 2
+  },
+  "scrub": "operator home directory prefix replaced with /example-home; host tools, MCP services, commands, agents, and skills replaced with structural example values; account rate-limit timestamps, utilization, and overage values nulled; manual grep found no username, hostname, home path, or private content; model ids kept because they are the evidence"
+}

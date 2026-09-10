@@ -9,14 +9,11 @@
  * Differences from the Codex shell that are protocol, not preference:
  *
  * - There is no request/response RPC for turns: a turn is admitted by writing
- *   a user-message line to stdin, and only the `result` event ends it. The
- *   CLI queues stdin messages sent mid-turn, so `submit()` does not gate.
- *   **Do not trust the clause after "so"** -- D16 requires a mid-turn submit
- *   to steer or be rejected, never queued silently, and whether Claude can
- *   steer is unknown. The queueing here is inferred from this comment alone
- *   and never observed: no run in MANUAL_TESTING sends a mid-turn prompt, and
- *   the control-subtype probe never tried a steering one. OW-jihete observes
- *   it first and then changes this or retires the claim.
+ *   a user-message line to stdin, and only the `result` event ends it. Claude
+ *   Code queues a user message written mid-turn as a later turn, and has no
+ *   `steer` control subtype (OW-jihete), so `submit()` rejects while the first
+ *   turn is active. `compact()` uses the same gate; this adapter never creates
+ *   the CLI's queue window itself.
  * - The session id is chosen by US at spawn (`--session-id`, settled live
  *   2026-08-25): a fresh session and a fork both know their id synchronously,
  *   so nothing waits on the `init` event (which only arrives with the first
@@ -74,6 +71,7 @@ import { ClaudeReducer, type ClaudeEffect } from "./reducer.ts";
 export const CLAUDE_FORK_SESSION_START = "session-start";
 
 const DEFAULT_CLAUDE_ROOT = join(homedir(), ".claude", "projects");
+const TURN_ACTIVE_ERROR = "claude adapter cannot submit while a turn is active";
 
 export interface ClaudeAdapterOptions {
 	/** Injected in tests; the default spawns `direnv exec <cwd> sbox -- claude -p ...`. */
@@ -193,6 +191,7 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	async submit(text: string, images?: ImageInput[]): Promise<void> {
 		const proc = this.requireProc();
+		if (this.turnActive) throw new Error(TURN_ACTIVE_ERROR);
 		const content: ClaudeUserContent[] = [];
 		if (text) content.push({ type: "text", text });
 		for (const image of images ?? []) {
@@ -201,7 +200,7 @@ export class ClaudeAdapter implements BackendAdapter {
 				source: { type: "base64", media_type: image.mimeType, data: image.base64 },
 			});
 		}
-		// Admission is the stdin write; the CLI queues messages sent mid-turn.
+		// Admission is the stdin write; the active gate keeps this single-flight.
 		proc.write(JSON.stringify(buildUserMessageLine(content)));
 		this.turnActive = true;
 		this.applyEffects(this.reducer.beginTurn(text, images));
@@ -224,6 +223,9 @@ export class ClaudeAdapter implements BackendAdapter {
 	 */
 	async compact(): Promise<void> {
 		const proc = this.requireProc();
+		// A stream-json /compact line is a turn too. Without this shared gate the
+		// CLI would queue it behind the live turn, reopening submit's ambiguity.
+		if (this.turnActive) throw new Error(TURN_ACTIVE_ERROR);
 		this.applyEffects(this.reducer.requestCompaction());
 		try {
 			proc.write(JSON.stringify(buildUserMessageLine([{ type: "text", text: "/compact" }])));

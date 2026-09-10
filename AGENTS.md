@@ -53,6 +53,8 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   Proposed for OW-yudoni on 2026-08-19 and declined by the owner for exactly this reason.
 - Pi fork behavior settled live on the work laptop (2026-08-20, `pi 0.84.2`): forking at a user message is exclusive of that message, while forking during a streaming turn succeeds but abandons the in-flight turn.
   See `docs/MANUAL_TESTING.md` OW-yudoni.
+- Claude Code mid-turn handling settled live on the home server (2026-09-10, `claude 2.1.267`, explicit `--model haiku`): a stream-json user message written during a turn is acknowledged only after the first `result` and runs as a second turn, while a `steer` control request errors as unsupported.
+  The adapter therefore rejects `submit()` and `/compact` while a turn is active; see `docs/MANUAL_TESTING.md` OW-jihete.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.

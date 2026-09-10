@@ -52,6 +52,7 @@ locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 
 Codex `account/rateLimits/updated` events keep their field shape, but the scrubber nulls subscription, utilization, reset-time, and credit values because those describe the operator's account rather than the protocol behavior under test.
 `src/fixture-scrub.test.ts` rejects committed live values in those fields.
+New Claude `rate_limit_event` captures follow the same rule, and their `init` events replace the host's tools, MCP services, commands, agents, and skills with structural example values.
 
 ## Scenarios
 
@@ -82,26 +83,13 @@ in the `text` scenario. Still uncovered, because they are hard to trigger
 deterministically: `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`.
 Add scenarios when you implement those mapping rows.
 
-## The claude/ directory (OW-yilabe, captured 2026-08-25)
+## The claude/ directory (OW-yilabe, OW-jihete)
 
-Claude Code stream-json captures, `claude 2.1.238`, Haiku only
-(`claude-haiku-4-5-20251001` — the owner's authorization condition for live
-turns on the home server). **Not** produced by `capture_fixtures.py`: each was
-driven by hand over `--input-format stream-json`; the exact invocation is in
-each `.meta.json` and the full evidence pass is the OW-yilabe section of
-`docs/MANUAL_TESTING.md`. Scenarios: `text-turn`, `thinking`, `tool-use`
-(Bash + Read + Edit, so Edit's `old_string`/`new_string` input is on record),
-`interrupt` (a `control_request` stopping a streaming turn — its result is
-`error_during_execution` and the exit code is 1, by design), `permission-request`
-(`--permission-mode default --permission-prompt-tool stdio`, a `can_use_tool`
-request answered with an allow), `compact` (`/compact` as a stream-json user
-message), `fork` (`--resume --fork-session`), `fork-at-message` (OW-mayuza,
-2026-08-25: the `--help`-hidden `--resume-session-at` — a pre-tip truncating
-fork at a store-line `uuid`, inclusive of the named entry), `control-discovery`
-(`set_model`, `set_permission_mode`, and the unknown-subtype error), and
-`session-id` (caller-chosen uuid). The scrub here is textual, not key-based:
-the operator home-directory prefix became `/example-home`; model ids are kept
-because they are the evidence.
+The original Claude Code stream-json captures used `claude 2.1.238`, Haiku only (`claude-haiku-4-5-20251001` — the owner's authorization condition for live turns on the home server), on 2026-08-25.
+They were not produced by `capture_fixtures.py`: each was driven by hand over `--input-format stream-json`; the exact invocation is in each `.meta.json` and the full evidence pass is the OW-yilabe section of `docs/MANUAL_TESTING.md`.
+Those scenarios are `text-turn`, `thinking`, `tool-use` (Bash + Read + Edit, so Edit's `old_string`/`new_string` input is on record), `interrupt` (a `control_request` stopping a streaming turn — its result is `error_during_execution` and the exit code is 1, by design), `permission-request` (`--permission-mode default --permission-prompt-tool stdio`, a `can_use_tool` request answered with an allow), `compact` (`/compact` as a stream-json user message), `fork` (`--resume --fork-session`), `fork-at-message` (OW-mayuza, 2026-08-25: the `--help`-hidden `--resume-session-at` — a pre-tip truncating fork at a store-line `uuid`, inclusive of the named entry), `control-discovery` (`set_model`, `set_permission_mode`, and the unknown-subtype error), and `session-id` (caller-chosen uuid).
+The `mid-turn` scenario was captured separately for OW-jihete on 2026-09-10 with Claude Code 2.1.267 and records a user line queued behind an active turn plus the unsupported `steer` control subtype.
+The scrub here is textual, not key-based: the operator home-directory prefix became `/example-home`; model ids are kept because they are the evidence.
 
 ## The compact scenario (OW-72, captured 2026-08-18)
 

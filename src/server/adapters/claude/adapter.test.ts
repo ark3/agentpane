@@ -218,6 +218,46 @@ describe("ClaudeAdapter turns", () => {
 		expect(state.messages[0]?.role).toBe("user");
 	});
 
+	it("rejects a submit while a turn is active, then admits one after its result", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		await h.adapter.submit("first prompt");
+		const before = h.proc().written.length;
+
+		await expect(h.adapter.submit("queued prompt")).rejects.toThrow(
+			"claude adapter cannot submit while a turn is active",
+		);
+		expect(h.proc().written).toHaveLength(before);
+		expect(h.adapter.getState().messages).toHaveLength(1);
+
+		h.proc().emit({ type: "result", subtype: "success", is_error: false });
+		await h.adapter.submit("next prompt");
+		expect(h.proc().lastUserMessage()).toEqual({
+			type: "user",
+			message: { role: "user", content: [{ type: "text", text: "next prompt" }] },
+		});
+	});
+
+	it("refuses to queue compaction behind an active turn", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		await h.adapter.submit("active prompt");
+		const before = h.proc().written.length;
+
+		await expect(h.adapter.compact()).rejects.toThrow(
+			"claude adapter cannot submit while a turn is active",
+		);
+		expect(h.proc().written).toHaveLength(before);
+		expect(h.adapter.getState().compaction).toBeNull();
+
+		h.proc().emit({ type: "result", subtype: "success", is_error: false });
+		await h.adapter.compact();
+		expect(h.proc().lastUserMessage()).toEqual({
+			type: "user",
+			message: { role: "user", content: [{ type: "text", text: "/compact" }] },
+		});
+	});
+
 	it("replays a recorded turn through the live process seam", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
