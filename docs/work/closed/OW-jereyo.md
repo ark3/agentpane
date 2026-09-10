@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # Closing a session and re-attaching it before dispose settles spawns a second agent on the same session file
@@ -17,3 +18,7 @@ D12's reaper (OW-33) will evict through the same path and inherits whichever ans
 ## Done when
 
 - A test in `session-manager.test.ts` closes a session whose fake adapter's `dispose()` is held open, attaches the same ref while it is held, releases it, and asserts exactly one spawn happened after the first; it fails before the change.
+
+## Close note
+
+Prevented attach from spawning a replacement until the prior adapter has finished disposing, preserving canonical identity across stale aliases so concurrent attaches collapse to one startup. Added a gated-disposal regression test covering canonical and aliased refs; it failed before the fix with three adapters and passes with exactly one replacement. Verified with the targeted session-manager suite (29 tests) and bun run check (48 files, 964 tests).
