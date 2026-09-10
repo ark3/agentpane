@@ -603,6 +603,69 @@ describe("client controller", () => {
 		await recovery.promise;
 	});
 
+	it("keeps the view error through a sequence-gap recovery (OW-yasewo)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.submit();
+		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
+
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null });
+		await settle();
+
+		expect(api.attach).toHaveBeenCalledWith(ref);
+		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
+		controller.dispose();
+	});
+
+	// `busy` is one global slot and `recover` is per-session, so a gap on B used
+	// to write "Opening session…" over the prompt the user is watching in A.
+	it("leaves busy at submitting across another session's recovery (OW-yasewo)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("hello");
+		const submitted = controller.submit();
+
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		api.emit({ type: "status", session: attachedRef, seq: 3, isStreaming: true, compaction: null, model: null });
+		await settle();
+
+		expect(controller.getView().busy).toBe("submitting");
+		prompt.resolve();
+		await submitted;
+		expect(controller.getView().busy).toBe("idle");
+		controller.dispose();
+	});
+
+	// A regression guard, not a red-first test: since OW-kelede the send guard
+	// reads `sending`, which no recovery touches. Nothing else pins `recover`
+	// against that guard, and the guard has moved once already.
+	it("ignores a second submit while another session recovers (OW-yasewo)", async () => {
+		const api = new FakeApi();
+		const prompt = deferred<void>();
+		api.prompt.mockReturnValue(prompt.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("hello");
+		const first = controller.submit();
+
+		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		api.emit({ type: "status", session: attachedRef, seq: 3, isStreaming: true, compaction: null, model: null });
+		await settle();
+		const second = controller.submit();
+
+		expect(api.prompt).toHaveBeenCalledOnce();
+		prompt.resolve();
+		await Promise.all([first, second]);
+		controller.dispose();
+	});
+
 	it("does not select an unrelated session while recovering it", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

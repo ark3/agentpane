@@ -182,8 +182,11 @@ export function createController(
 			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested))
 			? summary.ref
 			: view.state.selected;
-		// An explicit attach replaces any read-only preview with the live transcript.
-		publish({ state: { ...replaceSummary(summary, requested), selected }, error: null, ...(select ? { preview: null } : {}) });
+		// An explicit attach replaces any read-only preview with the live
+		// transcript, and clears the error slot the gesture is answering. Both are
+		// gated on `select` because the one caller that passes `false` is
+		// `recover`, which no gesture reaches -- see its docblock (OW-yasewo).
+		publish({ state: { ...replaceSummary(summary, requested), selected }, ...(select ? { error: null, preview: null } : {}) });
 	}
 
 	function validWorkspace(cwd: string): boolean {
@@ -368,19 +371,36 @@ export function createController(
 		syncPoll();
 	}
 
+	/**
+	 * Re-attach a session whose SSE sequence gapped (`acceptsSequence` in
+	 * `session-state.ts`), which means this client dropped an event. Nothing
+	 * user-driven reaches here: the only caller is `onEvent`, so every recovery is
+	 * background repair, for whichever session gapped -- not necessarily the
+	 * selected one.
+	 *
+	 * It therefore writes neither `busy` nor `error`, deliberately, and does not
+	 * report its own failure (OW-yasewo; OW-dinuwu is the same defect through the
+	 * re-list door). `busy` is one global slot naming what the user's own last
+	 * gesture is doing: `"attaching"` here wrote "Opening session…" over the
+	 * "Sending prompt…" of a prompt the user was watching in another session, and
+	 * the `finally`'s `busy: "idle"` cut a genuine `attachAndSelect`'s status short
+	 * as well. The error slot is mail the user has not read; a recovery nobody
+	 * asked for has no standing to empty it, and a failed one has none to fill it
+	 * either -- an error with no gesture behind it is unattributable, and the
+	 * remedy is automatic anyway: the next event for that session gaps again and
+	 * retries, and a Refresh re-lists regardless. A background attach that reports
+	 * nothing is the intended behaviour, not an oversight.
+	 */
 	async function recover(ref: SessionRef): Promise<void> {
 		const key = sessionKey(ref);
 		const inFlight = recoveries.get(key);
 		if (inFlight) return inFlight;
 		const request = (async () => {
-			publish({ busy: "attaching", error: null });
 			try {
 				const attached = await api.attach(ref);
 				if (!disposed) applyAttached(attached, false, ref);
-			} catch (error: unknown) {
-				if (!disposed) publish({ error: errorMessage(error) });
-			} finally {
-				if (!disposed && view.busy === "attaching") publish({ busy: "idle" });
+			} catch {
+				// Silent by design -- see the docblock above.
 			}
 		})();
 		recoveries.set(key, request);
