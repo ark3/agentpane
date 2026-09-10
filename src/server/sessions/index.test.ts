@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { listSessions } from "./index.ts";
+import { getSession, listSessions } from "./index.ts";
 
 function codexHeader(id: string, cwd: string) {
 	return {
@@ -131,5 +131,54 @@ describe("listSessions", () => {
 		const ids = result.map((s) => s.ref.id);
 		expect(ids).toContain("good");
 		expect(result).toHaveLength(2);
+	});
+});
+
+describe("getSession", () => {
+	let root: string;
+
+	beforeEach(async () => {
+		root = await mkdtemp(join(tmpdir(), "agentpane-get-session-"));
+	});
+
+	afterEach(async () => {
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it("rejects a readable Pi session reached by traversal outside the configured store root", async () => {
+		const piRoot = join(root, "pi-sessions");
+		const outside = join(root, "outside.jsonl");
+		await mkdir(piRoot, { recursive: true });
+		await writeJsonl(outside, [piHeader("outside", "/ws/outside"), piUserMessage("question")]);
+
+		const result = await getSession(
+			{ backend: "pi", id: `${piRoot}/../outside.jsonl` },
+			{ piRoot },
+		);
+
+		expect(result).toBeNull();
+	});
+
+	it("returns an in-root Pi session", async () => {
+		const piRoot = join(root, "pi-sessions");
+		const inside = join(piRoot, "workspace", "inside.jsonl");
+		await writeJsonl(inside, [piHeader("inside", "/ws/inside"), piUserMessage("question")]);
+
+		const result = await getSession({ backend: "pi", id: inside }, { piRoot });
+
+		expect(result).toMatchObject({ ref: { backend: "pi", id: inside }, cwd: "/ws/inside" });
+	});
+
+	it("rejects a Pi session reached through an in-root symlink that escapes the store", async () => {
+		const piRoot = join(root, "pi-sessions");
+		const outside = join(root, "outside.jsonl");
+		const link = join(piRoot, "escaped.jsonl");
+		await mkdir(piRoot, { recursive: true });
+		await writeJsonl(outside, [piHeader("outside", "/ws/outside"), piUserMessage("question")]);
+		await symlink(outside, link);
+
+		const result = await getSession({ backend: "pi", id: link }, { piRoot });
+
+		expect(result).toBeNull();
 	});
 });

@@ -27,7 +27,7 @@
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { extractClaudePreviewTurns, findClaudeSessionFiles } from "./claude.ts";
 import { extractCodexPreviewTurns } from "./codex.ts";
-import { SESSION_ROOTS } from "./index.ts";
+import { resolvePiSessionPath, SESSION_ROOTS } from "./index.ts";
 import { extractPiPreviewTurns } from "./pi.ts";
 import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
@@ -61,8 +61,10 @@ export async function readSessionPreview(
 	const readClaudeTurns = opts.readClaudeTurns ?? extractClaudePreviewTurns;
 
 	if (ref.backend === "pi") {
-		// D9: the ref IS the file path. One read, no discovery.
-		return readPiTurns(ref.id);
+		// D9: the ref IS the file path. Validate it against the same store-root
+		// boundary as attach, then read it directly with no discovery.
+		const file = await resolvePiSessionPath(ref.id, opts.piRoot);
+		return file === null ? [] : readPiTurns(file);
 	}
 
 	if (ref.backend === "claude") {

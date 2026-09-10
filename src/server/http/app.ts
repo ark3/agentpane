@@ -72,7 +72,7 @@ export function createApp(deps: AppDeps): App {
 			return served ?? notFound(url.pathname);
 		}
 
-		if (!isLoopbackOrigin(request.headers.get("origin"))) {
+		if (!isTrustedRequestMetadata(request.headers)) {
 			return error(403, "forbidden_origin", "this API is reachable only from a local page");
 		}
 
@@ -504,12 +504,20 @@ function sessionRefFromRequest(request: Request): SessionRef | undefined {
  * being overturned here. pipane has no origin check either (HANDOFF finding
  * 17), which is where the gap was inherited from.
  *
- * The rule is loopback-*origin*, not same-origin: in dev the page is served by
- * Vite on another port and proxied here, so an exact match would reject the
- * only client we have. A request with no `Origin` at all is curl, or a typed
- * URL — not something a page can forge, since browsers always attach it
- * cross-origin.
+ * The Origin rule is loopback-*origin*, not same-origin: in dev the page is
+ * served by Vite on another port and proxied here, so an exact match would
+ * reject the only client we have. Browsers can omit Origin on cross-site
+ * no-CORS GETs, so Sec-Fetch-Site closes that gap: when present it must say
+ * `same-origin` or `none`. Header absence remains valid for non-browser clients
+ * such as curl, while the production and proxied development clients are
+ * same-origin and send `same-origin`.
  */
+function isTrustedRequestMetadata(headers: Headers): boolean {
+	const site = headers.get("sec-fetch-site");
+	if (site !== null && site !== "same-origin" && site !== "none") return false;
+	return isLoopbackOrigin(headers.get("origin"));
+}
+
 function isLoopbackOrigin(origin: string | null): boolean {
 	if (origin === null) return true;
 	let hostname: string;

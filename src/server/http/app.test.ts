@@ -920,6 +920,28 @@ describe("origin", () => {
 		expect(pi.created).toHaveLength(0);
 	});
 
+	it("refuses a cross-site attach even when the browser omits Origin", async () => {
+		const response = await app.fetch(
+			new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, {
+				headers: { "sec-fetch-site": "cross-site" },
+			}),
+		);
+
+		expect(response.status).toBe(403);
+		expect(((await response.json()) as ApiError).error).toBe("forbidden_origin");
+		expect(pi.created).toHaveLength(0);
+	});
+
+	it("allows same-origin browser metadata", async () => {
+		const response = await app.fetch(
+			new Request(`http://127.0.0.1${ROUTES.sessions}`, {
+				headers: { "sec-fetch-site": "same-origin" },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+	});
+
 	it("allows the dev server's origin, which is loopback on another port", async () => {
 		// vite.config.ts serves the client from 127.0.0.1:5173 and proxies /api
 		// here with changeOrigin: false, so same-origin would reject dev.
@@ -927,7 +949,7 @@ describe("origin", () => {
 		expect((await withOrigin(ROUTES.sessions, "http://localhost:5173")).status).toBe(200);
 	});
 
-	it("allows a request with no Origin, which no page can produce", async () => {
+	it("allows requests with neither browser metadata header for non-browser clients", async () => {
 		expect((await get(ROUTES.sessions)).status).toBe(200);
 	});
 

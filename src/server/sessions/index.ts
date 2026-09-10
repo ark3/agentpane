@@ -10,9 +10,9 @@
  */
 
 import type { Stats } from "node:fs";
-import { stat as fsStat } from "node:fs/promises";
+import { realpath, stat as fsStat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { SessionRef, SessionSummary } from "../../shared/protocol.ts";
 import { findClaudeSessionFiles, parseClaudeSession } from "./claude.ts";
 import { parseCodexSession } from "./codex.ts";
@@ -140,6 +140,25 @@ export interface GetSessionOptions {
 }
 
 /**
+ * Resolve a Pi ref only when both it and the configured store root exist and
+ * the ref's real path remains inside the root's real path. Resolving both sides
+ * rejects lexical traversal and symlinks that escape the store.
+ */
+export async function resolvePiSessionPath(
+	refPath: string,
+	piRoot: string = DEFAULT_PI_ROOT,
+): Promise<string | null> {
+	try {
+		const [resolvedRoot, resolvedRef] = await Promise.all([realpath(piRoot), realpath(refPath)]);
+		const fromRoot = relative(resolvedRoot, resolvedRef);
+		if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return null;
+		return resolvedRef;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Metadata for exactly one stored session, located without walking or parsing
  * the rest of the corpus the way `listSessions` must. The
  * backends locate their one file the same way the preview path (OW-38) does:
@@ -160,7 +179,8 @@ export async function getSession(
 	opts: GetSessionOptions = {},
 ): Promise<SessionSummary | null> {
 	if (ref.backend === "pi") {
-		return loadOne(ref.id, parsePiSession);
+		const file = await resolvePiSessionPath(ref.id, opts.piRoot);
+		return file === null ? null : loadOne(file, parsePiSession);
 	}
 
 	if (ref.backend === "claude") {

@@ -101,6 +101,22 @@ describe("readSessionPreview", () => {
 	});
 
 	describe("Pi", () => {
+		it("does not read a ref outside the configured store root", async () => {
+			const piRoot = join(root, "pi-sessions");
+			const outside = join(root, "outside.jsonl");
+			await mkdir(piRoot, { recursive: true });
+			await writeJsonl(outside, [piHeader(), piMessage("user", "must stay unread")]);
+			const readPiTurns = vi.fn(async () => []);
+
+			const turns = await readSessionPreview(
+				{ backend: "pi", id: outside },
+				{ piRoot, readPiTurns },
+			);
+
+			expect(turns).toEqual([]);
+			expect(readPiTurns).not.toHaveBeenCalled();
+		});
+
 		it("returns the user/assistant conversation from the ref's file (D9)", async () => {
 			const file = join(root, "session.jsonl");
 			await writeJsonl(file, [
