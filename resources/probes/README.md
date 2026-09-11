@@ -147,6 +147,34 @@ writing their own harness:
   `ServerRequest` approvals both wait for an answer. The harness answers them
   and records that they happened.
 
+## `approval_policy_probe.py`
+
+Proves: **what `approvalPolicy` does to Codex's approval `ServerRequest`s, and what
+a forked thread carries** (OW-18). Six live cells against `codex app-server`:
+the same edit-provoking prompt on `danger-full-access` and on `read-only`, each
+with and without `approvalPolicy: "never"`; and two `thread/fork` cells that read
+`sandbox` and `approvalPolicy` straight off `ThreadForkResponse`.
+
+```bash
+python3 approval_policy_probe.py            # all cells, JSON record on stdout
+python3 approval_policy_probe.py --timeout 150
+```
+
+The `read-only` pair is the control that makes the `never` cells mean something:
+without it, "no approval arrived" cannot be told apart from "the prompt never
+provoked one". Unlike `fork_probe.py`, this harness **records every
+server-initiated request before answering it** -- answering in the reader thread
+first, as that one does, would report the arrivals as absences.
+
+Writes no fixtures. Temporary writable `CODEX_HOME` with `auth.json`/`config.toml`
+copied in by name and never printed, temporary git workspace per cell, both
+removed on exit. Threads are ephemeral except the fork parents, which have to
+materialise on disk for `thread/fork` to load them. Costs tokens: every cell
+drives a real model turn.
+
+Verified with: `codex-cli` 0.154.0. What it showed is `docs/MANUAL_TESTING.md`,
+"Observed Codex approval policy, and what a fork carries (OW-18)".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's
