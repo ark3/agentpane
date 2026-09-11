@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # Whether an approval kind agentpane knows but cannot answer should decline like an unknown one, or keep hanging the turn until OW-bijera lands
@@ -41,3 +42,18 @@ If the answer is decline, the code change is small and belongs with the decision
 If the answer is keep pending, no code changes and the reasoning goes at the `applyEffects` gate beside OW-nujawi's note, so the asymmetry reads as chosen rather than accidental.
 
 Whichever way it goes, record what it means for `OW-bijera`: a decline makes that card's premise narrower, because the turn no longer hangs and the card is then about offering a choice rather than about unblocking anything.
+
+## Close note
+
+Decided 2026-09-11: a request the browser cannot answer is declined rather than held, recorded in `docs/DESIGN.md` D2a under "And when the browser cannot answer either". Where the kind has a `DECLINE_RESPONSES` shape it gets that shape, so the model reads a "no" it can carry on from and try something else; where it does not, the JSON-RPC error OW-nujawi already sends stands. The user is told what arrived in both cases.
+
+The reasoning that carried it: a turn continuing from a refusal beats a session the user has to destroy, and the warning OW-nujawi wrote was itself the argument -- it told the user that killing the session was the remedy. The counter-argument, that these are exactly the kinds OW-bijera would make answerable, did not hold, because bijera is not merely unbuilt but currently unstageable: nothing can produce a live request to test it against. The decision is provisional and bijera revisits it.
+
+The implementation is **not** in this card and was deliberately not folded in. Two attempts at it during this session both failed, and the second failure is the useful one:
+
+- Declining without publishing takes eight tests in `adapter.test.ts` red -- request namespace per adapter lifetime, typed reverse mapping for pre-adoption requests, wire-id scoping, numeric-versus-string wire ids, reply correlation, and both OW-futewo cases. They become meaningless rather than adaptable, and OW-bijera needs that machinery back.
+- Declining *and* publishing is worse: `reduceServerEvent`'s `request` arm appends to `view.requests` and nothing removes from it, so the warning would stand permanently over a turn that had already continued. Today's warning is true; that version is a lie that never clears.
+
+Both fail on the same missing thing: `ServerEvent` can announce a request and cannot retract one. `OW-gusifo` carries the implementation with that wire event as its first move, and D2a's closing paragraph now names the gap and points at it. It is sequenced before OW-bijera, not after, because bijera needs the same retraction for its own removal path.
+
+No code changed under this card. The working tree was taken to the first implementation and reverted once its cost was measured.

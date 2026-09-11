@@ -108,6 +108,21 @@ The agent blocks until answered.
 The adapter answers what it can itself.
 What genuinely needs a human goes to the browser over SSE with its id and comes back via a REST reply route; the adapter matches it up and responds to Codex.
 
+**And when the browser cannot answer either, the adapter declines rather than holding it.**
+Decided 2026-09-11 (OW-yikoyo).
+The sentence above assumed the browser is a place a request can be answered, and today it is not: the whole of agentpane's response to a pending request is a warning line, because OW-bijera's client half does not exist.
+So a request nothing can answer was being held until the user killed the session, and the user was told that killing it was the remedy.
+A turn that carries on from a "no" it can read beats a session that has to be destroyed, and the model can try something else -- which is the case for declining rather than erroring where a decline shape exists, since a JSON-RPC error reads as a broken client rather than a refusal.
+The user is told what arrived in both cases; silently refusing on the agent's behalf is the one outcome ruled out.
+
+This is provisional and OW-bijera is what revisits it: once a human can answer, holding becomes the right behaviour again for the kinds they can answer.
+It is therefore sequenced *before* bijera rather than after, because declining honestly needs the retraction this contract has always lacked -- see the paragraph below.
+
+**A resolved request has no wire event, and that is a gap, not a decision.**
+`ServerEvent` carries `request` and nothing that retracts it, so the browser is never told a request stopped being pending -- not when this client answers it, not when another does, and not when Codex resolves it itself through auto-approval.
+The client's `requests` array is append-only for that reason (`src/client/session-state.ts`, the `request` arm of `reduceServerEvent`), which is why a declined request would otherwise leave a warning standing over a turn that had already moved on.
+The Codex reducer already produces a `request-resolved` effect that the adapter consumes and drops, so the missing piece is the wire event and the client arm, not the detection (OW-gusifo).
+
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
 An unanswered one hangs the turn.
