@@ -1,5 +1,5 @@
 ---
-labels: [change, now]
+labels: [change]
 ---
 
 # Surface Claude Code's `can_use_tool` control request as an `AgentRequest`, replacing the Claude adapter's inert `onRequest`.
@@ -28,3 +28,12 @@ shaped (the fixture captures an allow). OW-bijera is the client half of the
 
 Done when: adapter tests over the fixture drive `onRequest` → `reply` round
 trips and fail before the change; `bun run check` green.
+
+## Probably a decline -- do not start this without reading OW-18
+
+The owner decided on 2026-09-11 that agentpane avoids permission prompts rather than routing them into its UI, which is this card's whole premise.
+Note also that `onRequest` is inert on this adapter for a structural reason, not an oversight: sbox injects `--permission-mode bypassPermissions` for the `claude` profile, and agentpane spawns its backends through sbox (D7), so the control request this card wants to surface cannot fire under agentpane's own spawn configuration.
+See the `CodexAdapter`-side module docblock's counterpart at the top of `src/server/adapters/claude/adapter.ts`, which already says so.
+
+Left open rather than closed only so the decline can cite the `docs/DESIGN.md` decision OW-18 records, instead of a conversation that does not outlive the session.
+Pulled off `now` on 2026-09-11 for the same reason it is likely declined.
