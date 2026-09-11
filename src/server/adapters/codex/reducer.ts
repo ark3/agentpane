@@ -45,8 +45,8 @@ export type CodexEffect =
 	| { type: "reset" }
 	| { type: "streaming"; isStreaming: boolean }
 	| { type: "compaction"; compaction: "requesting" | "running" | null }
-	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a). */
-	| { type: "request"; requestId: RequestId; kind: string; payload: unknown }
+	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a, OW-futewo). */
+	| { type: "request"; requestId: RequestId; kind: string; payload: unknown; issuerThreadId?: string | null }
 	/** Codex resolved a pending request itself (auto-approval, another client). */
 	| { type: "request-resolved"; requestId: RequestId }
 	| { type: "error"; message: string };
@@ -167,9 +167,22 @@ export class CodexReducer {
 		if (!isRecord(msg)) return [];
 		if (isCodexResponse(msg)) return []; // the JSON-RPC client owns responses
 		if (isCodexServerRequest(msg)) {
-			return [{ type: "request", requestId: msg.id, kind: msg.method, payload: msg.params }];
+			const issuerThreadId = this.extractIssuerThreadId(msg.params);
+			return [{ type: "request", requestId: msg.id, kind: msg.method, payload: msg.params, issuerThreadId }];
 		}
 		return isCodexNotification(msg) ? this.handleNotification(msg) : [];
+	}
+
+	/**
+	 * Extract the `threadId` from a ServerRequest payload and return it only if it
+	 * differs from this reducer's own thread id (i.e., the request originates from a child thread).
+	 */
+	private extractIssuerThreadId(params: unknown): string | null {
+		if (!isRecord(params)) return null;
+		const payloadThreadId = params.threadId;
+		if (typeof payloadThreadId !== "string") return null;
+		// Return the issuer's thread id only if it differs from the reducer's own thread
+		return payloadThreadId !== this.threadId ? payloadThreadId : null;
 	}
 
 	private handleNotification(message: CodexNotification): CodexEffect[] {

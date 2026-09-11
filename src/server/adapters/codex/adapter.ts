@@ -553,6 +553,7 @@ export class CodexAdapter implements BackendAdapter {
 						session: this.currentRef,
 						kind: effect.kind,
 						payload: effect.payload,
+						...(effect.issuerThreadId ? { issuerThreadId: effect.issuerThreadId } : {}),
 					};
 					for (const listener of [...this.requestListeners]) listener(request);
 					break;

@@ -1122,3 +1122,77 @@ describe("hydrate (cold start)", () => {
 		expect(messages[0]?.timestamp).toBe(1_700_000_000_000);
 	});
 });
+
+describe("ServerRequest issuer thread identification (OW-futewo)", () => {
+	it("identifies a child-thread blocking request and sets issuerThreadId", () => {
+		const parentThreadId = "parent-thread-id";
+		const childThreadId = "child-thread-id";
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.setIdentity({ threadId: parentThreadId });
+
+		const childBlockingRequest = unsafeMessage({
+			id: "req-1",
+			method: "item/commandExecution/requestApproval",
+			params: {
+				threadId: childThreadId,
+				turnId: "turn-1",
+				itemId: "item-1",
+				startedAtMs: 1000,
+				command: "echo test",
+			},
+		});
+
+		const effects = reducer.handle(childBlockingRequest);
+		expect(effects).toHaveLength(1);
+		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
+		expect(requestEffect.type).toBe("request");
+		expect(requestEffect.issuerThreadId).toBe(childThreadId);
+	});
+
+	it("returns null issuerThreadId for a same-thread blocking request", () => {
+		const threadId = "same-thread-id";
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.setIdentity({ threadId });
+
+		const sameThreadRequest = unsafeMessage({
+			id: "req-1",
+			method: "item/commandExecution/requestApproval",
+			params: {
+				threadId,
+				turnId: "turn-1",
+				itemId: "item-1",
+				startedAtMs: 1000,
+				command: "echo test",
+			},
+		});
+
+		const effects = reducer.handle(sameThreadRequest);
+		expect(effects).toHaveLength(1);
+		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
+		expect(requestEffect.type).toBe("request");
+		expect(requestEffect.issuerThreadId).toBeNull();
+	});
+
+	it("returns null issuerThreadId for a request with no threadId in payload", () => {
+		const parentThreadId = "parent-thread-id";
+		const reducer = new CodexReducer({ now: () => 1 });
+		reducer.setIdentity({ threadId: parentThreadId });
+
+		const requestNoThreadId = unsafeMessage({
+			id: "req-1",
+			method: "item/commandExecution/requestApproval",
+			params: {
+				turnId: "turn-1",
+				itemId: "item-1",
+				startedAtMs: 1000,
+				command: "echo test",
+			},
+		});
+
+		const effects = reducer.handle(requestNoThreadId);
+		expect(effects).toHaveLength(1);
+		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
+		expect(requestEffect.type).toBe("request");
+		expect(requestEffect.issuerThreadId).toBeNull();
+	});
+});

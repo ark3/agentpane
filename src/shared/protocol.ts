@@ -100,12 +100,17 @@ export interface SessionSummary {
  * `kind` is the backend's own method name, deliberately not normalised -- the
  * renderer dispatches on it and falls back to a generic prompt for unknown kinds,
  * the same principle as D5's default tool card.
+ *
+ * `issuerThreadId` names the Codex thread that issued this request when it differs
+ * from `session.id` -- i.e., when a spawned child's blocking request is routed
+ * through its parent adapter (D2a, OW-futewo).
  */
 export interface AgentRequest {
 	requestId: string;
 	session: SessionRef;
 	kind: string;
 	payload: unknown;
+	issuerThreadId?: string | null;
 }
 
 export interface AgentRequestReply {
