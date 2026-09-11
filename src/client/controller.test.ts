@@ -996,10 +996,12 @@ describe("client controller", () => {
 
 	/**
 	 * A fork is a selection change, but not one that outranks a click that
-	 * happened while it was in flight (OW-mifuki). The user gave up on the fork
-	 * and went somewhere else; landing it would yank the view back.
+	 * happened while it was in flight (OW-mifuki). The user gave up on *going to*
+	 * the fork and went somewhere else -- and that is all they gave up on: under
+	 * D17 the click is navigation, not a retraction, so the fork is still made,
+	 * attached and prompted, and they end up with both conversations (OW-miyemo).
 	 */
-	it("abandons a fork whose selection was overtaken by a click mid-flight (OW-mifuki)", async () => {
+	it("lands a fork whose selection was overtaken by a click mid-flight, without moving the user (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
@@ -1014,10 +1016,105 @@ describe("client controller", () => {
 		await controller.select(other);
 		forking.resolve(forkedRef);
 
-		expect(await submitted).toBeNull();
-		expect(api.attach).not.toHaveBeenCalledWith(forkedRef);
-		expect(api.prompt).not.toHaveBeenCalled();
+		expect(await submitted).toEqual(forkedRef);
+		expect(api.attach).toHaveBeenCalledWith(forkedRef);
+		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
 		expect(controller.getView().state.selected).toEqual(other);
+		controller.dispose();
+	});
+
+	/**
+	 * The abort window, which had no test at all: removing that guard used to
+	 * leave the whole client suite green. It is also the window where the old
+	 * behaviour was worst in kind -- the button says "Stop and fork", so a click
+	 * here killed the parent's turn the user *had* asked for and then abandoned
+	 * the fork they had asked for too, leaving them with neither (D17, OW-miyemo).
+	 */
+	it("lands a fork whose selection was overtaken while the abort was in flight (D17, OW-miyemo)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const aborting = deferred<void>();
+		api.abort.mockReturnValueOnce(aborting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		expect(api.abort).toHaveBeenCalledWith(ref);
+		await controller.select(other);
+		aborting.resolve();
+
+		expect(await submitted).toEqual(forkedRef);
+		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
+		expect(api.attach).toHaveBeenCalledWith(forkedRef);
+		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
+		expect(controller.getView().state.selected).toEqual(other);
+		controller.dispose();
+	});
+
+	/** The `fork-points` window, the other one that had no test (D17, OW-miyemo). */
+	it("lands a fork whose selection was overtaken while fork points were being read (D17, OW-miyemo)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		const points = deferred<ForkPoint[]>();
+		api.forkPoints.mockReturnValueOnce(points.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		expect(api.forkPoints).toHaveBeenCalledWith(ref);
+		await controller.select(other);
+		points.resolve([{ id: "turn-1", text: "first" }]);
+
+		expect(await submitted).toEqual(forkedRef);
+		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
+		expect(api.attach).toHaveBeenCalledWith(forkedRef);
+		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
+		expect(controller.getView().state.selected).toEqual(other);
+		controller.dispose();
+	});
+
+	/**
+	 * The sharp edge D17 names. A fork that takes the selection bumps
+	 * `selectionIntent` to fence off a preview poll still in flight; a fork that
+	 * declines it must not, because bumping past the user's own click strands it
+	 * -- their `attachAndSelect` falls into its `else` branch, the selection is
+	 * never set and `busy` sits on "attaching" under "Opening session..." forever.
+	 */
+	it("does not bump the selection intent past the click it declined to overtake (D17, OW-miyemo)", async () => {
+		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		const forking = deferred<SessionRef>();
+		api.fork.mockReturnValueOnce(forking.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		// The user's own attach is still in flight when the fork resolves and
+		// runs its attach, its prompt and its publishes underneath it.
+		const attachingOther = deferred<SessionSummary>();
+		api.attach.mockReturnValueOnce(attachingOther.promise);
+		const selecting = controller.select(other);
+		await settle();
+		forking.resolve(forkedRef);
+		expect(await submitted).toEqual(forkedRef);
+		attachingOther.resolve(summary(other));
+		await selecting;
+
+		expect(controller.getView().state.selected).toEqual(other);
+		expect(controller.getView().busy).toBe("idle");
+		controller.dispose();
 	});
 
 	/**

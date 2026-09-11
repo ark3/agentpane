@@ -95,6 +95,13 @@ export interface AgentpaneController {
 	 * to move it onto the fork; reading `state.selected` back instead would move
 	 * it onto whatever the user clicked mid-fork (OW-mifuki).
 	 *
+	 * Null means a genuine failure -- nothing selected, an empty draft, a press
+	 * on top of one still in flight, a missing fork point, or a rejected request.
+	 * Clicking another session mid-fork is not one of them: under D17 that is
+	 * navigation, not a retraction, so the round trip runs to completion and the
+	 * ref comes back while the selection stays where the click put it
+	 * (OW-miyemo).
+	 *
 	 * The caller owns the compose mode this drives, and a failed fork has to
 	 * leave that mode standing: the draft is still the edited text, and clearing
 	 * the mark under it would leave a composer that says nothing about where it
@@ -184,8 +191,11 @@ export function createController(
 			: view.state.selected;
 		// An explicit attach replaces any read-only preview with the live
 		// transcript, and clears the error slot the gesture is answering. Both are
-		// gated on `select` because the one caller that passes `false` is
-		// `recover`, which no gesture reaches -- see its docblock (OW-yasewo).
+		// gated on `select` because neither caller that passes `false` has any
+		// standing over them: `recover`, which no gesture reaches -- see its
+		// docblock (OW-yasewo) -- and a `forkAndSubmit` the user has clicked away
+		// from, which under D17 still lands its prompt but owns neither the error
+		// slot nor the preview of the session they went to (OW-miyemo).
 		publish({ state: { ...replaceSummary(summary, requested), selected }, ...(select ? { error: null, preview: null } : {}) });
 	}
 
@@ -651,9 +661,11 @@ export function createController(
 			// Captured first, the way `refetchPreview` captures it: every await
 			// below is a window in which the user can click another session, and
 			// a fork that reaches its attach after that click must not yank the
-			// selection back onto itself (OW-mifuki). Reassigned at the bump below,
-			// where this call becomes the newest intent itself.
-			let intent = selectionIntent;
+			// selection back onto itself (OW-mifuki). That is the *only* thing the
+			// click decides: under D17 it is navigation, not a cancel, so the fork
+			// is still created, still attached and still prompted, and the user
+			// ends up with both conversations (OW-miyemo).
+			const intent = selectionIntent;
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
 				// Stop a running turn before forking it, on every backend. Not a
@@ -665,13 +677,13 @@ export function createController(
 				// thread (OW-mewiga, OW-pifowo); probing it mid-stream is OW-gojado.
 				// A turn that survives streams into a session the user has left.
 				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
-				if (disposed || intent !== selectionIntent) return null;
+				if (disposed) return null;
 				const points = await api.forkPoints(ref);
-				if (disposed || intent !== selectionIntent) return null;
+				if (disposed) return null;
 				const point = points[ordinal];
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
 				const forked = await api.fork(ref, { entryId: point.id });
-				if (disposed || intent !== selectionIntent) return null;
+				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
 				// process onto the new file -- and Claude Code's respawned its child
@@ -680,10 +692,20 @@ export function createController(
 				// this attach is what spawns it. A fork is a selection change, so the
 				// intent bumps -- a preview poll still in flight must not put its old
 				// transcript back over the fork.
-				intent = ++selectionIntent;
+				//
+				// Only a fork that is actually taking the selection may bump, which
+				// is why this is read before the bump destroys what it reads. A fork
+				// the user has clicked away from must leave the counter alone:
+				// bumping past their own click strands it, leaving their
+				// `attachAndSelect` in its `else` branch with the selection never set
+				// and `busy` stuck on "attaching" forever (D17, OW-miyemo).
+				const takesSelection = intent === selectionIntent;
+				const forkIntent = takesSelection ? ++selectionIntent : intent;
 				const attached = await api.attach(forked);
-				if (disposed || intent !== selectionIntent) return null;
-				applyAttached(attached, true, forked);
+				if (disposed) return null;
+				// The attach is one more window for a click, and it gets the same
+				// answer: the attach still lands, it just does not move the user.
+				applyAttached(attached, forkIntent === selectionIntent, forked);
 				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
 				// The prompt landed, so the composer must stop offering text that has
@@ -702,7 +724,7 @@ export function createController(
 				// no claim on that slot.
 				publish({
 					...(view.draft === text ? { draft: "" } : {}),
-					...(intent === selectionIntent ? { error: null } : {}),
+					...(forkIntent === selectionIntent ? { error: null } : {}),
 				});
 				return attached.ref;
 			} catch (error: unknown) {
