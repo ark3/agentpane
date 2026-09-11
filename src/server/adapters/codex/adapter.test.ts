@@ -1509,6 +1509,22 @@ describe("CodexAdapter request replies", () => {
 		});
 	});
 
+	it("answers a request kind it has no handler for and names it in an error (OW-nujawi)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-unknown" });
+		const requests = vi.fn();
+		const errors: string[] = [];
+		adapter.onRequest(requests);
+		adapter.onError((message) => errors.push(message));
+
+		proc.emit({ id: 31, method: "workspace/trust/request", params: { threadId: "thread-unknown" } });
+
+		expect(responses(proc)).toEqual([
+			{ id: 31, error: { code: -32601, message: expect.stringContaining("workspace/trust/request") } },
+		]);
+		expect(errors).toEqual([expect.stringContaining("workspace/trust/request")]);
+		expect(requests).not.toHaveBeenCalled();
+	});
+
 	it("identifies a child-thread blocking request and routes it through the parent (OW-futewo)", async () => {
 		const parentThreadId = "parent-thread";
 		const childThreadId = "child-thread";

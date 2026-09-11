@@ -224,7 +224,7 @@ One seam, no PATH dependency, testable.
 ### D7a. Codex approval policy: `never`, set by the adapter
 
 agentpane sets `approvalPolicy: "never"` on every Codex thread it creates, rather than inheriting Codex's `on-request` default.
-The intent is to avoid permission prompts, not to route them into agentpane's UI: agentpane has no approval dialog, so an approval `ServerRequest` renders as a single `Unsupported agent request pending.` warning and the turn then hangs until the session is killed.
+The intent is to avoid permission prompts, not to route them into agentpane's UI: agentpane has no approval dialog, so an approval `ServerRequest` renders as a single warning naming the kind and the turn then hangs until the session is killed.
 The real trade is "no dialog" against "a hung turn", and the hung turn is worse.
 
 The site is `CodexAdapterOptions.approvalPolicy` in `src/server/adapters/codex/adapter.ts`, beside `sandbox`, applied at thread creation exactly the way `sandbox` is.
@@ -552,6 +552,8 @@ Three groups, and they are not treated alike.
 - **Facts that license code that does not exist.** These are the only ones defended against time. The shape is always the same: a run showed that some input cannot arrive, so nothing was built to handle it; the backend then changes, the input arrives, and there is no test to go red and no log line, because the missing code is exactly what would have noticed. The live instance is agent requests — OW-zogogo asks whether any Codex `ServerRequest` kind can still reach agentpane, and OW-bijera stays unbuilt on the current answer of no.
 
 For that third group the defence is not documentation, it is a runtime assertion: the impossible input is made loud where it arrives, so a backend upgrade that reopens the hole reports itself the first time it happens instead of presenting as intermittent flakiness months later.
+That assertion exists for Codex `ServerRequest`s as of OW-nujawi: a kind with no entry in `DECLINE_RESPONSES` is answered at arrival with JSON-RPC `-32601` naming the method and raises a session error, so the turn fails in seconds with the kind on screen.
+The three approval kinds keep their pending path, because a decline shape is a handler and there is nothing surprising about their arrival.
 
 Two supporting practices follow, and neither is a promise to re-verify everything.
 

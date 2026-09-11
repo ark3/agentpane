@@ -1196,7 +1196,11 @@
 	{/if}
 
 	{#if selectedSession && selectedSession.requests.length > 0}
-		<p class="warning">Unsupported agent request pending.</p>
+		<p class="warning">
+			The agent is blocked on a request agentpane cannot answer: {selectedSession.requests
+				.map((request) => request.kind)
+				.join(", ")}. There is nothing to act on here; end the session to clear it.
+		</p>
 	{/if}
 
 	<section

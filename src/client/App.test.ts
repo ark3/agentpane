@@ -2425,7 +2425,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 
 		expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
-		expect(screen.getByText("Unsupported agent request pending.")).toBeInTheDocument();
+		expect(screen.getByText(/blocked on a request agentpane cannot answer: approval/)).toBeInTheDocument();
 	});
 
 	it("warns by the composer when the draft starts with / but does not submit anything (OW-73)", async () => {

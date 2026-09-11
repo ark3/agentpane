@@ -79,8 +79,8 @@ const TURN_START_ABORTED_ERROR = "codex adapter submit aborted: disposed during 
 const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
 const TURN_ACTIVE_ERROR = "codex adapter cannot submit while a turn is active";
 
-/** JSON-RPC "request cancelled"; used when a blocking request is declined. */
-const DECLINED_CODE = -32800;
+/** JSON-RPC "method not found"; used when a blocking request's kind has no handler. */
+const UNSUPPORTED_REQUEST_CODE = -32601;
 
 interface ClientOwnership {
 	proc: CodexProcess;
@@ -456,9 +456,10 @@ export class CodexAdapter implements BackendAdapter {
 
 	/**
 	 * Answer a blocking `ServerRequest` (D2a). `null` declines, using the
-	 * decision shape the method expects where we know one -- an approval
-	 * answered with a JSON-RPC error would read as a client failure rather
-	 * than a "no".
+	 * decision shape the method expects -- an approval answered with a JSON-RPC
+	 * error would read as a client failure rather than a "no". Only kinds with
+	 * such a shape are ever pending: `applyEffects` errors the rest out at
+	 * arrival rather than publishing them.
 	 */
 	async reply(requestId: string, response: unknown): Promise<void> {
 		const client = this.requireClient();
@@ -469,9 +470,7 @@ export class CodexAdapter implements BackendAdapter {
 			this.externalRequestIds.delete(pending.wireKey);
 		}
 		if (response === null || response === undefined) {
-			const decline = DECLINE_RESPONSES[pending.kind];
-			if (decline !== undefined) client.respond(pending.id, decline);
-			else client.respondError(pending.id, DECLINED_CODE, "declined by user");
+			client.respond(pending.id, DECLINE_RESPONSES[pending.kind]);
 			return;
 		}
 		client.respond(pending.id, response);
@@ -564,6 +563,26 @@ export class CodexAdapter implements BackendAdapter {
 					this.emitUpdate(undefined);
 					break;
 				case "request": {
+					// A kind with no entry in `DECLINE_RESPONSES` is one nothing here
+					// can answer, and under D7a (`approvalPolicy: "never"`, with no
+					// approval `ServerRequest` observed as of `codex-cli 0.154.0`)
+					// nothing should be arriving at all -- so reaching this line means
+					// a premise broke, most likely a newer app-server asking for
+					// something new. This is not rudeness to a legitimate request: the
+					// alternative is D2a's silent stall, a turn that blocks until the
+					// session is killed, with no test and no log naming the cause.
+					// Erroring out costs one turn and names the kind that did it.
+					if (!Object.hasOwn(DECLINE_RESPONSES, effect.kind)) {
+						this.requireClient().respondError(
+							effect.requestId,
+							UNSUPPORTED_REQUEST_CODE,
+							`agentpane cannot answer ${effect.kind}`,
+						);
+						this.emitError(
+							`codex sent an unsupported request (${effect.kind}); agentpane declined it`,
+						);
+						break;
+					}
 					const wireKey = wireRequestKey(effect.requestId);
 					const previousExternalId = this.externalRequestIds.get(wireKey);
 					if (previousExternalId) this.pendingRequests.delete(previousExternalId);
