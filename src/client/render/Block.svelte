@@ -6,6 +6,7 @@
 	 * introduces something new.
 	 */
 	import type { ToolResultMessage } from "@earendil-works/pi-ai";
+	import type { SessionRef } from "$shared/protocol.ts";
 	import type { Snippet } from "svelte";
 	import BlockActions from "./BlockActions.svelte";
 	import ImageBlock from "./ImageBlock.svelte";
@@ -21,6 +22,7 @@
 		timestamp,
 		meta,
 		onedit,
+		onopensession,
 	}: {
 		block: ContentBlock;
 		results?: Map<string, ToolResultMessage>;
@@ -39,6 +41,8 @@
 		meta?: Snippet | undefined;
 		/** Take the owning user message into the composer (OW-hezidi). Passed by `Message.svelte` to one block only. */
 		onedit?: (() => void) | undefined;
+		/** Open a session a tool block names (OW-benige). */
+		onopensession?: ((ref: SessionRef) => void) | undefined;
 	} = $props();
 </script>
 
@@ -54,7 +58,7 @@
 {:else if block.type === "thinking"}
 	<Thinking text={block.thinking} redacted={block.redacted ?? false} {streaming} />
 {:else if block.type === "toolCall"}
-	<ToolCallBlock call={block} result={results.get(block.id)} {streaming} />
+	<ToolCallBlock call={block} result={results.get(block.id)} {streaming} {onopensession} />
 {:else if block.type === "image"}
 	<ImageBlock data={block.data} mimeType={block.mimeType} />
 {/if}

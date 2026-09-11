@@ -6,6 +6,7 @@
  * from them reaches the bundle (`src/import-boundaries.test.ts` enforces it).
  */
 
+import type { SessionRef } from "$shared/protocol.ts";
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -44,6 +45,14 @@ export interface ToolRenderProps {
 	result?: ToolResultMessage | undefined;
 	/** True while the turn that owns this call is still streaming. */
 	streaming?: boolean | undefined;
+	/**
+	 * Open another session, the way clicking it in the session list does
+	 * (OW-benige). Passed down from the shell like `onedit`, and for the same
+	 * reason: the renderer knows which session, and only the shell can select
+	 * one. Absent -- a read-only preview, or any tool that names no session --
+	 * and no control is drawn.
+	 */
+	onopensession?: ((ref: SessionRef) => void) | undefined;
 }
 
 /** Visual state of a tool card, derived once and shared by every renderer. */

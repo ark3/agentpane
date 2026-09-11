@@ -1,6 +1,7 @@
 <script lang="ts">
 	/** The transcript is a keyed list of messages. */
 	import type { AgentMessage } from "@earendil-works/pi-agent-core";
+	import type { SessionRef } from "$shared/protocol.ts";
 	import Message from "./Message.svelte";
 	import { buildTranscript, condense, readingTailStatus } from "./transcript.ts";
 
@@ -10,6 +11,7 @@
 		reading = false,
 		editingIndex = null,
 		onedit,
+		onopensession,
 	}: {
 		messages?: AgentMessage[];
 		isStreaming?: boolean;
@@ -25,6 +27,12 @@
 		editingIndex?: number | null;
 		/** Offer an edit control on every user message. Omitted -- a read-only preview -- and none is drawn. */
 		onedit?: ((index: number) => void) | undefined;
+		/**
+		 * Open another session from inside the transcript (OW-benige): Codex's
+		 * subagent card names a child thread and this is how it is reached.
+		 * Omitted and the card still names the thread, without the control.
+		 */
+		onopensession?: ((ref: SessionRef) => void) | undefined;
 	} = $props();
 
 	const fullView = $derived(buildTranscript(messages));
@@ -42,6 +50,7 @@
 			editing={entry.index === editingIndex}
 			dimmed={editingIndex !== null && entry.index > editingIndex}
 			{onedit}
+			{onopensession}
 		/>
 	{/each}
 

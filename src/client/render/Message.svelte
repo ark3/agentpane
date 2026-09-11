@@ -11,7 +11,7 @@
 	 * dead code even though today it is unreachable by type.
 	 */
 	import type { ToolResultMessage } from "@earendil-works/pi-ai";
-	import type { AssistantTurn, PaneMessage } from "$shared/protocol.ts";
+	import type { AssistantTurn, PaneMessage, SessionRef } from "$shared/protocol.ts";
 	import { formatTimestamp, timestampIso } from "../time.ts";
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
@@ -28,6 +28,7 @@
 		editing = false,
 		dimmed = false,
 		onedit,
+		onopensession,
 	}: {
 		message: PaneMessage;
 		results?: Map<string, ToolResultMessage>;
@@ -40,6 +41,8 @@
 		dimmed?: boolean;
 		/** Offer an edit control on this user message. Absent -- a preview, or any other role -- and none is drawn. */
 		onedit?: ((index: number) => void) | undefined;
+		/** Open a session a tool block names (OW-benige). Passed to every assistant block; only the subagent card uses it. */
+		onopensession?: ((ref: SessionRef) => void) | undefined;
 	} = $props();
 
 	/**
@@ -142,6 +145,7 @@
 					{results}
 					meta={i === metaIndex ? meta : undefined}
 					streaming={streaming && i === turn.content.length - 1}
+					{onopensession}
 				/>
 			{/each}
 

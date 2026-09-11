@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import { sessionKey, type BackendId, type SessionSummary } from "$shared/protocol.ts";
+	import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 	import type { AgentpaneController, ControllerView } from "./controller.ts";
 	import {
 		emptyTurnWatch,
@@ -930,6 +930,19 @@
 		void controller.compact();
 	}
 
+	/**
+	 * Open a session the transcript points at (OW-benige): Codex's subagent card
+	 * names a child thread, which is a real session with its own rollout.
+	 *
+	 * `controller.preview` is exactly what clicking that session in the list
+	 * does -- cheap, read-only, and it leaves the Attach button for anyone who
+	 * wants the live thread. A subagent's rollout is listed there too (D19), so
+	 * this is a shortcut to a door that already exists rather than a second way in.
+	 */
+	function openSession(ref: SessionRef): void {
+		void controller.preview(ref);
+	}
+
 	/** Promote a read-only preview into a live session via the existing attach path, then focus the prompt. */
 	async function attachSelected(): Promise<void> {
 		const ref = view.preview?.ref;
@@ -1221,6 +1234,7 @@
 				{reading}
 				editingIndex={editing?.index ?? null}
 				onedit={startEdit}
+				onopensession={openSession}
 			/>
 		{/if}
 	</section>

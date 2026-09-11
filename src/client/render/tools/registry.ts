@@ -20,6 +20,7 @@ import BashTool from "./BashTool.svelte";
 import DefaultTool from "./DefaultTool.svelte";
 import EditTool from "./EditTool.svelte";
 import ReadTool from "./ReadTool.svelte";
+import SubagentTool from "./SubagentTool.svelte";
 import WriteTool from "./WriteTool.svelte";
 
 export type ToolRenderer = Component<ToolRenderProps>;
@@ -30,6 +31,8 @@ const renderers = new Map<string, ToolRenderer>([
 	["read", ReadTool as ToolRenderer],
 	["write", WriteTool as ToolRenderer],
 	["edit", EditTool as ToolRenderer],
+	// Codex's collab tools, all five under one name (`CODEX_TOOL_NAMES`).
+	["subagent", SubagentTool as ToolRenderer],
 ]);
 
 /** Used for every name not in the map. Never null. */
