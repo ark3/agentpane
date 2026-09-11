@@ -59,3 +59,24 @@ it cleanly, and in both cases the pending state clears. Evidence in
 Found on 2026-08-18 while checking `OW-diyuwu`, whose original premise was a
 favicon badge for exactly this blocked state; that premise was dropped because
 the state it reports can be entered but never left.
+
+## What the OW-18 run means for this card (2026-09-11)
+
+OW-18's conditional asked this card to become moot if nothing can arrive, or real but much smaller if only `item/tool/requestUserInput` can.
+The run's answer fits neither, so both branches are discharged here and the remaining question is `OW-zogogo`.
+
+Under agentpane's own Codex configuration no approval request arrives.
+The adapter now sends `approvalPolicy: "never"` on all three thread-creation paths (D7a), and the live run (`docs/MANUAL_TESTING.md`, "Observed Codex approval policy, and what a fork carries") showed an edit-provoking prompt raising an `item/fileChange/requestApproval` on a `read-only` thread under `on-request` and none under `"never"` — and none at all on a `danger-full-access` thread, which is what agentpane uses, because the sandbox grants the write and `on-request` has nothing to ask about.
+So the approval kind this card was written against, the one captured in `resources/fixtures/codex/tool-edit.jsonl`, is doubly out of reach: the sandbox leaves nothing to approve and the policy would suppress the ask anyway.
+
+`item/tool/requestUserInput` was not settled.
+Two deliberate attempts on a `"never"`, `danger-full-access` thread failed to provoke one: the model answered that the user-input tool is unavailable in the current mode, once with `experimentalApi: true` declared in `initialize` and once without, and neither turn emitted a tool call of any kind.
+That is not evidence either way — the tool is gated by something those runs did not find.
+
+The Claude side is separately unreachable: sbox injects `--permission-mode bypassPermissions` for the `claude` profile, so its `can_use_tool` control request cannot fire under agentpane's spawn (OW-bovase).
+The Pi side remains OW-25.
+
+What this leaves.
+This card's premise is not refuted — an unanswered `ServerRequest` still hangs the turn behind one line of text, and the server half is still built and the client half still absent.
+What changed is that no known request kind can currently reach it, so nobody can stage the live run this card's done-condition requires.
+`OW-zogogo` carries that: it asks whether any `ServerRequest` kind can arrive under agentpane's own configuration at all, and its answer is what decides whether this card is moot, real, or merely unstageable.

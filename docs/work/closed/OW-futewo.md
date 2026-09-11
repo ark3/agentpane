@@ -28,6 +28,10 @@ The child's spawn prompt from the parent's `collabAgentToolCall` item (`prompt`,
 
 OW-bijera is where a request first becomes answerable from the browser, and this card's field is what that UI reads to label it; land the two together or this one first.
 OW-18 is still open on whether agentpane sets `approvalPolicy` at all, and a spawned child inherits the parent's policy, so under agentpane's default of `on-request` children do raise these.
+**Corrected 2026-09-11 by OW-18**: agentpane no longer has an `on-request` default.
+The adapter sends `approvalPolicy: "never"` on all three thread-creation paths (`docs/DESIGN.md` D7a), and the live run raised no approval request at all on a `danger-full-access` thread under either policy.
+A child does inherit the parent's `approvalPolicy` — that much the fork cells confirmed — but what it inherits is now `"never"`, so the sentence above has the mechanism right and the conclusion backwards.
+Whether any `ServerRequest` kind can still reach agentpane is `OW-zogogo`.
 
 Done when an adapter-level test emits a foreign-thread blocking request after attaching the parent, is watched red against the current code, and passes once the emitted `AgentRequest` names the child thread as its issuer while staying pending and replyable through the parent, while a same-thread request remains covered and names no foreign issuer, and `bun run check` passes.
 

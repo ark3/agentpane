@@ -36,4 +36,7 @@ Note also that `onRequest` is inert on this adapter for a structural reason, not
 See the `CodexAdapter`-side module docblock's counterpart at the top of `src/server/adapters/claude/adapter.ts`, which already says so.
 
 Left open rather than closed only so the decline can cite the `docs/DESIGN.md` decision OW-18 records, instead of a conversation that does not outlive the session.
+**That decision now exists**: `docs/DESIGN.md` D7a, "Codex approval policy: `never`, set by the adapter", recorded at OW-18's close on 2026-09-11.
+It is written over Codex, but its reasoning is the general one this card's decline rests on — prompts are to be avoided rather than surfaced, and the trade is no dialog against a turn that hangs behind one line of text.
+The decline note has something durable to cite whenever the owner chooses to write it.
 Pulled off `now` on 2026-09-11 for the same reason it is likely declined.
