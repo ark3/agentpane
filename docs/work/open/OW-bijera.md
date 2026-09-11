@@ -15,13 +15,19 @@ hands the body to the adapter's `reply()` (`src/server/adapters/types.ts`), and
 `src/server/http/app.test.ts` covers the round trip in "routes a request out
 over SSE and the reply back to the right adapter".
 
-The client half does not exist. `src/client/api.ts` has no method that calls
-that route. `App.svelte`'s entire response to a pending request is
+The client half does not exist.
+`src/client/api.ts` has no method that calls that route.
+`App.svelte`'s entire response to a pending request is
 
 ```svelte
 {#if selectedSession && selectedSession.requests.length > 0}
-	<p class="warning">Unsupported agent request pending.</p>
+	<p class="warning">
+		The agent is blocked on a request agentpane cannot answer: {...kinds}.
+		There is nothing to act on here; end the session to clear it.
+	</p>
 ```
+
+OW-nujawi narrowed what reaches that block: as of that card, a Codex `ServerRequest` whose kind has no entry in `DECLINE_RESPONSES` is errored out at arrival and never becomes pending, so the only kinds that still land here are the three the adapter knows a decline shape for -- which are exactly the ones this card is about.
 
 D2a's own words are that an unanswered request hangs the turn. Codex raises
 one for `item/fileChange/requestApproval`; a real capture is in
