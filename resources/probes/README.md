@@ -130,8 +130,12 @@ exists, what it returned, and what it left on disk:
   carries `status: "completed"`, and the whole reply lands in the parent rollout,
   which the cell sha256s at the fork and again after and then *reads* — the
   header-only `parent_untouched` check the new-session cell makes could not have
-  told those outcomes apart. Writes no fixture; the protocol shapes here are
-  already in `fork.jsonl`.
+  told those outcomes apart. It also validates the fork itself past the returned
+  id — `thread/read` on it, and its rollout on disk with `forked_from_id` — but
+  drives no turn in it, because the parent is the subject. Writes no fixture:
+  nothing here is a protocol shape worth committing, and the cell's own JSON
+  record carries the census of every rollout line the parent gained, which is
+  what a later reader needs.
 
 ```bash
 python3 fork_probe.py                 # all five cells, write fixtures
@@ -149,7 +153,9 @@ a turn, or if the mid-stream cell could not confirm the parent was streaming
 when it forked.
 
 Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the mid-stream cell with
-`codex-cli` 0.154.0. What that cell showed is `docs/MANUAL_TESTING.md`,
+`codex-cli` 0.154.0, on which the rollout no longer writes an
+`event_msg`/`agent_message` beside each assistant `response_item` — so
+`fork.jsonl`, captured on 0.147.0, is a version behind on line shapes. What that cell showed is `docs/MANUAL_TESTING.md`,
 "Forking a Codex thread mid-stream leaves the parent turn running (OW-gojado)".
 
 Two things it handles that the older probes do not, and that will bite anyone

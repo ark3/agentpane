@@ -40,6 +40,9 @@ OW-gojado for the fifth):
   Codex, new session-> `thread/fork` with `lastTurnId` (inclusive). Mints a new
                        thread id; the on-disk rollout carries `forked_from_id`.
                        This probe forks, then drives a real turn in the fork.
+                       Its `parent_untouched` flag is a header read, not a
+                       before/after comparison -- see the note at that line, and
+                       the mid-stream cell for what a real one looks like.
   Codex, mid-stream -> `thread/fork` fired while the PARENT is mid-turn, the
                        one condition D15 turns on and the only cell here that
                        reads the parent rather than the fork. Confirms the turn
@@ -53,7 +56,11 @@ OW-gojado for the fifth):
                        cannot answer this (OW-gojado). On 0.154.0 the parent
                        SURVIVES: deltas keep arriving, the turn completes, and
                        the full reply lands in the parent rollout -- the
-                       opposite of Pi's mid-stream fork.
+                       opposite of Pi's mid-stream fork. The cell also records
+                       the KIND of every rollout line the parent gained,
+                       because it deletes its CODEX_HOME and that census is all
+                       a later reader gets; it is how the 0.147.0 -> 0.154.0
+                       rollout shape change was caught.
   Codex, rewind     -> `thread/rollback`. Marked DEPRECATED ("will be removed
                        soon") in the generated schema; there is no
                        non-deprecated in-place rewind. "Codex cannot rewind" is
@@ -595,7 +602,6 @@ def run_pi(timeout, want_fixtures):
 
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
-
     return version, cells, fixture_lines
 
 
@@ -607,12 +613,28 @@ def codex_rollout_for(home, thread_id):
     """The rollout file whose session_meta header names `thread_id`, or None."""
     for f in sorted((home / "sessions").rglob("*.jsonl")):
         try:
-            header = json.loads(open(f).readline()).get("payload", {})
+            with open(f, "rb") as fh:
+                header = json.loads(fh.readline()).get("payload", {})
         except (ValueError, OSError):
             continue
         if header.get("id") == thread_id:
             return f
     return None
+
+
+def codex_rollout_lines(path):
+    """A rollout's non-blank lines, split on BYTES.
+
+    One representation for every line index in this probe. `str.splitlines`
+    also breaks on U+2028, U+2029 and U+0085, and Codex rollouts are serde_json
+    output that emits those raw inside text -- so a str split and a bytes split
+    of the same file disagree on how many lines it has, and an index taken
+    under one is meaningless under the other. This module's docstring already
+    names U+2028/U+2029 as the framing hazard here.
+    """
+    if path is None or not path.exists():
+        return []
+    return [l for l in path.read_bytes().splitlines() if l.strip()]
 
 
 def codex_rollout_snapshot(path):
@@ -623,43 +645,48 @@ def codex_rollout_snapshot(path):
     check the codex_new_session cell makes.
     """
     if path is None or not path.exists():
-        return {"sha256": None, "lines": 0, "bytes": 0}
-    data = path.read_bytes()
-    return {"sha256": hashlib.sha256(data).hexdigest(),
-            "lines": len([l for l in data.splitlines() if l.strip()]),
-            "bytes": len(data)}
+        return {"sha256": None, "lines": 0}
+    return {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "lines": len(codex_rollout_lines(path))}
 
 
-def codex_assistant_text_between(path, from_line, limit=400):
-    """Assistant text in a rollout's lines after `from_line` -- what landed.
+def codex_rollout_gained(path, from_line, limit=400):
+    """What a rollout gained after `from_line`: every line's kind, and any
+    assistant text.
 
-    Reads what the file actually gained, so "the file changed" and "the model
-    wrote a reply into it" are separate answers.
+    The census is the point, not a detail. This cell deletes its CODEX_HOME on
+    the way out, so the rollout the claim rests on survives nowhere and the JSON
+    record is the only artifact a later reader gets. Recording the `type` /
+    `payload.type` / `role` of every gained line lets that reader check which
+    lines the text was extracted from, and notice a rollout shape that has
+    changed since, without a re-run and without committing model output.
     """
-    if path is None or not path.exists():
-        return []
-    lines = [l for l in path.read_text(errors="replace").splitlines() if l.strip()]
-    out = []
-    for raw in lines[from_line:]:
+    census = []
+    texts = []
+    for raw in codex_rollout_lines(path)[from_line:]:
         try:
             e = json.loads(raw)
         except ValueError:
+            census.append({"type": "<unparsed>", "payload_type": None, "role": None})
             continue
         payload = e.get("payload", {})
-        texts = []
+        census.append({"type": e.get("type"),
+                       "payload_type": payload.get("type"),
+                       "role": payload.get("role")})
+        found = []
         if e.get("type") == "event_msg" and payload.get("type") == "agent_message":
-            texts.append(payload.get("message", ""))
+            found.append(payload.get("message", ""))
         elif e.get("type") == "response_item" and payload.get("role") == "assistant":
             for block in payload.get("content", []) or []:
                 if block.get("text"):
-                    texts.append(block["text"])
-        for text in texts:
+                    found.append(block["text"])
+        for text in found:
             # Length and tail as well as head: a truncated preview cannot tell
             # a complete reply from one that stopped partway.
-            out.append({"chars": len(text),
-                        "head": preview(text, limit),
-                        "tail": text[-limit:]})
-    return out
+            texts.append({"from": census[-1], "chars": len(text),
+                          "head": preview(text, limit),
+                          "tail": text[-limit:]})
+    return census, texts
 
 
 class CodexSession:
@@ -730,15 +757,16 @@ class CodexSession:
                    "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]}})
         return mark
 
-    def events_since(self, mark, method, thread_id=None):
-        out = []
-        for e in self.events[mark:]:
-            if e.get("method") != method:
-                continue
-            if thread_id is not None and e.get("params", {}).get("threadId") != thread_id:
-                continue
-            out.append(e)
-        return out
+    def events_since(self, mark, method, thread_id):
+        """Notifications of `method` for `thread_id` since `mark`.
+
+        The thread filter is not optional: this driver's whole use is watching
+        a parent while a fork of it exists in the same process, and an unfiltered
+        count would silently mix the two.
+        """
+        return [e for e in self.events[mark:]
+                if e.get("method") == method
+                and e.get("params", {}).get("threadId") == thread_id]
 
     def await_streaming(self, mark, thread_id, min_deltas, timeout):
         """Block until the turn is positively observed streaming.
@@ -777,8 +805,6 @@ class CodexSession:
             settled = self.events_since(mark, "turn/completed", thread_id)
             if settled:
                 return settled[0]
-            if self.proc.poll() is not None:
-                return None
             time.sleep(0.2)
         return None
 
@@ -914,6 +940,13 @@ def run_codex(timeout, want_fixtures):
             "forked_from_id_before_turn": pre_turn_rollouts.get(forked_id),
             "thread_read_forked_before_turn_ok": thread_read_forked_before_turn_ok,
             "on_disk_forked_from_id": rollouts.get(forked_id, {}).get("forked_from_id"),
+            # NOT a before/after comparison, and not strong enough to carry
+            # one: this reads the parent header's own `forked_from_id`, which
+            # says the parent is not itself a fork. It cannot see whether the
+            # parent's file changed, and it says nothing at all about a parent
+            # that was mid-turn -- that question belongs to the
+            # codex_fork_mid_stream cell below, which sha256s the file across
+            # the fork and reads what it gained (OW-gojado, D15).
             "parent_untouched": rollouts.get(parent_id, {}).get("forked_from_id") is None,
             "rollout_files": rollouts,
         }
@@ -961,6 +994,11 @@ def run_codex(timeout, want_fixtures):
                                   "Count from 1 to 400. Print one number per line and nothing else.")
         streaming = cx.await_streaming(long_mark, parent_id, min_deltas=5, timeout=timeout)
 
+        # Taken immediately before the request goes out, which is as close to
+        # the fork as a separate disk read can get. The residual window -- send,
+        # server work, response -- is attributed to *after* the fork, so any
+        # error here inflates what the parent is credited with writing
+        # post-fork rather than hiding it.
         before = codex_rollout_snapshot(parent_file)
         fork = cx.request(6, "thread/fork",
                           {"threadId": parent_id,
@@ -977,11 +1015,22 @@ def run_codex(timeout, want_fixtures):
         deltas_after_fork = len(cx.events_since(fork_mark, "item/agentMessage/delta", parent_id))
         turn_status = settle["params"]["turn"].get("status") if settle else None
         turn_error = settle["params"]["turn"].get("error") if settle else None
+        # A returned id is not a fork (README: "a returned id alone cannot pass
+        # the check"). The parent is this cell's subject, so the fork gets the
+        # cheap checks rather than a turn: is it readable, and is it on disk
+        # with the right lineage?
+        forked_read = cx.request(8, "thread/read", {"threadId": forked_id},
+                                 timeout=timeout) if fork_ok else None
         cx.close()
         time.sleep(0.5)
 
+        forked_file = codex_rollout_for(mid_home, forked_id) if fork_ok else None
+        forked_from_id = None
+        if forked_file:
+            with open(forked_file, "rb") as fh:
+                forked_from_id = json.loads(fh.readline()).get("payload", {}).get("forked_from_id")
         after = codex_rollout_snapshot(parent_file)
-        landed = codex_assistant_text_between(parent_file, before["lines"])
+        gained_census, landed = codex_rollout_gained(parent_file, before["lines"])
 
         cells["codex_fork_mid_stream"] = {
             "operation": "thread/fork fired while the parent turn is streaming",
@@ -999,21 +1048,27 @@ def run_codex(timeout, want_fixtures):
             "streaming_turn_id": streaming["turn_id"],
             "fork_succeeded_mid_stream": fork_ok,
             "fork_response": fork if not fork_ok else {"forked_thread_id": forked_id},
+            "forked_thread_read_ok": forked_read is not None and "result" in forked_read,
+            "forked_rollout_on_disk": forked_file is not None,
+            "forked_rollout_forked_from_id": forked_from_id,
             # What the parent did after the fork call.
             "parent_deltas_after_fork": deltas_after_fork,
             "parent_turn_completed_after_fork": settle is not None,
             "parent_turn_status": turn_status,
             "parent_turn_error": turn_error,
-            # The parent rollout on disk, hashed at the fork and again after
-            # the parent settled -- not the header-only `parent_untouched`
-            # check the codex_new_session cell carries, which D15 names as too
-            # weak to answer this.
+            # The parent rollout on disk, hashed just before the fork request
+            # and again after the parent settled -- not the header-only
+            # `parent_untouched` check the codex_new_session cell carries,
+            # which D15 names as too weak to answer this.
             "parent_rollout_file": parent_file.name if parent_file else None,
             "parent_rollout_sha256_at_fork": before["sha256"],
             "parent_rollout_sha256_after": after["sha256"],
             "parent_rollout_changed_after_fork": before["sha256"] != after["sha256"],
             "parent_rollout_lines_at_fork": before["lines"],
             "parent_rollout_lines_after": after["lines"],
+            # Every line the parent gained, by kind -- the audit trail for the
+            # text below, since this cell's CODEX_HOME does not survive it.
+            "parent_rollout_lines_gained": gained_census,
             "parent_assistant_text_after_fork": landed,
             "result": "measured" if streaming["streaming_confirmed"] else "unearned",
         }
