@@ -1304,7 +1304,7 @@ It licenses nothing about the `danger-full-access` pair, where no approval arose
 Nothing here was measured about `item/commandExecution/requestApproval` or the other approval methods.
 
 What the `read-only` cells show about the effect on the work itself is narrower than "the edit was refused".
-In the `never` cell a `commandExecution` item completed, no `fileChange` item did, `notes.txt` was unchanged, and the assistant's text said "I'll update `notes.txt` so it contains exactly the requested line."
+In the `never` cell a `commandExecution` item completed, no `fileChange` item did, `notes.txt` was unchanged, and the assistant's text said "I’ll update `notes.txt` so it contains exactly the requested line."
 The probe reads final file bytes, completed item types, and the absence of a request; it cannot distinguish the sandbox refusing a tool call from the model never issuing one, and it saw no rollback.
 Both `read-only` cells reached `turn/completed`, but that notification's `turn.status` was not read on this run — the probe reported the method's arrival and called it completion.
 The probe now reads `turn.status`; a re-run of the fork cell reported `"completed"`, and the four approval cells have no such value on record.
@@ -1318,8 +1318,8 @@ A fork issued with `sandbox: "danger-full-access"` and `approvalPolicy: "never"`
 
 **`item/tool/requestUserInput` was not provoked, on either of two attempts.**
 Both ran on a `"never"`, `danger-full-access` thread.
-The first asked the model to use its tool for asking the user a question before doing anything, and to not proceed without an answer; it replied "I can't ask that question because the user-input tool is unavailable in the current mode" and stopped without editing the file.
-The second named the tool (`request_user_input` / `ask-user`), asked for a two-option question, and declared `experimentalApi: true` in `initialize`; it replied "The question tool is unavailable in the current mode" and again stopped.
+The first asked the model to use its tool for asking the user a question before doing anything, and to not proceed without an answer; it replied "I can’t ask that question because the user-input tool is unavailable in the current mode. I won’t proceed or modify `notes.txt`." and stopped without editing the file.
+The second named the tool (`request_user_input` / `ask-user`), asked for a two-option question, and declared `experimentalApi: true` in `initialize`; it replied "The question tool is unavailable in the current mode." and again stopped.
 Neither turn emitted a tool call of any kind — only `userMessage`, `reasoning`, and `agentMessage` items.
 So the question is unsettled rather than answered: the tool is gated by something these runs did not find, and whether `"never"` would suppress it if it were available was never reached.
 Nothing here is evidence that `"never"` suppresses it, and nothing here is evidence that it does not.

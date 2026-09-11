@@ -38,9 +38,11 @@ Two things this script has to work around, both learned the hard way:
 2. **Blocking dialogs would hang the capture.** Pi can emit
    `extension_ui_request` and Codex can emit a `ServerRequest`; both wait for
    an answer. We answer them and record that they happened. Codex's approval
-   requests do fire: `tool-edit` caught one, and the OW-18 run has since fixed
-   when -- on a `read-only` thread under `on-request`, and not under
-   `approvalPolicy: "never"` nor on a `danger-full-access` thread.
+   requests do fire: `tool-edit` caught one, and the OW-18 run has since
+   established the conditions. An edit-provoking prompt raised an
+   `item/fileChange/requestApproval` on a `read-only` thread under
+   `on-request`. It raised none under `approvalPolicy: "never"`, and none on a
+   `danger-full-access` thread under either policy.
 
 We deliberately do *not* spawn through sbox here. sbox cannot fix (1) in a
 nested sandbox, and the protocol is sbox-transparent over stdio (HANDOFF fact

@@ -149,8 +149,9 @@ writing their own harness:
 
 ## `approval_policy_probe.py`
 
-Proves: **what `approvalPolicy` does to Codex's approval `ServerRequest`s, and what
-a forked thread carries** (OW-18). Eight live cells against `codex app-server`:
+Proves: **what `approvalPolicy` does to Codex's approval `ServerRequest`s, and
+what a forked thread carries** (OW-18). Eight live cells against `codex
+app-server`:
 the same edit-provoking prompt on `danger-full-access` and on `read-only`, each
 with and without `approvalPolicy: "never"`; two `thread/fork` cells that read
 `sandbox` and `approvalPolicy` straight off `ThreadForkResponse`; and two that
@@ -166,18 +167,19 @@ something: without it, "no approval arrived" cannot be told apart from "the
 prompt never provoked one". It licenses nothing about the `danger-full-access`
 pair, where no approval arose either way.
 
-Each server-initiated request is recorded **with its method and params**, before
-being answered, in a list of its own -- so a cell reports which requests arrived,
-not merely that some did. `fork_probe.py` also logs each one before answering,
-but it answers every server request uniformly and keeps no separate record.
+Each server-initiated request is recorded **with its method and params**,
+before being answered, in a list of its own -- so a cell reports which requests
+arrived, not merely that some did. `fork_probe.py` also logs each one before
+answering, but it answers every server request uniformly and keeps no separate
+record.
 
 Writes no fixtures. One temporary writable `CODEX_HOME` for the whole run, with
 `auth.json`/`config.toml` copied in by name and never printed -- only the
 config's key and table *names* reach the record, so a reader can tell
 app-server's defaults from the operator's config. A temporary git workspace per
-cell. Both removed on exit. Threads are ephemeral except the fork parents, which have to
-materialise on disk for `thread/fork` to load them. Costs tokens: every cell
-drives a real model turn.
+cell. Both removed on exit. Threads are ephemeral except the fork parents,
+which have to materialise on disk for `thread/fork` to load them. Costs tokens:
+every cell drives a real model turn.
 
 Verified with: `codex-cli` 0.154.0. What it showed is `docs/MANUAL_TESTING.md`,
 "Observed Codex approval policy, and what a fork carries (OW-18)".
