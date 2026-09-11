@@ -486,6 +486,36 @@ On Codex it is a regression once OW-tifuha lands: today's clean rejection become
 On Pi nothing changes, because Pi already steers it.
 So this decision does not remove the need for OW-nasofa's in-flight guard, and on one backend it is what will make that guard load-bearing.
 
+### D17. Navigating away during a fork does not cancel it
+
+Pressing send in edit mode forks the session and prompts the fork.
+Clicking another session while that round trip is in flight moves the user, and nothing else: the fork is still created, still attached and still prompted, and the user ends up with both conversations.
+The owner took this on 2026-09-10 (OW-miyemo).
+
+The gesture asks for two things — make a new conversation, and take me to it — and OW-mifuki decided the click wins the second.
+It left the first unanswered, and the answer that had accreted by default was the worst of the three available: the fork was created and then abandoned mid-round-trip, so the user got a session nothing had attached, nothing had prompted, and nobody had told them about.
+It surfaced later in the sidebar as a near-duplicate of its parent, because every backend's fork carries the parent's history and the sidebar preview is taken from the first user message in the file.
+
+A click is navigation, not a retraction.
+Nothing in the UI presents it as a cancel, and a user who wanted to call the fork off has no reason to believe that clicking elsewhere is how.
+So the fork completes and the prompt lands; the fork streams in the background and badges when it finishes, which is the mechanism that already exists for a session that streams while the user is looking elsewhere (OW-mifuki's arming, re-keyed onto the landed ref).
+
+The two alternatives were priced on OW-miyemo and declined.
+*Leave the orphan* is what was happening already and is what this decision replaces.
+*Delete the orphan* does not work with what exists: `DELETE /api/sessions/:backend/:id` routes to `close()`, which kills the process and drops the session from the table but touches nothing on disk, while `listSessions` is a pure disk walk with no filter — so the row survives the delete.
+Making the row disappear would mean a new route that unlinks the transcript, and that is agentpane crossing from reading someone else's corpus (D9) to owning it, which it has never done.
+That crossing may be worth making one day, but an edge case is a poor reason to force it, and on Pi it would mean unlinking the file the live process believes it is in.
+
+What this changes in `forkAndSubmit` is that the intent guards stop being cancel guards.
+They returned `null` after each await; under this decision the operation always runs to completion and the only thing conditional on the intent is whether `applyAttached` moves the selection.
+This also retires the case the card called worse in kind: a click landing in the `api.abort` window used to kill the parent's turn and then abandon everything, so the user lost a turn and got nothing — and the button said "Stop and fork", so they had asked for the stop but not for the nothing.
+Both now stand.
+
+The sharp edge is the `selectionIntent` bump, which is why the guards were written as returns rather than as a choice.
+The fork bumps the intent just before it attaches, because a fork that takes the selection must fence off a preview poll still in flight.
+A fork that declines the selection must not bump: bumping past the user's own click strands it, leaving their `attachAndSelect` in its `else` branch with the selection never set and `busy` stuck on `"attaching"` forever.
+So the bump is conditional on the fork actually taking the selection, and that condition has to be captured before the bump, which destroys the information it is read from.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.
