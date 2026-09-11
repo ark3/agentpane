@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork abandoned by a mid-flight click leaves the forked session orphaned on the backend
@@ -105,3 +106,38 @@ The caveat is that `listForkPoints` would then run against a streaming session; 
 The executing session priced this and did not choose.
 The branch that removes the row destroys a transcript, the answer is backend-asymmetric, and this repo puts that class of call with the owner — D15's own docblock in `forkAndSubmit` records the owner taking the neighbouring one.
 The card stays open on the decision; the two guard tests it asks for cannot be written until the decision says what they should assert.
+
+## Close note
+
+Decided by the owner on 2026-09-10 and recorded as **D17** in `docs/DESIGN.md`, "Navigating away during a fork does not cancel it" (commit a239db2, which also moved AGENTS.md's citation from D1–D16 to D1–D17).
+Implemented as 81bfab0, `Land a fork the user navigated away from`.
+
+**The decision.** A click during a fork's round trip is navigation, not a retraction.
+The fork is still created, still attached and still prompted; the user ends up with both conversations and stays where they clicked, and the fork streams in the background and badges on completion through OW-mifuki's arming, re-keyed onto the landed ref.
+
+The two alternatives this card listed were priced first and declined; the pricing is in the card above and the reasoning in D17.
+"Delete it" was ruled out on a fact this card had wrong: `DELETE /api/sessions/:backend/:id` does exist and routes to `close()`, but that kills a process and touches no file, while `listSessions` is an unfiltered disk walk — so the row survives the delete, and making it vanish would mean agentpane unlinking a transcript, crossing from reading someone else's corpus (D9) to owning it.
+"Never create it" as a reordering was ruled out outright: the fork must precede the attach and the prompt, so no ordering reaches zero windows.
+
+**The change.** The four intent guards in `forkAndSubmit` keep their `disposed` half and lose their intent half, so the round trip always completes.
+The only thing conditional on the intent is whether the attach moves the selection: `const takesSelection = intent === selectionIntent;` read *before* `const forkIntent = takesSelection ? ++selectionIntent : intent;`, then `applyAttached(attached, forkIntent === selectionIntent, forked)`.
+Re-reading after the attach covers that fourth window with the same expression, since a declined fork's `forkIntent` is already stale.
+
+That conditional bump is the sharp edge D17 names, and it is the whole reason the guards were returns rather than a choice: bumping past the user's own in-flight click strands it, leaving their `attachAndSelect` in its `else` branch with the selection never set and `busy` stuck on `"attaching"` under "Opening session…" forever.
+
+The `api.abort` window — the one this card called worse in kind — falls out with no extra code: both the stop and the fork now stand, which is what "Stop and fork" said on the button.
+
+**Coverage.** The two guards this card reported as untested now have tests, and the OW-mifuki test that asserted the old decision is inverted in place rather than left contradicting D17.
+All four confirmed red by the dispatching session against 81bfab0~1: `expected null to deeply equal { backend: 'codex', … }` four times.
+The bump test needed a second, targeted red, because that one only proves it notices the return value — with the change in place, mutating the bump to be unconditional while gating `applyAttached` on `takesSelection` isolates it, and the test fails with the selection stranded on the parent (`expected { backend: 'pi', id: 'virtual-a' } to deeply equal { … id: '/sessions/other.jsonl' }`) and `busy` left on `"attaching"`.
+That was reproduced by the dispatching session, not just reported.
+
+`bun run check` green: 0 type errors, 1005 tests.
+`bun run test:browser` not run and not applicable — nothing here touches layout, scrolling or the Popover API.
+
+**Judgments the card's conditional required, all recorded at the code.**
+`applyAttached`'s residual selection (it still selects when the requested ref is already the selected one) is kept: `requested` is the fork's own ref, so the only way it fires is that the user clicked onto the fork itself, where adopting the live attached ref is right.
+`send()` in `src/client/App.svelte` needed no change — re-keying the arming onto `landed` rather than `state.selected` is exactly what makes the background badge work, and clearing edit mode is right because the prompt genuinely went.
+The draft clear stays as OW-kelede left it: the prompt landed, so leaving the text under a Send button would be wrong, and anything typed during the window is preserved by the `view.draft === text` gate.
+
+Filed from this work: OW-tatebi, a stale preview that can survive the attach when that residual selection fires.
