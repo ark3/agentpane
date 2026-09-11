@@ -683,6 +683,22 @@ export function createController(
 				const point = points[ordinal];
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
 				const forked = await api.fork(ref, { entryId: point.id });
+				// From here the fork exists, and every exit below up to the prompt
+				// abandons it: this `disposed` return, the one after the attach, and
+				// the `catch` on a throw from `api.attach` or `api.prompt`. That orphan
+				// is deliberate (OW-puduro). The only cleanup the server offers is the
+				// `DELETE` route, which would need a verb on `AgentpaneApi` to reach --
+				// and it disposes the *adapter*, never the file. On Pi and Claude Code
+				// that adapter is the one live process, which the parent's ref now
+				// resolves to through `#aliases` (`SessionManager.fork` re-keyed it), so
+				// the call would kill the agent the user is talking to, and dropping
+				// that alias with it un-hides the parent file `list()` was suppressing.
+				// On Codex the forked thread is in no table until the attach, so the
+				// call is a 204 no-op there; only past a successful attach would it do
+				// what it says, reaping an idle child. One backend, one exit: not worth
+				// a verb. The cost of leaving it is a session file at most -- whether
+				// one exists before the first prompt is settled only for Codex, with
+				// OW-gajesu open on Pi and no run having read Claude's.
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
@@ -702,6 +718,8 @@ export function createController(
 				const takesSelection = intent === selectionIntent;
 				const forkIntent = takesSelection ? ++selectionIntent : intent;
 				const attached = await api.attach(forked);
+				// Abandons the fork as well; see the note at `api.fork` for why that
+				// is deliberate.
 				if (disposed) return null;
 				// The attach is one more window for a click, and it gets the same
 				// answer: the attach still lands, it just does not move the user.
@@ -728,6 +746,8 @@ export function createController(
 				});
 				return attached.ref;
 			} catch (error: unknown) {
+				// Reached past a successful `api.fork`, this abandons the fork too; the
+				// note at that call says why that is deliberate (OW-puduro).
 				if (!disposed) publish({ error: errorMessage(error) });
 				return null;
 			} finally {
