@@ -23,11 +23,11 @@ import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import {
 	DECLINE_RESPONSES,
 	wireRequestKey,
+	type AskForApproval,
 	type ClientInfo,
 	type CodexServerMessage,
 	type ModelListResponse,
 	type RequestId,
-	type AskForApproval,
 	type SandboxMode,
 	type Thread,
 	type ThreadForkResponse,

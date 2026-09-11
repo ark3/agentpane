@@ -1279,9 +1279,9 @@ A typed navigation omitted `Origin` and carried `Sec-Fetch-Site: none`.
 
 **2026-09-11, home server, `codex-cli 0.154.0`, `resources/probes/approval_policy_probe.py`.**
 
-Six cells, each a fresh `codex app-server` over stdio with a temporary writable `CODEX_HOME` and a throwaway git workspace holding a one-line `notes.txt`.
+Eight cells, each a fresh `codex app-server` over stdio with a temporary writable `CODEX_HOME` and a throwaway git workspace holding a one-line `notes.txt`.
 The probe records every server-initiated request *before* it answers it, which is the whole measurement here; `fork_probe.py`'s session answers in its reader thread and would have reported the arrivals as absences.
-Five cells drove the same prompt: edit `notes.txt` so its only line reads `beta`.
+Four of them drove the same prompt: edit `notes.txt` so its only line reads `beta`.
 
 **Under `sandbox: "danger-full-access"`, no approval request arrived either way.**
 The cell with no `approvalPolicy` reported `approvalPolicy: "on-request"` on the `thread/start` response and `sandbox: {"type":"dangerFullAccess"}`; the turn completed, `notes.txt` read `beta`, and the wire carried no `ServerRequest` at all.

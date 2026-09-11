@@ -150,10 +150,11 @@ writing their own harness:
 ## `approval_policy_probe.py`
 
 Proves: **what `approvalPolicy` does to Codex's approval `ServerRequest`s, and what
-a forked thread carries** (OW-18). Six live cells against `codex app-server`:
+a forked thread carries** (OW-18). Eight live cells against `codex app-server`:
 the same edit-provoking prompt on `danger-full-access` and on `read-only`, each
-with and without `approvalPolicy: "never"`; and two `thread/fork` cells that read
-`sandbox` and `approvalPolicy` straight off `ThreadForkResponse`.
+with and without `approvalPolicy: "never"`; two `thread/fork` cells that read
+`sandbox` and `approvalPolicy` straight off `ThreadForkResponse`; and two that
+try to provoke an `item/tool/requestUserInput`.
 
 ```bash
 python3 approval_policy_probe.py            # all cells, JSON record on stdout

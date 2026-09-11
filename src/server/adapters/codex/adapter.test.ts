@@ -785,10 +785,7 @@ describe("CodexAdapter turns", () => {
 					});
 					break;
 				}
-				case "thread/fork":
-				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
-				break;
-			case "turn/interrupt":
+				case "turn/interrupt":
 					proc.emit({ id, result: {} });
 					break;
 			}
