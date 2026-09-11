@@ -417,6 +417,12 @@ export class CodexAdapter implements BackendAdapter {
 		// `lastTurnId` is inclusive, so forking *at* a user message means
 		// keeping everything through the turn before it.
 		const lastTurnId = index > 0 ? this.turnOrder[index - 1] : undefined;
+		// Both policies are spelled out because a fork inherits `approvalPolicy`
+		// from its parent but NOT `sandbox`, which falls back to app-server's
+		// `workspaceWrite` -- a silent downgrade from the thread being forked
+		// (OW-18, D7a). Passing `approvalPolicy` too keeps the three
+		// thread-creation paths reading alike rather than relying on that
+		// asymmetry holding.
 		const forked = await client.request<ThreadForkResponse>("thread/fork", {
 			threadId: this.requireThread(),
 			...(lastTurnId ? { lastTurnId } : {}),

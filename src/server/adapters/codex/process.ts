@@ -42,9 +42,12 @@ export interface CodexSpawnOptions {
  * read-write (Codex needs a writable sqlite state runtime) and injects
  * `--sandbox danger-full-access`. That injected flag is a no-op for
  * `app-server`, which ignores it and defaults each thread to `read-only`; the
- * sandbox policy that actually takes effect is set per `thread/start` by the
- * adapter (`CodexAdapterOptions.sandbox`). The mount, on the other hand, is
- * real and needed. Neither belongs here; adding one by hand would fight sbox.
+ * sandbox policy that actually takes effect is set by the adapter on every
+ * thread-creation call -- `thread/start`, `thread/resume` and `thread/fork` --
+ * from `CodexAdapterOptions.sandbox`, alongside
+ * `CodexAdapterOptions.approvalPolicy` (D7a). An approval flag here would be
+ * the same no-op for the same reason. The mount, on the other hand, is real
+ * and needed. Neither policy belongs here; adding one by hand would fight sbox.
  */
 export function codexCommand(cwd: string): { command: string; args: string[] } {
 	return { command: "direnv", args: ["exec", cwd, "sbox", "--", "codex", "app-server"] };
