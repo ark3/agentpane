@@ -112,4 +112,16 @@ describe("createStaticHandler", () => {
 		const response = await createStaticHandler(ROOT, fs.open)(req("/boom", navigation));
 		expect(await response?.text()).toBe("<!doctype html>");
 	});
+
+	it("carries a CSP restricting img/media to self and data:, on the served document", async () => {
+		const fs = fakeFs({ [INDEX]: "<!doctype html>" });
+		const response = await createStaticHandler(ROOT, fs.open)(req("/sessions/abc", navigation));
+		expect(response?.headers.get("Content-Security-Policy")).toBe("img-src 'self' data:; media-src 'self' data:");
+	});
+
+	it("does not carry the document's CSP on a plain asset response", async () => {
+		const fs = fakeFs({ [`${ROOT}/assets/app.js`]: "console.log(1)" });
+		const response = await createStaticHandler(ROOT, fs.open)(req("/assets/app.js"));
+		expect(response?.headers.get("Content-Security-Policy")).toBeNull();
+	});
 });

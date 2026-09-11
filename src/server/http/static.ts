@@ -23,6 +23,17 @@ export interface StaticFile {
 export type OpenFile = (absolutePath: string) => StaticFile;
 
 /**
+ * The renderer's sanitizer (D5, `sanitize()` in `src/client/render/markdown.ts`)
+ * is the semantic half of blocking a hostile transcript from phoning home
+ * through media it renders -- it fails open silently if DOMPurify's profile
+ * widens or a future `{@html}` sink bypasses it. This header is the
+ * browser-enforced half, scoped to exactly the two directives that back that
+ * decision: nothing wider, and no `default-src` or script/style/connect
+ * restriction, which is a different decision needing its own evidence.
+ */
+const DOCUMENT_CSP = "img-src 'self' data:; media-src 'self' data:";
+
+/**
  * Map a URL pathname to an absolute path inside `root`, or null if it does not
  * name one.
  *
@@ -87,7 +98,10 @@ export function createStaticHandler(root: string, open: OpenFile) {
 		if (!wantsHtml && candidate !== indexPath) return null;
 
 		const index = open(indexPath);
-		return (await exists(index)) ? index.toResponse() : null;
+		if (!(await exists(index))) return null;
+		const response = index.toResponse();
+		response.headers.set("Content-Security-Policy", DOCUMENT_CSP);
+		return response;
 	};
 }
 
