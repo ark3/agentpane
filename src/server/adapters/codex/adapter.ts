@@ -32,6 +32,7 @@ import {
 	type Thread,
 	type ThreadForkResponse,
 	type ThreadReadResponse,
+	type ThreadResumeResponse,
 	type ThreadStartResponse,
 	type TurnStartResponse,
 	type UserInput,
@@ -200,7 +201,7 @@ export class CodexAdapter implements BackendAdapter {
 			assertOwned();
 
 			const started = opts.resumeId
-				? await client.request<ThreadStartResponse>("thread/resume", {
+				? await client.request<ThreadResumeResponse>("thread/resume", {
 						threadId: opts.resumeId,
 						cwd: opts.cwd,
 						sandbox: this.sandbox,
@@ -217,8 +218,6 @@ export class CodexAdapter implements BackendAdapter {
 			assertOwned();
 
 			this.model = started.model ?? this.model;
-			// `ThreadResumeResponse` carries `reasoningEffort` identically, so this
-			// one line covers both branches above.
 			this.reducer.setIdentity({
 				threadId: started.thread.id,
 				model: started.model,

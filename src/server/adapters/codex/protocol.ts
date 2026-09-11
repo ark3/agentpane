@@ -38,6 +38,7 @@ export type { SandboxMode } from "../../../../resources/codex-protocol/v2/Sandbo
 export type { AskForApproval } from "../../../../resources/codex-protocol/v2/AskForApproval";
 export type { ThreadStartResponse } from "../../../../resources/codex-protocol/v2/ThreadStartResponse";
 export type { ThreadResumeParams } from "../../../../resources/codex-protocol/v2/ThreadResumeParams";
+export type { ThreadResumeResponse } from "../../../../resources/codex-protocol/v2/ThreadResumeResponse";
 export type { ThreadForkParams } from "../../../../resources/codex-protocol/v2/ThreadForkParams";
 export type { ThreadForkResponse } from "../../../../resources/codex-protocol/v2/ThreadForkResponse";
 export type { ThreadReadParams } from "../../../../resources/codex-protocol/v2/ThreadReadParams";
