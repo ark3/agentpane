@@ -1,6 +1,7 @@
 ---
 labels: [defect, now]
 blocked-by: [OW-fafeja]
+closed: done
 ---
 
 # A spawned Codex child's blocking ServerRequest is published as a request for the parent session.
@@ -29,3 +30,15 @@ OW-bijera is where a request first becomes answerable from the browser, and this
 OW-18 is still open on whether agentpane sets `approvalPolicy` at all, and a spawned child inherits the parent's policy, so under agentpane's default of `on-request` children do raise these.
 
 Done when an adapter-level test emits a foreign-thread blocking request after attaching the parent, is watched red against the current code, and passes once the emitted `AgentRequest` names the child thread as its issuer while staying pending and replyable through the parent, while a same-thread request remains covered and names no foreign issuer, and `bun run check` passes.
+
+## Close note
+
+Added `issuerThreadId?: string | null` to `AgentRequest` (`src/shared/protocol.ts`) and to the reducer's `CodexEffect` "request" variant (`src/server/adapters/codex/reducer.ts`).
+`CodexReducer.handle` now compares a `ServerRequest`'s own `threadId` (read out of `payload` via a new private `extractIssuerThreadId`) against the reducer's own `this.threadId`, and sets the effect's `issuerThreadId` only when they differ.
+`CodexAdapter.applyEffects` (`src/server/adapters/codex/adapter.ts`) copies that onto the `AgentRequest` it emits, only when non-null, so a same-thread request is unchanged and a foreign-thread request now names its issuing thread while still being routed, held pending, and replied through the parent adapter -- the parent stays the only client on the connection, per the card's "which way to fix it".
+
+Verified: `reducer.test.ts` gained three cases (child-thread sets `issuerThreadId`, same-thread sets none, a request with no `threadId` in its payload sets none), and `adapter.test.ts` gained two adapter-level cases exercising the full path -- `proc.emit` a foreign-thread `ServerRequest` after `startedAdapter`, assert the emitted `AgentRequest.issuerThreadId` and `session.id`, then `adapter.reply(...)` and assert the process receives the JSON-RPC response, so "stays pending and replyable through the parent" is covered end to end, not just at the pure reducer. Both new suites were watched red against the pre-fix code before going green. `bun run check`: 48 files, 1012 tests, clean.
+
+Commits on main: 17816f0 (fix), 2e452e2 (adapter-level test, added after review found the first pass only covered the reducer, not `applyEffects`).
+
+OW-bijera (browser-side rendering of this field) and OW-18 (whether agentpane sets `approvalPolicy`) are unaffected and remain open; this card only made the field available to emit.
