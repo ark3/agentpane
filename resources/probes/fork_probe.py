@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Fork-from-past probe — the 2x2 of {Pi, Codex} x {rewind, new session}.
+"""Fork-from-past probe — the 2x2 of {Pi, Codex} x {rewind, new session},
+plus a Codex mid-stream cell.
 
 `DESIGN.md:21` and HANDOFF finding 7 claim "both backends support fork-from-past
 natively". Nothing had ever run a fork on either backend; this probe runs all
-four cells against the live CLIs on this machine, prints a record for each
+five cells against the live CLIs on this machine, prints a record for each
 (does the operation exist? what did it return? what did it leave on disk?), and
 captures a forked-or-branched session fixture per backend so the mapping work
 can proceed on a machine that cannot run either CLI.
 
-The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
+The cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30, and
+OW-gojado for the fifth):
 
   Pi, rewind        -> RPC `fork` (entryId). On 0.84.2 this is COPY-ON-WRITE,
                        not the in-place rewrite the adapter docblock describes
@@ -38,6 +40,20 @@ The four cells (see OW-mewiga, docs/HANDOFF.md findings 7/18/19/21/30):
   Codex, new session-> `thread/fork` with `lastTurnId` (inclusive). Mints a new
                        thread id; the on-disk rollout carries `forked_from_id`.
                        This probe forks, then drives a real turn in the fork.
+  Codex, mid-stream -> `thread/fork` fired while the PARENT is mid-turn, the
+                       one condition D15 turns on and the only cell here that
+                       reads the parent rather than the fork. Confirms the turn
+                       is streaming first (`turn/started` plus accumulating
+                       `item/agentMessage/delta`s) and refuses to report a
+                       result it did not earn; then records whether deltas keep
+                       arriving, whether `turn/completed` lands and with what
+                       status, and whether assistant text reaches the parent
+                       rollout -- hashed at the fork and again after, since the
+                       new-session cell's header-only `parent_untouched` check
+                       cannot answer this (OW-gojado). On 0.154.0 the parent
+                       SURVIVES: deltas keep arriving, the turn completes, and
+                       the full reply lands in the parent rollout -- the
+                       opposite of Pi's mid-stream fork.
   Codex, rewind     -> `thread/rollback`. Marked DEPRECATED ("will be removed
                        soon") in the generated schema; there is no
                        non-deprecated in-place rewind. "Codex cannot rewind" is
@@ -57,12 +73,13 @@ Constraints honoured (OW-mewiga):
     assistant turn INSIDE the forked session, and rewind is proven against disk.
 
 Usage:
-    python3 fork_probe.py                 # run all four cells, write fixtures
+    python3 fork_probe.py                 # run all five cells, write fixtures
     python3 fork_probe.py --no-fixtures   # record only, don't touch fixtures/
     python3 fork_probe.py --timeout 90
 
 Needs: `pi` and `codex` on PATH with working credentials, and a writable temp
-area. Costs tokens: each new-session cell drives real model turns.
+area. Costs tokens: each new-session cell drives real model turns, and the
+mid-stream cell drives one it deliberately does not let finish quickly.
 
 Framing note: Pi RPC is LF-only. This reads text-mode line-by-line, which is
 adequate here because the probe's own prompts never embed U+2028/U+2029; the
@@ -578,12 +595,72 @@ def run_pi(timeout, want_fixtures):
 
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
+
     return version, cells, fixture_lines
 
 
 # ----------------------------------------------------------------------------
 # Codex app-server driver
 # ----------------------------------------------------------------------------
+
+def codex_rollout_for(home, thread_id):
+    """The rollout file whose session_meta header names `thread_id`, or None."""
+    for f in sorted((home / "sessions").rglob("*.jsonl")):
+        try:
+            header = json.loads(open(f).readline()).get("payload", {})
+        except (ValueError, OSError):
+            continue
+        if header.get("id") == thread_id:
+            return f
+    return None
+
+
+def codex_rollout_snapshot(path):
+    """sha256 and line count of a rollout, for a before/after comparison.
+
+    The Pi mid-stream cell hashes the file across the fork; this is the Codex
+    equivalent, and it is deliberately not the header-only `forked_from_id`
+    check the codex_new_session cell makes.
+    """
+    if path is None or not path.exists():
+        return {"sha256": None, "lines": 0, "bytes": 0}
+    data = path.read_bytes()
+    return {"sha256": hashlib.sha256(data).hexdigest(),
+            "lines": len([l for l in data.splitlines() if l.strip()]),
+            "bytes": len(data)}
+
+
+def codex_assistant_text_between(path, from_line, limit=400):
+    """Assistant text in a rollout's lines after `from_line` -- what landed.
+
+    Reads what the file actually gained, so "the file changed" and "the model
+    wrote a reply into it" are separate answers.
+    """
+    if path is None or not path.exists():
+        return []
+    lines = [l for l in path.read_text(errors="replace").splitlines() if l.strip()]
+    out = []
+    for raw in lines[from_line:]:
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        payload = e.get("payload", {})
+        texts = []
+        if e.get("type") == "event_msg" and payload.get("type") == "agent_message":
+            texts.append(payload.get("message", ""))
+        elif e.get("type") == "response_item" and payload.get("role") == "assistant":
+            for block in payload.get("content", []) or []:
+                if block.get("text"):
+                    texts.append(block["text"])
+        for text in texts:
+            # Length and tail as well as head: a truncated preview cannot tell
+            # a complete reply from one that stopped partway.
+            out.append({"chars": len(text),
+                        "head": preview(text, limit),
+                        "tail": text[-limit:]})
+    return out
+
 
 class CodexSession:
     def __init__(self, work, home):
@@ -640,6 +717,70 @@ class CodexSession:
                     return e.get("method") == "turn/completed", mark
             time.sleep(0.2)
         return False, mark
+
+    def start_turn(self, req_id, thread_id, text):
+        """Fire `turn/start` and return immediately, without waiting for the turn.
+
+        `turn()` blocks until the turn settles, which cannot express "do
+        something while it is running". The caller gets the event-log mark and
+        drives its own waiting.
+        """
+        mark = len(self.events)
+        self.send({"id": req_id, "method": "turn/start",
+                   "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]}})
+        return mark
+
+    def events_since(self, mark, method, thread_id=None):
+        out = []
+        for e in self.events[mark:]:
+            if e.get("method") != method:
+                continue
+            if thread_id is not None and e.get("params", {}).get("threadId") != thread_id:
+                continue
+            out.append(e)
+        return out
+
+    def await_streaming(self, mark, thread_id, min_deltas, timeout):
+        """Block until the turn is positively observed streaming.
+
+        Two independent signals, both required: `turn/started` for this thread,
+        and at least `min_deltas` `item/agentMessage/delta` notifications for
+        it. Sleeping and hoping would let a fork land on a finished turn and
+        report nothing, silently. Returns the observation either way -- the
+        caller decides what an unmet signal means.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            started = self.events_since(mark, "turn/started", thread_id)
+            deltas = self.events_since(mark, "item/agentMessage/delta", thread_id)
+            settled = self.events_since(mark, "turn/completed", thread_id)
+            if settled:
+                break
+            if started and len(deltas) >= min_deltas:
+                return {"turn_started_seen": True, "deltas_before_fork": len(deltas),
+                        "settled_before_fork": False, "streaming_confirmed": True,
+                        "turn_id": started[0]["params"]["turn"]["id"]}
+            time.sleep(0.1)
+        started = self.events_since(mark, "turn/started", thread_id)
+        settled = self.events_since(mark, "turn/completed", thread_id)
+        return {
+            "turn_started_seen": bool(started),
+            "deltas_before_fork": len(self.events_since(mark, "item/agentMessage/delta", thread_id)),
+            "settled_before_fork": bool(settled),
+            "streaming_confirmed": False,
+            "turn_id": started[0]["params"]["turn"]["id"] if started else None,
+        }
+
+    def await_turn_end(self, mark, thread_id, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            settled = self.events_since(mark, "turn/completed", thread_id)
+            if settled:
+                return settled[0]
+            if self.proc.poll() is not None:
+                return None
+            time.sleep(0.2)
+        return None
 
     def agent_text_since(self, mark):
         for e in self.events[mark:]:
@@ -785,6 +926,103 @@ def run_codex(timeout, want_fixtures):
         fixture_lines = scrub_lines([l for l in open(fixture_src) if l.strip()])
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
+
+    # --- Cell: Codex mid-stream fork. Read the PARENT, not the fork. ---
+    # D15 turns on one condition no cell had ever created: `thread/fork` fired
+    # while the parent is mid-turn. Everything else forks an idle thread, so
+    # "the parent keeps streaming" was an inference until this cell ran. On
+    # 0.154.0 it holds: the fork succeeds mid-stream, the parent keeps emitting
+    # deltas, and `turn/completed` arrives with status "completed" and the whole
+    # reply in the parent rollout. This cell forks in flight and reports only
+    # the parent (OW-gojado).
+    mid_work = make_workspace("agentpane-fork-codexmid-")
+    mid_home = make_state_home(Path.home() / ".codex", CODEX_STATE_FILES, "agentpane-fork-codexmidhome-")
+    cx = CodexSession(mid_work, mid_home)
+    try:
+        cx.request(1, "initialize", {"clientInfo": {"name": "agentpane-fork-probe",
+                                                     "version": "0", "title": "agentpane"}})
+        # Started the way the adapter starts one (codex/adapter.ts start(), D7a),
+        # and NOT ephemeral: the parent's on-disk rollout is read below.
+        started = cx.request(2, "thread/start", {"cwd": str(mid_work),
+                                                 "sandbox": "danger-full-access",
+                                                 "approvalPolicy": "never"})
+        parent_id = started["result"]["thread"]["id"]
+        started_model = started["result"].get("model")
+        prime_ok, _ = cx.turn(3, parent_id, "Say exactly: ALPHA", timeout)
+        read = cx.request(4, "thread/read", {"threadId": parent_id, "includeTurns": True})
+        turns = read["result"]["thread"].get("turns", []) if read and "result" in read else []
+        last_turn_id = turns[0]["id"] if turns else None
+
+        parent_file = codex_rollout_for(mid_home, parent_id)
+
+        # A turn long enough to still be running at the fork, started WITHOUT
+        # blocking so the fork can be fired into it.
+        long_mark = cx.start_turn(5, parent_id,
+                                  "Count from 1 to 400. Print one number per line and nothing else.")
+        streaming = cx.await_streaming(long_mark, parent_id, min_deltas=5, timeout=timeout)
+
+        before = codex_rollout_snapshot(parent_file)
+        fork = cx.request(6, "thread/fork",
+                          {"threadId": parent_id,
+                           **({"lastTurnId": last_turn_id} if last_turn_id else {}),
+                           "cwd": str(mid_work),
+                           "sandbox": "danger-full-access",
+                           "approvalPolicy": "never"},
+                          timeout=timeout)
+        fork_mark = len(cx.events)
+        fork_ok = fork is not None and "result" in fork
+        forked_id = fork["result"]["thread"]["id"] if fork_ok else None
+
+        settle = cx.await_turn_end(fork_mark, parent_id, timeout)
+        deltas_after_fork = len(cx.events_since(fork_mark, "item/agentMessage/delta", parent_id))
+        turn_status = settle["params"]["turn"].get("status") if settle else None
+        turn_error = settle["params"]["turn"].get("error") if settle else None
+        cx.close()
+        time.sleep(0.5)
+
+        after = codex_rollout_snapshot(parent_file)
+        landed = codex_assistant_text_between(parent_file, before["lines"])
+
+        cells["codex_fork_mid_stream"] = {
+            "operation": "thread/fork fired while the parent turn is streaming",
+            "reads": "the PARENT thread only; no turn is driven in the fork",
+            "parent_thread_id": parent_id,
+            "model": started_model,
+            "primed_turn_ok": prime_ok,
+            "forked_through_turn": last_turn_id,
+            # Earned, or not reported: a fork fired at a turn that had already
+            # settled measures nothing, and the failure mode is silent.
+            "streaming_confirmed_before_fork": streaming["streaming_confirmed"],
+            "turn_started_seen": streaming["turn_started_seen"],
+            "deltas_before_fork": streaming["deltas_before_fork"],
+            "parent_turn_settled_before_fork": streaming["settled_before_fork"],
+            "streaming_turn_id": streaming["turn_id"],
+            "fork_succeeded_mid_stream": fork_ok,
+            "fork_response": fork if not fork_ok else {"forked_thread_id": forked_id},
+            # What the parent did after the fork call.
+            "parent_deltas_after_fork": deltas_after_fork,
+            "parent_turn_completed_after_fork": settle is not None,
+            "parent_turn_status": turn_status,
+            "parent_turn_error": turn_error,
+            # The parent rollout on disk, hashed at the fork and again after
+            # the parent settled -- not the header-only `parent_untouched`
+            # check the codex_new_session cell carries, which D15 names as too
+            # weak to answer this.
+            "parent_rollout_file": parent_file.name if parent_file else None,
+            "parent_rollout_sha256_at_fork": before["sha256"],
+            "parent_rollout_sha256_after": after["sha256"],
+            "parent_rollout_changed_after_fork": before["sha256"] != after["sha256"],
+            "parent_rollout_lines_at_fork": before["lines"],
+            "parent_rollout_lines_after": after["lines"],
+            "parent_assistant_text_after_fork": landed,
+            "result": "measured" if streaming["streaming_confirmed"] else "unearned",
+        }
+    finally:
+        if cx.proc.poll() is None:
+            cx.close()
+        shutil.rmtree(mid_work, ignore_errors=True)
+        shutil.rmtree(mid_home, ignore_errors=True)
+
     return version, cells, fixture_lines
 
 
@@ -847,12 +1085,17 @@ def main():
 
     print(json.dumps(record, indent=2))
     # Non-zero if any new-session cell failed to drive a turn -- that is the
-    # one criterion that a returned id cannot fake.
+    # one criterion that a returned id cannot fake -- or if the mid-stream cell
+    # could not confirm the parent was streaming when it forked, which makes
+    # everything it reports about the parent unearned.
     ok = True
     for name in ("pi_new_session", "codex_new_session"):
         cell = record["cells"].get(name)
         if cell is not None and not cell.get("drove_turn_in_fork" if "codex" in name else "drove_turn_in_clone"):
             ok = False
+    mid = record["cells"].get("codex_fork_mid_stream")
+    if mid is not None and not mid.get("streaming_confirmed_before_fork"):
+        ok = False
     return 0 if ok else 1
 
 

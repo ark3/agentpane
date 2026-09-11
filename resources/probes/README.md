@@ -105,9 +105,10 @@ Read `../fixtures/README.md` for what was captured and what it revealed.
 ## `fork_probe.py`
 
 Proves: **the 2×2 of `{Pi, Codex} × {rewind, new session}`** — the fork claim
-in `DESIGN.md:21` and HANDOFF finding 7, which nothing had ever run (OW-mewiga).
-Runs all four cells live and prints a JSON record saying, for each, whether the
-operation exists, what it returned, and what it left on disk:
+in `DESIGN.md:21` and HANDOFF finding 7, which nothing had ever run (OW-mewiga)
+— plus a fifth cell that forks Codex *mid-stream* (OW-gojado). Runs all five
+cells live and prints a JSON record saying, for each, whether the operation
+exists, what it returned, and what it left on disk:
 
 - **Pi rewind** (`fork`): copy-on-write on 0.84.2 — original file untouched, the
   re-ask spins off a new `parentSession`-linked file, so the abandoned tail
@@ -119,9 +120,21 @@ operation exists, what it returned, and what it left on disk:
   `forked_from_id`, a real turn driven in the fork (HANDOFF 45).
 - **Codex rewind** (`thread/rollback`): recorded as DEPRECATED from the live
   schema rather than fired — "Codex cannot rewind" is the result (HANDOFF 46).
+- **Codex mid-stream** (`thread/fork` into a running parent): the only cell that
+  reports the *parent* rather than the fork, and the one D15 asked for
+  (OW-gojado). It confirms the parent is streaming before forking — `turn/started`
+  seen plus `item/agentMessage/delta`s accumulating, never a sleep — and records
+  `result: "unearned"` and exits non-zero if it cannot, because a fork fired at a
+  turn that had already settled measures nothing and fails silently. On 0.154.0
+  the parent survives: deltas keep arriving after the fork, `turn/completed`
+  carries `status: "completed"`, and the whole reply lands in the parent rollout,
+  which the cell sha256s at the fork and again after and then *reads* — the
+  header-only `parent_untouched` check the new-session cell makes could not have
+  told those outcomes apart. Writes no fixture; the protocol shapes here are
+  already in `fork.jsonl`.
 
 ```bash
-python3 fork_probe.py                 # all four cells, write fixtures
+python3 fork_probe.py                 # all five cells, write fixtures
 python3 fork_probe.py --no-fixtures   # record only
 python3 fork_probe.py --backend pi    # one side
 ```
@@ -132,9 +145,12 @@ session discipline as `capture_fixtures.py`; Codex threads are deliberately NOT
 ephemeral here because the on-disk residue is the question. New-session cells
 end with a completed assistant turn inside the fork, so a returned id alone
 cannot pass the check. Exit non-zero if either new-session cell failed to drive
-a turn.
+a turn, or if the mid-stream cell could not confirm the parent was streaming
+when it forked.
 
-Verified with: `pi` 0.84.2, `codex-cli` 0.147.0.
+Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the mid-stream cell with
+`codex-cli` 0.154.0. What that cell showed is `docs/MANUAL_TESTING.md`,
+"Forking a Codex thread mid-stream leaves the parent turn running (OW-gojado)".
 
 Two things it handles that the older probes do not, and that will bite anyone
 writing their own harness:
