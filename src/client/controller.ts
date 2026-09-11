@@ -674,10 +674,12 @@ export function createController(
 				// the turn whether or not we abort (OW-yudoni), so the abort only
 				// makes that loss visible. On Codex there is: a mid-stream
 				// `thread/fork` leaves the parent turn running, and it finishes
-				// normally with its full reply on disk -- measured, not inferred
-				// (OW-gojado, codex-cli 0.154.0). The abort is what makes the two
-				// behave alike, and it is spent to stop a turn that would
-				// otherwise stream into a session the user has left.
+				// normally with its full reply durably on disk -- measured, not
+				// inferred (OW-gojado, codex-cli 0.154.0). So this abort is
+				// bought, not free: it discards a reply Codex would have kept.
+				// Uniformity across backends is the reason, and the only one --
+				// Pi cannot be made to match, so the alternative is a permanent
+				// split.
 				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
 				if (disposed) return null;
 				const points = await api.forkPoints(ref);

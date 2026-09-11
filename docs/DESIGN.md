@@ -458,7 +458,7 @@ Escape as well is right; Escape only is the failure.
 
 So: when an interaction introduces a mode, the control that leaves it is visible and clickable, and it is drawn where the mode announces itself rather than somewhere the user has to go looking.
 
-### D15. Forking a streaming turn stops that turn, on every backend
+### D15. agentpane stops a streaming turn before forking it, on every backend
 
 Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first, identically on Pi and on Codex.
 The owner took this on 2026-09-09, replacing the "first cut, safe on both" that OW-hezidi shipped it as.
@@ -468,13 +468,15 @@ That section retired a third observation from the same run as a tautology, and t
 The abort does not cause that loss; it makes it deliberate and visible instead of silent.
 
 Codex is the side where a choice exists, and it is a real one: the parent turn survives.
-OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, six `item/agentMessage/delta`s accumulated, no `turn/completed`.
-The fork succeeded, the parent emitted a further 303 deltas and then `turn/completed` with `status: "completed"`, and a complete 1491-character reply landed in the parent's rollout on disk, whose hash the cell took at the fork and again after (`docs/MANUAL_TESTING.md`, OW-gojado).
+OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, five `item/agentMessage/delta`s accumulated, no `turn/completed`.
+The fork succeeded, the parent emitted at least 300 further deltas and then `turn/completed` with `status: "completed"`, and a complete 1491-character reply landed in the parent's rollout on disk, whose hash the cell took immediately before the fork request and again after the parent settled (`docs/MANUAL_TESTING.md`, OW-gojado).
 That replaces the inference this paragraph used to carry, and the weak check behind it: `fork_probe.py`'s `parent_untouched` reads only the parent header's `forked_from_id`, which cannot tell a surviving turn from a killed one, so the new cell hashes the file and reads what it gained.
 
-The abort stays anyway, now on the reason that always did the work rather than on the missing evidence.
-A parent turn that keeps running streams its reply into a session nobody is looking at, because the user has just forked away — tokens spent to produce an orphan.
-Uniform behaviour is worth more than a surviving turn nobody reads, and OW-hezidi's own worry — that the split "reads as a bug" — is now known to be permanent rather than pending, because Pi cannot be brought to match.
+The abort stays, and the honest reason is uniformity alone.
+The second reason this decision used to give — that a surviving turn streams into a session nobody is looking at, tokens spent to produce an orphan — is the part OW-gojado weakened.
+The surviving turn completed and wrote its whole reply durably into the parent's rollout, and that parent is a session agentpane lists and the user can navigate back to; it is not an orphan, and the tokens are spent either way, since the abort lands after the model has already produced most of the reply.
+What is left is that Pi cannot be brought to match, so a backend-dependent answer here would be permanent rather than pending — which is exactly OW-hezidi's worry that the split "reads as a bug".
+Uniform behaviour across backends is the whole of the case, and it is stated that way rather than propped up by a cost the run showed is smaller than it sounded.
 
 So the two backends differ as a matter of fact, and agentpane's uniformity is a choice laid over that difference rather than a description of it.
 Whether to take the asymmetry after all is a decision this record does not take; if it is ever taken, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.

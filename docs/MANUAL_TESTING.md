@@ -451,7 +451,9 @@ a `Thread` with a fresh `id`, `forkedFromId` set to the parent, and its own
 `sessionId`; the probe drove a real turn in the fork (assistant replied
 `GAMMA`). On disk the new rollout's `session_meta.payload` carries
 **`forked_from_id`** (snake_case) — the on-disk mirror of the protocol's
-`Thread.forkedFromId` (finding 21). The parent rollout is untouched; 21 of 597
+`Thread.forkedFromId` (finding 21). The fork writes nothing to the parent
+rollout — this parent was idle, and a mid-stream one keeps writing its own turn
+(OW-gojado, below); 21 of 597
 corpus files carry `forked_from_id` (HANDOFF 45).
 
 **Codex, rewind (`thread/rollback`) — unavailable, by design.** The method is
@@ -579,26 +581,39 @@ It reports the **parent** thread only; no turn is driven in the fork.
 
 **Streaming was confirmed before the fork, not assumed.**
 The cell waits for two signals on the parent's `threadId` and refuses to report a result without both: a `turn/started` notification, and at least five `item/agentMessage/delta` notifications accumulating.
-The run saw `turn/started` and six deltas, and no `turn/completed`, before it sent `thread/fork`.
-A cell that slept and hoped would have been unable to tell a surviving parent from a fork that landed after the turn had already finished, and `bun run check` cannot see that failure; the probe now exits non-zero when the confirmation is missing.
+The run saw `turn/started` and five deltas, and no `turn/completed`, before it sent `thread/fork`.
+Sleeping instead would have been unable to tell a surviving parent from a fork that landed after the turn had already finished, and that failure mode is silent, so the cell records `result: "unearned"` and the probe exits non-zero when either signal is missing.
 
-**The fork succeeded and the parent turn ran to completion.**
-`thread/fork` returned a new thread id mid-stream without error.
-After that call the parent emitted a further **303** `item/agentMessage/delta` notifications and then `turn/completed` with `turn.status: "completed"` and `turn.error: null`.
+**The fork succeeded, and the parent turn ran to completion.**
+`thread/fork` returned a new thread id mid-stream without error; `thread/read` on that id succeeded, and its rollout was on disk with `forked_from_id` naming the parent.
+No turn was driven in the fork — it is not this cell's subject.
+After the fork call the parent emitted a further **300** `item/agentMessage/delta` notifications and then `turn/completed` with `turn.status: "completed"` and `turn.error: null`.
+That delta count is a floor: the cell takes its mark after the fork *response* returns, so anything the parent streamed while the request was in flight is not counted.
 
 **A complete reply landed in the parent's rollout on disk after the fork.**
-The parent rollout was hashed at the moment of the fork and again after the parent settled: `1d444682…` became `c4544306…`, and the file went from 21 lines to 26.
-Reading what those lines contain rather than only that they changed, the parent gained one assistant message of 1491 characters beginning `1\n2\n3\n…` and ending `…398\n399\n400` — the whole answer, not a truncated one.
+The parent rollout was hashed immediately before the `thread/fork` request went out and again after the parent settled: `93e62f6c…` became `bfb474f6…`, and the file went from 21 lines to 26.
+The same residual window applies as above and in the same direction — the seconds spent sending and answering the fork are credited to *after* it, so the disk evidence is not flattered by the gap.
+Reading what those five lines contain rather than only that they changed, they are `event_msg`/`item_completed`, a `response_item` `message` with `role: "assistant"`, a `token_usage_record`, `event_msg`/`token_count`, and `event_msg`/`task_complete`.
+The assistant line carries 1491 characters beginning `1\n2\n3\n…` and ending `…398\n399\n400` — the whole answer, not a truncated one.
 This is the check D15 called for in place of `codex_new_session`'s `parent_untouched`, which reads only the parent header's `forked_from_id` and could not have distinguished these outcomes.
 
+**The rollout's own shape has changed since the committed fixture, which is why one assistant line landed and not two.**
+`resources/fixtures/codex/fork.jsonl`, captured on 0.147.0, writes every reply twice: an `event_msg` with `payload.type: "agent_message"` *and* a `response_item` `message` with `role: "assistant"`.
+On 0.154.0 the `agent_message` event is gone, replaced by `event_msg`/`item_completed`, and a `token_usage_record` line type appears that the fixture does not have.
+So a reply is one assistant-text line now, not two.
+Nothing in this section's conclusion turns on that, but the census of gained lines is recorded in the probe's JSON output for every run precisely so the next reader can see a shape change rather than infer one from a count.
+
 **Two things this run does not establish.**
-It forked through the *first* turn, so the streaming turn was outside the fork's range by construction; it says nothing about what a fork whose range includes the in-flight turn would do.
-And it measured one thread on one model — it shows that a surviving parent is what Codex does here, not that nothing can make it behave otherwise.
+It measured one thread on one model — it shows that a surviving parent is what Codex does here, not that nothing can make it behave otherwise.
+And it did not drive a turn inside the fork, so it says nothing about the fork's usability beyond being readable and on disk; `codex_new_session` covers that on an idle parent.
+
+**What it does not need to establish**: the cell forked through the turn *before* the streaming one, and that is not a gap.
+`resources/codex-protocol/v2/ThreadForkParams.ts` says of `lastTurnId` that "The referenced turn cannot be in progress", so a fork whose range includes the in-flight turn is not expressible; and `codex/adapter.ts` `fork()` computes `lastTurnId` as the turn *before* the fork point, so agentpane's own mid-stream fork excludes the running turn too.
+The cell measured what production does.
 
 So on Codex the parent turn survives a mid-stream `thread/fork` and finishes normally, where on Pi (OW-yudoni) it is abandoned.
 The asymmetry D15 assumed on an inference is real and now measured.
 D15's abort remains a deliberate choice on the Codex side rather than a necessity; whether to keep it is a separate decision this run does not take.
-The full JSON record for this run is `/var/tmp/OW-gojado-fork-mid-stream.json` on the home server.
 
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
