@@ -103,6 +103,27 @@ export function clearSessionError(state: ClientState, ref: SessionRef): ClientSt
  * "requesting" at the request itself, since the server's own "requesting"
  * status races the POST response (D2), and null again if that request fails.
  * Server events overwrite this; the reducer above stays wire-truth only.
+ *
+ * Sharing one field with the wire is deliberate, and it buys two races, both
+ * weighed and accepted on 2026-09-11 (OW-husivu, declined):
+ *
+ *  - A `status` or `snapshot` carrying `null` lands in the window before the
+ *    server's own "requesting" and wipes a fresh mark. This client's POST is
+ *    what makes the server write "requesting", so the healing event is already
+ *    in flight.
+ *  - A rejected POST clears a "requesting" that is another client's wire truth
+ *    (`compact()` in `controller.ts`). Nothing heals this one: the rejection
+ *    changed no server state, and `#onUpdate` broadcasts only what moved. The
+ *    mark returns when the *other* client's compaction advances to "running".
+ *
+ * What that costs is not cosmetic. This field gates Send and Compact
+ * (`App.svelte`, `send()` and the two `disabled=` conditions), so a wrongly
+ * cleared mark re-opens them while a compaction is genuinely running, and the
+ * prompt is refused by the backend. Accepted anyway: both races need a second
+ * client driving the same session, and the alternative is a client-only phase
+ * every reducer arm has to be taught to leave alone. A second optimistic mark
+ * in the composer would bring the same defect with it, and is what would
+ * reopen this.
  */
 export function setSessionCompaction(
 	state: ClientState,
@@ -118,6 +139,10 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	if (event.type === "sessions-changed") return result(state, [], true);
 
 	if (event.type === "snapshot") {
+		// This and the `status` arm below both overwrite `compaction`, which may
+		// be holding a click-time mark rather than wire truth. Overwriting it is
+		// the contract -- see `setSessionCompaction` for the two races that buys
+		// and why they were accepted (OW-husivu).
 		const key = sessionKey(event.session);
 		const previous = state.sessions[key];
 		const view: SessionView = {

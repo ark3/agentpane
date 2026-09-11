@@ -798,8 +798,18 @@ export function createController(
 				await api.compact(selected);
 			} catch (error: unknown) {
 				if (!disposed) {
-					// Failed admission: nothing is running unless a server event has
-					// since said otherwise, so only a still-"requesting" mark clears.
+					// Failed admission, so our own optimistic mark has to go. The
+					// guard reads "requesting" and cannot tell whose it is: in a
+					// multi-client session it is usually another client's wire truth,
+					// because the live compaction that made the backend refuse us is
+					// the same one that raised it (Codex's `TURN_ACTIVE_ERROR`). We
+					// clear it anyway, and it stays cleared until that compaction
+					// reaches "running". Accepted, with what it costs recorded at
+					// `setSessionCompaction` (OW-husivu).
+					//
+					// Threshold compaction is why this is narrow rather than
+					// unconditional: it enters at "running", never "requesting", so
+					// only a click-shaped mark is in scope here.
 					const current = view.state.sessions[sessionKey(ref)]?.compaction;
 					const state = current === "requesting"
 						? setSessionCompaction(view.state, ref, null)
