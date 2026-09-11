@@ -584,7 +584,7 @@ The `wait` completion carries the child's final message in `agentsStates[childId
 The parent therefore reads "spawned agent", then "waited", in sequence, collapsed by default like any other tool card.
 
 This is the **live attached** transcript's view, and only that.
-A stored rollout records the same calls as Responses-API `function_call`s under the `collaboration` namespace — `spawn_agent`, `wait_agent`, `list_agents`, `interrupt_agent`, counted across the September rollouts on the home server on 2026-09-11 — so `extractCodexPreviewTurns` names them `collaboration__wait_agent` and the read-only preview of the same parent draws an opaque default card with no child link at all.
+A stored rollout records the same calls as Responses-API `function_call`s under the `collaboration` namespace — `wait_agent`, `send_message`, `spawn_agent`, `followup_task`, `list_agents` and `interrupt_agent`, counted across the 72 September rollouts on the home server on 2026-09-11 (`codex-cli` 0.150.1 through 0.154.0) — so `extractCodexPreviewTurns` names them `collaboration__wait_agent` and the read-only preview of the same parent draws an opaque default card with no child link at all.
 Closing that gap is separate work.
 
 The child's conversation is **not** inlined as a nested block.
