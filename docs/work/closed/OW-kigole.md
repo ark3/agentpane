@@ -1,5 +1,6 @@
 ---
 labels: [change, now]
+closed: done
 ---
 
 # agentpane serves no Content-Security-Policy, so the sanitizer is the only thing standing between a hostile transcript and an outbound request
@@ -29,3 +30,7 @@ D8 bounds who can reach the server; it says nothing about where the page can sen
 - A server test asserts the header is present on the HTML response with the two directives, and asserts it is *absent* or harmless on non-HTML responses if that is how it is implemented; it fails before the change.
 - A browser check confirms the app still works with the header live — `bun run test:browser`, which is the vehicle for anything jsdom cannot see, and jsdom does not enforce CSP at all. Label `browser-testing` applies if that turns out to need a human eye rather than the Playwright run.
 - A remote image in a transcript is observably blocked by the browser with the sanitizer's link fallback removed for the length of the check, proving the header alone stops it. Restore the fallback afterwards; the two are meant to overlap.
+
+## Close note
+
+Committed 8116588: Content-Security-Policy (img-src 'self' data:; media-src 'self' data:) now set on the served HTML document in src/server/http/static.ts, scoped to exactly the two directives D5's remote-media decision needed as its browser-enforced complement. Two new tests in static.test.ts (header present on the document, absent on a plain asset) written red-first, then green; bun run check (1007/1007) and bun run test:browser (20/20) both pass. Verified at the source per AGENTS.md: built and ran the real production server, curl confirmed the header on / and its absence on /assets/*.js; then with the sanitizer's remote-media fallback in markdown.ts temporarily disabled, loaded the real page over the real header in a live Chromium instance and injected the resulting <img src=remote> markup, observing a securitypolicyviolation event, a failed network request (errorText: csp), and naturalWidth 0 -- the browser blocked it, not the sanitizer. markdown.ts restored exactly (confirmed via empty git diff) before landing.
