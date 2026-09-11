@@ -686,19 +686,13 @@ export function createController(
 				// From here the fork exists, and every exit below up to the prompt
 				// abandons it: this `disposed` return, the one after the attach, and
 				// the `catch` on a throw from `api.attach` or `api.prompt`. That orphan
-				// is deliberate (OW-puduro). The only cleanup the server offers is the
-				// `DELETE` route, which would need a verb on `AgentpaneApi` to reach --
-				// and it disposes the *adapter*, never the file. On Pi and Claude Code
-				// that adapter is the one live process, which the parent's ref now
-				// resolves to through `#aliases` (`SessionManager.fork` re-keyed it), so
-				// the call would kill the agent the user is talking to, and dropping
-				// that alias with it un-hides the parent file `list()` was suppressing.
-				// On Codex the forked thread is in no table until the attach, so the
-				// call is a 204 no-op there; only past a successful attach would it do
-				// what it says, reaping an idle child. One backend, one exit: not worth
-				// a verb. What the orphan costs is a session file, and the owner has
-				// weighed that and chosen not to care about it on any backend
-				// (OW-fejota, declined) -- so do not re-derive this as a leak.
+				// is deliberate (OW-puduro): what it costs is a session file, and the
+				// owner weighed that and declined to spend anything on it (OW-fejota).
+				// The trap if that is ever revisited: the server's `DELETE` route
+				// disposes the *adapter*, never the file, and `SessionManager.fork`
+				// re-keys `#aliases` so the parent's ref now resolves to the fork's
+				// live process -- on Pi and Claude Code that call would kill the agent
+				// the user is talking to.
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
