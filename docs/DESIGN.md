@@ -467,16 +467,17 @@ Pi leaves no choice: a mid-stream fork there returns `success: true` and abandon
 That section retired a third observation from the same run as a tautology, and the two above are what it says survives; nobody has yet read the file the abandoned turn was streaming into, so the conclusion rests on the settle rather than on a search for a partial reply.
 The abort does not cause that loss; it makes it deliberate and visible instead of silent.
 
-Codex is the side where a choice exists, and the case for taking it did not survive being looked at.
-`thread/fork` mints a separate thread and leaves the parent standing, so the parent turn plausibly keeps streaming — but every cell that established this forked an **idle** thread (`docs/MANUAL_TESTING.md`, OW-mewiga and OW-pifowo), and no run has ever forked Codex mid-stream.
-The parent check there is weaker than the Pi one it reads like: `fork_probe.py`'s `parent_untouched` asserts only that the parent's own header carries no `forked_from_id`, where the Pi cell hashes the file before and after.
-The asymmetry would therefore have been bought with an inference.
-It would also have been bought against a user who has just forked away: a parent turn that keeps running streams its reply into a session nobody is looking at, which spends tokens to produce an orphan.
+Codex is the side where a choice exists, and it is a real one: the parent turn survives.
+OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, six `item/agentMessage/delta`s accumulated, no `turn/completed`.
+The fork succeeded, the parent emitted a further 303 deltas and then `turn/completed` with `status: "completed"`, and a complete 1491-character reply landed in the parent's rollout on disk, whose hash the cell took at the fork and again after (`docs/MANUAL_TESTING.md`, OW-gojado).
+That replaces the inference this paragraph used to carry, and the weak check behind it: `fork_probe.py`'s `parent_untouched` reads only the parent header's `forked_from_id`, which cannot tell a surviving turn from a killed one, so the new cell hashes the file and reads what it gained.
+
+The abort stays anyway, now on the reason that always did the work rather than on the missing evidence.
+A parent turn that keeps running streams its reply into a session nobody is looking at, because the user has just forked away — tokens spent to produce an orphan.
 Uniform behaviour is worth more than a surviving turn nobody reads, and OW-hezidi's own worry — that the split "reads as a bug" — is now known to be permanent rather than pending, because Pi cannot be brought to match.
 
-What would reopen this is evidence, not preference: a probe that forks a Codex thread while a turn is streaming and records whether the parent survives and what it produces.
-That probe is cheap and belongs on any machine with `codex`, the home server included; it is OW-gojado.
-If the surviving turn turns out to be worth keeping, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.
+So the two backends differ as a matter of fact, and agentpane's uniformity is a choice laid over that difference rather than a description of it.
+Whether to take the asymmetry after all is a decision this record does not take; if it is ever taken, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.
 
 ### D16. A prompt submitted mid-turn steers that turn, and a backend that cannot steer rejects
 

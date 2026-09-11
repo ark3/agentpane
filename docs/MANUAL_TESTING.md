@@ -568,6 +568,38 @@ was in 2026-08-19; **the flag is unsettled until a run at that point says
 otherwise** (OW-gajesu). The stable fact across both runs is the file move
 itself (`active_file_moves_at_fork: true`).
 
+### Forking a Codex thread mid-stream leaves the parent turn running (OW-gojado)
+
+Run on the home server 2026-09-11, `codex-cli 0.154.0`, model `gpt-5.6-luna`, by a new `codex_fork_mid_stream` cell in `resources/probes/fork_probe.py`: `python3 resources/probes/fork_probe.py --backend codex --no-fixtures`.
+This is the Codex half of the question the OW-yudoni section above answers for Pi, and it is the run D15 named as the one thing that would reopen its decision.
+Every earlier Codex fork cell forked an idle thread, so what the parent did during a fork had never been observed at all.
+
+The cell starts a thread the way `codex/adapter.ts` `start()` does — `sandbox: "danger-full-access"`, `approvalPolicy: "never"`, not ephemeral — primes one short turn, then starts a second turn asking for the integers 1 through 400 one per line and fires `thread/fork` into it.
+It reports the **parent** thread only; no turn is driven in the fork.
+
+**Streaming was confirmed before the fork, not assumed.**
+The cell waits for two signals on the parent's `threadId` and refuses to report a result without both: a `turn/started` notification, and at least five `item/agentMessage/delta` notifications accumulating.
+The run saw `turn/started` and six deltas, and no `turn/completed`, before it sent `thread/fork`.
+A cell that slept and hoped would have been unable to tell a surviving parent from a fork that landed after the turn had already finished, and `bun run check` cannot see that failure; the probe now exits non-zero when the confirmation is missing.
+
+**The fork succeeded and the parent turn ran to completion.**
+`thread/fork` returned a new thread id mid-stream without error.
+After that call the parent emitted a further **303** `item/agentMessage/delta` notifications and then `turn/completed` with `turn.status: "completed"` and `turn.error: null`.
+
+**A complete reply landed in the parent's rollout on disk after the fork.**
+The parent rollout was hashed at the moment of the fork and again after the parent settled: `1d444682…` became `c4544306…`, and the file went from 21 lines to 26.
+Reading what those lines contain rather than only that they changed, the parent gained one assistant message of 1491 characters beginning `1\n2\n3\n…` and ending `…398\n399\n400` — the whole answer, not a truncated one.
+This is the check D15 called for in place of `codex_new_session`'s `parent_untouched`, which reads only the parent header's `forked_from_id` and could not have distinguished these outcomes.
+
+**Two things this run does not establish.**
+It forked through the *first* turn, so the streaming turn was outside the fork's range by construction; it says nothing about what a fork whose range includes the in-flight turn would do.
+And it measured one thread on one model — it shows that a surviving parent is what Codex does here, not that nothing can make it behave otherwise.
+
+So on Codex the parent turn survives a mid-stream `thread/fork` and finishes normally, where on Pi (OW-yudoni) it is abandoned.
+The asymmetry D15 assumed on an inference is real and now measured.
+D15's abort remains a deliberate choice on the Codex side rather than a necessity; whether to keep it is a separate decision this run does not take.
+The full JSON record for this run is `/var/tmp/OW-gojado-fork-mid-stream.json` on the home server.
+
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
 Recorded 2026-08-18. Two separate things: what headless Chromium refuses to
