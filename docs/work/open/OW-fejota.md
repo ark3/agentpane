@@ -1,0 +1,35 @@
+---
+labels: [unverified]
+---
+
+# Whether a Claude Code fork writes its store file before the first prompt has never been read
+
+Surfaced while executing OW-puduro, 2026-09-10, and not filed by that card.
+
+OW-puduro settled that a fork `forkAndSubmit` abandons before prompting is left in place deliberately, and the comment it landed at `src/client/controller.ts` (the note above `if (disposed) return null;` following `const forked = await api.fork(...)`) states the cost as "a session file at most -- whether one exists before the first prompt is settled only for Codex".
+That sentence is the claim this card discharges for Claude Code.
+
+## What is and is not settled
+
+Codex is settled `true`: `forked_on_disk_before_turn` in `resources/probes/fork_probe.py`'s `run_codex`, recorded in `docs/MANUAL_TESTING.md`.
+Pi is unsettled and has OW-gajesu open on it, which is `work-laptop`.
+Claude Code has neither.
+Every recorded Claude fork run forked **and drove a turn**: `docs/MANUAL_TESTING.md`'s "**Fork.** `--resume 919cd270-... --fork-session`" passage, and the OW-beripo passage whose store finding reads "the fork's store file held the truncated parent ... plus the new turn".
+Both observe the file only after a turn, so neither answers whether the file exists before one.
+
+This one is **not** `work-laptop`: Claude Code runs on the home server, pinned to Haiku by the `--model haiku` flag AGENTS.md requires.
+
+## Why it matters
+
+The same consequence OW-gajesu carries for Pi.
+`src/server/sessions/claude.ts` returns a `SessionSummary` for any store file it can parse, with `preview: null` when no user message is found, and nothing in `SessionManager.list` or `src/client/App.svelte` filters on an empty transcript.
+So if the file is written at spawn, a user who clicks edit, forks, and whose attach or prompt then fails is left looking at a phantom session in the picker that they never had a conversation in.
+If it is not written until the first turn, the abandonment costs nothing at all on this backend and the picker never sees it.
+
+## Done when
+
+`docs/MANUAL_TESTING.md` carries the observation, and the sentence in `controller.ts` quoted above is corrected to match whichever way it came out.
+
+The observable is a spawn without a prompt, which is exactly what `replaceProcess` in `src/server/adapters/claude/adapter.ts` does at a fork.
+Build the argv the way `src/server/adapters/claude/process.ts` does -- `--resume <parentId> --resume-session-at <uuid> --fork-session --session-id <minted uuid>` -- against a parent session with at least two turns, send it nothing, and check whether `<minted uuid>.jsonl` has appeared under the project's directory in the Claude store before any prompt is written.
+Record what the file holds if it is there, the way OW-gajesu asks for `moved_file_messages_at_fork`: an empty or header-only file and a file carrying the truncated parent are different answers to the picker question.
