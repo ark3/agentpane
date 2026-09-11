@@ -2048,6 +2048,30 @@ describe("App", () => {
 		expect(controller.forked).toEqual([]);
 	});
 
+	it("keeps the draft the first edit displaced when a second edit re-targets it (OW-bigotu)", async () => {
+		const controller = new FakeController(view({
+			draft: "half-written note",
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }]), user("second draft")]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		// Re-targeting an open edit is a real gesture, not a mistake: the click
+		// lands on a different message and the mode carries over.
+		const edits = screen.getAllByRole("button", { name: "Edit message" });
+		await fireEvent.click(edits[0]!);
+		await fireEvent.click(edits[1]!);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("second draft");
+		expect([...container.querySelectorAll(".msg.editing")].map((el) => el.getAttribute("data-index")))
+			.toEqual(["2"]);
+
+		// What Cancel owes is what you typed -- never the first edit's loaded text,
+		// which the composer would be inventing.
+		await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
+	});
+
 	it("also cancels an edit on Escape, a second way out and never the only one (OW-hezidi)", async () => {
 		const controller = new FakeController(view({
 			draft: "half-written note",

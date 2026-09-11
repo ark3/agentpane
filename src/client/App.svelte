@@ -959,7 +959,11 @@
 			if (block.type === "text") text.push(block.text);
 			else if (block.type === "image") images.push({ mimeType: block.mimeType, base64: block.data });
 		}
-		editing = { index, ordinal, images, stashedDraft: view.draft };
+		// Captured once per mode, not once per click: re-targeting an open edit
+		// finds `view.draft` already holding the previous edit's loaded text, so
+		// taking it again would lose what Cancel owes the typist (OW-bigotu).
+		const stashedDraft = editing ? editing.stashedDraft : view.draft;
+		editing = { index, ordinal, images, stashedDraft };
 		controller.setDraft(text.join("\n\n"));
 		promptEl?.focus();
 	}
