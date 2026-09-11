@@ -540,6 +540,31 @@ The fork bumps the intent just before it attaches, because a fork that takes the
 A fork that declines the selection must not bump: bumping past the user's own click strands it, leaving their `attachAndSelect` in its `else` branch with the selection never set and `busy` stuck on `"attaching"` forever.
 So the bump is conditional on the fork actually taking the selection, and that condition has to be captured before the bump, which destroys the information it is read from.
 
+### D18. Backend facts carry the version they were measured on, and only the ones that license absent code are defended against time
+
+Pi, Codex and Claude Code all move forward continuously and this project never rolls back, so every observed fact about them is decaying from the moment it is written.
+The owner decided on 2026-09-11 that the answer is not to chase currency but to sort the facts by what their going stale actually costs.
+
+Three groups, and they are not treated alike.
+
+- **Facts the code already defends against.** That a Codex fork does not inherit `sandbox` (D7a) is one: the adapter passes it explicitly on all three thread-creation paths, so if a future Codex starts inheriting, nothing breaks and the docblock is merely over-explained. These are allowed to rot and are corrected when someone trips on them.
+- **Facts behind a decision already taken.** D15's uniformity, D7a's policy choice. If one flips, a decision may want revisiting, but nothing fails silently and the decision record says what it rested on. These are corrected on contact too.
+- **Facts that license code that does not exist.** These are the only ones defended against time. The shape is always the same: a run showed that some input cannot arrive, so nothing was built to handle it; the backend then changes, the input arrives, and there is no test to go red and no log line, because the missing code is exactly what would have noticed. The live instance is agent requests — OW-zogogo asks whether any Codex `ServerRequest` kind can still reach agentpane, and OW-bijera stays unbuilt on the current answer of no.
+
+For that third group the defence is not documentation, it is a runtime assertion: the impossible input is made loud where it arrives, so a backend upgrade that reopens the hole reports itself the first time it happens instead of presenting as intermittent flakiness months later.
+
+Two supporting practices follow, and neither is a promise to re-verify everything.
+
+Prose asserting backend behaviour names the version it was measured on; `AGENTS.md` carries the rule.
+Present tense without a version is the defect this decision is named after: "app-server defaults each thread to `read-only`" was measured on codex-cli 0.147.0 and still read as current after the 0.154.0 run that sat three lines below it in this file.
+
+On a version bump the fixture censuses are re-run and diffed, and that diff is the change report.
+`resources/fixtures/*/*.meta.json` already carries `cli_version`, `event_census` and `server_requests_seen` per capture, which is a conformance baseline that nothing currently compares against.
+Nothing else is re-verified on a bump by policy, which is the part that keeps the rule above from being read as an obligation to keep every document current.
+
+Rejected: pinning backend versions, which converts drift into a different debt the project has already said it will not pay; and failing `bun run check` when the installed CLI moves, which turns every upgrade into a red build over facts that mostly do not matter.
+
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.

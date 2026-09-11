@@ -36,6 +36,11 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
 
 - Verify at the source.
   Where a claim about a CLI, a protocol, or a runtime is load-bearing, reproduce it and record how.
+- **A claim about backend behaviour names the version it was measured on.**
+  Pi, Codex and Claude Code move forward constantly and this project never rolls back, so present tense without a version is the defect: it reads as current forever and nothing marks the day it stopped being true.
+  Write "as of `codex-cli 0.147.0`, app-server defaulted each thread to `read-only`", not "app-server defaults each thread to `read-only`" -- that exact sentence sat three lines from a 0.154.0 measurement in `docs/DESIGN.md` and still read as present fact.
+  This is not an obligation to keep claims current.
+  D18 sorts backend facts by what their going stale costs and defends only the ones that license code nobody wrote; the rest are allowed to age and are corrected when someone trips on them.
 - **Only Pi is confined to the work laptop.**
   The home server has no `pi` at all.
   Claude Code and Codex both run there, each pinned to one model: Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna.
