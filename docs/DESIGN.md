@@ -112,8 +112,10 @@ What genuinely needs a human goes to the browser over SSE with its id and comes 
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
 An unanswered one hangs the turn.
 
-A `danger-full-access` thread does suppress the exec/patch approvals, and so, independently, does `approvalPolicy: "never"` (OW-18, `docs/MANUAL_TESTING.md`).
-A live edit-provoking prompt on a `danger-full-access` thread raised no approval `ServerRequest` under either `on-request` or `never`; the same prompt on a `read-only` thread raised an `item/fileChange/requestApproval` under `on-request` and none under `never`.
+What the OW-18 run showed (`docs/MANUAL_TESTING.md`): a live edit-provoking prompt on a `danger-full-access` thread raised no approval `ServerRequest` under either `on-request` or `never`, and the same prompt on a `read-only` thread raised one `item/fileChange/requestApproval` under `on-request` and none under `never`.
+So `approvalPolicy: "never"` demonstrably suppresses that request where one would otherwise arise, and on a `danger-full-access` thread none arises to suppress — the sandbox grants the write and `on-request` has nothing to ask about.
+Those are different facts, and only the `read-only` pair is a suppression result.
+`item/fileChange/requestApproval` is the only approval kind any cell provoked; the command-execution and permissions approvals were not measured.
 Note the older framing here — that sbox's injected `--sandbox danger-full-access` governs this — was wrong: that CLI flag is a no-op for `app-server` (OW-37), and the effective levers are the per-thread sandbox and approval policies, both of which the adapter now sets (D7a).
 `requestUserInput` and MCP elicitation are separate from the approvals and have not been shown to be suppressed by either lever; the attempts to provoke a `requestUserInput` are recorded with the OW-18 run and did not fire, so they still need a path to the human.
 
@@ -231,11 +233,13 @@ Not `~/.codex/config.toml`: the `-c approval_policy=never` route `app-server` do
 
 Both policies go on **all three** thread-creation paths — `thread/start`, `thread/resume`, and `thread/fork`.
 `thread/fork` is not symmetry for its own sake.
-The OW-18 run found that a fork inherits the parent's `approvalPolicy` but **not** its `sandbox`: forking a `dangerFullAccess` parent with only `threadId` and `cwd` returned a thread reporting `workspaceWrite`, app-server's own default.
+The OW-18 run found that a fork inherits the parent's `approvalPolicy` but **not** its `sandbox`: forking a `dangerFullAccess` parent with only `threadId` and `cwd` returned a thread reporting `workspaceWrite`.
+The copied `~/.codex/config.toml` sets no sandbox key, so that value is app-server's own default rather than the operator's configuration; the probe records the config's key names for exactly that reason.
 Passing both explicitly repairs that downgrade.
 
-What the policy buys today is insurance rather than a behaviour change: under the `danger-full-access` sandbox agentpane already uses, the exec/patch approvals do not arrive under either policy, so `never` bites only if that sandbox setting ever narrows.
-The suppression is a refusal, not a grant — a `read-only` thread under `never` completed the turn with the edit silently undone.
+What the policy buys today is insurance rather than a behaviour change: under the `danger-full-access` sandbox agentpane already uses, no approval arrived under either policy, so `never` was not shown to be doing work today and bites only if that sandbox setting ever narrows.
+Where it did bite — a `read-only` thread — the suppression is not a silent grant: that cell ended with `notes.txt` unchanged and no `fileChange` item completed, while the assistant's text claimed the edit was made.
+The run did not establish whether the tool call was refused or never issued, and did not read the turn's final `status`.
 
 ### D8. Loopback only
 
@@ -622,6 +626,7 @@ Correlate by `itemId`.
 This state machine is the thing D3 keeps server-side.
 
 Fork: Codex `thread/fork` exposes the same `listForkPoints`/`fork` contract by reading thread items for the fork points; deprecated `thread/rollback` is not an in-place rewind path.
+The fork call carries `sandbox` and `approvalPolicy` explicitly, because a fork inherits the latter from its parent and not the former (D7a).
 
 ## Spawning through sbox
 
@@ -632,7 +637,8 @@ Per D7 the server builds the command itself:
 - Codex: `direnv exec <workspace> sbox -- codex app-server` — sbox's `codex` profile mounts `~/.codex` rw (so the sqlite state runtime works) and injects `--sandbox danger-full-access`.
   That injection is keyed on the command name, so it applies to `codex` and not to the surrounding wrapper — but it is a **no-op for `app-server`**, which ignores the CLI flag and defaults each thread to `read-only`.
   The sandbox policy that actually takes effect is set per `thread/start` by the adapter (OW-37); `danger-full-access` there, since sbox's bwrap jail is already the confinement boundary.
-  The adapter sets `approvalPolicy: "never"` in the same breath and on the same three thread-creation calls, for the reasons in D7a — and because a fork inherits neither the flag nor, in the sandbox's case, the parent's value.
+  "Per `thread/start`" is shorthand for all three thread-creation calls — `thread/start`, `thread/resume` and `thread/fork` — each of which carries both the sandbox and `approvalPolicy: "never"`, for the reasons in D7a.
+  `thread/fork` needs `sandbox` spelled out because a fork inherits the parent's `approvalPolicy` but **not** its sandbox, falling back to `workspaceWrite` (OW-18).
 - Claude Code: `direnv exec <workspace> sbox -- claude -p --verbose --input-format stream-json --output-format stream-json --include-partial-messages` — sbox's `claude` profile mounts `~/.claude` and injects `--permission-mode bypassPermissions`.
 - **The server must spawn each subprocess with `cwd` = that session's workspace**, or sbox jails the wrong tree (or refuses if there is no git root), and `direnv` loads the wrong environment.
 

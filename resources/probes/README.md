@@ -161,15 +161,21 @@ python3 approval_policy_probe.py            # all cells, JSON record on stdout
 python3 approval_policy_probe.py --timeout 150
 ```
 
-The `read-only` pair is the control that makes the `never` cells mean something:
-without it, "no approval arrived" cannot be told apart from "the prompt never
-provoked one". Unlike `fork_probe.py`, this harness **records every
-server-initiated request before answering it** -- answering in the reader thread
-first, as that one does, would report the arrivals as absences.
+The `read-only` pair is the control that makes the read-only `never` cell mean
+something: without it, "no approval arrived" cannot be told apart from "the
+prompt never provoked one". It licenses nothing about the `danger-full-access`
+pair, where no approval arose either way.
 
-Writes no fixtures. Temporary writable `CODEX_HOME` with `auth.json`/`config.toml`
-copied in by name and never printed, temporary git workspace per cell, both
-removed on exit. Threads are ephemeral except the fork parents, which have to
+Each server-initiated request is recorded **with its method and params**, before
+being answered, in a list of its own -- so a cell reports which requests arrived,
+not merely that some did. `fork_probe.py` also logs each one before answering,
+but it answers every server request uniformly and keeps no separate record.
+
+Writes no fixtures. One temporary writable `CODEX_HOME` for the whole run, with
+`auth.json`/`config.toml` copied in by name and never printed -- only the
+config's key and table *names* reach the record, so a reader can tell
+app-server's defaults from the operator's config. A temporary git workspace per
+cell. Both removed on exit. Threads are ephemeral except the fork parents, which have to
 materialise on disk for `thread/fork` to load them. Costs tokens: every cell
 drives a real model turn.
 

@@ -120,9 +120,14 @@ non-obvious step per backend:
 **Codex really does send approval requests.** `tool-edit` contains a live
 `item/fileChange/requestApproval` server request, answered by the harness,
 followed by `serverRequest/resolved`. DESIGN D2a is therefore not theoretical.
-What remains unverified is whether sbox's injected `--sandbox
-danger-full-access` suppresses them — these captures do **not** run through
-sbox (see the harness docstring for why).
+The sbox framing that stood here — that its injected `--sandbox
+danger-full-access` might suppress them — was wrong twice over: that CLI flag
+is a no-op for `app-server` (OW-37), and the live OW-18 run has since settled
+the substantive question. A `read-only` thread raised this same request under
+`on-request` and none under `approvalPolicy: "never"`, while a
+`danger-full-access` thread raised none either way. See
+`docs/MANUAL_TESTING.md`, "Observed Codex approval policy, and what a fork
+carries (OW-18)".
 
 **Codex emits more than DESIGN's mapping table lists.** Beyond `item/*` and
 `turn/started|completed`, the captures contain `turn/diff/updated` (a

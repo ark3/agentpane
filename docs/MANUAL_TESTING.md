@@ -1279,26 +1279,41 @@ A typed navigation omitted `Origin` and carried `Sec-Fetch-Site: none`.
 
 **2026-09-11, home server, `codex-cli 0.154.0`, `resources/probes/approval_policy_probe.py`.**
 
-Eight cells, each a fresh `codex app-server` over stdio with a temporary writable `CODEX_HOME` and a throwaway git workspace holding a one-line `notes.txt`.
-The probe records every server-initiated request *before* it answers it, which is the whole measurement here; `fork_probe.py`'s session answers in its reader thread and would have reported the arrivals as absences.
-Four of them drove the same prompt: edit `notes.txt` so its only line reads `beta`.
+Eight cells over stdio, each a fresh `codex app-server` in its own throwaway git workspace holding a one-line `notes.txt`, all sharing one temporary writable `CODEX_HOME`.
+The probe records each server-initiated request's method and params before answering it, so a cell reports *which* requests arrived rather than only that some did.
+Four cells drove the same prompt: edit `notes.txt` so its only line reads `beta`.
+
+The model was whatever the copied `~/.codex/config.toml` selected; re-running the fork cell against the same config read it back off the `thread/start` response as `gpt-5.6-luna`, and the probe now records `reported_model` so a future run carries its own answer.
+That config's key and table names are `model`, `model_reasoning_effort`, a `[projects."…"]` trust entry for a path none of these temp workspaces match, a `[notice.model_migrations]` block, and two `[plugins."…"]` toggles.
+It sets no `approval_policy` and no sandbox key, which is what licenses calling the values below app-server's own defaults rather than this operator's configuration.
 
 **Under `sandbox: "danger-full-access"`, no approval request arrived either way.**
-The cell with no `approvalPolicy` reported `approvalPolicy: "on-request"` on the `thread/start` response and `sandbox: {"type":"dangerFullAccess"}`; the turn completed, `notes.txt` read `beta`, and the wire carried no `ServerRequest` at all.
-The cell with `approvalPolicy: "never"` reported `"never"`, completed, wrote `beta`, and likewise carried none.
+The cell with no `approvalPolicy` reported `approvalPolicy: "on-request"` on the `thread/start` response and `sandbox: {"type":"dangerFullAccess"}`; `notes.txt` read `beta` afterwards, and the wire carried no `ServerRequest` at all.
+The cell with `approvalPolicy: "never"` reported `"never"`, also ended with `beta`, and likewise carried none.
 So under agentpane's own sandbox setting the two policies are indistinguishable on this prompt: the sandbox already grants the write, and `on-request` has nothing to ask about.
+That is an absence of occasion, not a demonstration that either lever suppresses anything.
 
 **Under `sandbox: "read-only"`, the policies separate.**
-With no `approvalPolicy` the thread reported `"on-request"` and the wire carried one `item/fileChange/requestApproval`, with `threadId`, `turnId`, `itemId`, `startedAtMs`, and null `reason` and `grantRoot`; the probe accepted it and `notes.txt` read `beta`.
-With `approvalPolicy: "never"` the thread reported `"never"`, no `ServerRequest` reached the wire, the turn still completed, and `notes.txt` still read `alpha`.
-That is the control the "never" cells needed: the same prompt provokes an approval without the policy and none with it, so `"never"` suppresses the request rather than the prompt failing to provoke one.
-It also shows the shape of the suppression — the action is refused, not granted, and the turn completes with the write undone while the assistant's text says it made the change.
+With no `approvalPolicy` the thread reported `"on-request"` and the wire carried one `item/fileChange/requestApproval` — params `threadId`, `turnId`, `itemId`, `startedAtMs`, and null `reason` and `grantRoot`.
+The probe accepted it and `notes.txt` read `beta`.
+With `approvalPolicy: "never"` the thread reported `"never"`, no `ServerRequest` reached the wire, and `notes.txt` still read `alpha`.
+That is the control the read-only `never` cell needed: the same prompt provokes an approval without the policy and none with it, so there `"never"` suppresses the request rather than the prompt failing to provoke one.
+It licenses nothing about the `danger-full-access` pair, where no approval arose to be suppressed.
+
+`item/fileChange/requestApproval` is the only approval kind any cell provoked.
+Nothing here was measured about `item/commandExecution/requestApproval` or the other approval methods.
+
+What the `read-only` cells show about the effect on the work itself is narrower than "the edit was refused".
+In the `never` cell a `commandExecution` item completed, no `fileChange` item did, `notes.txt` was unchanged, and the assistant's text said "I'll update `notes.txt` so it contains exactly the requested line."
+The probe reads final file bytes, completed item types, and the absence of a request; it cannot distinguish the sandbox refusing a tool call from the model never issuing one, and it saw no rollback.
+Both `read-only` cells reached `turn/completed`, but that notification's `turn.status` was not read on this run — the probe reported the method's arrival and called it completion.
+The probe now reads `turn.status`; a re-run of the fork cell reported `"completed"`, and the four approval cells have no such value on record.
 
 **A fork inherits `approvalPolicy` but not `sandbox`.**
 A non-ephemeral parent started as the adapter starts one (`sandbox: "danger-full-access"`, no `approvalPolicy`) reported `dangerFullAccess` and `on-request`.
-`thread/fork` against it with only `threadId` and `cwd` returned a different thread id, `approvalPolicy: "on-request"`, and `sandbox: {"type":"workspaceWrite","writableRoots":[],"networkAccess":false,...}`.
+`thread/fork` against it with only `threadId` and `cwd` returned a different thread id, `approvalPolicy: "on-request"`, and `sandbox: {"type":"workspaceWrite","writableRoots":[],"networkAccess":false,…}`.
 Repeating the fork from a parent started with `approvalPolicy: "never"` returned `"never"` on the fork response, so the approval policy is genuinely inherited and the `on-request` in the first fork was the parent's, not a fallback.
-The sandbox has no such inheritance: both parents reported `dangerFullAccess` and both bare forks came back `workspaceWrite`, which is app-server's own default and a silent downgrade from what the parent thread was running under.
+The sandbox has no such inheritance: both parents reported `dangerFullAccess` and both bare forks came back `workspaceWrite`, a silent downgrade from what the parent thread was running under.
 A fork issued with `sandbox: "danger-full-access"` and `approvalPolicy: "never"` passed explicitly reported exactly those.
 
 **`item/tool/requestUserInput` was not provoked, on either of two attempts.**
@@ -1310,8 +1325,9 @@ So the question is unsettled rather than answered: the tool is gated by somethin
 Nothing here is evidence that `"never"` suppresses it, and nothing here is evidence that it does not.
 
 What this means for agentpane.
-Setting `approvalPolicy: "never"` is a real suppression, proven against a control, not a no-op — but under the sandbox agentpane already uses it is currently redundant on the exec/patch path, and its value is that it stays correct if the sandbox setting ever narrows.
-The fork finding is the one that changes code today: carrying `sandbox` on `thread/fork` is not symmetry for its own sake, it repairs a downgrade to `workspaceWrite` that a fork was silently taking.
+Setting `approvalPolicy: "never"` was shown to suppress a `fileChange` approval on a `read-only` thread, against a control.
+Under the `danger-full-access` sandbox agentpane actually uses, no approval arose in either policy, so on this prompt the policy changed nothing observable — its value is that it stays correct if that sandbox setting ever narrows, and it was not shown to be doing work today.
+The fork finding is the one that changes code: carrying `sandbox` on `thread/fork` is not symmetry for its own sake, it repairs a downgrade to `workspaceWrite` that a fork was silently taking.
 See D7a.
 
 ## Still unverified

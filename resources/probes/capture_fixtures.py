@@ -37,8 +37,10 @@ Two things this script has to work around, both learned the hard way:
 
 2. **Blocking dialogs would hang the capture.** Pi can emit
    `extension_ui_request` and Codex can emit a `ServerRequest`; both wait for
-   an answer. We answer them and record that they happened -- whether Codex's
-   approval requests fire at all is an open question in DESIGN D2a.
+   an answer. We answer them and record that they happened. Codex's approval
+   requests do fire: `tool-edit` caught one, and the OW-18 run has since fixed
+   when -- on a `read-only` thread under `on-request`, and not under
+   `approvalPolicy: "never"` nor on a `danger-full-access` thread.
 
 We deliberately do *not* spawn through sbox here. sbox cannot fix (1) in a
 nested sandbox, and the protocol is sbox-transparent over stdio (HANDOFF fact
