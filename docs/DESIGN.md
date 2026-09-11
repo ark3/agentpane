@@ -112,11 +112,10 @@ What genuinely needs a human goes to the browser over SSE with its id and comes 
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
 An unanswered one hangs the turn.
 
-Still unverified (OW-18): whether a `danger-full-access` thread (OW-37) suppresses the exec/patch approvals specifically.
-Note the older framing here — that sbox's injected `--sandbox danger-full-access` governs this — was wrong: that CLI flag is a no-op for `app-server` (OW-37), and the effective lever is the per-`thread/start` sandbox policy.
-The fixtures were captured *without* sbox, so they cannot answer it, and neither do the live smoke runs — the Codex one prompts "do not use tools" deliberately, to keep its transcript assertions deterministic.
-(Pi, separately, ran a shell tool through sbox with no dialog at all; that is a different backend and a copied `trust.json`, so it says nothing about this.)
-Even if it does, `requestUserInput` and MCP elicitation are separate and still need a path to the human.
+A `danger-full-access` thread does suppress the exec/patch approvals, and so, independently, does `approvalPolicy: "never"` (OW-18, `docs/MANUAL_TESTING.md`).
+A live edit-provoking prompt on a `danger-full-access` thread raised no approval `ServerRequest` under either `on-request` or `never`; the same prompt on a `read-only` thread raised an `item/fileChange/requestApproval` under `on-request` and none under `never`.
+Note the older framing here — that sbox's injected `--sandbox danger-full-access` governs this — was wrong: that CLI flag is a no-op for `app-server` (OW-37), and the effective levers are the per-thread sandbox and approval policies, both of which the adapter now sets (D7a).
+`requestUserInput` and MCP elicitation are separate from the approvals and have not been shown to be suppressed by either lever; the attempts to provoke a `requestUserInput` are recorded with the OW-18 run and did not fire, so they still need a path to the human.
 
 ### D3. State protocol: server-authoritative snapshot + tail upsert
 
@@ -219,6 +218,24 @@ Pi hands it to us for free, which makes the Pi adapter nearly an identity mappin
 The server spawns `direnv exec <workspace> sbox -- <agent> ...` directly.
 One seam, no PATH dependency, testable.
 `~/.local/bin/sandboxed-pi` exists for pipane specifically and is not used here.
+
+### D7a. Codex approval policy: `never`, set by the adapter
+
+agentpane sets `approvalPolicy: "never"` on every Codex thread it creates, rather than inheriting Codex's `on-request` default.
+The intent is to avoid permission prompts, not to route them into agentpane's UI: agentpane has no approval dialog, so an approval `ServerRequest` renders as a single `Unsupported agent request pending.` warning and the turn then hangs until the session is killed.
+The real trade is "no dialog" against "a hung turn", and the hung turn is worse.
+
+The site is `CodexAdapterOptions.approvalPolicy` in `src/server/adapters/codex/adapter.ts`, beside `sandbox`, applied at thread creation exactly the way `sandbox` is.
+Not sbox: sbox injects its flags before the subcommand (`codex --sandbox danger-full-access app-server`), and a CLI approval flag there would be the same no-op the sandbox flag already is for `app-server` (OW-37).
+Not `~/.codex/config.toml`: the `-c approval_policy=never` route `app-server` does accept would put a hidden global outside the repo, contradicting an adapter option that sets the sibling policy and invisible to `bun run check`.
+
+Both policies go on **all three** thread-creation paths — `thread/start`, `thread/resume`, and `thread/fork`.
+`thread/fork` is not symmetry for its own sake.
+The OW-18 run found that a fork inherits the parent's `approvalPolicy` but **not** its `sandbox`: forking a `dangerFullAccess` parent with only `threadId` and `cwd` returned a thread reporting `workspaceWrite`, app-server's own default.
+Passing both explicitly repairs that downgrade.
+
+What the policy buys today is insurance rather than a behaviour change: under the `danger-full-access` sandbox agentpane already uses, the exec/patch approvals do not arrive under either policy, so `never` bites only if that sandbox setting ever narrows.
+The suppression is a refusal, not a grant — a `read-only` thread under `never` completed the turn with the edit silently undone.
 
 ### D8. Loopback only
 
@@ -615,6 +632,7 @@ Per D7 the server builds the command itself:
 - Codex: `direnv exec <workspace> sbox -- codex app-server` — sbox's `codex` profile mounts `~/.codex` rw (so the sqlite state runtime works) and injects `--sandbox danger-full-access`.
   That injection is keyed on the command name, so it applies to `codex` and not to the surrounding wrapper — but it is a **no-op for `app-server`**, which ignores the CLI flag and defaults each thread to `read-only`.
   The sandbox policy that actually takes effect is set per `thread/start` by the adapter (OW-37); `danger-full-access` there, since sbox's bwrap jail is already the confinement boundary.
+  The adapter sets `approvalPolicy: "never"` in the same breath and on the same three thread-creation calls, for the reasons in D7a — and because a fork inherits neither the flag nor, in the sandbox's case, the parent's value.
 - Claude Code: `direnv exec <workspace> sbox -- claude -p --verbose --input-format stream-json --output-format stream-json --include-partial-messages` — sbox's `claude` profile mounts `~/.claude` and injects `--permission-mode bypassPermissions`.
 - **The server must spawn each subprocess with `cwd` = that session's workspace**, or sbox jails the wrong tree (or refuses if there is no git root), and `direnv` loads the wrong environment.
 

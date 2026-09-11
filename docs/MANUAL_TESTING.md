@@ -1275,6 +1275,45 @@ A cross-site image/no-cors GET omitted `Origin` and carried `Sec-Fetch-Site: cro
 A cross-site POST carried `Origin: http://localhost:4798`.
 A typed navigation omitted `Origin` and carried `Sec-Fetch-Site: none`.
 
+## Observed Codex approval policy, and what a fork carries (OW-18)
+
+**2026-09-11, home server, `codex-cli 0.154.0`, `resources/probes/approval_policy_probe.py`.**
+
+Six cells, each a fresh `codex app-server` over stdio with a temporary writable `CODEX_HOME` and a throwaway git workspace holding a one-line `notes.txt`.
+The probe records every server-initiated request *before* it answers it, which is the whole measurement here; `fork_probe.py`'s session answers in its reader thread and would have reported the arrivals as absences.
+Five cells drove the same prompt: edit `notes.txt` so its only line reads `beta`.
+
+**Under `sandbox: "danger-full-access"`, no approval request arrived either way.**
+The cell with no `approvalPolicy` reported `approvalPolicy: "on-request"` on the `thread/start` response and `sandbox: {"type":"dangerFullAccess"}`; the turn completed, `notes.txt` read `beta`, and the wire carried no `ServerRequest` at all.
+The cell with `approvalPolicy: "never"` reported `"never"`, completed, wrote `beta`, and likewise carried none.
+So under agentpane's own sandbox setting the two policies are indistinguishable on this prompt: the sandbox already grants the write, and `on-request` has nothing to ask about.
+
+**Under `sandbox: "read-only"`, the policies separate.**
+With no `approvalPolicy` the thread reported `"on-request"` and the wire carried one `item/fileChange/requestApproval`, with `threadId`, `turnId`, `itemId`, `startedAtMs`, and null `reason` and `grantRoot`; the probe accepted it and `notes.txt` read `beta`.
+With `approvalPolicy: "never"` the thread reported `"never"`, no `ServerRequest` reached the wire, the turn still completed, and `notes.txt` still read `alpha`.
+That is the control the "never" cells needed: the same prompt provokes an approval without the policy and none with it, so `"never"` suppresses the request rather than the prompt failing to provoke one.
+It also shows the shape of the suppression — the action is refused, not granted, and the turn completes with the write undone while the assistant's text says it made the change.
+
+**A fork inherits `approvalPolicy` but not `sandbox`.**
+A non-ephemeral parent started as the adapter starts one (`sandbox: "danger-full-access"`, no `approvalPolicy`) reported `dangerFullAccess` and `on-request`.
+`thread/fork` against it with only `threadId` and `cwd` returned a different thread id, `approvalPolicy: "on-request"`, and `sandbox: {"type":"workspaceWrite","writableRoots":[],"networkAccess":false,...}`.
+Repeating the fork from a parent started with `approvalPolicy: "never"` returned `"never"` on the fork response, so the approval policy is genuinely inherited and the `on-request` in the first fork was the parent's, not a fallback.
+The sandbox has no such inheritance: both parents reported `dangerFullAccess` and both bare forks came back `workspaceWrite`, which is app-server's own default and a silent downgrade from what the parent thread was running under.
+A fork issued with `sandbox: "danger-full-access"` and `approvalPolicy: "never"` passed explicitly reported exactly those.
+
+**`item/tool/requestUserInput` was not provoked, on either of two attempts.**
+Both ran on a `"never"`, `danger-full-access` thread.
+The first asked the model to use its tool for asking the user a question before doing anything, and to not proceed without an answer; it replied "I can't ask that question because the user-input tool is unavailable in the current mode" and stopped without editing the file.
+The second named the tool (`request_user_input` / `ask-user`), asked for a two-option question, and declared `experimentalApi: true` in `initialize`; it replied "The question tool is unavailable in the current mode" and again stopped.
+Neither turn emitted a tool call of any kind — only `userMessage`, `reasoning`, and `agentMessage` items.
+So the question is unsettled rather than answered: the tool is gated by something these runs did not find, and whether `"never"` would suppress it if it were available was never reached.
+Nothing here is evidence that `"never"` suppresses it, and nothing here is evidence that it does not.
+
+What this means for agentpane.
+Setting `approvalPolicy: "never"` is a real suppression, proven against a control, not a no-op — but under the sandbox agentpane already uses it is currently redundant on the exec/patch path, and its value is that it stays correct if the sandbox setting ever narrows.
+The fork finding is the one that changes code today: carrying `sandbox` on `thread/fork` is not symmetry for its own sake, it repairs a downgrade to `workspaceWrite` that a fork was silently taking.
+See D7a.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:
