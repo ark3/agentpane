@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, now]
 ---
 
 # The Send and fork buttons stay enabled while a send is in flight

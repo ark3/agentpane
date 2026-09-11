@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, now]
 ---
 
 # Surface Claude Code's `can_use_tool` control request as an `AgentRequest`, replacing the Claude adapter's inert `onRequest`.

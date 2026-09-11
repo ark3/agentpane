@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, now]
 ---
 
 # A fork the user clicked away from can leave a stale preview over the live transcript
