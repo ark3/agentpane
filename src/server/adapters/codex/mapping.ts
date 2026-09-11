@@ -46,11 +46,18 @@ import type {
  * shape, so one renderer serves both backends. `fileChange` uses the render
  * registry's `edit` contract; `fileChangeArguments` translates Codex's unified
  * diffs into that renderer's nested `edits[]` shape.
+ *
+ * All five collab tools (`spawnAgent`, `sendInput`, `resumeAgent`, `wait`,
+ * `closeAgent`) share the single name `subagent` rather than getting one
+ * registry key each: the card is the same in every case -- which operation,
+ * which child thread, what the child said -- and the operation rides in
+ * `arguments.tool`, where the renderer reads it.
  */
 export const CODEX_TOOL_NAMES = {
 	commandExecution: "bash",
 	fileChange: "edit",
 	webSearch: "web_search",
+	collabAgentToolCall: "subagent",
 } as const;
 
 /** What a Codex `ThreadItem` becomes. Tool-ish items become a *pair*, like Pi's. */
@@ -285,12 +292,12 @@ const SILENT_ITEM_TYPES = new Set<string>([
 	"hookPrompt",
 	"enteredReviewMode",
 	"exitedReviewMode",
-	"subAgentActivity",
 	"sleep",
-	// A live collab session now drives this shape in subagent.jsonl. Rendering
-	// the parent-visible lifecycle honestly is separate work (OW-benige);
-	// listing it here keeps "unknown" meaning *Codex moved* until then.
-	"collabAgentToolCall",
+	// `subAgentActivity` is the rollout's on-disk form of the collab lifecycle
+	// the parent sees as `collabAgentToolCall`. It never arrived over the wire
+	// in subagent.jsonl (`codex-cli 0.153.4`), so rendering it would only ever
+	// double the block that item already draws.
+	"subAgentActivity",
 ]);
 
 /**
@@ -471,6 +478,46 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 					ctx.completed ? "stop" : "pending",
 				),
 			};
+		}
+
+		case "collabAgentToolCall": {
+			// The parent thread's whole view of a subagent (OW-benige). The
+			// child's own items never reach this transcript -- OW-fafeja took
+			// them out, and a nested transcript would bury the parent for the
+			// many minutes a subagent can run -- so this block is what the
+			// reader gets: the operation, the child thread it names, and, for
+			// `wait`, what the child answered.
+			const children = item.receiverThreadIds;
+			const replies = children
+				.map((threadId) => item.agentsStates[threadId]?.message)
+				.filter((message): message is string => Boolean(message));
+			return toolPair(
+				ctx,
+				{
+					type: "toolCall",
+					id: item.id,
+					name: CODEX_TOOL_NAMES.collabAgentToolCall,
+					arguments: {
+						tool: item.tool,
+						// Empty on a spawn's `item/started`; the completion fills
+						// it in, and the reducer re-maps the stored item.
+						threadIds: children,
+						...(item.prompt === null ? {} : { prompt: item.prompt }),
+						...(item.model ? { model: item.model } : {}),
+					},
+				},
+				{
+					content: textBlocks(replies.join("\n\n")),
+					isError: item.status === "failed",
+					details: {
+						tool: item.tool,
+						status: item.status,
+						senderThreadId: item.senderThreadId,
+						receiverThreadIds: children,
+						agentsStates: item.agentsStates,
+					},
+				},
+			);
 		}
 
 		case "contextCompaction": {

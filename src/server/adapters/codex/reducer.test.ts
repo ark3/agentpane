@@ -75,12 +75,62 @@ describe("replaying the subagent fixture", () => {
 
 		expect(injectedChildStart).toBe(true);
 		expect(reducer.threadId).toBe(parentThreadId);
+		// Every parent item that renders, and nothing from the child: the
+		// collab items are the parent's own view of the subagent (OW-benige),
+		// so they belong here; the child's userMessage and agentMessage do not.
 		const parentMessageRoles = byMethod(lines, "item/completed")
 			.filter((line) => line.params.threadId === parentThreadId)
 			.map(itemOf)
-			.filter((item) => item.type === "userMessage" || item.type === "agentMessage")
-			.map((item) => item.type === "userMessage" ? "user" : "assistant");
+			.flatMap((item): AgentMessage["role"][] => {
+				if (item.type === "userMessage") return ["user"];
+				if (item.type === "agentMessage") return ["assistant"];
+				if (item.type === "collabAgentToolCall") return ["assistant", "toolResult"];
+				return [];
+			});
 		expect(reducer.getState().messages.map((message) => message.role)).toEqual(parentMessageRoles);
+	});
+
+	it("renders each collab item as a tool pair naming the child thread", () => {
+		const lines = readFixture("subagent");
+		const parentThreadId = readFixtureMeta("subagent").thread_id;
+		const collabItems = byMethod(lines, "item/completed")
+			.filter((line) => line.params.threadId === parentThreadId)
+			.map(itemOf)
+			.filter((item) => item.type === "collabAgentToolCall");
+		// The capture exercises spawnAgent then wait, in that order.
+		expect(collabItems.map((item) => item.tool)).toEqual(["spawnAgent", "wait"]);
+
+		const { messages } = replay("subagent");
+		const calls = messages
+			.filter(isAssistant)
+			.flatMap((message) => message.content)
+			.filter((block) => block.type === "toolCall")
+			.filter((block) => block.name === CODEX_TOOL_NAMES.collabAgentToolCall);
+		expect(calls.map((call) => call.id)).toEqual(collabItems.map((item) => item.id));
+		expect(calls.map((call) => call.arguments["tool"])).toEqual(collabItems.map((item) => item.tool));
+
+		const spawn = collabItems[0];
+		const wait = collabItems[1];
+		if (!spawn || !wait) throw new Error("subagent fixture lost its collab items");
+		const childThreadId = spawn.receiverThreadIds[0];
+		if (!childThreadId) throw new Error("spawn completion carries no child thread id");
+		expect(calls[0]?.arguments["prompt"]).toBe(spawn.prompt);
+		expect(calls[0]?.arguments["threadIds"]).toEqual([childThreadId]);
+		expect(calls[1]?.arguments["threadIds"]).toEqual([childThreadId]);
+
+		const results = messages.filter(
+			(message): message is ToolResultMessage =>
+				message.role === "toolResult" && message.toolName === CODEX_TOOL_NAMES.collabAgentToolCall,
+		);
+		expect(results.map((r) => r.toolCallId)).toEqual(collabItems.map((item) => item.id));
+		expect(results.every((r) => r.isError === false)).toBe(true);
+
+		// The wait completion carries the child's final message, so the parent
+		// transcript shows what the subagent answered without reading the child
+		// thread at all.
+		const childMessage = wait.agentsStates[childThreadId]?.message;
+		expect(childMessage).toBeTruthy();
+		expect(results[1]?.content).toEqual([{ type: "text", text: childMessage }]);
 	});
 });
 
@@ -762,28 +812,7 @@ describe("defensive handling", () => {
 		expect(r.unmappedItemTypes.has("quantumEntanglement")).toBe(true);
 	});
 
-	it("classifies collabAgentToolCall as unrendered rather than unknown", () => {
-		// "unknown" is the signal for a variant Codex added after this code was
-		// written. `collabAgentToolCall` is in the bindings the repo vendors, so
-		// spending that string on it makes the one useful signal a lie. Rendering
-		// the now-captured item is separate work; the reducer drops `reason`, so
-		// this asks `mapItem` directly and the case below pins that it reduces to
-		// nothing in the meantime.
-		const item = { type: "collabAgentToolCall", id: "c1" } as unknown as ThreadItem;
-		expect(
-			mapItem(item, {
-				timestamp: 1,
-				api: "example-api",
-				provider: "example-provider",
-				model: "example-model",
-				effort: null,
-				completed: true,
-			}),
-		).toEqual({ kind: "none", reason: "unrendered item type: collabAgentToolCall" });
-	});
-
 	it.each([
-		"collabAgentToolCall",
 		"subAgentActivity",
 		"hookPrompt",
 		"enteredReviewMode",
