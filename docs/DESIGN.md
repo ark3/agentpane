@@ -573,6 +573,27 @@ Nothing else is re-verified on a bump by policy, which is the part that keeps th
 Rejected: pinning backend versions, which converts drift into a different debt the project has already said it will not pay; and failing `bun run check` when the installed CLI moves, which turns every upgrade into a red build over facts that mostly do not matter.
 
 
+### D19. A Codex subagent shows in the parent as one collapsed tool card per collab operation, and its rollout stays in the session picker
+
+A spawned Codex agent is a thread of its own, sharing the parent's app-server connection (HANDOFF finding 49).
+OW-fafeja stopped the child's items from leaking into the parent transcript, which left the parent showing nothing at all for a subagent: its turn appeared to pause for minutes inside a `wait` with no trace of why.
+
+What the parent actually receives is `collabAgentToolCall`, one item per `spawnAgent` / `sendInput` / `resumeAgent` / `wait` / `closeAgent`, each arriving `item/started` then `item/completed` (`resources/fixtures/codex/subagent.jsonl`, captured on `codex-cli 0.153.4`, which exercised spawn and wait).
+Each becomes the tool-call pair the renderer already knows, under the single name `subagent`, with the operation in `arguments.tool` and the child thread id in `arguments.threadIds`.
+The `wait` completion carries the child's final message in `agentsStates[childId].message`, so the block shows what the subagent answered without reading the child thread at all.
+The parent therefore reads "spawned agent", then "waited", in sequence, collapsed by default like any other tool card.
+
+The child's conversation is **not** inlined as a nested block.
+A subagent can run many minutes and many tool calls while the parent is blocked in `wait`, so a nested view would dominate the parent transcript for exactly the confusing effect OW-fafeja removed.
+Claude Code's adapter already keeps subagent transcripts out of the parent (`src/server/sessions/claude.ts`), and this keeps the two backends consistent.
+
+Instead the card names the child thread and offers to open it, through the same `controller.preview` path a click in the session list takes.
+
+**Subagent rollouts stay in the session picker, and ease decided it.**
+On the home server on 2026-09-11, 45 of 72 September Codex rollouts carried `thread_source: "subagent"` in their `session_meta`, so hiding them would visibly quieten the list -- but the owner stated no preference either way, and listing them is what the code already does.
+Filtering is not free: `listSessions` would have to drop them while `getSession` and the preview route kept resolving them, since the card's link is a request for exactly one of the threads the list would be hiding.
+That asymmetry is more machinery than the noise is worth at an undecided question, so the block is a shortcut to a door that already exists rather than the only way in.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.
@@ -636,6 +657,7 @@ Target types (`resources/codex-protocol/` for Codex; `pi-ai/dist/types.d.ts` for
 | `mcpToolCall`, `dynamicToolCall`, `webSearch` | `toolCall` + `toolResult` | arbitrary names — these are why D5 needs a fallback card |
 | `plan` | assistant text or a custom block | optional polish |
 | `contextCompaction` | compaction summary message | Pi has a compaction message type; mirror it |
+| `collabAgentToolCall` | `toolCall` + `toolResult`, named `subagent` | one card per collab operation, naming the child thread (D19) |
 
 **This table is a sketch, not a registry.**
 The registry is `src/server/adapters/codex/mapping.ts` — `mapItem`'s switch and the `SILENT_ITEM_TYPES` set above it, each arm carrying its own reasoning.

@@ -6,6 +6,13 @@
  * on this machine use an older bare `{id,timestamp}` header with no `cwd`.
  * Both are handled; anything else is bucketed unknown rather than thrown.
  *
+ * Subagent rollouts are listed like any other session (D19): a spawned thread
+ * writes its own rollout, carrying `thread_source: "subagent"` and a
+ * `forked_from_id` naming its parent, and nothing here filters on either. The
+ * parent's transcript links to the child by id, and that link resolves through
+ * `getSession` and the preview route -- which is the half a listing filter
+ * would have had to keep working anyway.
+ *
  * Preview: see SYNTHETIC_USER_PREFIXES below -- this is the one place this
  * module goes beyond what DESIGN/HANDOFF describe, because "first user
  * message" turned out not to mean what it sounds like for Codex. Flagged in
