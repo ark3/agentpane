@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # A fork the user clicked away from can leave a stale preview over the live transcript
@@ -29,3 +30,19 @@ And whatever the fix does to `recover`'s path is stated where the gating is, so 
 `applyAttached` is the only site.
 Read its comment first: it names both `false` callers and why neither owns the error slot or the preview.
 The question this card asks is narrower than that comment — not whether a declined-selection caller owns the preview, but what happens when the selection is *not* declined because the residual fired.
+
+## Close note
+
+Fixed in 935dcf2 on `main`.
+
+`applyAttached`'s residual selection — which fires with `select: false` when `sessionKey(view.state.selected) === sessionKey(requested)` — now carries `preview: null` with it.
+The gating is split: `error: null` stays on `select`, so OW-yasewo's silent `recover` keeps its hands off the error slot; `preview: null` is gated on the residual condition, named `takesSelection`.
+
+What the wider preview gate does to `recover` is stated in the comment at the gating: nothing.
+A session `recover` re-attaches is one this client already had attached, and an attached selection has no preview to clear (the `ControllerView.preview` invariant, "Null once the session is attached"), so the residual publishes a null that is already null.
+That argument rests on the documented invariant rather than on a test; if the invariant ever loosens, the new gate would start clearing previews on a background recovery.
+
+Verified: the new test in `src/client/controller.test.ts`, "clears the preview when the click it declined to overtake landed on the fork itself (OW-tatebi)", holds the fork's `api.attach` on a deferred, calls `controller.preview(forkedRef)` in that window, asserts the preview is non-null, then resolves the attach.
+Run against the pre-fix `controller.ts` it was the only failure in the file (1 failed, 68 passed) at the `expect(preview).toBeNull()` line, with the stale preview object as the received value; the selection assertion passed even then, confirming the residual was firing and only the preview was left behind.
+`bun run check` passes clean with the fix: 49 files, 1022 tests.
+Not reproduced against a running backend, and no browser surface is touched, so `test:browser` was not run.
