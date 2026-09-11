@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionRef } from "$shared/protocol.ts";
 import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import ToolCallBlock from "../ToolCallBlock.svelte";
+import { CODEX_TOOL_NAMES } from "$server/adapters/codex/mapping.ts";
 import { resolveToolRenderer, defaultToolRenderer } from "./registry.ts";
 import SubagentTool from "./SubagentTool.svelte";
 
@@ -39,9 +40,15 @@ function result(text: string): ToolResultMessage {
 }
 
 describe("the subagent card", () => {
-	it("is the registered renderer for the collab tool name", () => {
-		expect(resolveToolRenderer("subagent")).toBe(SubagentTool);
-		expect(resolveToolRenderer("subagent")).not.toBe(defaultToolRenderer);
+	it("is the registered renderer for the name the mapping actually emits", () => {
+		// The registry key and `CODEX_TOOL_NAMES` are one seam described in two
+		// files (the constant's own docblock says so), and nothing but this
+		// assertion holds them together: rename the constant alone and every
+		// subagent card silently falls back to `DefaultTool`. Reaching across
+		// into `$server` is a test-only import -- no client module does it, so
+		// nothing follows it into the bundle.
+		expect(resolveToolRenderer(CODEX_TOOL_NAMES.collabAgentToolCall)).toBe(SubagentTool);
+		expect(resolveToolRenderer(CODEX_TOOL_NAMES.collabAgentToolCall)).not.toBe(defaultToolRenderer);
 	});
 
 	it("names the operation and the child thread, and shows the child's reply", () => {
@@ -75,7 +82,9 @@ describe("the subagent card", () => {
 	});
 
 	it("offers no control when the shell passed no way to open one", () => {
-		// A read-only preview passes no handler, the way it passes no `onedit`.
+		// `ToolRenderProps` is shared by every renderer and most tools name no
+		// session, so the handler is optional and this card has to read as fine
+		// without it.
 		const { container } = render(ToolCallBlock, { props: { call: call("wait") } });
 		expect(container.querySelector("button.open-thread")).toBeNull();
 	});

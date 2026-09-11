@@ -487,6 +487,15 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			// many minutes a subagent can run -- so this block is what the
 			// reader gets: the operation, the child thread it names, and, for
 			// `wait`, what the child answered.
+			// Observed on `codex-cli 0.153.4` for `spawnAgent` and `wait` only
+			// (resources/fixtures/codex/subagent.jsonl); the other three
+			// operations take this arm untested. `agentsStates` is the protocol's
+			// "last known status of the target agents", NOT this call's output --
+			// so for a `sendInput` or `closeAgent` against a child that already
+			// replied, the result below is that earlier reply, and the next
+			// `wait` will show the same text again. Left as-is deliberately:
+			// nothing has been measured that would tell a better rule from a
+			// guess.
 			const children = item.receiverThreadIds;
 			const replies = children
 				.map((threadId) => item.agentsStates[threadId]?.message)
@@ -503,7 +512,6 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 						// it in, and the reducer re-maps the stored item.
 						threadIds: children,
 						...(item.prompt === null ? {} : { prompt: item.prompt }),
-						...(item.model ? { model: item.model } : {}),
 					},
 				},
 				{

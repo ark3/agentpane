@@ -226,10 +226,12 @@ button { padding: var(--ap-space-2) var(--ap-space-3); cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--ap-accent-soft); }
 
-/* The transcript's per-block copy/expand chrome (OW-63). Global rather than
-   component-scoped because three components share exactly one look -- the copy
-   button, the expand button beside it, and the overlay's close -- and scoping
-   it would mean maintaining the same rule in each of them. */
+/* The transcript's small-control chrome (OW-63). Global rather than
+   component-scoped because four components share exactly one look -- the copy
+   button, the expand button beside it, the overlay's close, and the subagent
+   card's link into a child thread (OW-benige) -- and scoping it would mean
+   maintaining the same rule in each of them. Without it a button in the
+   transcript takes the full-size global `button` padding above. */
 .ap-action {
 	flex: none;
 	min-width: 1.5rem;

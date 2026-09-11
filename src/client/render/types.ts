@@ -49,8 +49,9 @@ export interface ToolRenderProps {
 	 * Open another session, the way clicking it in the session list does
 	 * (OW-benige). Passed down from the shell like `onedit`, and for the same
 	 * reason: the renderer knows which session, and only the shell can select
-	 * one. Absent -- a read-only preview, or any tool that names no session --
-	 * and no control is drawn.
+	 * one. Optional because this interface is shared by every renderer and most
+	 * tools name no session to open; a renderer that has one draws no control
+	 * without it.
 	 */
 	onopensession?: ((ref: SessionRef) => void) | undefined;
 }

@@ -21,8 +21,8 @@
 
 	let { call, result, streaming = false, onopensession }: ToolRenderProps = $props();
 
-	/** The collab operation. `mapping.ts` puts it here; every card is the same otherwise. */
-	const tool = $derived(argString(call.arguments, "tool") || call.name);
+	/** The collab operation. `mapping.ts` always puts it here; every card is the same otherwise. */
+	const tool = $derived(argString(call.arguments, "tool"));
 	const prompt = $derived(argString(call.arguments, "prompt"));
 	/**
 	 * The child threads this call names. Empty on a spawn's `item/started` --
@@ -52,11 +52,21 @@
 	{#if prompt}
 		<p class="prompt">{prompt}</p>
 	{/if}
-	{#each threadIds as id (id)}
+	<!-- Unkeyed: `receiverThreadIds` is a bare `Array<string>` with no
+	     uniqueness guarantee in the protocol, and a duplicate key throws in
+	     Svelte 5 -- which would take down the whole transcript, not just this
+	     card. Nothing here reorders, so a key would buy nothing anyway. -->
+	{#each threadIds as id}
 		<p class="thread">
 			<span class="thread-id" title={id}>{id}</span>
+			<!-- The handler is optional because `ToolRenderProps` is shared by
+			     every renderer and most tools name no session. No stored-session
+			     path reaches this card: `extractCodexPreviewTurns` names a stored
+			     collab call after its namespace and function name, so a read-only
+			     preview of the parent draws it on `DefaultTool` with no child
+			     link at all. -->
 			{#if onopensession}
-				<button type="button" class="open-thread" onclick={() => open(id)}>
+				<button type="button" class="ap-action open-thread" onclick={() => open(id)}>
 					Open thread
 				</button>
 			{/if}

@@ -618,6 +618,44 @@ describe("App", () => {
 		).not.toBeInTheDocument();
 	});
 
+	it("opens the child thread a subagent card names (OW-benige)", async () => {
+		// The whole `onopensession` chain in one gesture: App -> Transcript ->
+		// Message -> Block -> ToolCallBlock -> the registry's subagent card, and
+		// back out to the controller. Cutting any one hop leaves the button
+		// missing or dead, and only a render this deep notices.
+		const child = "01a086ce-039d-7720-86cb-ceb8ec8f3774";
+		const session = {
+			ref: codexSession,
+			messages: [
+				assistant(
+					[{
+						type: "toolCall" as const,
+						id: "exec-1",
+						name: "subagent",
+						arguments: { tool: "wait", threadIds: [child] },
+					}],
+					"toolUse" as const,
+				),
+				toolResult("exec-1", "subagent", "Hello! How can I help?"),
+			],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+			seq: 1,
+			error: null,
+			requests: [],
+		};
+		const controller = new FakeController(view({
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
+
+		expect(controller.previewed).toContainEqual({ backend: "codex", id: child });
+	});
+
 	it("auto-selects the most recent session in scope on startup", async () => {
 		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
 		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });

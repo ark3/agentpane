@@ -30,7 +30,9 @@
 		/**
 		 * Open another session from inside the transcript (OW-benige): Codex's
 		 * subagent card names a child thread and this is how it is reached.
-		 * Omitted and the card still names the thread, without the control.
+		 * Omitted and the card still names the thread, without the control --
+		 * which is what the read-only preview branch gets, though no stored
+		 * transcript reaches that card today (D19).
 		 */
 		onopensession?: ((ref: SessionRef) => void) | undefined;
 	} = $props();
