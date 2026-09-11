@@ -15,7 +15,20 @@ Before OW-kelede the same was true of the plain path's `view.busy === "submittin
 
 `view.sending` is published on `ControllerView` (see its docblock in `src/client/controller.ts`) and is already read by `send()`, so nothing new has to be plumbed.
 
-Whether the fork/"Stop and fork" button and Ctrl/Cmd-Enter want the same treatment is part of the decision, not settled here: the keyboard path cannot be greyed out and is guarded already, and disabling a button under the pointer mid-press has its own feel.
+## Amended and decided 2026-09-11
+
+That framing was wrong, and the decision it asked for is taken.
+
+There is no separate fork button.
+`src/client/App.svelte` has one submit button, and its text comes from `sendLabel`, derived as `editing ? (streamingAction ? "Stop and fork" : "Fork") : "Send"`.
+Send, Fork and "Stop and fork" are three labels on one control with one disabled condition, so `view.sending` goes into that condition once and covers all three modes.
+There is no asymmetry to rule on.
+
+Ctrl/Cmd-Enter needs nothing: it cannot be greyed out, and `send()` already refuses it off the same flag.
+
+The owner decided on 2026-09-11 to disable rather than decline, against the argument that a send settling within a frame or two makes the button flicker.
+A control that silently refuses a press is the worse of the two, and backing this out is deleting one term from one expression.
+So the second branch of "Done when" below is closed off: this card lands the change or it does not close.
 
 ## Done when
 
