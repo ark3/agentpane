@@ -1463,6 +1463,68 @@ describe("CodexAdapter request replies", () => {
 			result: { action: "decline", content: null, _meta: null },
 		});
 	});
+
+	it("identifies a child-thread blocking request and routes it through the parent (OW-futewo)", async () => {
+		const parentThreadId = "parent-thread";
+		const childThreadId = "child-thread";
+		const { adapter, proc } = await startedAdapter({ threadId: parentThreadId });
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
+
+		proc.emit({
+			id: "child-approval-1",
+			method: "item/commandExecution/requestApproval",
+			params: {
+				threadId: childThreadId,
+				turnId: "turn-1",
+				itemId: "item-1",
+				startedAtMs: 1000,
+				command: "echo test",
+			},
+		});
+
+		expect(requests).toHaveLength(1);
+		const request = requests[0];
+		expect(request?.issuerThreadId).toBe(childThreadId);
+		expect(request?.session.id).toBe(parentThreadId);
+		expect(request?.kind).toBe("item/commandExecution/requestApproval");
+
+		// Verify the request stays pending and replyable through the parent adapter
+		await adapter.reply(request?.requestId ?? "", { decision: "accept" });
+
+		expect(responses(proc)).toEqual([
+			{ id: "child-approval-1", result: { decision: "accept" } },
+		]);
+	});
+
+	it("does not set issuerThreadId for a same-thread blocking request (OW-futewo)", async () => {
+		const threadId = "same-thread";
+		const { adapter, proc } = await startedAdapter({ threadId });
+		const requests: AgentRequest[] = [];
+		adapter.onRequest((request) => requests.push(request));
+
+		proc.emit({
+			id: "same-approval-1",
+			method: "item/fileChange/requestApproval",
+			params: {
+				threadId,
+				turnId: "turn-1",
+				itemId: "item-1",
+			},
+		});
+
+		expect(requests).toHaveLength(1);
+		const request = requests[0];
+		expect(request?.issuerThreadId).toBeUndefined();
+		expect(request?.session.id).toBe(threadId);
+
+		// Verify it's still replyable
+		await adapter.reply(request?.requestId ?? "", { decision: "accept" });
+
+		expect(responses(proc)).toEqual([
+			{ id: "same-approval-1", result: { decision: "accept" } },
+		]);
+	});
 });
 
 describe("CodexAdapterFactory", () => {
