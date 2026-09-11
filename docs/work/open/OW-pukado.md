@@ -4,10 +4,10 @@ labels: [change]
 
 # The fixture censuses are a conformance baseline nothing compares against, so a backend version bump reports no wire changes at all
 
-D18 makes the census diff the change report for a version bump.
+D18 makes the census diff the change report for a version bump, and places it on a live run rather than on a re-capture: a fixture is a stamped snapshot that is never treated as current, and the claim that the installed CLI still produces its shape is tested by driving a real turn and diffing what arrives against the newest fixture for that scenario.
 Today the baseline exists and the comparison does not, so producing it is a manual read of two JSON blobs.
 
-`resources/fixtures/*/*.meta.json`, `resources/probes/capture_fixtures.py`, `resources/fixtures/README.md`.
+`resources/fixtures/*/*.meta.json`, `resources/probes/agentpane_codex_smoke.py`, `resources/probes/agentpane_pi_smoke.py`, `resources/probes/capture_fixtures.py`, `resources/fixtures/README.md`.
 
 ## What is already there
 
@@ -26,11 +26,12 @@ That is the output this card wants on demand rather than by luck.
 
 ## Done when
 
-Re-capturing a scenario against a different CLI version reports the census delta -- event types added, removed, and counts materially changed -- rather than silently overwriting the old meta.
-Whether that is a flag on `capture_fixtures.py`, a separate comparison entry point, or part of the capture's normal output is the implementer's call; the observable is that the delta is printed without anyone opening two files.
+A live turn on the installed CLI reports the census delta against the newest stored fixture for its scenario -- event types added, removed, and counts materially changed -- without anyone opening two files.
+The natural home is the smoke scripts, which already drive that turn on demand and are the thing a person runs after a CLI upgrade; a re-capture with `capture_fixtures.py` should print the same delta before it overwrites the old meta.
+Whether that is one shared comparison module called from both, or a separate entry point they each invoke, is the implementer's call.
 
 A test covers the comparison itself against two synthetic censuses, since the real one cannot be exercised without a live run.
 
-`resources/fixtures/README.md` says what the census is for, so the next person to bump a CLI knows the diff exists.
+`resources/fixtures/README.md` says what the census is for and that a fixture is a stamped snapshot rather than a statement about the current CLI, so the next person to bump a CLI knows the diff exists and runs it instead of re-capturing everything.
 
 Note the counts are noisy by nature -- delta events scale with reply length and the same prompt does not produce the same token stream twice. Distinguishing a type that vanished from a count that drifted is the substance of this card, not an afterthought; a comparison that reports every count change will be ignored within two bumps.

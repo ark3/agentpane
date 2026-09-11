@@ -468,7 +468,7 @@ That section retired a third observation from the same run as a tautology, and t
 The abort does not cause that loss; it makes it deliberate and visible instead of silent.
 
 Codex is the side where a choice exists, and it is a real one: the parent turn survives.
-OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, five `item/agentMessage/delta`s accumulated, no `turn/completed`.
+OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, six `item/agentMessage/delta`s accumulated against a threshold of five, no `turn/completed`.
 The fork succeeded, the parent emitted at least 300 further deltas and then `turn/completed` with `status: "completed"`, and a complete 1491-character reply landed in the parent's rollout on disk, whose hash the cell took immediately before the fork request and again after the parent settled (`docs/MANUAL_TESTING.md`, OW-gojado).
 That replaces the inference this paragraph used to carry, and the weak check behind it: `fork_probe.py`'s `parent_untouched` reads only the parent header's `forked_from_id`, which cannot tell a surviving turn from a killed one, so the new cell hashes the file and reads what it gained.
 
@@ -558,8 +558,14 @@ Two supporting practices follow, and neither is a promise to re-verify everythin
 Prose asserting backend behaviour names the version it was measured on; `AGENTS.md` carries the rule.
 Present tense without a version is the defect this decision is named after: "app-server defaults each thread to `read-only`" was measured on codex-cli 0.147.0 and still read as current after the 0.154.0 run that sat three lines below it in this file.
 
-On a version bump the fixture censuses are re-run and diffed, and that diff is the change report.
-`resources/fixtures/*/*.meta.json` already carries `cli_version`, `event_census` and `server_requests_seen` per capture, which is a conformance baseline that nothing currently compares against.
+Fixtures are the one place the first group turns into the third without anyone writing a sentence.
+A fixture under `resources/fixtures/` makes two claims: that the reducer handles the shape it holds, which a test proves and which never goes stale, and that the installed CLI still produces that shape, which no test can prove and which the suite nevertheless asserts on every green run.
+The two claims get separate vehicles.
+The fixture stays as it is, stamped with the version it was captured on and never treated as current, because its job is the first claim and re-capturing it on every bump buys nothing for that claim while costing a live run, a scrub review and a fresh nondeterministic reply.
+The second claim belongs to a live run on the installed CLI: the smoke scripts in `resources/probes/` drive a real turn through agentpane, and after that turn the event types seen are diffed against the newest fixture for the scenario and the delta printed (OW-pukado).
+`resources/fixtures/*/*.meta.json` already carries `cli_version`, `event_census` and `server_requests_seen` per capture, which is the baseline that diff runs against.
+A re-capture happens only on a signal from that delta — a type added or removed, or a live reducer failure — and replaces only the scenario that moved; count drift is noise and triggers nothing.
+One fixture per scenario, and git history holds the old shapes.
 Nothing else is re-verified on a bump by policy, which is the part that keeps the rule above from being read as an obligation to keep every document current.
 
 Rejected: pinning backend versions, which converts drift into a different debt the project has already said it will not pay; and failing `bun run check` when the installed CLI moves, which turns every upgrade into a red build over facts that mostly do not matter.

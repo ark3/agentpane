@@ -20,7 +20,8 @@ When some later Codex raises a kind agentpane does not expect, there is no red t
 ## What to build
 
 Something small and loud, not the approval UI.
-When a `ServerRequest` arrives whose kind agentpane has no handler for, answer it -- `DECLINE_RESPONSES` in `src/server/adapters/codex/protocol.ts` already holds per-kind decline shapes -- and surface an error naming the kind, so the turn fails in seconds with a message that identifies what arrived.
+When a `ServerRequest` arrives whose kind agentpane has no handler for, answer it and surface an error naming the kind, so the turn fails in seconds with a message that identifies what arrived.
+`DECLINE_RESPONSES` in `src/server/adapters/codex/protocol.ts` holds per-kind decline shapes for the kinds already known, and an unknown kind by definition has no entry there, so the answer for it is a generic JSON-RPC error response rather than a table entry to add; the table is not the mechanism this card extends.
 
 The point is that the turn stops hanging and the event announces itself.
 A backend upgrade that reopens this then files its own bug report the first time it happens, instead of surfacing months later as intermittent trouble nobody can reproduce.
