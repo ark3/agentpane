@@ -1149,6 +1149,40 @@ describe("client controller", () => {
 	});
 
 	/**
+	 * The click that lands on the fork's *own* row, rather than away from it
+	 * (OW-tatebi). The fork still declines the selection -- the user's click owns
+	 * `selectionIntent` -- but `applyAttached`'s residual moves the selection
+	 * anyway, because the selection it finds is already the fork. The live
+	 * transcript then has to take over from the read-only preview that click
+	 * opened, or the user reads a frozen copy of a session that is streaming.
+	 */
+	it("clears the preview when the click it declined to overtake landed on the fork itself (OW-tatebi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.fork.mockResolvedValue(forkedRef);
+		api.preview.mockResolvedValue({ ref: forkedRef, turns: [previewAssistant("stale")] });
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		const attachingFork = deferred<SessionSummary>();
+		api.attach.mockReturnValueOnce(attachingFork.promise);
+		const submitted = controller.forkAndSubmit(0);
+		await settle();
+		// The fork is listed by now, and the click lands on it while its own
+		// attach is still in flight.
+		await controller.preview(forkedRef);
+		expect(controller.getView().preview).not.toBeNull();
+		attachingFork.resolve(summary(forkedRef));
+
+		expect(await submitted).toEqual(forkedRef);
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+		expect(controller.getView().preview).toBeNull();
+		controller.dispose();
+	});
+
+	/**
 	 * The rule `submit` has always had, brought to the fork path (OW-kelede).
 	 * Two fast presses in edit mode -- Ctrl-Enter twice, or Enter then a click on
 	 * the fork button -- used to start two whole forks, each one an abort against

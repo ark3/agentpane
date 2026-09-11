@@ -185,18 +185,30 @@ export function createController(
 	}
 
 	function applyAttached(summary: SessionSummary, select: boolean, requested: SessionRef): void {
-		const selected = select ||
-			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested))
-			? summary.ref
-			: view.state.selected;
-		// An explicit attach replaces any read-only preview with the live
-		// transcript, and clears the error slot the gesture is answering. Both are
-		// gated on `select` because neither caller that passes `false` has any
-		// standing over them: `recover`, which no gesture reaches -- see its
-		// docblock (OW-yasewo) -- and a `forkAndSubmit` the user has clicked away
-		// from, which under D17 still lands its prompt but owns neither the error
-		// slot nor the preview of the session they went to (OW-miyemo).
-		publish({ state: { ...replaceSummary(summary, requested), selected }, ...(select ? { error: null, preview: null } : {}) });
+		const takesSelection = select ||
+			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested));
+		const selected = takesSelection ? summary.ref : view.state.selected;
+		// The error slot is gated on `select`, because neither caller that passes
+		// `false` has standing over it: `recover`, which no gesture reaches -- see
+		// its docblock (OW-yasewo) -- and a `forkAndSubmit` the user has clicked
+		// away from, which under D17 still lands its prompt but owns neither the
+		// error slot nor the preview of the session they went to (OW-miyemo).
+		//
+		// The preview is gated on the selection actually landing here instead,
+		// which is wider: the residual above also fires with `select: false`, when
+		// the click that declined the attach landed on the very ref being attached
+		// -- clicking the fork's own row during its round trip (OW-tatebi). The
+		// selection moves to the live session, so the read-only preview that click
+		// opened has to go with it or it sits frozen over a streaming transcript.
+		// This does not loosen `recover`: the session it re-attaches is one this
+		// client already had attached, and an attached selection has no preview to
+		// clear (see `ControllerView.preview`), so the residual publishes a null
+		// that is already null.
+		publish({
+			state: { ...replaceSummary(summary, requested), selected },
+			...(select ? { error: null } : {}),
+			...(takesSelection ? { preview: null } : {}),
+		});
 	}
 
 	function validWorkspace(cwd: string): boolean {
