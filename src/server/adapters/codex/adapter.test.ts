@@ -112,6 +112,9 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
 				}
 				break;
+			case "thread/fork":
+				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
+				break;
 			case "turn/interrupt":
 				proc.emit({ id, result: {} });
 				break;
@@ -179,6 +182,7 @@ describe("CodexAdapter lifecycle", () => {
 			model: "gpt-requested",
 			ephemeral: true,
 			sandbox: "danger-full-access",
+			approvalPolicy: "never",
 		});
 		expect(adapter.getState().model).toBe("gpt-started");
 	});
@@ -225,6 +229,7 @@ describe("CodexAdapter lifecycle", () => {
 			threadId: STORED_REF.id,
 			cwd: "/workspace",
 			sandbox: "danger-full-access",
+			approvalPolicy: "never",
 		});
 		expect(adapter.getState().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 		expect(adapter.getState().messages[0]).toMatchObject({
@@ -238,6 +243,46 @@ describe("CodexAdapter lifecycle", () => {
 			provider: "openai",
 		});
 		expect(updates).toHaveBeenCalledWith(adapter.getState(), undefined);
+	});
+
+	it("carries both policies onto the forked thread", async () => {
+		// A fork is a thread-creation path like start and resume, and Codex does
+		// not inherit the parent's policies onto it (D7a).
+		const { adapter, proc } = await startedAdapter(
+			{
+				threadId: STORED_REF.id,
+				turns: [
+					{
+						id: "turn-stored",
+						items: [
+							{
+								type: "userMessage",
+								id: "user-stored",
+								clientId: null,
+								content: [{ type: "text", text: "saved prompt", text_elements: [] }],
+							},
+						],
+						itemsView: "full",
+						status: "completed",
+						error: null,
+						startedAt: 1_700_000_000,
+						completedAt: 1_700_000_001,
+						durationMs: 1000,
+					},
+				],
+			},
+			STORED_REF,
+		);
+
+		const forked = await adapter.fork("turn-stored");
+
+		expect(forked).toEqual({ backend: "codex", id: "thread-forked" });
+		expect(request(proc, "thread/fork")["params"]).toEqual({
+			threadId: STORED_REF.id,
+			cwd: "/workspace",
+			sandbox: "danger-full-access",
+			approvalPolicy: "never",
+		});
 	});
 
 	it("adopts the real Codex thread id while start resolves", async () => {
@@ -740,7 +785,10 @@ describe("CodexAdapter turns", () => {
 					});
 					break;
 				}
-				case "turn/interrupt":
+				case "thread/fork":
+				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
+				break;
+			case "turn/interrupt":
 					proc.emit({ id, result: {} });
 					break;
 			}

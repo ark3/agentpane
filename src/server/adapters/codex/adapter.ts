@@ -27,6 +27,7 @@ import {
 	type CodexServerMessage,
 	type ModelListResponse,
 	type RequestId,
+	type AskForApproval,
 	type SandboxMode,
 	type Thread,
 	type ThreadForkResponse,
@@ -56,12 +57,22 @@ export interface CodexAdapterOptions {
 	 * mount list in a second place that will drift.
 	 */
 	sandbox?: SandboxMode;
+	/**
+	 * Start threads with this approval policy. Defaults to `never` (D7a):
+	 * agentpane's UI has no approval dialog, so an approval `ServerRequest`
+	 * renders as an unsupported-request warning and hangs the turn until the
+	 * session is killed. Codex's own default is `on-request`, so this has to be
+	 * sent explicitly; it belongs here rather than in sbox's flags or a global
+	 * `~/.codex/config.toml` for the reasons D7a gives.
+	 */
+	approvalPolicy?: AskForApproval;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
 }
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
 const DEFAULT_SANDBOX: SandboxMode = "danger-full-access";
+const DEFAULT_APPROVAL_POLICY: AskForApproval = "never";
 const START_ABORTED_ERROR = "codex adapter start aborted: disposed during startup";
 const TURN_START_ABORTED_ERROR = "codex adapter submit aborted: disposed during turn startup";
 const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
@@ -85,6 +96,7 @@ export class CodexAdapter implements BackendAdapter {
 	private options: CodexAdapterOptions;
 	private reducer: CodexReducer;
 	private readonly sandbox: SandboxMode;
+	private readonly approvalPolicy: AskForApproval;
 
 	private proc: CodexProcess | null = null;
 	private client: CodexClient | null = null;
@@ -136,6 +148,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.options = options;
 		this.reducer = new CodexReducer({ now: options.now });
 		this.sandbox = options.sandbox ?? DEFAULT_SANDBOX;
+		this.approvalPolicy = options.approvalPolicy ?? DEFAULT_APPROVAL_POLICY;
 	}
 
 	/**
@@ -191,11 +204,13 @@ export class CodexAdapter implements BackendAdapter {
 						threadId: opts.resumeId,
 						cwd: opts.cwd,
 						sandbox: this.sandbox,
+						approvalPolicy: this.approvalPolicy,
 						...(this.model ? { model: this.model } : {}),
 					})
 				: await client.request<ThreadStartResponse>("thread/start", {
 						cwd: opts.cwd,
 						sandbox: this.sandbox,
+						approvalPolicy: this.approvalPolicy,
 						...(this.model ? { model: this.model } : {}),
 						...(this.options.ephemeral ? { ephemeral: true } : {}),
 					});
@@ -406,6 +421,8 @@ export class CodexAdapter implements BackendAdapter {
 			threadId: this.requireThread(),
 			...(lastTurnId ? { lastTurnId } : {}),
 			...(this.cwd ? { cwd: this.cwd } : {}),
+			sandbox: this.sandbox,
+			approvalPolicy: this.approvalPolicy,
 			...(this.options.ephemeral ? { ephemeral: true } : {}),
 		});
 		return { backend: "codex", id: forked.thread.id };

@@ -35,6 +35,7 @@ export type { FileUpdateChange } from "../../../../resources/codex-protocol/v2/F
 export type { Model as CodexModel } from "../../../../resources/codex-protocol/v2/Model";
 export type { ThreadStartParams } from "../../../../resources/codex-protocol/v2/ThreadStartParams";
 export type { SandboxMode } from "../../../../resources/codex-protocol/v2/SandboxMode";
+export type { AskForApproval } from "../../../../resources/codex-protocol/v2/AskForApproval";
 export type { ThreadStartResponse } from "../../../../resources/codex-protocol/v2/ThreadStartResponse";
 export type { ThreadResumeParams } from "../../../../resources/codex-protocol/v2/ThreadResumeParams";
 export type { ThreadForkParams } from "../../../../resources/codex-protocol/v2/ThreadForkParams";
