@@ -696,9 +696,9 @@ export function createController(
 				// On Codex the forked thread is in no table until the attach, so the
 				// call is a 204 no-op there; only past a successful attach would it do
 				// what it says, reaping an idle child. One backend, one exit: not worth
-				// a verb. The cost of leaving it is a session file at most -- whether
-				// one exists before the first prompt is settled only for Codex, with
-				// OW-gajesu open on Pi and no run having read Claude's.
+				// a verb. What the orphan costs is a session file, and the owner has
+				// weighed that and chosen not to care about it on any backend
+				// (OW-fejota, declined) -- so do not re-derive this as a leak.
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
