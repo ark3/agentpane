@@ -1,10 +1,10 @@
 ---
-labels: [defect, work-laptop]
+labels: [defect]
 ---
 
 # Nothing in the client can answer an agent's approval request, so a `ServerRequest` hangs the turn forever behind one line of text.
 
-**Work laptop:** needs a live Pi or Codex run.
+**Live backend run required.** Either backend settles this, and Codex is installed on the home server, so this needs no work-laptop trip; only Pi is confined there.
 
 `src/client/api.ts`, `src/client/App.svelte`, `src/client/session-state.ts`
 
