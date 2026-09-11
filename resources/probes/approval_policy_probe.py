@@ -20,18 +20,23 @@ Three questions, answered live in one run:
       question, on a `"never"` thread. "We did not see one" is not an answer;
       the record says what was asked and what came back.
 
-Every server-initiated request is RECORDED BEFORE it is answered. `fork_probe.py`'s
-session auto-accepts in its reader thread, which would answer (a) wrongly.
+Every server-initiated request is recorded, with its method and params, in a
+dedicated `server_requests` list before it is answered -- so a cell can report
+which requests arrived, not merely that some did. `fork_probe.py` also appends
+each one to its event log before answering, but it answers every server request
+uniformly and keeps no separate record of them, which is the whole of the
+difference.
 
 Usage:  python3 approval_policy_probe.py            # all cells, JSON record on stdout
-        python3 approval_policy_probe.py --timeout 120
+        python3 approval_policy_probe.py --timeout 150
 
 Needs: `codex` on PATH with working credentials. Costs tokens: each cell drives a
 real model turn. Writes no fixtures.
 
 Codex needs a *writable* `CODEX_HOME`; the real `~/.codex/{auth.json,config.toml}`
-are copied by name into a temp home (never printed) and the copy is removed on
-exit. Threads are `ephemeral: true` except the fork parent, which has to
+are copied by name into ONE temp home shared by every cell (never printed; only
+the config's key and table *names* reach the record) and removed on exit. The
+git workspace, not the home, is per cell. Threads are `ephemeral: true` except the fork parent, which has to
 materialise on disk for `thread/fork` to load it.
 """
 
@@ -82,6 +87,7 @@ class CodexSession:
         self.events = []
         self.responses = {}
         self.server_requests = []
+        self.next_id = 1
         self._t = threading.Thread(target=self._read, daemon=True)
         self._t.start()
 
@@ -104,9 +110,14 @@ class CodexSession:
 
     @staticmethod
     def _answer(e):
-        if e["method"] == USER_INPUT_METHOD:
+        """The response shape each server request expects, per its `*Response` type."""
+        method = e["method"]
+        if method == USER_INPUT_METHOD:
             questions = (e.get("params") or {}).get("questions") or []
             return {"answers": {q.get("id", ""): {"answers": ["probe"]} for q in questions}}
+        if method == "mcpServer/elicitation/request":
+            # `McpServerElicitationRequestResponse`, not an approval decision.
+            return {"action": "decline"}
         return {"decision": "accept"}
 
     def send(self, obj):
@@ -114,26 +125,49 @@ class CodexSession:
             self.proc.stdin.write(json.dumps(obj) + "\n")
             self.proc.stdin.flush()
 
-    def request(self, req_id, method, params, timeout=60):
+    def request(self, method, params, timeout=60):
+        """Send one request and wait. Raises on timeout rather than returning None.
+
+        A timeout that came back as a falsy value once read as a clean negative
+        result in this probe's own record; raising makes that impossible.
+        """
+        req_id = self.next_id
+        self.next_id += 1
         self.send({"id": req_id, "method": method, "params": params})
         deadline = time.time() + timeout
         while time.time() < deadline:
             if req_id in self.responses:
                 return self.responses[req_id]
             time.sleep(0.1)
-        return None
+        raise TimeoutError(f"no response to {method} within {timeout}s")
 
-    def turn(self, req_id, thread_id, text, timeout=120):
+    def turn(self, thread_id, text, timeout=120):
+        """Drive one turn. Returns (status, mark).
+
+        `status` is `turn.status` off the `turn/completed` params, not the
+        arrival of the notification: `TurnStatus` is
+        `"completed" | "interrupted" | "failed" | "inProgress"`, so a turn that
+        failed announces itself on the same method as one that succeeded, and a
+        record that reports only the method cannot tell them apart. There is no
+        `turn/failed` method; `turn/completed`, `turn/started` and
+        `turn/moderationMetadata` are the whole of the `turn/` notifications.
+
+        `"<timeout>"` is deliberately angle-bracketed so it can never be read as
+        a `TurnStatus` value the server sent.
+        """
         mark = len(self.events)
+        req_id = self.next_id
+        self.next_id += 1
         self.send({"id": req_id, "method": "turn/start",
                    "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]}})
         deadline = time.time() + timeout
         while time.time() < deadline:
             for e in self.events[mark:]:
-                if e.get("method") in ("turn/completed", "turn/failed"):
-                    return e.get("method"), mark
+                if e.get("method") == "turn/completed":
+                    turn = (e.get("params") or {}).get("turn") or {}
+                    return turn.get("status", "<absent>"), mark
             time.sleep(0.2)
-        return "timeout", mark
+        return "<timeout>", mark
 
     def requests_since(self, index):
         return self.server_requests[index:]
@@ -173,26 +207,32 @@ ASK_PROMPT2 = (
 )
 
 
-def run_turn_cell(home, req_base, start_params, prompt, timeout, capabilities=None):
+CLIENT_INFO = {"name": "approval-probe", "title": "approval-probe", "version": "0"}
+
+
+def run_turn_cell(home, start_params, prompt, timeout, capabilities=None):
     """Start one thread with `start_params`, drive `prompt`, report what arrived."""
     work = new_workspace()
     s = CodexSession(work, home)
     try:
-        s.request(req_base, "initialize", {
-            "clientInfo": {"name": "approval-probe", "title": "approval-probe", "version": "0"},
-            "capabilities": capabilities})
-        started = s.request(req_base + 1, "thread/start", dict(start_params, cwd=work))
-        if not started or "result" not in started:
+        init = s.request("initialize", {"clientInfo": CLIENT_INFO, "capabilities": capabilities})
+        started = s.request("thread/start", dict(start_params, cwd=work))
+        if "result" not in started:
             return {"error": "thread/start failed", "response": started}
         result = started["result"]
         mark = len(s.server_requests)
-        outcome, ev_mark = s.turn(req_base + 2, result["thread"]["id"], prompt, timeout=timeout)
+        turn_status, ev_mark = s.turn(result["thread"]["id"], prompt, timeout=timeout)
         arrivals = s.requests_since(mark)
         return {
             "start_params": {k: v for k, v in start_params.items()},
             "reported_approval_policy": result.get("approvalPolicy"),
             "reported_sandbox": result.get("sandbox"),
-            "turn_outcome": outcome,
+            # The model is the one axis a re-run has to match: these cells turn
+            # on whether the model chose to call an editing tool.
+            "reported_model": result.get("model"),
+            "reported_model_provider": result.get("modelProvider"),
+            "initialize_result": init.get("result"),
+            "turn_status": turn_status,
             "server_request_methods": [r["method"] for r in arrivals],
             "approval_requests": [r for r in arrivals if r["method"] in APPROVAL_METHODS],
             "user_input_requests": [r for r in arrivals if r["method"] == USER_INPUT_METHOD],
@@ -214,50 +254,73 @@ def run_turn_cell(home, req_base, start_params, prompt, timeout, capabilities=No
         shutil.rmtree(work, ignore_errors=True)
 
 
-def run_fork_cell(home, req_base, timeout, parent_params=None):
+def run_fork_cell(home, timeout, parent_params=None):
     """Fork a non-ephemeral parent started the way the adapter starts one, read the response."""
     work = new_workspace()
     s = CodexSession(work, home)
     try:
-        s.request(req_base, "initialize", {
-            "clientInfo": {"name": "approval-probe", "title": "approval-probe", "version": "0"}})
+        s.request("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None})
         # NOT ephemeral: thread/fork loads the parent from disk.
         params = dict(parent_params or {"sandbox": "danger-full-access"}, cwd=work)
-        started = s.request(req_base + 1, "thread/start", params)
-        if not started or "result" not in started:
+        started = s.request("thread/start", params)
+        if "result" not in started:
             return {"error": "thread/start failed", "response": started}
         parent = started["result"]
-        outcome, _ = s.turn(req_base + 2, parent["thread"]["id"],
-                            "Reply with exactly: ok", timeout=timeout)
-        forked = s.request(req_base + 3, "thread/fork",
-                           {"threadId": parent["thread"]["id"], "cwd": work})
+        status, _ = s.turn(parent["thread"]["id"], "Reply with exactly: ok", timeout=timeout)
         out = {
             "parent_start_params": {k: v for k, v in params.items() if k != "cwd"},
-            "parent_turn_outcome": outcome,
+            "parent_turn_status": status,
+            "parent_reported_model": parent.get("model"),
             "parent_reported_approval_policy": parent.get("approvalPolicy"),
             "parent_reported_sandbox": parent.get("sandbox"),
         }
-        if forked and "result" in forked:
+        # Bare, then with both policies passed explicitly, which is what the
+        # adapter now does.
+        for label, extra in (("fork", {}),
+                             ("explicit_fork",
+                              {"sandbox": "danger-full-access", "approvalPolicy": "never"})):
+            forked = s.request("thread/fork",
+                               {"threadId": parent["thread"]["id"], "cwd": work, **extra},
+                               timeout=timeout)
+            if "result" not in forked:
+                out[f"{label}_error"] = forked
+                continue
             fr = forked["result"]
-            out["fork_reported_approval_policy"] = fr.get("approvalPolicy")
-            out["fork_reported_sandbox"] = fr.get("sandbox")
-            out["fork_thread_id_differs"] = fr["thread"]["id"] != parent["thread"]["id"]
-        else:
-            out["fork_error"] = forked
-        # And the same fork with both policies passed explicitly, which is what
-        # the adapter now does.
-        forked2 = s.request(req_base + 4, "thread/fork",
-                            {"threadId": parent["thread"]["id"], "cwd": work,
-                             "sandbox": "danger-full-access", "approvalPolicy": "never"})
-        if forked2 and "result" in forked2:
-            out["explicit_fork_reported_approval_policy"] = forked2["result"].get("approvalPolicy")
-            out["explicit_fork_reported_sandbox"] = forked2["result"].get("sandbox")
-        else:
-            out["explicit_fork_error"] = forked2
+            out[f"{label}_reported_approval_policy"] = fr.get("approvalPolicy")
+            out[f"{label}_reported_sandbox"] = fr.get("sandbox")
+            out[f"{label}_thread_id_differs"] = fr["thread"]["id"] != parent["thread"]["id"]
         return out
     finally:
         s.close()
         shutil.rmtree(work, ignore_errors=True)
+
+
+def config_toml_keys(path):
+    """The top-level key and table names of the copied `config.toml`, no values.
+
+    The operator's config is copied into the temp home, so a thread's reported
+    policy could in principle come from it rather than from app-server's own
+    default. Recording the *names* present lets a reader of the record tell the
+    two apart without the file's contents ever reaching the output.
+
+    A `[projects."<path>"]` table name can still carry the operator's home path.
+    That is fine on stdout and not fine in a committed artifact; this probe
+    writes none, and any future one that does must scrub this field.
+    """
+    if not path.exists():
+        return {"present": False}
+    names, table = [], None
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            table = line.strip("[]")
+            names.append(f"[{table}]")
+        elif "=" in line:
+            names.append(f"{table}.{line.split('=', 1)[0].strip()}" if table
+                         else line.split("=", 1)[0].strip())
+    return {"present": True, "names": names}
 
 
 def main():
@@ -265,43 +328,40 @@ def main():
     ap.add_argument("--timeout", type=int, default=120)
     args = ap.parse_args()
 
+    # One home for the whole run; the workspace, not the home, is per cell.
     home = Path(tempfile.mkdtemp(prefix="agentpane-approval-home-"))
     real = Path.home() / ".codex"
     for f in CODEX_STATE_FILES:
         if (real / f).exists():
             shutil.copy(real / f, home / f)
 
-    record = {"codex_version": cli_version("codex")}
+    record = {
+        "codex_version": cli_version("codex"),
+        "copied_config_keys": config_toml_keys(home / "config.toml"),
+    }
+    danger = {"sandbox": "danger-full-access", "ephemeral": True}
+    readonly = {"sandbox": "read-only", "ephemeral": True}
     try:
         record["a_default_no_policy"] = run_turn_cell(
-            home, 100, {"sandbox": "danger-full-access", "ephemeral": True},
-            EDIT_PROMPT, args.timeout)
+            home, danger, EDIT_PROMPT, args.timeout)
         record["a_policy_never"] = run_turn_cell(
-            home, 200,
-            {"sandbox": "danger-full-access", "ephemeral": True, "approvalPolicy": "never"},
-            EDIT_PROMPT, args.timeout)
-        # A control that DOES provoke an approval: the write is outside the
+            home, dict(danger, approvalPolicy="never"), EDIT_PROMPT, args.timeout)
+        # The control that DOES provoke an approval: the write is outside the
         # sandbox's writable set, so `on-request` has to ask.
         record["a_control_readonly_no_policy"] = run_turn_cell(
-            home, 500, {"sandbox": "read-only", "ephemeral": True},
-            EDIT_PROMPT, args.timeout)
+            home, readonly, EDIT_PROMPT, args.timeout)
         record["a_readonly_policy_never"] = run_turn_cell(
-            home, 600, {"sandbox": "read-only", "ephemeral": True, "approvalPolicy": "never"},
-            EDIT_PROMPT, args.timeout)
-        record["b_fork"] = run_fork_cell(home, 300, args.timeout)
+            home, dict(readonly, approvalPolicy="never"), EDIT_PROMPT, args.timeout)
+        record["b_fork"] = run_fork_cell(home, args.timeout)
         # Disambiguates inherit-vs-default: the parent's policy is not
         # app-server's default here, so an inheriting fork would report "never".
         record["b_fork_parent_never"] = run_fork_cell(
-            home, 700, args.timeout,
+            home, args.timeout,
             parent_params={"sandbox": "danger-full-access", "approvalPolicy": "never"})
         record["c_user_input_under_never"] = run_turn_cell(
-            home, 400,
-            {"sandbox": "danger-full-access", "ephemeral": True, "approvalPolicy": "never"},
-            ASK_PROMPT, args.timeout)
+            home, dict(danger, approvalPolicy="never"), ASK_PROMPT, args.timeout)
         record["c_user_input_experimental_api"] = run_turn_cell(
-            home, 800,
-            {"sandbox": "danger-full-access", "ephemeral": True, "approvalPolicy": "never"},
-            ASK_PROMPT2, args.timeout,
+            home, dict(danger, approvalPolicy="never"), ASK_PROMPT2, args.timeout,
             capabilities={"experimentalApi": True, "requestAttestation": False})
         record["c_prompts"] = {"default": ASK_PROMPT, "experimental_api": ASK_PROMPT2}
     finally:
