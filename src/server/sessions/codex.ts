@@ -7,11 +7,15 @@
  * Both are handled; anything else is bucketed unknown rather than thrown.
  *
  * Subagent rollouts are listed like any other session (D19): a spawned thread
- * writes its own rollout, carrying `thread_source: "subagent"` and a
- * `forked_from_id` naming its parent, and nothing here filters on either. The
- * parent's transcript links to the child by id, and that link resolves through
- * `getSession` and the preview route -- which is the half a listing filter
- * would have had to keep working anyway.
+ * writes its own rollout, and nothing here filters it out. The marker is
+ * `session_meta.payload.thread_source === "subagent"` -- census on the home
+ * server 2026-09-11, over the 72 September rollouts written by `codex-cli`
+ * 0.150.1 through 0.154.0: 45 carry it. `forked_from_id` is NOT a reliable
+ * second marker; only 39 of those 45 carry one, and all six without it were
+ * written by 0.154.0, which emits it for 5 of its 11 subagent rollouts.
+ * The parent's transcript links to the child by id, and that link resolves
+ * through `getSession` and the preview route, which locate by filename and so
+ * would keep reaching a child even if the listing ever hid one.
  *
  * Preview: see SYNTHETIC_USER_PREFIXES below -- this is the one place this
  * module goes beyond what DESIGN/HANDOFF describe, because "first user

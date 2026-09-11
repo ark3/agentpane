@@ -583,6 +583,10 @@ Each becomes the tool-call pair the renderer already knows, under the single nam
 The `wait` completion carries the child's final message in `agentsStates[childId].message`, so the block shows what the subagent answered without reading the child thread at all.
 The parent therefore reads "spawned agent", then "waited", in sequence, collapsed by default like any other tool card.
 
+This is the **live attached** transcript's view, and only that.
+A stored rollout records the same calls as Responses-API `function_call`s under the `collaboration` namespace — `spawn_agent`, `wait_agent`, `list_agents`, `interrupt_agent`, counted across the September rollouts on the home server on 2026-09-11 — so `extractCodexPreviewTurns` names them `collaboration__wait_agent` and the read-only preview of the same parent draws an opaque default card with no child link at all.
+Closing that gap is separate work.
+
 The child's conversation is **not** inlined as a nested block.
 A subagent can run many minutes and many tool calls while the parent is blocked in `wait`, so a nested view would dominate the parent transcript for exactly the confusing effect OW-fafeja removed.
 Claude Code's adapter already keeps subagent transcripts out of the parent (`src/server/sessions/claude.ts`), and this keeps the two backends consistent.
@@ -590,9 +594,10 @@ Claude Code's adapter already keeps subagent transcripts out of the parent (`src
 Instead the card names the child thread and offers to open it, through the same `controller.preview` path a click in the session list takes.
 
 **Subagent rollouts stay in the session picker, and ease decided it.**
-On the home server on 2026-09-11, 45 of 72 September Codex rollouts carried `thread_source: "subagent"` in their `session_meta`, so hiding them would visibly quieten the list -- but the owner stated no preference either way, and listing them is what the code already does.
-Filtering is not free: `listSessions` would have to drop them while `getSession` and the preview route kept resolving them, since the card's link is a request for exactly one of the threads the list would be hiding.
-That asymmetry is more machinery than the noise is worth at an undecided question, so the block is a shortcut to a door that already exists rather than the only way in.
+The owner stated on 2026-09-09 that they had no preference either way, and listing them is what the code already does — no filter exists, so this decision cost nothing to take.
+The noise is real: on the home server on 2026-09-11, 45 of the 72 September Codex rollouts carried `thread_source: "subagent"` in their `session_meta` (written by `codex-cli` 0.150.1 through 0.154.0).
+Whichever way it had gone, only the listing would have moved — `getSession` and the preview route resolve a ref by filename and would keep reaching a hidden child, which is what the card's link asks for.
+So the card is a shortcut to a door that already exists rather than the only way in.
 
 ## The backend adapter contract
 
