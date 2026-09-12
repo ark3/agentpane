@@ -1496,7 +1496,7 @@ See D7a.
 
 **2026-09-12, home server, `codex-cli 0.154.0`, `codex app-server` over stdio, model pinned to `gpt-5.6-luna` on the `turn/start` params.**
 
-`resources/probes/codex_turn_probe.py` was extended for this and carries the run: after its original short turn it starts a second turn asking for the integers 1 through 200 one per line, waits until that turn is visibly streaming — a `turn/started` naming the turn id plus at least 20 `item/agentMessage/delta` notifications — and then sends `turn/steer` with `{ threadId, expectedTurnId, input }`.
+`resources/probes/codex_turn_probe.py` was extended for this and carries the run: after its original short turn it starts a second turn asking for the integers 1 through 200 one per line, waits until that turn is visibly streaming — it takes the turn id from the first notification that names one, and counts every `*/delta` notification, not agent-message deltas alone — and then sends `turn/steer` with `{ threadId, expectedTurnId, input }`.
 Re-run it with `python3 resources/probes/codex_turn_probe.py`; it needs `codex` on PATH and copies `~/.codex/{auth.json,config.toml}` into a writable temp `CODEX_HOME` the way it already did.
 
 **`turn/steer` succeeded.**

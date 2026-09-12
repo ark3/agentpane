@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Codex app-server probe — proves the full turn flow over stdio.
 
-Reproduces: initialize -> thread/start -> turn/start -> streaming
-`item/agentMessage/delta` -> `item/completed` -> `turn/completed`.
+Reproduces: initialize -> thread/start -> turn/start -> streaming deltas ->
+`item/completed` -> `turn/completed`. Deltas are counted, not printed: the
+steer phase below needs the count, and printing them buries everything else.
 
 Then (OW-tifuha) drives a second, deliberately long turn and fires
 `turn/steer` at it while it is still streaming, printing the steer response
@@ -24,7 +25,8 @@ from collections import Counter
 from pathlib import Path
 
 # Home-server agent sessions pin Codex to one model (AGENTS.md, "Evidence");
-# app-server takes no flag, so the pin rides on turn/start.
+# app-server takes no flag, so the pin rides on the turn/start below that this
+# script drives for the steer phase.
 MODEL = "gpt-5.6-luna"
 LONG_PROMPT = (
     "List the integers from 1 to 200, one per line, each on its own line, "
@@ -67,14 +69,13 @@ def reader():
         seen.append(e)
         if e.get("id") == 2:
             tid[0] = e["result"]["thread"]["id"]
-        if e.get("id") in (5, 6):
-            print(f"<< RESPONSE id={e['id']} |", json.dumps(e))
+        if e.get("id") == 5:
+            print("<< STEER RESPONSE |", json.dumps(e))
         m = e.get("method", "")
         if m.startswith(("item/", "turn/")):
             params = e.get("params", {})
-            for key in ("turnId", "turn_id"):
-                if isinstance(params.get(key), str):
-                    live_turn[0] = params[key]
+            if isinstance(params.get("turnId"), str):
+                live_turn[0] = params["turnId"]
             turn = params.get("turn")
             if isinstance(turn, dict) and isinstance(turn.get("id"), str):
                 live_turn[0] = turn["id"]
@@ -109,6 +110,8 @@ send({"id": 4, "method": "turn/start",
 deadline = time.time() + 60
 while time.time() < deadline and not (live_turn[0] and deltas[0] >= 20):
     time.sleep(0.2)
+if not live_turn[0]:
+    raise SystemExit("no turn id after 60s -- nothing to steer; re-run or lengthen the wait")
 print(f"steering at turnId={live_turn[0]} after {deltas[0]} deltas")
 steer_at = len(seen)
 mark[0] = "  [post-steer]"
@@ -122,14 +125,14 @@ mark[0] = ""
 print("=== post-steer turn ids seen ===")
 for e in seen[steer_at:]:
     m = e.get("method", "")
-    if m in ("turn/started", "turn/completed", "turn/failed"):
+    if m in ("turn/started", "turn/completed"):
         print(" ", m, "|", json.dumps(e.get("params", {}))[:300])
 
 print("=== full agent text after steer ===")
 for e in seen[steer_at:]:
     if e.get("method") == "item/completed":
         item = e.get("params", {}).get("item", {})
-        if item.get("item_type") == "agent_message" or item.get("type") == "agentMessage":
+        if item.get("type") == "agentMessage":
             print(" ", json.dumps(e.get("params", {}))[:1500])
 
 print("=== turn/item method counts ===")
