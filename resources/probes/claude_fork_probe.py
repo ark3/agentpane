@@ -97,6 +97,7 @@ CLAUDE_ROOT = Path.home() / ".claude" / "projects"
 # finish inside the timeout. The Codex mid-stream cell asks for the same range.
 LONG_PROMPT = "Count from 1 to 400. Print one number per line and nothing else."
 PRIME_PROMPT = "Say exactly: ALPHA"
+FORK_PROMPT = "Say exactly: BETA"
 
 # The deltas the cell waits for must be the ANSWER streaming, not the coda. The
 # first run of this probe (2.1.268, haiku) answered the counting prompt by
@@ -499,8 +500,10 @@ def cell_kill_mid_stream(timeout, model):
         at_kill = store_snapshot(path)
         streaming_at_kill = still_streaming(child, mark)
         killed = child.kill_like_adapter()
-        time.sleep(0.5)
-        after_kill = store_snapshot(path)
+        # Quiesced, not sampled once: the store lags the stream badly enough
+        # that a single read here would answer "did the dying CLI flush?" with
+        # whatever happened to be on disk half a second in.
+        after_kill = quiesce_store(path)
 
         events = [e for _, e in child.events_since(mark)]
         return {
@@ -572,15 +575,36 @@ def cell_fork_beside(timeout, model):
         fork_started_at = time.monotonic()
         fork_child = ClaudeChild(work, session_id=fork_session_id, resume=session_id,
                                  fork_at=fork_point, model=model)
-        fork_init = fork_child.await_event(0, is_init, timeout)
+        # Taken at the spawn and NOT after any await on the fork: everything
+        # counted against the parent below is counted from this mark, so an
+        # await placed above it would silently credit the parent's post-fork
+        # streaming to before the fork. The first run of this cell made exactly
+        # that mistake by waiting for the fork's `system:init` here -- which a
+        # `claude -p` child does not emit until it is given a message, so the
+        # mark moved by a whole timeout.
         fork_mark = child.mark()
 
-        # The parent is the subject. The fork gets the cheap checks only: did it
-        # come up, did it adopt the session id it was given, is it on disk?
+        # The parent is the subject; the fork gets the cheapest check that is
+        # still real. One short prompt is that check: a spawned process proves
+        # nothing (`fork_probe.py` README: "a returned id alone cannot pass the
+        # check"), and the fork emits no `system:init` at all until it is asked
+        # something. It also makes the concurrency claim honest -- two children
+        # with turns in flight at once, rather than one running and one idle.
+        fork_child.write_user(FORK_PROMPT)
+        fork_init = fork_child.await_event(0, is_init, timeout)
+        fork_settled = fork_child.await_event(0, is_result, timeout)
+        fork_reply = next((t for t in (assistant_text(e) for _, e in fork_child.snapshot()) if t),
+                          None)
+
         settle = child.await_event(fork_mark, is_result, timeout)
         deltas_after_fork = len([t for t in
                                  (text_delta(e) for _, e in child.events_since(fork_mark)) if t])
-        after = store_snapshot(path)
+        # Quiesced for the same reason the baseline is: the first run of this
+        # cell read the parent's store the instant its `result` arrived and saw
+        # a byte-identical file, because nothing had been written yet. Whether
+        # the surviving turn's reply reaches disk is the question -- it cannot
+        # be asked with a read that outruns the writer.
+        after = quiesce_store(path)
         fork_path = store_file(fork_session_id)
 
         return {
@@ -610,6 +634,9 @@ def cell_fork_beside(timeout, model):
             "fork_init_session_id": (fork_init[1].get("session_id") if fork_init else None),
             "fork_adopted_given_session_id": (
                 bool(fork_init) and fork_init[1].get("session_id") == fork_session_id),
+            "fork_drove_a_turn": fork_settled is not None,
+            "fork_result_subtype": (fork_settled[1].get("subtype") if fork_settled else None),
+            "fork_reply": preview(fork_reply),
             "fork_store_on_disk": fork_path is not None,
             "fork_store_lines": store_snapshot(fork_path)["lines"] if fork_path else 0,
             "fork_stderr_tail": fork_child.stderr_tail.strip()[-400:] or None,
