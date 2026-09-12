@@ -4,7 +4,7 @@ labels: [change]
 
 # The Codex adapter rejects a mid-turn prompt though `turn/steer` sits unused in the generated bindings
 
-`src/server/adapters/codex/adapter.ts` — `TURN_ACTIVE_ERROR` defined at `:68` and thrown from `submit` at `:278`; `resources/codex-protocol/v2/TurnSteerParams.ts`; `resources/probes/codex_turn_probe.py`.
+`src/server/adapters/codex/adapter.ts` — `TURN_ACTIVE_ERROR` defined at `:80` and thrown from `submit` at `:292`; `resources/codex-protocol/v2/TurnSteerParams.ts`; `resources/probes/codex_turn_probe.py`.
 
 D16 makes a mid-turn `submit()` mean *steer* on every backend that can steer.
 Codex can, on paper, and does not.
@@ -25,12 +25,16 @@ Then, on what it shows:
 - If steer works, `submit` sends `turn/steer` when a turn is active instead of throwing, `expectedTurnId` set from `this.turnId`, with an adapter test that goes red first.
 - If it does not work, that is the finding: record it in `docs/MANUAL_TESTING.md`, leave the rejection in place, and amend D16's line naming this card, since D16 currently reads Codex as a backend that can steer and merely does not.
 
-**Corrected 2026-09-09, hours after filing, by the adversarial read of D16.**
-This card first said `TURN_ACTIVE_ERROR` is thrown from `submit` at two sites, `:278` and `:361`, and told the implementer to decide about the second.
-That was wrong and the instruction was a trap.
-`:361` is `compact`'s guard, not a submit path, and the docblock above it at `:345-356` already settles it: `compact` is one of the two `NonSteerableTurnKind`s (`resources/codex-protocol/v2/NonSteerableTurnKind.ts` — `"review" | "compact"`), so app-server will not start a second turn nor steer the live one while one is running, and admitting the request only to have app-server reject it "would turn a well-defined 'busy' into an opaque wire error".
-Steering a compaction is protocol-impossible.
-**Leave `:361` alone**; D16 is about `submit` and does not reach it.
+**Addresses re-verified against `main` on 2026-09-12; line numbers above are as of that day.**
 
-**Four existing tests assert the rejection this card may flip**, and none of them is about the rejection: `codex/adapter.test.ts:619` and `:659` use it while testing the abort target, and `:1031` and `:1044` while testing an ambiguous turn response.
-They need rewriting to their actual subjects, not deleting, and a red suite there is the expected consequence of the change rather than a regression.
+**Corrected 2026-09-09, hours after filing, by the adversarial read of D16.**
+This card first said `TURN_ACTIVE_ERROR` is thrown from `submit` at two sites, `:292` and `:375`, and told the implementer to decide about the second.
+That was wrong and the instruction was a trap.
+`:375` is `compact`'s guard, not a submit path, and the docblock above it at `:358-371` already settles it: `compact` is one of the two `NonSteerableTurnKind`s (`resources/codex-protocol/v2/NonSteerableTurnKind.ts` — `"review" | "compact"`), so app-server will not start a second turn nor steer the live one while one is running, and admitting the request only to have app-server reject it "would turn a well-defined 'busy' into an opaque wire error".
+Steering a compaction is protocol-impossible.
+**Leave `:375` alone**; D16 is about `submit` and does not reach it.
+
+**Three existing tests assert the rejection message this card may flip**, and none of them is about the rejection.
+`codex/adapter.test.ts` — "rejects a submit while a turn is active without erasing its abort target" (`:659`) tests the abort target; "keeps an ambiguous successful submission busy until its response lifecycle completes" (`:1032`) asserts it twice while testing an ambiguous turn response.
+Those need rewriting to their actual subjects, not deleting, and a red suite there is the expected consequence of the change rather than a regression.
+A fourth site, "refuses to compact while a turn is active, and sends nothing on the wire (OW-72)" (`:695`), shares only the message constant: `compact` keeps its guard either way, so that test stands and must stay green.
