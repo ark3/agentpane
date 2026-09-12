@@ -356,8 +356,18 @@ This is the one place worth being concrete rather than leaving to implementation
 
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
 
-**Decided on 2026-08-15, not yet built.**
+**Decided on 2026-08-15, not yet built, and deliberately so.**
 The reaper is OW-33, the cap OW-34, and the transparent re-attach that makes eviction invisible OW-35; the prose below is written as the design reads once they land.
+
+Those three are open and are not a fire.
+The pressure this decision relieves does not arise yet: agentpane is still changed several times a day, and each restart reclaims every subprocess, so attached sessions never pile up far enough for an idle timer or a cap to have anything to do.
+The owner said so when D12 was taken and again on 2026-09-11, and the second time was a decision not to build it rather than an oversight.
+Read the gap between this decision and the code as waiting on a condition, then — not as a spec nobody got to.
+The condition is the restart cadence itself: when agentpane stops being restarted through the day, the sessions this bounds start accumulating and OW-33/34/35 become work.
+Nothing measures that, so the signal is the owner noticing it.
+
+The design below is not provisional and is not up for redesign in the meantime.
+It is unbuilt, which is a different thing, and the reasoning behind each of its parts is what an implementer would otherwise have to rediscover.
 
 The first draft tied a subprocess's life to the *server's*: killed only on an explicit close or on shutdown, never otherwise.
 That does not bound resource use — a day of browsing leaves a sandboxed agent alive per session touched, each holding its workspace.
