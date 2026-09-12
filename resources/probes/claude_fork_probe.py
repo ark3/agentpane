@@ -40,9 +40,17 @@ it is the load-bearing part: sleeping cannot distinguish a surviving parent
 from an action that landed after the turn had already finished, and that
 failure mode is silent. Both cells wait for a POSITIVE streaming signal on the
 parent -- a `stream_event`/`message_start` plus `MIN_DELTAS` accumulating
-`content_block_delta` text deltas, and no `result` yet -- re-check that the
-turn has still not settled at the instant of the action itself, and record
-`result: "unearned"` with a non-zero process exit if any of that is missing.
+`content_block_delta` text deltas, and no `result` yet -- and record
+`result: "unearned"` with a non-zero process exit if it is missing.
+
+Two things here are additions rather than inheritance, and both close gaps the
+Codex cell has too. `still_streaming` re-checks at the instant of the action,
+where `codex_fork_mid_stream` acts straight off `await_streaming`'s return and
+gates only on `streaming_confirmed`. And the "unearned" gate covers the DISK
+read as well as the wire: a store file the cell could not resolve, a baseline
+that does not exist, or a store whose existing lines changed under it all fail
+the cell, because the headline finding here is an ABSENCE on disk and an
+absence is exactly what a file that was never found also produces.
 
 Why this is a separate file and not a third `--backend` in `fork_probe.py`:
 that probe's two session classes are JSON-RPC request/response clients over a
@@ -108,6 +116,19 @@ FORK_PROMPT = "Say exactly: BETA"
 # call here), and the threshold is raised well past a one-paragraph coda.
 MIN_DELTAS = 40
 
+# Sample marks across the parent's reply, in accumulated text deltas. One
+# sample cannot tell "the store never gains assistant text mid-turn" from "it
+# had not gained any yet at the one point we looked", and the first version of
+# this cell had exactly one. The kill lands at the last mark. The ceiling is
+# set below the ~200 deltas the 1-to-400 reply runs to, and a turn that settles
+# before the last mark is reported unearned rather than quietly sampled short.
+SAMPLE_MARKS = (40, 80, 120, 160)
+
+# Pinned, and not a flag: AGENTS.md "Evidence" binds agent-driven work on the
+# home server to Haiku, `fork_probe.py` exposes no model flag either, and a
+# knob whose help text says not to turn it is not configurability.
+MODEL = "haiku"
+
 # Matches ChildClaudeProcess.kill() in claude/process.ts.
 TERMINATE_GRACE_S = 2.0
 KILL_GRACE_S = 1.0
@@ -133,7 +154,7 @@ class ClaudeChild:
     length so `events_since` reads only what followed an action.
     """
 
-    def __init__(self, cwd, session_id=None, resume=None, fork_at=None, model="haiku"):
+    def __init__(self, cwd, session_id=None, resume=None, fork_at=None):
         self.args = [
             "claude",
             "-p",
@@ -146,7 +167,7 @@ class ClaudeChild:
             # No tools: see MIN_DELTAS. The prompt must be answered by
             # generating text, because text streaming is the whole subject.
             "--tools", "",
-            "--model", model,
+            "--model", MODEL,
         ]
         if resume:
             self.args += ["--resume", resume]
@@ -292,8 +313,36 @@ def still_streaming(child, mark):
     settle in the gap between that return and the action -- which is how the
     first run of this probe killed a turn that had already finished. This is
     the check the cell records beside the action itself.
+
+    NOT inherited from `fork_probe.py`: `codex_fork_mid_stream` fires
+    `thread/fork` straight off `await_streaming`'s return and gates only on
+    `streaming_confirmed`. This is an addition, and the gap it closes is real
+    on both probes.
     """
     return not any(is_result(e) for _, e in child.events_since(mark))
+
+
+def await_delta_count(child, mark, target, timeout):
+    """Wait until `target` text deltas have accumulated since `mark`.
+
+    Returns the count actually reached and whether the turn settled first; a
+    settle is not an error here, it is the thing the caller has to report,
+    because a sample taken after the turn ended measures nothing.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        events = [e for _, e in child.events_since(mark)]
+        deltas = [t for t in (text_delta(e) for e in events) if t]
+        settled = any(is_result(e) for e in events)
+        if settled or len(deltas) >= target:
+            return {"deltas": len(deltas), "chars": len("".join(deltas)), "settled": settled}
+        if child.proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    events = [e for _, e in child.events_since(mark)]
+    deltas = [t for t in (text_delta(e) for e in events) if t]
+    return {"deltas": len(deltas), "chars": len("".join(deltas)),
+            "settled": any(is_result(e) for e in events), "timed_out": True}
 
 
 def await_streaming(child, mark, min_deltas, timeout):
@@ -400,8 +449,9 @@ def gained(before_raw, after_raw):
         census[line_kind(line)] = census.get(line_kind(line), 0) + 1
         text = store_assistant_text(line)
         if text:
-            texts.append({"chars": len(text), "head": preview(text[:60], 80),
-                          "tail": preview(text[-40:], 60)})
+            texts.append({"chars": len(text),
+                          "head": text[:60].replace("\n", "\\n"),
+                          "tail": text[-40:].replace("\n", "\\n")})
     return {"count": len(new), "census": census, "assistant_text": texts,
             "prefix_preserved": after_raw[:len(before_raw)] == before_raw}
 
@@ -431,7 +481,7 @@ def make_workspace(prefix):
     return path
 
 
-def start_primed_parent(work, timeout, model):
+def start_primed_parent(work, timeout):
     """A parent child with one settled turn behind it, so there is a store file
     with a forkable entry before anything streams.
 
@@ -441,7 +491,7 @@ def start_primed_parent(work, timeout, model):
     first burns the whole timeout and then reports `init` missing.
     """
     session_id = str(uuid.uuid4())
-    child = ClaudeChild(work, session_id=session_id, model=model)
+    child = ClaudeChild(work, session_id=session_id)
     child.write_user(PRIME_PROMPT)
     init = child.await_event(0, is_init, timeout)
     primed = child.await_event(0, is_result, timeout)
@@ -481,11 +531,11 @@ def claude_version():
 # ---------------------------------------------------------------------------
 
 
-def cell_kill_mid_stream(timeout, model):
+def cell_kill_mid_stream(timeout):
     work = make_workspace("agentpane-claudefork-kill-")
     child = None
     try:
-        child, session_id, init, primed = start_primed_parent(work, timeout, model)
+        child, session_id, init, primed = start_primed_parent(work, timeout)
         path = store_file(session_id)
         baseline = quiesce_store(path)
 
@@ -493,19 +543,52 @@ def cell_kill_mid_stream(timeout, model):
         child.write_user(LONG_PROMPT)
         streaming = await_streaming(child, mark, min_deltas=MIN_DELTAS, timeout=timeout)
 
-        # Taken as close to the kill as a separate disk read can get. Any error
-        # in the residual window is attributed to BEFORE the kill, so the file
-        # is credited with more streamed text than it had rather than less --
-        # the direction that cannot manufacture the finding.
-        at_kill = store_snapshot(path)
+        # Walk the reply, reading the store at each mark. Each sample is taken
+        # as close to its delta count as a separate disk read can get, and any
+        # error in that residual window credits the file with MORE streamed
+        # text than it had rather than less -- the direction that cannot
+        # manufacture an absence.
+        samples = []
+        previous = baseline
+        for target in SAMPLE_MARKS:
+            reached = await_delta_count(child, mark, target, timeout)
+            snap = store_snapshot(path)
+            samples.append({
+                "target_deltas": target,
+                "deltas_at_sample": reached["deltas"],
+                "streamed_chars_at_sample": reached["chars"],
+                "turn_had_settled": reached["settled"],
+                "sha256": snap["sha256"],
+                "lines": snap["lines"],
+                "gained_since_previous_sample": gained(previous["raw"], snap["raw"]),
+            })
+            previous = snap
+        at_kill = previous
+
         streaming_at_kill = still_streaming(child, mark)
         killed = child.kill_like_adapter()
-        # Quiesced, not sampled once: the store lags the stream badly enough
-        # that a single read here would answer "did the dying CLI flush?" with
-        # whatever happened to be on disk half a second in.
+        # Both reads: the immediate one answers "was anything flushed by the
+        # time the process was gone", the quiesced one answers "did anything
+        # arrive later". A single sample here cannot separate them.
+        after_kill_immediate = store_snapshot(path)
         after_kill = quiesce_store(path)
 
         events = [e for _, e in child.events_since(mark)]
+        gained_by_kill = gained(at_kill["raw"], after_kill["raw"])
+        # The headline here is an ABSENCE on disk, and a store file that was
+        # never resolved produces the identical absence -- so the disk read is
+        # gated exactly as hard as the wire signals are. `prefix_preserved`
+        # gates too: the census only means anything if the file is append-only,
+        # and if it ever stops being, every "gained" number above is wrong.
+        disk_earned = (
+            path is not None
+            and baseline["exists"]
+            and all(s["gained_since_previous_sample"]["prefix_preserved"] for s in samples)
+            and gained_by_kill["prefix_preserved"]
+        )
+        # A sample taken after the turn ended measures nothing, and the kill
+        # must land inside the turn.
+        marks_earned = not any(s["turn_had_settled"] for s in samples)
         return {
             "operation": "the parent process is killed mid-turn, the way "
                          "claude/adapter.ts fork() -> replaceProcess() kills it",
@@ -518,10 +601,16 @@ def cell_kill_mid_stream(timeout, model):
             "primed_turn_ok": primed is not None,
             "streaming_confirmed_before_kill": streaming["streaming_confirmed"],
             "message_start_seen": streaming["message_start_seen"],
-            "deltas_before_kill": streaming["deltas_before_action"],
-            "streamed_text_chars_before_kill": len(streaming["streamed_text_before_action"]),
-            "streamed_text_preview": preview(streaming["streamed_text_before_action"]),
-            "parent_turn_settled_before_kill": streaming["settled_before_action"],
+            # Named for WHERE they were taken. These are the first sample's
+            # numbers, at the moment `await_streaming` crossed its threshold,
+            # and the kill is now four marks later -- calling them
+            # "before_kill" invited reading them as the state at the kill,
+            # which they never were. The count is the first poll past
+            # MIN_DELTAS, not a chosen value.
+            "deltas_at_first_mark": streaming["deltas_before_action"],
+            "streamed_chars_at_first_mark": len(streaming["streamed_text_before_action"]),
+            "streamed_text_preview_at_first_mark": preview(streaming["streamed_text_before_action"]),
+            "parent_turn_settled_at_first_mark": streaming["settled_before_action"],
             "still_streaming_at_the_kill_itself": streaming_at_kill,
             "kill": killed,
             "store_file": path.name if path else None,
@@ -535,14 +624,23 @@ def cell_kill_mid_stream(timeout, model):
             "store_lines_after_kill": after_kill["lines"],
             "store_changed_while_streaming": baseline["sha256"] != at_kill["sha256"],
             "store_changed_by_the_kill": at_kill["sha256"] != after_kill["sha256"],
+            "store_changed_before_quiescing_after_kill":
+                at_kill["sha256"] != after_kill_immediate["sha256"],
+            "store_lines_after_kill_immediate": after_kill_immediate["lines"],
+            # Per mark across the whole reply, not one point in it.
+            "samples_across_the_turn": samples,
             "gained_while_streaming": gained(baseline["raw"], at_kill["raw"]),
-            "gained_by_the_kill": gained(at_kill["raw"], after_kill["raw"]),
+            "gained_by_the_kill": gained_by_kill,
+            "store_resolved": path is not None,
+            "baseline_store_exists": baseline["exists"],
+            "disk_read_earned": disk_earned,
+            "all_samples_mid_turn": marks_earned,
             "assistant_events_during_turn": [preview(t) for t in
                                              (assistant_text(e) for e in events) if t],
             "result_events_during_turn": [e.get("subtype") for e in events if is_result(e)],
             "stderr_tail": child.stderr_tail.strip()[-400:] or None,
-            "result": ("measured" if streaming["streaming_confirmed"] and streaming_at_kill
-                       else "unearned"),
+            "result": ("measured" if (streaming["streaming_confirmed"] and streaming_at_kill
+                                      and disk_earned and marks_earned) else "unearned"),
         }
     finally:
         if child:
@@ -555,12 +653,12 @@ def cell_kill_mid_stream(timeout, model):
 # ---------------------------------------------------------------------------
 
 
-def cell_fork_beside(timeout, model):
+def cell_fork_beside(timeout):
     work = make_workspace("agentpane-claudefork-beside-")
     child = None
     fork_child = None
     try:
-        child, session_id, init, primed = start_primed_parent(work, timeout, model)
+        child, session_id, init, primed = start_primed_parent(work, timeout)
         path = store_file(session_id)
         baseline = quiesce_store(path)
         fork_point = last_entry_uuid(baseline["raw"])
@@ -574,7 +672,7 @@ def cell_fork_beside(timeout, model):
         fork_session_id = str(uuid.uuid4())
         fork_started_at = time.monotonic()
         fork_child = ClaudeChild(work, session_id=fork_session_id, resume=session_id,
-                                 fork_at=fork_point, model=model)
+                                 fork_at=fork_point)
         # Taken at the spawn and NOT after any await on the fork: everything
         # counted against the parent below is counted from this mark, so an
         # await placed above it would silently credit the parent's post-fork
@@ -599,13 +697,19 @@ def cell_fork_beside(timeout, model):
         settle = child.await_event(fork_mark, is_result, timeout)
         deltas_after_fork = len([t for t in
                                  (text_delta(e) for _, e in child.events_since(fork_mark)) if t])
-        # Quiesced for the same reason the baseline is: the first run of this
-        # cell read the parent's store the instant its `result` arrived and saw
-        # a byte-identical file, because nothing had been written yet. Whether
-        # the surviving turn's reply reaches disk is the question -- it cannot
-        # be asked with a read that outruns the writer.
+        # BOTH reads, in one run. The immediate one is taken as soon as the
+        # parent's `result` is seen; the quiesced one waits for the writer.
+        # Taking only the second cannot say when the reply landed, and taking
+        # only the first says the reply never landed at all -- which is what
+        # the first version of this cell reported, across two runs it could not
+        # compare. The pair makes "the store lags `result`" a within-run
+        # measurement rather than an inference over separate sessions.
+        after_at_result = store_snapshot(path)
         after = quiesce_store(path)
         fork_path = store_file(fork_session_id)
+        parent_gained = gained(at_fork["raw"], after["raw"])
+        fork_disk_earned = (path is not None and baseline["exists"]
+                            and parent_gained["prefix_preserved"])
 
         return {
             "operation": "a SECOND claude child spawned with --resume "
@@ -622,12 +726,12 @@ def cell_fork_beside(timeout, model):
             "fork_point_entry_uuid": fork_point,
             "streaming_confirmed_before_fork": streaming["streaming_confirmed"],
             "message_start_seen": streaming["message_start_seen"],
+            # First poll past MIN_DELTAS, and the fork fires immediately after.
             "deltas_before_fork": streaming["deltas_before_action"],
             "parent_turn_settled_before_fork": streaming["settled_before_action"],
             "still_streaming_at_the_fork_itself": streaming_at_fork,
             # The fork child.
             "fork_session_id": fork_session_id,
-            "fork_spawned": fork_child.proc.poll() is None or fork_init is not None,
             "fork_init_seen": fork_init is not None,
             "fork_init_ms": (round((time.monotonic() - fork_started_at) * 1000)
                              if fork_init else None),
@@ -647,14 +751,23 @@ def cell_fork_beside(timeout, model):
             "parent_result_subtype": (settle[1].get("subtype") if settle else None),
             "parent_result_is_error": (settle[1].get("is_error") if settle else None),
             "parent_store_sha256_at_fork": at_fork["sha256"],
+            "parent_store_sha256_at_result": after_at_result["sha256"],
             "parent_store_sha256_after": after["sha256"],
             "parent_store_changed_after_fork": at_fork["sha256"] != after["sha256"],
+            # The late-flush question, measured inside one run.
+            "parent_store_changed_by_result": at_fork["sha256"] != after_at_result["sha256"],
+            "parent_store_changed_after_result": after_at_result["sha256"] != after["sha256"],
             "parent_store_lines_at_fork": at_fork["lines"],
+            "parent_store_lines_at_result": after_at_result["lines"],
             "parent_store_lines_after": after["lines"],
-            "parent_store_gained": gained(at_fork["raw"], after["raw"]),
+            "parent_store_gained_by_result": gained(at_fork["raw"], after_at_result["raw"]),
+            "parent_store_gained": parent_gained,
+            "store_resolved": path is not None,
+            "baseline_store_exists": baseline["exists"],
+            "disk_read_earned": fork_disk_earned,
             "parent_stderr_tail": child.stderr_tail.strip()[-400:] or None,
-            "result": ("measured" if streaming["streaming_confirmed"] and streaming_at_fork
-                       else "unearned"),
+            "result": ("measured" if (streaming["streaming_confirmed"] and streaming_at_fork
+                                      and fork_disk_earned) else "unearned"),
         }
     finally:
         if fork_child:
@@ -675,9 +788,6 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="seconds to wait for a turn to settle (default: 120)")
-    ap.add_argument("--model", default="haiku",
-                    help="passed to --model; pinned to haiku on the home server "
-                         "(AGENTS.md 'Evidence') and there is no reason to change it")
     ap.add_argument("--cell", choices=tuple(CELLS), action="append",
                     help="repeatable; default is both")
     args = ap.parse_args()
@@ -688,14 +798,14 @@ def main():
 
     record = {"captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "cli_version": claude_version(),
-              "model_flag": args.model,
+              "model_flag": MODEL,
               "spawned_without_direnv_sbox": True,
               "cells": {}}
 
     for key in (args.cell or list(CELLS)):
         name, fn = CELLS[key]
         print(f"=== Claude: {name} ===", file=sys.stderr)
-        record["cells"][name] = fn(args.timeout, args.model)
+        record["cells"][name] = fn(args.timeout)
 
     print(json.dumps(record, indent=2))
 
