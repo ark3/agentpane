@@ -1529,3 +1529,32 @@ without a trusting `trust.json`).
 The application has since been opened by hand in a browser, on 2026-08-12. What
 that found is OW-26 through OW-31. A further hand-open on 2026-08-14, after
 OW-39 landed, hit the startup freeze recorded as OW-41.
+
+## Observed Codex app-server sandbox default on a bare `thread/start` (OW-pibivi)
+
+**2026-09-12, home server, `codex-cli 0.154.0`, `resources/probes/approval_policy_probe.py`.**
+
+Two cells, added to the probe as its `(d)` question and re-runnable on their own with `python3 resources/probes/approval_policy_probe.py --only d`.
+Both start one thread with `{"ephemeral": true, "cwd": <fresh git workspace>}` and **no `sandbox` key and no `approvalPolicy` key**, and read the `thread/start` response.
+Neither drives a model turn: the whole answer is on that response, so the pair costs no tokens.
+They differ only in how `app-server` itself was spawned — one bare, one carrying the flag sbox injects.
+
+The copied `~/.codex/config.toml`'s key and table names on this run were `model`, `model_reasoning_effort`, a `[projects."…"]` trust entry, a `[notice.model_migrations]` block and two `[plugins."…"]` toggles.
+It sets no sandbox key and no `approval_policy`, which is what licenses reading the values below as app-server's own defaults rather than as this operator's configuration.
+The model read back off both responses was `gpt-5.6-luna`, from that `model` key.
+
+**A bare `thread/start` reports `readOnly`, and the injected CLI flag does not move it.**
+Under `codex app-server` the response reported `sandbox: {"type":"readOnly","networkAccess":false}` and `approvalPolicy: "on-request"`.
+Under `codex --sandbox danger-full-access app-server` — the exact invocation sbox produces — the response reported the same two values, byte for byte.
+So on 0.154.0 the flag is confirmed ignored by `app-server`, and `read-only` is still that path's default.
+The OW-37 measurement on 0.147.0 survives its two version bumps unchanged; the repo was not holding a stale fact here.
+
+**Bare-start and bare-fork defaults genuinely differ, and both were measured on 0.154.0.**
+A bare `thread/start` reports `readOnly` (above); a bare `thread/fork` off a `dangerFullAccess` parent reports `workspaceWrite` (OW-18, same CLI version, section above).
+These are two per-path defaults, not one fact contradicting itself, and reading them side by side is the only way to see that.
+A fork is not falling back to app-server's start default — it is falling back to something else again, and to something *wider* than the start default while still being narrower than its own parent.
+Nothing here was measured about `thread/resume`.
+
+What this means for agentpane.
+Nothing changes in the code: the adapter already passes `sandbox` explicitly on all three thread-creation paths (D7a), which is correct against either default and against both at once.
+What the run buys is that the stated reason for doing so is now true on the installed CLI rather than two versions behind it, and that the `read-only` and `workspaceWrite` numbers standing near each other in `docs/DESIGN.md` are no longer an unacknowledged puzzle.

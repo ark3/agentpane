@@ -590,6 +590,7 @@ Two supporting practices follow, and neither is a promise to re-verify everythin
 
 Prose asserting backend behaviour names the version it was measured on; `AGENTS.md` carries the rule.
 Present tense without a version is the defect this decision is named after: "app-server defaults each thread to `read-only`" was measured on codex-cli 0.147.0 and still read as current after the 0.154.0 run that sat three lines below it in this file.
+That instance was closed on 2026-09-12 by re-measuring it rather than by stamping it — the value had not in fact moved (OW-pibivi) — which is the outcome the rule is indifferent to and the reason it asks for the version either way.
 
 Fixtures are the one place the first group turns into the third without anyone writing a sentence.
 A fixture under `resources/fixtures/` makes two claims: that the reducer handles the shape it holds, which a test proves and which never goes stale, and that the installed CLI still produces that shape, which no test can prove and which the suite nevertheless asserts on every green run.
@@ -729,10 +730,12 @@ Per D7 the server builds the command itself:
 
 - Pi: `direnv exec <workspace> sbox -- pi --mode rpc [--model ...]` — sbox auto-detects the `pi` profile (mounts `~/.pi/agent`), workspace = git root of the spawn cwd.
 - Codex: `direnv exec <workspace> sbox -- codex app-server` — sbox's `codex` profile mounts `~/.codex` rw (so the sqlite state runtime works) and injects `--sandbox danger-full-access`.
-  That injection is keyed on the command name, so it applies to `codex` and not to the surrounding wrapper — but it is a **no-op for `app-server`**, which ignores the CLI flag and defaults each thread to `read-only`.
+  That injection is keyed on the command name, so it applies to `codex` and not to the surrounding wrapper — but it is a **no-op for `app-server`**, which ignores the CLI flag.
   The sandbox policy that actually takes effect is set per `thread/start` by the adapter (OW-37); `danger-full-access` there, since sbox's bwrap jail is already the confinement boundary.
   "Per `thread/start`" is shorthand for all three thread-creation calls — `thread/start`, `thread/resume` and `thread/fork` — each of which carries both the sandbox and `approvalPolicy: "never"`, for the reasons in D7a.
-  `thread/fork` needs `sandbox` spelled out because a fork inherits the parent's `approvalPolicy` but **not** its sandbox, falling back to `workspaceWrite` (OW-18).
+  Spelling it out on each is not symmetry: as of `codex-cli 0.154.0` (measured 2026-09-12, OW-pibivi and OW-18) the two paths fall back to **different** sandboxes when it is omitted, so there is no one default to rely on.
+  A `thread/start` with no `sandbox` key reports `readOnly`, whether or not `app-server` was spawned with the injected flag — the 0.147.0 OW-37 answer, re-measured unchanged.
+  A `thread/fork` with no `sandbox` key reports `workspaceWrite`, a silent widening of the start default and a silent narrowing of the `dangerFullAccess` parent it was forked from; `approvalPolicy`, by contrast, *is* inherited.
 - Claude Code: `direnv exec <workspace> sbox -- claude -p --verbose --input-format stream-json --output-format stream-json --include-partial-messages` — sbox's `claude` profile mounts `~/.claude` and injects `--permission-mode bypassPermissions`.
 - **The server must spawn each subprocess with `cwd` = that session's workspace**, or sbox jails the wrong tree (or refuses if there is no git root), and `direnv` loads the wrong environment.
 

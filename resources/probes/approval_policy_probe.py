@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Approval-policy probe -- what `approvalPolicy` does to Codex's `ServerRequest`s (OW-18).
 
-Three questions, answered live in one run:
+Four questions, answered live in one run:
 
   (a) Does `approvalPolicy: "never"` stop the approval `ServerRequest`s?
       Two threads, same edit-provoking prompt, same `sandbox` -- one started
@@ -20,6 +20,13 @@ Three questions, answered live in one run:
       question, on a `"never"` thread. "We did not see one" is not an answer;
       the record says what was asked and what came back.
 
+  (d) What `sandbox` does a thread started with no `sandbox` key report (OW-pibivi)?
+      Two cells with identical start params, one under a bare `codex app-server`
+      and one under `codex --sandbox danger-full-access app-server`, which is
+      how sbox spawns it. The first reads app-server's own default; the pair
+      reads whether that injected CLI flag reaches the thread at all. Neither
+      drives a model turn -- the answer is on the `thread/start` response.
+
 Every server-initiated request is recorded, with its method and params, in a
 dedicated `server_requests` list before it is answered -- so a cell can report
 which requests arrived, not merely that some did. `fork_probe.py` also appends
@@ -29,9 +36,10 @@ difference.
 
 Usage:  python3 approval_policy_probe.py            # all cells, JSON record on stdout
         python3 approval_policy_probe.py --timeout 150
+        python3 approval_policy_probe.py --only d   # just the no-turn (d) cells
 
-Needs: `codex` on PATH with working credentials. Costs tokens: each cell drives a
-real model turn. Writes no fixtures.
+Needs: `codex` on PATH with working credentials. Writes no fixtures. Costs
+tokens: every cell but the (d) pair drives a real model turn.
 
 Codex needs a *writable* `CODEX_HOME`; the real `~/.codex/{auth.json,config.toml}`
 are copied by name into ONE temp home shared by every cell (never printed; only
@@ -76,10 +84,11 @@ def cli_version(exe):
 class CodexSession:
     """A live `codex app-server` over stdio that records requests before answering."""
 
-    def __init__(self, work, home):
+    def __init__(self, work, home, spawn_flags=()):
+        """`spawn_flags` go between `codex` and `app-server`, where sbox injects its own."""
         env = dict(os.environ, CODEX_HOME=str(home))
         self.proc = subprocess.Popen(
-            ["codex", "app-server"],
+            ["codex", *spawn_flags, "app-server"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, cwd=work, env=env,
         )
@@ -295,6 +304,34 @@ def run_fork_cell(home, timeout, parent_params=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def run_start_only_cell(home, start_params, spawn_flags=()):
+    """Start one thread and report what the response says. No model turn.
+
+    The whole answer is on the `thread/start` response, so these cells drive no
+    turn and cost no tokens. Pass `start_params` with no `sandbox` key to read
+    app-server's own default, and `spawn_flags` to ask whether a CLI flag on the
+    `app-server` invocation moves it (OW-pibivi).
+    """
+    work = new_workspace()
+    s = CodexSession(work, home, spawn_flags=spawn_flags)
+    try:
+        s.request("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None})
+        started = s.request("thread/start", dict(start_params, cwd=work))
+        if "result" not in started:
+            return {"error": "thread/start failed", "response": started}
+        result = started["result"]
+        return {
+            "spawn_argv": ["codex", *spawn_flags, "app-server"],
+            "start_params": {k: v for k, v in start_params.items()},
+            "reported_approval_policy": result.get("approvalPolicy"),
+            "reported_sandbox": result.get("sandbox"),
+            "reported_model": result.get("model"),
+        }
+    finally:
+        s.close()
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def config_toml_keys(path):
     """The top-level key and table names of the copied `config.toml`, no values.
 
@@ -326,6 +363,9 @@ def config_toml_keys(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--only", action="append", default=None,
+                    help="run only cells whose name starts with this (repeatable). "
+                         "The a/b/c cells drive real model turns; the d cells do not.")
     args = ap.parse_args()
 
     # One home for the whole run; the workspace, not the home, is per cell.
@@ -341,29 +381,53 @@ def main():
     }
     danger = {"sandbox": "danger-full-access", "ephemeral": True}
     readonly = {"sandbox": "read-only", "ephemeral": True}
-    try:
-        record["a_default_no_policy"] = run_turn_cell(
-            home, danger, EDIT_PROMPT, args.timeout)
-        record["a_policy_never"] = run_turn_cell(
-            home, dict(danger, approvalPolicy="never"), EDIT_PROMPT, args.timeout)
+    cells = [
+        ("a_default_no_policy",
+         lambda: run_turn_cell(home, danger, EDIT_PROMPT, args.timeout)),
+        ("a_policy_never",
+         lambda: run_turn_cell(home, dict(danger, approvalPolicy="never"),
+                               EDIT_PROMPT, args.timeout)),
         # The control that DOES provoke an approval: the write is outside the
         # sandbox's writable set, so `on-request` has to ask.
-        record["a_control_readonly_no_policy"] = run_turn_cell(
-            home, readonly, EDIT_PROMPT, args.timeout)
-        record["a_readonly_policy_never"] = run_turn_cell(
-            home, dict(readonly, approvalPolicy="never"), EDIT_PROMPT, args.timeout)
-        record["b_fork"] = run_fork_cell(home, args.timeout)
+        ("a_control_readonly_no_policy",
+         lambda: run_turn_cell(home, readonly, EDIT_PROMPT, args.timeout)),
+        ("a_readonly_policy_never",
+         lambda: run_turn_cell(home, dict(readonly, approvalPolicy="never"),
+                               EDIT_PROMPT, args.timeout)),
+        ("b_fork", lambda: run_fork_cell(home, args.timeout)),
         # Disambiguates inherit-vs-default: the parent's policy is not
         # app-server's default here, so an inheriting fork would report "never".
-        record["b_fork_parent_never"] = run_fork_cell(
-            home, args.timeout,
-            parent_params={"sandbox": "danger-full-access", "approvalPolicy": "never"})
-        record["c_user_input_under_never"] = run_turn_cell(
-            home, dict(danger, approvalPolicy="never"), ASK_PROMPT, args.timeout)
-        record["c_user_input_experimental_api"] = run_turn_cell(
-            home, dict(danger, approvalPolicy="never"), ASK_PROMPT2, args.timeout,
-            capabilities={"experimentalApi": True, "requestAttestation": False})
-        record["c_prompts"] = {"default": ASK_PROMPT, "experimental_api": ASK_PROMPT2}
+        ("b_fork_parent_never",
+         lambda: run_fork_cell(
+             home, args.timeout,
+             parent_params={"sandbox": "danger-full-access", "approvalPolicy": "never"})),
+        ("c_user_input_under_never",
+         lambda: run_turn_cell(home, dict(danger, approvalPolicy="never"),
+                               ASK_PROMPT, args.timeout)),
+        ("c_user_input_experimental_api",
+         lambda: run_turn_cell(home, dict(danger, approvalPolicy="never"),
+                               ASK_PROMPT2, args.timeout,
+                               capabilities={"experimentalApi": True,
+                                             "requestAttestation": False})),
+        ("c_prompts", lambda: {"default": ASK_PROMPT, "experimental_api": ASK_PROMPT2}),
+        # (d) What sandbox does a thread started with NO `sandbox` key report?
+        # The pair is the point: the same start params under a bare `app-server`
+        # and under the one sbox spawns, which carries `--sandbox
+        # danger-full-access`. Equal values say the CLI flag is ignored; unequal
+        # values say it is not. Read alongside `copied_config_keys`, which has to
+        # show no sandbox key, or the value is the operator's config rather than
+        # app-server's default.
+        ("d_bare_start_bare_server",
+         lambda: run_start_only_cell(home, {"ephemeral": True})),
+        ("d_bare_start_flagged_server",
+         lambda: run_start_only_cell(home, {"ephemeral": True},
+                                     spawn_flags=("--sandbox", "danger-full-access"))),
+    ]
+    try:
+        for name, cell in cells:
+            if args.only and not any(name.startswith(pre) for pre in args.only):
+                continue
+            record[name] = cell()
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
