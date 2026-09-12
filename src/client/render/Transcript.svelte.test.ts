@@ -390,6 +390,21 @@ describe("Transcript", () => {
 		expect(container.querySelector("[data-reading-tail]")).toBeNull();
 	});
 
+	it("does not call a fully elided transcript empty (OW-pezero)", async () => {
+		// Reading view drops all tool chrome, so a transcript that is nothing but
+		// an orphan tool result condenses to zero entries -- but it is not empty,
+		// and saying so hides that there is something to go and look at.
+		const messages = orphanResult.slice(0, 1);
+		const { container, rerender } = render(Transcript, { props: { messages, reading: true } });
+		expect(container.querySelector(".empty")).toBeNull();
+		expect(container.querySelector("[data-reading-elided]")).not.toBeNull();
+
+		await rerender({ messages, reading: false });
+		await tick();
+		expect(container.querySelector("[data-reading-elided]")).toBeNull();
+		expect(roles(container)).toEqual(["tool-result"]);
+	});
+
 	it("says something sensible when there is nothing to show", () => {
 		const { container } = render(Transcript, { props: { messages: [] } });
 		expect(container.querySelector(".empty")).not.toBeNull();

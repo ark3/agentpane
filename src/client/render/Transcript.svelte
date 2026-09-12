@@ -64,10 +64,19 @@
 		</p>
 	{/if}
 
-	{#if isStreaming && view.entries.length === 0 && !tailStatus}
+	{#if view.entries.length === 0 && fullView.entries.length > 0}
+		<!--
+			Everything there is to read got elided (OW-pezero): a transcript that
+			is only an orphan tool result, or only tool calls and thinking, leaves
+			reading view with no entries. It is not empty, and the empty-state
+			wording below would claim it is.
+		-->
+		{#if !tailStatus}
+			<p class="elided" data-reading-elided>Reading view is hiding this session's tool activity and thinking.</p>
+		{/if}
+	{:else if isStreaming && view.entries.length === 0 && !tailStatus}
 		<p class="waiting">Waiting for the agent…</p>
-	{/if}
-	{#if !isStreaming && view.entries.length === 0}
+	{:else if !isStreaming && view.entries.length === 0}
 		<p class="empty">No messages yet.</p>
 	{/if}
 </div>
@@ -86,7 +95,8 @@
 	}
 
 	.waiting,
-	.empty {
+	.empty,
+	.elided {
 		margin: 0;
 		color: var(--ap-fg-subtle);
 		font-size: var(--ap-text-sm);
