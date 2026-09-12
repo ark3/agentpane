@@ -1737,6 +1737,22 @@ describe("App", () => {
 		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 	});
 
+	it("disables the submit button while a send is in flight (OW-mutuya)", async () => {
+		// `send()` already refuses a press off `view.sending`; the button has to
+		// say so rather than silently swallowing it.
+		const controller = new FakeController(view({ draft: "Summarize the diff" }));
+		render(App, { props: { controller } });
+		expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+
+		controller.publish(view({ draft: "Summarize the diff", busy: "submitting", sending: true }));
+		await tick();
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+		controller.publish(view({ draft: "Summarize the diff" }));
+		await tick();
+		expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+	});
+
 	it("submits on Ctrl-Enter and Cmd-Enter but inserts a newline on plain Enter", async () => {
 		const controller = new FakeController(view({ draft: "Summarize the diff" }));
 		render(App, { props: { controller } });

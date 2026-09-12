@@ -1358,7 +1358,7 @@
 						{streamingAction ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft || compaction !== null}>{sendLabel}</button>
+				<button type="submit" disabled={!view.draft || view.sending || compaction !== null}>{sendLabel}</button>
 				{#if streamingAction}
 					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
 				{/if}
