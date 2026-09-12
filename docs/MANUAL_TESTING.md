@@ -1492,6 +1492,32 @@ Under the `danger-full-access` sandbox agentpane actually uses, no approval aros
 The fork finding is the one that changes code: carrying `sandbox` on `thread/fork` is not symmetry for its own sake, it repairs a downgrade to `workspaceWrite` that a fork was silently taking.
 See D7a.
 
+## Observed Codex `turn/steer` against a live turn (OW-tifuha)
+
+**2026-09-12, home server, `codex-cli 0.154.0`, `codex app-server` over stdio, model pinned to `gpt-5.6-luna` on the `turn/start` params.**
+
+`resources/probes/codex_turn_probe.py` was extended for this and carries the run: after its original short turn it starts a second turn asking for the integers 1 through 200 one per line, waits until that turn is visibly streaming — a `turn/started` naming the turn id plus at least 20 `item/agentMessage/delta` notifications — and then sends `turn/steer` with `{ threadId, expectedTurnId, input }`.
+Re-run it with `python3 resources/probes/codex_turn_probe.py`; it needs `codex` on PATH and copies `~/.codex/{auth.json,config.toml}` into a writable temp `CODEX_HOME` the way it already did.
+
+**`turn/steer` succeeded.**
+Fired after 29 deltas against turn `01a093cb-a92b-7ef3-8ac2-02cadd2bb65e`, the response was a result, not an error, and it named that same turn:
+
+```json
+{"id": 5, "result": {"turnId": "01a093cb-a92b-7ef3-8ac2-02cadd2bb65e"}}
+```
+
+**The steered text lands inside the running turn; no second turn opens.**
+Every notification after the steer carried `turnId` `01a093cb-a92b-7ef3-8ac2-02cadd2bb65e`: an `item/started`/`item/completed` pair for the steered `userMessage`, then a `reasoning` item, then a second `agentMessage` whose completed text was exactly the steer's marker `steered-marker-ow-tifuha`.
+Exactly one `turn/completed` arrived for that turn, and its `turn.items` summary held the *steered* answer rather than the enumeration.
+Over the whole run the census was two `turn/started` and two `turn/completed` for the two `turn/start` calls — the steer added none.
+
+One caveat on what was *not* shown: the model had already emitted its complete 1-to-200 enumeration and that first `agentMessage` completed before the steered `userMessage` item appeared, so this run does not show a steer cutting an in-flight assistant message short.
+It shows the request being accepted mid-turn and its content answered within the same turn, which is what D16 needs.
+
+This is the opposite of Claude Code 2.1.267's answer two sections up, where `steer` is an unsupported control subtype.
+Codex's rejection of a mid-turn `submit()` was therefore the adapter's own choice and not a protocol limit; `submit` now sends `turn/steer` when a turn is active.
+`compact` keeps its rejection for an unrelated reason: `compact` is one of the two `NonSteerableTurnKind`s (`resources/codex-protocol/v2/NonSteerableTurnKind.ts`), so steering a compaction is protocol-impossible.
+
 ## Still unverified
 
 Tracked as work items under `docs/work/open/`, not restated here:

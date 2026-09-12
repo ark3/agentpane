@@ -31,7 +31,10 @@ Note: Codex needs a *writable* `CODEX_HOME` with valid auth. The script copies
 your real `~/.codex/{auth.json,config.toml}` into a temp home because the
 sandbox makes `~/.codex` read-only. It cleans up the temp copy on exit.
 
-Verified with: `codex-cli` 0.147.0.
+It also proves (OW-tifuha) that **`turn/steer` works against a live turn**: fired mid-stream with `expectedTurnId` set to the active turn, it returns that same turn id and its text is answered inside that turn, opening no second turn.
+Extend the wait or the prompt if a faster model finishes before the steer lands.
+
+Verified with: `codex-cli` 0.147.0; the steer phase with `codex-cli` 0.154.0 on 2026-09-12.
 
 ## `agentpane_codex_smoke.py`
 
