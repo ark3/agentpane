@@ -1,5 +1,6 @@
 ---
 labels: [change, now]
+closed: done
 ---
 
 # The Send and fork buttons stay enabled while a send is in flight
@@ -35,3 +36,23 @@ So the second branch of "Done when" below is closed off: this card lands the cha
 The button's disabled state reflects `view.sending`, and a test in `src/client/App.test.ts` asserts it — the button is enabled with a draft, disabled while a send is in flight, and enabled again once it settles; it fails before the change.
 
 Or the decision goes the other way and the card closes `--declined` with the reason written where the disabled condition is, so the next reader stops re-asking.
+
+## Close note
+
+Landed as fd98325 on `main` (implementer's 0c01211, cherry-picked unamended).
+
+One term added to the composer's submit button in `src/client/App.svelte`: `disabled={!view.draft || view.sending || compaction !== null}`.
+That is the whole behaviour change.
+`sendLabel` makes Send, Fork and "Stop and fork" three labels on one control, so the single term covers all three; the guard `if (view.sending) return;` at the top of `send()` is untouched, and Ctrl/Cmd-Enter still refuses off the same flag with nothing greyed.
+
+Verified: `src/client/App.test.ts`, "disables the submit button while a send is in flight (OW-mutuya)" — enabled with a draft, disabled after a publish carrying `sending: true`, enabled again once it drops.
+Shown red first by the dispatching session's own run against the un-amended expression (`expect(element).toBeDisabled()` / "Received element is not disabled"), green after.
+`bun run check` clean (49 files, 1023 tests, 20.7s) and `bun run test:browser` clean (20 passed), the latter because the change is in the composer's action row.
+
+An adversarial reader checked the two questions worth checking and found no defect.
+The abort path in "Stop and fork" mode does not need this button: the dedicated `Stop` button beside it is never disabled, and `forkAndSubmit` in `src/client/controller.ts` re-checks `isStreaming` and aborts before forking.
+`sending` cannot strand true — both setters sit immediately before a `try` and both clears are in the matching `finally`, so every mid-body early return still clears it.
+
+Noted, not filed: `sending` is global rather than per-session, so switching sessions mid-send now greys that session's button visibly. That is the pre-existing `send()` lock becoming visible, which is the point of the card, not a new behaviour.
+
+The "Or the decision goes the other way" branch of the done-condition was already closed off by the card's own 2026-09-11 amendment, so it had nothing to discharge.
