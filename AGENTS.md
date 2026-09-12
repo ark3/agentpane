@@ -60,6 +60,8 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   See `docs/MANUAL_TESTING.md` OW-yudoni.
 - Claude Code mid-turn handling settled live on the home server (2026-09-10, `claude 2.1.267`, explicit `--model haiku`): a stream-json user message written during a turn is acknowledged only after the first `result` and runs as a second turn, while a `steer` control request errors as unsupported.
   The adapter therefore rejects `submit()` and `/compact` while a turn is active; see `docs/MANUAL_TESTING.md` OW-jihete.
+- Claude Code mid-stream fork behaviour settled live on the home server (2026-09-11, `claude 2.1.268`, explicit `--model haiku`): the parent's streaming partial never reaches its store file, so agentpane's abort loses all of it, but the parent turn itself survives a fork spawned as a second child and writes its whole reply durably.
+  The loss is agentpane's kill, not the CLI's; see `docs/MANUAL_TESTING.md` OW-japuzo.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.

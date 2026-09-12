@@ -615,6 +615,95 @@ So on Codex the parent turn survives a mid-stream `thread/fork` and finishes nor
 The asymmetry D15 assumed on an inference is real and now measured.
 D15's abort remains a deliberate choice on the Codex side rather than a necessity; whether to keep it is a separate decision this run does not take.
 
+### A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)
+
+Run on the home server 2026-09-11, `claude 2.1.268`, explicit `--model haiku` resolved by the CLI as `claude-haiku-4-5-20251001`, by a probe written for this: `python3 resources/probes/claude_fork_probe.py`, whose two cells are `--cell kill` and `--cell fork`.
+It is a separate file from `fork_probe.py` because that probe's cells are JSON-RPC clients where a fork is one request on a live server, and Claude Code has no RPC surface for a fork at all — a fork there is a process spawn carrying `--fork-session`.
+
+This is the third and last backend to be asked D15's question.
+D15 is headed "agentpane stops a streaming turn before forking it, on every backend" and reasons about Pi and Codex only; Claude Code does not appear in it once.
+The abort is client-side and backend-agnostic (`src/client/controller.ts` `forkAndSubmit`, the `isStreaming` check), so it has always applied to Claude too, and nothing had ever looked at what it costs there.
+
+**The command line differs from production, deliberately.**
+Production spawns `direnv exec <cwd> sbox -- claude -p ...` (`claude/process.ts` `buildClaudeSpawnCommand`), but `direnv` is not on PATH on the home server, so the probe spawns `claude` directly and passes by hand the `--permission-mode bypassPermissions` that sbox injects — the same substitution every earlier Claude capture used (`resources/fixtures/claude/*.meta.json`).
+It also passes `--tools ""`, which production does not.
+Neither deviation reaches what is measured here.
+What sbox changes is filesystem reach, and store flush timing, process lifetime and delta arrival do not go through it.
+`--tools ""` is there because the first run of this probe was silently unearned: asked for the integers 1 through 400, haiku called `Bash` and then streamed an 88-character "the counting is complete" coda, so the six text deltas the cell waited for were the end of the turn and the kill landed after it had finished.
+Text streaming is the whole subject, so the prompt has to be answered by generating text.
+The exact line, both cells, was `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-mode bypassPermissions --tools "" --model haiku --session-id <uuid>`, in a throwaway git repository under the temp area so the probe's sessions land in their own `~/.claude/projects/` directory and never in this repo's.
+
+**Streaming was confirmed before each action, not assumed.**
+Each cell waits for a `stream_event`/`message_start` on the parent plus forty accumulating `content_block_delta` text deltas with no `result` yet, re-reads the buffer at the instant of the action to confirm the turn still has not settled, and records `result: "unearned"` with a non-zero exit if any of that is missing.
+Both runs saw `message_start` and 41 deltas, and both were still streaming at the action itself.
+The threshold is forty rather than the Codex cell's five for the reason the tool-call run showed: a low threshold cannot tell the answer streaming from the coda after it, and that failure mode is silent.
+
+#### 1. The partial reply is not on disk when the kill lands
+
+The `kill` cell reproduces what `claude/adapter.ts` `fork()` does today: `replaceProcess` sets `previous.live = false`, rejects the pending controls, and awaits `previous.proc.kill()` before respawning.
+The cell kills the same way `ChildClaudeProcess.kill()` does — stdin closed, SIGTERM, a two-second grace, SIGKILL — and SIGTERM was enough both times (exit code 143, no escalation).
+
+At the kill the parent had streamed 535 characters of the count.
+Its store file had gained **four** lines since the priming turn quiesced: two `queue-operation`, one `user` with a text block, one `attachment`.
+That is the prompt going in.
+**No assistant content of any kind — not a text block, not a thinking block, not a partial.**
+The file went from 20 lines and `5e1a6035…` after the prime to 24 lines and `2f86686a…` at the kill, and the kill itself added exactly one more line, a `last-prompt`, for 25 lines and `043df66d…`.
+That closing read is quiesced rather than sampled once, so it is not a snapshot that outran a dying writer; nothing further arrived.
+
+The census does detect assistant text when there is any: in the contaminated first run, where the turn completed around the kill, the same code reported an `assistant:text` line of 109 characters landing in exactly that window.
+So the null here is the CLI's behaviour and not an artifact of how the lines are read.
+
+The `fork` cell puts a sharper point on it.
+Its first version read the parent's store the instant the parent's `result` event arrived and saw a byte-identical file — the whole reply landed **after** `result`, not before it.
+On 2.1.268 a `claude -p` session's assistant message reaches `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` only when the turn ends, and slightly after the wire says it has.
+There is no window in which a killed turn's partial survives.
+
+**So the loss is total, and it matches Pi's in effect while differing from it in cause.**
+On Pi the CLI abandons the turn whatever the client does (OW-yudoni).
+On Claude the CLI would have finished it; agentpane kills the process hosting it.
+
+#### 2. The parent turn survives a fork spawned beside it
+
+The `fork` cell leaves the first child running and spawns the fork as a **second** child: `--resume <parent-id> --resume-session-at <entry-uuid> --fork-session --session-id <uuid>`.
+Nothing in `adapter.ts` was changed; this establishes what the CLI permits before anyone decides what the adapter should do with it.
+
+The parent finished normally with a second child alive beside it.
+After the fork mark it emitted a further **160** text deltas and then `result` with `subtype: "success"` and `is_error: false`.
+Its store went from 24 lines and `17e4541b…` to 26 lines and `cd4351bf…`, gaining one `assistant:thinking` line and one `assistant:text` line of **1491** characters beginning `1\n2\n3…` and ending `…398\n399\n400` — the whole answer, durably, in the session agentpane lists.
+That delta count is a floor: the mark is taken at the spawn, so anything streamed while the second process was starting is counted against the parent's post-fork total rather than hidden, but nothing streamed before the mark is.
+
+The fork came up as a genuine session rather than a process that merely started.
+It adopted the session id it was given (7,545 ms to `system:init`, `init.session_id` equal to the uuid passed), answered its own prompt with `BETA` and `result` `subtype: "success"` while the parent was still counting, and has its own 24-line store file.
+Two `claude` children with live turns overlapped on the same workspace, one resuming the other's store file mid-write, and neither reported an error.
+
+#### What this means for D15
+
+**Claude sits on Codex's side of the line.**
+The parent turn is capable of surviving a fork; what ends it is agentpane's kill, not the CLI.
+Pi is the only backend where the loss is forced.
+
+That makes D15's uniformity argument harder rather than easier, in two ways.
+Its remaining case is "Pi cannot be brought to match, so the alternative is a permanent split" — and the split is now one backend against two, not one against one.
+And the cost of the abort is larger on Claude than the Codex run made it look.
+D15 records that on Codex the surviving turn "wrote its whole reply durably into the parent's rollout" and so the tokens are spent either way; on Claude the killed turn writes nothing at all, so agentpane's abort destroys a reply that would otherwise have landed.
+
+**Where the distinction does not survive contact** is the shape of the survival.
+Codex survives by construction: one app-server process hosts many threads, `thread/fork` mints a thread beside the parent, and there is nothing to kill.
+Claude would survive only by running two processes at once, which is a thing the CLI allows and the adapter does not do.
+So "Claude is like Codex" is true of the backend and not yet true of anything agentpane could ship.
+
+#### What this run does not establish
+
+It measured one workspace, one model, and one fork point, on two turns each.
+It shows that a surviving parent is available on Claude Code, not that nothing can make it behave otherwise.
+It also did not fork *into* the streaming turn: the fork point is the last store entry from the priming turn, which is the same exclusion `codex/adapter.ts` `fork()` makes, so it measured the range production would ask for.
+
+**Open, and not designed around here: whether a second concurrent child is cheap in the adapter.**
+The CLI permits it; the adapter is written for one child.
+`Ownership` is a single nullable field on `ClaudeAdapter` and `replaceProcess` is written as a swap over it; the control channel has one `controlNamespace` and one `pendingControls` map per adapter, which `replaceProcess` rejects wholesale on a fork; and `SessionManager.fork`'s docblock records that Claude "takes Pi's path here" through `#adoptRef`, re-keying the session table because `adapter.ref` changes.
+A surviving-parent fork would take Codex's path instead — the adapter's own `ref` unchanged, the returned ref naming a session this adapter is not driving — and something would then have to drive that session.
+Whether that is a small change or a real refactor is a question for whoever takes the decision; this run only removes the reason to assume the backend forbids it.
+
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
 Recorded 2026-08-18. Two separate things: what headless Chromium refuses to
