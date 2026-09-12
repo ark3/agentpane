@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # `unmappedItemTypes` collects every item that produced no message, so it holds `reasoning` in every ordinary session and the silent/unknown distinction beside it is computed and thrown away.
@@ -56,3 +57,22 @@ a deliberately silent one -- and spends the rename on the symptom.
 - `bun run check` passes.
 
 Filed from OW-vefiso's close, which found it and did not fix it.
+
+## Close note
+
+`unmappedItemTypes` now collects only genuinely unknown Codex item types.
+
+`MappedItem`'s `none` variant carries `unknownType?: true` beside `reason`; `mapItem`'s default arm sets it only for a type outside `SILENT_ITEM_TYPES`, and `CodexReducer.remap` collects on that flag rather than on `kind === "none"`.
+The `empty reasoning` and `unrendered item type` cases no longer enter the set, so `"reasoning"` — which landed there in essentially every ordinary session — is gone from it.
+Not renamed, per the card.
+Docblocks at both sites (`MappedItem`'s `none` variant, the `unmappedItemTypes` field) now say what the set holds and why the other two `none` cases are excluded, citing OW-mezeso.
+
+Verified: a new test in `src/server/adapters/codex/reducer.test.ts` ("does not report a hidden reasoning item's type as unmapped") replays the `text` fixture, asserts it actually contains reasoning items, and asserts `"reasoning"` is absent from the set.
+Watched red independently in the dispatching session by reverting only the `remap` line — `expected true to be false` at that assertion — then green with it restored; the fixture was not touched.
+The `quantumEntanglement` assertion and the `it.each` over the silent types still hold.
+`bun run check` passes: 49 files, 1025 tests, 20.5s.
+
+Commit 59a1a79 on `main`.
+
+Noted, not acted on: every reasoning item across the fixture corpus is the hidden kind (`text` 2/2 hidden, `tool-edit` 6/6 hidden, `tool-read` none), so `mapItem`'s `kind: "single"` arm for a reasoning item with text is exercised only by unit tests over `mapItem`, never by a replay.
+`unmappedItemTypes` and `MappedItem.reason` still have no reader outside their definitions and the one call site — the set remains diagnostics-only, which the card scoped deliberately.
