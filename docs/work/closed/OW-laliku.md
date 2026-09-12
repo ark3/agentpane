@@ -50,3 +50,6 @@ Both halves of the code disposition this card asked for are in place, not one or
 The evidence is in `docs/MANUAL_TESTING.md`, "Observed Codex approval policy, and what a fork carries (OW-18)", under "A fork inherits `approvalPolicy` but not `sandbox`". It is not in `fork_probe.py`, which this card nominated as the vehicle: the OW-18 run needed a harness that records each server-initiated request with its method and params before answering it, and `fork_probe.py` answers every server request uniformly and keeps no separate record, so the cells went into a new `resources/probes/approval_policy_probe.py` instead. Re-recording the fork read in `fork_probe.py` would be a second copy of the same fact, which is why it was not done.
 
 Landed on `main` in cfa716a..1c3aca9.
+
+Re-measured on 2026-09-12 under OW-pibivi: the `read-only` default this card's body quotes off the `codexCommand` docblock still held on `codex-cli 0.154.0`, with the injected CLI flag confirmed ignored.
+That docblock, `docs/DESIGN.md` and `docs/HANDOFF.md` now carry the version; the body above quotes the unversioned wording it had when this card was written.
