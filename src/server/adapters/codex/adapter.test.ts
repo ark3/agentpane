@@ -692,6 +692,44 @@ describe("CodexAdapter turns", () => {
 		});
 	});
 
+	it("refuses to steer a compaction turn, and sends nothing on the wire (OW-tifuha)", async () => {
+		// `compact` is one of the two `NonSteerableTurnKind`s, and a compaction
+		// runs as its own turn (`resources/fixtures/codex/compact.jsonl`: a
+		// `turn/started` brackets the `contextCompaction` item), so the adapter
+		// holds a `turnId` naming a turn app-server will refuse to steer. Steering
+		// it would turn a well-defined "busy" into an opaque wire error -- exactly
+		// what `compact`'s own guard exists to prevent.
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-compaction-turn" });
+		proc.emit({
+			method: "turn/started",
+			params: {
+				threadId: "thread-compaction-turn",
+				turn: {
+					id: "turn-compaction",
+					items: [],
+					itemsView: "notLoaded",
+					status: "inProgress",
+					error: null,
+					startedAt: 1,
+					completedAt: null,
+					durationMs: null,
+				},
+			},
+		});
+		proc.emit({
+			method: "item/started",
+			params: {
+				threadId: "thread-compaction-turn",
+				item: { type: "contextCompaction", id: "item-compaction" },
+			},
+		});
+
+		await expect(adapter.submit("steer the compaction")).rejects.toThrow(
+			"codex adapter cannot submit while a turn is active",
+		);
+		expect(methods(proc)).not.toContain("turn/steer");
+	});
+
 	it("compacts an idle thread via thread/compact/start with just the thread id (OW-72)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact" });
 		const updates: ("requesting" | "running" | null)[] = [];

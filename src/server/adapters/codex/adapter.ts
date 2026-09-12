@@ -302,11 +302,22 @@ export class CodexAdapter implements BackendAdapter {
 		// second turn.
 		//
 		// `expectedTurnId` is a precondition app-server enforces, so this needs
-		// a turn id it knows is live: `turnId` is exactly that, set only from a
-		// lifecycle-corroborated id. A `turnBusy` with no id is a submission the
-		// adapter cannot name, so there is nothing to steer and the rejection
-		// stands.
-		if (this.turnId) {
+		// a turn id it knows is live: `turnId` is exactly that, set only from an
+		// unambiguously correlated id -- a `turn/started` notification, or a
+		// `turn/start` response whose candidate nothing contradicts. A `turnBusy`
+		// with no id is a submission the adapter cannot name, so there is nothing
+		// to steer and the rejection stands.
+		//
+		// A compaction is the one live turn that must not be steered: `compact` is
+		// one of the two `NonSteerableTurnKind`s, and a compaction runs as its own
+		// turn (`resources/fixtures/codex/compact.jsonl` -- a `turn/started`
+		// brackets the `contextCompaction` item), so `turnId` names a turn
+		// app-server will refuse. The client disables Send while compaction is
+		// showing, but a threshold compaction nobody asked for, a second client,
+		// and `POST prompt` all reach here; without this the well-defined "busy"
+		// becomes an opaque wire error, which is what `compact`'s own guard below
+		// exists to prevent.
+		if (this.turnId && !this.reducer.getState().compaction) {
 			await client.request("turn/steer", { threadId, input, expectedTurnId: this.turnId });
 			return;
 		}
