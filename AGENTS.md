@@ -7,7 +7,8 @@ Work items are cards, in the deck at `docs/work/`, read and written through the 
 
 `bun install` first.
 Runtime is Bun, tests are vitest.
-`bun run check` (typecheck + svelte-check + all tests, ~25s) must pass before any commit touching `src/`; say so explicitly when a commit is docs only.
+`bun run check` (svelte-check, which also typechecks the plain `.ts` files, plus all tests) must pass before any commit touching `src/`; say so explicitly when a commit is docs only.
+It is kept fast enough to run before every commit -- about 40s on the home server's 4 cores as of 2026-09-11 -- and a run that drifts well past that is a defect to profile, not a reason to skip it.
 The `test` script pins `TZ=Asia/Kolkata`, a half-hour-offset zone that makes both the clock and the offset arithmetic visible in time assertions (OW-70); running `vitest` directly, without the pin, fails those tests.
 
 `bun run test:browser` runs the Playwright vehicle in `e2e/` (~30s, headless Chromium).
