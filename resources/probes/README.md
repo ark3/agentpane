@@ -218,19 +218,36 @@ python3 claude_fork_probe.py --cell kill # one of them
 ```
 
 `--cell kill` reproduces the kill `claude/adapter.ts` `fork()` performs today — `replaceProcess` then `ChildClaudeProcess.kill()`, SIGTERM and a grace and SIGKILL — and asks whether the streaming partial had reached `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` before it landed.
-`--cell fork` spawns the fork as a **second** child instead of replacing the first and asks whether the parent turn survives.
+`--cell fork` spawns the fork as a **second** child instead of replacing the first and asks whether the parent turn survives, reading the parent's store both the instant its `result` is seen and again once the writer has quiesced.
 That second cell is a probe and not a proposal: it changes nothing in `adapter.ts`, because the point is to establish the behaviour before anyone decides whether the adapter should work that way.
 
 Separate from `fork_probe.py` rather than a third `--backend` in it: that probe's cells are JSON-RPC clients where a fork is one request on a live server, and Claude Code has no RPC surface for a fork at all — it is a process spawn carrying `--fork-session`, over an unmatched NDJSON stream with no request ids.
 
-The streaming discipline is `fork_probe.py`'s `codex_fork_mid_stream` cell's, and it is the load-bearing part: `message_start` plus forty accumulating text deltas, a re-check that the turn still has not settled at the instant of the action, and `result: "unearned"` with a non-zero exit if any of it is missing.
-Forty rather than five because the first run showed what a low threshold cannot see: haiku answered the counting prompt by calling `Bash` and streamed only a short coda, so the action landed after the turn had finished and nothing said so.
-Hence `--tools ""`, which production does not pass.
-The probe also spawns `claude` directly rather than through `direnv exec <cwd> sbox`, which is not available on the home server, and passes by hand the `--permission-mode bypassPermissions` that sbox injects.
+The streaming discipline comes from `fork_probe.py`'s `codex_fork_mid_stream` cell: `message_start` plus accumulating text deltas before the action, and `result: "unearned"` with a non-zero exit when they are missing.
+Two parts are **additions rather than inheritance**, and both close gaps that cell has too.
+`still_streaming` re-reads the buffer at the instant of the action, where `codex_fork_mid_stream` acts straight off `await_streaming`'s return and gates only on `streaming_confirmed`.
+And the "unearned" gate covers the disk read, not just the wire: an unresolved store file, a baseline that does not exist, or a store whose existing lines changed under the cell all fail it.
+That last one matters because the headline finding is an *absence* on disk, and a file that was never found produces the identical absence.
 
-Writes no fixtures. A throwaway git workspace per cell under the temp area, removed on exit, which keeps the probe's sessions in their own `~/.claude/projects/` directory rather than this repo's; the store files themselves are left where the CLI put them. Costs tokens: each cell drives two real model turns, one of them long.
+The delta threshold is forty rather than the Codex cell's five, and the `kill` cell samples the store at four marks across the reply rather than one.
+Both come from runs that went wrong.
+A low threshold cannot tell the answer streaming from the coda after it: asked for the integers 1 through 400, haiku called `Bash` and then streamed a short "the counting is complete" summary, so the action landed after the turn had finished and nothing said so.
+And one mid-turn sample cannot tell "the store never gains assistant text mid-turn" from "it had not gained any at the one point we looked".
 
-Verified with: `claude` 2.1.268 on explicit `--model haiku`. What it showed is `docs/MANUAL_TESTING.md`, "A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)".
+`--tools ""` is there to remove the tool shortcut, and production does not pass it.
+What the flag does was checked directly on 2.1.268: with it, `system:init` advertises no built-in tools and the model answers that it has no `Bash` tool available.
+It does **not** remove MCP tools, which `init.tools` still lists, so this probe's records are sensitive to the operator's MCP configuration and the cells report their gained-line census by kind partly so a stray `tool_use` would be visible.
+
+The probe spawns `claude` directly rather than through `direnv exec <cwd> sbox`, which is not available on the home server.
+It passes by hand the `--permission-mode bypassPermissions` that sbox injects, as 10 of the 11 captures under `resources/fixtures/claude/` do.
+
+Writes no fixtures.
+A throwaway git workspace per cell under the temp area, removed on exit, which keeps the probe's sessions in their own `~/.claude/projects/` directory rather than this repo's.
+The store files themselves are left where the CLI put them.
+Costs tokens: each cell drives two real model turns, one of them long.
+
+Verified with: `claude` 2.1.268 on explicit `--model haiku`.
+What it showed is `docs/MANUAL_TESTING.md`, "A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)".
 
 ## Why these live here
 
