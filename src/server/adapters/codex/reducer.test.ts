@@ -812,6 +812,19 @@ describe("defensive handling", () => {
 		expect(r.unmappedItemTypes.has("quantumEntanglement")).toBe(true);
 	});
 
+	it("does not report a hidden reasoning item's type as unmapped", () => {
+		// Every fixture's reasoning items arrive with empty summary and content,
+		// which maps to `kind: "none"` by design. Collecting those alongside a
+		// type Codex invented since we last looked would make an unknown type
+		// invisible in the ordinary case.
+		const { reducer } = replay("text");
+		const reasoning = byMethod(readFixture("text"), "item/completed")
+			.map(itemOf)
+			.filter((item) => item.type === "reasoning");
+		expect(reasoning.length).toBeGreaterThan(0);
+		expect(reducer.unmappedItemTypes.has("reasoning")).toBe(false);
+	});
+
 	it.each([
 		"subAgentActivity",
 		"hookPrompt",

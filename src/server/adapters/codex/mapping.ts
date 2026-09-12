@@ -64,8 +64,17 @@ export const CODEX_TOOL_NAMES = {
 export type MappedItem =
 	| { kind: "single"; message: AgentMessage }
 	| { kind: "tool"; call: AssistantMessage; result: ToolResultMessage | null }
-	/** Nothing to show yet (or ever). `reason` is for diagnostics only. */
-	| { kind: "none"; reason: string };
+	/**
+	 * Nothing to show yet (or ever). `reason` is for diagnostics only.
+	 *
+	 * `unknownType` is the load-bearing half: it is set only when Codex sent an
+	 * item type this mapper has never heard of, which is the one case that says
+	 * Codex moved and the table has not caught up. A hidden reasoning item and a
+	 * deliberately silent type are also `kind: "none"`, and folding them in with
+	 * it made "reasoning" a member of the reducer's unmapped set in every
+	 * ordinary session (OW-mezeso).
+	 */
+	| { kind: "none"; reason: string; unknownType?: true };
 
 /** Everything `mapItem` needs that is not on the item itself. */
 export interface MapContext {
@@ -541,10 +550,8 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 
 		default: {
 			const type = item.type;
-			return {
-				kind: "none",
-				reason: SILENT_ITEM_TYPES.has(type) ? `unrendered item type: ${type}` : `unknown item type: ${type}`,
-			};
+			if (SILENT_ITEM_TYPES.has(type)) return { kind: "none", reason: `unrendered item type: ${type}` };
+			return { kind: "none", reason: `unknown item type: ${type}`, unknownType: true };
 		}
 	}
 }

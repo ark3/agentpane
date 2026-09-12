@@ -87,9 +87,14 @@ export class CodexReducer {
 	threadId: string | null = null;
 	turnId: string | null = null;
 	/**
-	 * Item types seen but not rendered. Diagnostics only -- an unknown item must
-	 * never be an error, because Codex adds `ThreadItem` variants between
-	 * releases and the session would die on a routine upgrade.
+	 * Item types Codex sent that this build has no mapping for. Diagnostics only
+	 * -- an unknown item must never be an error, because Codex adds `ThreadItem`
+	 * variants between releases and the session would die on a routine upgrade.
+	 *
+	 * Only genuinely unknown types land here. The other two ways an item maps to
+	 * nothing -- a hidden reasoning item, and the types in `SILENT_ITEM_TYPES` --
+	 * are working as designed, and collecting them would bury the one signal this
+	 * set exists to carry (OW-mezeso).
 	 */
 	readonly unmappedItemTypes = new Set<string>();
 
@@ -322,7 +327,7 @@ export class CodexReducer {
 		const mapped = mapItem(slot.item, ctx);
 		let next: AgentMessage[];
 		if (mapped.kind === "none") {
-			this.unmappedItemTypes.add(slot.item.type);
+			if (mapped.unknownType) this.unmappedItemTypes.add(slot.item.type);
 			next = [];
 		} else if (mapped.kind === "single") {
 			next = [mapped.message];
