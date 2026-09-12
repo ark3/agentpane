@@ -603,7 +603,7 @@ def cell_kill_mid_stream(timeout):
             "message_start_seen": streaming["message_start_seen"],
             # Named for WHERE they were taken. These are the first sample's
             # numbers, at the moment `await_streaming` crossed its threshold,
-            # and the kill is now four marks later -- calling them
+            # and the kill lands three marks later -- calling them
             # "before_kill" invited reading them as the state at the kill,
             # which they never were. The count is the first poll past
             # MIN_DELTAS, not a chosen value.

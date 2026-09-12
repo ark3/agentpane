@@ -658,10 +658,10 @@ All four marks landed mid-turn, and the file was **byte-identical at every one o
 
 The four lines gained by the first mark are the prompt going in.
 **No assistant content of any kind — not a text block, not a thinking block, not a partial — appeared at any mark**, across 41 to 160 deltas and 230 to 1163 characters, the latter about 78% of the 1491-character reply this prompt eventually produces.
-The file had 20 lines and `5e1a6035…` after the priming turn quiesced.
+The file had 20 lines and `f7dc849f…` after the priming turn quiesced.
 The kill added exactly one more line, a `last-prompt`, for 25 lines, and the immediate and quiesced post-kill reads agree on that, so nothing arrived late from a dying writer either.
 
-Note where the first row's numbers come from: 41 is the first poll past the threshold of forty rather than a chosen value, and both figures are the state four marks *before* the kill, not at it.
+Note where the first row's numbers come from: 41 is the first poll past the threshold of forty rather than a chosen value, and both figures are the state at the first of the four marks, three marks *before* the kill rather than at it.
 
 The census does detect assistant text when there is any: in the contaminated first run, where the turn completed around the kill, the same code reported an `assistant:text` line of 109 characters landing in exactly that window.
 So the null here is the CLI's behaviour and not an artifact of how the lines are read.
@@ -729,7 +729,6 @@ The CLI permits it; the adapter is written for one child.
 `Ownership` is a single nullable field on `ClaudeAdapter` and `replaceProcess` is written as a swap over it; the control channel has one `controlNamespace` and one `pendingControls` map per adapter, which `replaceProcess` rejects wholesale on a fork; and `SessionManager.fork`'s docblock records that Claude "takes Pi's path here" through `#adoptRef`, re-keying the session table because `adapter.ref` changes.
 A surviving-parent fork would take Codex's path instead — the adapter's own `ref` unchanged, the returned ref naming a session this adapter is not driving — and something would then have to drive that session.
 Whether that is a small change or a real refactor is a question for whoever takes the decision; this run only removes the reason to assume the backend forbids it.
-
 
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
