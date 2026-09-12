@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # Nobody has measured what a mid-stream fork does to a Claude Code parent turn, and D15 decides for three backends on evidence from two
@@ -61,3 +62,36 @@ Do not amend D15 here: OW-ziyobe is the card that takes that decision.
 
 Home server, `claude --model haiku`.
 Not `work-laptop`: no Pi involved.
+
+## Close note
+
+Measured on the home server 2026-09-11, `claude 2.1.268`, explicit `--model haiku`.
+`docs/MANUAL_TESTING.md` carries the section, "A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)"; the run is reproducible with `python3 resources/probes/claude_fork_probe.py`, a new probe written for this rather than a third `--backend` in `fork_probe.py` — Claude Code has no RPC surface for a fork at all, so nothing in that file's JSON-RPC session classes applied.
+
+**Both measurements came out, and both went against the adapter.**
+
+*Is the partial on disk when we kill it?* No, at any point in the turn.
+The `kill` cell reads the parent's store at four marks across the reply and kills at the last; the file was byte-identical at all four, 41 through 160 text deltas and 230 through 1163 characters, the last about 78% of the 1491-character reply.
+The only lines gained were the prompt going in — two `queue-operation`, one `user`, one `attachment`.
+The `fork` cell closes the rest of the span within one run: byte-identical at the parent's `result`, then two lines gained once the writer quiesced, an `assistant:thinking` and an `assistant:text` of the whole 1491-character answer.
+So on 2.1.268 the assistant message reaches `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` only at the end of the turn and strictly after the wire says the turn is over, and agentpane's abort loses all of it.
+
+*Can the parent turn survive?* Yes.
+Spawned as a second child rather than replacing the first, the fork came up, adopted the session id it was given, answered its own prompt with `result` success and has its own store — while the parent emitted 160 further deltas, settled `success` with `is_error: false`, and wrote its whole reply durably.
+Two `claude` children with live turns overlapped on one workspace, one resuming the other's store file mid-write, neither erroring.
+What ends the turn today is `replaceProcess`'s `await previous.proc.kill()`, not the CLI.
+
+**For D15: Claude sits on Codex's side of the line, and the uniformity argument is harder than it was.**
+The split D15 fears is now one backend against two rather than one against one, and the abort costs more on Claude than the Codex run made it look — D15 can say of Codex that the reply landed anyway, and on Claude it does not.
+Where the likeness stops is the shape: Codex survives by construction (one app-server process, many threads, nothing to kill), where Claude would survive only by running two children at once — which the CLI plainly allows and the adapter is not written for.
+`Ownership` is a single nullable field, `replaceProcess` a swap over it, one `controlNamespace` and one `pendingControls` per adapter rejected wholesale on fork, and `SessionManager.fork`'s docblock has Claude on Pi's `#adoptRef` path where a surviving-parent fork would need Codex's.
+Whether that is a small change or a real refactor is left open, deliberately; this run only removes the reason to assume the backend forbids it.
+D15 is untouched, as the card required — `OW-ziyobe` takes that decision and the section names it as the vehicle.
+
+**Note for whoever picks up OW-ziyobe:** that card is framed as a Codex-only question ("Whether agentpane should stop aborting a streaming *Codex* turn before forking"), and it was filed before this evidence existed. It is now a three-backend question with three different shapes, and the Claude case is the one that costs an adapter refactor. Widening it is the owner's call.
+
+**How it was built.** One implementer in a worktree, one adversarial reader at the finished work, three rounds of correction — the reader's findings are why this note can be trusted, and two of them were load-bearing. The first draft's sharpest sentence rested on a cross-run comparison of two sessions never measured at the same point; the re-run replaced it with a within-run double read. And the cell's `"unearned"` gate covered the wire but not the disk, so an unresolved store path would have produced the identical absence to the headline finding and exited zero. Both are fixed in the committed probe. The same two gaps exist in `fork_probe.py`'s `codex_fork_mid_stream`, filed as **OW-wifibe**.
+
+Also checked live rather than inferred: `--tools ""` on 2.1.268 strips the built-in tools (the model reports no `Bash` available) but not MCP tools, which `init.tools` still lists — so these records are sensitive to the operator's MCP configuration, and the section says so.
+
+Landed on `main` as 85f0438, 6e32aa9, 5d0df8b, 01b0d4c, 035e072, 24db2de. Docs and probe only; nothing under `src/`, so `bun run check` does not gate them.
