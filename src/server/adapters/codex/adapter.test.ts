@@ -115,6 +115,12 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 			case "thread/fork":
 				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
 				break;
+			case "turn/steer": {
+				// OW-tifuha, codex-cli 0.154.0: the result names the steered turn.
+				const params = message["params"] as { expectedTurnId?: string } | undefined;
+				proc.emit({ id, result: { turnId: params?.expectedTurnId } });
+				break;
+			}
 			case "turn/interrupt":
 				proc.emit({ id, result: {} });
 				break;
@@ -656,13 +662,26 @@ describe("CodexAdapter turns", () => {
 		});
 	});
 
-	it("rejects a submit while a turn is active without erasing its abort target", async () => {
-		const { adapter, proc } = await startedAdapter({ threadId: "thread-active-submit" });
+	it("steers a submit into the active turn instead of starting a second one (OW-tifuha)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-steer" });
 		await adapter.submit("first");
 
-		await expect(adapter.submit("second")).rejects.toThrow(
-			"codex adapter cannot submit while a turn is active",
-		);
+		await adapter.submit("second");
+
+		expect(request(proc, "turn/steer")["params"]).toEqual({
+			threadId: "thread-steer",
+			input: [{ type: "text", text: "second", text_elements: [] }],
+			expectedTurnId: "turn-1",
+		});
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+
+		await adapter.abort(); // leave the fixture's turn tidily interrupted
+	});
+
+	it("keeps its abort target across a mid-turn steer", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-active-submit" });
+		await adapter.submit("first");
+		await adapter.submit("second");
 
 		await adapter.abort();
 
@@ -1029,7 +1048,7 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/interrupt");
 	});
 
-	it("keeps an ambiguous successful submission busy until its response lifecycle completes", async () => {
+	it("cannot steer an ambiguous submission, and stays blocked until its response lifecycle completes", async () => {
 		const proc = new AdapterProcess();
 		configureHappyServer(proc, {
 			threadId: "thread-ambiguous-response",
@@ -1072,10 +1091,14 @@ describe("CodexAdapter turns", () => {
 
 		await submitting;
 		await adapter.abort();
+		// The mismatched candidate left no lifecycle-corroborated `turnId`, so
+		// there is no `expectedTurnId` to steer with (OW-tifuha) and the
+		// submission that is nonetheless still in flight keeps this blocked.
 		await expect(adapter.submit("must stay blocked")).rejects.toThrow(
 			"codex adapter cannot submit while a turn is active",
 		);
 		expect(methods(proc)).not.toContain("turn/interrupt");
+		expect(methods(proc)).not.toContain("turn/steer");
 		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
 
 		proc.emit({
@@ -1088,6 +1111,7 @@ describe("CodexAdapter turns", () => {
 		await expect(adapter.submit("stale completion must not unblock")).rejects.toThrow(
 			"codex adapter cannot submit while a turn is active",
 		);
+		expect(methods(proc)).not.toContain("turn/steer");
 
 		proc.emit({
 			method: "turn/started",

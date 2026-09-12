@@ -289,12 +289,28 @@ export class CodexAdapter implements BackendAdapter {
 			throw new Error("codex adapter not started");
 		}
 		if (this.turnStartPending) throw new Error(TURN_START_PENDING_ERROR);
-		if (this.turnBusy || this.turnId) throw new Error(TURN_ACTIVE_ERROR);
 		const input: UserInput[] = [];
 		if (text) input.push({ type: "text", text, text_elements: [] });
 		for (const image of images ?? []) {
 			input.push({ type: "image", url: `data:${image.mimeType};base64,${image.base64}` });
 		}
+		// D16: a prompt submitted mid-turn steers that turn. Verified live on
+		// 2026-09-12 against codex-cli 0.154.0 (OW-tifuha, `docs/MANUAL_TESTING.md`):
+		// `turn/steer` fired 29 deltas into a streaming turn returned that same
+		// turn id, and the steered `userMessage` and the answering
+		// `agentMessage` both arrived under it -- one `turn/completed`, no
+		// second turn.
+		//
+		// `expectedTurnId` is a precondition app-server enforces, so this needs
+		// a turn id it knows is live: `turnId` is exactly that, set only from a
+		// lifecycle-corroborated id. A `turnBusy` with no id is a submission the
+		// adapter cannot name, so there is nothing to steer and the rejection
+		// stands.
+		if (this.turnId) {
+			await client.request("turn/steer", { threadId, input, expectedTurnId: this.turnId });
+			return;
+		}
+		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
 		this.turnStartPending = true;
 		this.turnBusy = { source: "submission", turnId: null };
 		let responseTurnId: string | undefined;
@@ -360,13 +376,14 @@ export class CodexAdapter implements BackendAdapter {
 	 * `{ threadId }`, response an empty object -- OW-72, verified against
 	 * codex-cli 0.147.0's generated schema).
 	 *
-	 * Refused while a turn is active, deliberately, for the same reason
-	 * `submit()` is: Codex runs compaction as its own turn, and `compact` is one
-	 * of the two `NonSteerableTurnKind`s -- app-server will not start a second
-	 * turn (nor steer the live one) while one is running, so admitting the
-	 * request here only to have app-server reject it would turn a well-defined
-	 * "busy" into an opaque wire error. The single-flight admission gate
-	 * (`turnBusy`/`turnId`/`turnStartPending`) is exactly the one `submit` uses.
+	 * Refused while a turn is active, and it stays refused now that `submit()`
+	 * steers instead (OW-tifuha): `compact` is one of the two
+	 * `NonSteerableTurnKind`s, so there is no steering a compaction into a
+	 * running turn, and app-server will not start a second turn while one runs.
+	 * Admitting the request here only to have app-server reject it would turn a
+	 * well-defined "busy" into an opaque wire error. The gate
+	 * (`turnBusy`/`turnId`/`turnStartPending`) is the one `submit` used before
+	 * it gained a steer path.
 	 */
 	async compact(): Promise<void> {
 		const client = this.requireClient();

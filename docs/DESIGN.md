@@ -525,13 +525,15 @@ Rejection is a real answer here, not a failure mode.
 The route already turns an adapter throw into a 500, and `controller.ts`'s `submit` clears the draft only on success, so a rejected mid-turn prompt leaves the user's text where they typed it.
 What an adapter must not do is silently downgrade to a follow-up, which is indistinguishable from success at the wire and puts the prompt after the turn without saying so.
 
-Pi is already correct, Claude now rejects because its backend cannot steer, and Codex still rejects pending its live steer probe.
-Codex rejects today though `turn/steer` sits in the generated bindings, unused and never run live (OW-tifuha).
-OW-jihete's fixture and the matching section in `docs/MANUAL_TESTING.md` preserve Claude's observation; OW-tifuha still requires its observation before any Codex change.
+Pi is already correct, Claude rejects because its backend cannot steer, and Codex steers.
+`turn/steer` was run live on the home server on 2026-09-12 against `codex-cli 0.154.0` (OW-tifuha): fired 29 deltas into a streaming turn with `expectedTurnId` set to that turn, it returned a result naming the same turn id, and both the steered `userMessage` and the answering `agentMessage` arrived under that turn id, with exactly one `turn/completed` and no second turn.
+The Codex adapter's `submit()` now sends `turn/steer` whenever it holds a lifecycle-corroborated `turnId`; it still rejects when a turn is in flight under an id it cannot name, because `expectedTurnId` is a precondition and there is nothing to put in it.
+`compact()` keeps its rejection regardless: `compact` is one of the two `NonSteerableTurnKind`s, so steering a compaction is protocol-impossible.
+OW-jihete's fixture and OW-tifuha's section in `docs/MANUAL_TESTING.md` preserve both observations.
 
 The effect on the accidental double-submit OW-nasofa describes — a second Ctrl-Enter during the round trip, which `App.svelte`'s `send()` and `controller.ts`'s `submit()` both fail to guard — runs in both directions, per backend.
 On Claude it is an improvement: a silently queued duplicate becomes a rejection with the draft intact.
-On Codex it is a regression once OW-tifuha lands: today's clean rejection becomes a duplicate steered into the running turn.
+On Codex it is a regression now that OW-tifuha has landed: the former clean rejection is a duplicate steered into the running turn.
 On Pi nothing changes, because Pi already steers it.
 So this decision does not remove the need for OW-nasofa's in-flight guard, and on one backend it is what will make that guard load-bearing.
 
