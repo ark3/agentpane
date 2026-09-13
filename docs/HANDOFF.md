@@ -189,6 +189,14 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
   This repository has no `.envrc` and needs none -- `direnv exec` against a directory without one runs the command and loads nothing.
   **Before that date, every live run on this machine went through a pass-through shim**, `/tmp/ow-derewo-bin/direnv`, which dropped `exec <dir>` and exec'd the rest; runs recorded in `docs/MANUAL_TESTING.md` before 2026-09-13 either used it, invoked the agent directly, or say which.
   Read those sections' "the home server has no `direnv`" as true of their date, not of yours.
+- **Never match a live-run's agent processes by name: the agent driving the run has the same name.**
+  A live run spawns `claude` or `codex` children through agentpane, and the session measuring them is itself a `claude` or `codex` process on this machine.
+  `pgrep claude` counts the measurer, so an overlap count taken that way proves nothing, and `pkill claude` kills the measurer -- which is how OW-razoki's live run ended its own session on 2026-09-13.
+  Count and signal by the `--session-id` values the run put under test, which are yours and nobody else's.
+  Do not reach for a name filter plus "the newest N": the measuring session is often the newest.
+  **Do not count on the sandbox to contain this.**
+  That session survived reaching only itself because it ran one `bwrap` deeper than its siblings -- measured the same day: its inner `claude` sat in PID namespace `4026532772` while a sibling agent session two days old, and the outer wrapper of the session itself, shared `4026532490`.
+  Sessions at that outer level see each other, so the same `pkill` run from one of them takes out the others.
 - **Pi RPC framing is LF-only.**
   Split on `\n` only; do not use Node `readline` (it also splits on U+2028/U+2029, which are valid inside JSON strings).
   See Pi's `docs/rpc.md` "Framing".
