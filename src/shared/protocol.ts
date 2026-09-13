@@ -267,6 +267,22 @@ export interface ForkResponse {
 export interface ForkPoint {
 	id: string;
 	text: string;
+	/**
+	 * Where this point sits in the session's flat transcript -- an index into
+	 * the very array `snapshot.messages` and `upsert.index` address (OW-roveze).
+	 *
+	 * A fork point names its own position; the client never counts. The count it
+	 * used to do assumed one point per user message on every backend, and Codex
+	 * falsified that: steering puts two `userMessage` items in one turn, Codex
+	 * forks at turn granularity, so three user messages can answer with two
+	 * points and every ordinal past the steer addressed the wrong turn -- with no
+	 * error once a later turn made the index resolve.
+	 *
+	 * The consequence is deliberate: a user message no point names is not
+	 * forkable, and the UI offers no Edit on it rather than forking somewhere
+	 * else.
+	 */
+	index: number;
 }
 export interface ForkPointsResponse {
 	points: ForkPoint[];

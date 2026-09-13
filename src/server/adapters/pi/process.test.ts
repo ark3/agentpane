@@ -134,6 +134,9 @@ async function startAdapter(h: Harness, extraState: Record<string, unknown> = {}
 const assistantMessage = (text: string): AgentMessage =>
 	({ role: "assistant", content: [{ type: "text", text }] }) as AgentMessage;
 
+const userMessage = (text: string): AgentMessage =>
+	({ role: "user", content: [{ type: "text", text }] }) as AgentMessage;
+
 // ---------------------------------------------------------------------------
 
 describe("PiAdapter.start", () => {
@@ -322,6 +325,9 @@ describe("PiAdapter command correlation", () => {
 		const h = makeHarness();
 		await startAdapter(h);
 
+		// A fork point is paired with the user message it forks at (OW-roveze), so
+		// the transcript has to hold one for the answer to be anything but empty.
+		h.child.emitLine({ type: "message_start", message: userMessage("first prompt") });
 		const models = h.adapter.listModels();
 		const forkPoints = h.adapter.listForkPoints();
 
@@ -346,7 +352,7 @@ describe("PiAdapter command correlation", () => {
 			data: { models: [{ provider: "anthropic", id: "claude-opus-5", name: "Opus 5" }] },
 		});
 
-		expect(await forkPoints).toEqual([{ id: "e1", text: "first prompt" }]);
+		expect(await forkPoints).toEqual([{ id: "e1", text: "first prompt", index: 0 }]);
 		// ModelInfo.id is `provider/modelId` -- the bridge to Pi's split set_model.
 		expect(await models).toEqual([{ id: "anthropic/claude-opus-5", label: "Opus 5" }]);
 	});
@@ -529,6 +535,57 @@ describe("PiAdapter request/reply (D2a)", () => {
 
 		expect(onRequest).not.toHaveBeenCalled();
 		await expect(h.adapter.reply("ui-2", "x")).rejects.toThrow(/No pending Pi UI request/);
+	});
+});
+
+describe("PiAdapter fork points", () => {
+	/**
+	 * The pairing the client used to do, done where both lists are in hand
+	 * (OW-roveze). Pi answers one entry per user message, so the k-th entry is
+	 * the k-th user message, whatever sits between them.
+	 */
+	it("pairs each fork point with the transcript index of its user message (OW-roveze)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.emitLine({ type: "message_start", message: userMessage("first prompt") });
+		h.child.emitLine({ type: "message_start", message: assistantMessage("first answer") });
+		h.child.emitLine({ type: "message_start", message: userMessage("second prompt") });
+
+		const points = h.adapter.listForkPoints();
+		h.child.respondTo("get_fork_messages", {
+			messages: [
+				{ entryId: "e1", text: "first prompt" },
+				{ entryId: "e2", text: "second prompt" },
+			],
+		});
+
+		expect(await points).toEqual([
+			{ id: "e1", text: "first prompt", index: 0 },
+			{ id: "e2", text: "second prompt", index: 2 },
+		]);
+	});
+
+	/**
+	 * Nothing here can say *where* two lists of different lengths diverged, and
+	 * pairing the common prefix anyway is the silent mis-fork this change exists
+	 * to remove. Answering with nothing costs every Edit control, which is
+	 * visible and recoverable; forking a turn away from where the user pointed is
+	 * neither (OW-roveze).
+	 */
+	it("answers with no points at all when the two lists disagree on length (OW-roveze)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.emitLine({ type: "message_start", message: userMessage("only prompt") });
+
+		const points = h.adapter.listForkPoints();
+		h.child.respondTo("get_fork_messages", {
+			messages: [
+				{ entryId: "e1", text: "only prompt" },
+				{ entryId: "e2", text: "a prompt the transcript does not have" },
+			],
+		});
+
+		expect(await points).toEqual([]);
 	});
 });
 

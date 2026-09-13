@@ -256,16 +256,3 @@ export async function readClaudeMessageEntries(filePath: string): Promise<Claude
 	}
 	return entries;
 }
-
-/**
- * The human-typed text of a user store line, or null when the line is not a
- * real prompt (tool_result wrapper, harness-injected content, assistant line).
- * This is the fork-point label.
- */
-export function claudePromptText(record: Record<string, unknown>): string | null {
-	const texts = extractMessageTexts(record, "user");
-	if (!texts) return null;
-	const kept = texts.filter((t) => t.trim().length > 0 && !isSyntheticBlock(t));
-	const joined = kept.join(" ").trim();
-	return joined.length > 0 ? joined : null;
-}

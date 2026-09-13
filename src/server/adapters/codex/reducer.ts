@@ -350,6 +350,22 @@ export class CodexReducer {
 		return next.map((_, offset) => ({ type: "message", index: startIndex + offset }));
 	}
 
+	/**
+	 * Where the item's first transcript message sits in the flat array, or null
+	 * when this reducer has never seen the item (OW-roveze).
+	 *
+	 * The bridge from a Codex `ThreadItem.id` to the index space `getState()`
+	 * hands out -- the only correct one. A position within `turn.items` is not:
+	 * `mapItem` answers zero messages for a hidden reasoning item, for every
+	 * `SILENT_ITEM_TYPES` member and for any item type a newer `codex-cli` adds,
+	 * and two for a tool call with a result.
+	 */
+	indexOfItem(itemId: string): number | null {
+		const slot = this.slots.get(itemId);
+		if (!slot || slot.messages.length === 0) return null;
+		return this.startIndex(slot);
+	}
+
 	private startIndex(target: Slot): number {
 		let index = 0;
 		for (const slot of this.slots.values()) {

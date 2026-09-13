@@ -35,9 +35,9 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import {
-	claudePromptText,
 	findClaudeSessionFile,
 	readClaudeMessageEntries,
 	type ClaudeStoreMessageEntry,
@@ -52,6 +52,7 @@ import type {
 } from "../types.ts";
 import { spawnClaude, type ClaudeProcess, type ClaudeSpawner } from "./process.ts";
 import {
+	asClaudeEvent,
 	buildControlRequestLine,
 	buildUserMessageLine,
 	isRecord,
@@ -241,23 +242,56 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- fork-from-past -----------------------------------------------------
 
 	/**
-	 * One fork point per human prompt, labelled with that prompt's text -- the
-	 * ordinal contract `controller.forkAndSubmit` indexes by. Truncation via
-	 * `--resume-session-at` is INCLUSIVE of the named entry (OW-mayuza), so the
-	 * point for "fork before prompt X" carries the uuid of the message entry
-	 * PRECEDING X -- and the first prompt, which nothing precedes, carries
-	 * `CLAUDE_FORK_SESSION_START`.
+	 * One fork point per human prompt, labelled with that prompt's text and
+	 * carrying that prompt's index in the flat transcript (OW-roveze).
+	 * Truncation via `--resume-session-at` is INCLUSIVE of the named entry
+	 * (OW-mayuza), so the point for "fork before prompt X" carries the uuid of
+	 * the message entry PRECEDING X -- and the first prompt, which nothing
+	 * precedes, carries `CLAUDE_FORK_SESSION_START`.
+	 *
+	 * Which store lines are prompts, and where they land, is settled by replaying
+	 * them through a throwaway `ClaudeReducer` -- the same walk cold-start
+	 * hydration does with the same records, so the answer is the reducer's by
+	 * construction. Asking `claudePromptText` instead was the old way and it did
+	 * not agree: it filters only `isSyntheticBlock`, while `handleUser` also drops
+	 * `isSynthetic`, `isCompactSummary` and `isReplay` lines and routes
+	 * `tool_result` blocks to a `toolResult` message. A compacted session
+	 * therefore emitted a point with no user message behind it and pushed every
+	 * ordinal after the compaction off by one; the replay fixes that as a side
+	 * effect.
+	 *
+	 * The store lags the live transcript -- as of `claude 2.1.268` it gains no
+	 * content until a turn ends (MANUAL_TESTING OW-japuzo), while `beginTurn`
+	 * echoes the human's prompt into the reducer immediately -- so the replay is
+	 * a *prefix* of the live array, and a prefix's indices are the live array's
+	 * indices. Each point is checked against the live reducer before it ships:
+	 * anything not landing on a user message there is dropped rather than
+	 * shipped as an index into an array it does not describe.
 	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		this.requireProc();
 		const entries = await this.readStore(this.currentRef.id);
+		const replay = new ClaudeReducer();
+		const live = this.reducer.getState().messages;
 		const points: ForkPoint[] = [];
 		let previousUuid: string | null = null;
 		for (const entry of entries) {
+			const before = replay.getState().messages.length;
+			const event = asClaudeEvent(entry.record);
+			if (event) replay.handle(event);
 			if (entry.type === "user") {
-				const text = claudePromptText(entry.record);
-				if (text !== null) {
-					points.push({ id: previousUuid ?? CLAUDE_FORK_SESSION_START, text });
+				const produced = replay.getState().messages;
+				for (let index = before; index < produced.length; index++) {
+					const message = produced[index];
+					if (message?.role !== "user") continue;
+					if (live[index]?.role === "user") {
+						points.push({
+							id: previousUuid ?? CLAUDE_FORK_SESSION_START,
+							text: userMessageText(message.content),
+							index,
+						});
+					}
+					break;
 				}
 			}
 			previousUuid = entry.uuid;
@@ -519,6 +553,15 @@ async function defaultReadStoreEntries(
 	const file = await findClaudeSessionFile(root, sessionId);
 	if (!file) return [];
 	return readClaudeMessageEntries(file);
+}
+
+/** The fork point's label: the text of the user message the reducer built. */
+function userMessageText(content: UserMessage["content"]): string {
+	if (typeof content === "string") return content;
+	return content
+		.filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
+		.map((block) => block.text)
+		.join("\n");
 }
 
 export class ClaudeAdapterFactory implements AdapterFactory {

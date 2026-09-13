@@ -112,6 +112,9 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
 				}
 				break;
+			case "thread/read":
+				proc.emit({ id, result: { thread: { id: options.threadId ?? "thread-real", turns: options.turns ?? [] } } });
+				break;
 			case "thread/fork":
 				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
 				break;
@@ -1343,6 +1346,144 @@ describe("CodexAdapter turns", () => {
 		await adapter.submit("use it");
 
 		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-selected" });
+	});
+});
+
+describe("CodexAdapter fork points", () => {
+	/**
+	 * Codex forks at turn granularity, so a turn answers with exactly one point
+	 * however many user messages it holds -- and steering puts a second one in
+	 * (D16, OW-tifuha). The point names the *first* user message's transcript
+	 * index, and the steered message at index 2 is named by nothing, which is
+	 * what makes the UI decline to offer an Edit there rather than fork one turn
+	 * further on (OW-roveze).
+	 */
+	it("names the first user message's transcript index, and no point for a steered one (OW-roveze)", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, {
+			threadId: STORED_REF.id,
+			turns: [
+				{
+					id: "turn-steered",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-a",
+							clientId: null,
+							content: [{ type: "text", text: "first ask", text_elements: [] }],
+						},
+						{ type: "agentMessage", id: "agent-a", text: "part one", phase: "final_answer", memoryCitation: null },
+						{
+							type: "userMessage",
+							id: "user-steer",
+							clientId: null,
+							content: [{ type: "text", text: "also this", text_elements: [] }],
+						},
+						{ type: "agentMessage", id: "agent-b", text: "part two", phase: "final_answer", memoryCitation: null },
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1_700_000_000,
+					completedAt: 1_700_000_001,
+					durationMs: 1000,
+				},
+				{
+					id: "turn-next",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-b",
+							clientId: null,
+							content: [{ type: "text", text: "second ask", text_elements: [] }],
+						},
+						{ type: "agentMessage", id: "agent-c", text: "an answer", phase: "final_answer", memoryCitation: null },
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1_700_000_002,
+					completedAt: 1_700_000_003,
+					durationMs: 1000,
+				},
+			],
+		});
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+		// Six items, six messages: the steered prompt is a transcript message of
+		// its own, and it is index 2.
+		expect(adapter.getState().messages.map((message) => message.role)).toEqual([
+			"user",
+			"assistant",
+			"user",
+			"assistant",
+			"user",
+			"assistant",
+		]);
+		expect(await adapter.listForkPoints()).toEqual([
+			{ id: "turn-steered", text: "first ask", index: 0 },
+			{ id: "turn-next", text: "second ask", index: 4 },
+		]);
+	});
+
+	/**
+	 * The index is the reducer's, not a count of `turn.items`: a reasoning item
+	 * with nothing to show maps to no message at all, so counting items would
+	 * put the second turn's point one past where its prompt actually sits.
+	 */
+	it("takes the index from the reducer, so items that map to nothing do not shift it (OW-roveze)", async () => {
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, {
+			threadId: STORED_REF.id,
+			turns: [
+				{
+					id: "turn-one",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-a",
+							clientId: null,
+							content: [{ type: "text", text: "first ask", text_elements: [] }],
+						},
+						{ type: "reasoning", id: "reason-a", summary: [], content: [] },
+						{ type: "agentMessage", id: "agent-a", text: "an answer", phase: "final_answer", memoryCitation: null },
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1_700_000_000,
+					completedAt: 1_700_000_001,
+					durationMs: 1000,
+				},
+				{
+					id: "turn-two",
+					items: [
+						{
+							type: "userMessage",
+							id: "user-b",
+							clientId: null,
+							content: [{ type: "text", text: "second ask", text_elements: [] }],
+						},
+						{ type: "agentMessage", id: "agent-b", text: "another", phase: "final_answer", memoryCitation: null },
+					],
+					itemsView: "full",
+					status: "completed",
+					error: null,
+					startedAt: 1_700_000_002,
+					completedAt: 1_700_000_003,
+					durationMs: 1000,
+				},
+			],
+		});
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+		expect(adapter.getState().messages).toHaveLength(4);
+		expect(await adapter.listForkPoints()).toEqual([
+			{ id: "turn-one", text: "first ask", index: 0 },
+			{ id: "turn-two", text: "second ask", index: 2 },
+		]);
 	});
 });
 

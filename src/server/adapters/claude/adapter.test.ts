@@ -447,8 +447,62 @@ describe("ClaudeAdapter fork", () => {
 		// the second prompt names the last entry of the first turn, and the
 		// first prompt -- with nothing before it -- gets the session-start id.
 		expect(points).toEqual([
-			{ id: CLAUDE_FORK_SESSION_START, text: "first prompt" },
-			{ id: "a2", text: "second prompt" },
+			{ id: CLAUDE_FORK_SESSION_START, text: "first prompt", index: 0 },
+			{ id: "a2", text: "second prompt", index: 2 },
+		]);
+	});
+
+	/**
+	 * A pre-existing off-by-one, fixed by taking the answer from the reducer
+	 * (OW-roveze). `/compact` writes the summary back as an `isCompactSummary`
+	 * user line, which the reducer folds onto the compaction marker and never
+	 * makes a user message of -- but the old `claudePromptText` filter saw a user
+	 * line with text and emitted a point for it. That extra point pushed every
+	 * ordinal after the compaction one step along, so on a compacted session the
+	 * wrong message got forked.
+	 */
+	it("emits no fork point for a compaction summary, which is not a human turn (OW-roveze)", async () => {
+		const entry = (
+			uuid: string,
+			type: "user" | "assistant",
+			message: Record<string, unknown>,
+			extra: Record<string, unknown> = {},
+		): ClaudeStoreMessageEntry => ({
+			uuid,
+			type,
+			record: { type, uuid, timestamp: "2026-08-25T12:00:00.000Z", message, ...extra },
+		});
+		const h = harness({
+			entries: [
+				entry("u1", "user", { role: "user", content: "first prompt" }),
+				entry("a1", "assistant", {
+					id: "msg_a",
+					role: "assistant",
+					model: "m",
+					content: [{ type: "text", text: "first answer" }],
+				}),
+				entry("s1", "user", { role: "user", content: "a summary of everything above" }, { isCompactSummary: true }),
+				entry("u2", "user", { role: "user", content: "second prompt" }),
+				entry("a2", "assistant", {
+					id: "msg_b",
+					role: "assistant",
+					model: "m",
+					content: [{ type: "text", text: "second answer" }],
+				}),
+			],
+		});
+		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+
+		// Four transcript messages: the summary line made none of them.
+		expect(h.adapter.getState().messages.map((message) => message.role)).toEqual([
+			"user",
+			"assistant",
+			"user",
+			"assistant",
+		]);
+		expect(await h.adapter.listForkPoints()).toEqual([
+			{ id: CLAUDE_FORK_SESSION_START, text: "first prompt", index: 0 },
+			{ id: "s1", text: "second prompt", index: 2 },
 		]);
 	});
 

@@ -345,9 +345,34 @@ export class PiAdapter implements BackendAdapter {
 
 	// -- fork-from-past -----------------------------------------------------
 
+	/**
+	 * One fork point per user message, each carrying that message's index in the
+	 * flat transcript (OW-roveze).
+	 *
+	 * Pi forks at message granularity and `get_fork_messages` answers one entry
+	 * per user message, so the two lists correspond one-to-one -- but `PaneMessage`
+	 * carries no id (D11 freezes `protocol.ts`) and Pi's entry ids are not in it,
+	 * so the pairing is positional either way. It is done *here* rather than in
+	 * the client because this is the one place both arrays are in hand, which is
+	 * what makes a disagreement detectable instead of silent.
+	 *
+	 * On a length mismatch this answers with no points at all. There is no honest
+	 * way to say *where* the two lists diverged, and pairing the common prefix
+	 * anyway would be the same silent mis-fork this change exists to remove.
+	 * Losing every Edit affordance is visible and recoverable; forking one turn
+	 * away from where the user pointed is neither. It is not logged either --
+	 * adapters have no logger to reach for, and the whole transcript losing its
+	 * Edit controls is a louder signal than a line nobody is reading.
+	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		const resp = await this.sendCommand<PiResponseFor<"get_fork_messages">>({ type: "get_fork_messages" });
-		return resp.data.messages.map((m) => ({ id: m.entryId, text: m.text }));
+		const entries = resp.data.messages;
+		const userIndices: number[] = [];
+		this.state.messages.forEach((message, index) => {
+			if (message.role === "user") userIndices.push(index);
+		});
+		if (userIndices.length !== entries.length) return [];
+		return entries.map((m, i) => ({ id: m.entryId, text: m.text, index: userIndices[i] as number }));
 	}
 
 	async fork(entryId: string): Promise<SessionRef> {

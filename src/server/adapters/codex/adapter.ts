@@ -413,13 +413,28 @@ export class CodexAdapter implements BackendAdapter {
 	// -- fork-from-past -----------------------------------------------------
 
 	/**
-	 * One fork point per turn, labelled with that turn's user message.
+	 * One fork point per turn, labelled with that turn's *first* user message
+	 * and carrying that message's index in the flat transcript.
 	 *
 	 * Codex forks at *turn* granularity (`ThreadForkParams.lastTurnId`), not at
 	 * item granularity, so a fork point is a turn id even though the UI shows
 	 * the user message inside it. `thread/rollback` -- DESIGN's other
 	 * suggestion -- is marked DEPRECATED in the generated bindings and is not
 	 * used here.
+	 *
+	 * A turn can hold more than one user message: steering a running turn
+	 * (D16) appends a second `userMessage` item to it, and `mapping.ts` gives
+	 * that its own `role: "user"` transcript message. One point per turn is
+	 * still right -- the backend cannot cut between them -- so the steered
+	 * message simply gets no point, and the UI offers no Edit on it
+	 * (OW-roveze). Folding it into the turn's first message instead would hide
+	 * a steer that really shipped.
+	 *
+	 * The index comes from the reducer's own slot map, never from a position
+	 * within `turn.items`; see `CodexReducer.indexOfItem`. The `thread/read`
+	 * here is a fresh fetch while the reducer holds the live stream, so the two
+	 * can disagree about a just-started turn: a slot miss drops the point, which
+	 * costs an Edit affordance and never mis-places one.
 	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		const client = this.requireClient();
@@ -430,8 +445,11 @@ export class CodexAdapter implements BackendAdapter {
 		this.rememberTurns(read.thread);
 		const points: ForkPoint[] = [];
 		for (const turn of read.thread.turns ?? []) {
-			const text = firstUserText(turn.items ?? []);
-			if (text !== null) points.push({ id: turn.id, text });
+			const first = firstUserItem(turn.items ?? []);
+			if (!first) continue;
+			const index = this.reducer.indexOfItem(first.id);
+			if (index === null) continue;
+			points.push({ id: turn.id, text: first.text, index });
 		}
 		return points;
 	}
@@ -683,17 +701,22 @@ export class CodexAdapter implements BackendAdapter {
 	}
 }
 
-/** The text of the first user message in a turn -- the fork point's label. */
-function firstUserText(items: { type: string }[]): string | null {
+/**
+ * The turn's first `userMessage` item -- its id, which is the reducer's key
+ * into the flat transcript, and its text, which is the fork point's label.
+ */
+function firstUserItem(items: { type: string }[]): { id: string; text: string } | null {
 	for (const item of items) {
 		if (item.type !== "userMessage") continue;
+		const id = (item as { id?: unknown }).id;
+		if (typeof id !== "string") return null;
 		const content = (item as { content?: UserInput[] }).content ?? [];
 		const text = content
 			.filter((part): part is Extract<UserInput, { type: "text" }> => part.type === "text")
 			.map((part) => part.text)
 			.join("\n")
 			.trim();
-		return text;
+		return { id, text };
 	}
 	return null;
 }

@@ -751,12 +751,12 @@ describe("server-initiated requests (D2a)", () => {
 describe("fork, model, and enumeration routes", () => {
 	it("lists fork points from the attached agent", async () => {
 		const withPoints = new FakeAdapterFactory({
-			forkPoints: [{ id: "e1", text: "first ask" }],
+			forkPoints: [{ id: "e1", text: "first ask", index: 0 }],
 		});
 		app = createApp({ index, adapters: { pi: withPoints } });
 
 		const body = (await (await get(ROUTES.forkPoints(PI_SESSION))).json()) as ForkPointsResponse;
-		expect(body.points).toEqual([{ id: "e1", text: "first ask" }]);
+		expect(body.points).toEqual([{ id: "e1", text: "first ask", index: 0 }]);
 	});
 
 	it("forks and hands back the new ref", async () => {
