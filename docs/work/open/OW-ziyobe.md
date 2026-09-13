@@ -1,6 +1,6 @@
 ---
 labels: [question]
-blocked-by: [OW-japuzo]
+blocked-by: [OW-razoki]
 ---
 
 # Whether agentpane should stop aborting a streaming Codex turn before forking, now that the parent is known to survive
@@ -83,6 +83,30 @@ This card was filed on the Codex evidence and its headline says so, but the deci
 Claude Code has never been weighed there at all -- see OW-japuzo.
 Whoever takes the decision takes it for all three, or states explicitly why Codex alone.
 
+## Reframed 2026-09-13: this decision now falls out of the architecture
+
+The owner reframed the question rather than answering it as posed, and that reframing is the useful part.
+
+The question this card asks -- whether to keep the abort -- was framed as a choice between uniformity and letting the parent turn finish.
+That framing assumed a fork on Claude has to kill the parent.
+It does not.
+`OW-razoki` carries the finding: Codex's `fork()` leaves the parent's adapter alone and returns a ref the client attaches as its own container, where Claude's calls `replaceProcess` and kills the child.
+The owner's model, stated in discussion, is Codex's: "the current session to remain as-is and a new session to be started, with a new session container, so both the original and the fork end up as full-fledged sessions."
+
+So the abort is not a decision to take on its own.
+Once Claude forks the way Codex does, the abort is left standing only where the backend forces it, which is Pi.
+That is the answer, and it is a consequence rather than a choice: nobody has to weigh uniformity against a surviving reply, because the only backend that loses the turn is the one whose CLI abandons it regardless.
+
+**What this card becomes.**
+Record that in D15, after `OW-razoki` lands.
+D15's uniformity argument does not survive it and should not be restated -- the split it feared is now one backend behaving differently because it genuinely behaves differently, which is what the labels exist to say.
+
+**The Claude evidence that moved it**, from OW-japuzo's close note: nothing reaches Claude's store file until after the wire says the turn is over -- four marks across one reply, byte-identical each time, the last at about 78% of a 1491-character answer -- so the abort there destroys the entire reply, where D15 can say of Codex that the reply landed anyway.
+The uniformity argument was protecting the case where the loss was largest and had never been weighed.
+
+**Do not take this decision before `OW-razoki`.**
+If that card finds Claude's fork cannot mint its own container cheaply, the abort question comes back as a real choice and this card is where it gets taken.
+
 ## Done when
 
 The decision is recorded in `docs/DESIGN.md` D15 — either as a restatement that the abort stays on uniformity alone, now that it has been re-examined against OW-gojado's evidence, or as a change of decision with the behaviour and labels that follow it.
@@ -91,5 +115,5 @@ Either way D15 stops being a decision whose second reason was removed without th
 If the decision is to keep the abort, that closes this card and nothing else changes.
 If the decision is to take the asymmetry, the behaviour change and the label change are work, and belong in their own cards filed from this one — do not fold them in here.
 
-Blocked on OW-japuzo: the Claude Code measurement is the evidence this decision is now missing.
-Beyond that it needs no live run of its own -- the Pi and Codex evidence is already recorded.
+Blocked on OW-razoki, which is what makes the answer fall out rather than needing to be chosen.
+OW-japuzo supplied the Claude measurement this card was previously waiting on; no further live run is needed here.
