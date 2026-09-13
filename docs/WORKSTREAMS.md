@@ -44,7 +44,8 @@ If you write another adapter, `ref` is not stable — say where it changes, and 
 - **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is authoritative** and may differ from the ref in the URL, for the same reason.
 - **A client must handle the `renamed` SSE event** by re-keying everything it holds under `from`.
   A snapshot under the new ref follows immediately.
-  The old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again.
+  After a rename the old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again.
+  A fork on Pi or Claude Code emits `renamed` too, and neither half of that holds there: the parent is a second conversation, so its ref stops resolving until someone re-attaches it, and events carry it again once they do (OW-kekoji).
 - **`/api` rejects a non-loopback `Origin`** (D8).
   Nothing to do from the app; it matters if you ever test the API from a page served from somewhere else.
 

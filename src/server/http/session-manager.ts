@@ -668,11 +668,12 @@ export class SessionManager {
 		const byKey = new Map<string, SessionSummary>();
 		for (const summary of stored) {
 			const key = sessionKey(summary.ref);
-			// An id we have RENAMED away from is not a session of its own. Listing
-			// it alongside the session that outgrew it shows one conversation
-			// twice, and offers the browser a handle that opens a second agent on
-			// it. Only a rename writes an alias, so a fork's parent -- a genuine
-			// second conversation -- is not caught here (`#adoptRef`).
+			// An id we have RENAMED away from, or a spelling we canonicalised away
+			// from in `#start`, is not a session of its own. Listing it alongside
+			// the session that outgrew it shows one conversation twice, and offers
+			// the browser a handle that opens a second agent on it. A fork writes
+			// no alias, so a fork's parent -- a genuine second conversation -- is
+			// not caught here (`#adoptRef`).
 			if (this.#aliases.has(key)) continue;
 			byKey.set(key, { ...summary, ...this.#liveOverlay(summary.ref) });
 		}
