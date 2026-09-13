@@ -322,9 +322,10 @@ export function createApp(deps: AppDeps): App {
 				// and Codex, OW-yilabe/OW-mayuza for Claude Code):
 				//   * Pi's `fork` is copy-on-write. The same process's active
 				//     `sessionFile` MOVES to a new file (the old branch survives on
-				//     disk byte-identical), so `sessions.fork` re-keys the table and
-				//     broadcasts `renamed` + a snapshot through `#adoptRef`. The ref
-				//     it returns is the moved file.
+				//     disk byte-identical), so `sessions.fork` re-keys the table
+				//     through `#adoptRef`. It broadcasts no `renamed`: the parent is a
+				//     second conversation, not an older name (OW-suhoto). The ref it
+				//     returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread this process is not
 				//     driving; Codex flushes that rollout to disk immediately, before
 				//     any turn, so a fresh attach on the returned ref finds it. The

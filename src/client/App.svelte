@@ -1090,9 +1090,10 @@
 				if (armedKey) disarmSubmit(armedKey);
 				return;
 			}
-			// Pi's fork renames, and `rekeySession` has already run off that event.
-			// Codex's does not -- it hands back a ref nothing was renamed to -- so
-			// this is where the follow armed above catches up with it. A no-op
+			// No backend's fork broadcasts `renamed` (OW-suhoto), so this is where
+			// the follow armed above catches up with the ref the fork landed on --
+			// on Pi, whose live process moved onto a new file, exactly as much as on
+			// Codex, which hands back a ref nothing was renamed to. A no-op
 			// whenever the key did not move. The *landed* ref, never
 			// `state.selected`: a click mid-fork moves the selection and the
 			// controller now honours it, so reading the selection back here would

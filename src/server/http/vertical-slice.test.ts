@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	type AttachSessionResponse,
 	type CreateSessionResponse,
+	type ForkResponse,
 	ROUTES,
 	type ServerEvent,
 	type SessionRef,
@@ -19,6 +20,7 @@ import {
 	assistantMessage,
 	FakeAdapterFactory,
 	FakeSessionIndex,
+	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
 import { SseTestClient } from "./testing/sse-client.ts";
@@ -152,5 +154,50 @@ describe("offline vertical slice", () => {
 		]);
 		expect(state.sessions[sessionKey(materialised)]?.isStreaming).toBe(false);
 		await events.close();
+	});
+
+	it("leaves a browser that did not fork on the parent it was reading (OW-suhoto)", async () => {
+		// Pi is the only backend whose own ref moves on fork, so it is the only one
+		// that reaches `#adoptRef`'s fork path at all. The parent is detached, not
+		// renamed: it is still on disk and still listed, so a second browser that
+		// was reading it must keep both its selection and its transcript.
+		const parent: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/parent.jsonl" };
+		const fork: SessionRef = { backend: "pi", id: `${parent.id}#fork-e1` };
+		const pi = new FakeAdapterFactory({
+			onSubmit(adapter, text) {
+				adapter.append(userMessage(text));
+				adapter.append(assistantMessage("parent reply"));
+			},
+		});
+		app = createApp({
+			index: new FakeSessionIndex([storedSession(parent, WORKSPACE)]),
+			adapters: { pi },
+			newId: () => "offline-virtual-id",
+			now: () => "2026-08-11T00:00:00.000Z",
+		});
+		// The browser that does NOT fork: it is on this stream and its selection is
+		// the parent throughout.
+		const onlooker = await openEvents();
+
+		await request(ROUTES.session(parent));
+		await onlooker.until(() => onlooker.typed("snapshot").length === 1, "the attach snapshot");
+		expect((await post(ROUTES.prompt(parent), { text: "hello" })).status).toBe(202);
+		await onlooker.until(() => onlooker.transcript(parent).length === 2, "the parent's turn");
+
+		const forked = (await (await post(ROUTES.fork(parent), { entryId: "e1" })).json()) as ForkResponse;
+		expect(forked.ref).toEqual(fork);
+		await onlooker.until(
+			() => onlooker.typed("sessions-changed").length >= 1,
+			"the list invalidation the fork emits",
+		);
+
+		const state = reduceEvents(parent, onlooker.events);
+		expect(state.selected).toEqual(parent);
+		expect(transcript(state, parent)).toEqual([userMessage("hello"), assistantMessage("parent reply")]);
+		expect(state.sessions[sessionKey(fork)]).toBeUndefined();
+		// And the reason it holds: nothing was renamed, a second conversation was
+		// created, so no `renamed` reaches anyone.
+		expect(onlooker.typed("renamed")).toEqual([]);
+		await onlooker.close();
 	});
 });

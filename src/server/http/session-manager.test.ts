@@ -354,7 +354,7 @@ describe("fork (the third #adoptRef point)", () => {
 	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
 	// OW-razoki).
 	// SessionManager.fork must absorb every shape through #adoptRef.
-	it("re-keys and emits `renamed` when a Pi-style fork moves the active file", async () => {
+	it("re-keys, without emitting `renamed`, when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
 		const events: { from: SessionRef; to: SessionRef }[] = [];
 		const prevRenamed = broadcaster.renamed.bind(broadcaster);
@@ -370,7 +370,10 @@ describe("fork (the third #adoptRef point)", () => {
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 		expect(forked).toEqual(moved);
 		expect(sessions.liveRefs()).toEqual([moved]);
-		expect(events).toEqual([{ from: REF, to: moved }]);
+		// But no `renamed`: the parent was not renamed, it was left behind as a
+		// second conversation, and that event tells every browser the opposite
+		// (OW-suhoto).
+		expect(events).toEqual([]);
 	});
 
 	it("does NOT re-key when a Codex-style fork leaves the adapter's own ref unchanged", async () => {

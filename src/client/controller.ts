@@ -767,10 +767,10 @@ export function createController(
 			if (view.sending) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
-			// Same rename hazard `submit` above carries (D9), and the fork adds a
-			// second source of it: Pi's fork moves the live process onto a new file,
-			// which the server reports as `renamed`. So the ref this reads fork
-			// points from, and forks, is tracked through any rename in flight.
+			// Same rename hazard `submit` above carries (D9): the ref this reads fork
+			// points from, and forks, is tracked through any rename in flight. The
+			// fork itself is not a second source of that -- it moves Pi's live
+			// process onto a new file, but it broadcasts no `renamed` (OW-suhoto).
 			let ref = selected;
 			const onRename = (from: SessionRef, to: SessionRef) => {
 				if (sessionKey(from) === sessionKey(ref)) ref = to;

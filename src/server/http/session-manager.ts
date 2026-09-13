@@ -289,8 +289,9 @@ export class SessionManager {
 	 * `#adoptRef` absorbs all of them:
 	 *
 	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
-	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table
-	 *    and emits `renamed`. The value the adapter returns IS its new ref.
+	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table.
+	 *    It emits no `renamed` -- see `#adoptRef`. The value the adapter returns
+	 *    IS its new ref.
 	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
 	 *    driving; its own `ref` is unchanged, so `#adoptRef` no-ops. The returned
 	 *    ref points at the freshly-flushed forked thread, which differs from
@@ -340,8 +341,15 @@ export class SessionManager {
 	 *    the agent the user is talking to on the fork (OW-kekoji). The parent is
 	 *    left detached instead, in the sense D9 and D12 already define.
 	 *
-	 * Either way, re-key everything that is keyed by the old id and tell the
-	 * browsers so they can follow (`renamed`).
+	 * Either way, re-key everything that is keyed by the old id. Only a rename
+	 * broadcasts `renamed`: that event means "this conversation took a new id",
+	 * and every browser that hears it discards what it holds under the old one
+	 * and follows its selection across. On a fork that is false for every
+	 * browser, and actively wrong for the ones that did not fork -- it would
+	 * throw away a parent transcript the server still lists and drag a reader
+	 * onto a conversation nobody there opened (OW-suhoto). The fork path emits
+	 * `sessionsChanged` alone; the browser that forked already has the fork's ref
+	 * from the response and attaches it, which is what snapshots it.
 	 */
 	#adoptRef(session: ManagedSession, cause: "rename" | "fork"): void {
 		const next = session.adapter?.ref;
@@ -371,7 +379,7 @@ export class SessionManager {
 		}
 
 		this.broadcaster.sessionsChanged();
-		this.broadcaster.renamed(from, next);
+		if (cause === "rename") this.broadcaster.renamed(from, next);
 	}
 
 	async #start(
