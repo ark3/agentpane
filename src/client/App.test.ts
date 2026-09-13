@@ -2100,7 +2100,8 @@ describe("App", () => {
 		await fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]!);
 		expect(primary()).toHaveTextContent("Fork");
 
-		// Scrolled up and hit edit while a turn was running: submitting stops it first.
+		// Scrolled up and hit edit while a Pi turn was running: submitting stops it
+		// first, because Pi's fork abandons that turn anyway (D15, OW-bakosi).
 		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, true) }));
 		await tick();
 		expect(primary()).toHaveTextContent("Stop and fork");
@@ -2111,6 +2112,29 @@ describe("App", () => {
 		await tick();
 		expect(primary()).toHaveTextContent("Fork");
 	});
+
+	/**
+	 * The same button on the backends whose parent turn survives the fork
+	 * (D15, OW-bakosi): nothing is stopped, so the label must not say it is.
+	 * Stop is still offered -- the turn is stoppable, it is just not what
+	 * submitting this edit does.
+	 */
+	it.each([["codex"], ["claude"]] as const)(
+		"does not promise a stop on a streaming %s session, which the fork leaves running (D15, OW-bakosi)",
+		async (backend) => {
+			const session: SessionRef = { backend, id: `${backend}-1` };
+			const messages = [user("first draft"), assistant([{ type: "text", text: "an answer" }])];
+			const controller = new FakeController(view({ state: attachedState(messages, session, true) }));
+			const { container } = render(App, { props: { controller } });
+			await tick();
+			const primary = () => container.querySelector("button[type='submit']")!;
+
+			await fireEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]!);
+			expect(primary()).toHaveTextContent("Fork");
+			expect(primary()).not.toHaveTextContent("Stop and fork");
+			expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+		},
+	);
 
 	it("carries an edited message's images into the fork rather than silently dropping them (OW-hezidi)", async () => {
 		const withImages: AgentMessage = {
@@ -2456,6 +2480,30 @@ describe("App", () => {
 		await tick();
 		expect(primary()).toHaveTextContent("Fork");
 	});
+
+	/**
+	 * The shortcut's name and its click-time stop follow the same split as the
+	 * primary button (D15, OW-bakosi): on Codex and Claude the fork leaves the
+	 * parent turn running, so reaching for the last message is free again --
+	 * exactly what OW-hezidi wanted of it everywhere, and what Pi cannot give.
+	 */
+	it.each([["codex"], ["claude"]] as const)(
+		"takes the last message back without stopping a streaming %s turn (D15, OW-bakosi)",
+		async (backend) => {
+			const session: SessionRef = { backend, id: `${backend}-1` };
+			const messages = [user("first draft"), assistant([{ type: "text", text: "an answer" }])];
+			const controller = new FakeController(view({ state: attachedState(messages, session, true) }));
+			const { container } = render(App, { props: { controller } });
+			await tick();
+
+			expect(screen.queryByRole("button", { name: "Stop and edit" })).not.toBeInTheDocument();
+			await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
+
+			expect(controller.aborted).toBe(0);
+			expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+			expect(container.querySelector("button[type='submit']")).toHaveTextContent("Fork");
+		},
+	);
 
 	it("edits the last message into exactly the state the transcript's own edit control leaves (OW-relehi)", async () => {
 		const messages = [

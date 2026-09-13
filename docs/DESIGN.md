@@ -515,16 +515,17 @@ The live run that confirmed it end to end went through `bun run start` on the pr
 The question used to be framed as uniformity against letting the parent turn finish, and that framing assumed a fork on Claude had to kill the parent.
 It did not.
 With Codex and Claude both leaving the parent alone, the only backend that loses the turn is the one whose CLI abandons it regardless, so nobody has to weigh uniformity against a surviving reply.
-The split that remains is not agentpane behaving inconsistently across backends — it is one backend genuinely behaving differently, which is what the labels will be there to say.
+The split that remains is not agentpane behaving inconsistently across backends — it is one backend genuinely behaving differently, which is what the labels are there to say.
 
 That retires the uniformity argument, and it should not be restated.
 It was the whole of this decision's case from OW-gojado's close until now, after that run took away the second reason the decision used to give — that a surviving turn "streams into a session nobody is looking at, tokens spent to produce an orphan", which the run is the counterexample to: the reply is durable in the parent's rollout, the parent is a session agentpane lists and the user can navigate back to, and the tokens are spent either way, since the abort lands after the model has already produced most of the reply.
 Uniformity was doing its heaviest work on the backend whose cost had never been weighed at all: Claude does not appear in this record's pre-2026-09-13 text once, and is the one backend where the abort destroys a whole reply that would otherwise have landed.
 Retiring the kill removed that cost instead of paying it.
 
-**The behaviour has not changed yet.**
-This record takes the decision; the code and the labels that follow from it are OW-bakosi, unlanded as of 2026-09-13.
-Until it lands, `forkAndSubmit` still aborts on every backend and the comment above that line still argues uniformity; OW-bakosi rewrites both, and takes the labels with them, because the label follows the behaviour — `sendLabel` and the composer's "Stop and edit" shortcut read "Stop and ..." only where the stop is real.
+**The behaviour now matches.**
+OW-bakosi landed it on 2026-09-13: `forkAndSubmit` aborts only where `ref.backend` is `pi`, and the comment above that line states the asymmetry rather than the uniformity it used to argue.
+The labels went with it, because the label follows the behaviour — `sendLabel` and the composer's "Stop and edit" shortcut read "Stop and ..." only where the stop is real, both off one derived `stopsBeforeFork` in `App.svelte` that reads the same selected ref the controller decides on.
+`src/client/controller.test.ts` and `src/client/App.test.ts` pin both halves per backend.
 
 ### D16. A prompt submitted mid-turn steers that turn, and a backend that cannot steer rejects
 

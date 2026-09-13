@@ -786,19 +786,28 @@ export function createController(
 			const intent = selectionIntent;
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				// Stop a running turn before forking it, on every backend. Not a
-				// first cut any more -- the owner took it deliberately (D15,
-				// OW-zekuhe). On Pi there is nothing to choose: the fork abandons
-				// the turn whether or not we abort (OW-yudoni), so the abort only
-				// makes that loss visible. On Codex there is: a mid-stream
-				// `thread/fork` leaves the parent turn running, and it finishes
-				// normally with its full reply durably on disk -- measured, not
-				// inferred (OW-gojado, codex-cli 0.154.0). So this abort is
-				// bought, not free: it discards a reply Codex would have kept.
-				// Uniformity across backends is the reason, and the only one --
-				// Pi cannot be made to match, so the alternative is a permanent
-				// split.
-				if (view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
+				// Stop a running turn before forking it on Pi, and nowhere else.
+				// The asymmetry is the decision, not an oversight (D15,
+				// OW-bakosi): it stands only where the backend destroys the turn
+				// whatever agentpane does.
+				//
+				// Pi is that backend. Its CLI abandons the in-flight turn on a
+				// mid-stream fork whether or not we abort (work laptop,
+				// 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md` OW-yudoni),
+				// so the abort does not cause the loss -- it makes it deliberate
+				// and visible, and the "Stop and ..." label is the only warning
+				// the user gets.
+				//
+				// Codex's parent turn survives: a mid-stream `thread/fork` leaves
+				// it running and it finishes with its whole reply durable on disk
+				// -- measured, not inferred (home server, 2026-09-11, `codex-cli
+				// 0.154.0`; OW-gojado). Claude's survives too now that OW-razoki
+				// stopped the fork killing the parent's child, and there the abort
+				// would cost most of all: nothing reaches the store file until the
+				// turn is over, so a stop mid-turn destroys the entire reply rather
+				// than racing it (home server, 2026-09-11, `claude 2.1.268`;
+				// OW-japuzo).
+				if (ref.backend === "pi" && view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
 				if (disposed) return null;
 				const points = await api.forkPoints(ref);
 				if (disposed) return null;

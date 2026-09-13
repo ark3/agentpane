@@ -1035,7 +1035,13 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(forkedRef);
 	});
 
-	it("stops a running turn before forking it (OW-hezidi)", async () => {
+	/**
+	 * Pi's own CLI abandons the in-flight turn on a mid-stream fork whatever the
+	 * client does (OW-yudoni), so the abort is not what costs the reply -- it is
+	 * what makes the loss deliberate and visible, under the label that warns
+	 * about it (D15, OW-bakosi).
+	 */
+	it("stops a running Pi turn before forking it (D15, OW-bakosi)", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const controller = createController(api);
@@ -1049,6 +1055,33 @@ describe("client controller", () => {
 		expect(api.abort).toHaveBeenCalledWith(ref);
 		expect(api.abort.mock.invocationCallOrder[0]!).toBeLessThan(api.fork.mock.invocationCallOrder[0]!);
 	});
+
+	/**
+	 * The other half of the same decision: a Codex or Claude parent survives a
+	 * mid-stream fork with its whole reply durable (OW-gojado, OW-japuzo), so an
+	 * abort there would destroy a reply nothing else was going to take. Forking
+	 * is all an edit submitted mid-stream does on those backends (D15, OW-bakosi).
+	 */
+	it.each([["codex"], ["claude"]] as const)(
+		"forks a streaming %s session without stopping its turn (D15, OW-bakosi)",
+		async (backend) => {
+			const parent: SessionRef = { backend, id: `${backend}-parent` };
+			const api = new FakeApi();
+			api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+			const controller = createController(api);
+			await controller.start();
+			await controller.select(parent);
+			api.emit({ type: "snapshot", session: parent, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+			controller.setDraft("reworded");
+
+			expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
+
+			expect(api.abort).not.toHaveBeenCalled();
+			expect(api.fork).toHaveBeenCalledWith(parent, { entryId: "turn-1" });
+			expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
+			controller.dispose();
+		},
+	);
 
 	/**
 	 * A fork is a selection change, but not one that outranks a click that

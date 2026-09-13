@@ -254,13 +254,27 @@
 	 */
 	const streamingAction = $derived(streamingNow && compaction === null);
 	/**
+	 * Whether reaching for an edit here stops the running turn, which is what the
+	 * stop-first labels below promise. Pi only (D15, OW-bakosi): its CLI abandons
+	 * the in-flight turn on a mid-stream fork whatever agentpane does (OW-yudoni),
+	 * so `forkAndSubmit` aborts first to make that loss deliberate and visible,
+	 * and this label is the only warning the user gets. Codex's and Claude's
+	 * parent turns survive the fork with their whole reply durable (OW-gojado,
+	 * OW-japuzo), so there an edit submitted mid-stream is just a fork -- and a
+	 * button that said otherwise would name a consequence it does not have.
+	 *
+	 * Read off the selected ref, the same value `forkAndSubmit` decides on, so
+	 * the label and the behaviour cannot drift apart.
+	 */
+	const stopsBeforeFork = $derived(streamingAction && view.state.selected?.backend === "pi");
+	/**
 	 * The primary button names every consequence it will have (OW-hezidi).
 	 * "Fork", not a plainer phrase: all three CLIs in play use that word for this
 	 * operation and for the new-session sense of it. Never "rewind" -- that is
 	 * Claude Code's word for the in-place operation, which agentpane does not
 	 * offer and Codex cannot do at all.
 	 */
-	const sendLabel = $derived(editing ? (streamingAction ? "Stop and fork" : "Fork") : "Send");
+	const sendLabel = $derived(editing ? (stopsBeforeFork ? "Stop and fork" : "Fork") : "Send");
 	/**
 	 * Transcript indices the selected session can be forked at, or null while the
 	 * answer has not arrived (OW-roveze). Null offers every user message a
@@ -1015,22 +1029,26 @@
 	 * composer, so it goes through `startEdit` and repeats none of it: any
 	 * divergence between the two would be a defect, not a feature.
 	 *
-	 * Streaming, this stops the turn at the click rather than at submit -- the
+	 * Where the submit would stop the turn anyway -- Pi, streaming; see
+	 * `stopsBeforeFork` -- this stops it at the click rather than at submit, the
 	 * one exception to OW-hezidi's free-and-abandonable rule, and it says so in
-	 * its own name. The fill runs first and the abort is not awaited. Awaiting it
-	 * would buy nothing: `controller.abort` never clears `isStreaming`, only a
-	 * server event does, so the primary button reads "Stop and fork" either way.
-	 * And it would cost something -- through that whole round trip the composer
-	 * would still hold the old draft under a button reading "Send", where a
-	 * Ctrl-Enter prompts the running session instead of forking it. Filled first,
-	 * "Stop and fork" is the truth: `forkAndSubmit` re-checks `isStreaming` and
-	 * aborts again before it forks.
+	 * its own name. Elsewhere there is nothing to stop and the shortcut is free
+	 * again, so the abort goes exactly where the label does (D15, OW-bakosi).
+	 *
+	 * When it does fire, the fill runs first and the abort is not awaited.
+	 * Awaiting it would buy nothing: `controller.abort` never clears
+	 * `isStreaming`, only a server event does, so the primary button reads "Stop
+	 * and fork" either way. And it would cost something -- through that whole
+	 * round trip the composer would still hold the old draft under a button
+	 * reading "Send", where a Ctrl-Enter prompts the running session instead of
+	 * forking it. Filled first, "Stop and fork" is the truth: `forkAndSubmit`
+	 * re-checks `isStreaming` and aborts again before it forks.
 	 */
 	function editLastMessage(): void {
 		const index = lastUserIndex;
 		if (index === null) return;
 		startEdit(index);
-		if (streamingAction) void controller.abort();
+		if (stopsBeforeFork) void controller.abort();
 	}
 
 	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
@@ -1385,7 +1403,7 @@
 				     the last message is the frequent one. -->
 				{#if lastUserIndex !== null}
 					<button type="button" onclick={editLastMessage}>
-						{streamingAction ? "Stop and edit" : "Edit last message"}
+						{stopsBeforeFork ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
 				<button type="submit" disabled={!view.draft || view.sending || compaction !== null}>{sendLabel}</button>
