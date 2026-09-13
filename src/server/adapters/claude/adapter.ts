@@ -137,7 +137,14 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.reducer = new ClaudeReducer({ now: options.now });
 	}
 
-	/** Changes during `start()` (a `virtual` id becomes the real one) and on `fork()`. */
+	/**
+	 * Not stable. It moves in `start()`, where a `virtual` id becomes the minted
+	 * or resumed one, and again if an `init` event names a different
+	 * `session_id` -- the CLI is authoritative about its own store, and `init`
+	 * arrives with the first turn, so that second move lands well after
+	 * `start()` resolved (`handleLine`). `fork()` does NOT move it: the fork is
+	 * a second session with an adapter of its own (OW-razoki).
+	 */
 	get ref(): SessionRef {
 		return this.currentRef;
 	}

@@ -116,8 +116,14 @@ export class SessionManager {
 	 * arguments and nothing else. Claude Code's fork writes no store file until
 	 * its first turn ends (OW-japuzo), so `#start`'s index lookup cannot answer
 	 * for it and would throw `UnknownSessionError` at the attach that follows
-	 * every fork. Consumed by that attach. An entry outlives a fork nobody
-	 * attaches, which is the same abandoned fork D17 already declines to spend
+	 * every fork.
+	 *
+	 * An entry ends three ways: the attach that spawns the fork consumes it,
+	 * `close()` on that ref discards it, and `disposeAll()` drops the lot. An
+	 * attach that FAILS keeps it deliberately -- `#start`'s failure path
+	 * unregisters the container too, so the recipe is the whole of what a retry
+	 * has left to work from. An entry does outlive a fork nobody ever attaches
+	 * or closes, which is the abandoned fork D17 already declines to spend
 	 * anything on (OW-puduro).
 	 */
 	readonly #pendingForks = new Map<string, StartOptions>();
@@ -529,8 +535,11 @@ export class SessionManager {
 		// `session.adapter` and close's other branch disposes it. Moving this line
 		// after `#adoptRef` turns that key miss into a leaked subprocess.
 		bound.adapter = adapter;
-		// Spent: the fork has its child, and from its first turn on the store
-		// answers for it like any other session.
+		// Consumed: the fork has its own child and its own container, so nothing
+		// reaches it through the recipe again -- and must not, or a `close()`
+		// followed by an attach on a spelling the rename left behind would fork
+		// the PARENT a second time. Deliberately after `start()` resolved: the
+		// failure path above leaves the entry parked for a retry.
 		this.#pendingForks.delete(sessionKey(ref));
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
@@ -622,6 +631,11 @@ export class SessionManager {
 	 */
 	async close(ref: SessionRef): Promise<void> {
 		const session = this.#lookup(ref);
+		// Before the `!session` return below, which is exactly a fork whose recipe
+		// is parked and which was never attached: leaving it would let a later
+		// attach spawn a child for a session this call deleted. The same line
+		// `#aliases` and `#pendingRequests` get further down, for the same reason.
+		this.#pendingForks.delete(sessionKey(ref));
 		// Flag the startup before anything else: an adapter that does not exist
 		// yet cannot be disposed, and this is what stops it being born at all.
 		const pending = this.#attaching.get(sessionKey(session?.ref ?? ref));
@@ -679,6 +693,7 @@ export class SessionManager {
 		this.#sessions.clear();
 		this.#aliases.clear();
 		this.#pendingRequests.clear();
+		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
 		// finds this rather than spawning into a server that is already leaving.
 		for (const pending of starting) pending.torndown = true;

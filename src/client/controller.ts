@@ -821,9 +821,9 @@ export function createController(
 				// and this one line covers all of them. Pi's fork moved the live
 				// process onto the new file, so the manager has already re-keyed and
 				// this attach finds it; Codex and Claude Code each minted a
-				// conversation nothing is driving, and this attach is what spawns it. A fork is a selection change, so the
-				// intent bumps -- a preview poll still in flight must not put its old
-				// transcript back over the fork.
+				// conversation nothing is driving, and this attach is what spawns it.
+				// A fork is a selection change, so the intent bumps -- a preview poll
+				// still in flight must not put its old transcript back over the fork.
 				//
 				// Only a fork that is actually taking the selection may bump, which
 				// is why this is read before the bump destroys what it reads. A fork

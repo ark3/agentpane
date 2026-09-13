@@ -425,6 +425,54 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
 			[sessionKey(claudeRef), sessionKey(forked)].sort(),
 		);
+		// The container built from the recipe carries the recipe's workspace, or
+		// the fork drops out of the sidebar the user forked it from: nothing on
+		// disk carries its cwd yet, so `#ownSummary` is the only thing that can
+		// answer the cwd-filtered list (D7, D9).
+		expect((await sessions.list({ cwd: WORKSPACE })).map((s) => sessionKey(s.ref))).toContain(
+			sessionKey(forked),
+		);
+	});
+
+	it("discards the recipe for a fork the caller deleted before ever attaching it", async () => {
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		const claude = new FakeAdapterFactory({ forkMode: "claude" });
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+		const forked = await sessions.fork(claudeRef, "e1");
+
+		await sessions.close(forked);
+
+		// DELETE then attach is reachable straight off the HTTP API. A recipe that
+		// survived the close would spawn a sandboxed agent for a session the
+		// caller has already thrown away.
+		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(claude.created).toHaveLength(1);
+	});
+
+	it("stops reaching the recipe once the fork has its own child, including on a spelling the rename left behind", async () => {
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		// The CLI is authoritative about its own store, so a Claude session can
+		// rename under us after `start()` -- `ClaudeAdapter` adopts the id `init`
+		// reports. The client follows `renamed` and holds the new ref from there.
+		const claude = new FakeAdapterFactory({ forkMode: "claude", materialiseOnSubmit: "fork-real" });
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+		const forked = await sessions.fork(claudeRef, "e1");
+		await sessions.attach(forked);
+		await sessions.submit(forked, "hi");
+		const renamed: SessionRef = { backend: "claude", id: "fork-real" };
+		expect(sessions.canonicalRef(forked)).toEqual(renamed);
+
+		await sessions.close(renamed);
+
+		// The pre-rename spelling is the one key `close()` could not know to
+		// clear. A recipe still parked under it would fork the PARENT a second
+		// time and hand the caller that as the session it asked for.
+		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(claude.created).toHaveLength(2);
 	});
 
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
