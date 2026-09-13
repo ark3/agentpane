@@ -733,6 +733,56 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc)).not.toContain("turn/steer");
 	});
 
+	it("refuses to steer a turn it has already interrupted, and sends nothing on the wire (OW-pefawi)", async () => {
+		// `abort()` returns once `turn/interrupt` resolves, but `turnId` is only
+		// cleared by `turn/completed`, which arrives later. A submit in that window
+		// would steer a turn app-server is tearing down, and `expectedTurnId` is a
+		// precondition against the currently active turn -- so the caller would get
+		// an opaque wire error where the adapter can say "busy" itself.
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-interrupted" });
+		await adapter.submit("first");
+		await adapter.abort();
+		expect(request(proc, "turn/interrupt")["params"]).toEqual({
+			threadId: "thread-interrupted",
+			turnId: "turn-1",
+		});
+
+		await expect(adapter.submit("second")).rejects.toThrow(
+			"codex adapter cannot submit while an interrupted turn is ending",
+		);
+		expect(methods(proc)).not.toContain("turn/steer");
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
+	});
+
+	it("admits a submit once the interrupted turn completes (OW-pefawi)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-interrupt-done" });
+		await adapter.submit("first");
+		await adapter.abort();
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-interrupt-done",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "summary",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+
+		await adapter.submit("second");
+
+		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(2);
+		expect(methods(proc)).not.toContain("turn/steer");
+
+		await adapter.abort(); // leave the fixture's turn tidily interrupted
+	});
+
 	it("compacts an idle thread via thread/compact/start with just the thread id (OW-72)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-compact" });
 		const updates: ("requesting" | "running" | null)[] = [];

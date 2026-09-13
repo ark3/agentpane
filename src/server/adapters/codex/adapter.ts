@@ -78,6 +78,7 @@ const START_ABORTED_ERROR = "codex adapter start aborted: disposed during startu
 const TURN_START_ABORTED_ERROR = "codex adapter submit aborted: disposed during turn startup";
 const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
 const TURN_ACTIVE_ERROR = "codex adapter cannot submit while a turn is active";
+const TURN_INTERRUPTED_ERROR = "codex adapter cannot submit while an interrupted turn is ending";
 
 /** JSON-RPC "method not found"; used when a blocking request's kind has no handler. */
 const UNSUPPORTED_REQUEST_CODE = -32601;
@@ -105,6 +106,11 @@ export class CodexAdapter implements BackendAdapter {
 	private threadId: string | null = null;
 	/** A known-safe lifecycle id that `abort()` may interrupt. */
 	private turnId: string | null = null;
+	/**
+	 * The turn `abort()` asked app-server to interrupt, held until that turn's
+	 * `turn/completed` arrives and clears `turnId` with it (OW-pefawi).
+	 */
+	private interruptedTurnId: string | null = null;
 	private turnStartPending = false;
 	/**
 	 * The single-flight admission gate. This is intentionally separate from
@@ -272,6 +278,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.errorListeners.clear();
 		this.clearPendingRequests();
 		this.turnId = null;
+		this.interruptedTurnId = null;
 		this.turnStartPending = false;
 		this.turnBusy = null;
 		this.pendingTurnCompletions.clear();
@@ -317,6 +324,19 @@ export class CodexAdapter implements BackendAdapter {
 		// and `POST prompt` all reach here; without this the well-defined "busy"
 		// becomes an opaque wire error, which is what `compact`'s own guard below
 		// exists to prevent.
+		// A turn this adapter has already interrupted is the other live turn that
+		// must not be steered (OW-pefawi). `abort()` sends `turn/interrupt` and
+		// only `turn/completed` clears `turnId`, so between the two this still
+		// holds an id -- and `expectedTurnId` is a precondition app-server checks
+		// against the *currently active* turn (`resources/codex-protocol/v2/
+		// TurnSteerParams.ts`), which a turn being torn down is not. Stop-then-send
+		// is an ordinary gesture, so the window is reachable by hand; refusing here
+		// keeps the well-defined "busy" the caller got before `submit()` gained a
+		// steer path instead of spending a round trip to translate app-server's
+		// error text back into one.
+		if (this.turnId && this.interruptedTurnId === this.turnId) {
+			throw new Error(TURN_INTERRUPTED_ERROR);
+		}
 		if (this.turnId && !this.reducer.getState().compaction) {
 			await client.request("turn/steer", { threadId, input, expectedTurnId: this.turnId });
 			return;
@@ -379,6 +399,10 @@ export class CodexAdapter implements BackendAdapter {
 		const client = this.requireClient();
 		const turnId = this.turnId;
 		if (!turnId) return;
+		// Set before the request, not after: the turn is no longer steerable from
+		// the moment app-server sees the interrupt, and a failed interrupt leaves a
+		// turn that still runs and still completes, which clears this.
+		this.interruptedTurnId = turnId;
 		await client.request("turn/interrupt", { threadId: this.requireThread(), turnId });
 	}
 
@@ -585,6 +609,7 @@ export class CodexAdapter implements BackendAdapter {
 						this.pendingTurnCompletions.set(completedTurnId, "completed");
 					}
 					if (this.turnId === completedTurnId) this.turnId = null;
+					if (this.interruptedTurnId === completedTurnId) this.interruptedTurnId = null;
 					if (!this.turnStartPending && this.turnBusy?.turnId === completedTurnId) {
 						this.turnBusy = this.turnId
 							? { source: "lifecycle", turnId: this.turnId }
