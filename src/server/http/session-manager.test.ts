@@ -396,6 +396,68 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(renamed).toEqual([]);
 	});
 
+	// What a ref-changing fork leaves behind for the PARENT (OW-risuwo). No new
+	// container is made: `fork` re-keys the parent's own `ManagedSession` onto
+	// the fork's id and leaves the parent's id behind as an alias, so every
+	// public surface that goes through `#lookup` now answers about the fork.
+	// The index below still reports the parent's stored session, which is
+	// Claude Code's shape -- its fork respawns the child onto the forked
+	// session and leaves the parent's store file untouched (OW-mayuza).
+	it("resolves the parent's ref to the fork's session after a ref-changing fork", async () => {
+		await sessions.attach(REF);
+		const parentAdapter = pi.forRef(REF);
+
+		const forked = await sessions.fork(REF, "e1");
+
+		// One adapter, reachable under both refs: the parent's id is an alias now.
+		expect(sessions.adapterFor(REF)).toBe(parentAdapter);
+		expect(sessions.adapterFor(forked)).toBe(parentAdapter);
+		expect(sessions.canonicalRef(REF)).toEqual(forked);
+		expect(sessions.summaryOf(REF)?.ref).toEqual(forked);
+	});
+
+	it("(WRONG) drops the parent from list() after a ref-changing fork", async () => {
+		await sessions.attach(REF);
+
+		const forked = await sessions.fork(REF, "e1");
+
+		// The index still reports the parent -- its store file is untouched --
+		// but `list()` skips any stored summary whose key has become an alias,
+		// so the only thing a client can see is the fork. On Claude Code that
+		// hides a session that still exists on disk and is still resumable.
+		const listed = await sessions.list();
+		expect(listed.map((s) => sessionKey(s.ref))).toEqual([sessionKey(forked)]);
+		expect(listed.map((s) => sessionKey(s.ref))).not.toContain(sessionKey(REF));
+	});
+
+	it("keeps the parent in list() when a Codex-style fork leaves the ref unchanged", async () => {
+		// The contrast: no re-key means no alias, so the parent stays listed.
+		const codexRef: SessionRef = { backend: "codex", id: "thread-parent" };
+		const codex = new FakeAdapterFactory({ forkMode: "codex" });
+		index = new FakeSessionIndex([storedSession(codexRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(codexRef);
+
+		await sessions.fork(codexRef, "e1");
+
+		const listed = await sessions.list();
+		expect(listed.map((s) => sessionKey(s.ref))).toEqual([sessionKey(codexRef)]);
+	});
+
+	it("(WRONG) disposes the fork's live adapter when the parent's ref is closed", async () => {
+		// `close()` is what the DELETE route calls (app.ts). Routed through the
+		// alias, a DELETE aimed at the parent kills the agent the fork is driving.
+		await sessions.attach(REF);
+		const parentAdapter = pi.forRef(REF);
+
+		const forked = await sessions.fork(REF, "e1");
+		await sessions.close(REF);
+
+		expect(parentAdapter?.disposed).toBe(true);
+		expect(sessions.isAttached(forked)).toBe(false);
+		expect(sessions.liveRefs()).toEqual([]);
+	});
+
 	it("rejects a fork on a session with no live adapter", async () => {
 		await expect(sessions.fork({ backend: "pi", id: "/nope" }, "e1")).rejects.toBeInstanceOf(
 			UnknownSessionError,
