@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # Codex's compaction marker shows no token figure, and the usage payload that could supply one is already in the reducer, unread.
@@ -85,3 +86,21 @@ then.
 Load-bearing: the figure means the same thing on both backends, and it is the
 one live before compaction. Incidental: how `MapContext` grows to carry it, and
 where the figure sits in the marker.
+
+## Close note
+
+Codex's compaction marker now carries a real pre-compaction token figure, on `main` at 459c05c ("feat: Codex's compaction marker carries the pre-compaction token figure").
+
+**The field, and why.** `last.totalTokens` sampled at `item/started contextCompaction` -- the last model request's input+output, i.e. the context as it stood going in, which is the same quantity Pi's `tokensBefore` names. In the committed capture that is 16304. `total.totalTokens` was rejected: it is cumulative for the thread and runs 9398 -> 23009 -> 37756 -> 54060 -> 68752, climbing straight through the compaction.
+
+**The card's open question, answered.** `MANUAL_TESTING.md` and `resources/fixtures/README.md` both quoted the Codex drop as 16802 -> 9231, under a claim that the figures were "read straight from" the committed capture. They are not: no field reconstructs that pair, and the strings appear nowhere in `resources/fixtures/codex/compact.jsonl`. The pair came from a different run of the same probe. Both copies are corrected in the same commit and now carry the numbers the capture actually supports, with `codex-cli 0.147.0` named. The third copy, in closed OW-72, was deliberately left as a record of what was believed then.
+
+**The seam.** `CodexReducer` gained a private `compactionTokensBefore: Map<itemId, number>`, written in the `item/started` branch that already special-cased `contextCompaction`, cleared in `reset()`, read in `remap()` into a new `MapContext.tokensBefore`. Keyed by item id rather than held as one field so a hydrated compaction -- which never sees an `item/started` -- reports 0 instead of borrowing a neighbour's figure. Sampling at start is the whole trick: three `thread/tokenUsage/updated` fire between the item's start and its completion, so the naive read at mapping time yields the *post*-compaction 4844.
+
+**How it was verified.** Two tests, and the dispatching session confirmed the red itself rather than taking the implementer's word. `src/server/adapters/codex/reducer.test.ts` drives the whole committed fixture and asserts the exact 16304; `src/client/render/Transcript.svelte.test.ts` drives a real `CodexReducer` over the capture's event order and asserts the rendered `.compaction-tokens`. Defeating the fix two ways made both go red and nothing else: passing 0 through gave `tokensBefore: 0`, and reading `this.tokenUsage` at mapping time gave `tokensBefore: 4844` -- the precise bug the card was written about. `bun run check` passes clean, 49 files / 1059 tests / 39s.
+
+**One thing deliberately unchanged.** The existing `reducer.test.ts` case asserting `tokensBefore: 0` did not flip and should not have: its helper sends only `item/completed`, so no start and no usage were ever observed and 0 is the honest answer. Its comment now says that rather than leaving it reading as a leftover. Same for the OW-72 "bare marker" render test, which stays reachable via cold hydrate.
+
+**Filed, not fixed:** OW-bisubi -- the session-preview path (`src/server/sessions/codex.ts`) reconstructs compaction markers from the on-disk rollout and still hardcodes `tokensBefore: 0`, so the same compaction now shows a figure in the transcript and none in the session list.
+
+**For anyone loading fixtures from a jsdom test:** you cannot. `readFixture` in the server test-support module dies with "The URL must be of scheme file" when pulled into the client project, because Vite rewrites `import.meta.url` there. Model the event order by hand instead, which is what the render test does.
