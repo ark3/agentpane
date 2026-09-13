@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # fork_probe.py's Codex mid-stream cell can report a measurement it did not earn, in two ways claude_fork_probe.py closed
@@ -34,3 +35,22 @@ Shown by running the cell with the rollout path deliberately broken — a wrong 
 That is the red-then-green: break it first and watch the current code pass.
 
 Home server; needs `codex -m gpt-5.6-luna`, and a live run costs one long model turn per invocation.
+
+## Close note
+
+Both gaps closed in `resources/probes/fork_probe.py`'s `codex_fork_mid_stream` cell, landed as 000daad on main.
+
+`CodexSession.still_streaming(mark, thread_id)` re-reads the buffer for a `turn/completed` immediately before the `thread/fork` request goes out, is recorded as `still_streaming_at_the_fork_itself`, and gates the cell's `result` beside `streaming_confirmed`.
+`codex_rollout_snapshot` now returns `exists` and the byte-split `raw` lines (via `codex_rollout_lines`, not `str.splitlines`), which feed a `disk_read_earned` gate of the same three checks `claude_fork_probe.py` makes: rollout resolved, baseline on disk, `prefix_preserved`.
+`main()` gates the process exit on the cell's own `result` rather than re-listing `streaming_confirmed_before_fork`, so a condition added to the cell reaches the exit code without a second edit.
+
+Shown red-then-green live on the home server, 2026-09-13, `codex-cli 0.154.0`, with `codex_rollout_for`'s glob deliberately broken to `*.deliberately-broken`.
+On the old code that break gave `result: "measured"`, exit 0, `parent_rollout_file: null`, `parent_rollout_lines_at_fork: 0` and an empty gained census — the silent failure the card named.
+On the new code the same break gives `result: "unearned"`, `disk_read_earned: false`, `parent_rollout_resolved: false`, exit 1.
+Unbroken it gives `result: "measured"`, `still_streaming_at_the_fork_itself: true`, `disk_read_earned: true`, the parent rollout resolved and going 21 -> 26 lines with one assistant `response_item` of 1491 chars, `parent_turn_status: "completed"`, exit 0.
+The 0.154.0 finding the cell exists to carry — the parent survives a mid-stream fork and writes its whole reply — is unchanged and now earned.
+The three run records are `/tmp/ow-wifibe-{red,green,healthy}.log`, which do not survive the machine; the numbers above and the commit message carry what they showed.
+
+The claim that these two gaps were still open lived in four places and all four were retired in the same commit: `fork_probe.py`'s module docstring, `claude_fork_probe.py`'s module docstring and its `still_streaming` docstring, `resources/probes/README.md` (the mid-stream bullet, the exit-code sentence, and the `claude_fork_probe.py` section), and `docs/MANUAL_TESTING.md`'s "Streaming was confirmed before each action" paragraph, where the sentence was redated to the run rather than deleted.
+
+Nothing under `src/` was touched, so `bun run check` is not implicated.
