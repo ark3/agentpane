@@ -91,6 +91,16 @@ export interface MapContext {
 	effort: string | null;
 	/** False for `item/started` and deltas; true for authoritative completion/hydration. */
 	completed: boolean;
+	/**
+	 * Context size going into a compaction, read only by the `contextCompaction`
+	 * arm. It cannot come off the item -- it rides `thread/tokenUsage/updated` --
+	 * and it cannot be read at mapping time either, because that stream fires
+	 * again between the compaction's start and its completion and by then reports
+	 * the *post*-compaction size. The reducer captures it at `item/started` and
+	 * hands it over here. 0 means no usage was ever observed (a cold hydrate),
+	 * and the renderer then shows no figure at all.
+	 */
+	tokensBefore: number;
 }
 
 export const ZERO_USAGE: Usage = {
@@ -538,14 +548,12 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 		}
 
 		case "contextCompaction": {
-			// The item is `{ type, id }` and nothing else -- no summary text, no
-			// token figure (OW-72). So it maps to a bare compaction marker: a
-			// `compactionSummary` message with an empty summary, which
-			// `Message.svelte`'s one compaction renderer draws as a marker with no
-			// body. `tokensBefore` is unknown here (it rides `thread/tokenUsage/
-			// updated`, not the item), so 0 -- the renderer shows a figure only
-			// when it is positive.
-			return { kind: "single", message: compactionMarker(ctx.timestamp) };
+			// The item is `{ type, id }` and nothing else -- no summary text (OW-72
+			// decided not to go hunting for one), so the marker's body stays empty
+			// and `Message.svelte`'s one compaction renderer draws it as a marker
+			// with no body. The token figure does not come off the item either; it
+			// arrives on `ctx.tokensBefore` (OW-kelomi).
+			return { kind: "single", message: compactionMarker(ctx.timestamp, ctx.tokensBefore) };
 		}
 
 		default: {
@@ -562,16 +570,18 @@ function blockAsAssistant(block: TextContent | ImageContent): TextContent {
 }
 
 /**
- * A bare compaction marker (OW-72). Codex's `contextCompaction` item carries no
- * summary and no token figure, so both fields are empty here; `Message.svelte`
- * draws the marker regardless and the summary/figure only when present. Built
- * as the `CompactionSummaryMessage` shape pi-agent-core declaration-merges into
- * `AgentMessage` -- constructed inline rather than via
- * `createCompactionSummaryMessage`, because the pi packages are types-only
- * (D10, enforced by import-boundaries.test.ts).
+ * A compaction marker (OW-72). Codex's `contextCompaction` item carries no
+ * summary, so that field is empty here; `Message.svelte` draws the marker
+ * regardless and the summary/figure only when present. `tokensBefore` means the
+ * same thing it means on Pi's marker -- the context as it stood going into the
+ * compaction (OW-kelomi) -- because two markers on one screen must not name the
+ * same figure for different things. Built as the `CompactionSummaryMessage`
+ * shape pi-agent-core declaration-merges into `AgentMessage` -- constructed
+ * inline rather than via `createCompactionSummaryMessage`, because the pi
+ * packages are types-only (D10, enforced by import-boundaries.test.ts).
  */
-function compactionMarker(timestamp: number): AgentMessage {
-	return { role: "compactionSummary", summary: "", tokensBefore: 0, timestamp };
+function compactionMarker(timestamp: number, tokensBefore: number): AgentMessage {
+	return { role: "compactionSummary", summary: "", tokensBefore, timestamp };
 }
 
 /**

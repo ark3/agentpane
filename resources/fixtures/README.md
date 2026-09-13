@@ -98,13 +98,12 @@ backend's manual compaction, so the fixture carries the compaction wire shapes
 both adapters reduce against. It is a two-phase capture, and it needed one
 non-obvious step per backend:
 
-- **Codex** (`compact.jsonl`, 5247 lines): after the priming turns settle the
-  harness sends `thread/compact/start` (params `{ threadId }`, response `{}`),
-  which Codex runs as its own non-steerable turn. The fixture contains a
-  `contextCompaction` `item/completed` — the item carries *no* summary and *no*
-  token figure, only `{ type, id }` — and `thread/tokenUsage/updated` shows the
-  drop: total `totalTokens` went **16802 → 9231** across the compaction. The
-  adapter maps `contextCompaction` to a bare `compactionSummary` marker.
+- **Codex** (`compact.jsonl`, 5247 lines, `codex-cli 0.147.0`): after the priming turns settle the harness sends `thread/compact/start` (params `{ threadId }`, response `{}`), which Codex runs as its own non-steerable turn.
+  The fixture contains a `contextCompaction` `item/started`/`item/completed` pair, and the item carries *no* summary and *no* token figure, only `{ type, id }`.
+  The drop is on `thread/tokenUsage/updated` instead: `last.totalTokens` is **16304** at the item's start and **4844** by its completion, via 14692 in between.
+  `total.totalTokens` is cumulative for the thread (9398 → 23009 → 37756 → 54060 → 68752, climbing through the compaction) and is not a context size.
+  This bullet previously read **16802 → 9231**; no field in the committed capture reconstructs that pair, which came from a different run of the same probe, and it is retired here (OW-kelomi).
+  The adapter maps `contextCompaction` to a `compactionSummary` marker with an empty summary and `tokensBefore` sampled at `item/started` — the same quantity Pi's `tokensBefore` names.
 - **Pi** (`compact.jsonl`, 3587 lines): Pi refuses to compact a session that
   still fits inside `keepRecentTokens` ("Nothing to compact (session too
   small)"; default 20000, verified against 0.84.2's `prepareCompaction`), so

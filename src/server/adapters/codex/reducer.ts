@@ -84,6 +84,20 @@ export class CodexReducer {
 	turnDiff: string | null = null;
 	/** Latest `thread/tokenUsage/updated` payload; drives the cost display. */
 	tokenUsage: ThreadTokenUsage | null = null;
+	/**
+	 * Context size at the moment each compaction started, by item id (OW-kelomi).
+	 *
+	 * Sampled at `item/started` and not later: `thread/tokenUsage/updated` fires
+	 * three more times before the matching `item/completed`
+	 * (`resources/fixtures/codex/compact.jsonl`, `codex-cli 0.147.0`: `last.
+	 * totalTokens` 16304 at the start, then 14692, then 4844), so reading
+	 * `this.tokenUsage` when the completed item is mapped would label the shrunk
+	 * context "before". Keyed by id rather than kept as one field so that a
+	 * second compaction cannot lend its figure to the first, and so that a
+	 * hydrated item -- which has no `item/started` -- reports nothing instead of
+	 * something borrowed.
+	 */
+	private compactionTokensBefore = new Map<string, number>();
 	threadId: string | null = null;
 	turnId: string | null = null;
 	/**
@@ -149,6 +163,7 @@ export class CodexReducer {
 		this.streaming = false;
 		this.compaction = null;
 		this.turnDiff = null;
+		this.compactionTokensBefore.clear();
 	}
 
 	/**
@@ -238,7 +253,12 @@ export class CodexReducer {
 						? message.params.completedAtMs
 						: message.params.startedAtMs;
 				if (message.params.item.type === "contextCompaction") {
-					if (!completed) return this.setCompaction("running");
+					if (!completed) {
+						// The only moment the pre-compaction context size is still live.
+						const before = this.tokenUsage?.last.totalTokens ?? 0;
+						this.compactionTokensBefore.set(message.params.item.id, before);
+						return this.setCompaction("running");
+					}
 					this.compaction = null;
 				}
 				return this.applyItem(message.params.item, at, completed);
@@ -322,6 +342,7 @@ export class CodexReducer {
 		const ctx: MapContext = {
 			timestamp: slot.timestamp,
 			completed: slot.completed,
+			tokensBefore: this.compactionTokensBefore.get(slot.item.id) ?? 0,
 			...this.identity,
 		};
 		const mapped = mapItem(slot.item, ctx);

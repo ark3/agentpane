@@ -310,6 +310,20 @@ describe("replaying the compact fixture", () => {
 		expect(reducer.getState().messages.filter((message) => message.role === "compactionSummary")).toHaveLength(1);
 	});
 
+	it("carries the pre-compaction token figure onto the marker (OW-kelomi)", () => {
+		// The figure has to be the one live *before* the compaction, because the
+		// same name means the same thing on Pi's marker. `thread/tokenUsage/
+		// updated` fires three more times between `item/started` and
+		// `item/completed` (`last.totalTokens` 16304 -> 14692 -> 4844), so the
+		// value sitting in the reducer when the completed item is mapped is the
+		// *post*-compaction one. Asserted as the exact number: "greater than
+		// zero" would pass on 4844, which is the bug this guards.
+		const reducer = new CodexReducer({ now: () => 1_000 });
+		for (const line of readFixture("compact")) reducer.handle(line);
+		const marker = reducer.getState().messages.find((message) => message.role === "compactionSummary");
+		expect(marker).toMatchObject({ role: "compactionSummary", summary: "", tokensBefore: 16_304 });
+	});
+
 	it("clears a running compaction when its turn is interrupted before item completion", () => {
 		const reducer = new CodexReducer({ now: () => 1_000 });
 		reducer.handle(startedItem({ type: "contextCompaction", id: "compact" }, 10));
@@ -1078,10 +1092,16 @@ describe("item types with no fixture yet", () => {
 
 	it("renders contextCompaction as a bare marker: no summary text, no token figure", () => {
 		// OW-72: the item is `{ type, id }` and nothing else, so the marker is
-		// empty-bodied -- a `compactionSummary` message with an empty summary and
-		// no positive token figure. `Message.svelte` draws the marker regardless,
-		// and the transcript can no longer silently drop the compaction. The old
-		// behaviour was `toEqual([])`; this went red against that first.
+		// empty-bodied -- a `compactionSummary` message with an empty summary.
+		// `Message.svelte` draws the marker regardless, and the transcript can no
+		// longer silently drop the compaction. The old behaviour was `toEqual([])`;
+		// this went red against that first.
+		//
+		// `tokensBefore` is 0 here and that is the honest answer, not a leftover:
+		// this helper sends only `item/completed`, so no `thread/tokenUsage/
+		// updated` and no `item/started` were ever seen and there is no
+		// pre-compaction figure to report (OW-kelomi). The same holds for a cold
+		// hydrate. The fixture-driven case above is where the figure is asserted.
 		const messages = complete({ type: "contextCompaction", id: "c1" });
 		expect(messages).toHaveLength(1);
 		expect(messages[0]).toMatchObject({ role: "compactionSummary", summary: "", tokensBefore: 0 });

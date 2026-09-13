@@ -14,6 +14,7 @@ import { previewMessages } from "../preview.ts";
 import type { SessionPreviewTurn } from "$shared/protocol.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
+import { CodexReducer } from "$server/adapters/codex/reducer.ts";
 import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
 
 const roles = (container: HTMLElement) =>
@@ -209,6 +210,26 @@ describe("Message", () => {
 		expect(container.textContent).toContain("compaction");
 	});
 
+	/** One `thread/tokenUsage/updated`, with `last.totalTokens` the only figure that matters here. */
+	function tokenUsage(lastTotal: number) {
+		const breakdown = {
+			inputTokens: lastTotal,
+			cachedInputTokens: 0,
+			cacheWriteInputTokens: 0,
+			outputTokens: 0,
+			reasoningOutputTokens: 0,
+			totalTokens: lastTotal,
+		};
+		return {
+			method: "thread/tokenUsage/updated" as const,
+			params: {
+				threadId: "t",
+				turnId: "u",
+				tokenUsage: { last: breakdown, total: breakdown, modelContextWindow: null },
+			},
+		};
+	}
+
 	it("renders a compactionSummary as its own marker, not the unknown dump (OW-72)", () => {
 		// One renderer for every backend. The marker must not fall through to the
 		// unknown JSON dump -- that is the whole point of the branch.
@@ -226,8 +247,10 @@ describe("Message", () => {
 	});
 
 	it("renders a bare compactionSummary marker with no summary and no token figure (OW-72)", () => {
-		// Codex's contextCompaction carries neither: still a marker, but no body
-		// and no token figure. Same renderer, same data-role -- just empty fields.
+		// Still reachable after OW-kelomi gave Codex's marker a figure: a
+		// compaction hydrated cold, or one whose `item/started` the reducer never
+		// saw, has no pre-compaction size to report and arrives with 0. Still a
+		// marker, but no body and no figure -- same renderer, same data-role.
 		const { container } = render(Message, {
 			props: {
 				message: { role: "compactionSummary", summary: "", tokensBefore: 0, timestamp: 1 } as unknown as AgentMessage,
@@ -236,6 +259,34 @@ describe("Message", () => {
 		expect(roles(container)).toEqual(["compactionSummary"]);
 		expect(container.querySelector(".compaction-marker")).not.toBeNull();
 		expect(container.querySelector(".compaction-tokens")).toBeNull();
+		expect(container.querySelector(".body")).toBeNull();
+	});
+
+	it("shows the token figure on a Codex compaction marker (OW-kelomi)", () => {
+		// Built by the Codex reducer rather than by hand: the renderer has always
+		// drawn a positive `tokensBefore`, so the only thing this can catch is the
+		// adapter not supplying one. The event order is the recorded one
+		// (`resources/fixtures/codex/compact.jsonl`, `codex-cli 0.147.0`) --
+		// usage, `item/started`, usage again now that the context has shrunk, then
+		// `item/completed` -- and 16304 is that capture's pre-compaction figure.
+		const reducer = new CodexReducer({ now: () => 1_000 });
+		reducer.handle(tokenUsage(16_304));
+		reducer.handle({
+			method: "item/started",
+			params: { threadId: "t", turnId: "u", item: { type: "contextCompaction", id: "c1" }, startedAtMs: 1 },
+		});
+		reducer.handle(tokenUsage(4_844));
+		reducer.handle({
+			method: "item/completed",
+			params: { threadId: "t", turnId: "u", item: { type: "contextCompaction", id: "c1" }, completedAtMs: 2 },
+		});
+		const message = reducer.getState().messages.find((m) => m.role === "compactionSummary");
+		if (!message) throw new Error("the reducer produced no compaction marker");
+
+		const { container } = render(Message, { props: { message } });
+		expect(roles(container)).toEqual(["compactionSummary"]);
+		expect(container.querySelector(".compaction-tokens")?.textContent).toMatch(/16K/);
+		// Still no summary text: the item carries none, and OW-72 settled that.
 		expect(container.querySelector(".body")).toBeNull();
 	});
 });

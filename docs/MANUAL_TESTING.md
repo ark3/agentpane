@@ -377,16 +377,17 @@ Captured 2026-08-18 while landing OW-72, through `resources/probes/
 capture_fixtures.py --scenario compact`, which primes a context with several
 long turns and then drives each backend's manual compaction. These are live
 runs against the real CLIs (Codex `codex-cli 0.147.0`, Pi `0.84.2`); the
-recorded streams are committed as `resources/fixtures/{codex,pi}/compact.jsonl`
-and the token figures below are read straight from them, not estimated.
+recorded streams are committed as `resources/fixtures/{codex,pi}/compact.jsonl`.
+The Pi figures below are read straight from the committed capture.
+The Codex pair originally recorded here was not, and is corrected in the next paragraph.
 
-**Codex** compacts as its own non-steerable turn, triggered by
-`thread/compact/start`. Its `thread/tokenUsage/updated` events bracket the
-compaction, and the total context dropped from **16802 → 9231 tokens** across
-it (a 45% reduction). The `contextCompaction` item Codex emits carries no
-summary text and no token figure — only `{ type, id }` — so the transcript
-renders it as a bare marker, which is exactly what the mapped
-`compactionSummary` message (empty summary, `tokensBefore: 0`) produces.
+**Codex** compacts as its own non-steerable turn, triggered by `thread/compact/start`.
+Its `thread/tokenUsage/updated` events bracket the compaction: in the committed capture `last.totalTokens` stands at **16304** when the `contextCompaction` item starts and has fallen to **4844** by the time it completes, via 14692 in between.
+`total.totalTokens` is cumulative for the thread, not a context size — it runs 9398 → 23009 → 37756 → 54060 → 68752, climbing straight through the compaction — so it can never supply a before/after pair.
+This section previously reported that drop as **16802 → 9231 tokens**; neither number appears anywhere in the committed capture and no field reconstructs that pair, so it came from a different run of the same probe and is retired here (OW-kelomi).
+The `contextCompaction` item itself carries no summary text and no token figure — only `{ type, id }` — so the marker's body stays empty.
+The figure comes off the token-usage stream instead: the reducer samples `last.totalTokens` at the item's `item/started`, because the same stream fires again before the completion and by then reports the shrunk context, and carries it onto the mapped `compactionSummary` as `tokensBefore` (OW-kelomi).
+That is the same quantity Pi's `tokensBefore` names, which is the point — two markers on one screen must not give one name to two different things.
 
 **Pi** compacts in response to a `{ type: "compact" }` command. It refuses when
 the whole context still fits inside `keepRecentTokens` ("Nothing to compact
@@ -399,11 +400,10 @@ summary text and `firstKeptEntryId`. Pi does not re-emit that summary through
 message from `compaction_end` itself — verified by the fixture, whose only
 events after `compaction_start` are `compaction_end` and the command response.
 
-Pi and Codex therefore differ in what a compaction can show: Pi has a
-summary and a real before/after figure; Codex has neither on the item and only
-a marker, with the token drop visible only via the separate token-usage
-stream. One `Message.svelte` renderer covers both — marker always, summary and
-token figure only when present.
+Pi and Codex therefore differ in what a compaction can show.
+Pi has a summary and a real before/after figure, both on the item itself.
+Codex has no summary at all, and one figure rather than two: the pre-compaction size, which the item does not carry and the adapter takes from the token-usage stream.
+One `Message.svelte` renderer covers both — marker always, summary and token figure only when present.
 
 ## Observed fork-from-past, the 2×2 of {Pi, Codex} × {rewind, new session} (OW-mewiga)
 
