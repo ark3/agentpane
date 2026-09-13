@@ -735,6 +735,71 @@ The CLI permits it; the adapter is written for one child.
 A surviving-parent fork would take Codex's path instead — the adapter's own `ref` unchanged, the returned ref naming a session this adapter is not driving — and something would then have to drive that session.
 Whether that is a small change or a real refactor is a question for whoever takes the decision; this run only removes the reason to assume the backend forbids it.
 
+### A fork through agentpane leaves the parent's turn running and answers on its own child (OW-razoki)
+
+Run on the home server 2026-09-13, `claude 2.1.270`, `direnv 2.37.1`, every turn on `--model haiku` (the standing authorization condition), passed as the session's `model` through the API.
+This is the run OW-japuzo's section could not be: that one measured a probe's kill against a probe's spawn, and this one drives the real server over the production spawn path.
+
+**Nothing about the command line differs from production.**
+`bun run start` on port 4321, driven over the HTTP API with an `/api/events` SSE reader deciding when a turn was genuinely mid-stream.
+Each session's workspace was a throwaway `git init` directory under the session scratchpad, so the stores landed in their own `~/.claude/projects/` directories and never in this repo's; all of them were removed afterwards.
+The fork's child, read out of `ps` while it was alive, was:
+
+```
+claude --permission-mode bypassPermissions -p --input-format stream-json --output-format stream-json \
+  --verbose --include-partial-messages --model claude-haiku-4-5-20251001 \
+  --resume 58cef8cf-b562-491f-b1e0-50e375bec767 \
+  --resume-session-at 7c4670f1-4273-4c99-96b8-21022c32d966 \
+  --fork-session --session-id 76e81bd6-d5d2-496b-a2f3-86b6e8590dd5
+```
+
+which is `buildClaudeSpawnCommand`'s fork shape with sbox's `--permission-mode bypassPermissions` injected, reached through `direnv exec <cwd> sbox --`.
+
+#### 1. The parent finishes its reply, and the reply reaches disk
+
+Every run forked while the parent's second or third turn was streaming, confirmed at the instant of the fork by an `isStreaming: true` status plus several hundred accumulated characters of assistant text, not by a timer.
+
+| fork point | parent text at fork | parent's final reply | store growth after the fork | reply on disk |
+|---|---|---|---|---|
+| `session-start` | 470 chars | 3702 chars | 7439 bytes | yes |
+| a real store entry | 490 chars | 3906 chars | 7491 bytes | yes |
+| a real store entry, fork driven concurrently | 496 chars | 8536 chars | 12549 bytes | yes |
+
+The store growth is the whole point: at the moment of the fork the parent's file did not yet carry a byte of that reply, which is OW-japuzo's finding unchanged on 2.1.270.
+Under the old `replaceProcess` the kill landed exactly there and all of it was lost.
+The `POST .../fork` route returned `201` in under 10ms in every run, because `fork()` now only mints an id and builds `StartOptions`.
+
+#### 2. The fork inherits the parent's truncated history, and only that
+
+Forking at a real store entry rather than `session-start` is what exercises `--resume --resume-session-at --fork-session`, and the two are different code paths in `ClaudeAdapter.start`, so both were run.
+
+The parent was told a codeword on turn 1, answered `second` on turn 2, and was mid-way through a long essay on turn 3 when the fork was taken at the entry preceding turn 2's prompt.
+Asked "What is the codeword, and have we discussed bicycles?", the fork answered:
+
+> PLATYPUS, and no, we haven't discussed bicycles.
+
+So the fork carried turn 1 across and carried neither turn 2's cut nor the turn 3 the parent was still streaming — truncation inclusive of the named entry, as OW-mayuza has it, now observed through agentpane rather than through a probe.
+The fork's own `~/.claude/projects/<munged-cwd>/<fork-id>.jsonl` exists and is a different file from the parent's, and `GET /api/sessions?cwd=<workspace>` lists both sessions.
+
+#### 3. Two children, two live turns, one workspace
+
+The first attempt to show this counted every process named `claude` and proved nothing: the server had been kept alive across runs, so nine children from earlier sessions were still resident, and one of the things named `claude` on this machine is the Claude Code CLI driving the session doing the measuring.
+Counting by the two `--session-id` values under test is the measurement that means something.
+
+With the parent still streaming, the fork was attached and prompted without waiting:
+
+```
+parent pid 964  --session-id 58cef8cf-...   parent isStreaming = true, 496 chars in
+fork   pid 1030 --session-id 76e81bd6-...   fork   isStreaming = true
+```
+
+Both children held live turns at the same instant, on the same workspace, and both turns completed: the parent with 8536 characters written durably, the fork with its answer and its own store.
+That is the CLI tolerance OW-japuzo measured with two hand-spawned children, now reached through agentpane's own adapters — one adapter and one `Ownership` each, which is what made it cheap.
+
+**Not established here.**
+Nothing was measured about a fork of a fork, about two forks of one parent taken together, or about what happens when the parent's turn fails rather than succeeds.
+Nothing was run on Pi or Codex: this section is Claude Code only, and Pi remains the one backend whose fork moves the live process's own file.
+
 ## Observed favicon badge across engines, and the limit of headless focus (OW-diyuwu)
 
 Recorded 2026-08-18. Two separate things: what headless Chromium refuses to
