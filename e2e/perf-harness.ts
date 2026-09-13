@@ -23,7 +23,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController, type AgentpaneController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 const CWD = "/tmp/agentpane-perf";
 
@@ -176,8 +176,21 @@ const api: AgentpaneApi = {
 		return [];
 	},
 	async setModel() {},
-	async forkPoints() {
-		return [];
+	/**
+	 * One point per user message, each naming that message's transcript index
+	 * -- the same shape `harness.ts` answers, and the reason is the cost being
+	 * measured: `Transcript.svelte` draws an Edit control only on the indices
+	 * this set names, so an empty answer renders one button per user message
+	 * fewer than the app this harness stands for (OW-sibebe). Answered per
+	 * `ref`, because this harness drives several sessions at once.
+	 */
+	async forkPoints(ref: SessionRef) {
+		const id = ref.id.split("/").pop()!.replace(".jsonl", "");
+		const points: ForkPoint[] = [];
+		sessionOf(id).messages.forEach((message, index) => {
+			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
+		});
+		return points;
 	},
 	async fork(ref: SessionRef) {
 		return ref;

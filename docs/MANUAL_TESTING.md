@@ -858,6 +858,28 @@ two sessions) with 8 summaries listed:
 per token, for a list that did not change. The second row is the guard: the
 memo must not stop the list re-sorting when it really is re-listed.
 
+## Observed perf-harness cost before and after answering fork points (OW-sibebe)
+
+Recorded 2026-09-13 on the home server (4 cores), `bun 1.3.14`, `@playwright/test 1.62.1`, headless Chromium, on the production-build recipe in `e2e/perf-probe.ts`'s docblock.
+Before is `3880ea7`, after is the same tree with `e2e/perf-harness.ts`'s `forkPoints` answering one point per user message of the session the ref names instead of `[]`.
+
+The divergence the card is about, measured directly in the built page rather than inferred: with the harness at `sessions: 2, seedTurns: 5, otherTurns: 5`, `[data-edit]` controls in the selected transcript number **0** before and **5** after -- one per seeded user message, which is what the real app draws.
+So every perf figure recorded against this harness since OW-roveze was taken on a transcript one button per user message short.
+
+Median wall time of one `upsert`, 60 events per cell, two full probe runs per side (the spread between the two runs is reported where they differ):
+
+| Scenario | selected before | selected after | background before | background after |
+|---|---|---|---|---|
+| short transcript (15 msgs), 2 sessions | 0.60ms | 0.70ms | 0.20ms | 0.20ms |
+| long transcript (180 msgs), 2 sessions | 3.60-3.70ms | 3.80-3.90ms | 1.40-1.50ms | 1.50ms |
+| long transcript (180 msgs), 400 sessions | 4.40-4.70ms | 4.90-5.20ms | 2.80-4.30ms | 3.20-3.40ms |
+| short transcript (15 msgs), 400 sessions | 1.30-1.40ms | 1.20-1.30ms | 1.10-1.20ms | 1.10-1.20ms |
+
+`rendered` is 15 and 180 on both sides, as it must be: the fix adds buttons to existing messages, not messages.
+The selected-session rows move by 0.1-0.5ms, at or just outside the run-to-run spread the 400-session rows already show; the background rows do not move at all, which is the control -- a background session's events touch no transcript DOM, so its cost cannot depend on how many controls that DOM has.
+The honest reading is that the missing controls were costing a streaming delta little or nothing to *update*, and that what the empty answer was really hiding was first-paint and node-count fidelity rather than per-event cost.
+That is worth knowing and was not knowable before the measurement: the card assumed the reported figures were a floor, and they are, but a shallow one.
+
 ## Observed assistant footer rows before and after merging them (OW-75)
 
 Captured 2026-08-19 from the browser vehicle, not from a backend: `page.goto`
