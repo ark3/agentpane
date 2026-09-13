@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # Nobody has run what a fork actually does to the parent in SessionManager, and the code and two cards disagree about it
@@ -46,3 +47,19 @@ Where behaviour is wrong, the test says so in its name and the fix belongs to th
 The close note states, for each of the two consequences, whether it is real, and resolves the OW-vezipo contradiction explicitly rather than leaving both claims standing.
 
 No live backend needed: the existing fakes under `src/server/http/` drive adapters whose `fork()` changes the ref.
+
+## Close note
+
+Ran it. Four tests in `src/server/http/session-manager.test.ts`, in the existing `describe("fork (the third #adoptRef point)")` block, characterize today's behaviour on the `FakeAdapterFactory`'s default Pi shape (ref changes) with a Codex-shape contrast. `bun run check` green; every assertion was flipped and watched go red, and three were re-flipped independently by the reviewing session.
+
+The reading in this card was correct on all counts. `SessionManager.fork` makes no new container: it re-keys the parent's own `ManagedSession` onto the fork's id and leaves the parent's id behind as an alias.
+
+**Does `DELETE` on the parent's ref dispose the fork? Yes, real.** The DELETE route (`app.ts`) calls `sessions.close(ref)`; routed through the alias it disposes the single adapter, which is now driving the fork. Test: "(WRONG) disposes the fork's live adapter when the parent's ref is closed". The comment in `src/client/controller.ts` `forkAndSubmit` that asserted this from a reading was right.
+
+**Does the parent drop out of `list()`? Yes, real.** The index still reports the parent's stored summary -- on Claude its store file is untouched -- but `list()` skips any stored summary whose key is in `#aliases`, so the client sees only the fork. Test: "(WRONG) drops the parent from list() after a ref-changing fork". Also confirmed the third consequence the card did not name: `adapterFor`, `canonicalRef` and `summaryOf` on the parent's ref all answer about the fork, so after a Pi or Claude fork the parent is unreachable through the HTTP API entirely until a restart clears `#aliases`. That is OW-kekoji's subject.
+
+**The OW-vezipo contradiction resolves as "neither is wrong, they are about different backends."** Not one of the three the card guessed, though closest to the first. Codex's `thread/fork` leaves `adapter.ref` unchanged, so no alias is set and both parent and fork list -- OW-vezipo's twin rows are real there today. Pi and Claude re-key, so the parent is filtered and there is one row, because one was hidden rather than because the two can be told apart. OW-vezipo amended in place with that scoping (it stays open, and fixing the drop makes it bite on all three backends).
+
+**The Claude adapter docblock was the wrong one.** `src/server/adapters/claude/adapter.ts` said the parent "turns up in listings as a detached session"; it does not, per the test above. Corrected in the same change to state what the code does and why the alias filter is right for Pi and wrong for Claude.
+
+Commits: cc5601b (the tests), da8589e (docblock correction plus the OW-vezipo amendment).
