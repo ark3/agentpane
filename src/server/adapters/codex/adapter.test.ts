@@ -285,7 +285,9 @@ describe("CodexAdapter lifecycle", () => {
 
 		const forked = await adapter.fork("turn-stored");
 
-		expect(forked).toEqual({ backend: "codex", id: "thread-forked" });
+		// No `start`: Codex has already flushed the forked thread, so the manager
+		// reaches it through the index like any other stored session.
+		expect(forked).toEqual({ ref: { backend: "codex", id: "thread-forked" } });
 		expect(request(proc, "thread/fork")["params"]).toEqual({
 			threadId: STORED_REF.id,
 			cwd: "/workspace",

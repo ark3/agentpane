@@ -24,6 +24,7 @@ import type {
 	AdapterState,
 	BackendAdapter,
 	ImageInput,
+	StartOptions,
 	Unsubscribe,
 } from "../adapters/types.ts";
 import type { Broadcaster } from "./broadcaster.ts";
@@ -110,6 +111,16 @@ export class SessionManager {
 	readonly #aliases = new Map<string, string>();
 	/** requestId -> the session whose agent is blocked on it (D2a). */
 	readonly #pendingRequests = new Map<string, string>();
+	/**
+	 * Fork ref -> the `StartOptions` that spawn it, for a fork that exists as
+	 * arguments and nothing else. Claude Code's fork writes no store file until
+	 * its first turn ends (OW-japuzo), so `#start`'s index lookup cannot answer
+	 * for it and would throw `UnknownSessionError` at the attach that follows
+	 * every fork. Consumed by that attach. An entry outlives a fork nobody
+	 * attaches, which is the same abandoned fork D17 already declines to spend
+	 * anything on (OW-puduro).
+	 */
+	readonly #pendingForks = new Map<string, StartOptions>();
 	readonly #index: SessionIndex;
 	readonly #adapters: Partial<Record<BackendId, { create(ref: SessionRef): BackendAdapter }>>;
 	readonly #newId: () => string;
@@ -279,20 +290,26 @@ export class SessionManager {
 	 *    ref points at the freshly-flushed forked thread, which differs from
 	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
 	 *    `session.ref`.
-	 *  - Claude Code's `fork` respawns its own child onto the forked session, so
-	 *    it takes Pi's path here: `adapter.ref` changes and `#adoptRef` re-keys.
+	 *  - Claude Code's `fork` takes Codex's path -- its own ref is unchanged and
+	 *    the parent keeps its child and its turn (OW-razoki) -- but nothing has
+	 *    recorded the fork yet, so it also hands back the `StartOptions` its own
+	 *    adapter must be started with. `#pendingForks` holds those until the
+	 *    attach that follows.
 	 *
-	 * Where the ref does change, the live adapter is driving the FORK from here
-	 * on and the parent is left detached -- still on disk, still listed, still
-	 * attachable, but no longer reachable through the container that moved. That
-	 * is why this passes `"fork"`: unlike a rename, the parent's id must not
-	 * become an alias for the fork (`#adoptRef`, OW-kekoji).
+	 * Where the ref DOES change, which is Pi alone, the live adapter is driving
+	 * the FORK from here on and the parent is left detached -- still on disk,
+	 * still listed, still attachable, but no longer reachable through the
+	 * container that moved. That is why this passes `"fork"`: unlike a rename,
+	 * the parent's id must not become an alias for the fork (`#adoptRef`,
+	 * OW-kekoji).
 	 */
 	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
 		const session = this.#lookup(ref);
 		if (!session?.adapter) throw new UnknownSessionError(ref);
 		try {
-			return await session.adapter.fork(entryId);
+			const forked = await session.adapter.fork(entryId);
+			if (forked.start) this.#pendingForks.set(sessionKey(forked.ref), forked.start);
+			return forked.ref;
 		} finally {
 			this.#adoptRef(session, "fork");
 		}
@@ -309,9 +326,9 @@ export class SessionManager {
 	 *    older name for this same conversation, so it stays alive as an alias for
 	 *    clients still holding it.
 	 *  - `"fork"` -- a SECOND conversation now exists. The container still moves,
-	 *    because on Pi and Claude Code the one live adapter is driving the fork
-	 *    now, but the parent is not an older name for it: it is a session of its
-	 *    own that is still on disk, still listable and still resumable. Aliasing
+	 *    because on Pi the one live adapter is driving the fork now, but the
+	 *    parent is not an older name for it: it is a session of its own that is
+	 *    still on disk, still listable and still resumable. Aliasing
 	 *    it would say the opposite, and would hand every client holding the
 	 *    parent's ref a handle that prompts -- or, through `close()`, kills --
 	 *    the agent the user is talking to on the fork (OW-kekoji). The parent is
@@ -359,6 +376,23 @@ export class SessionManager {
 		if (!this.#adapters[ref.backend]) throw new UnknownBackendError(ref.backend);
 		let session = existing;
 		let addedAlias: [string, string] | undefined;
+		const forkStart = this.#pendingForks.get(sessionKey(ref));
+		if (!session && forkStart) {
+			// A fork this manager minted a moment ago. Its workspace and its spawn
+			// arguments came back from `fork()` because nothing on disk carries
+			// them yet -- see `#pendingForks`.
+			session = {
+				ref,
+				cwd: forkStart.cwd,
+				virtual: false,
+				fromStore: false,
+				subscriptions: [],
+				lastStreaming: false,
+				lastCompaction: null,
+				lastModel: null,
+				createdAt: this.#now(),
+			};
+		}
 		if (!session) {
 			// Not one of ours yet -- it must exist in the backend's store, and we
 			// need its workspace before we can spawn anything (D7).
@@ -459,13 +493,15 @@ export class SessionManager {
 				}),
 				adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
 			);
-			await adapter.start({
-				cwd: bound.cwd,
-				// Only a session the backend itself stored can be resumed; a
-				// `virtual:` id means nothing to Pi or Codex.
-				...(bound.fromStore ? { resumeId: bound.ref.id } : {}),
-				...(bound.model ? { model: bound.model } : {}),
-			});
+			await adapter.start(
+				forkStart ?? {
+					cwd: bound.cwd,
+					// Only a session the backend itself stored can be resumed; a
+					// `virtual:` id means nothing to Pi or Codex.
+					...(bound.fromStore ? { resumeId: bound.ref.id } : {}),
+					...(bound.model ? { model: bound.model } : {}),
+				},
+			);
 			// Teardown ran while we were starting. Publishing the adapter now
 			// would hand the table a live agent that shutdown has already walked
 			// past, and `#adoptRef` below would re-key a closed session back into
@@ -493,6 +529,9 @@ export class SessionManager {
 		// `session.adapter` and close's other branch disposes it. Moving this line
 		// after `#adoptRef` turns that key miss into a leaked subprocess.
 		bound.adapter = adapter;
+		// Spent: the fork has its child, and from its first turn on the store
+		// answers for it like any other session.
+		this.#pendingForks.delete(sessionKey(ref));
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
 		bound.lastCompaction = initialState.compaction;

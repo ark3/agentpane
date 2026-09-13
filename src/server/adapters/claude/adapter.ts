@@ -18,14 +18,18 @@
  *   2026-08-25): a fresh session and a fork both know their id synchronously,
  *   so nothing waits on the `init` event (which only arrives with the first
  *   turn, not at spawn -- settled live the same day).
- * - `fork()` respawns THIS adapter's child onto the forked session
- *   (`--resume <id> --resume-session-at <entryId> --fork-session`), so like
- *   Pi -- and unlike Codex -- `adapter.ref` changes and the session manager's
- *   `#adoptRef` re-keys the table. The parent's store file is untouched, and
- *   the re-key does NOT alias the parent onto the fork (`#adoptRef` takes the
- *   `"fork"` path, OW-kekoji): the parent is left detached, still listed and
- *   still resumable, and this adapter's live child is the fork's. No lineage
- *   marker exists on disk (MANUAL_TESTING OW-mayuza).
+ * - `fork()` runs nothing. It mints the fork's session id and returns the
+ *   `StartOptions` (`forkOf`) that spawn it, leaving this adapter on the parent
+ *   with its child, its ref and its in-flight turn intact -- so like Codex, and
+ *   unlike Pi, `adapter.ref` does not change and `#adoptRef` no-ops (OW-razoki).
+ *   The fork becomes a full session when the manager attaches it: a second
+ *   adapter, started with `forkOf`, spawns `--resume <parentId>
+ *   --resume-session-at <entryId> --fork-session --session-id <forkId>`.
+ *   Respawning THIS child onto the fork was the old shape, and its kill was what
+ *   destroyed a parent turn still streaming -- as of `claude 2.1.268` the CLI
+ *   itself tolerates two live children on one workspace (MANUAL_TESTING
+ *   OW-japuzo). The parent's store
+ *   file is untouched and no lineage marker exists on disk (OW-mayuza).
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
@@ -48,6 +52,7 @@ import type {
 	AdapterState,
 	AdapterFactory,
 	BackendAdapter,
+	ForkResult,
 	ImageInput,
 	StartOptions,
 	Unsubscribe,
@@ -146,23 +151,35 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.cwd = opts.cwd;
 		if (opts.model) this.model = opts.model;
 
-		if (opts.resumeId) {
+		if (opts.forkOf) {
+			// The fork `fork()` minted: this adapter's ref already carries its id,
+			// and the history it starts with is the parent's, truncated inclusive
+			// of the cut (OW-mayuza). A cut before the first entry keeps nothing,
+			// so it is a fresh session in the same workspace rather than a resume.
+			const { parentId, entryId } = opts.forkOf;
+			if (entryId === CLAUDE_FORK_SESSION_START) {
+				await this.attachProcess({ cwd: opts.cwd, sessionId: this.currentRef.id });
+			} else {
+				const kept = await this.readForkHistory(parentId, entryId);
+				if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
+				this.applyEffects(this.reducer.hydrate(kept.map((entry) => entry.record)));
+				this.adoptStoredModel();
+				await this.attachProcess({
+					cwd: opts.cwd,
+					resumeId: parentId,
+					forkAtEntryId: entryId,
+					sessionId: this.currentRef.id,
+				});
+			}
+			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
+		} else if (opts.resumeId) {
 			// Cold start (D3): the stream will not replay history, so repaint from
 			// the store file before spawning. The one await here is also the one
 			// place a dispose can land before a child exists.
 			const entries = await this.readStore(opts.resumeId);
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 			this.applyEffects(this.reducer.hydrate(entries.map((entry) => entry.record)));
-			if (this.model === null) {
-				const messages = this.reducer.getState().messages;
-				for (let i = messages.length - 1; i >= 0; i -= 1) {
-					const message = messages[i];
-					if (message?.role !== "assistant") continue;
-					this.model = message.model;
-					this.emitUpdate();
-					break;
-				}
-			}
+			this.adoptStoredModel();
 			this.currentRef = { backend: "claude", id: opts.resumeId };
 			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
@@ -302,40 +319,31 @@ export class ClaudeAdapter implements BackendAdapter {
 	}
 
 	/**
-	 * Respawn this adapter's child onto a fork of the current session truncated
-	 * inclusive of `entryId` (a store-line uuid), minting the forked session's
-	 * id ourselves via `--session-id`. The ref changes; the manager re-keys.
+	 * Mint the forked session's id and the arguments that spawn it, and change
+	 * nothing here: the parent keeps this adapter, this child and any turn still
+	 * in flight (OW-razoki). The fork is spawned by its OWN adapter, which the
+	 * manager starts with the returned `forkOf` -- the id is ours to choose
+	 * (`--session-id`), so it is known before anything is written, which matters
+	 * because the fork's store file does not exist until its first turn ends
+	 * (OW-japuzo) and the session index therefore cannot find it.
+	 *
+	 * The cut is validated here rather than left to that start: this is what the
+	 * `POST .../fork` route answers, and a fork point the parent's store does not
+	 * carry must fail the request, not a later attach.
 	 */
-	async fork(entryId: string): Promise<SessionRef> {
-		const ownership = this.ownership;
+	async fork(entryId: string): Promise<ForkResult> {
 		const cwd = this.cwd;
-		if (!ownership || !cwd) throw new Error("claude adapter not started");
+		if (!this.ownership || !cwd) throw new Error("claude adapter not started");
 		const parentId = this.currentRef.id;
-		const sessionId = this.mintSessionId();
-
-		if (entryId === CLAUDE_FORK_SESSION_START) {
-			// Nothing survives a cut before the first entry, so this is a fresh
-			// session in the same workspace, not a resume.
-			await this.replaceProcess(ownership, { cwd, sessionId });
-			this.reducer.reset();
-		} else {
-			const entries = await this.readStore(parentId);
-			const cut = entries.findIndex((entry) => entry.uuid === entryId);
-			if (cut < 0) throw new Error(`unknown fork point: ${entryId}`);
-			await this.replaceProcess(ownership, {
+		if (entryId !== CLAUDE_FORK_SESSION_START) await this.readForkHistory(parentId, entryId);
+		return {
+			ref: { backend: "claude", id: this.mintSessionId() },
+			start: {
 				cwd,
-				resumeId: parentId,
-				forkAtEntryId: entryId,
-				sessionId,
-			});
-			// The fork's transcript is the parent's, truncated inclusive of the
-			// cut -- exactly what the CLI keeps (OW-mayuza). Repaint from that.
-			this.reducer.hydrate(entries.slice(0, cut + 1).map((entry) => entry.record));
-		}
-		this.turnActive = false;
-		this.currentRef = { backend: "claude", id: sessionId };
-		this.applyEffects([{ type: "reset" }]);
-		return this.currentRef;
+				forkOf: { parentId, entryId },
+				...(this.model ? { model: this.model } : {}),
+			},
+		};
 	}
 
 	// -- state --------------------------------------------------------------
@@ -366,8 +374,8 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	async setModel(model: string): Promise<void> {
 		await this.sendControl({ subtype: "set_model", model });
-		// Only on success (a bogus id rejects above): remembered so a fork's
-		// respawn keeps it.
+		// Only on success (a bogus id rejects above): remembered so `fork()` can
+		// hand it to the fork's own adapter.
 		this.model = model;
 		this.emitUpdate();
 	}
@@ -397,6 +405,33 @@ export class ClaudeAdapter implements BackendAdapter {
 	private readStore(sessionId: string): Promise<ClaudeStoreMessageEntry[]> {
 		if (this.options.readStoreEntries) return this.options.readStoreEntries(sessionId);
 		return defaultReadStoreEntries(this.options.claudeRoot ?? DEFAULT_CLAUDE_ROOT, sessionId);
+	}
+
+	/**
+	 * The slice of `parentId`'s store a fork at `entryId` keeps: truncation is
+	 * INCLUSIVE of the named entry (OW-mayuza), so the named line survives.
+	 */
+	private async readForkHistory(
+		parentId: string,
+		entryId: string,
+	): Promise<ClaudeStoreMessageEntry[]> {
+		const entries = await this.readStore(parentId);
+		const cut = entries.findIndex((entry) => entry.uuid === entryId);
+		if (cut < 0) throw new Error(`unknown fork point: ${entryId}`);
+		return entries.slice(0, cut + 1);
+	}
+
+	/** Adopt the model the last hydrated assistant message names, if nothing else has. */
+	private adoptStoredModel(): void {
+		if (this.model !== null) return;
+		const messages = this.reducer.getState().messages;
+		for (let i = messages.length - 1; i >= 0; i -= 1) {
+			const message = messages[i];
+			if (message?.role !== "assistant") continue;
+			this.model = message.model;
+			this.emitUpdate();
+			break;
+		}
 	}
 
 	private attachProcess(spawnOpts: {
@@ -440,21 +475,6 @@ export class ClaudeAdapter implements BackendAdapter {
 			);
 		});
 		return spawnResult;
-	}
-
-	/** Swap the child under this adapter (fork): retire the old one first. */
-	private async replaceProcess(
-		previous: Ownership,
-		spawnOpts: { cwd: string; resumeId?: string; sessionId?: string; forkAtEntryId?: string },
-	): Promise<void> {
-		previous.live = false;
-		this.rejectPendingControls(new Error("claude adapter forked; control channel replaced"));
-		await previous.proc.kill();
-		if (this.disposed) throw new Error("claude adapter disposed");
-		// Initial startup is gated on OS-level spawn, but a fork has already
-		// published this adapter. Preserve its existing asynchronous error path
-		// rather than changing fork failure semantics as part of startup readiness.
-		void this.attachProcess(spawnOpts).catch(() => {});
 	}
 
 	private handleLine(line: string): void {

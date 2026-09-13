@@ -351,7 +351,8 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 describe("fork (the third #adoptRef point)", () => {
 	// Fork is the third point at which a session's id can change under us, and
 	// the backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
-	// / OW-22; Claude Code's respawn-fork re-keys like Pi's, OW-mayuza).
+	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
+	// OW-razoki).
 	// SessionManager.fork must absorb every shape through #adoptRef.
 	it("re-keys and emits `renamed` when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
@@ -395,15 +396,45 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(renamed).toEqual([]);
 	});
 
+	// Claude Code's shape (OW-razoki): `fork()` mints the fork's id and the
+	// arguments that spawn its child, but runs nothing. The fork's store file
+	// does not exist until its first turn ends (OW-japuzo), so the session index
+	// cannot answer for it -- the manager has to hold that recipe until the fork
+	// is attached, and hand it to the fork's own adapter.
+	it("attaches a fork the session index has never heard of, from the recipe fork() returned", async () => {
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		const claude = new FakeAdapterFactory({ forkMode: "claude" });
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		const parent = await sessions.attach(claudeRef);
+
+		const forked = await sessions.fork(claudeRef, "e1");
+
+		expect(forked).toEqual({ backend: "claude", id: "parent#fork-e1" });
+		// The parent is untouched: same ref, same live adapter.
+		expect(sessions.canonicalRef(claudeRef)).toEqual(claudeRef);
+		expect(sessions.adapterFor(claudeRef)).toBe(parent);
+
+		const forkAdapter = await sessions.attach(forked);
+
+		expect(forkAdapter).not.toBe(parent);
+		expect(claude.forRef(forked)?.startOptions).toEqual({
+			cwd: WORKSPACE,
+			forkOf: { parentId: "parent", entryId: "e1" },
+		});
+		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
+			[sessionKey(claudeRef), sessionKey(forked)].sort(),
+		);
+	});
+
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
 	// container genuinely moves -- the one live adapter is driving the fork now
 	// -- but the parent is a second conversation, not an older name for this
 	// one, so no alias is written and the parent's ref stops resolving at all.
 	// It is detached, in the sense D9 and D12 already define, and the next
-	// attach rehydrates it. The index below still reports the parent's stored
-	// session, which is Claude Code's shape -- its fork respawns the child onto
-	// the forked session and leaves the parent's store file untouched
-	// (OW-mayuza).
+	// attach rehydrates it. Pi is the only backend that reaches this now
+	// (OW-razoki), and the index below still reports the parent's stored session
+	// because Pi's fork leaves the pre-fork file byte-identical (OW-pifowo).
 	it("leaves the parent detached rather than aliased onto the fork", async () => {
 		await sessions.attach(REF);
 		const parentAdapter = pi.forRef(REF);

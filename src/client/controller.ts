@@ -811,18 +811,17 @@ export function createController(
 				// is deliberate (OW-puduro): what it costs is a session file, and the
 				// owner weighed that and declined to spend anything on it (OW-fejota).
 				// The trap if that is ever revisited: the server's `DELETE` route
-				// disposes the *adapter*, never the file, and on Pi and Claude Code
-				// the one live adapter has MOVED onto the fork -- so a DELETE aimed at
-				// the orphan is aimed at the agent the user is talking to. Only the
+				// disposes the *adapter*, never the file, and on Pi the one live
+				// adapter has MOVED onto the fork -- so a DELETE aimed at the orphan
+				// is aimed at the agent the user is talking to. Only the
 				// fork's own ref carries that hazard: since OW-kekoji the parent's ref
 				// is not an alias for it.
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
-				// process onto the new file -- and Claude Code's respawned its child
-				// onto the forked session -- so the manager has already re-keyed and
-				// this attach finds it; Codex minted a thread nothing is driving, and
-				// this attach is what spawns it. A fork is a selection change, so the
+				// process onto the new file, so the manager has already re-keyed and
+				// this attach finds it; Codex and Claude Code each minted a
+				// conversation nothing is driving, and this attach is what spawns it. A fork is a selection change, so the
 				// intent bumps -- a preview poll still in flight must not put its old
 				// transcript back over the fork.
 				//

@@ -607,7 +607,8 @@ describe("PiAdapter.fork", () => {
 		await Promise.resolve();
 		h.child.respondTo("get_messages", { messages: [assistantMessage("rewound")] });
 
-		expect(await forked).toEqual({ backend: "pi", id: MOVED }); // moved file, NOT REF
+		// No `start`: the fork IS the file this live process is already writing.
+		expect(await forked).toEqual({ ref: { backend: "pi", id: MOVED } }); // moved file, NOT REF
 		expect(h.adapter.ref).toEqual({ backend: "pi", id: MOVED });
 		expect(h.adapter.getState().messages).toHaveLength(1);
 		expect(h.adapter.getState().model).toBe("anthropic/claude-haiku");

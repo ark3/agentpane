@@ -27,6 +27,7 @@ import type {
 	AdapterFactory,
 	AdapterState,
 	BackendAdapter,
+	ForkResult,
 	ImageInput,
 	StartOptions,
 	Unsubscribe,
@@ -106,12 +107,14 @@ export interface FakeAdapterOptions {
 	 * How `fork()` behaves, so the backends' asymmetric forks can be modelled:
 	 *  - "pi" (default): the process's active file MOVES, so the adapter adopts a
 	 *    new id (`${ref.id}#fork-${entryId}`) and returns it -- `#adoptRef`
-	 *    re-keys. Claude Code's respawn-fork changes its own ref the same way,
-	 *    so this mode covers it too.
+	 *    re-keys.
 	 *  - "codex": a new thread is minted that this adapter is NOT driving, so its
 	 *    own `ref` is left unchanged while `fork()` returns the new thread's ref.
+	 *  - "claude": like "codex", except that nothing has recorded the fork yet,
+	 *    so `fork()` also returns the `StartOptions` its own adapter needs
+	 *    (OW-razoki).
 	 */
-	forkMode?: "pi" | "codex";
+	forkMode?: "pi" | "codex" | "claude";
 }
 
 /** A promise a test resolves by hand, to park an adapter mid-`start()`. */
@@ -205,14 +208,21 @@ export class FakeAdapter implements BackendAdapter {
 		return this.options.forkPoints ?? [];
 	}
 
-	async fork(entryId: string): Promise<SessionRef> {
+	async fork(entryId: string): Promise<ForkResult> {
 		this.forks.push(entryId);
-		const forkedRef = { backend: this.ref.backend, id: `${this.ref.id}#fork-${entryId}` };
-		// Codex mints a new thread this adapter does not drive: its own ref is
-		// unchanged, and the returned ref is the fresh thread. Pi's active file
-		// moves, so the adapter adopts the new id and returns it.
+		const parentId = this.ref.id;
+		const forkedRef = { backend: this.ref.backend, id: `${parentId}#fork-${entryId}` };
+		// Codex and Claude Code mint a conversation this adapter does not drive:
+		// its own ref is unchanged, and the returned ref is the new one. Pi's
+		// active file moves, so the adapter adopts the new id and returns it.
+		if (this.options.forkMode === "claude") {
+			return {
+				ref: forkedRef,
+				start: { cwd: this.startOptions?.cwd ?? "", forkOf: { parentId, entryId } },
+			};
+		}
 		if (this.options.forkMode !== "codex") this.#ref = forkedRef;
-		return forkedRef;
+		return { ref: forkedRef };
 	}
 
 	getState(): AdapterState {

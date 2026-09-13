@@ -643,7 +643,8 @@ The gate also covers the **disk** read, because the headline below is an absence
 
 #### 1. The store gains no assistant content at any point during the turn
 
-The `kill` cell reproduces what `claude/adapter.ts` `fork()` does today: `replaceProcess` sets `previous.live = false`, rejects the pending controls, and awaits `previous.proc.kill()` before respawning.
+The `kill` cell reproduces what `claude/adapter.ts` `fork()` did at the time of this run: `replaceProcess` sets `previous.live = false`, rejects the pending controls, and awaits `previous.proc.kill()` before respawning.
+That kill is gone as of OW-razoki (2026-09-13) -- `fork()` no longer touches the parent's child -- so this cell now reproduces nothing agentpane does, and stands only as the measurement of what the kill cost.
 The cell kills the same way `ChildClaudeProcess.kill()` does — stdin closed, SIGTERM, a two-second grace, SIGKILL — and SIGTERM was enough (exit code 143, no escalation).
 
 It reads the store at four marks across the reply and kills at the last, because one sample cannot tell "the store never gains assistant text mid-turn" from "it had not gained any at the one point we looked".
@@ -724,7 +725,11 @@ On Claude `--resume-session-at` is **inclusive** of the named entry (OW-mayuza),
 Production would name the entry immediately before the long prompt's `user` line, which `listForkPoints` supplies as `previousUuid` — and the census above shows a `queue-operation` line can sit between those two.
 The two backends land on the same range for opposite reasons, and the probe's range is production's approximately rather than exactly.
 
-**Open, and not designed around here: whether a second concurrent child is cheap in the adapter.**
+**Settled by OW-razoki (2026-09-13), by not needing an answer.**
+`fork()` now mints the fork's session id and the `StartOptions` that spawn it and runs nothing, so the fork gets its own adapter, its own `Ownership` and its own control channel by the path that already attaches a session -- the parent's single child is never displaced and `replaceProcess` is deleted.
+The paragraph below sized the alternative that was weighed and rejected, two children under one adapter, and is kept as that record.
+
+**Open at the time of this run, and not designed around here: whether a second concurrent child is cheap in the adapter.**
 The CLI permits it; the adapter is written for one child.
 `Ownership` is a single nullable field on `ClaudeAdapter` and `replaceProcess` is written as a swap over it; the control channel has one `controlNamespace` and one `pendingControls` map per adapter, which `replaceProcess` rejects wholesale on a fork; and `SessionManager.fork`'s docblock records that Claude "takes Pi's path here" through `#adoptRef`, re-keying the session table because `adapter.ref` changes.
 A surviving-parent fork would take Codex's path instead — the adapter's own `ref` unchanged, the returned ref naming a session this adapter is not driving — and something would then have to drive that session.

@@ -39,6 +39,25 @@ export interface StartOptions {
 	/** Resume an existing session; omit to start a fresh one. */
 	resumeId?: string;
 	model?: string;
+	/**
+	 * Start as the fork `fork()` minted but did not run, keeping the parent's
+	 * history through `entryId`. The adapter's own `ref` already carries the
+	 * fork's id, so this only names what it is a fork OF.
+	 */
+	forkOf?: { parentId: string; entryId: string };
+}
+
+/**
+ * What `fork()` hands back. `ref` is the new conversation; `start` is present
+ * only when the fork exists as arguments rather than as anything the backend
+ * has recorded, and is then the `StartOptions` its own adapter must be started
+ * with. Codex flushes the forked thread to disk before `thread/fork` returns
+ * and Pi's fork IS the live process, so both omit it and the fork is reachable
+ * the ordinary way.
+ */
+export interface ForkResult {
+	ref: SessionRef;
+	start?: StartOptions;
 }
 
 export interface BackendAdapter {
@@ -86,7 +105,12 @@ export interface BackendAdapter {
 
 	// -- fork-from-past -----------------------------------------------------
 	listForkPoints(): Promise<ForkPoint[]>;
-	fork(entryId: string): Promise<SessionRef>;
+	/**
+	 * Branch a second conversation off this one at `entryId`. This adapter keeps
+	 * driving the session it already has -- except on Pi, whose fork moves the
+	 * live process's own file, so its `ref` changes and the manager re-keys.
+	 */
+	fork(entryId: string): Promise<ForkResult>;
 
 	// -- state (what the server broadcasts) ---------------------------------
 	getState(): AdapterState;

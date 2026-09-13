@@ -11,8 +11,9 @@ import { randomUUID } from "node:crypto";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import type {
 	AdapterState,
-	BackendAdapter,
 	AdapterFactory,
+	BackendAdapter,
+	ForkResult,
 	ImageInput,
 	StartOptions,
 	Unsubscribe,
@@ -478,7 +479,7 @@ export class CodexAdapter implements BackendAdapter {
 		return points;
 	}
 
-	async fork(entryId: string): Promise<SessionRef> {
+	async fork(entryId: string): Promise<ForkResult> {
 		const client = this.requireClient();
 		if (!this.turnOrder.length) await this.listForkPoints();
 		const index = this.turnOrder.indexOf(entryId);
@@ -500,7 +501,9 @@ export class CodexAdapter implements BackendAdapter {
 			approvalPolicy: this.approvalPolicy,
 			...(this.options.ephemeral ? { ephemeral: true } : {}),
 		});
-		return { backend: "codex", id: forked.thread.id };
+		// No `start`: Codex flushes the forked rollout to disk here, before any
+		// turn, so a fresh attach on this ref finds it in the index.
+		return { ref: { backend: "codex", id: forked.thread.id } };
 	}
 
 	// -- state --------------------------------------------------------------

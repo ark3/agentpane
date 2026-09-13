@@ -58,11 +58,13 @@ interface Harness {
 function harness(options: {
 	entries?: ClaudeStoreMessageEntry[];
 	ids?: string[];
+	/** The ref the adapter is constructed with; a fork's adapter is built on the id `fork()` minted. */
+	ref?: SessionRef;
 } = {}): Harness {
 	const procs: FakeClaudeProcess[] = [];
 	const spawns: ClaudeSpawnOptions[] = [];
 	const ids = [...(options.ids ?? ["minted-1", "minted-2"])];
-	const adapter = new ClaudeAdapter(VIRTUAL_REF, {
+	const adapter = new ClaudeAdapter(options.ref ?? VIRTUAL_REF, {
 		spawn: (opts) => {
 			spawns.push(opts);
 			const proc = new FakeClaudeProcess();
@@ -381,7 +383,7 @@ describe("ClaudeAdapter session controls", () => {
 		]);
 	});
 
-	it("sets the model via set_model and keeps it for later respawns", async () => {
+	it("sets the model via set_model and hands it to a fork", async () => {
 		const h = harness({ entries: storedEntries() });
 		await h.adapter.start({ cwd: "/workspace" });
 
@@ -395,8 +397,8 @@ describe("ClaudeAdapter session controls", () => {
 		await setting;
 		expect(h.adapter.getState().model).toBe("haiku");
 
-		await h.adapter.fork("u1");
-		expect(h.spawns.at(-1)?.model).toBe("haiku");
+		const forked = await h.adapter.fork("u1");
+		expect(forked.start?.model).toBe("haiku");
 		expect(h.adapter.getState().model).toBe("haiku");
 	});
 
@@ -506,22 +508,71 @@ describe("ClaudeAdapter fork", () => {
 		]);
 	});
 
-	it("forks by respawning onto a minted id and hydrating the truncated history", async () => {
+	it("forks without touching the parent, returning a ref and the recipe that spawns it", async () => {
 		const h = harness({ entries: storedEntries(), ids: ["forked-1"] });
 		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
 
 		const forked = await h.adapter.fork("a2");
 
-		expect(forked).toEqual({ backend: "claude", id: "forked-1" });
-		expect(h.adapter.ref).toEqual(forked);
-		expect(h.procs[0]?.killCount).toBe(1);
-		expect(h.spawns.at(-1)).toEqual({
+		expect(forked.ref).toEqual({ backend: "claude", id: "forked-1" });
+		// The parent keeps its id, its child and its whole transcript: the fork is
+		// a second session, not a move of this one (OW-razoki).
+		expect(h.adapter.ref).toEqual({ backend: "claude", id: "parent" });
+		expect(h.procs).toHaveLength(1);
+		expect(h.procs[0]?.killCount).toBe(0);
+		expect(h.adapter.getState().messages.map((m) => m.role)).toEqual([
+			"user",
+			"assistant",
+			"user",
+			"assistant",
+		]);
+		expect(forked.start).toEqual({
 			cwd: "/workspace",
-			resumeId: "parent",
-			forkAtEntryId: "a2",
-			sessionId: "forked-1",
+			forkOf: { parentId: "parent", entryId: "a2" },
 			model: "last-model",
 		});
+	});
+
+	it("leaves the parent's in-flight turn running across a fork", async () => {
+		const h = harness({ entries: storedEntries() });
+		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+		await h.adapter.submit("keep going");
+
+		await h.adapter.fork("a2");
+
+		// The turn gate still holds, which is only true if the parent's turn is
+		// still this adapter's business after the fork.
+		await expect(h.adapter.submit("again")).rejects.toThrow("while a turn is active");
+	});
+
+	it("keeps the parent's child streaming after a fork", async () => {
+		const h = harness({ entries: storedEntries() });
+		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+		const parent = h.proc();
+		await h.adapter.fork("a2");
+		const updates = vi.fn();
+		h.adapter.onUpdate(updates);
+
+		parent.emit({ type: "system", subtype: "status", status: "requesting" });
+
+		expect(updates).toHaveBeenCalled();
+	});
+
+	it("starts a fork on its own child, hydrated from the parent's truncated history", async () => {
+		const h = harness({ entries: storedEntries(), ref: { backend: "claude", id: "forked-1" } });
+
+		await h.adapter.start({ cwd: "/workspace", forkOf: { parentId: "parent", entryId: "a2" } });
+
+		expect(h.spawns).toEqual([
+			{
+				cwd: "/workspace",
+				resumeId: "parent",
+				forkAtEntryId: "a2",
+				sessionId: "forked-1",
+				model: "m",
+			},
+		]);
+		expect(h.adapter.ref).toEqual({ backend: "claude", id: "forked-1" });
 		// Everything through a2 survives; the second turn is gone. The cut is
 		// INCLUSIVE of the named entry (OW-mayuza): a2's text block must be here.
 		const messages = h.adapter.getState().messages;
@@ -536,8 +587,28 @@ describe("ClaudeAdapter fork", () => {
 
 		const forked = await h.adapter.fork(CLAUDE_FORK_SESSION_START);
 
-		expect(forked).toEqual({ backend: "claude", id: "forked-1" });
-		expect(h.spawns.at(-1)).toEqual({ cwd: "/workspace", sessionId: "forked-1", model: "last-model" });
+		expect(forked.ref).toEqual({ backend: "claude", id: "forked-1" });
+		expect(forked.start).toEqual({
+			cwd: "/workspace",
+			forkOf: { parentId: "parent", entryId: CLAUDE_FORK_SESSION_START },
+			model: "last-model",
+		});
+		expect(h.procs).toHaveLength(1);
+		expect(h.adapter.getState().messages).toHaveLength(4);
+	});
+
+	it("starts a session-start fork as a fresh child with an empty transcript", async () => {
+		const h = harness({ entries: storedEntries(), ref: { backend: "claude", id: "forked-1" } });
+
+		await h.adapter.start({
+			cwd: "/workspace",
+			forkOf: { parentId: "parent", entryId: CLAUDE_FORK_SESSION_START },
+			model: "last-model",
+		});
+
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", sessionId: "forked-1", model: "last-model" },
+		]);
 		expect(h.adapter.getState().messages).toEqual([]);
 	});
 
@@ -548,19 +619,6 @@ describe("ClaudeAdapter fork", () => {
 		await expect(h.adapter.fork("nope")).rejects.toThrow("unknown fork point: nope");
 		expect(h.procs).toHaveLength(1);
 		expect(h.procs[0]?.killed).toBe(false);
-	});
-
-	it("ignores lines from the retired child after a fork", async () => {
-		const h = harness({ entries: storedEntries() });
-		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
-		const old = h.proc();
-		await h.adapter.fork("a2");
-		const updates = vi.fn();
-		h.adapter.onUpdate(updates);
-
-		old.emit({ type: "system", subtype: "status", status: "requesting" });
-
-		expect(updates).not.toHaveBeenCalled();
 	});
 });
 

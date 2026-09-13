@@ -15,6 +15,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type {
 	AdapterState,
 	BackendAdapter,
+	ForkResult,
 	ImageInput,
 	StartOptions,
 	Unsubscribe,
@@ -375,7 +376,7 @@ export class PiAdapter implements BackendAdapter {
 		return entries.map((m, i) => ({ id: m.entryId, text: m.text, index: userIndices[i] as number }));
 	}
 
-	async fork(entryId: string): Promise<SessionRef> {
+	async fork(entryId: string): Promise<ForkResult> {
 		const forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
 		// A `session_before_fork` extension handler can veto the fork, and Pi
 		// reports that as `success: true` with `data.cancelled: true` (rpc.md,
@@ -408,7 +409,8 @@ export class PiAdapter implements BackendAdapter {
 		// `start()` uses when resuming.
 		this.state = { ...this.state, isStreaming: false };
 		await this.hydrateMessages();
-		return this.ref;
+		// No `start`: the fork is the file this live process is already writing.
+		return { ref: this.ref };
 	}
 
 	// -- state ----------------------------------------------------------------

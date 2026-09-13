@@ -329,10 +329,13 @@ export function createApp(deps: AppDeps): App {
 				//     driving; Codex flushes that rollout to disk immediately, before
 				//     any turn, so a fresh attach on the returned ref finds it. The
 				//     current adapter's own ref is unchanged, so `#adoptRef` no-ops.
-				//   * Claude Code's fork RESPAWNS the same adapter's child onto the
-				//     forked session (`--resume --resume-session-at --fork-session`,
-				//     truncation inclusive of the named entry), so like Pi its ref
-				//     changes and `#adoptRef` re-keys; the parent survives detached.
+				//   * Claude Code's fork mints the forked session's id and the
+				//     arguments that spawn it (`--resume --resume-session-at
+				//     --fork-session --session-id`, truncation inclusive of the named
+				//     entry) but runs nothing, so like Codex the parent's ref is
+				//     unchanged and `#adoptRef` no-ops. Nothing has written the fork's
+				//     store file yet, so the attach on the returned ref spawns it from
+				//     the recipe `SessionManager.fork` kept (OW-razoki).
 				// `#adoptRef` already emits `sessionsChanged` when it re-keys, so no
 				// explicit broadcast here.
 				const response: ForkResponse = { ref: forked };
