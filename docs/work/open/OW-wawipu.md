@@ -1,5 +1,5 @@
 ---
-labels: [unverified]
+labels: [unverified, emacs]
 ---
 
 # agentpane-created Claude sessions are hidden from the claude --resume picker by their sdk-cli entrypoint, while its Codex sessions show up as vscode

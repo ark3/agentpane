@@ -111,10 +111,11 @@ Every card carries exactly one kind, given to `card new --label`:
 - `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
 - `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
 
-Three cross-cutting labels may follow that kind.
+Four cross-cutting labels may follow that kind.
 `work-laptop` gates live Pi evidence to the machine described under "Evidence".
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
+`emacs` groups the Emacs client work, an ACP shim over the HTTP API driven by `agent-shell`, filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo, OW-wawipu and OW-mikuyo; `card list --open --label emacs` is that set, blockers and all.
 
 `now` marks the cards to execute next, and `card list --open --label now` is that queue.
 It is the deck's only priority signal: card has no priority axis, and `--ready` cannot serve as one here because nearly every open card is unblocked, so a listing that selects everything selects nothing.

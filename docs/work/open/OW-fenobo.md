@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, emacs]
 ---
 
 # A pure mapping turns agentpane transcripts into ACP session/update notifications, for replay and for streaming alike

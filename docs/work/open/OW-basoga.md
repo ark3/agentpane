@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, emacs]
 blocked-by: [OW-fenobo]
 ---
 

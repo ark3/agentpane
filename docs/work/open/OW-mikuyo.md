@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [deferral, emacs]
 ---
 
 # A standalone read-only session browser in Emacs, talking to the HTTP API directly, is judged from use of the shim rather than built now
