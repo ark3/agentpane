@@ -4,21 +4,21 @@ labels: [change]
 
 # Codex's compaction marker shows no token figure, and the usage payload that could supply one is already in the reducer, unread.
 
-`src/server/adapters/codex/mapping.ts` (`compactionMarker`, `MapContext`), `src/server/adapters/codex/reducer.ts` (`tokenUsage`, `:85`/`:358`)
+`src/server/adapters/codex/mapping.ts` (`compactionMarker`, `MapContext`), `src/server/adapters/codex/reducer.ts` (`tokenUsage`, `applyTokenUsage`)
 
 OW-72 built one compaction renderer for both backends: `Message.svelte` draws
 the marker always, and the summary text and token figure only when present.
 Pi's marker gets both, synthesised by the reducer from `compaction_end`
-(`MANUAL_TESTING.md:378` records `tokensBefore 17660` from the live run).
-Codex's gets neither: `mapping.ts:474-483` maps `contextCompaction` to
-`compactionMarker` (`:505-508`), which is `{summary: "", tokensBefore: 0}`.
+(`MANUAL_TESTING.md`'s "Observed manual compaction" section records `tokensBefore 17660` from the live run).
+Codex's gets neither: `mapping.ts`'s `contextCompaction` arm maps to
+`compactionMarker`, which is `{summary: "", tokensBefore: 0}`.
 
 The empty summary is correct and settled -- the item is `{type, id}` and
 carries no text, and OW-72's close note says not to go hunting for one. The
-**token figure is a different case**, and the comment at `mapping.ts:478-481`
+**token figure is a different case**, and the comment in that arm
 says why: `tokensBefore` "is unknown here (it rides `thread/tokenUsage/
 updated`, not the item)". That payload is not unavailable; it is sitting in
-`CodexReducer.tokenUsage` (`reducer.ts:85`, assigned `:358`), and nothing in
+`CodexReducer.tokenUsage` (`reducer.ts`, assigned in `applyTokenUsage`), and nothing in
 `src/` outside the reducer reads it. `MapContext` carries only `{timestamp,
 completed, ...identity}`, so `mapItem` cannot see it. That seam is the work.
 
@@ -41,9 +41,9 @@ climbing straight through the compaction. It is a running sum of every request
 and must not be used. The candidate is `last.totalTokens` at `item/started`,
 which is 16304 in this capture.
 
-## The thing to settle before choosing a field
+## The thing to settle before choosing a field — settled 2026-09-13
 
-`MANUAL_TESTING.md:368` quotes the live Codex run as 16802 -> 9231, which
+`MANUAL_TESTING.md`'s "Observed manual compaction" section quotes the live Codex run as 16802 -> 9231, which
 matches **neither** field in this capture -- so either the prose figure came
 from a different measurement than the one a reader would reconstruct, or the
 mapping from payload to "context before" is not what it looks like. Reconcile
@@ -51,6 +51,23 @@ that first. Pi's marker will be showing `tokensBefore` from `compaction_end`
 (17660) in the same list, so two markers on one screen must mean the same
 thing by the same name; picking a Codex field that measures something else is
 worse than the blank the code shows today.
+
+**Settled by the executing session, 2026-09-13, from the committed capture.**
+The 16802 -> 9231 pair cannot be reconstructed from
+`resources/fixtures/codex/compact.jsonl` by any field: across the compaction
+`total.totalTokens` runs 54060 -> 68752 and `last.totalTokens` runs
+16304 -> 14692 -> 4844, and the strings "16802" and "9231" appear nowhere in
+the capture. The prose therefore came from a different run than the one that
+was committed, and the surrounding claim that "the token figures below are
+read straight from them, not estimated" is false for the Codex pair. The field
+to use is `last.totalTokens` live at `item/started contextCompaction` -- 16304
+here -- which is the last model request's input+output, i.e. the context as it
+stood going into the compaction, the same thing Pi's `tokensBefore` names.
+Correcting the prose is part of this card, and there are **two** copies of the
+16802 -> 9231 claim: `docs/MANUAL_TESTING.md` and `resources/fixtures/README.md`
+(the "Codex (`compact.jsonl`, 5247 lines)" bullet). `docs/work/closed/OW-72.md`
+carries a third; leave that one, a closed card is a record of what was believed
+then.
 
 ## Done when
 
