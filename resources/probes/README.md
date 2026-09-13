@@ -212,7 +212,7 @@ Verified with: `codex-cli` 0.154.0. What it showed is `docs/MANUAL_TESTING.md`,
 ## `claude_fork_probe.py`
 
 Proves: **what a mid-stream fork costs a Claude Code parent turn** (OW-japuzo).
-`docs/DESIGN.md` D15 is headed "on every backend" and reasons about Pi and Codex only, so this is the third backend being asked its question.
+Written when `docs/DESIGN.md` D15 was headed "on every backend" and reasoned about Pi and Codex only, so this was the third backend being asked its question; D15 has since been rewritten on what this probe found.
 Two cells, both reading the PARENT and never the fork.
 
 ```bash
@@ -220,7 +220,7 @@ python3 claude_fork_probe.py             # both cells, JSON record on stdout
 python3 claude_fork_probe.py --cell kill # one of them
 ```
 
-`--cell kill` reproduces the kill `claude/adapter.ts` `fork()` performs today — `replaceProcess` then `ChildClaudeProcess.kill()`, SIGTERM and a grace and SIGKILL — and asks whether the streaming partial had reached `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` before it landed.
+`--cell kill` reproduces the kill `claude/adapter.ts` `fork()` performed before OW-razoki deleted `replaceProcess` on 2026-09-13 — `replaceProcess` then `ChildClaudeProcess.kill()`, SIGTERM and a grace and SIGKILL — and asks whether the streaming partial had reached `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` before it landed.
 `--cell fork` spawns the fork as a **second** child instead of replacing the first and asks whether the parent turn survives, reading the parent's store both the instant its `result` is seen and again once the writer has quiesced.
 That second cell is a probe and not a proposal: it changes nothing in `adapter.ts`, because the point is to establish the behaviour before anyone decides whether the adapter should work that way.
 

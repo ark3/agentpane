@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """Claude Code mid-stream fork probe -- what a fork costs the PARENT turn.
 
-`docs/DESIGN.md` D15 ("agentpane stops a streaming turn before forking it, on
-every backend") reasons about Pi and Codex only; Claude Code is not mentioned
-in it once, yet the abort is client-side and backend-agnostic
-(`src/client/controller.ts` `forkAndSubmit`) so it applies there too. Nothing
-had ever measured what it costs on Claude. This probe answers the two
-questions OW-japuzo names, and reads the PARENT in both cells -- never the
-fork.
+Written when `docs/DESIGN.md` D15 was headed "on every backend" and reasoned
+about Pi and Codex only, with Claude Code not mentioned in it once, while the
+abort was client-side and backend-agnostic (`src/client/controller.ts`
+`forkAndSubmit`) so it applied there too. Nothing had ever measured what it
+cost on Claude. This probe answers the two questions OW-japuzo names, and
+reads the PARENT in both cells -- never the fork. D15 has since been rewritten
+on what it found; read it there for the current decision.
 
   claude_kill_mid_stream  -> Is the parent's partial reply already on disk when
-                             the adapter kills it? `claude/adapter.ts` `fork()`
-                             goes through `replaceProcess`, whose first acts are
+                             the adapter kills it? At the time of the run
+                             `claude/adapter.ts` `fork()` went through
+                             `replaceProcess`, whose first acts were
                              `previous.live = false` and `await
-                             previous.proc.kill()`, so today's fork terminates
-                             the process hosting the in-flight turn. This cell
+                             previous.proc.kill()`, so a fork terminated the
+                             process hosting the in-flight turn. OW-razoki
+                             deleted `replaceProcess` on 2026-09-13, so this
+                             cell now reproduces nothing agentpane does. It
                              reproduces that kill -- SIGTERM, grace, SIGKILL,
                              matching `ChildClaudeProcess.kill()` -- and hashes
                              the parent's store file at three points: after the
                              priming turn, immediately before the kill, and
                              after the child is gone. If Claude Code flushes
-                             assistant text as it streams, today's abort loses
-                             less than it looks like it does.
+                             assistant text as it streams, that abort lost less
+                             than it looked like it did.
 
   claude_fork_beside      -> Can the parent turn survive at all? Spawns the
                              fork as a SECOND child (`--resume <id>
@@ -527,7 +530,7 @@ def claude_version():
 
 
 # ---------------------------------------------------------------------------
-# Cell 1: the kill the adapter performs today
+# Cell 1: the kill the adapter performed before OW-razoki (2026-09-13)
 # ---------------------------------------------------------------------------
 
 

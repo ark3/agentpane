@@ -483,28 +483,48 @@ Escape as well is right; Escape only is the failure.
 
 So: when an interaction introduces a mode, the control that leaves it is visible and clickable, and it is drawn where the mode announces itself rather than somewhere the user has to go looking.
 
-### D15. agentpane stops a streaming turn before forking it, on every backend
+### D15. agentpane stops a streaming turn before forking it only where the backend abandons that turn anyway, which is Pi
 
-Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first, identically on Pi and on Codex.
-The owner took this on 2026-09-09, replacing the "first cut, safe on both" that OW-hezidi shipped it as.
+Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first.
+The owner took that abort uniformly across every backend on 2026-09-09, replacing the "first cut, safe on both" that OW-hezidi shipped it as.
+The owner reframed it on 2026-09-13 (OW-ziyobe) and it is now Pi-only: the abort stands where the backend destroys the turn whatever agentpane does, and nowhere else.
 
-Pi leaves no choice: a mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and `agent_settled` arrives carrying no assistant text (`docs/MANUAL_TESTING.md`, OW-yudoni).
+This is not a window nobody enters.
+Asked directly on 2026-09-11 whether the workflow ever involves scrolling back and editing while a turn is running, the owner said it absolutely does.
+
+**Pi leaves no choice.**
+A mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and `agent_settled` arrives carrying no assistant text (work laptop, 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md`, OW-yudoni).
 That section retired a third observation from the same run as a tautology, and the two above are what it says survives; nobody has yet read the file the abandoned turn was streaming into, so the conclusion rests on the settle rather than on a search for a partial reply.
-The abort does not cause that loss; it makes it deliberate and visible instead of silent.
+The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
 
-Codex is the side where a choice exists, and it is a real one: the parent turn survives.
-OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, six `item/agentMessage/delta`s accumulated against a threshold of five, no `turn/completed`.
+**Codex's parent turn survives.**
+OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, five `item/agentMessage/delta`s accumulated against a threshold of five, no `turn/completed`.
 The fork succeeded, the parent emitted at least 300 further deltas and then `turn/completed` with `status: "completed"`, and a complete 1491-character reply landed in the parent's rollout on disk, whose hash the cell took immediately before the fork request and again after the parent settled (`docs/MANUAL_TESTING.md`, OW-gojado).
-That replaces the inference this paragraph used to carry, and the weak check behind it: `fork_probe.py`'s `parent_untouched` reads only the parent header's `forked_from_id`, which cannot tell a surviving turn from a killed one, so the new cell hashes the file and reads what it gained.
+That replaced the inference this record used to carry, and the weak check behind it: `fork_probe.py`'s `parent_untouched` reads only the parent header's `forked_from_id`, which cannot tell a surviving turn from a killed one, so the new cell hashes the file and reads what it gained.
 
-The abort stays, and the honest reason is uniformity alone.
-The second reason this decision used to give — that a surviving turn streams into a session nobody is looking at, tokens spent to produce an orphan — is the part OW-gojado weakened.
-The surviving turn completed and wrote its whole reply durably into the parent's rollout, and that parent is a session agentpane lists and the user can navigate back to; it is not an orphan, and the tokens are spent either way, since the abort lands after the model has already produced most of the reply.
-What is left is that Pi cannot be brought to match, so a backend-dependent answer here would be permanent rather than pending — which is exactly OW-hezidi's worry that the split "reads as a bug".
-Uniform behaviour across backends is the whole of the case, and it is stated that way rather than propped up by a cost the run showed is smaller than it sounded.
+**Claude's parent turn survives too, once agentpane stops killing it.**
+The kill was agentpane's, not the CLI's.
+OW-japuzo measured that on the home server on 2026-09-11 (`claude 2.1.268`, `--model haiku`): a fork spawned as a second child rather than replacing the first came up and answered its own prompt while the parent emitted 160 further deltas, settled `success`, and wrote its whole reply durably.
+The same run settled the price of the abort there, and it is larger than on Codex: nothing reaches `~/.claude/projects/<munged-cwd>/<session-id>.jsonl` while the turn runs — four marks across one reply, byte-identical each time, the last at about 78% of a 1491-character answer — and a separate cell's read at `result` found the file still unchanged at the wire's end of turn, so a kill mid-turn destroys the entire reply rather than racing it.
+How much of a Codex parent's partial reply is on disk at an abort was never measured, so this is a comparison of what the abort destroys and not of bytes.
+OW-razoki then removed the kill from agentpane on 2026-09-13: `ClaudeAdapter.fork()` mints the fork's session id and returns the recipe to spawn it, and `replaceProcess` is deleted.
+`SessionManager.fork` parks that recipe in `#pendingForks` for `#start` to consult ahead of the session index, which cannot answer for a fork whose store file does not exist until its first turn ends, and the fork then gets its own adapter and child down the attach path Codex already used.
+The live run that confirmed it end to end went through `bun run start` on the production spawn path (home server, 2026-09-13, `claude 2.1.270`, haiku): forked at a confirmed-streaming instant in three shapes, the parent finished its own reply every time and the store gained 7439, 7491 and 12549 bytes that the old kill would have destroyed (`docs/MANUAL_TESTING.md`, "A fork through agentpane leaves the parent's turn running and answers on its own child").
 
-So the two backends differ as a matter of fact, and agentpane's uniformity is a choice laid over that difference rather than a description of it.
-Whether to take the asymmetry after all is a decision this record does not take; if it is ever taken, the label follows the behaviour — `sendLabel` and the "Stop and edit" button both read "Stop and ..." only because the stop is real.
+**Why this is a consequence rather than a choice.**
+The question used to be framed as uniformity against letting the parent turn finish, and that framing assumed a fork on Claude had to kill the parent.
+It did not.
+With Codex and Claude both leaving the parent alone, the only backend that loses the turn is the one whose CLI abandons it regardless, so nobody has to weigh uniformity against a surviving reply.
+The split that remains is not agentpane behaving inconsistently across backends — it is one backend genuinely behaving differently, which is what the labels will be there to say.
+
+That retires the uniformity argument, and it should not be restated.
+It was the whole of this decision's case from OW-gojado's close until now, after that run took away the second reason the decision used to give — that a surviving turn "streams into a session nobody is looking at, tokens spent to produce an orphan", which the run is the counterexample to: the reply is durable in the parent's rollout, the parent is a session agentpane lists and the user can navigate back to, and the tokens are spent either way, since the abort lands after the model has already produced most of the reply.
+Uniformity was doing its heaviest work on the backend whose cost had never been weighed at all: Claude does not appear in this record's pre-2026-09-13 text once, and is the one backend where the abort destroys a whole reply that would otherwise have landed.
+Retiring the kill removed that cost instead of paying it.
+
+**The behaviour has not changed yet.**
+This record takes the decision; the code and the labels that follow from it are OW-bakosi, unlanded as of 2026-09-13.
+Until it lands, `forkAndSubmit` still aborts on every backend and the comment above that line still argues uniformity; OW-bakosi rewrites both, and takes the labels with them, because the label follows the behaviour — `sendLabel` and the composer's "Stop and edit" shortcut read "Stop and ..." only where the stop is real.
 
 ### D16. A prompt submitted mid-turn steers that turn, and a backend that cannot steer rejects
 
@@ -580,7 +600,7 @@ The owner decided on 2026-09-11 that the answer is not to chase currency but to 
 Three groups, and they are not treated alike.
 
 - **Facts the code already defends against.** That a Codex fork does not inherit `sandbox` (D7a) is one: the adapter passes it explicitly on all three thread-creation paths, so if a future Codex starts inheriting, nothing breaks and the docblock is merely over-explained. These are allowed to rot and are corrected when someone trips on them.
-- **Facts behind a decision already taken.** D15's uniformity, D7a's policy choice. If one flips, a decision may want revisiting, but nothing fails silently and the decision record says what it rested on. These are corrected on contact too.
+- **Facts behind a decision already taken.** D15's per-backend fork behaviour, D7a's policy choice. If one flips, a decision may want revisiting, but nothing fails silently and the decision record says what it rested on. These are corrected on contact too.
 - **Facts that license code that does not exist.** These are the only ones defended against time. The shape is always the same: a run showed that some input cannot arrive, so nothing was built to handle it; the backend then changes, the input arrives, and there is no test to go red and no log line, because the missing code is exactly what would have noticed. The live instance is agent requests — OW-zogogo asks whether any Codex `ServerRequest` kind can still reach agentpane, and OW-bijera stays unbuilt on the current answer of no.
 
 For that third group the defence is not documentation, it is a runtime assertion: the impossible input is made loud where it arrives, so a backend upgrade that reopens the hole reports itself the first time it happens instead of presenting as intermittent flakiness months later.
