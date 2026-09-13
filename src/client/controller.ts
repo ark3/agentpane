@@ -264,9 +264,21 @@ export function createController(
 	 * it is the one that decides anything.
 	 */
 	function refreshForkPoints(ref: SessionRef): void {
-		const key = sessionKey(ref);
+		let key = sessionKey(ref);
 		if (forkPointsInFlight.has(key)) return;
 		forkPointsInFlight.add(key);
+		// Track the target through a rename in flight (D9), as `submit` and
+		// `forkAndSubmit` do: a Pi fork renames the session, so a refresh that
+		// started before it would otherwise fail the selection check below and
+		// publish nothing, leaving the transcript's Edit controls drawn from the
+		// pre-fork set until the next turn boundary re-asks (OW-lizohe).
+		const onRename = (from: SessionRef, to: SessionRef) => {
+			if (sessionKey(from) !== key) return;
+			forkPointsInFlight.delete(key);
+			key = sessionKey(to);
+			forkPointsInFlight.add(key);
+		};
+		renameListeners.add(onRename);
 		void api
 			.forkPoints(ref)
 			.then((points) => {
@@ -279,7 +291,10 @@ export function createController(
 				publish({ forkIndices: points.map((point) => point.index) });
 			})
 			.catch(() => {})
-			.finally(() => forkPointsInFlight.delete(key));
+			.finally(() => {
+				renameListeners.delete(onRename);
+				forkPointsInFlight.delete(key);
+			});
 	}
 
 	function validWorkspace(cwd: string): boolean {

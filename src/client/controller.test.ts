@@ -1139,6 +1139,32 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(other);
 		controller.dispose();
 	});
+	/**
+	 * OW-lizohe. Pi's fork renames the session mid-flight (D9), and the refresh
+	 * an attach started is keyed on the name the session had when it went out.
+	 * Untracked, its reply fails the still-selected check and publishes nothing,
+	 * so the transcript keeps drawing Edit controls from the pre-fork set --
+	 * exactly when the user has just reworded a message and may want another
+	 * edit -- until the next turn boundary re-asks.
+	 */
+	it("publishes fork points for a session renamed while the refresh was in flight (OW-lizohe)", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
+		const api = new FakeApi();
+		const points = deferred<ForkPoint[]>();
+		api.forkPoints.mockReturnValueOnce(points.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		expect(api.forkPoints).toHaveBeenCalledWith(ref);
+
+		api.emit({ type: "renamed", from: ref, session: renamed, seq: 1 });
+		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
+		await settle();
+
+		expect(controller.getView().state.selected).toEqual(renamed);
+		expect(controller.getView().forkIndices).toEqual([0]);
+		controller.dispose();
+	});
 
 	/**
 	 * The sharp edge D17 names. A fork that takes the selection bumps
