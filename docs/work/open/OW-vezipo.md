@@ -14,6 +14,13 @@ distinguishable only by timestamp. The single exception is a fork taken at the
 first message, whose branch has no history at all and whose preview is the
 edited text.
 
+**Scoped on 2026-09-13 by OW-risuwo, which ran it.**
+The identical-rows problem is real on Codex and is *not* reachable today on Pi or Claude Code, for a reason that is itself a defect rather than a fix.
+Codex's `thread/fork` leaves `adapter.ref` unchanged, so `SessionManager.fork` sets no alias and both the parent and the fork are listed -- the twin rows this card describes.
+Pi's and Claude's forks change `adapter.ref`, so `#adoptRef` re-keys the parent's container onto the fork's id and `list()` drops the parent entirely (`src/server/http/session-manager.test.ts`, "(WRONG) drops the parent from list() after a ref-changing fork").
+There is one row there because the parent has been hidden, not because it can be told apart.
+So this card is not stale and neither claim was wrong; when the drop is fixed, the twin rows appear on all three backends and this card bites everywhere.
+
 OW-hezidi is what makes this bite: it makes forking cheap enough to do often,
 and every fork adds a twin.
 

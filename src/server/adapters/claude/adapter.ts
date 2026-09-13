@@ -21,9 +21,13 @@
  * - `fork()` respawns THIS adapter's child onto the forked session
  *   (`--resume <id> --resume-session-at <entryId> --fork-session`), so like
  *   Pi -- and unlike Codex -- `adapter.ref` changes and the session manager's
- *   `#adoptRef` re-keys the table. The parent's store file is untouched and
- *   turns up in listings as a detached session; no lineage marker exists on
- *   disk (MANUAL_TESTING OW-mayuza).
+ *   `#adoptRef` re-keys the table. The parent's store file is untouched, but
+ *   it does NOT turn up in listings: the re-key leaves the parent's id as an
+ *   alias and `list()` skips any stored summary whose key is an alias, so the
+ *   parent is dropped even though its file is still there and still resumable
+ *   (characterized in `session-manager.test.ts`, OW-risuwo). That filter is
+ *   right for Pi, where the file genuinely moved, and wrong here. No lineage
+ *   marker exists on disk (MANUAL_TESTING OW-mayuza).
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
