@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # Steering a Codex turn desynchronizes the fork-point ordinal, and Edit forks at the wrong message
@@ -69,3 +70,43 @@ If that bridge turns out to be expensive, say so in the close note rather than r
 
 A test in `src/client/` goes red first on the desynchronized case — a Codex transcript whose turn holds two user messages, an Edit on a later message, asserting the fork lands on the turn the user pointed at or is refused outright — and green after.
 The contract that resolves it is recorded where the next reader meets it: the `fork` docblock in `src/client/controller.ts`, whose present wording ("one point per user message in transcript order on every backend") is what this card falsifies, and in `docs/DESIGN.md` if it changes a decision.
+
+## Close note
+
+Built, landed on `main` as 2d922f0 (server + protocol), 9724ed7 (client) and 4c6c257 (D20 in `docs/DESIGN.md`).
+`bun run check` green (1036 tests) and `bun run test:browser` green (20 passed), both re-run in the main checkout after the cherry-pick.
+
+**What it is now.**
+`ForkPoint` in `src/shared/protocol.ts` carries `index`: the position, in the array `snapshot.messages` and `upsert.index` address, of the user message it forks at.
+`forkAndSubmit` resolves a point with `points.find(p => p.index === index)` and refuses when nothing matches; `startEdit` no longer counts user messages, and `Transcript.svelte` draws an Edit control only on indices some point names.
+The counting invariant is gone rather than repaired -- D20 records that, and the three docblocks that stated it (`forkAndSubmit` in `src/client/controller.ts`, `editing` in `src/client/App.svelte`, `forkPoints` in `src/client/api.ts`) were rewritten.
+
+**The Codex index cost the card asked to be reported, not assumed: it is cheap, and no bridge had to be built.**
+`CodexReducer.slots` was already a `Map<itemId, Slot>` populated identically on the hydrate and live paths, and `startIndex(slot)` already existed as a private.
+`indexOfItem(itemId)` is six lines wrapping the two.
+The adapter never needs a turn's position in the transcript -- it needs the turn's first `userMessage` item's id, which `thread/read` already carries, so `firstUserText` became `firstUserItem` and returns id alongside text.
+A slot miss drops the point, costing an Edit affordance and never mis-placing one.
+An index computed from a position within `turn.items` would have been wrong and is explicitly warned against at `indexOfItem`: `mapping.ts` answers zero messages for a hidden `reasoning` item, for every `SILENT_ITEM_TYPES` member and for any item type a newer `codex-cli` adds, and two for a tool call with a result.
+
+**Pi** pairs `get_fork_messages` against `this.state.messages`'s user indices server-side -- the client's old count moved to the one place both arrays are in hand, which is what makes a disagreement detectable.
+On a length mismatch it answers with **no points at all**: nothing can say where two unequal lists diverged, and pairing the common prefix would be the same silent mis-fork this card exists to remove.
+Losing every Edit control is visible and recoverable; forking a turn away is not.
+
+**Claude** derives each index by replaying the store entries through a throwaway `ClaudeReducer` -- the same walk cold-start hydration does -- so the answer is the reducer's by construction, and each point is re-checked against the live reducer before it ships.
+This fixed a **pre-existing off-by-one** that had nothing to do with Codex: `claudePromptText` filtered only `isSyntheticBlock` while the reducer's `handleUser` also drops `isSynthetic`, `isCompactSummary` and `isReplay` lines, so a compacted session emitted a fork point with no user message behind it and every ordinal after the compaction addressed the wrong message.
+`claudePromptText` had no other caller and was removed.
+On staleness: as of `claude 2.1.268` the store gains no content until a turn ends (MANUAL_TESTING OW-japuzo), so the store is a *prefix* of the live array, and a prefix's indices are the live array's indices -- a lagging store loses points at the tail, never mis-places one.
+
+**Client-side choice.**
+`ControllerView.forkIndices: number[] | null`, not a `SessionView` field -- only the selected session draws Edit controls, and a `SessionView` write is how `replaceSessionSummaries` distinguishes a touched session from an untouched one (an early version on `SessionView` broke "forgets a cached live session when a fresh listing reports it detached").
+Refreshed at attach, at both directions of a turn boundary, and on any snapshot; the e2e harness proved the snapshot trigger necessary.
+`null` means not-yet-answered and offers every user message a control, because the worst that window can produce is a refusal.
+"Edit last message" takes the same gate and goes absent rather than searching backwards.
+
+**Red-then-green, reproduced independently by the dispatching session, not taken on the implementer's word.**
+Reverting `forkAndSubmit` to `points[index]` turns three `src/client/controller.test.ts` tests red, including "refuses, rather than forking elsewhere, at a message steering added mid-turn (OW-roveze)" -- which stocks three fork points precisely so a positional lookup finds *something* at every position a click can produce, reproducing the silent half of the defect.
+Also red first: two `App.test.ts` affordance tests, two new `codex/adapter.test.ts` tests (which needed a `thread/read` case added to `configureHappyServer` -- there had been zero adapter-level coverage of Codex `listForkPoints`), and a `claude/adapter.test.ts` test that reproduces the compaction off-by-one.
+
+No live-run evidence was produced, so `docs/MANUAL_TESTING.md` is untouched; the code cites OW-japuzo (`claude 2.1.268`) and OW-tifuha/OW-gojado (`codex-cli 0.154.0`) by their recorded versions rather than adding any.
+
+**Filed from this execution:** OW-sibebe (`e2e/perf-harness.ts` answers no fork points, so its transcripts now render with no Edit controls -- a fidelity gap this change introduced) and OW-lizohe (a fork-points refresh in flight is dropped across Pi's rename, so Edit controls are stale for a turn right after a fork).
