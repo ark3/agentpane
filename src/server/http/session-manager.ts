@@ -260,7 +260,7 @@ export class SessionManager {
 		try {
 			await session.adapter.submit(text, images);
 		} finally {
-			this.#adoptRef(session);
+			this.#adoptRef(session, "rename");
 		}
 	}
 
@@ -281,6 +281,12 @@ export class SessionManager {
 	 *    `session.ref`.
 	 *  - Claude Code's `fork` respawns its own child onto the forked session, so
 	 *    it takes Pi's path here: `adapter.ref` changes and `#adoptRef` re-keys.
+	 *
+	 * Where the ref does change, the live adapter is driving the FORK from here
+	 * on and the parent is left detached -- still on disk, still listed, still
+	 * attachable, but no longer reachable through the container that moved. That
+	 * is why this passes `"fork"`: unlike a rename, the parent's id must not
+	 * become an alias for the fork (`#adoptRef`, OW-kekoji).
 	 */
 	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
 		const session = this.#lookup(ref);
@@ -288,19 +294,33 @@ export class SessionManager {
 		try {
 			return await session.adapter.fork(entryId);
 		} finally {
-			this.#adoptRef(session);
+			this.#adoptRef(session, "fork");
 		}
 	}
 
 	/**
-	 * Honour the adapter contract that `ref` is not stable: `PiAdapter` documents
-	 * that its id changes when `start()` resolves and when the first `submit()`
-	 * resolves, because Pi's session id IS its JSONL path (D9) and a `virtual`
-	 * session has no path until its first prompt writes one. Re-key everything
-	 * that is keyed by the old id, keep the old id as an alias for clients still
-	 * holding it, and tell the browsers so they can follow (`renamed`).
+	 * Honour the adapter contract that `ref` is not stable. Two different things
+	 * can move it and the caller is the only one that knows which, so it says:
+	 *
+	 *  - `"rename"` -- one conversation took a new id. `PiAdapter` documents that
+	 *    its id changes when `start()` resolves and when the first `submit()`
+	 *    resolves, because Pi's session id IS its JSONL path (D9) and a `virtual`
+	 *    session has no path until its first prompt writes one. The old id is an
+	 *    older name for this same conversation, so it stays alive as an alias for
+	 *    clients still holding it.
+	 *  - `"fork"` -- a SECOND conversation now exists. The container still moves,
+	 *    because on Pi and Claude Code the one live adapter is driving the fork
+	 *    now, but the parent is not an older name for it: it is a session of its
+	 *    own that is still on disk, still listable and still resumable. Aliasing
+	 *    it would say the opposite, and would hand every client holding the
+	 *    parent's ref a handle that prompts -- or, through `close()`, kills --
+	 *    the agent the user is talking to on the fork (OW-kekoji). The parent is
+	 *    left detached instead, in the sense D9 and D12 already define.
+	 *
+	 * Either way, re-key everything that is keyed by the old id and tell the
+	 * browsers so they can follow (`renamed`).
 	 */
-	#adoptRef(session: ManagedSession): void {
+	#adoptRef(session: ManagedSession, cause: "rename" | "fork"): void {
 		const next = session.adapter?.ref;
 		if (!next) return;
 		const oldKey = sessionKey(session.ref);
@@ -312,9 +332,16 @@ export class SessionManager {
 		session.ref = next;
 		this.#sessions.set(newKey, session);
 
-		this.#aliases.set(oldKey, newKey);
-		for (const [alias, target] of this.#aliases) {
-			if (target === oldKey) this.#aliases.set(alias, newKey);
+		if (cause === "rename") {
+			this.#aliases.set(oldKey, newKey);
+			// Pre-existing aliases are older names for whatever `oldKey` named, so
+			// on a rename they follow it. On a fork they must NOT: they are older
+			// names for the PARENT, and retargeting them recreates the same bug one
+			// level up. Their lookups miss from here on, which is the right answer
+			// -- the parent is detached, not aliased.
+			for (const [alias, target] of this.#aliases) {
+				if (target === oldKey) this.#aliases.set(alias, newKey);
+			}
 		}
 		for (const [requestId, owner] of this.#pendingRequests) {
 			if (owner === oldKey) this.#pendingRequests.set(requestId, newKey);
@@ -471,7 +498,7 @@ export class SessionManager {
 		bound.lastCompaction = initialState.compaction;
 		bound.lastModel = initialState.model;
 		// The first of the two points at which the id can change (D9).
-		this.#adoptRef(bound);
+		this.#adoptRef(bound, "rename");
 		return bound;
 	}
 
@@ -641,9 +668,11 @@ export class SessionManager {
 		const byKey = new Map<string, SessionSummary>();
 		for (const summary of stored) {
 			const key = sessionKey(summary.ref);
-			// An id we have superseded is not a session of its own. Listing it
-			// alongside the session that outgrew it shows one conversation twice,
-			// and offers the browser a handle that opens a second agent on it.
+			// An id we have RENAMED away from is not a session of its own. Listing
+			// it alongside the session that outgrew it shows one conversation
+			// twice, and offers the browser a handle that opens a second agent on
+			// it. Only a rename writes an alias, so a fork's parent -- a genuine
+			// second conversation -- is not caught here (`#adoptRef`).
 			if (this.#aliases.has(key)) continue;
 			byKey.set(key, { ...summary, ...this.#liveOverlay(summary.ref) });
 		}

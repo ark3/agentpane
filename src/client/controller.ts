@@ -811,10 +811,11 @@ export function createController(
 				// is deliberate (OW-puduro): what it costs is a session file, and the
 				// owner weighed that and declined to spend anything on it (OW-fejota).
 				// The trap if that is ever revisited: the server's `DELETE` route
-				// disposes the *adapter*, never the file, and `SessionManager.fork`
-				// re-keys `#aliases` so the parent's ref now resolves to the fork's
-				// live process -- on Pi and Claude Code that call would kill the agent
-				// the user is talking to.
+				// disposes the *adapter*, never the file, and on Pi and Claude Code
+				// the one live adapter has MOVED onto the fork -- so a DELETE aimed at
+				// the orphan is aimed at the agent the user is talking to. Only the
+				// fork's own ref carries that hazard: since OW-kekoji the parent's ref
+				// is not an alias for it.
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live

@@ -368,7 +368,6 @@ describe("fork (the third #adoptRef point)", () => {
 		// moved ref and re-keys the table to it.
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 		expect(forked).toEqual(moved);
-		expect(sessions.canonicalRef(REF)).toEqual(moved);
 		expect(sessions.liveRefs()).toEqual([moved]);
 		expect(events).toEqual([{ from: REF, to: moved }]);
 	});
@@ -396,38 +395,40 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(renamed).toEqual([]);
 	});
 
-	// What a ref-changing fork leaves behind for the PARENT (OW-risuwo). No new
-	// container is made: `fork` re-keys the parent's own `ManagedSession` onto
-	// the fork's id and leaves the parent's id behind as an alias, so every
-	// public surface that goes through `#lookup` now answers about the fork.
-	// The index below still reports the parent's stored session, which is
-	// Claude Code's shape -- its fork respawns the child onto the forked
-	// session and leaves the parent's store file untouched (OW-mayuza).
-	it("resolves the parent's ref to the fork's session after a ref-changing fork", async () => {
+	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
+	// container genuinely moves -- the one live adapter is driving the fork now
+	// -- but the parent is a second conversation, not an older name for this
+	// one, so no alias is written and the parent's ref stops resolving at all.
+	// It is detached, in the sense D9 and D12 already define, and the next
+	// attach rehydrates it. The index below still reports the parent's stored
+	// session, which is Claude Code's shape -- its fork respawns the child onto
+	// the forked session and leaves the parent's store file untouched
+	// (OW-mayuza).
+	it("leaves the parent detached rather than aliased onto the fork", async () => {
 		await sessions.attach(REF);
 		const parentAdapter = pi.forRef(REF);
 
 		const forked = await sessions.fork(REF, "e1");
 
-		// One adapter, reachable under both refs: the parent's id is an alias now.
-		expect(sessions.adapterFor(REF)).toBe(parentAdapter);
+		// The live adapter answers under the fork's ref only. A parent ref that
+		// still resolved would hand a client a handle on the fork's agent.
 		expect(sessions.adapterFor(forked)).toBe(parentAdapter);
-		expect(sessions.canonicalRef(REF)).toEqual(forked);
-		expect(sessions.summaryOf(REF)?.ref).toEqual(forked);
+		expect(sessions.adapterFor(REF)).toBeUndefined();
+		expect(sessions.canonicalRef(REF)).toEqual(REF);
+		expect(sessions.summaryOf(REF)).toBeNull();
 	});
 
-	it("(WRONG) drops the parent from list() after a ref-changing fork", async () => {
+	it("keeps the parent in list() after a ref-changing fork", async () => {
 		await sessions.attach(REF);
 
 		const forked = await sessions.fork(REF, "e1");
 
 		// The index still reports the parent -- its store file is untouched --
-		// but `list()` skips any stored summary whose key has become an alias,
-		// so the only thing a client can see is the fork. On Claude Code that
-		// hides a session that still exists on disk and is still resumable.
-		const listed = await sessions.list();
-		expect(listed.map((s) => sessionKey(s.ref))).toEqual([sessionKey(forked)]);
-		expect(listed.map((s) => sessionKey(s.ref))).not.toContain(sessionKey(REF));
+		// and nothing aliases its key away, so a client can still see it and
+		// re-attach to it alongside the fork.
+		const listed = await sessions.list().then((l) => l.map((s) => sessionKey(s.ref)));
+		expect(listed).toContain(sessionKey(forked));
+		expect(listed).toContain(sessionKey(REF));
 	});
 
 	it("keeps the parent in list() when a Codex-style fork leaves the ref unchanged", async () => {
@@ -444,18 +445,45 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(listed.map((s) => sessionKey(s.ref))).toEqual([sessionKey(codexRef)]);
 	});
 
-	it("(WRONG) disposes the fork's live adapter when the parent's ref is closed", async () => {
-		// `close()` is what the DELETE route calls (app.ts). Routed through the
-		// alias, a DELETE aimed at the parent kills the agent the fork is driving.
+	it("leaves the fork's live adapter alone when the parent's ref is closed", async () => {
+		// `close()` is what the DELETE route calls (app.ts). The parent is
+		// detached, so the call finds nothing and returns silently -- the route
+		// still answers 204 -- and the agent the fork is driving lives on.
 		await sessions.attach(REF);
 		const parentAdapter = pi.forRef(REF);
 
 		const forked = await sessions.fork(REF, "e1");
-		await sessions.close(REF);
+		await expect(sessions.close(REF)).resolves.toBeUndefined();
 
-		expect(parentAdapter?.disposed).toBe(true);
-		expect(sessions.isAttached(forked)).toBe(false);
-		expect(sessions.liveRefs()).toEqual([]);
+		expect(parentAdapter?.disposed).toBe(false);
+		expect(sessions.isAttached(forked)).toBe(true);
+		expect(sessions.liveRefs()).toEqual([forked]);
+	});
+
+	it("leaves an older alias of the parent pointing at the parent", async () => {
+		// A `virtual:` id that materialised into the parent is an older name for
+		// the PARENT's conversation. Following the container onto the fork would
+		// recreate the bug one level up: a stale client handle that can kill the
+		// live fork.
+		const renaming = new FakeAdapterFactory({
+			materialiseOnSubmit: "/home/u/.pi/agent/sessions/materialised.jsonl",
+		});
+		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
+		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+		await sessions.attach(virtualRef);
+		await sessions.submit(virtualRef, "first");
+		const parentAdapter = renaming.forRef(virtualRef);
+
+		const forked = await sessions.fork(virtualRef, "e1");
+
+		// The alias still names the parent, which is now detached, so it misses
+		// -- and a miss is what `canonicalRef` reports by handing `ref` back. Had
+		// it followed the container it would resolve to the fork instead.
+		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
+		expect(sessions.canonicalRef(virtualRef)).not.toEqual(forked);
+		expect(sessions.adapterFor(virtualRef)).toBeUndefined();
+		await sessions.close(virtualRef);
+		expect(parentAdapter?.disposed).toBe(false);
 	});
 
 	it("rejects a fork on a session with no live adapter", async () => {
