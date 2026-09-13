@@ -537,8 +537,9 @@ On Codex it is a regression now that OW-tifuha has landed: the former clean reje
 On Pi nothing changes, because Pi already steers it.
 So this decision does not remove the need for OW-nasofa's in-flight guard, and on one backend it is what will make that guard load-bearing.
 
-Steering also costs Codex an invariant the fork path leans on: a steered turn holds two user messages where `listForkPoints` answers one point per turn, so the ordinal `controller.ts` computes by counting user messages no longer indexes the fork-point list.
-That desynchronization is OW-roveze, and it is silent — a later Edit forks at the wrong turn rather than failing.
+Steering also cost Codex an invariant the fork path leaned on: a steered turn holds two user messages where `listForkPoints` answers one point per turn, so the ordinal `controller.ts` computed by counting user messages no longer indexed the fork-point list.
+That desynchronization was OW-roveze, and it was silent — a later Edit forked at the wrong turn rather than failing.
+D20 below retires the counting; the invariant is gone rather than restored, and the steered message is simply not a fork target.
 The narrower window between `abort()` and `turn/completed`, where a steer hits a turn being torn down, is OW-pefawi.
 
 ### D17. Navigating away during a fork does not cancel it
@@ -630,6 +631,29 @@ The owner stated on 2026-09-09 that they had no preference either way, and listi
 The noise is real: on the home server on 2026-09-11, 45 of the 72 September Codex rollouts carried `thread_source: "subagent"` in their `session_meta` (written by `codex-cli` 0.150.1 through 0.154.0).
 Whichever way it had gone, only the listing would have moved — `getSession` and the preview route resolve a ref by filename and would keep reaching a hidden child, which is what the card's link asks for.
 So the card is a shortcut to a door that already exists rather than the only way in.
+
+### D20. A fork point names its transcript index, and a message no point names is not editable
+
+`ForkPoint` carries the index, in the session's flat transcript, of the user message it forks at.
+The client resolves a fork point by matching that index against the message the user clicked, and offers an Edit control only on messages some point names.
+The owner took this on 2026-09-13 (OW-roveze).
+
+What it replaces is positional addressing: `GET fork-points` was specified to answer one point per user message in transcript order, so the client counted user messages before the clicked one and indexed the list with that ordinal.
+Nothing carried the correspondence — `PaneMessage` has no id and D11 freezes `protocol.ts`, so it could not grow one — and the two lists agreed only by convention.
+D16's steering broke the convention on Codex, and the failure was silent in the worst way available: with a later turn present the ordinal still resolved, to a point one whole turn past where the user pointed, with no error and nothing on screen to notice.
+
+Making Codex answer one point per user message was the obvious repair and is wrong.
+`ThreadForkParams.lastTurnId` is the only cut Codex offers and `thread/rollback` is deprecated in the generated bindings, so a per-message point would be a point that cannot be forked at — worse than none.
+Folding the steered message into its turn's first message was also declined: it hides a steer that really shipped.
+
+So the unevenness is shipped instead.
+Inside one steered Codex turn, the first user message carries an Edit control and the steered one does not.
+That is visibly odd and it is the intended outcome: it tells the truth about where the backend can cut, and every alternative papers over it.
+Every backend now pays the same way — Pi pairs its `get_fork_messages` entries against its own transcript server-side and answers with nothing at all if the two lists disagree on length, and Claude derives each point's index by replaying the store through the reducer that built the transcript, which fixed a pre-existing off-by-one where a compaction summary emitted a point with no user message behind it.
+
+Knowing the set at render time costs a round trip the old client did not make: the client fetches fork points on attach, at each turn boundary and on any snapshot, and holds the indices for the selected session only.
+That set is an affordance and may be briefly stale; nothing is decided on it.
+`forkAndSubmit` refetches at submit and resolves by index, refusing rather than falling back — so the worst a stale affordance can produce is a refusal, never a fork somewhere the user did not point.
 
 ## The backend adapter contract
 
