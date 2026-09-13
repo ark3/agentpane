@@ -47,8 +47,16 @@ OW-gojado for the fifth):
                        one condition D15 turns on and the only cell here that
                        reads the parent rather than the fork. Confirms the turn
                        is streaming first (`turn/started` plus accumulating
-                       `item/agentMessage/delta`s) and refuses to report a
-                       result it did not earn; then records whether deltas keep
+                       `item/agentMessage/delta`s), re-reads the buffer at the
+                       instant the fork request goes out -- the threshold being
+                       met is not the turn still running when the request lands
+                       -- and refuses to report a result it did not earn, on the
+                       wire OR on disk: a parent rollout it could not resolve,
+                       one that was not there to begin with, or one whose
+                       already-written lines moved under it all fail the cell
+                       too, because the finding is what that file GAINED and a
+                       file that was never found gains nothing in exactly the
+                       same way (OW-wifibe). Then records whether deltas keep
                        arriving, whether `turn/completed` lands and with what
                        status, and whether assistant text reaches the parent
                        rollout -- hashed at the fork and again after, since the
@@ -638,16 +646,23 @@ def codex_rollout_lines(path):
 
 
 def codex_rollout_snapshot(path):
-    """sha256 and line count of a rollout, for a before/after comparison.
+    """Whether a rollout exists, its sha256, and its lines, for a before/after
+    comparison.
 
     The Pi mid-stream cell hashes the file across the fork; this is the Codex
     equivalent, and it is deliberately not the header-only `forked_from_id`
     check the codex_new_session cell makes.
+
+    The lines come back beside the hash because the mid-stream cell checks that
+    the file only GAINED, and `exists` because a file that was never found
+    hashes to the same `None` a file that never changed would. Both feed that
+    cell's `disk_read_earned` gate.
     """
     if path is None or not path.exists():
-        return {"sha256": None, "lines": 0}
-    return {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            "lines": len(codex_rollout_lines(path))}
+        return {"exists": False, "sha256": None, "lines": 0, "raw": []}
+    raw = codex_rollout_lines(path)
+    return {"exists": True, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "lines": len(raw), "raw": raw}
 
 
 def codex_rollout_gained(path, from_line, limit=400):
@@ -798,6 +813,19 @@ class CodexSession:
             "streaming_confirmed": False,
             "turn_id": started[0]["params"]["turn"]["id"] if started else None,
         }
+
+    def still_streaming(self, mark, thread_id):
+        """Re-read the buffer at the instant of the action.
+
+        `await_streaming` returns the moment its threshold is met, and the turn
+        can settle in the gap between that return and the fork request going
+        out -- which is how the first run of `claude_fork_probe.py` killed a
+        turn that had already finished. `streaming_confirmed` cannot see that
+        gap: it was decided before it opened. This is the check the cell
+        records beside the fork itself, and `claude_fork_probe.py`'s
+        `still_streaming` is its sibling.
+        """
+        return not self.events_since(mark, "turn/completed", thread_id)
 
     def await_turn_end(self, mark, thread_id, timeout):
         deadline = time.time() + timeout
@@ -1000,6 +1028,7 @@ def run_codex(timeout, want_fixtures):
         # error here inflates what the parent is credited with writing
         # post-fork rather than hiding it.
         before = codex_rollout_snapshot(parent_file)
+        streaming_at_fork = cx.still_streaming(long_mark, parent_id)
         fork = cx.request(6, "thread/fork",
                           {"threadId": parent_id,
                            **({"lastTurnId": last_turn_id} if last_turn_id else {}),
@@ -1030,6 +1059,17 @@ def run_codex(timeout, want_fixtures):
             with open(forked_file, "rb") as fh:
                 forked_from_id = json.loads(fh.readline()).get("payload", {}).get("forked_from_id")
         after = codex_rollout_snapshot(parent_file)
+        prefix_preserved = after["raw"][:len(before["raw"])] == before["raw"]
+        # The wire signals cannot carry this cell on their own. Its finding is
+        # what the parent rollout GAINED, and an absence there is exactly what
+        # a rollout path that never resolved, or a baseline file that was not
+        # on disk, also produces -- silently, and reported as "the file did not
+        # change". A rollout whose already-written lines moved under the cell
+        # fails it too, because then the line index `before["lines"]` hands the
+        # census no longer points where it did. Taken from
+        # `claude_fork_probe.py`, whose disk gate is these same three.
+        disk_read_earned = (parent_file is not None and before["exists"]
+                            and prefix_preserved)
         gained_census, landed = codex_rollout_gained(parent_file, before["lines"])
 
         cells["codex_fork_mid_stream"] = {
@@ -1046,6 +1086,7 @@ def run_codex(timeout, want_fixtures):
             "deltas_before_fork": streaming["deltas_before_fork"],
             "parent_turn_settled_before_fork": streaming["settled_before_fork"],
             "streaming_turn_id": streaming["turn_id"],
+            "still_streaming_at_the_fork_itself": streaming_at_fork,
             "fork_succeeded_mid_stream": fork_ok,
             "fork_response": fork if not fork_ok else {"forked_thread_id": forked_id},
             "forked_thread_read_ok": forked_read is not None and "result" in forked_read,
@@ -1070,7 +1111,12 @@ def run_codex(timeout, want_fixtures):
             # text below, since this cell's CODEX_HOME does not survive it.
             "parent_rollout_lines_gained": gained_census,
             "parent_assistant_text_after_fork": landed,
-            "result": "measured" if streaming["streaming_confirmed"] else "unearned",
+            "parent_rollout_resolved": parent_file is not None,
+            "baseline_rollout_exists": before["exists"],
+            "parent_rollout_prefix_preserved": prefix_preserved,
+            "disk_read_earned": disk_read_earned,
+            "result": ("measured" if (streaming["streaming_confirmed"] and streaming_at_fork
+                                      and disk_read_earned) else "unearned"),
         }
     finally:
         if cx.proc.poll() is None:
@@ -1141,15 +1187,17 @@ def main():
     print(json.dumps(record, indent=2))
     # Non-zero if any new-session cell failed to drive a turn -- that is the
     # one criterion that a returned id cannot fake -- or if the mid-stream cell
-    # could not confirm the parent was streaming when it forked, which makes
-    # everything it reports about the parent unearned.
+    # reported anything but "measured", which is that cell's own verdict on
+    # whether it earned what it reports. Read through `result` rather than by
+    # re-listing its conditions here, so a condition added there reaches the
+    # exit code without a second edit.
     ok = True
     for name in ("pi_new_session", "codex_new_session"):
         cell = record["cells"].get(name)
         if cell is not None and not cell.get("drove_turn_in_fork" if "codex" in name else "drove_turn_in_clone"):
             ok = False
     mid = record["cells"].get("codex_fork_mid_stream")
-    if mid is not None and not mid.get("streaming_confirmed_before_fork"):
+    if mid is not None and mid.get("result") != "measured":
         ok = False
     return 0 if ok else 1
 

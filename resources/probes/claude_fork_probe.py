@@ -46,10 +46,11 @@ parent -- a `stream_event`/`message_start` plus `MIN_DELTAS` accumulating
 `content_block_delta` text deltas, and no `result` yet -- and record
 `result: "unearned"` with a non-zero process exit if it is missing.
 
-Two things here are additions rather than inheritance, and both close gaps the
-Codex cell has too. `still_streaming` re-checks at the instant of the action,
-where `codex_fork_mid_stream` acts straight off `await_streaming`'s return and
-gates only on `streaming_confirmed`. And the "unearned" gate covers the DISK
+Two things here were additions rather than inheritance when this probe was
+written, and both have since been carried back into `codex_fork_mid_stream`
+(OW-wifibe). `still_streaming` re-checks at the instant of the action, because
+`await_streaming`'s threshold being met is not the turn still running when the
+action lands. And the "unearned" gate covers the DISK
 read as well as the wire: a store file the cell could not resolve, a baseline
 that does not exist, or a store whose existing lines changed under it all fail
 the cell, because the headline finding here is an ABSENCE on disk and an
@@ -317,10 +318,9 @@ def still_streaming(child, mark):
     first run of this probe killed a turn that had already finished. This is
     the check the cell records beside the action itself.
 
-    NOT inherited from `fork_probe.py`: `codex_fork_mid_stream` fires
-    `thread/fork` straight off `await_streaming`'s return and gates only on
-    `streaming_confirmed`. This is an addition, and the gap it closes is real
-    on both probes.
+    Written here rather than inherited from `fork_probe.py`, and carried back
+    there as `CodexSession.still_streaming` once it was clear the gap is real
+    on both probes (OW-wifibe).
     """
     return not any(is_result(e) for _, e in child.events_since(mark))
 

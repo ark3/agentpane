@@ -639,7 +639,7 @@ It does **not** remove MCP tools, which `init.tools` still lists, so these recor
 
 **Streaming was confirmed before each action, not assumed.**
 Each cell waits for a `stream_event`/`message_start` on the parent plus forty accumulating `content_block_delta` text deltas with no `result` yet, re-reads the buffer at the instant of the action to confirm the turn still has not settled, and records `result: "unearned"` with a non-zero exit if any of that is missing.
-The re-check is this probe's addition and not inherited: `fork_probe.py`'s `codex_fork_mid_stream` fires `thread/fork` straight off its wait's return and gates only on the wait, and the gap between the two is real there too.
+The re-check was this probe's addition and not inherited: at the time of this run `fork_probe.py`'s `codex_fork_mid_stream` fired `thread/fork` straight off its wait's return and gated only on the wait, and the gap between the two is real there too — closed there on 2026-09-13 by OW-wifibe, which also carried this probe's disk gate across.
 The threshold is forty rather than that cell's five for the reason the tool-call run showed: a low threshold cannot tell the answer streaming from the coda after it, and that failure mode is silent.
 The gate also covers the **disk** read, because the headline below is an absence on disk and a store file that was never resolved produces the identical absence; an unresolved path, a missing baseline, or a store whose existing lines change under the cell all fail it.
 

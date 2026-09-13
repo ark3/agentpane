@@ -125,20 +125,12 @@ exists, what it returned, and what it left on disk:
   schema rather than fired — "Codex cannot rewind" is the result (HANDOFF 46).
 - **Codex mid-stream** (`thread/fork` into a running parent): the only cell that
   reports the *parent* rather than the fork, and the one D15 asked for
-  (OW-gojado). It confirms the parent is streaming before forking — `turn/started`
-  seen plus `item/agentMessage/delta`s accumulating, never a sleep — and records
-  `result: "unearned"` and exits non-zero if it cannot, because a fork fired at a
-  turn that had already settled measures nothing and fails silently. On 0.154.0
-  the parent survives: deltas keep arriving after the fork, `turn/completed`
-  carries `status: "completed"`, and the whole reply lands in the parent rollout,
-  which the cell sha256s at the fork and again after and then *reads* — the
-  header-only `parent_untouched` check the new-session cell makes could not have
-  told those outcomes apart. It also validates the fork itself past the returned
-  id — `thread/read` on it, and its rollout on disk with `forked_from_id` — but
-  drives no turn in it, because the parent is the subject. Writes no fixture:
-  nothing here is a protocol shape worth committing, and the cell's own JSON
-  record carries the census of every rollout line the parent gained, which is
-  what a later reader needs.
+  (OW-gojado).
+  It confirms the parent is streaming before forking — `turn/started` seen plus `item/agentMessage/delta`s accumulating, never a sleep — and re-reads the buffer once more at the instant the fork request goes out, since the turn can settle in the gap after the threshold is met; it records `result: "unearned"` and exits non-zero if either check fails, because a fork fired at a turn that had already settled measures nothing and fails silently.
+  The same gate covers the disk read (OW-wifibe): a parent rollout the cell could not resolve, one that was not on disk to begin with, or one whose already-written lines moved under it all make it "unearned" too, because the finding is what that file gained and a file that was never found gains nothing in the identical way.
+  On 0.154.0 the parent survives: deltas keep arriving after the fork, `turn/completed` carries `status: "completed"`, and the whole reply lands in the parent rollout, which the cell sha256s at the fork and again after and then *reads* — the header-only `parent_untouched` check the new-session cell makes could not have told those outcomes apart.
+  It also validates the fork itself past the returned id — `thread/read` on it, and its rollout on disk with `forked_from_id` — but drives no turn in it, because the parent is the subject.
+  Writes no fixture: nothing here is a protocol shape worth committing, and the cell's own JSON record carries the census of every rollout line the parent gained, which is what a later reader needs.
 
 ```bash
 python3 fork_probe.py                 # all five cells, write fixtures
@@ -151,9 +143,8 @@ with a turn driven inside it). Same writable-state-dir and never-fork-a-corpus-
 session discipline as `capture_fixtures.py`; Codex threads are deliberately NOT
 ephemeral here because the on-disk residue is the question. New-session cells
 end with a completed assistant turn inside the fork, so a returned id alone
-cannot pass the check. Exit non-zero if either new-session cell failed to drive
-a turn, or if the mid-stream cell could not confirm the parent was streaming
-when it forked.
+cannot pass the check.
+Exit non-zero if either new-session cell failed to drive a turn, or if the mid-stream cell's own `result` is anything but `measured`.
 
 Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the mid-stream cell with
 `codex-cli` 0.154.0, on which the rollout no longer writes an
@@ -227,8 +218,8 @@ That second cell is a probe and not a proposal: it changes nothing in `adapter.t
 Separate from `fork_probe.py` rather than a third `--backend` in it: that probe's cells are JSON-RPC clients where a fork is one request on a live server, and Claude Code has no RPC surface for a fork at all — it is a process spawn carrying `--fork-session`, over an unmatched NDJSON stream with no request ids.
 
 The streaming discipline comes from `fork_probe.py`'s `codex_fork_mid_stream` cell: `message_start` plus accumulating text deltas before the action, and `result: "unearned"` with a non-zero exit when they are missing.
-Two parts are **additions rather than inheritance**, and both close gaps that cell has too.
-`still_streaming` re-reads the buffer at the instant of the action, where `codex_fork_mid_stream` acts straight off `await_streaming`'s return and gates only on `streaming_confirmed`.
+Two parts were **additions rather than inheritance** when this probe was written, and both have since been carried back into that cell (OW-wifibe).
+`still_streaming` re-reads the buffer at the instant of the action, because the threshold being met is not the turn still running when the action lands.
 And the "unearned" gate covers the disk read, not just the wire: an unresolved store file, a baseline that does not exist, or a store whose existing lines changed under the cell all fail it.
 That last one matters because the headline finding is an *absence* on disk, and a file that was never found produces the identical absence.
 
