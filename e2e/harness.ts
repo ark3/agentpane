@@ -229,14 +229,17 @@ const api: AgentpaneApi = {
 		queueMicrotask(() => status(false));
 	},
 	/**
-	 * One point per user message, in transcript order -- the shape both real
-	 * adapters answer with, and the whole of what the client's ordinal
-	 * addressing depends on (OW-hezidi).
+	 * One point per user message, each naming that message's transcript index
+	 * (OW-roveze) -- the Pi shape, and the one a backend answers with when every
+	 * user message is forkable. Codex's asymmetry, where a steered turn holds a
+	 * user message no point names, is the server's business and is covered in
+	 * the unit tests; what the browser is here for is the control's place in the
+	 * block action row.
 	 */
 	async forkPoints() {
 		const points: ForkPoint[] = [];
 		messages.forEach((message, index) => {
-			if (message.role === "user") points.push({ id: `entry-${index}`, text: "" });
+			if (message.role === "user") points.push({ id: `entry-${index}`, text: "", index });
 		});
 		return points;
 	},

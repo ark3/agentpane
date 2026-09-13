@@ -935,22 +935,21 @@ describe("client controller", () => {
 	});
 
 	/**
-	 * OW-hezidi. The fork point is addressed by *ordinal* among user messages --
-	 * `GET fork-points` returns one point per user message in transcript order --
-	 * so identical wording in two messages cannot confuse it.
+	 * OW-hezidi. The fork point is addressed by the *transcript index* it names,
+	 * so identical wording in two messages cannot confuse it (OW-roveze).
 	 */
-	it("forks at the ordinal-th user message and only then prompts, into the ref the fork returned (OW-hezidi)", async () => {
+	it("forks at the point naming that transcript index and only then prompts, into the ref the fork returned (OW-hezidi)", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([
-			{ id: "turn-1", text: "same words" },
-			{ id: "turn-2", text: "same words" },
-			{ id: "turn-3", text: "same words" },
+			{ id: "turn-1", text: "same words", index: 0 },
+			{ id: "turn-2", text: "same words", index: 2 },
+			{ id: "turn-3", text: "same words", index: 4 },
 		]);
 		const controller = createController(api);
 		await controller.select(ref);
 		controller.setDraft("reworded");
 
-		await controller.forkAndSubmit(1);
+		await controller.forkAndSubmit(2);
 
 		expect(api.forkPoints).toHaveBeenCalledWith(ref);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
@@ -961,9 +960,66 @@ describe("client controller", () => {
 		expect(controller.getView().draft).toBe("");
 	});
 
+	/**
+	 * OW-roveze, the defect this addressing scheme exists for. Steering a running
+	 * Codex turn puts a second `userMessage` in it, which is its own `role:
+	 * "user"` transcript message -- but Codex forks at turn granularity, so the
+	 * turn still answers with one point. Three user messages, two points.
+	 *
+	 * Counting user messages made the click on the third one ask for the point at
+	 * position 2, which is the *third* turn: a fork one whole turn past where the
+	 * user pointed, with no error and nothing on screen to notice. Here the same
+	 * click asks for transcript index 3 and gets the turn that holds it.
+	 */
+	it("forks at the turn holding the clicked message, not the turn in that position (OW-roveze)", async () => {
+		const api = new FakeApi();
+		// T1: prompt at 0, reply at 1, steered prompt at 2, reply at 3.
+		// T2: prompt at 4, reply at 5. Two turns, three user messages.
+		api.forkPoints.mockResolvedValue([
+			{ id: "turn-1", text: "first", index: 0 },
+			{ id: "turn-2", text: "second", index: 4 },
+		]);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		expect(await controller.forkAndSubmit(4)).toEqual(forkedRef);
+
+		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
+	});
+
+	/**
+	 * The other half of OW-roveze: the steered message itself. No point names
+	 * index 2, so there is nothing to fork at and the answer is a refusal --
+	 * never the next point along, which is what a positional lookup would have
+	 * handed back. The shell normally draws no Edit control on such a message at
+	 * all; reaching here means the transcript moved under the affordance.
+	 */
+	it("refuses, rather than forking elsewhere, at a message steering added mid-turn (OW-roveze)", async () => {
+		const api = new FakeApi();
+		// Three turns, so a positional lookup finds *something* at every position
+		// a click can produce -- which is the silent half of the defect: no error,
+		// and a fork at a turn the user never pointed at.
+		api.forkPoints.mockResolvedValue([
+			{ id: "turn-1", text: "first", index: 0 },
+			{ id: "turn-2", text: "second", index: 4 },
+			{ id: "turn-3", text: "third", index: 6 },
+		]);
+		const controller = createController(api);
+		await controller.select(ref);
+		controller.setDraft("reworded");
+
+		expect(await controller.forkAndSubmit(2)).toBeNull();
+
+		expect(api.fork).not.toHaveBeenCalled();
+		expect(api.prompt).not.toHaveBeenCalled();
+		expect(controller.getView().draft).toBe("reworded");
+		expect(controller.getView().error).not.toBeNull();
+	});
+
 	it("ends selected and attached to a Codex-shaped fork, which renames nothing (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -981,7 +1037,7 @@ describe("client controller", () => {
 
 	it("stops a running turn before forking it (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
@@ -1004,7 +1060,7 @@ describe("client controller", () => {
 	it("lands a fork whose selection was overtaken by a click mid-flight, without moving the user (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
@@ -1033,7 +1089,7 @@ describe("client controller", () => {
 	it("lands a fork whose selection was overtaken while the abort was in flight (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const aborting = deferred<void>();
 		api.abort.mockReturnValueOnce(aborting.promise);
 		const controller = createController(api);
@@ -1061,17 +1117,20 @@ describe("client controller", () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
 		const points = deferred<ForkPoint[]>();
-		api.forkPoints.mockReturnValueOnce(points.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		// After the select: attaching a session refreshes its fork points for the
+		// transcript's Edit controls (OW-roveze), and that read is not this one.
+		api.forkPoints.mockClear();
+		api.forkPoints.mockReturnValueOnce(points.promise);
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
 		expect(api.forkPoints).toHaveBeenCalledWith(ref);
 		await controller.select(other);
-		points.resolve([{ id: "turn-1", text: "first" }]);
+		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
 
 		expect(await submitted).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
@@ -1091,7 +1150,7 @@ describe("client controller", () => {
 	it("does not bump the selection intent past the click it declined to overtake (D17, OW-miyemo)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValueOnce(forking.promise);
 		const controller = createController(api);
@@ -1127,7 +1186,7 @@ describe("client controller", () => {
 	it("reports the fork it landed on, and clears the draft, when the click comes after the prompt (OW-mifuki)", async () => {
 		const other: SessionRef = { backend: "pi", id: "/sessions/other.jsonl" };
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		api.fork.mockResolvedValue(forkedRef);
 		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
 		const prompt = deferred<void>();
@@ -1158,7 +1217,7 @@ describe("client controller", () => {
 	 */
 	it("clears the preview when the click it declined to overtake landed on the fork itself (OW-tatebi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		api.fork.mockResolvedValue(forkedRef);
 		api.preview.mockResolvedValue({ ref: forkedRef, turns: [previewAssistant("stale")] });
 		const controller = createController(api);
@@ -1190,12 +1249,15 @@ describe("client controller", () => {
 	 */
 	it("forks once when the fork path is entered twice while the first is still in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const forking = deferred<SessionRef>();
 		api.fork.mockReturnValue(forking.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		// The attach's own fork-points read (OW-roveze) is not one of the two this
+		// test is counting.
+		api.forkPoints.mockClear();
 		controller.setDraft("reworded");
 
 		const first = controller.forkAndSubmit(0);
@@ -1220,7 +1282,7 @@ describe("client controller", () => {
 	 */
 	it("keeps a draft typed while the fork was in flight (OW-kelede)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		api.attach.mockImplementation(async (target: SessionRef) => summary(target));
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -1269,9 +1331,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("keeps the draft, and reports, when there is no fork point at that ordinal (OW-hezidi)", async () => {
+	it("keeps the draft, and reports, when no fork point names that index (OW-hezidi)", async () => {
 		const api = new FakeApi();
-		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first" }]);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const controller = createController(api);
 		await controller.select(ref);
 		controller.setDraft("reworded");

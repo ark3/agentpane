@@ -155,6 +155,7 @@ function initialView(selectedTurns: number): ControllerView {
 		models: [],
 		modelSetting: false,
 		preview: null,
+		forkIndices: null,
 	};
 }
 

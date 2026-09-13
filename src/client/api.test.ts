@@ -144,7 +144,7 @@ describe("agentpane API", () => {
 	});
 
 	it("lists a session's fork points and unwraps them (OW-hezidi)", async () => {
-		const points = [{ id: "entry-1", text: "first" }, { id: "entry-2", text: "second" }];
+		const points = [{ id: "entry-1", text: "first", index: 0 }, { id: "entry-2", text: "second", index: 2 }];
 		const fetch = fetchRecorder(response({ points }));
 		const api = createAgentpaneApi({ fetch });
 

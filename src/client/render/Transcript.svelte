@@ -10,6 +10,7 @@
 		isStreaming = false,
 		reading = false,
 		editingIndex = null,
+		editableIndices,
 		onedit,
 		onopensession,
 	}: {
@@ -25,7 +26,16 @@
 		 * append here", and those outcomes differ by a whole session.
 		 */
 		editingIndex?: number | null;
-		/** Offer an edit control on every user message. Omitted -- a read-only preview -- and none is drawn. */
+		/**
+		 * The `messages` indices an edit may start at (OW-roveze): the ones the
+		 * backend answered `GET fork-points` with. A user message outside it gets
+		 * no control, because forking at it is not something any backend offers
+		 * -- a Codex turn steered mid-flight holds a second user message the
+		 * backend cannot cut before. Omitted, every user message is offered one;
+		 * the shell omits it exactly while the answer is still in flight.
+		 */
+		editableIndices?: ReadonlySet<number> | undefined;
+		/** Offer an edit control on user messages. Omitted -- a read-only preview -- and none is drawn. */
 		onedit?: ((index: number) => void) | undefined;
 		/**
 		 * Open another session from inside the transcript (OW-benige): Codex's
@@ -51,7 +61,7 @@
 			index={entry.index}
 			editing={entry.index === editingIndex}
 			dimmed={editingIndex !== null && entry.index > editingIndex}
-			{onedit}
+			onedit={!editableIndices || editableIndices.has(entry.index) ? onedit : undefined}
 			{onopensession}
 		/>
 	{/each}

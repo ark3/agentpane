@@ -64,10 +64,16 @@ export interface AgentpaneApi {
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
 	setModel(ref: SessionRef, model: string): Promise<void>;
 	/**
-	 * The points a session can be forked at (OW-hezidi): one per user message,
-	 * in transcript order, on every backend. Position is the whole addressing
-	 * scheme -- `ForkPoint.id` is a Pi entry id, a Codex turn id, or a Claude
-	 * Code store-line uuid, and `PaneMessage` carries none of them.
+	 * The points a session can be forked at (OW-hezidi), each naming the
+	 * transcript index of the user message it forks at (OW-roveze).
+	 *
+	 * Not one per user message: a backend answers with the points it can
+	 * actually cut at, and Codex cuts at turn granularity, so a message added by
+	 * steering a running turn gets none. Nor is position the addressing scheme
+	 * any more -- `ForkPoint.index` is, and it is an index into the same array
+	 * `snapshot.messages` carries. `ForkPoint.id` is the backend's own cut
+	 * token (a Pi entry id, a Codex turn id, a Claude Code store-line uuid) and
+	 * `PaneMessage` carries none of them, which is why the index exists.
 	 */
 	forkPoints(ref: SessionRef): Promise<ForkPoint[]>;
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */

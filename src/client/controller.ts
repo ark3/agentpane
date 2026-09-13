@@ -50,6 +50,29 @@ export interface ControllerView {
 	 * always equals `state.selected` while non-null.
 	 */
 	preview: { ref: SessionRef; turns: SessionPreviewTurn[] } | null;
+	/**
+	 * Transcript indices the *selected* session can be forked at, as of the last
+	 * `GET fork-points` (OW-roveze), or null while nobody has been told yet.
+	 * Whether a user message is offered an Edit control at all reads this.
+	 *
+	 * On the view rather than on each `SessionView` because only the selected
+	 * session draws Edit controls and only the selected session is ever asked --
+	 * and because a `SessionView` write is how `replaceSessionSummaries` tells a
+	 * touched session from an untouched one, which a fork-points reply has no
+	 * business answering.
+	 *
+	 * Not-yet-known is a third state on purpose, and it offers every user message
+	 * a control: a session is attached and drawn before this can answer, and a
+	 * transcript that blinks its controls in a beat later is worse than one whose
+	 * worst case for that beat is a refusal. It can only be a refusal --
+	 * `forkAndSubmit` resolves the point by index at submit, so an Edit offered
+	 * here that the backend cannot honour is declined, never redirected.
+	 *
+	 * An affordance, not a fact, even once known: it is refreshed at attach and
+	 * at turn boundaries, and between a refresh and the click the transcript can
+	 * move under it. Nothing is decided on it.
+	 */
+	forkIndices: number[] | null;
 }
 
 export interface AgentpaneController {
@@ -81,13 +104,21 @@ export interface AgentpaneController {
 	 */
 	submit(): Promise<boolean>;
 	/**
-	 * Fork the selected session just before its `ordinal`-th user message and
-	 * send the current draft, plus `images`, into the fork (OW-hezidi). Always a
-	 * new session: no backend is asked to rewind in place, and Codex cannot.
+	 * Fork the selected session just before the user message at transcript
+	 * `index` and send the current draft, plus `images`, into the fork
+	 * (OW-hezidi). Always a new session: no backend is asked to rewind in place,
+	 * and Codex cannot.
 	 *
-	 * The ordinal indexes `GET fork-points`, which answers one point per user
-	 * message in transcript order on every backend -- the caller counts user
-	 * messages and never matches on wording, which two identical messages break.
+	 * `index` addresses the transcript array itself -- the one `snapshot.messages`
+	 * carries -- and a fork point is resolved by matching `ForkPoint.index`
+	 * against it (OW-roveze). Never by position in the points list: Codex answers
+	 * one point per *turn*, a steered turn holds two user messages, so counting
+	 * user messages addressed a later turn than the user clicked and forked
+	 * there silently. Never by wording either, which two identical messages break.
+	 *
+	 * No point at that index is a refusal, not a fallback. The caller normally
+	 * offers no Edit control on such a message at all, so reaching here means the
+	 * transcript moved under the affordance.
 	 *
 	 * Resolves to **the ref the prompt landed on**, or null if it never landed.
 	 * The ref rather than a boolean because the caller has per-tab state keyed on
@@ -96,7 +127,8 @@ export interface AgentpaneController {
 	 * it onto whatever the user clicked mid-fork (OW-mifuki).
 	 *
 	 * Null means a genuine failure -- nothing selected, an empty draft, a press
-	 * on top of one still in flight, a missing fork point, or a rejected request.
+	 * on top of one still in flight, no fork point at that index, or a rejected
+	 * request.
 	 * Clicking another session mid-fork is not one of them: under D17 that is
 	 * navigation, not a retraction, so the round trip runs to completion and the
 	 * ref comes back while the selection stays where the click put it
@@ -107,7 +139,7 @@ export interface AgentpaneController {
 	 * the mark under it would leave a composer that says nothing about where it
 	 * is about to send.
 	 */
-	forkAndSubmit(ordinal: number, images?: PromptRequest["images"]): Promise<SessionRef | null>;
+	forkAndSubmit(index: number, images?: PromptRequest["images"]): Promise<SessionRef | null>;
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
@@ -147,6 +179,7 @@ export function createController(
 		models: [],
 		modelSetting: false,
 		preview: null,
+		forkIndices: null,
 	};
 	let connection: EventConnection | undefined;
 	let disposed = false;
@@ -159,6 +192,7 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const recoveries = new Map<string, Promise<void>>();
+	const forkPointsInFlight = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
@@ -209,6 +243,43 @@ export function createController(
 			...(select ? { error: null } : {}),
 			...(takesSelection ? { preview: null } : {}),
 		});
+		// Only where the transcript is about to be drawn with Edit controls on it
+		// (OW-roveze); a background `recover` renders nothing and needs none.
+		if (takesSelection) refreshForkPoints(summary.ref);
+	}
+
+	/**
+	 * Re-ask the server which transcript indices this session can be forked at,
+	 * so the transcript knows where to draw an Edit control (OW-roveze).
+	 *
+	 * Cheap and best-effort. The client used to need nothing from the server to
+	 * decide this -- it counted user messages -- and that count is what was
+	 * wrong. It is paid for at attach and at each turn boundary, which are the
+	 * moments the set can change, and never per message.
+	 *
+	 * A failure is swallowed. This fills in an affordance, not an operation: the
+	 * user asked for nothing, so there is nobody to report to, and the last known
+	 * set standing is the same staleness the window between two refreshes already
+	 * has. `forkAndSubmit` refetches at submit and reports its own failures, and
+	 * it is the one that decides anything.
+	 */
+	function refreshForkPoints(ref: SessionRef): void {
+		const key = sessionKey(ref);
+		if (forkPointsInFlight.has(key)) return;
+		forkPointsInFlight.add(key);
+		void api
+			.forkPoints(ref)
+			.then((points) => {
+				if (disposed) return;
+				// Only while it is still the session on screen: a reply that lands
+				// after the user clicked away describes a transcript nobody is
+				// looking at, and the session they went to has its own refresh.
+				const selected = view.state.selected;
+				if (!selected || sessionKey(selected) !== key) return;
+				publish({ forkIndices: points.map((point) => point.index) });
+			})
+			.catch(() => {})
+			.finally(() => forkPointsInFlight.delete(key));
 	}
 
 	function validWorkspace(cwd: string): boolean {
@@ -433,7 +504,7 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
-		publish({ busy: "attaching", error: null, models: [], modelSetting: modelSettingForSession(ref) });
+		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref) });
 		try {
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
@@ -457,6 +528,11 @@ export function createController(
 	const handlers: EventHandlers = {
 		onEvent(event: ServerEvent) {
 			if (disposed) return;
+			// Read before the publish below overwrites it: a turn ending is a
+			// transition, and only the pair of values shows one (OW-roveze).
+			const wasStreaming =
+				event.type !== "sessions-changed" &&
+				view.state.sessions[sessionKey(event.session)]?.isStreaming === true;
 			const result = reduceServerEvent(view.state, event);
 			if (event.type === "renamed") {
 				for (const listener of renameListeners) listener(event.from, event.session);
@@ -464,6 +540,21 @@ export function createController(
 			if (result.state !== view.state) publish({ state: result.state });
 			if (event.type === "snapshot" && result.state.selected && sessionKey(result.state.selected) === sessionKey(event.session)) {
 				void loadModelsForSelected(selectionIntent);
+			}
+			// The two moments the forkable set moves out from under the transcript
+			// (OW-roveze). A turn boundary, in both directions: a turn that ends
+			// adds its messages to what the backend will cut at, and a turn that
+			// starts adds the prompt the composer's "Edit last message" is about
+			// to point at. And a snapshot, which replaces the array wholesale --
+			// the client-visible form of the adapter's `reset`, after which no
+			// index held from before means anything. Only for the selected
+			// session: it is the only transcript drawing Edit controls.
+			if (event.type !== "sessions-changed") {
+				const key = sessionKey(event.session);
+				const selected = result.state.selected;
+				const isStreaming = result.state.sessions[key]?.isStreaming === true;
+				const moved = event.type === "snapshot" || isStreaming !== wasStreaming;
+				if (moved && selected && sessionKey(selected) === key) refreshForkPoints(event.session);
 			}
 			for (const ref of result.recover) void recover(ref);
 			if (result.refreshSessions) void refreshSessions(false);
@@ -645,7 +736,7 @@ export function createController(
 				if (!disposed && busyIs("editing-externally")) publish({ busy: "idle" });
 			}
 		},
-		async forkAndSubmit(ordinal, images) {
+		async forkAndSubmit(index, images) {
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
@@ -696,7 +787,7 @@ export function createController(
 				if (disposed) return null;
 				const points = await api.forkPoints(ref);
 				if (disposed) return null;
-				const point = points[ordinal];
+				const point = points.find((candidate) => candidate.index === index);
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
 				const forked = await api.fork(ref, { entryId: point.id });
 				// From here the fork exists, and every exit below up to the prompt

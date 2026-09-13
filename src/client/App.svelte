@@ -46,6 +46,7 @@
 		models: [],
 		modelSetting: false,
 		preview: null,
+		forkIndices: null,
 	});
 	/**
 	 * The workspace filter. A sentinel rather than "" so it can never collide
@@ -94,15 +95,23 @@
 	 * abandonable. The fork happens at submit. `stashedDraft` is whatever the
 	 * composer held when the edit displaced it, put back by Cancel.
 	 *
-	 * `ordinal` is the message's position *among user messages*, which is how
-	 * the fork point is addressed: `GET fork-points` answers one point per user
-	 * message in transcript order on every backend, while `PaneMessage` carries
-	 * no id of its own (D11 freezes `protocol.ts`, so it cannot grow one).
-	 * Matching on wording instead would break on two identical messages.
+	 * `index` is the message's position in the transcript array, and it is the
+	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
+	 * forks at, and `forkAndSubmit` matches on it (OW-roveze). `PaneMessage`
+	 * carries no id of its own (D11 freezes `protocol.ts`, so it cannot grow
+	 * one), and matching on wording instead would break on two identical
+	 * messages.
+	 *
+	 * Only a message some fork point names can be edited at all, which is why
+	 * `forkableIndices` gates the control rather than every user message
+	 * carrying one. On Codex that is visibly uneven inside a single turn -- a
+	 * turn steered mid-flight holds two user messages and the backend can only
+	 * cut before the first -- and that unevenness is the intended outcome: it
+	 * says what the backend can actually do, where hiding it forked somewhere
+	 * the user never pointed.
 	 */
 	let editing = $state<{
 		index: number;
-		ordinal: number;
 		images: { mimeType: string; base64: string }[];
 		stashedDraft: string;
 	} | null>(null);
@@ -253,13 +262,31 @@
 	 */
 	const sendLabel = $derived(editing ? (streamingAction ? "Stop and fork" : "Fork") : "Send");
 	/**
+	 * Transcript indices the selected session can be forked at, or null while the
+	 * answer has not arrived (OW-roveze). Null offers every user message a
+	 * control; see `ControllerView.forkIndices` for why that beat is spent this
+	 * way.
+	 */
+	const forkableIndices = $derived(view.forkIndices ? new Set(view.forkIndices) : null);
+	/**
 	 * The last user message in the selected transcript, or null if there is none
 	 * to go back to (OW-relehi). The composer's shortcut renders only when this
 	 * is an index, matching how Stop behaves in that row: absent, not disabled.
+	 *
+	 * Null too when that message is not one the backend can fork at (OW-roveze),
+	 * which is the same bargain the transcript's own control takes. Deliberately
+	 * *not* a search backwards for the newest forkable message: this button says
+	 * "last message", and quietly loading an older one would be the silent
+	 * mis-targeting this card exists to remove. Absent is the honest answer, and
+	 * the control comes back as soon as the backend can name the point -- which
+	 * on a turn just started may be a moment after the prompt lands.
 	 */
 	const lastUserIndex = $derived.by(() => {
 		const messages = selectedSession?.messages ?? [];
-		for (let i = messages.length - 1; i >= 0; i--) if (messages[i]?.role === "user") return i;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i]?.role !== "user") continue;
+			return !forkableIndices || forkableIndices.has(i) ? i : null;
+		}
 		return null;
 	});
 	/** Advisory only (OW-73): a leading `/` is the whole trigger, deliberately imprecise -- Send still works either way. */
@@ -733,7 +760,7 @@
 		lastScrollKey = key;
 		// An edit is anchored to one transcript by index, so it cannot survive the
 		// pane moving to another one: the mark would land on an unrelated message
-		// and the ordinal would address the wrong session's fork points. The
+		// and the index would address the wrong session's fork points. The
 		// displaced draft is not restored here -- switching sessions has never
 		// rewritten the composer, and this is a switch.
 		editing = null;
@@ -961,8 +988,9 @@
 		const messages = selectedSession?.messages ?? [];
 		const message = messages[index];
 		if (!message || message.role !== "user") return;
-		let ordinal = 0;
-		for (let i = 0; i < index; i++) if (messages[i]?.role === "user") ordinal += 1;
+		// Nothing else may open an edit the fork cannot honour; the two callers
+		// already check, and this is the one place that must (OW-roveze).
+		if (forkableIndices && !forkableIndices.has(index)) return;
 		const text: string[] = [];
 		// Carried, not dropped: `PromptRequest.images` takes them back, and a fork
 		// that quietly sent fewer images than the original held is exactly the
@@ -976,7 +1004,7 @@
 		// finds `view.draft` already holding the previous edit's loaded text, so
 		// taking it again would lose what Cancel owes the typist (OW-bigotu).
 		const stashedDraft = editing ? editing.stashedDraft : view.draft;
-		editing = { index, ordinal, images, stashedDraft };
+		editing = { index, images, stashedDraft };
 		controller.setDraft(text.join("\n\n"));
 		promptEl?.focus();
 	}
@@ -1053,7 +1081,7 @@
 			});
 			return;
 		}
-		void controller.forkAndSubmit(edit.ordinal, edit.images).then((landed) => {
+		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
 			unsubscribeRename();
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
@@ -1233,6 +1261,7 @@
 				isStreaming={selectedSession?.isStreaming ?? false}
 				{reading}
 				editingIndex={editing?.index ?? null}
+				editableIndices={forkableIndices ?? undefined}
 				onedit={startEdit}
 				onopensession={openSession}
 			/>

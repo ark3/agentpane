@@ -63,6 +63,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		models: [],
 		modelSetting: false,
 		preview: null,
+		forkIndices: null,
 		...overrides,
 	};
 }
@@ -193,7 +194,7 @@ class FakeController implements AgentpaneController {
 	}
 
 	/** Every fork the shell asked for, in order, with the images it carried. */
-	forked: Array<{ ordinal: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
+	forked: Array<{ index: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
 	/**
 	 * The ref `forkAndSubmit` resolves to -- the one the prompt landed on, or
 	 * null for "the fork never landed". The real one hands back the ref rather
@@ -201,11 +202,11 @@ class FakeController implements AgentpaneController {
 	 */
 	forkResult: SessionRef | null = null;
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's `renamed`. */
-	onForkAndSubmit: ((ordinal: number) => void) | null = null;
+	onForkAndSubmit: ((index: number) => void) | null = null;
 
-	async forkAndSubmit(ordinal: number, images?: { mimeType: string; base64: string }[]) {
-		this.forked.push({ ordinal, images });
-		this.onForkAndSubmit?.(ordinal);
+	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[]) {
+		this.forked.push({ index, images });
+		this.onForkAndSubmit?.(index);
 		return this.forkResult;
 	}
 
@@ -2002,6 +2003,66 @@ describe("App", () => {
 
 	const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
+	/**
+	 * OW-roveze, in the shell. The transcript is a Codex thread whose first turn
+	 * was steered mid-flight: three user messages, at 0, 2 and 4, and two fork
+	 * points, because Codex cuts at turn granularity and cannot cut before the
+	 * steered one. The controller has been told which indices those are.
+	 *
+	 * Two user messages get an Edit control and the steered one does not, inside
+	 * a single turn. That is visibly uneven and it is the point: it says what the
+	 * backend can do. The control the third message *does* carry addresses index
+	 * 4 -- the message under it -- where counting user messages made it the third
+	 * ordinal, which on this transcript is a turn that does not exist and on a
+	 * longer one is the turn after the one clicked.
+	 */
+	it("offers no Edit on a message steering added mid-turn, and forks the clicked index (OW-roveze)", async () => {
+		const controller = new FakeController(view({
+			forkIndices: [0, 4],
+			state: attachedState([
+				user("first ask"),
+				assistant([{ type: "text", text: "part one" }]),
+				user("also this"),
+				assistant([{ type: "text", text: "part two" }]),
+				user("second ask"),
+				assistant([{ type: "text", text: "an answer" }]),
+			]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		const edits = screen.getAllByRole("button", { name: "Edit message" });
+		expect(edits).toHaveLength(2);
+		await fireEvent.click(edits[1]!);
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("second ask");
+		expect([...container.querySelectorAll(".msg.editing")].map((el) => el.getAttribute("data-index")))
+			.toEqual(["4"]);
+
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.forked).toEqual([{ index: 4, images: [] }]);
+	});
+
+	/**
+	 * The composer's shortcut takes the same gate (OW-roveze): it says "last
+	 * message", so where the last message is one no backend can fork at it goes
+	 * away rather than quietly loading an older one.
+	 */
+	it("withdraws Edit last message when the last message is not a fork point (OW-roveze)", async () => {
+		const controller = new FakeController(view({
+			forkIndices: [0],
+			state: attachedState([
+				user("first ask"),
+				assistant([{ type: "text", text: "part one" }]),
+				user("also this"),
+			]),
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		expect(screen.queryByRole("button", { name: "Edit last message" })).toBeNull();
+	});
+
 	it("filling the composer from an earlier user message asks the server for nothing, and marks it (OW-hezidi)", async () => {
 		const controller = new FakeController(view({
 			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }]), user("second draft")]),
@@ -2071,7 +2132,7 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 
 		expect(controller.forked).toEqual([{
-			ordinal: 0,
+			index: 0,
 			images: [
 				{ mimeType: "image/png", base64: PIXEL },
 				{ mimeType: "image/jpeg", base64: PIXEL },
@@ -2215,7 +2276,7 @@ describe("App", () => {
 			compact: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
-			forkPoints: async () => [{ id: "turn-1", text: "first draft" }],
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => {
 				forks += 1;
 				if (forks > 1) throw new Error("fork refused");
@@ -2285,7 +2346,7 @@ describe("App", () => {
 
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
-		expect(controller.forked).toEqual([{ ordinal: 0, images: [] }]);
+		expect(controller.forked).toEqual([{ index: 0, images: [] }]);
 
 		// The fork's own transcript arrives under the new key: everything before the
 		// edited message, then the edited message itself.
@@ -2335,7 +2396,7 @@ describe("App", () => {
 
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
-		expect(controller.forked).toEqual([{ ordinal: 0, images: [] }]);
+		expect(controller.forked).toEqual([{ index: 0, images: [] }]);
 		expect(controller.getView().state.selected).toEqual(forkRef);
 
 		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
