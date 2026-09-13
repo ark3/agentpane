@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork still broadcasts `renamed`, which tells every other browser the parent became the fork — and since OW-kekoji the server disagrees
@@ -50,3 +51,17 @@ A test in `src/client/session-state.test.ts` or `src/server/http/` drives a ref-
 It goes red first against today's behaviour.
 
 `docs/WORKSTREAMS.md`'s client contract under "What the transport expects of its callers" is rewritten to match whichever way this goes; it currently carries a paragraph scoped to say that a fork's `renamed` breaks both of its promises, which exists only because this card was not yet worked.
+
+## Close note
+
+Fixed by dropping the broadcast on the fork path: `#adoptRef` in `src/server/http/session-manager.ts` now ends `if (cause === "rename") this.broadcaster.renamed(from, next)`, with `sessionsChanged()` still firing unconditionally (69d80c1).
+
+The card left a choice open between that drop and minting a `forked(parent, fork)` event. The drop won: `src/shared/protocol.ts` is frozen under D11, and a `forked` event would have had no consumer that needed it — `sessionsChanged()` already invalidates every browser's list, and the forking browser's own selection comes from `applyAttached` in `forkAndSubmit`, not from any event. Each of the four "load-bearing for nothing" claims the card listed was re-checked at the source and held; in particular `Broadcaster.renamed`'s seq carry-over is now reached only by real renames, and leaving the parent's seq entry alone on a fork is the more correct outcome since the parent still exists and browsers still hold views at that seq.
+
+Verified by `src/server/http/vertical-slice.test.ts`, "leaves a browser that did not fork on the parent it was reading (OW-suhoto)": a real app over a Pi-shaped fake adapter, one `SseTestClient` standing in for the browser that did not fork, its events fed through the real `reduceServerEvent` with `selected` seeded to the parent. It asserts the onlooker keeps `selected === parent` and the parent's two-message transcript, holds no view under the fork's key, and receives no `renamed`. Shown red twice — once by the implementer, once again by the dispatching session re-breaking the one-line change — and it goes red on `expect(state.selected).toEqual(parent)` receiving the fork's id, which is the defect itself rather than merely the event's absence.
+
+`src/server/http/session-manager.test.ts`'s Pi-style fork test kept its re-keying assertions (`forked` equals the moved ref, `liveRefs()` is the moved ref alone) and flipped only its `renamed` expectation to `[]`.
+
+Retired every copy of the old claim, not just the docs: `docs/WORKSTREAMS.md`'s client contract under "What the transport expects of its callers" (the fork paragraph is gone, replaced by "A fork never emits it, on any backend"), the `fork()` and `#adoptRef` docblocks in `session-manager.ts`, the fork route's Pi bullet in `src/server/http/app.ts`, `forkAndSubmit`'s comment in `src/client/controller.ts`, and the follow-mode `rekeySession` fallback comment in `src/client/App.svelte` — which had said Pi's fork renames and Codex's does not, and now says no fork does, so that fallback is the path for both. The surviving `renamed` mentions in `protocol.ts`, `app.ts:242`, `docs/DESIGN.md` and `docs/HANDOFF.md` are all about the D9 materialisation rename and stay true. The WORKSTREAMS line also carried a second error worth recording: it said a fork on "Pi or Claude Code" emits `renamed`, but Claude Code takes Codex's path with its own ref unchanged (OW-razoki), so Pi was always the only backend reaching that path.
+
+`bun run check` green (49 files, 1051 tests, 21s). `bun run test:browser` not run and not required: no scrolling, `app.css`, composer, message-footer or `public/` code is touched, and the one `App.svelte` edit is a comment.
