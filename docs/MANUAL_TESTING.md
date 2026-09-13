@@ -613,7 +613,8 @@ The cell measured what production does.
 
 So on Codex the parent turn survives a mid-stream `thread/fork` and finishes normally, where on Pi (OW-yudoni) it is abandoned.
 The asymmetry D15 assumed on an inference is real and now measured.
-D15's abort remains a deliberate choice on the Codex side rather than a necessity; whether to keep it is a separate decision this run does not take.
+D15's abort was, at this run, still a deliberate choice on the Codex side rather than a necessity, and whether to keep it was a separate decision this run did not take.
+**Taken since:** OW-ziyobe took it on 2026-09-13 and OW-bakosi landed it the same day — the abort is Pi-only now, and Codex no longer has one.
 
 ### A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)
 
@@ -621,8 +622,9 @@ Run on the home server 2026-09-11, `claude 2.1.268`, explicit `--model haiku` re
 It is a separate file from `fork_probe.py` because that probe's cells are JSON-RPC clients where a fork is one request on a live server, and Claude Code has no RPC surface for a fork at all — a fork there is a process spawn carrying `--fork-session`.
 
 This is the third and last backend to be asked D15's question.
-D15 is headed "agentpane stops a streaming turn before forking it, on every backend" and reasons about Pi and Codex only; Claude Code does not appear in it once.
-The abort is client-side and backend-agnostic (`src/client/controller.ts` `forkAndSubmit`, the `isStreaming` check), so it has always applied to Claude too, and nothing had ever looked at what it costs there.
+D15 was headed "agentpane stops a streaming turn before forking it, on every backend" at the time of this run, and reasoned about Pi and Codex only; Claude Code did not appear in it once.
+The abort was then client-side and backend-agnostic (`src/client/controller.ts` `forkAndSubmit`, the `isStreaming` check), so it had always applied to Claude too, and nothing had ever looked at what it costs there.
+**Both retired since:** `aafde65` retitled D15 to "only where the backend abandons that turn anyway, which is Pi" on 2026-09-13, and OW-bakosi made `forkAndSubmit`'s check `ref.backend === "pi" && ...isStreaming` the same day, so the abort is no longer backend-agnostic and no longer reaches Claude at all.
 
 **The command line differs from production, deliberately.**
 Production spawns `direnv exec <cwd> sbox -- claude -p ...` (`claude/process.ts` `buildClaudeSpawnCommand`), but `direnv` was not on PATH on the home server at the time of this run, so the probe spawns `claude` directly and passes by hand the `--permission-mode bypassPermissions` that sbox injects — as 10 of the 11 captures under `resources/fixtures/claude/` do, the exception being `permission-request`, which needed a live prompt.
@@ -704,12 +706,14 @@ Pi is the only backend where the loss is forced.
 That makes D15's uniformity argument harder rather than easier, in two ways.
 Its remaining case is "Pi cannot be brought to match, so the alternative is a permanent split" — and the split is now one backend against two, not one against one.
 And the cost of the abort is larger on Claude than the Codex run made it look.
-D15 records that on Codex the surviving turn "wrote its whole reply durably into the parent's rollout" and so the tokens are spent either way; on Claude the killed turn writes nothing at all, so agentpane's abort destroys a reply that would otherwise have landed.
+D15 records that on Codex the surviving turn "wrote its whole reply durably into the parent's rollout" and so the tokens are spent either way; on Claude the killed turn writes nothing at all, so agentpane's abort destroyed a reply that would otherwise have landed.
+**Spent rather than paid:** that cost is what OW-bakosi removed on 2026-09-13 by making the abort Pi-only, which is the finding of this run acted on rather than a contradiction of it.
 
 **Where the distinction does not survive contact** is the shape of the survival.
 Codex survives by construction: one app-server process hosts many threads, `thread/fork` mints a thread beside the parent, and there is nothing to kill.
-Claude would survive only by running two processes at once, which is a thing the CLI allows and the adapter does not do.
-So "Claude is like Codex" is true of the backend and not yet true of anything agentpane could ship.
+Claude would survive only by running two processes at once, which is a thing the CLI allows and the adapter did not do at this run.
+So "Claude is like Codex" was true of the backend and not yet true of anything agentpane could ship.
+**Shippable since:** OW-razoki made the adapter do exactly that on 2026-09-13 — `ClaudeAdapter.fork()` runs nothing and returns the `StartOptions` for a second child, `replaceProcess` is gone, and `SessionManager` parks the recipe in `#pendingForks` until the attach spawns it.
 
 This run takes no decision. `OW-ziyobe` is the card that takes D15's, and it is blocked on this one; the contradiction above is for it to retire.
 

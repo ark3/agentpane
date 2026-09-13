@@ -2496,6 +2496,9 @@ describe("App", () => {
 			const { container } = render(App, { props: { controller } });
 			await tick();
 
+			// The premise: the turn really is running, so the three assertions below
+			// are the split and not an idle session passing them for free.
+			expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
 			expect(screen.queryByRole("button", { name: "Stop and edit" })).not.toBeInTheDocument();
 			await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
 

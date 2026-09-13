@@ -78,6 +78,10 @@ test("the last-message shortcut shares the action row rather than crowding it of
 	await send.click();
 	const stop = page.getByRole("button", { name: "Stop", exact: true });
 	await expect(stop).toBeVisible();
+	// "Stop and edit" rather than "Edit last message" because `harness.ts` pins
+	// this session to `backend: "pi"`, the one backend whose fork destroys the
+	// running turn and so the only one that names a stop here (D15, OW-bakosi).
+	// Repointing the harness at another backend is meant to fail on this line.
 	await expectOnOneRow(
 		tools,
 		externalEditor,

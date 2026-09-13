@@ -1115,7 +1115,8 @@ describe("client controller", () => {
 	/**
 	 * The abort window, which had no test at all: removing that guard used to
 	 * leave the whole client suite green. It is also the window where the old
-	 * behaviour was worst in kind -- the button says "Stop and fork", so a click
+	 * behaviour was worst in kind -- the button says "Stop and fork" on Pi, which
+	 * this test's ref is (D15, OW-bakosi), so a click
 	 * here killed the parent's turn the user *had* asked for and then abandoned
 	 * the fork they had asked for too, leaving them with neither (D17, OW-miyemo).
 	 */

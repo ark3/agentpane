@@ -255,16 +255,21 @@
 	const streamingAction = $derived(streamingNow && compaction === null);
 	/**
 	 * Whether reaching for an edit here stops the running turn, which is what the
-	 * stop-first labels below promise. Pi only (D15, OW-bakosi): its CLI abandons
-	 * the in-flight turn on a mid-stream fork whatever agentpane does (OW-yudoni),
-	 * so `forkAndSubmit` aborts first to make that loss deliberate and visible,
-	 * and this label is the only warning the user gets. Codex's and Claude's
-	 * parent turns survive the fork with their whole reply durable (OW-gojado,
-	 * OW-japuzo), so there an edit submitted mid-stream is just a fork -- and a
-	 * button that said otherwise would name a consequence it does not have.
+	 * stop-first labels below promise. Pi only, because Pi is the only backend
+	 * whose fork destroys the in-flight turn whatever agentpane does; the
+	 * evidence for that, and the versions it was measured on, sit at the abort
+	 * itself in `controller.ts` `forkAndSubmit` (D15, OW-bakosi). Elsewhere an
+	 * edit submitted mid-stream is just a fork, and a button that said otherwise
+	 * would name a consequence it does not have.
 	 *
-	 * Read off the selected ref, the same value `forkAndSubmit` decides on, so
-	 * the label and the behaviour cannot drift apart.
+	 * The backend half is read off the selected ref, which is the value
+	 * `forkAndSubmit` decides on, so the label and the abort cannot disagree
+	 * about which backend they are on. They can still disagree about compaction:
+	 * `forkAndSubmit`'s condition tests `isStreaming` alone, so a Pi session
+	 * mid-compaction would read "Fork" over a controller that would abort.
+	 * Nothing reaches that -- `send()` returns early under a compaction and the
+	 * submit button is disabled through one -- but it is those guards that hold
+	 * it, not this line.
 	 */
 	const stopsBeforeFork = $derived(streamingAction && view.state.selected?.backend === "pi");
 	/**

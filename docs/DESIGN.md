@@ -485,7 +485,7 @@ So: when an interaction introduces a mode, the control that leaves it is visible
 
 ### D15. agentpane stops a streaming turn before forking it only where the backend abandons that turn anyway, which is Pi
 
-Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first.
+Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first — on Pi, and only there.
 The owner took that abort uniformly across every backend on 2026-09-09, replacing the "first cut, safe on both" that OW-hezidi shipped it as.
 The owner reframed it on 2026-09-13 (OW-ziyobe) and it is now Pi-only: the abort stands where the backend destroys the turn whatever agentpane does, and nowhere else.
 
