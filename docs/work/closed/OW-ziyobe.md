@@ -1,6 +1,7 @@
 ---
 labels: [question]
 blocked-by: [OW-razoki]
+closed: done
 ---
 
 # Whether agentpane should stop aborting a streaming Codex turn before forking, now that the parent is known to survive
@@ -118,3 +119,55 @@ If the decision is to take the asymmetry, the behaviour change and the label cha
 
 Blocked on OW-razoki, which is what makes the answer fall out rather than needing to be chosen.
 OW-japuzo supplied the Claude measurement this card was previously waiting on; no further live run is needed here.
+
+## Close note
+
+The decision is recorded in `docs/DESIGN.md` D15, rewritten in aafde65.
+It is a change of decision, not a restatement: the abort is Pi-only.
+
+## The decision as recorded
+
+D15 is now headed "agentpane stops a streaming turn before forking it only where the backend abandons that turn anyway, which is Pi".
+The reasoning is this card's own reframing, and it is stated as a consequence rather than a choice: the old framing assumed a fork on Claude had to kill the parent, and it did not -- the kill was agentpane's `replaceProcess`, which OW-razoki deleted on 2026-09-13.
+With Codex and Claude both leaving the parent turn alone, the only backend that loses the turn is the one whose CLI abandons it regardless, so nobody weighs uniformity against a surviving reply.
+
+D15 carries one block per backend, each naming the version its behaviour was measured on: Pi on the work laptop 2026-08-20 `pi 0.84.2` (OW-yudoni), Codex on the home server 2026-09-11 `codex-cli 0.154.0` (OW-gojado), Claude on the home server 2026-09-11 `claude 2.1.268` for the probe (OW-japuzo) and 2026-09-13 `claude 2.1.270` for the live run through `bun run start` (OW-razoki).
+It says the uniformity argument does not survive and should not be restated, and it says why uniformity was doing its heaviest work on the backend whose cost had never been weighed: on Claude nothing reaches the store while the turn runs, so the abort destroys a whole reply that would otherwise have landed.
+
+D15 also states plainly that the behaviour has not changed yet.
+`forkAndSubmit` still aborts on every backend and the comment above that line still argues uniformity; that comment and the labels are OW-bakosi's, which this card filed and deliberately did not fold in.
+
+## The conditional
+
+Discharged before the close, and it fired the way this card expected.
+The decision was to take the asymmetry, so the behaviour and label change belong in their own card: OW-bakosi, filed 2026-09-13 from this card and now unblocked by OW-razoki.
+
+## The copies this change owed
+
+Retiring the uniformity argument meant retiring every live copy of it, not just D15's own.
+Three sites, all in the same commit:
+
+- `docs/DESIGN.md` D18's bullet list cited "D15's uniformity" as a fact behind a decision already taken; it now cites D15's per-backend fork behaviour.
+- `resources/probes/README.md` and `resources/probes/claude_fork_probe.py` both quoted D15's old heading as current -- "D15 is headed 'on every backend' ... Claude Code is not mentioned in it once" -- and both described `replaceProcess`'s kill in the present tense ("the kill `fork()` performs today", "Cell 1: the kill the adapter performs today").
+  That second one was already false before this card: OW-razoki deleted `replaceProcess` and the correction landed in `docs/MANUAL_TESTING.md` and not in the docblock a reader meets at the code, which is `AGENTS.md`'s 034d7dd failure repeated.
+  Both files now date the claim to what it was at the run and name OW-razoki.
+
+Hits left alone on purpose: `docs/MANUAL_TESTING.md`'s several references to D15's old heading are inside dated run sections and are historical records, and the `forkAndSubmit` comment is OW-bakosi's by that card's own done-condition.
+
+## What review caught
+
+The dispatching session wrote D15 itself, so an adversarial reader was dispatched at the finished text and its report checked against the sources rather than taken on trust.
+It found the four stale probe/README copies above, which is the finding worth keeping.
+It also caught two overstatements and a misquote in the new text, all fixed before the commit:
+
+- "six `item/agentMessage/delta`s accumulated against a threshold of five" was wrong and had been carried forward verbatim from the old D15.
+  `docs/MANUAL_TESTING.md` records five, and `fork_probe.py` passes `min_deltas=5`.
+- "the price of the abort there ... is the highest of the three" is unmeasured against Codex -- nobody measured how much of a Codex parent's partial reply is on disk at an abort.
+  D15 now says the abort's cost on Claude is larger than on Codex and states explicitly that this compares what the abort destroys, not bytes.
+- The quoted retired reason had "its reply" interpolated inside the quotation marks; it is now verbatim from the pre-change text.
+- "which is what the labels exist to say" was present tense about labels that do not vary by backend yet; it now reads "will be there to say".
+
+## Verification
+
+Docs and one probe file; no `src/` change, so `bun run check` does not apply and was not run.
+`python3 -m py_compile resources/probes/claude_fork_probe.py` passes.
