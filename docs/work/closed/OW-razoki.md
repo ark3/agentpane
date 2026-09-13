@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-risuwo, OW-naribu]
+closed: done
 ---
 
 # Claude's fork kills the parent's process and reuses its container, where Codex leaves the parent alone and lets the client attach the fork as its own session
@@ -86,3 +87,60 @@ Every existing fork test was rewritten to the new contract and none had to be dr
 Driving it end to end through the real server returns HTTP 500 at the first prompt: `Failed to spawn Claude Code (direnv): Executable not found in $PATH: "direnv"`.
 Every backend spawns via `direnv exec <cwd> sbox -- <agent>` and `direnv` is not installed on the home server.
 So this card is blocked on OW-naribu and what remains of it is exactly one thing: the live run, and the `docs/MANUAL_TESTING.md` entry that records it.
+
+## Close note
+
+Landed in 2e673aa (the change), 9e31638 (review fixes) and 6ec52cc (the live run's record in `docs/MANUAL_TESTING.md`, "A fork through agentpane leaves the parent's turn running and answers on its own child").
+`bun run check` green at 1050 tests, ~39s.
+
+## What was built
+
+`ClaudeAdapter.fork()` mints the fork's session id and returns a `ForkResult` carrying the `StartOptions` that spawn it -- `forkOf: { parentId, entryId }`, a new field -- and runs nothing.
+The parent keeps its child, its ref and any turn in flight; `replaceProcess` is deleted.
+`SessionManager.fork` parks that recipe in `#pendingForks` keyed by the fork's ref, and `#start` consults it ahead of the session-index lookup, which is what the card's second reading required: the fork's store file does not exist until its first turn ends, so the index cannot answer for it.
+The fork then gets its own adapter, its own `Ownership` and its own control channel by the attach path that already existed.
+
+The alternative weighed and rejected is two children under one adapter, the shape OW-japuzo's close note sized.
+Giving the fork its own adapter keeps `Ownership`, `controlNamespace` and `pendingControls` one-per-adapter, which is why this was small.
+
+`BackendAdapter.fork` returning `ForkResult` instead of a bare `SessionRef` edits the FROZEN INTERFACE in `src/server/adapters/types.ts`.
+Raised deliberately rather than slipped in: the card's open question cannot be answered without getting spawn arguments to whoever spawns the fork, and `StartOptions` carried only `cwd`, `resumeId` and `model`.
+
+## Tests, and none dropped
+
+Every existing fork test was rewritten to the new contract; none had to be deleted, so the close note names nothing.
+`ignores lines from the retired child after a fork` became its own inverse, `keeps the parent's child streaming after a fork`, since there is no retired child now.
+
+Red-first was checked independently by the dispatching session rather than taken from the implementer's report: reintroducing `this.currentRef = minted` in `fork()` failed one test, reintroducing the kill failed three, and removing the new `close()` line failed one.
+
+## What review found, which was not nothing
+
+An adversarial reader found three real defects in the first cut and two test gaps.
+`close()` returned early when `#lookup` missed, which is exactly a parked-but-never-attached fork, so a `DELETE` then attach would spawn a sandboxed agent for a session the caller had deleted -- reachable straight off the HTTP API.
+`disposeAll()` walked past the same map.
+The two gaps were assertions that passed under a wrong implementation: `cwd: ""` on the fork's container dropped every fork out of the cwd-filtered sidebar, and never consuming the recipe let a renamed-then-closed fork be resurrected on its pre-rename spelling by forking the parent again.
+It also caught a false claim the dispatching session had written itself into `ClaudeAdapter.ref`'s docblock.
+
+One test the dispatching session proposed could not go red -- a plain second attach returns early -- and the implementer said so and wrote the rename case instead, which can.
+
+## The live run
+
+Home server 2026-09-13, `claude 2.1.270`, `direnv 2.37.1`, haiku, through `bun run start` on the production spawn path.
+Forked at a confirmed-streaming instant in three shapes, including both branches of `ClaudeAdapter.start` (`session-start` and a real store entry).
+In every one the parent finished its own reply and the store gained the whole of it after the fork -- 7439, 7491 and 12549 bytes that the old kill would have destroyed, since at the moment of the fork the file carried none of it.
+The fork inherited the parent's history truncated inclusive of the named entry and nothing after: forked before turn 2 while turn 3 streamed, it answered "PLATYPUS, and no, we haven't discussed bicycles."
+Parent pid 964 and fork pid 1030 held live turns at the same instant on one workspace.
+
+A negative worth keeping: the first overlap measurement counted every process named `claude` and proved nothing, because the server had been kept alive across runs and one process named `claude` on this machine is the Claude Code CLI doing the measuring. Count by the `--session-id` values under test. The same mistake, made once more as `kill`, killed the measuring session.
+
+## What this does not settle
+
+Nothing was measured about a fork of a fork, two forks of one parent taken together, or a parent turn that fails rather than succeeds.
+Claude Code only; Pi remains the one backend whose fork moves the live process's own file, and is now the only one reaching `#adoptRef`'s `"fork"` path.
+
+## For the card this frees
+
+OW-ziyobe asked not to be decided before this card, on the grounds that if Claude's fork could not mint its own container cheaply the abort question came back as a real choice.
+It could, and it did, so that branch does not fire and OW-ziyobe's own reading stands: the abort is left standing only where the backend forces it, which is Pi.
+This card deliberately changed neither the abort nor the labels, as it said it would not.
+The live run adds one fact OW-ziyobe did not have: on Claude the parent's reply is now durable across a fork, where OW-japuzo could only say the abort destroyed it.
