@@ -625,7 +625,7 @@ D15 is headed "agentpane stops a streaming turn before forking it, on every back
 The abort is client-side and backend-agnostic (`src/client/controller.ts` `forkAndSubmit`, the `isStreaming` check), so it has always applied to Claude too, and nothing had ever looked at what it costs there.
 
 **The command line differs from production, deliberately.**
-Production spawns `direnv exec <cwd> sbox -- claude -p ...` (`claude/process.ts` `buildClaudeSpawnCommand`), but `direnv` is not on PATH on the home server, so the probe spawns `claude` directly and passes by hand the `--permission-mode bypassPermissions` that sbox injects — as 10 of the 11 captures under `resources/fixtures/claude/` do, the exception being `permission-request`, which needed a live prompt.
+Production spawns `direnv exec <cwd> sbox -- claude -p ...` (`claude/process.ts` `buildClaudeSpawnCommand`), but `direnv` was not on PATH on the home server at the time of this run, so the probe spawns `claude` directly and passes by hand the `--permission-mode bypassPermissions` that sbox injects — as 10 of the 11 captures under `resources/fixtures/claude/` do, the exception being `permission-request`, which needed a live prompt.
 It also passes `--tools ""`, which production does not.
 Neither deviation reaches what is measured here: what sbox changes is filesystem reach, and store flush timing, process lifetime and delta arrival do not go through it.
 The exact line, both cells, was `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-mode bypassPermissions --tools "" --model haiku --session-id <uuid>`, in a throwaway git repository under the temp area so the probe's sessions land in their own `~/.claude/projects/` directory and never in this repo's.
@@ -1171,7 +1171,7 @@ Read call on the bespoke ReadTool card (the case-insensitive registry match
 working against Claude's `Read`), the tool result, the final `done` text, and
 the model/token footer.
 
-**Honest scope.** The home server has no `direnv`, so the spawn ran with a
+**Honest scope.** The home server had no `direnv` at the time of this run, so the spawn ran with a
 pass-through shim on PATH (`direnv exec <dir> <cmd…>` → `<cmd…>`); everything
 downstream was real — sbox ran, jailed the workspace, and injected
 `--permission-mode bypassPermissions` itself. Not driven live through the
@@ -1204,8 +1204,8 @@ server was pinned at 2.1.238.
 
 The home server is no longer pinned: `claude --version` reports `2.1.247
 (Claude Code)`, from `~/.local/share/claude/versions/2.1.247`. Every probe
-below ran there on Haiku. **Honest scope:** the home server still has no
-`direnv`, and these probes invoked `claude` directly rather than through
+below ran there on Haiku. **Honest scope:** the home server still had no
+`direnv` at the time of these runs, and they invoked `claude` directly rather than through
 `direnv exec <cwd> sbox --`, so the sandbox layer was not in the path. Where
 the adapter relies on sbox to inject `--permission-mode bypassPermissions`,
 the probes passed that flag by hand. cwd was `/tmp/ow-bumota` throughout.
@@ -1424,7 +1424,8 @@ A fresh page starts at System, `main.ts` writes the resolved `data-theme` before
 **2026-09-08, home server, Claude Code 2.1.265 on Haiku and Codex CLI 0.153.4 on `gpt-5.6-luna`.**
 
 The production client was built with `bun run build` and served on port 4197 with `PATH=/tmp/ow-derewo-bin:$PATH PORT=4197 bun run start`.
-The home server still has no `direnv`, so `/tmp/ow-derewo-bin/direnv` was the same pass-through shim used by the earlier adapter run: it consumed `exec <cwd>` and executed the remaining real `sbox -- <agent>` command unchanged.
+The home server still had no `direnv` at the time of this run, so `/tmp/ow-derewo-bin/direnv` was the same pass-through shim used by the earlier adapter run: it consumed `exec <cwd>` and executed the remaining real `sbox -- <agent>` command unchanged.
+The owner installed the real `direnv` on 2026-09-13, so this substitution applies to runs before that date only; see `docs/HANDOFF.md`, "Environment gotchas".
 
 A throwaway Playwright script created and attached one empty conversation per backend over the real HTTP server, opened the built UI, clicked each conversation row, selected the required model through the visible `Conversation model` picker, sent one prompt, waited for the real turn to settle, and read both the locked composer label and assistant footer from the rendered DOM.
 

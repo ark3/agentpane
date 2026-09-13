@@ -182,6 +182,13 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
   A failure here is quiet and looks like success: the turn "completes" in under a second with `stopReason: "error"` and empty content.
   With that state dir, a **live spawn from inside this sandbox does work** — it is how `resources/probes/agentpane_codex_smoke.py` drives a real Codex through the built server, and how finding 34 was settled.
   Earlier drafts of this document said the sandbox prevented one; what it prevents is a spawn that inherits the read-only `~/.codex`.
+- **`direnv` is the first link in every spawn, and the home server did not have it until 2026-09-13.**
+  All three backends spawn as `direnv exec <cwd> sbox -- <agent>` (D7, and `src/server/adapters/types.ts` states it as the contract), so without `direnv` on `PATH` the first prompt fails with HTTP 500 and `Failed to spawn <backend> (direnv): Executable not found in $PATH: "direnv"` -- every backend, not one.
+  The home server now has the real thing, `direnv 2.37.1` at `/sbin/direnv`, installed by the owner on 2026-09-13 (OW-naribu).
+  Verified through the production shape: `direnv exec /home/ark3/projects/agentpane sbox --dry-run -- claude --version` exits 0 and prints the `bwrap` line with `--permission-mode bypassPermissions` injected.
+  This repository has no `.envrc` and needs none -- `direnv exec` against a directory without one runs the command and loads nothing.
+  **Before that date, every live run on this machine went through a pass-through shim**, `/tmp/ow-derewo-bin/direnv`, which dropped `exec <dir>` and exec'd the rest; runs recorded in `docs/MANUAL_TESTING.md` before 2026-09-13 either used it, invoked the agent directly, or say which.
+  Read those sections' "the home server has no `direnv`" as true of their date, not of yours.
 - **Pi RPC framing is LF-only.**
   Split on `\n` only; do not use Node `readline` (it also splits on U+2028/U+2029, which are valid inside JSON strings).
   See Pi's `docs/rpc.md` "Framing".

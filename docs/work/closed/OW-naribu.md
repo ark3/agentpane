@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # agentpane cannot spawn any backend on the home server: the spawn path runs `direnv`, which is not installed there
@@ -54,3 +55,29 @@ Two resolutions, and this card closes when one is recorded:
 ## Done when
 
 Either `direnv` is present and the reproduction above returns a streamed turn instead of a 500, or `docs/DESIGN.md` records the decision that D7's path no longer requires it and the spawn builders match that.
+
+## Close note
+
+Resolved by provisioning, not by code: the owner installed the real `direnv` on the home server on 2026-09-13.
+`direnv 2.37.1` at `/sbin/direnv`, verified through the production shape -- `direnv exec /home/ark3/projects/agentpane sbox --dry-run -- claude --version` exits 0 and prints the `bwrap` line with `--permission-mode bypassPermissions` injected.
+`direnv exec` against a directory with no `.envrc` runs the command and loads nothing, so this repository needs no `.envrc` and none was added.
+
+**This card's reproduction and diagnosis were right; its history was wrong, and the correction is the part worth keeping.**
+The card said "OW-beripo drove a full live turn through the real server on this machine on 2026-08-25, so this path worked then.
+Nothing in the deck records it being removed."
+Nothing was removed.
+The home server never had `direnv`, and `docs/MANUAL_TESTING.md` recorded the substitute three separate times -- at the OW-japuzo probe section, at the OW-beripo run this card cited, and at OW-derewo, which names it outright: `/tmp/ow-derewo-bin/direnv`, a 118-byte `sh` script that drops `exec <dir>` and execs the rest.
+That shim was still on disk when this card was filed.
+OW-derewo's run started the server as `PATH=/tmp/ow-derewo-bin:$PATH PORT=4197 bun run start`, and that `PATH=` prefix is the whole of the difference between the runs that worked and the one that produced this card.
+
+So the defect was never a missing binary.
+It was that the workaround lived only in dated prose inside `MANUAL_TESTING.md` run records, which nobody reads unless already reading them, and in a `/tmp` directory a reboot deletes.
+An executor meeting a "confirm it live on the home server" done-condition had no way to learn it, and one spent a session rediscovering it competently from scratch.
+
+**Fixed in the same change, per the every-copy rule.**
+`docs/HANDOFF.md` "Environment gotchas" gains the entry that was missing: `direnv` is the first link in every backend's spawn, what its absence looks like (HTTP 500, `Failed to spawn <backend> (direnv)`, every backend at once), that the machine now has the real thing with the verification above, and that pre-2026-09-13 sections saying otherwise are true of their date.
+The four present-tense claims in `docs/MANUAL_TESTING.md` -- lines 628, 1174, 1208 and 1427 -- were date-scoped rather than rewritten, since each is an honest record of what its own run did; OW-derewo's also now points at the HANDOFF entry.
+
+**What this unblocks.**
+OW-razoki, whose only remaining limb is the live run and its `MANUAL_TESTING.md` entry.
+More broadly, every done-condition in the deck reading "confirm it live on the home server", which this card correctly noted is a property none of them state.
