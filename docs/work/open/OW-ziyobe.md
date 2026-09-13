@@ -99,6 +99,7 @@ That is the answer, and it is a consequence rather than a choice: nobody has to 
 
 **What this card becomes.**
 Record that in D15, after `OW-razoki` lands.
+The behaviour and the labels that follow from it are `OW-bakosi`, filed 2026-09-13 as this card's terms below require; they are not this card's work.
 D15's uniformity argument does not survive it and should not be restated -- the split it feared is now one backend behaving differently because it genuinely behaves differently, which is what the labels exist to say.
 
 **The Claude evidence that moved it**, from OW-japuzo's close note: nothing reaches Claude's store file until after the wire says the turn is over -- four marks across one reply, byte-identical each time, the last at about 78% of a 1491-character answer -- so the abort there destroys the entire reply, where D15 can say of Codex that the reply landed anyway.

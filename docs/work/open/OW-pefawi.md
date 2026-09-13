@@ -12,7 +12,13 @@ Between the interrupt resolving and that notification arriving, `submit()` sees 
 
 Stop-then-immediately-send is an ordinary gesture, so the window is reachable by hand.
 Before OW-tifuha the same window produced `TURN_ACTIVE_ERROR`, which is legible; nothing here is newly *broken*, only newly illegible.
-That is why this is filed rather than fixed inside OW-tifuha: the right answer may be a flag `abort()` sets and `turn/completed` clears, or it may be that mapping a failed `turn/steer` precondition back to a well-defined "busy" is the general fix and covers more than this one window. Nobody has decided.
+That is why this is filed rather than fixed inside OW-tifuha: two answers were open, a flag `abort()` sets and `turn/completed` clears, or mapping a failed `turn/steer` precondition back to a well-defined "busy" as a general fix covering more than this one window.
+
+**Decided 2026-09-13: the flag.**
+Sending a request the adapter can predict will fail, in order to translate its failure, spends a round trip to arrive where it started, and it leaves the adapter's notion of "busy" defined by app-server's error text rather than by the adapter.
+The Done-when below already assumed this -- "no `turn/steer` reaches the wire" rules the mapping out -- and now says so rather than deciding by omission.
+
+The mapping is not rejected as an idea, only as the fix for this window: it is worth having as a backstop for precondition failures nobody anticipated, and if the implementer wants it, it is a separate card and not this one.
 
 The compaction case is already guarded — `submit()` refuses to steer while `this.reducer.getState().compaction` is set, with the test "refuses to steer a compaction turn, and sends nothing on the wire (OW-tifuha)" in `src/server/adapters/codex/adapter.test.ts`. That guard does not reach this one.
 
