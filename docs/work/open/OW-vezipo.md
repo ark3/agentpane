@@ -4,7 +4,7 @@ labels: [deferral]
 
 # A forked session's row in the list is a character-for-character copy of its parent's, so the two cannot be told apart.
 
-`src/shared/protocol.ts` `SessionSummary.preview` (`:79-80`), the session list in `src/client/App.svelte` (`:750`)
+`src/shared/protocol.ts` `SessionSummary.preview`, and `sessionLabel` in `src/client/App.svelte`, which is what a sidebar row renders
 
 `SessionSummary.preview` is *"First user message, trimmed for display"*
 (`protocol.ts:79`). A fork carries the history up to the fork point, so a
@@ -20,6 +20,8 @@ Codex's `thread/fork` leaves `adapter.ref` unchanged, so `SessionManager.fork` s
 Pi's and Claude's forks change `adapter.ref`, so `#adoptRef` re-keys the parent's container onto the fork's id and `list()` drops the parent entirely (`src/server/http/session-manager.test.ts`, "(WRONG) drops the parent from list() after a ref-changing fork").
 There is one row there because the parent has been hidden, not because it can be told apart.
 So this card is not stale and neither claim was wrong; when the drop is fixed, the twin rows appear on all three backends and this card bites everywhere.
+**The drop was fixed the same day, by OW-kekoji (`0edd97e`): a fork no longer aliases the parent, so the parent stays in `list()` and the twin rows are now live on all three backends.**
+OW-sehaja (`732769a`) followed and is not this card: it stopped the fork from wearing the parent's *stored* preview, while this card is about the fork's true preview, which is genuinely the parent's first user message once the index catches up.
 
 OW-hezidi is what makes this bite: it makes forking cheap enough to do often,
 and every fork adds a twin.
