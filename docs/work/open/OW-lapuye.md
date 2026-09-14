@@ -22,4 +22,5 @@ An approval arriving by any other mechanism is invisible to this field however i
 ## Done when
 
 A `--tool-check` run on the home server produces evidence that covers the tool turn's own window — the requests seen between the tool prompt and that turn settling, distinguishable from the first turn's — and `docs/HANDOFF.md` finding 42 is rewritten to say what that run actually measured, naming the `pi` version it measured it on.
-Note that the probe never waits for the tool turn to reach idle at all, which is the neighbouring defect in OW-hahohi; a window with no end is part of the same repair and the two are best done together.
+OW-hahohi has since landed (`d628076`), so the tool turn's end now exists: `tool_turn_idle` waits for that turn to return to idle and `checks.tool_output` records `turn_streaming_at` and `turn_idle_at`.
+The window this card needs an end for is therefore already bounded in the probe, and what remains is to scope the request capture to it.
