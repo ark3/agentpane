@@ -412,8 +412,8 @@ def main() -> int:
         # What this asks for and what it delivers are not the same thing, and the
         # gap is the phase's real reach. As of `pi 0.85.1` on 2026-09-13 the
         # model declined the task and explained itself instead in every one of
-        # the four runs measured that day, leaving a pre-abort transcript of
-        # between 449 and 472 characters against a request for 10000 lines.
+        # the six runs measured that day, none of which left a pre-abort
+        # transcript above 472 characters against a request for 10000 lines.
         # So the phase establishes that `/abort` is accepted and that a
         # streaming turn stops and stays stopped; it does not establish
         # anything about tearing down a large buffered transcript.

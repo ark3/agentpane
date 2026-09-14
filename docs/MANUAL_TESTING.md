@@ -1796,7 +1796,7 @@ Same model string, same event type, same settle point — so the field is not an
 
 ## The Pi smoke probe's abort is now provably aimed at the long turn (OW-hahohi)
 
-Run on the home server 2026-09-13, **`pi 0.85.1`**, from the `card/OW-hahohi` worktree at commit `f370249` — the probe as committed by that change, twice: once with `--tool-check` and once bare.
+Run on the home server 2026-09-13, **`pi 0.85.1`**, from the `card/OW-hahohi` worktree at the commit that landed here as `787e2dd` — the probe as that change committed it, twice: once with `--tool-check` and once bare.
 Both reported `"result": "pass"` with every check inside them passing, and both exited 0: the `--tool-check` run took 19 seconds (23:45:23.382 to 23:45:42.128 local, `-04:00`), the bare run 10 seconds (23:45:49.793 to 23:45:59.803).
 The client was rebuilt rather than reused in both (`build.returncode: 0`, no `--skip-build`) and `built_client` answered HTTP 200 with `has_app_mount: true`, so the commit named above is the code that served the runs.
 Each run's own `checks.model` reported `{"result": "pass", "model": "openrouter/deepseek/deepseek-v4.1-flash", "event_type": "snapshot"}` — the wire spelling, provider prefix included, as OW-guvojo's section above explains.
@@ -1834,4 +1834,11 @@ Under `--tool-check` two turns precede the aborted one, so a longer earlier repl
 The one bound the blob offers does not settle it: `text_stream` reports the first turn at 77 characters under `--tool-check` and 44 bare, but `growing_assistant_text` returns as soon as growth is established, so that is a mid-stream sample and not the finished reply — and under `--tool-check` the first turn then ran a further 8.5s (`streaming_at` 23:45:30.468 to `idle_at` 23:45:38.971), against roughly 400 ms of wire time for the aborted turn.
 So which message the number belongs to is unsettled in both runs, and reading it as the aborted turn's own length is exactly what this field cannot support.
 The post-abort growth check inherits the same shape: it compares that session maximum, so a *shorter* message arriving after the abort would not move it.
+
+**Reproduced from `main` after review, at `d628076`.**
+The two runs above were made by the agent that wrote the change, on its own branch, and review then corrected the comments and this section's prose; the probe was run again from the main checkout at `d628076`, once with `--tool-check` and once bare, and both reported `"result": "pass"` and exited 0.
+`--tool-check` carried `tool_output.turn_idle_at: "2026-09-13T23:54:39.461-04:00"` with `abort.streaming_before_long_prompt: false` and `streaming_at: "2026-09-13T23:54:39.511-04:00"`, and its abort was requested at 23:54:39.911 and idle at 23:54:39.931; bare reported the same `false`, requested at 23:54:55.783 and idle at 23:54:55.801.
+So the separation holds across two hands and four runs rather than one pair.
+The declined transcript came to 414 characters under `--tool-check` and 427 bare, against 449 and 467 in the pair above and 472 and 467 in the OW-moradi pair — six runs on `pi 0.85.1` that day, none above 472, which is the spread the comment at the prompt now cites instead of a single pair's numbers.
+That run also saw the `toolCall` block arrive alone, in a message whose blocks were `["toolCall"]` with no `thinking` beside it, where both runs above and OW-moradi's saw `["thinking", "toolCall"]` — the check asserts the `toolCall` block and not the shape of the message around it, which is why that variation passed unremarked.
 Neither limit is a defect this change was asked to fix, and both are named here so the next reader does not rediscover them with a re-run.
