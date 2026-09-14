@@ -1768,8 +1768,9 @@ The evidence blob for *these two runs* records `pi --version` and never records 
 That file was measured one section above, twice that same evening, selecting `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, and it was not edited between those readings and these runs — so the model is knowable with confidence for them, by inference rather than from the blob.
 The probe has since been taught to read it off the wire (see "The Pi smoke probe names the model that answered" below, OW-guvojo), so a run at `1c749a8` or later does record it and this gap is closed for future runs, not retroactively for these.
 It is also the reason these runs sit outside `AGENTS.md`'s model pin without violating it: nothing passed `--model`, and the settings file happened to name the pinned model anyway.
-The `--tool-check` run's abort phase is not clean evidence either: the probe posts the long prompt immediately after the `toolCall` block arrives, without waiting for that turn to reach idle, so what it aborted there may have been the tool turn — the bare run's abort is the one to cite, and OW-hahohi carries the defect.
-That same card carries the other half of it: the long prompt asks for the integers 1 through 10000 and the bare run's transcript stood at 472 characters when the abort landed, so the check exercises far less buffered output than its prompt implies.
+The `--tool-check` run's abort phase is not clean evidence either: the probe as it stood at `967b319` posted the long prompt immediately after the `toolCall` block arrived, without waiting for that turn to reach idle, so what it aborted there may have been the tool turn — the bare run's abort is the one to cite from these two runs.
+OW-hahohi fixed that and the probe now asserts the session is idle before posting; see "The Pi smoke probe's abort is now provably aimed at the long turn" at the end of this file.
+The other half of that card stands as a limit rather than a fix: the long prompt asks for the integers 1 through 10000 and the bare run's transcript stood at 472 characters when the abort landed, so the check exercises far less buffered output than its prompt implies, and the prompt was left as written for the reasons that section records.
 
 ## The Pi smoke probe names the model that answered (OW-guvojo)
 
@@ -1792,3 +1793,41 @@ Deliberately broken first, by reading a field name that does not exist: the run 
 **Reproduced once more from `main`, by a second hand.**
 The run above was made by the agent that wrote the change, on its own branch; the same probe was then run again from the main checkout at `9b0bfc1`, bare, and reported `"result": "pass"` with `checks.model` reading `{"result": "pass", "at": "2026-09-13T23:40:29.435-04:00", "model": "openrouter/deepseek/deepseek-v4.1-flash", "event_type": "snapshot"}`.
 Same model string, same event type, same settle point — so the field is not an artifact of one run's timing.
+
+## The Pi smoke probe's abort is now provably aimed at the long turn (OW-hahohi)
+
+Run on the home server 2026-09-13, **`pi 0.85.1`**, from the `card/OW-hahohi` worktree at commit `f370249` — the probe as committed by that change, twice: once with `--tool-check` and once bare.
+Both reported `"result": "pass"` with every check inside them passing, and both exited 0: the `--tool-check` run took 19 seconds (23:45:23.382 to 23:45:42.128 local, `-04:00`), the bare run 10 seconds (23:45:49.793 to 23:45:59.803).
+The client was rebuilt rather than reused in both (`build.returncode: 0`, no `--skip-build`) and `built_client` answered HTTP 200 with `has_app_mount: true`, so the commit named above is the code that served the runs.
+Each run's own `checks.model` reported `{"result": "pass", "model": "openrouter/deepseek/deepseek-v4.1-flash", "event_type": "snapshot"}` — the wire spelling, provider prefix included, as OW-guvojo's section above explains.
+Nothing passed `--model`; Pi resolved that from the `settings.json` copied into the throwaway state home.
+
+**The tool turn and the aborted turn are now separated by a recorded idle point, not by a reader subtracting timestamps.**
+`checks.tool_output` gained the tool turn's own settle: `{"at": "2026-09-13T23:45:39.606-04:00", "blocks": ["thinking", "toolCall"], "turn_streaming_at": "2026-09-13T23:45:39.006-04:00", "turn_idle_at": "2026-09-13T23:45:40.138-04:00", "turn_idle_event_type": "snapshot"}`.
+`checks.abort` then carries `"streaming_before_long_prompt": false`, read immediately before the long prompt was posted, with the long turn's own `"streaming_at": "2026-09-13T23:45:40.166-04:00"` — 28 ms after the tool turn went idle.
+The bare run reports the same `"streaming_before_long_prompt": false`.
+That field, not the interval, is the assertion: the previous `streaming_at_abort: true` guard answers `true` whichever turn is running, which is exactly how the OW-moradi run passed while aborting an unknown turn.
+
+**The new guard was seen red before it was believed.**
+With the fix in place except for the tool turn's idle wait — that is, with the old behaviour of posting the long prompt the moment the `toolCall` block arrived — the `--tool-check` run reported `"result": "fail"`, exit 1, with `RuntimeError: a turn was still active when the long prompt was posted, so the aborted turn would not be the long one (last reported state: True)`.
+`checks` stopped after `tool_output`, whose `toolCall` block had arrived at 23:45:18.236, and no `abort` check was written at all.
+So the guard fails on precisely the condition the OW-moradi `--tool-check` run met silently.
+
+**The abort itself still behaves, and is still answered in milliseconds.**
+`--tool-check`: requested at 23:45:40.567 against a confirmed-streaming turn, idle at 23:45:40.591 — 24 ms — HTTP 204, `assistant_length_at_abort: 449` and unchanged at 449 both when idle and 1.5s later.
+Bare: requested at 23:45:58.251, idle at 23:45:58.268 — 17 ms — 467 characters, likewise unchanged through settling.
+Those two intervals are genuine request-to-event measurements because `abort_requested_at` is stamped immediately before the request is sent; no other pair of timestamps in the blob may be read as a duration, since the rest are SSE arrival stamps against waits whose events were often already buffered.
+The bare run's tree was `bun → bwrap → bwrap → pi`, one Pi descendant reporting `comm=pi`, and SIGTERM left `remaining_worker_pids: []`.
+
+**The long prompt was deliberately left as it is, so what the phase establishes is narrower than the prompt reads.**
+The prompt asks for the integers 1 through 10000, one per line; as of `pi 0.85.1` the model declines and explains itself instead — 449 and 467 characters here, 472 and 467 in the OW-moradi runs.
+It was not reworded because `resources/probes/agentpane_codex_smoke.py` sends the same string, nothing has measured how that string behaves there, and changing one probe's prompt on a guess is worse than recording what the prompt delivers; a comment beside the prompt now says so at the site.
+The phase therefore establishes that `/abort` is accepted against a streaming turn and that the turn stops and stays stopped — and establishes nothing about tearing down a large buffered transcript.
+No threshold is asserted on the length, because the model's compliance is not something this probe can require.
+
+**Read `assistant_length_at_abort` as an upper bound, not as the aborted turn's length.**
+It is `max_assistant_length` over the pre-abort snapshot, which is the longest assistant message *in the session* — matching the field `agentpane_codex_smoke.py` already reports, and carrying the same limit.
+Under `--tool-check` two turns precede the aborted one, so a longer earlier reply would stand in for it, and nothing in the blob attributes the number to a message.
+The first turn's transcript was still well short of it when `text_stream` last sampled it — 77 characters under `--tool-check` and 44 bare, against 449 and 467 — so the aborted turn is the likely owner in these two runs, by inference and not from the blob.
+The post-abort growth check inherits the same shape: it compares that session maximum, so a *shorter* message arriving after the abort would not move it.
+Neither limit is a defect this change was asked to fix, and both are named here so the next reader does not rediscover them with a re-run.
