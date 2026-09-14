@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork that resolves after a concurrent close puts the disposed adapter back into the session table
@@ -38,3 +39,23 @@ A test in `src/server/http/session-manager.test.ts` drives `close()` concurrentl
 It goes red first.
 
 Or, if the race turns out to be unreachable, this card closes `--declined` with the reasoning recorded, which is the outcome that stops the next reader re-filing it.
+
+## Close note
+
+Reachable, and fixed in 1f29763 (`fix: a close mid-fork no longer re-keys the dead session back in`).
+
+Reachability, settled by reading and confirmed against the source: nothing serializes the routes.
+DELETE (`sessions.close`), fork (`sessions.attach` then `sessions.fork`) and prompt (`sessions.submit`) are plain concurrent handlers in `src/server/http/app.ts` under `Bun.serve`, and the manager's only guards are `#attaching` and `#disposing`, with which an in-flight `fork`/`submit` registers nothing.
+Pi is the one backend whose `adapter.ref` actually moves, so the one that gets past `#adoptRef`'s `oldKey === newKey` early return: `src/server/adapters/pi/process.ts` `fork()` re-adopts the moved `sessionFile` unconditionally (copy-on-write), and `adoptSessionFile` moves it at a virtual session's first `submit()`.
+Codex and Claude Code hit the early return.
+There is no D12 reaper in the tree yet -- only the prose in `session-manager.ts` saying the future one inherits `close()`'s path -- so the reaching sequence today is two concurrent requests: prompt a Pi session once, `POST .../fork`, and `DELETE` the parent while Pi's fork + `get_state` + `hydrateMessages` round trips are parked.
+
+The fix is the shape the card named: `torndown?: boolean` on `ManagedSession`, set by `close()` immediately before its first await, read by an early return at the top of `#adoptRef`.
+The one check covers both call sites, since `submit`'s `"rename"` path and `fork`'s `"fork"` path reach it with no branch in between; no separate submit test was added for that reason.
+
+Verified: `does not re-key a session that was closed while its fork was in flight` in `src/server/http/session-manager.test.ts` gates the fake adapter's `fork` (the pattern from `"waits for a closing adapter to be disposed before attaching its replacement"`), closes the parent while it is parked, then releases.
+The fake's default `forkMode: "pi"` moves the ref, so the assertion is not vacuous.
+Shown red first by hand with the guard line removed -- `liveRefs()` returned `[{backend: "pi", id: ".../a.jsonl#fork-e1"}]` against an expected `[]`, with `adapter.disposed === true` already asserted on the line above -- and green with it restored.
+`bun run check` passes on `main`: 49 files, 1061 tests, svelte-check clean.
+
+`disposeAll()` takes the other teardown path and sets no such flag, so the same `#adoptRef`-after-teardown window remains there; left alone deliberately and filed as OW-jimasu.
