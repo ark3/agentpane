@@ -91,6 +91,35 @@ def pi_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def requests_in(
+    events: list[tuple[str, dict[str, Any]]], start: int, end: int
+) -> dict[str, Any]:
+    """Blocking requests the stream carried between two pinned cuts.
+
+    Scoped rather than whole-stream because a whole-stream read has to be taken
+    at some one moment, and the moment this probe used to take it -- the first
+    turn's `idle` -- is before the `--tool-check` prompt is even posted, so the
+    tool turn's requests were structurally unreachable (OW-lapuye).
+
+    A limit, not a defect, and not to be "fixed": this filters on
+    `event["type"] == "request"`, and the Pi adapter's only source of that event
+    is an `extension_ui_request` carrying a dialog method
+    (`src/server/adapters/pi/reducer.ts`, the `extension_ui_request` arm; the
+    fire-and-forget methods are dropped there deliberately). An approval
+    arriving by any other mechanism is invisible to this field however it is
+    scoped, so "empty" will never mean "Pi asked nothing" -- only "no dialog
+    request reached the wire".
+    """
+    return {
+        "window": {"from_index": start, "to_index": end},
+        "requests": [
+            {"at": stamp, "kind": event.get("request", {}).get("kind")}
+            for stamp, event in events[start:end]
+            if event.get("type") == "request"
+        ],
+    }
+
+
 def process_evidence(server_pid: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     tree = descendants(server_pid)
     return compact_tree(tree), pi_workers(tree)
@@ -332,12 +361,15 @@ def main() -> int:
         evidence["checks"]["model"] = {"result": "pass", **model_seen}
 
         # Any blocking request Pi raised is worth recording either way: whether
-        # these fire at all under the sandbox is an open question (D2a).
-        evidence["agent_requests_seen"] = [
-            {"at": stamp, "kind": event.get("request", {}).get("kind")}
-            for stamp, event in stream.snapshot()
-            if event.get("type") == "request"
-        ]
+        # these fire at all under the sandbox is an open question (D2a). One
+        # entry per turn, keyed by turn, so a reader can tell which turn raised
+        # what; a bare run reports only `first_turn` and says nothing about a
+        # tool turn that never happened. The window closes at the cut taken here,
+        # the first one after the turn reported idle.
+        first_turn_events = stream.snapshot()
+        evidence["agent_requests_seen"] = {
+            "first_turn": requests_in(first_turn_events, first_start, len(first_turn_events)),
+        }
 
         if args.tool_check:
             tool_start = len(stream.snapshot())
@@ -391,6 +423,15 @@ def main() -> int:
 
             tool_idle = stream.wait_for(tool_turn_idle, 180, "the tool turn to return to idle")
             evidence["checks"]["tool_output"] = {"result": "pass", **tool, **tool_idle}
+
+            # The tool turn's own window: opened where its prompt was posted,
+            # closed at the first cut after it reported idle. This is the window
+            # HANDOFF finding 42 needs and the old whole-stream read could not
+            # take.
+            tool_turn_events = stream.snapshot()
+            evidence["agent_requests_seen"]["tool_turn"] = requests_in(
+                tool_turn_events, tool_start, len(tool_turn_events)
+            )
 
         # -- 4. abort, then shutdown without an orphan ---------------------
         #
