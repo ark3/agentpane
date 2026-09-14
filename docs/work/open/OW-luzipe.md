@@ -1,10 +1,11 @@
 ---
-labels: [deferral, work-laptop]
+labels: [deferral]
 ---
 
 # D3 calls the tail upsert "O(1) per token", but it re-sends the whole message, so a turn is quadratic in its own length.
 
-**Work laptop:** needs a live Pi run.
+**Runs on the home server** as of 2026-09-13, which has `pi 0.85.1`.
+This card carried `work-laptop` until then; the run it asks for no longer needs a trip.
 
 `src/server/http/session-manager.ts:363-378`, `src/server/http/broadcaster.ts`, `docs/DESIGN.md` D3
 

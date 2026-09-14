@@ -1,10 +1,11 @@
 ---
-labels: [unverified, work-laptop]
+labels: [unverified]
 ---
 
 # AGENTS.md states that a mid-stream Pi fork abandons the in-flight turn, on evidence that run itself does not carry
 
-**Work laptop:** needs a live Pi run.
+**Runs on the home server** as of 2026-09-13, which has `pi 0.85.1`.
+This card carried `work-laptop` until then; the run it asks for no longer needs a trip, and it will measure 0.85.1 rather than the 0.84.2 cited below.
 
 `resources/probes/fork_probe.py` `pi_rewind` cell, `docs/MANUAL_TESTING.md` OW-pifowo and OW-yudoni sections.
 
@@ -45,7 +46,7 @@ One run of
 python3 resources/probes/fork_probe.py --backend pi --no-fixtures
 ```
 
-on the work laptop, with `MANUAL_TESTING.md` carrying its `pi_rewind` values for `midstream_expected_message_count` against the observed count, `midstream_abandoned_file_messages`, `moved_file_on_disk_at_fork` and `moved_file_messages_at_fork`.
+on the home server, with `MANUAL_TESTING.md` carrying its `pi_rewind` values for `midstream_expected_message_count` against the observed count, `midstream_abandoned_file_messages`, `moved_file_on_disk_at_fork` and `moved_file_messages_at_fork`.
 
 Whatever the mid-stream fields say, AGENTS.md's sentence under "Evidence" is brought into line with what the run actually carries — confirmed on stronger evidence, or narrowed to what is proven, or corrected.
 Leaving that sentence untouched because the run agreed with it is not a close: the defect is that it asserts more than its evidence, and a second thin run does not repair that.
