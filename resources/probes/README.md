@@ -89,7 +89,8 @@ python3 agentpane_pi_steer_probe.py --model <ref>     # default is the model AGE
 Two things it does that the other live harnesses do not.
 
 It **taps Pi's stdout**, because none of the discriminating evidence reaches agentpane's SSE wire: `src/server/adapters/pi/reducer.ts` drops `turn_start`, `turn_end`, `agent_end` and `queue_update` as session bookkeeping, and `agent_settled` alone cannot tell a steer from a drained follow-up queue.
-The tap is a `pi` shim first on the server's PATH that pipes the real binary through `tee`; it is transparent to the adapter, and it adds an `sh` and a `tee` to the sandbox tree, which the probe's worker filter reaps along with the agent.
+The tap is a `pi` shim first on the server's PATH that pipes the real binary through `tee`; stdin, stdout and stderr pass through untouched, and it adds an `sh` and a `tee` to the sandbox tree, which the probe's worker filter reaps along with the agent.
+Pi's exit status does not pass through — `sh` reports the pipeline's last stage — which costs this probe nothing because it never reads the agent's exit code, but has to be taken out of the pipeline by anyone copying the shim to assert on how Pi exited.
 The tap preserves order, not time — `tee` stamps nothing — so every duration in the record is measured from a stamp taken immediately before the request that caused the event, and positions in the tap are pinned by reading its line count at the instant the mid-turn POST goes out.
 
 It **passes `--model` explicitly**, unlike `agentpane_pi_smoke.py`, through the create-session route's `model` field.
@@ -99,7 +100,10 @@ Writes no fixtures.
 Same temporary writable state dir and credentials-copied-by-name discipline as the two smoke harnesses.
 Costs tokens: one long turn plus the steered reply.
 
-Verified with: `pi` 0.85.1 on the home server, 2026-09-14.
+Only `steered_into_running_turn` passes.
+`dropped` and `following_turn` are real outcomes it exists to be able to report, and each is a divergence from D16, so each raises; so does `indeterminate`, which is what a run gets when the `queue_update` and `agent_settled` readings disagree or when no `queue_update` names the marker at all — the boundary alone is not allowed to carry a verdict it cannot discriminate.
+
+Verified with: `pi` 0.85.1 on the home server, 2026-09-14, six runs.
 What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)".
 
 ## `agentpane_live_support.py`

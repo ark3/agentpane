@@ -6,8 +6,9 @@
 than silently downgrading to a follow-up. Claude Code's rejection and Codex's
 steer were both settled live; Pi's half rested on `submit()` in
 `src/server/adapters/pi/process.ts` setting `streamingBehavior: "steer"` when
-`this.state.isStreaming`, plus `resources/pi-protocol`, and on nothing anyone
-ran. A mid-turn POST returning **202** was separately observed, but a 202 that
+`this.state.isStreaming`, plus Pi's own `rpc.md` (which lives on the work
+laptop -- see `docs/HANDOFF.md`, "Reference material on the work laptop"), and
+on nothing anyone ran. A mid-turn POST returning **202** was separately observed, but a 202 that
 steers into the running turn, a 202 that queues for a following turn, and a 202
 that drops the text are three different products behind one status code.
 
@@ -23,8 +24,10 @@ steer phase.
 The discriminating evidence is Pi's own turn bookkeeping, and none of it
 reaches agentpane's wire: `src/server/adapters/pi/reducer.ts` maps
 `agent_start`/`agent_settled` to `isStreaming` and drops `turn_start`,
-`turn_end`, `agent_end` and `queue_update` on the floor as "session
-bookkeeping outside the AgentMessage/isStreaming contract". `agent_settled` on
+`turn_end`, `agent_end` and `queue_update` on the floor -- the first two as
+redundant with the `message_*` pair, `agent_end` by falling through to
+`default`, and `queue_update` as "session bookkeeping outside the
+AgentMessage/isStreaming contract". `agent_settled` on
 its own cannot settle the question either, because that same docblock records
 that an `agent_end` may be followed by *queued continuations* -- so a follow-up
 queue could drain without any `agent_settled` in between and look identical on
@@ -241,19 +244,32 @@ def census(events: list[Any]) -> dict[str, int]:
 def classify(rows: list[dict[str, Any]], cut: int, marker: str) -> dict[str, Any]:
     """Which of D16's three the 202 was, read off Pi's own events.
 
-    `cut` is the tap's line count at the instant the mid-turn POST went out, so
-    everything considered here is strictly after the request. Two independent
-    readings have to agree:
+    `cut` is the tap's line count read immediately before the mid-turn POST goes
+    out, so everything considered here is strictly later in the tap than that
+    pin. That is a hair earlier than the request itself, which is the safe
+    direction: a stray line from the gap can only add to `agent_settled_between`
+    and push the verdict toward `following_turn` or `indeterminate`, never
+    toward a false steer.
+
+    Two readings are taken, and they are **not** equals -- only the first tells
+    steer from follow-up:
 
     * **Which queue Pi put it in.** `queue_update` carries `steering` and
-      `followUp` arrays; Pi naming the queue is the direct answer.
-    * **Whether the turn ended in between.** The boundary is `agent_settled`,
-      because that is the one Pi event agentpane turns into a turn boundary:
-      `reducer.ts` maps `agent_settled` to `isStreaming: false`, which is the
-      session going idle on the wire and the turn ending as D16, the HTTP
-      contract and the user all mean it. An answer with no `agent_settled`
-      before it was answered without the session ever leaving the turn the
-      prompt was posted into.
+      `followUp` arrays. Pi naming the queue is the whole discriminator: it is
+      the only thing here that a follow-up would answer differently, which is
+      why a run that does not produce one is `indeterminate` rather than a pass
+      on the other reading.
+    * **Whether the session left the turn in between.** The boundary is
+      `agent_settled`, because that is the one Pi event agentpane turns into a
+      turn boundary: `reducer.ts` maps `agent_settled`, and only
+      `agent_settled`, to `isStreaming: false`, which is the session going idle
+      on the wire and the turn ending as D16, the HTTP contract and the user all
+      mean it. An answer with no `agent_settled` before it was answered without
+      the session ever leaving the turn the prompt was posted into.
+      This does **not** discriminate: the reducer's docblock records that an
+      `agent_end` can be followed by queued continuations, so a `followUp` queue
+      draining inside the same span would read identically. It is a necessary
+      condition for D16 and not a sufficient one, and it is recorded as such.
 
     Deliberately *not* `agent_end`, and not Pi's own `turn_start`/`turn_end`,
     both of which are finer than an agentpane turn and neither of which
@@ -262,7 +278,15 @@ def classify(rows: list[dict[str, Any]], cut: int, marker: str) -> dict[str, Any
     * `turn_start`/`turn_end` bound one LLM round. A steered message is drained
       into a round of its own, so even the cleanest steer shows two of them --
       the "same turn id throughout" reading that settled Codex under OW-tifuha
-      has no Pi equivalent.
+      has no Pi equivalent, and could not have one: `protocol.ts` types
+      `turn_start` as `{ type: "turn_start" }`, carrying no id at all.
+      This is not a boundary chosen after seeing which one gave the wanted
+      answer. `resources/fixtures/pi/tool-read.jsonl` and `tool-edit.jsonl`,
+      captured long before this probe existed, each hold **two**
+      `turn_start`/`turn_end` pairs inside a single
+      `agent_start`...`agent_settled` span, against one pair in `text.jsonl` --
+      so an agentpane turn already demonstrably spanned several of Pi's, with
+      no steer involved.
     * `agent_end` is the inner agent loop ending, and the reducer's own docblock
       says it "can be followed by retry/compaction/queued continuations" -- so
       it is not the turn ending. Measured on `pi 0.85.1`, whether one falls
@@ -274,8 +298,8 @@ def classify(rows: list[dict[str, Any]], cut: int, marker: str) -> dict[str, Any
       is therefore recorded here as `agent_end_between`, for the reader, and
       decides nothing.
 
-    Returns `verdict: "indeterminate"` when the two disagree or when neither
-    fires -- a verdict this probe treats as a failed run, because a reader who
+    Returns `verdict: "indeterminate"` when the two disagree or when the queue
+    reading -- the only discriminating one -- never fires -- a verdict this probe treats as a failed run, because a reader who
     cannot tell the three apart from the record is exactly what the card
     forbids.
     """
@@ -319,7 +343,10 @@ def classify(rows: list[dict[str, Any]], cut: int, marker: str) -> dict[str, Any
         if queued_as is None
         else ("steered_into_running_turn" if queued_as == "steering" else "following_turn")
     )
-    verdict = by_boundary if by_queue in (None, by_boundary) else "indeterminate"
+    # `by_queue is None` is not a pass on `by_boundary` alone: that reading
+    # cannot tell a steer from a drained follow-up, so with nothing to agree
+    # with it the run has not answered the question.
+    verdict = by_boundary if by_queue == by_boundary else "indeterminate"
 
     return {
         "verdict": verdict,
@@ -531,13 +558,17 @@ def main() -> int:
             return None
 
         idle = stream.wait_for(settled, 300, "the session to report idle after the mid-turn prompt")
+        # Stamped here, before the settle pad below: a field named for the
+        # interval it reports has to exclude the probe's own waiting, or the
+        # next probe copied from this one inherits a number 2 s too large.
+        seconds_to_idle = round(time.monotonic() - steer_monotonic, 3)
         # Pi writes `message_end` before the adapter reports idle, but the tap
         # is a separate file being appended to by a process in another
         # namespace; wait out the write rather than racing it.
         time.sleep(2.0)
         evidence["checks"]["settled"] = {
             "result": "pass",
-            "seconds_from_steer_request_to_idle": round(time.monotonic() - steer_monotonic, 3),
+            "seconds_from_steer_request_to_idle": seconds_to_idle,
             **idle,
         }
 
@@ -552,8 +583,12 @@ def main() -> int:
             "census_after_steer_post": census(raw[tap_cut:]),
             "timeline": rows,
         }
+        # Only a steer is a pass. `dropped` and `following_turn` are real
+        # outcomes this probe exists to be able to report, and each is a
+        # divergence from D16 -- a run that found one must stop the probe, or
+        # the check can never go red on the answer that matters.
         evidence["checks"]["verdict"] = {
-            "result": "pass" if verdict["verdict"] != "indeterminate" else "fail",
+            "result": "pass" if verdict["verdict"] == "steered_into_running_turn" else "fail",
             **verdict,
         }
         if verdict["verdict"] == "indeterminate":
@@ -561,6 +596,12 @@ def main() -> int:
                 "Pi's events do not tell the three outcomes apart: "
                 f"queue said {verdict.get('by_queue')}, turn boundaries said "
                 f"{verdict.get('by_turn_boundary')}"
+            )
+        if verdict["verdict"] != "steered_into_running_turn":
+            raise RuntimeError(
+                f"a prompt posted mid-turn was {verdict['verdict']} rather than steered "
+                f"into the running turn, which D16 does not allow of the Pi adapter "
+                f"(queued as {verdict.get('queued_as')!r})"
             )
 
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
