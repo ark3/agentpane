@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # agent_requests_seen is captured before the tool prompt, so no smoke-probe run has ever covered the tool turn
@@ -24,3 +25,20 @@ An approval arriving by any other mechanism is invisible to this field however i
 A `--tool-check` run on the home server produces evidence that covers the tool turn's own window — the requests seen between the tool prompt and that turn settling, distinguishable from the first turn's — and `docs/HANDOFF.md` finding 42 is rewritten to say what that run actually measured, naming the `pi` version it measured it on.
 OW-hahohi has since landed (`d628076`), so the tool turn's end now exists: `tool_turn_idle` waits for that turn to return to idle and `checks.tool_output` records `turn_streaming_at` and `turn_idle_at`.
 The window this card needs an end for is therefore already bounded in the probe, and what remains is to scope the request capture to it.
+
+## Close note
+
+`agent_requests_seen` in `resources/probes/agentpane_pi_smoke.py` was one whole-stream list assigned at the first turn's idle, before `--tool-check` posts its prompt, so it structurally could not contain anything the tool turn raised — and `docs/HANDOFF.md` finding 42 rested on it being empty.
+It is now a dict of per-turn windows built by a `requests_in` helper, each carrying the stream cuts it was taken between: `first_turn` always, and `tool_turn` only under `--tool-check`, opening where the tool prompt is posted and closing at the first cut after that turn reports idle — the idle wait OW-hahohi added at `d628076` is what gives the window an end.
+Landed as `2760e01` (probe) and `719a1b4` + `5363a68` (docs).
+`agentpane_codex_smoke.py` does not collect the field at all, so nothing was needed there.
+
+Measured on the home server, `pi 0.85.1`, 2026-09-13 into 2026-09-14: four runs across two hands, all `"result": "pass"` and exit 0, every tool window empty.
+The empty result was shown to be a real slice rather than a misaddressed one by a throwaway run with the predicate relaxed to also accept `upsert`, whose same two windows carried 42 and 23 entries; that relaxation is not in the committed change.
+Full evidence in `docs/MANUAL_TESTING.md`, "The Pi smoke probe measures the tool turn's own requests".
+
+Finding 42 was rewritten to cite that run and to name the version.
+An adversarial reader then caught that the rewrite still said Pi "ran" a shell tool, which nothing has ever measured — the probe matches a `toolCall` block and no run records a `toolResult` — so the headline now claims only that a tool call reached the wire with no dialog request beside it, with three limits stated: no `toolResult`, no `trust.json` on this machine, and the field's blindness to any approval that is not a dialog-method `extension_ui_request`.
+That same review retired three surviving copies of the old claim: the `pi 0.84.1` table row's unqualified "no approval dialog", the OW-moradi section's present-tense description of the old field, and its quotation of a finding-42 sentence the rewrite had deleted.
+
+One gap found and filed rather than fixed: `tool_turn` is written only after the turn reaches idle, so a request that actually *blocks* the turn is the one case the window cannot witness — OW-johano.
