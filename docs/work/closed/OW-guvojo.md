@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # The Pi smoke probe never records which model answered, so its evidence cannot name one
@@ -33,3 +34,21 @@ Read it from an event the probe already has and record it in the evidence — do
 
 One caveat for whoever writes it: `model` is `null` until `start()`'s `get_state` answers, so a `status` event can legitimately carry `null` early.
 Take it from an event at or after the point the run is already asserting on rather than from the first one that arrives, and treat a still-`null` value at settle time as a finding rather than as a field to leave empty.
+
+## Close note
+
+Done. The Pi smoke probe now records the model that answered, read off the SSE stream it was already buffering.
+
+What was built: `resources/probes/agentpane_pi_smoke.py` gained a `resolved_model()` scan immediately after the `idle` check (~20 lines, commit `1c749a8`). It walks `SseReader`'s buffer in reverse for the latest `snapshot` or `status` event for the run's real ref carrying a non-empty string `model`, and records `evidence["checks"]["model"]` as `{"result", "at", "model", "event_type"}`. Where no such event exists it raises, so a Pi that stops reporting a model stops the probe rather than leaving the field quietly empty — the card's caveat about early `null` values, honoured by taking the settled event rather than the first one.
+
+No second `get_state` beside the server and no new request, as the card directed. The attach body was correctly left alone: `SessionSummary` has no model field.
+
+How it was verified: two live runs on the home server, 2026-09-13, `pi 0.85.1`. The implementer's run at the probe commit, and an independent re-run from the main checkout at `9b0bfc1` by the dispatching session rather than a report taken on trust. Both reported `"result": "pass"` with `checks.model` naming `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot` event at the instant the first turn returned to idle. The check was also seen red first, by reading a field name that does not exist: `RuntimeError: no settled snapshot or status event named the model Pi resolved`, exit 1, `checks` stopping at `idle`.
+
+One finding worth carrying forward: the string the server reports is not the string the settings file names. `~/.pi/agent/settings.json` selects `deepseek/deepseek-v4.1-flash`; what comes back through `get_state` and out over SSE is `openrouter/deepseek/deepseek-v4.1-flash`, provider prefix included. Same model, different literal — cite the wire string when quoting a run's evidence and the settings string when quoting the file.
+
+Evidence: `docs/MANUAL_TESTING.md`, "The Pi smoke probe names the model that answered (OW-guvojo)". The stale sentence in the OW-moradi section's "What this leaves open" paragraph — the model "is still not in the evidence, which is what OW-guvojo is for" — was retired in the same change, narrowed to say the gap is closed for runs at `1c749a8` or later and not retroactively for the two runs that section reports.
+
+The fork this card opened needed no filing: the card had already settled from the source that the server does expose the model, so the "exposes no model at all" branch never fired.
+
+Commits on `main`: `1c749a8` (probe), `9b0bfc1` (evidence), `2ac491b` (sha correction plus the confirming run).
