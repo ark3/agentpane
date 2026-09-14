@@ -366,8 +366,8 @@ export class SessionManager {
 		// every reconnecting client and `attach` returns the dead adapter instead
 		// of spawning a replacement, permanently. `#disposing` cannot catch it:
 		// close computed its keys before the re-key, so the new one is not among
-		// them. `#start`'s call site is guarded by `pending.torndown`; these two
-		// are guarded here.
+		// them. `disposeAll()` sets the same flag, for the same window. `#start`'s
+		// call site is guarded by `pending.torndown`; these two are guarded here.
 		if (session.torndown) return;
 		const next = session.adapter?.ref;
 		if (!next) return;
@@ -747,8 +747,11 @@ export class SessionManager {
 		this.#pendingRequests.clear();
 		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
-		// finds this rather than spawning into a server that is already leaving.
+		// finds this rather than spawning into a server that is already leaving,
+		// and a `submit()`/`fork()` already in flight cannot re-key its container
+		// back into the table just cleared (`#adoptRef`).
 		for (const pending of starting) pending.torndown = true;
+		for (const session of sessions) session.torndown = true;
 		// In parallel and settled, not sequential and awaited: every session left
 		// undisposed is a sandboxed agent still holding its workspace, so one
 		// adapter that cannot die must not spare the rest.

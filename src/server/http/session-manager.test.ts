@@ -605,6 +605,37 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.isAttached(forked)).toBe(false);
 	});
 
+	it("does not re-key a session that was disposed while its fork was in flight", async () => {
+		// Same window as the test above, with shutdown in place of DELETE.
+		// `disposeAll()` clears the table before its first await, and the parked
+		// `fork` reaches `#adoptRef` afterwards -- so without the teardown flag on
+		// each ManagedSession it re-inserts the disposed container under the
+		// fork's id, into the table shutdown just emptied. `liveRefs()` then hands
+		// that dead session to a browser reconnecting mid-shutdown (the event
+		// stream sends `retry: 500`), and `isAttached()`/`adapterFor()` hand out
+		// its disposed adapter to the abort and compact routes.
+		await sessions.attach(REF);
+		const adapter = pi.created[0];
+		if (!adapter) throw new Error("no adapter");
+		const gate = deferred();
+		const fork = adapter.fork.bind(adapter);
+		// As above: only the fake's default "pi" mode moves the adapter's ref, and
+		// on any other mode `#adoptRef` returns at `oldKey === newKey`.
+		adapter.fork = async (entryId) => {
+			await gate.promise;
+			return fork(entryId);
+		};
+
+		const forking = sessions.fork(REF, "e1");
+		await sessions.disposeAll();
+		gate.resolve();
+		const forked = await forking;
+
+		expect(adapter.disposed).toBe(true);
+		expect(sessions.liveRefs()).toEqual([]);
+		expect(sessions.isAttached(forked)).toBe(false);
+	});
+
 	it("leaves an older alias of the parent pointing at the parent", async () => {
 		// A `virtual:` id that materialised into the parent is an older name for
 		// the PARENT's conversation. Following the container onto the fork would
