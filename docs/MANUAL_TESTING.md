@@ -1889,12 +1889,17 @@ So the tool window holds across two hands and four runs, and it has been empty i
 
 **2026-09-14, home server, `pi 0.85.1`, through agentpane's own built server on the production `direnv exec <workspace> sbox -- pi --mode rpc` chain.**
 
-`resources/probes/agentpane_pi_steer_probe.py` carries the run, from the `card/OW-yuyofu` worktree cut at `891d487`, with the probe's content exactly as it landed here in `4f1c83a`.
+`resources/probes/agentpane_pi_steer_probe.py` carries the run.
+The first four runs were made from the `card/OW-yuyofu` worktree cut at `891d487`, at the probe's content as it landed here in `0b39003`; the probe has since been corrected twice by review, as the closing paragraphs of this section record, and the current file is the one to re-run.
 Re-run it with `python3 resources/probes/agentpane_pi_steer_probe.py`.
 It passes `--model openrouter/deepseek/deepseek-v4.1-flash:high` through the create-session route rather than relying on `~/.pi/agent/settings.json` the way `agentpane_pi_smoke.py` does, and every run below read back `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot` event — the wire spelling, carrying the provider prefix the settings file's string does not, as OW-guvojo's section explains.
-`copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]` in all four runs; this machine still has no `models.json` and no `trust.json`.
+`copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]` in all six runs; this machine still has no `models.json` and no `trust.json`.
+One half of the pin is confirmed only in argv: the flag carries `:high` and the wire spelling does not, so what came back confirms the model and not the thinking level.
 
 **The verdict is the first of D16's three: the marker was answered inside the running turn.**
+What carries that verdict is one fact and not two — Pi named the queue.
+The `agent_settled` census below is a necessary condition and not a sufficient one: it rules out a follow-up delivered after the turn, but a `followUp` queue drained inside the same span would read identically, because `src/server/adapters/pi/reducer.ts` records that an `agent_end` can be followed by queued continuations.
+Read the `queue_update` as the evidence and the boundary census as corroboration.
 The reference run started 2026-09-14 00:18:25.395 local (`-04:00`) and reported `"result": "pass"` with every check inside it passing, exiting 0.
 Pi's own census for the whole run was **one** `agent_start`, one `agent_end` and one `agent_settled`, around two `turn_start`/`turn_end` pairs, two `queue_update`s, four `message_start`/`message_end` pairs and 1395 `message_update` deltas.
 One agent loop, opened by the first prompt and closed after the marker was answered.
@@ -1928,12 +1933,17 @@ Everything below is strictly after the pinned cut, in Pi's own emission order:
 | 1414 | `agent_settled` |
 
 No `agent_settled` falls between the request and the answering assistant message, so the session never returned to idle in between — the marker was answered without the turn the prompt was posted into ever ending.
-The HTTP status was 202, `isStreaming` read `true` at the instant of the post, and the elapsed time from the stamp taken immediately before the POST to the `snapshot` reporting idle was 30.343 s.
+The HTTP status was 202 and `isStreaming` read `true` at the instant of the post.
+The run recorded `seconds_from_steer_request_to_idle: 30.343`, which is a `time.monotonic()` interval and not one arrival stamp minus another — but the probe as it stood built that field *after* its own 2 s settle pad, so about 28.3 s of it is the turn and the rest is the probe waiting.
+The field is stamped before the pad from the sixth run below onward; read the four branch runs' figures as 2 s long.
 
 **`agent_settled` is the boundary, and the two finer signals are not.**
 Pi's `turn_start`/`turn_end` bound one LLM round, and a steered message is drained into a round of its own — the clean run above has two of them — so the "every post-steer notification carried the same turn id" reading that settled Codex under OW-tifuha has no Pi equivalent, and counting `turn_*` would call a perfect steer a second turn.
 `agent_end` is the inner agent loop ending, which `src/server/adapters/pi/reducer.ts` already records "can be followed by retry/compaction/queued continuations", and it is not what agentpane turns into a turn boundary; `reducer.ts` maps `agent_settled`, and only `agent_settled`, to `isStreaming: false`.
 The probe therefore decides on `agent_settled` and records `agent_end_between` for the reader without letting it decide anything.
+That boundary was widened from `agent_end` after a run disagreed, which is the shape of a boundary chosen to fit the answer — so it is worth saying that the repo already held the independent proof, captured long before this probe existed and with no steer involved.
+`resources/fixtures/pi/tool-read.jsonl` and `tool-edit.jsonl` each hold **two** `turn_start`/`turn_end` pairs inside a single `agent_start`…`agent_settled` span, against one pair in `text.jsonl`; and `src/server/adapters/pi/protocol.ts` types `turn_start` as `{ type: "turn_start" }`, with no id, so OW-tifuha's "same turn id" test is not merely inapplicable to Pi but impossible.
+An agentpane turn already demonstrably spanned several of Pi's.
 
 **That distinction was not theoretical: `agent_end` came out both ways.**
 Four runs were made between 00:16 and 00:20, all four with the marker queued as `steering` and answered, and all four with zero `agent_settled` in between.
@@ -1955,12 +1965,28 @@ An earlier break at 00:17:06, against a first draft of the classifier that decid
 That disagreement is what moved the boundary to `agent_settled` and is why the classifier reports `indeterminate` as a failure rather than picking a side.
 Neither edit is in the committed probe, and the reference run's file is byte-identical to the probe as `4f1c83a` committed it, which landed here as `0b39003`.
 
-**Reproduced from `main`, by a second hand, at the reviewed probe.**
-Review of that branch found one docblock claim that did not hold — the shim was described as passing "stdin, stdout and exit status" through untouched, but `exec pi "$@" | tee` reports the pipeline's last stage, so the server sees `tee`'s status and never Pi's.
-The probe decides on positive evidence in the tap and never reads the agent's exit code, so no run above is affected; the docstring was corrected in `9a50201` and now says so.
-The probe was then run once more from the main checkout at that content, starting 2026-09-14 00:23:16.803 local (`-04:00`), `"result": "pass"`, exit 0, the same `pi 0.85.1` and the same `openrouter/deepseek/deepseek-v4.1-flash` read off a `snapshot`.
-Verdict `steered_into_running_turn` again, with `by_queue` and `by_turn_boundary` agreeing, the marker queued as `steering` with `followUp` empty, `agent_settled_between: 0` and — this run's first reply running to 11476 characters — `agent_end_between: 0` as well.
+**Run five: reproduced from `main`, by a second hand.**
+Started 2026-09-14 00:23:16.803 local (`-04:00`), from the main checkout, `"result": "pass"`, exit 0, the same `pi 0.85.1` and the same `openrouter/deepseek/deepseek-v4.1-flash` read off a `snapshot`.
+The probe file it ran was byte-identical to what was committed 50 seconds later as `9a50201` — the docstring correction below was in the working tree, uncommitted, when it ran.
+Verdict `steered_into_running_turn` again, the marker queued as `steering` with `followUp` empty, `agent_settled_between: 0` and — this run's first reply running to 11476 characters — `agent_end_between: 0` as well.
 The structure between the cut and the answer repeated exactly: `queue_update` naming `steering`, the `prompt` `response`, the first reply's `message_end`, `turn_end`, `turn_start`, a drained `queue_update`, the steered **user** message, and the 24-character assistant `message_end` carrying the marker.
-Five runs now, on two checkouts, none of which left the turn.
 
-**Cleanup held.** All five runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
+**Three defects review then found in the probe, and run six on the corrected one.**
+None of them changes any verdict above — every run had the marker in `steering` and an answer carrying it — but two of them meant the probe was weaker than the write-up implied.
+
+*It could not go red on the outcome that matters.* `checks.verdict` passed on anything that was not `indeterminate`, so a `dropped` run — the outcome this card said would be a divergence from D16 — reported `"result": "pass"` and exit 0.
+That is why the deliberate break below had to be hand-written as `if verdict["verdict"] != "dropped": raise`.
+Only `steered_into_running_turn` is a pass now, and `dropped` and `following_turn` each raise.
+
+*The one discriminating reading was optional.* A run with no `queue_update` naming the marker fell back to the `agent_settled` boundary alone and still passed, on a reading that cannot tell a steer from a drained follow-up.
+The queue reading and the boundary reading must now agree, so that case is `indeterminate` and raises.
+Exercised offline against synthetic timelines, the classifier now returns `steered_into_running_turn` only for the steer shape, and `indeterminate` for a `followUp` queue, a `followUp` queue drained with no `agent_settled`, an answer arriving after an `agent_settled`, and a timeline with no `queue_update` at all — five shapes, every one of them red.
+
+*The shim does not pass Pi's exit status through.* It was described as transparent in "stdin, stdout and exit status", but `exec pi "$@" | tee` reports the pipeline's last stage, so the server sees `tee`'s status and never Pi's.
+Nothing in the probe reads the agent's exit code, so no run is affected; the docstring now says so, for whoever copies this shim next.
+
+Run six, on the corrected probe, started 00:34:24.804 local, `"result": "pass"`, exit 0, `pi 0.85.1`, `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot`, verdict `steered_into_running_turn` with `by_queue` and `by_turn_boundary` agreeing, `queued_as: "steering"`, `agent_end_between: 0`, `agent_settled_between: 0`, `seconds_from_steer_request_to_idle: 19.642` — the first of these figures to exclude the settle pad — and `cleanup.result: "pass"` with no orphans.
+Six runs now, on two checkouts, none of which left the turn.
+
+**Cleanup held.** All six runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
+The orphan check is not vacuous here: `agentpane_live_support.py` enumerates the server's descendants through the probe's own `worker_filter` *before* killing the server and then polls those recorded pids for liveness, so reparenting at teardown cannot hide one, and the filter matches `tee` by `comm` and the shim's `sh` by the `--mode rpc` in its argv.

@@ -17,7 +17,7 @@ So the card is now the prerequisite it named as load-bearing, and its kind is `u
 What is genuinely unmeasured is Pi's half of D16.
 Claude Code's rejection was settled live (`docs/MANUAL_TESTING.md`, "Observed Claude Code mid-turn prompt handling", OW-jihete, `claude 2.1.267`) and Codex's steer was settled live ("Observed Codex `turn/steer` against a live turn", OW-tifuha, `codex-cli 0.154.0`).
 Pi has no such section.
-D16's sentence "Pi is already correct" rests on `resources/pi-protocol` docs plus the adapter's own code — `submit()` in `src/server/adapters/pi/process.ts` sets `streamingBehavior: "steer"` when `this.state.isStreaming` — and on nothing that was ever run.
+D16's sentence "Pi is already correct" rests on Pi's own `rpc.md` reference plus the adapter's own code — `submit()` in `src/server/adapters/pi/process.ts` sets `streamingBehavior: "steer"` when `this.state.isStreaming` — and on nothing that was ever run.
 A 202 that steers the prompt into the running turn, a 202 that queues it for a following turn, and a 202 that silently drops it are three different products behind one status code, and only the first is D16.
 
 ## Done when
