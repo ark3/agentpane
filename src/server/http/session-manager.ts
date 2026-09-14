@@ -73,6 +73,13 @@ interface ManagedSession {
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
+	/**
+	 * Set by `close()` before its first await. `submit()` and `fork()` both
+	 * re-key this container from a `finally` that can run long after teardown
+	 * emptied the table -- see `#adoptRef`. Mirrors `PendingStart.torndown`,
+	 * which does the same job one stage earlier.
+	 */
+	torndown?: boolean;
 }
 
 /**
@@ -352,6 +359,16 @@ export class SessionManager {
 	 * from the response and attaches it, which is what snapshots it.
 	 */
 	#adoptRef(session: ManagedSession, cause: "rename" | "fork"): void {
+		// `close()` ran while the `submit()`/`fork()` that called this was still
+		// in flight. It deleted this container before its first await, and
+		// re-keying now would put a session whose adapter is already disposed back
+		// into `#sessions` under the new id -- where `liveRefs()` hands it to
+		// every reconnecting client and `attach` returns the dead adapter instead
+		// of spawning a replacement, permanently. `#disposing` cannot catch it:
+		// close computed its keys before the re-key, so the new one is not among
+		// them. `#start`'s call site is guarded by `pending.torndown`; these two
+		// are guarded here.
+		if (session.torndown) return;
 		const next = session.adapter?.ref;
 		if (!next) return;
 		const oldKey = sessionKey(session.ref);
@@ -678,6 +695,9 @@ export class SessionManager {
 			if (pending) await this.#terminate(pending);
 			return;
 		}
+		// Before the first await below, so a `submit()`/`fork()` already in flight
+		// cannot re-key this container back into the table behind us (`#adoptRef`).
+		session.torndown = true;
 		const key = sessionKey(session.ref);
 		const disposalKeys = [key];
 		this.#sessions.delete(key);

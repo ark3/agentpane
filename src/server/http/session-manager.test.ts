@@ -573,6 +573,38 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.liveRefs()).toEqual([forked]);
 	});
 
+	it("does not re-key a session that was closed while its fork was in flight", async () => {
+		// DELETE and POST .../fork are plain concurrent handlers under
+		// `Bun.serve` (app.ts); nothing serializes them. `close()` empties the
+		// table before its first await, and `fork`'s `finally` reaches
+		// `#adoptRef` long afterwards -- here, while Pi's fork round trip is
+		// parked. Without the teardown flag that puts the closed container back
+		// into `#sessions` under the fork's id, with an adapter that is already
+		// disposed, and `#disposing` never catches it because `close()` computed
+		// its keys before the re-key.
+		await sessions.attach(REF);
+		const adapter = pi.created[0];
+		if (!adapter) throw new Error("no adapter");
+		const gate = deferred();
+		const fork = adapter.fork.bind(adapter);
+		// The fake's default "pi" mode is the one that actually moves the
+		// adapter's ref; on a mode that leaves it alone `#adoptRef` returns at
+		// `oldKey === newKey` and the test proves nothing.
+		adapter.fork = async (entryId) => {
+			await gate.promise;
+			return fork(entryId);
+		};
+
+		const forking = sessions.fork(REF, "e1");
+		await sessions.close(REF);
+		gate.resolve();
+		const forked = await forking;
+
+		expect(adapter.disposed).toBe(true);
+		expect(sessions.liveRefs()).toEqual([]);
+		expect(sessions.isAttached(forked)).toBe(false);
+	});
+
 	it("leaves an older alias of the parent pointing at the parent", async () => {
 		// A `virtual:` id that materialised into the parent is an older name for
 		// the PARENT's conversation. Following the container onto the fork would
