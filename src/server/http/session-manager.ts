@@ -363,6 +363,30 @@ export class SessionManager {
 		session.ref = next;
 		this.#sessions.set(newKey, session);
 
+		if (cause === "fork") {
+			// `session.stored` is the index's answer about the PARENT, and this
+			// container is the fork's from here on. A rename keeps it because it is
+			// still the same conversation under a new name; a fork must not, or
+			// `summaryOf` dresses the parent's `preview` and `updatedAt` in the
+			// fork's ref and the attach response draws the fork's row as a copy of
+			// the parent's -- identical character for character, now that both rows
+			// are listed (OW-kekoji, OW-sehaja). Dropping it makes `#ownSummary`
+			// answer instead, whose `preview: null` says "not read from the index
+			// yet", not "has said nothing": Pi is the only backend that gets here
+			// and its fork inherits the parent's transcript prefix, so the fork's
+			// true preview is normally the parent's first user message and the next
+			// `list()` will show it. Re-reading the index here would be truer, but
+			// it is async in a sync path and on Claude Code the fork is not on disk
+			// at all until its first turn ends (OW-japuzo), so it would often have
+			// nothing to return.
+			session.stored = undefined;
+			// `#start` seeded `createdAt` from the parent's stored summary, and
+			// `#ownSummary` reports it as `updatedAt` too. The fork's container came
+			// into being now, and a stamp days older would sort a brand-new fork
+			// below the conversations it was forked out of.
+			session.createdAt = this.#now();
+		}
+
 		if (cause === "rename") {
 			this.#aliases.set(oldKey, newKey);
 			// Pre-existing aliases are older names for whatever `oldKey` named, so

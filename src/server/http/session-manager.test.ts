@@ -500,6 +500,37 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.summaryOf(REF)).toBeNull();
 	});
 
+	it("does not hand the fork the parent's stored preview", async () => {
+		// `#adoptRef` re-keys the parent's own container onto the fork, so
+		// `session.stored` -- the index's answer about the PARENT -- would ride
+		// along and `summaryOf` would dress it in the fork's ref. Since OW-kekoji
+		// the parent is listed too, so the attach response would draw the fork's
+		// row character-for-character identical to the parent's until the next
+		// refetch.
+		const forkedAt = "2026-08-11T09:30:00.000Z";
+		sessions = new SessionManager({ index, adapters: { pi }, now: () => forkedAt }, broadcaster);
+		await sessions.attach(REF);
+		const parentSummary = sessions.summaryOf(REF);
+		expect(parentSummary?.preview).toBe("hello");
+
+		const forked = await sessions.fork(REF, "e1");
+
+		const summary = sessions.summaryOf(forked);
+		expect(summary?.ref).toEqual(forked);
+		expect(summary?.preview).toBeNull();
+		// The workspace must survive: it is what keeps the fork in the
+		// cwd-filtered sidebar the user forked it from (D7).
+		expect(summary?.cwd).toBe(WORKSPACE);
+		// And the stamps are the fork's moment, not the parent's. `#start` seeded
+		// this container's `createdAt` from the parent's stored summary, so
+		// leaving it would sort a brand-new fork by a date days older than itself
+		// -- `recency()` in `src/client/time.ts` reads `updatedAt ?? createdAt`,
+		// and the row renders `updatedAt`.
+		expect(summary?.createdAt).toBe(forkedAt);
+		expect(summary?.updatedAt).toBe(forkedAt);
+		expect(parentSummary?.updatedAt).not.toBe(forkedAt);
+	});
+
 	it("keeps the parent in list() after a ref-changing fork", async () => {
 		await sessions.attach(REF);
 
