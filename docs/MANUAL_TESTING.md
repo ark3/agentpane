@@ -1884,3 +1884,75 @@ The `--tool-check` run (2026-09-14 00:03:31.927 to 00:03:43.215 local, `-04:00`)
 The bare run (00:03:43.403 to 00:03:54.034) reported `first_turn` at `7`–`56` and again no `tool_turn` key.
 The windows are wider here than in the pair above and their boundaries fall at different indices, which is what a window pinned to stream position rather than to a fixed count should do; the two windows were again contiguous, at 63.
 So the tool window holds across two hands and four runs, and it has been empty in all of them.
+
+## A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)
+
+**2026-09-14, home server, `pi 0.85.1`, through agentpane's own built server on the production `direnv exec <workspace> sbox -- pi --mode rpc` chain.**
+
+`resources/probes/agentpane_pi_steer_probe.py` carries the run, from the `card/OW-yuyofu` worktree cut at `891d487`, with the probe's content exactly as it landed here in `4f1c83a`.
+Re-run it with `python3 resources/probes/agentpane_pi_steer_probe.py`.
+It passes `--model openrouter/deepseek/deepseek-v4.1-flash:high` through the create-session route rather than relying on `~/.pi/agent/settings.json` the way `agentpane_pi_smoke.py` does, and every run below read back `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot` event — the wire spelling, carrying the provider prefix the settings file's string does not, as OW-guvojo's section explains.
+`copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]` in all four runs; this machine still has no `models.json` and no `trust.json`.
+
+**The verdict is the first of D16's three: the marker was answered inside the running turn.**
+The reference run started 2026-09-14 00:18:25.395 local (`-04:00`) and reported `"result": "pass"` with every check inside it passing, exiting 0.
+Pi's own census for the whole run was **one** `agent_start`, one `agent_end` and one `agent_settled`, around two `turn_start`/`turn_end` pairs, two `queue_update`s, four `message_start`/`message_end` pairs and 1395 `message_update` deltas.
+One agent loop, opened by the first prompt and closed after the marker was answered.
+
+**Pi named the queue it put the text in.**
+The tap's line count was pinned at 177 immediately before the POST, and line 178 — the very next thing Pi wrote — was:
+
+```json
+{"type": "queue_update", "steering": ["Ignore the gardening guide. Reply with exactly this token and nothing else: AGENTPANE-STEER-6DFB2120"], "followUp": []}
+```
+
+`steering`, not `followUp`.
+The matching drain is `queue_update` at line 1345 with both arrays empty, sitting between the second `turn_start` and the steered `message_start`.
+
+**The structure between the request and the answer.**
+Everything below is strictly after the pinned cut, in Pi's own emission order:
+
+| line | event |
+| --- | --- |
+| 178 | `queue_update`, marker in `steering` |
+| 179 | `response` to `prompt`, `success: true` |
+| 1342 | `message_end`, role `assistant`, 12575 chars, no marker |
+| 1343 | `turn_end` |
+| 1344 | `turn_start` |
+| 1345 | `queue_update`, both queues empty |
+| 1346–1347 | `message_start`/`message_end`, role **user**, 100 chars, marker present |
+| 1348 | `message_start`, role `assistant` |
+| 1411 | `message_end`, role `assistant`, 24 chars, **marker present** |
+| 1412 | `turn_end` |
+| 1413 | `agent_end` |
+| 1414 | `agent_settled` |
+
+No `agent_settled` falls between the request and the answering assistant message, so the session never returned to idle in between — the marker was answered without the turn the prompt was posted into ever ending.
+The HTTP status was 202, `isStreaming` read `true` at the instant of the post, and the elapsed time from the stamp taken immediately before the POST to the `snapshot` reporting idle was 30.343 s.
+
+**`agent_settled` is the boundary, and the two finer signals are not.**
+Pi's `turn_start`/`turn_end` bound one LLM round, and a steered message is drained into a round of its own — the clean run above has two of them — so the "every post-steer notification carried the same turn id" reading that settled Codex under OW-tifuha has no Pi equivalent, and counting `turn_*` would call a perfect steer a second turn.
+`agent_end` is the inner agent loop ending, which `src/server/adapters/pi/reducer.ts` already records "can be followed by retry/compaction/queued continuations", and it is not what agentpane turns into a turn boundary; `reducer.ts` maps `agent_settled`, and only `agent_settled`, to `isStreaming: false`.
+The probe therefore decides on `agent_settled` and records `agent_end_between` for the reader without letting it decide anything.
+
+**That distinction was not theoretical: `agent_end` came out both ways.**
+Four runs were made between 00:16 and 00:20, all four with the marker queued as `steering` and answered, and all four with zero `agent_settled` in between.
+Three had zero `agent_end` in between.
+The run at 00:17:06 had one: its first reply finished at 3618 characters rather than the 9922–12575 the others produced, Pi closed the loop with `agent_end`, and then opened a **second** `agent_start` to drain the same `steering` queue — census two `agent_start`, two `agent_end`, one `agent_settled`.
+So whether the steer is drained inside the first agent loop or into a fresh one is a race against how much the model had left to say, while whether the session leaves the turn is not: it did not, in any of the four.
+
+**What the runs did not show.**
+No run cut an in-flight assistant message short.
+In every one the first reply ran to its own `message_end` before the steered user message appeared, so this measures the request being accepted mid-turn and answered without the turn ending, not a steer truncating generation — the same caveat OW-tifuha's Codex section carries.
+Neither did any turn here call a tool.
+Pi's steering is documented to deliver after the current *tool batch*, and every run was a pure text turn on an explicit "do not use tools" prompt, so the tool-batch case is untested.
+And this is the `submit()` path only: nothing here exercised `streamingBehavior: "followUp"`, which the adapter never sends, so "Pi would have queued it for a following turn had we asked" is inference and not measurement.
+
+**The discriminating check was broken on purpose first.**
+A temporary `if verdict["verdict"] != "dropped": raise` was added after the classifier and the probe re-run live at 00:19:19, asserting the outcome the evidence contradicts.
+It went red and exited 1, with `"result": "fail"` and `"error": "RuntimeError: DELIBERATE BREAK: expected dropped, got steered_into_running_turn"`, on a run whose own `checks.verdict` still read `steered_into_running_turn`.
+An earlier break at 00:17:06, against a first draft of the classifier that decided on `agent_end` rather than `agent_settled`, is the run described above: it reported `"got indeterminate"` because the queue said steering and the `agent_end` count said following turn.
+That disagreement is what moved the boundary to `agent_settled` and is why the classifier reports `indeterminate` as a failure rather than picking a side.
+Neither edit is in the committed probe, and the reference run's file is byte-identical to `4f1c83a`.
+
+**Cleanup held.** All four runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
