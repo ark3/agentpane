@@ -57,12 +57,7 @@ of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
 
 ## `agentpane_pi_smoke.py`
 
-The same assembled application path with a real Pi process, plus the three
-things only Pi can establish: that the production `direnv exec <workspace>
-sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py`
-deliberately bypasses sbox, so nothing had ever run this), that the session id
-changes under the client and the superseded id keeps working, and that killing
-the server reaches an agent two `exec`s down inside `bwrap`.
+The same assembled application path with a real Pi process, plus the three things only Pi can establish: that the production `direnv exec <workspace> sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py` deliberately bypasses sbox, so nothing had run this chain until this harness first did), that the session id changes under the client and the superseded id keeps working, and that killing the server reaches an agent two `exec`s down inside `bwrap`.
 
 ```bash
 python3 agentpane_pi_smoke.py --workspace /home/asa0717/src/agentpane
@@ -76,6 +71,9 @@ inspection scoped to this run's server tree. It never invokes Codex.
 `--tool-check` is opt-in because it is the most model-dependent criterion --
 the model has to choose to call a tool. It passes; it is separated so the
 default run stays deterministic.
+
+Verified with: `pi` 0.85.1 on the home server, 2026-09-13, both bare and with `--tool-check`; those were its first runs on that machine.
+See `docs/MANUAL_TESTING.md`, "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi), for what the evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
 
 ## `agentpane_live_support.py`
 

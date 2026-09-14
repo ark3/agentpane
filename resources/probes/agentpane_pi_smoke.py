@@ -10,7 +10,9 @@ Three things only this harness can establish:
 * **The spawn chain.** Production builds `direnv exec <workspace> sbox -- pi
   --mode rpc` (D7). `capture_fixtures.py` deliberately does *not* go through
   sbox -- it spawns Pi directly, because it only needs the protocol -- so
-  nothing had ever run Pi through the real wrapper chain.
+  nothing ran Pi through the real wrapper chain until this harness did.
+  It has since: HANDOFF findings 39-42 (work laptop, pi 0.84.1) and
+  MANUAL_TESTING's OW-moradi section (home server, pi 0.85.1).
 * **The rename.** Pi's session id *is* its JSONL path (D9), and a `virtual`
   session has no path until its first prompt writes one. The id therefore
   changes under the client mid-conversation, which Codex never does. That is

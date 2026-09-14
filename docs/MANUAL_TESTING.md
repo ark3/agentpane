@@ -1686,7 +1686,8 @@ An earlier turn the same evening, at 22:40 — three minutes before that setting
 Both readings are correct for their moment, which is the only reason this paragraph is here: a model read off `get_state` is a reading of a mutable file, and it goes stale as soon as the owner edits it.
 
 What this leaves open.
-`resources/probes/agentpane_pi_smoke.py` drives Pi through the built server and has never been run on this machine; nothing here exercised the server, the adapter, or a fork.
+`resources/probes/agentpane_pi_smoke.py` drives Pi through the built server and had not been run on this machine when this section was written; nothing here exercised the server, the adapter, or a fork.
+It has since — see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi), run later the same evening.
 Whether the read-only `~/.pi/agent` survives the next sandbox restart is unmeasured and expected to change — the owner intends to grant write access, and when that lands the `docs/HANDOFF.md` gotcha and the `AGENTS.md` note above both want re-measuring rather than editing from memory.
 
 ## The sandbox restart makes the backend state directories writable (OW-vowire)
@@ -1718,3 +1719,53 @@ What this closes and what it leaves.
 The three passages OW-vowire named — the `docs/HANDOFF.md` state-directory gotcha, its neighbouring sbox-profiles sentence, and the Pi sentence in `AGENTS.md`'s model pin — are reconciled with these readings in the same change, each keeping the date it was measured on.
 The model pin stays a flag on all three CLIs: the pre-restart reading is exactly the failure the flag exists to survive, and a readable settings file is still a mutable one.
 The throwaway `PI_CODING_AGENT_DIR` and `CODEX_HOME` keep their other purpose — keeping a probe off the real session corpus and credentials — which is why `fork_probe.py` should not drop them.
+
+## The Pi smoke probe runs on the home server, end to end through the built server (OW-moradi)
+
+Run on the home server 2026-09-13, **`pi 0.85.1`**, at commit `967b319`, by `python3 resources/probes/agentpane_pi_smoke.py` — the committed harness, unmodified, twice: once bare and once with `--tool-check`.
+Both runs reported `"result": "pass"` with every check inside them passing, and both exited 0.
+The client was rebuilt rather than reused (`build.returncode: 0`, no `--skip-build`), so the commit named above is the code that served the run, and `built_client` answered HTTP 200 with `has_app_mount: true` in both.
+The bare run took 16 seconds wall clock (23:12:24.002 to 23:12:39.917 local, `-04:00`), the `--tool-check` run 19 seconds.
+
+This is the first time anything has driven Pi through agentpane's own server **on this machine**.
+It is not the first time anywhere: `docs/HANDOFF.md` findings 39–42 came out of the first execution of the production chain, on the work laptop, against `pi 0.84.1`.
+What the two ad-hoc runs in "Pi arrives on the home server" above did, earlier the same evening, was drive `pi --mode rpc` directly; the OW-vowire section between them added a `sbox -- pi --mode rpc` invocation, which is most of the spawn chain but still no `direnv`, no server, no adapter and no abort.
+
+**The production spawn chain starts an agent, and `bwrap` is in it — finding 39 reproduces here on 0.85.1.**
+`buildPiSpawnCommand` asks for `direnv exec <cwd> sbox -- pi --mode rpc` (`src/server/adapters/pi/spawn.ts`), and the process tree under the server was `bun → bwrap → bwrap → pi` in both runs.
+`direnv` and `sbox` leave no process of their own — they `exec` away, which is precisely the property the "whether killing the spawned process actually stops the agent" answer in `docs/DESIGN.md` rests on — and the probe walks every descendant of the server, so a survivor would have shown.
+Neither `direnv` nor `sbox` carries a version here; `sbox` is a local script the owner edits, so this is a reading of whatever it was that evening.
+Exactly one Pi descendant was found each time, reporting `comm=pi` with a command line of exactly `pi`: finding 40's `process.title` overwrite still holds on 0.85.1, so the `node` fallback matcher was again not exercised.
+
+**The rename lands during attach, as finding 41 recorded on 0.84.1.**
+`renamed_during: "attach"` in both runs, with `still_virtual_after_attach: false`.
+D9 says a `virtual` session has no JSONL path until its first prompt writes one, and the rename beating the first prompt is the thing finding 41 is about; what permits either ordering is the adapter's own contract, which promises `ref` is unstable at two points rather than that it moves at exactly one.
+Create and attach returned `[201, 200]`; the adopted id was a `.jsonl` path; the superseded `virtual:` id kept resolving (HTTP 200) and resolved to the new ref; a prompt posted through the superseded id was accepted with 202.
+
+**Streaming, idle and abort all behave, far faster than the probe's timeouts assume.**
+The bare run's first turn streamed in 3 incremental updates (27 → 67 characters) and returned to idle 5.0s after `streaming=true`.
+The abort was issued against a confirmed-streaming turn at 23:12:38.366 and the turn reported idle at 23:12:38.382 — **16 ms**, the one genuine request-to-event measurement in the run — with the longest assistant message at 472 characters both when idle and 1.5s later, so nothing kept arriving after the abort.
+SIGTERM to the server was answered in 32 ms with `returncode: 0`, `launched_pi_worker_pids: [295]` and `remaining_worker_pids: []`; cleanup removed the temporary state home and the server log and reported no orphan.
+Waits budgeted at 60, 90, 120 and 180 seconds all resolved within seconds.
+
+**A shell tool call reaches the wire with no dialog request beside it — but this run cannot add to finding 42.**
+The `--tool-check` run saw a `toolCall` block at 23:13:06.302, in a message whose blocks were `["thinking", "toolCall"]`.
+That is a tool call reaching the client, not an executed command: no `toolResult` and no completion of that turn is recorded either here or in the probe's evidence.
+`agent_requests_seen` was the empty list in both runs, and in the `--tool-check` run that field is worthless: the probe assigns it once, immediately after the *first* turn goes idle and before the tool prompt is ever posted, so it was captured before the tool turn existed.
+Finding 42 rests on the same field with the same ordering, and is left standing with that defect named against it; OW-lapuye carries it.
+Two limits hold whichever way that is repaired.
+`agent_requests_seen` can only ever see an `extension_ui_request` carrying a dialog method — that is the Pi adapter's sole source of a `request` event (`src/server/adapters/pi/reducer.ts`) — so an approval delivered by any other mechanism is invisible to it by construction.
+And the probe's own comment beside that field, not `docs/DESIGN.md`, is what frames this as "whether these fire at all under the sandbox is an open question (D2a)"; D2a itself is written about Codex's `ServerRequest`, and that phrase is not in it.
+
+**Two of the five files the probe copies do not exist here, including `trust.json`.**
+`copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]`; `models.json` and `trust.json` are simply absent from `~/.pi/agent` on this machine.
+The `PI_STATE_FILES` comment calls that tuple "enough for a turn", and three of the five were.
+This matters for finding 42, which explicitly qualifies itself with "the harness copies `trust.json` into its temporary state dir": here it copied none, and both runs' first turns — the window `agent_requests_seen` does validly cover — still raised no dialog.
+The throwaway `PI_CODING_AGENT_DIR` is no longer forced by a read-only `~/.pi/agent` (see the section above), but the probe still sets one, and out of band after both runs `~/.pi/agent/sessions/` held only a JSONL predating them.
+
+What this leaves open.
+The evidence blob records `pi --version` and never records which model answered: the probe sends no `--model`, so Pi resolved its own default out of the `settings.json` copied into the throwaway state home.
+That file was measured one section above, twice that same evening, selecting `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, and it was not edited between those readings and these runs — so the model is knowable with confidence and is still not in the evidence, which is what OW-guvojo is for.
+It is also the reason these runs sit outside `AGENTS.md`'s model pin without violating it: nothing passed `--model`, and the settings file happened to name the pinned model anyway.
+The `--tool-check` run's abort phase is not clean evidence either: the probe posts the long prompt immediately after the `toolCall` block arrives, without waiting for that turn to reach idle, so what it aborted there may have been the tool turn — the bare run's abort is the one to cite, and OW-hahohi carries the defect.
+That same card carries the other half of it: the long prompt asks for the integers 1 through 10000 and the bare run's transcript stood at 472 characters when the abort landed, so the check exercises far less buffered output than its prompt implies.

@@ -11,7 +11,7 @@ It never touched the server, the adapter, or a fork.
 So the Pi adapter has never been exercised end to end on this machine, and the probe written for exactly that has never run here.
 
 This is the cheapest thing the install makes newly possible, which is the whole reason to file it.
-Expect the throwaway `PI_CODING_AGENT_DIR` to still be necessary while `~/.pi/agent` is read-only; the probe already sets one.
+The sandbox restart later that same day made `~/.pi/agent` writable, so the throwaway `PI_CODING_AGENT_DIR` is no longer forced by the environment; the probe sets one unconditionally anyway, and that is left alone here.
 
 ## Done when
 
