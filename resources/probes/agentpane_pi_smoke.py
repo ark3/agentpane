@@ -308,6 +308,29 @@ def main() -> int:
         evidence["checks"]["text_stream"] = {"result": "pass", **growth}
         evidence["checks"]["idle"] = {"result": "pass", **idle}
 
+        # Which model actually answered. The run sends no `--model`, so Pi
+        # resolved its own default out of the `settings.json` copied into the
+        # throwaway state home -- a mutable file -- and the criteria that depend
+        # on the model most (a tool call happening at all, how much text a long
+        # turn produces) cannot be read without it. `snapshot` and `status` both
+        # carry it, but it is null until `start()`'s `get_state` answers, so take
+        # the latest one the settled turn left on the wire.
+        def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
+            for stamp, event in reversed(events):
+                if event.get("session") != real_ref:
+                    continue
+                if event.get("type") not in ("snapshot", "status"):
+                    continue
+                model = event.get("model")
+                if isinstance(model, str) and model:
+                    return {"at": stamp, "model": model, "event_type": event.get("type")}
+            return None
+
+        model_seen = resolved_model(stream.snapshot())
+        if model_seen is None:
+            raise RuntimeError("no settled snapshot or status event named the model Pi resolved")
+        evidence["checks"]["model"] = {"result": "pass", **model_seen}
+
         # Any blocking request Pi raised is worth recording either way: whether
         # these fire at all under the sandbox is an open question (D2a).
         evidence["agent_requests_seen"] = [
