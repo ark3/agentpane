@@ -75,6 +75,33 @@ default run stays deterministic.
 Verified with: `pi` 0.85.1 on the home server, 2026-09-13, both bare and with `--tool-check`; those were its first runs on that machine.
 See `docs/MANUAL_TESTING.md`, "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi), for what the evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
 
+## `agentpane_pi_steer_probe.py`
+
+Proves: **which of D16's three outcomes Pi's mid-turn 202 actually is** (OW-yuyofu).
+Copied from `agentpane_pi_smoke.py` rather than added to it — the card asked for a separate vehicle — and shaped after `codex_turn_probe.py`'s steer phase: start a turn that keeps streaming, confirm it is streaming at the instant of the request, post a second prompt carrying a unique marker through the ordinary REST submit route, then read off Pi's own events whether the marker was answered inside the running turn, in a following turn, or never.
+
+```bash
+python3 agentpane_pi_steer_probe.py
+python3 agentpane_pi_steer_probe.py --skip-build      # reuse dist/client
+python3 agentpane_pi_steer_probe.py --model <ref>     # default is the model AGENTS.md pins
+```
+
+Two things it does that the other live harnesses do not.
+
+It **taps Pi's stdout**, because none of the discriminating evidence reaches agentpane's SSE wire: `src/server/adapters/pi/reducer.ts` drops `turn_start`, `turn_end`, `agent_end` and `queue_update` as session bookkeeping, and `agent_settled` alone cannot tell a steer from a drained follow-up queue.
+The tap is a `pi` shim first on the server's PATH that pipes the real binary through `tee`; it is transparent to the adapter, and it adds an `sh` and a `tee` to the sandbox tree, which the probe's worker filter reaps along with the agent.
+The tap preserves order, not time — `tee` stamps nothing — so every duration in the record is measured from a stamp taken immediately before the request that caused the event, and positions in the tap are pinned by reading its line count at the instant the mid-turn POST goes out.
+
+It **passes `--model` explicitly**, unlike `agentpane_pi_smoke.py`, through the create-session route's `model` field.
+The first turn's length is a criterion here, so a run that silently answered on whatever `~/.pi/agent/settings.json` happened to name would not be measuring what it reports; the model that answered is still read back off the wire and recorded.
+
+Writes no fixtures.
+Same temporary writable state dir and credentials-copied-by-name discipline as the two smoke harnesses.
+Costs tokens: one long turn plus the steered reply.
+
+Verified with: `pi` 0.85.1 on the home server, 2026-09-14.
+What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)".
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
