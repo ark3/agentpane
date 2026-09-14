@@ -1655,3 +1655,36 @@ Nothing here was measured about `thread/resume`.
 What this means for agentpane.
 Nothing changes in the code: the adapter already passes `sandbox` explicitly on all three thread-creation paths (D7a), which is correct against either default and against both at once.
 What the run buys is that the stated reason for doing so is now true on the installed CLI rather than two versions behind it, and that the `read-only` and `workspaceWrite` numbers standing near each other in `docs/DESIGN.md` are no longer an unacknowledged puzzle.
+
+## Pi arrives on the home server, and what its settings file is worth there (no card)
+
+Run on the home server 2026-09-13, **`pi 0.85.1`** at `~/.local/bin/pi`, installed by the owner that day.
+Until this, the repo recorded that the home server had no `pi` at all, and the `work-laptop` label existed mainly to send live Pi evidence to the other machine.
+Both runs below were ad-hoc: a short Python driver over `pi --mode rpc --session-dir <throwaway>`, speaking the same LF-framed JSON the `PiSession` class in `resources/probes/fork_probe.py` speaks, not a committed probe.
+Nothing was written to the session corpus; both runs used throwaway workspaces under `/var/tmp`, since removed.
+
+**Pi runs here, through the documented throwaway state directory.**
+With `PI_CODING_AGENT_DIR` pointed at a fresh directory holding copies of `auth.json`, `models-store.json` and `settings.json` — the workaround `capture_fixtures.py` implements, and the same one the read-only `~/.pi/agent` still forces — one turn ran end to end.
+`get_state` answered with a resolved model, the prompt `Say exactly: PONG` reached `agent_settled`, and the assistant message carried `stopReason: "stop"` with the text `PONG` and real usage: 1565 input, 4 output, $0.00024.
+That is the positive form of the failure this environment produces when the state directory is wrong, which "succeeds" in under a second with `stopReason: "error"` and empty content.
+A session file materialised carrying the version-3 header `{"type":"session","version":3,"id":…,"timestamp":…,"cwd":…}`, which is D9's shape.
+
+**Without that redirection Pi resolves no model at all.**
+Driven against the real `~/.pi/agent`, with no `PI_CODING_AGENT_DIR`, the process starts and answers `get_state` — but reports `model: {"id": "unknown", "name": "unknown", "provider": "unknown", "contextWindow": 0}` and `thinkingLevel: "off"`.
+`pi --help` names the cause on stderr: `Invalid settings file /home/ark3/.pi/agent/settings.json: EROFS: read-only file system, mkdir '/home/ark3/.pi/agent/settings.json.lock'`.
+Pi takes a lock merely to *read* its settings, exactly as `docs/HANDOFF.md` records it doing for the credential store, and the sandbox mounts that directory read-only.
+No turn was driven from that state, so what such a turn does is unmeasured; the model resolution is the finding.
+This is why `AGENTS.md` pins Pi with a flag rather than by pointing at `settings.json`: on this machine, today, that file reaches Pi only when it has been copied somewhere writable first.
+
+**The model the pin names was read off a live turn, not off the file.**
+The owner set `defaultProvider: "openrouter"` and `defaultModel: "deepseek/deepseek-v4.1-flash"` in `~/.pi/agent/settings.json` at 22:43 local, with `modelThinkingLevels` mapping `openrouter/deepseek/deepseek-v4.1-flash` to `high`.
+The turn above, run after that edit with the file copied in, reported `deepseek/deepseek-v4.1-flash` on the `message_end` and `thinkingLevel: "high"` on `get_state` — so the thinking-level entry does apply to the selected model.
+The catalogue entry for it gives a 1048576-token context window, `maxTokens` 384000, and $0.15/$0.60 per Mtok in/out against Kimi K2.6's $0.95/$4.00.
+Its `thinkingLevelMap` is sparse: only `off`, `high` and `xhigh` map to real values, while `minimal`, `low`, `medium` and `max` are `null`, so `high` is the bottom of this model's usable reasoning range and `medium` does not exist on it.
+
+An earlier turn the same evening, at 22:40 — three minutes before that settings edit — reported `moonshotai/kimi-k2.6` and was billed at Kimi's rates.
+Both readings are correct for their moment, which is the only reason this paragraph is here: a model read off `get_state` is a reading of a mutable file, and it goes stale as soon as the owner edits it.
+
+What this leaves open.
+`resources/probes/agentpane_pi_smoke.py` drives Pi through the built server and has never been run on this machine; nothing here exercised the server, the adapter, or a fork.
+Whether the read-only `~/.pi/agent` survives the next sandbox restart is unmeasured and expected to change — the owner intends to grant write access, and when that lands the `docs/HANDOFF.md` gotcha and the `AGENTS.md` note above both want re-measuring rather than editing from memory.

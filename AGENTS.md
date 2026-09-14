@@ -42,16 +42,17 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   Write "as of `codex-cli 0.147.0`, app-server defaulted each thread to `read-only`", not "app-server defaults each thread to `read-only`" -- that exact sentence sat three lines from a 0.154.0 measurement in `docs/DESIGN.md` and still read as present fact.
   This is not an obligation to keep claims current.
   D18 sorts backend facts by what their going stale costs and defends only the ones that license code nobody wrote; the rest are allowed to age and are corrected when someone trips on them.
-- **Only Pi is confined to the work laptop.**
-  The home server has no `pi` at all.
-  Claude Code and Codex both run there, each pinned to one model: Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna.
-  Do not trust the machine's defaults to enforce it: as of 2026-09-09 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` happens to select `gpt-5.6-luna`, and either can change — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`.
+- **All three CLIs run on the home server, each pinned to one model.**
+  Claude Code on Haiku (OW-yilabe, OW-beripo), Codex on Luna, and — since the owner installed `pi 0.85.1` there on 2026-09-13 — Pi on DeepSeek V4.1 Flash.
+  Do not trust the machine's defaults to enforce it: as of 2026-09-09 the home server's `~/.claude/settings.json` selects `sonnet` and its `~/.codex/config.toml` happens to select `gpt-5.6-luna`, and either can change — so the flag is the whole of the constraint and is never optional: `claude --model haiku`, `codex -m gpt-5.6-luna`, `pi --model openrouter/deepseek/deepseek-v4.1-flash:high`.
+  Pi's own default is weaker than a default that could drift, and the flag is doing more work there than on the other two: as of 2026-09-13 the sandbox mounts `~/.pi/agent` read-only, so Pi cannot take the lock it needs merely to *read* `settings.json`, resolves no model at all, and answers `get_state` with `"id": "unknown"` and `thinkingLevel: "off"` — see `docs/MANUAL_TESTING.md`, "Pi arrives on the home server".
   The pin binds the turns an agent session drives while coding, debugging, or testing, because that work belongs on inexpensive models; it says nothing about agentpane's users, and the owner driving agentpane on the home server may choose any model.
   A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
-  Pi runs only on the work laptop, which is why an item whose evidence has to come from a live Pi turn belongs there.
-  Such an item carries the label `work-laptop`, and its body still opens with the line `**Work laptop:**` naming which CLI the visit needs.
+- **What is still confined to the work laptop is that machine itself.**
+  Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and a card asking for one belongs wherever the session is.
+  What remains is that clone's own provisioning — its `.git/card/` and its PATH, as in OW-gabemi — and the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop".
+  Such an item carries the label `work-laptop`, and its body still opens with the line `**Work laptop:**` naming what the visit needs.
   The label is the filter: `card list --open --label work-laptop` prints those cards with their headlines, which is the intersection view the old two-command survey could not produce.
-  Reading a captured fixture under `resources/fixtures/` is not a live run and is fine on either.
   Name the machine rather than writing "here": this file is checked in and read from both clones, so a sentence that resolves against the reader's location is false on one of them.
 - **A work-laptop item does all of its work in one visit.**
   The scarce resource is trips, not minutes once you are there, so never rank such an item's contents by urgency or name the half that matters most: that is an excuse to do part of it and come back, and the second question usually costs almost nothing while the CLI is already running.
@@ -112,7 +113,7 @@ Every card carries exactly one kind, given to `card new --label`:
 - `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
 
 Four cross-cutting labels may follow that kind.
-`work-laptop` gates live Pi evidence to the machine described under "Evidence".
+`work-laptop` marks work that needs the work laptop itself — that clone's provisioning, or the reference material addressed there by absolute path — as described under "Evidence"; it stopped gating live Pi evidence when the home server got `pi` on 2026-09-13.
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
 `emacs` groups the Emacs client work, an ACP shim over the HTTP API driven by `agent-shell`, filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo, OW-wawipu and OW-mikuyo; `card list --open --label emacs` is that set, blockers and all.
