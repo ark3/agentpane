@@ -1,5 +1,6 @@
 ---
 labels: [change, browser-testing]
+closed: done
 ---
 
 # Nobody has looked at the remote-media link badge in a real browser, and its shape was a first cut
@@ -25,3 +26,8 @@ The cases worth putting in front of an eye: an image with empty `alt` and a long
 Do not settle this by adding a jsdom test.
 It cannot see any of it, which is the whole reason this card exists.
 An `e2e/` spec asserting the badge's text and that the links are present is worth adding while someone is in there, but it is not the verdict either.
+
+## Close note
+
+On the work laptop, a human inspected the four required cases in a real browser through the Vite harness: empty-alt long-URL image, alt image, video with poster and nested source, and multi-candidate srcset.
+The rendering stands: badges make image and video links clear, the long URL wraps readably, every srcset candidate is individually selectable, and no media loads without a click.
