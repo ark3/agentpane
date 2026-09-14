@@ -546,7 +546,13 @@ Rejection is a real answer here, not a failure mode.
 The route already turns an adapter throw into a 500, and `controller.ts`'s `submit` clears the draft only on success, so a rejected mid-turn prompt leaves the user's text where they typed it.
 What an adapter must not do is silently downgrade to a follow-up, which is indistinguishable from success at the wire and puts the prompt after the turn without saying so.
 
-Pi is already correct, Claude rejects because its backend cannot steer, and Codex steers.
+Pi steers, Claude rejects because its backend cannot steer, and Codex steers.
+Pi's half of that was the last one resting on a reading rather than a run, and it was measured on the home server on 2026-09-14 against `pi 0.85.1` (OW-yuyofu), five runs through the built server on the production spawn chain.
+A prompt posted while a turn was streaming came back 202, and Pi's own `queue_update` named the queue it went into: `steering`, with `followUp` empty.
+The marker was then answered without the session ever returning to idle — `agent_settled`, which `src/server/adapters/pi/reducer.ts` maps to `isStreaming: false` and which is therefore the boundary this decision is written about, fell nowhere between the request and its answer in any of the five.
+Two finer signals deliberately do not decide it: Pi's `turn_start`/`turn_end` bound one LLM round and a steered message is drained into a round of its own, so OW-tifuha's "same turn id" reading has no Pi equivalent, and `agent_end` — the inner agent loop, which the reducer's own docblock records can be followed by queued continuations — came out both ways across the runs depending on how much the model had left to say.
+Two things that measurement does not reach: no run cut an in-flight assistant message short, and no turn in it called a tool, so Pi's documented "deliver after the current tool batch" is still unexercised.
+`docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn", carries the run.
 `turn/steer` was run live on the home server on 2026-09-12 against `codex-cli 0.154.0` (OW-tifuha): fired 29 deltas into a streaming turn with `expectedTurnId` set to that turn, it returned a result naming the same turn id, and both the steered `userMessage` and the answering `agentMessage` arrived under that turn id, with exactly one `turn/completed` and no second turn.
 The Codex adapter's `submit()` now sends `turn/steer` whenever it holds an unambiguously correlated `turnId`; it still rejects when a turn is in flight under an id it cannot name, because `expectedTurnId` is a precondition and there is nothing to put in it.
 `compact()` keeps its rejection regardless, and `submit()` gained one of its own for the same reason: `compact` is one of the two `NonSteerableTurnKind`s and a compaction runs as its own turn, so a `turnId` naming a compaction is a turn app-server will refuse to steer.

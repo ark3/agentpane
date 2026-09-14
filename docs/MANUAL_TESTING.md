@@ -1953,6 +1953,14 @@ A temporary `if verdict["verdict"] != "dropped": raise` was added after the clas
 It went red and exited 1, with `"result": "fail"` and `"error": "RuntimeError: DELIBERATE BREAK: expected dropped, got steered_into_running_turn"`, on a run whose own `checks.verdict` still read `steered_into_running_turn`.
 An earlier break at 00:17:06, against a first draft of the classifier that decided on `agent_end` rather than `agent_settled`, is the run described above: it reported `"got indeterminate"` because the queue said steering and the `agent_end` count said following turn.
 That disagreement is what moved the boundary to `agent_settled` and is why the classifier reports `indeterminate` as a failure rather than picking a side.
-Neither edit is in the committed probe, and the reference run's file is byte-identical to `4f1c83a`.
+Neither edit is in the committed probe, and the reference run's file is byte-identical to the probe as `4f1c83a` committed it, which landed here as `0b39003`.
 
-**Cleanup held.** All four runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
+**Reproduced from `main`, by a second hand, at the reviewed probe.**
+Review of that branch found one docblock claim that did not hold — the shim was described as passing "stdin, stdout and exit status" through untouched, but `exec pi "$@" | tee` reports the pipeline's last stage, so the server sees `tee`'s status and never Pi's.
+The probe decides on positive evidence in the tap and never reads the agent's exit code, so no run above is affected; the docstring was corrected in `9a50201` and now says so.
+The probe was then run once more from the main checkout at that content, starting 2026-09-14 00:23:16.803 local (`-04:00`), `"result": "pass"`, exit 0, the same `pi 0.85.1` and the same `openrouter/deepseek/deepseek-v4.1-flash` read off a `snapshot`.
+Verdict `steered_into_running_turn` again, with `by_queue` and `by_turn_boundary` agreeing, the marker queued as `steering` with `followUp` empty, `agent_settled_between: 0` and — this run's first reply running to 11476 characters — `agent_end_between: 0` as well.
+The structure between the cut and the answer repeated exactly: `queue_update` naming `steering`, the `prompt` `response`, the first reply's `message_end`, `turn_end`, `turn_start`, a drained `queue_update`, the steered **user** message, and the 24-character assistant `message_end` carrying the marker.
+Five runs now, on two checkouts, none of which left the turn.
+
+**Cleanup held.** All five runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
