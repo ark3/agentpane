@@ -72,6 +72,37 @@ function codexUser(...texts: string[]) {
 	};
 }
 
+function codexTokenCount(totalTotal: number, lastTotal: number) {
+	return {
+		type: "event_msg",
+		timestamp: "2026-08-28T07:29:00.000Z",
+		payload: {
+			type: "token_count",
+			info: {
+				total_token_usage: { total_tokens: totalTotal },
+				last_token_usage: { total_tokens: lastTotal },
+				model_context_window: 258400,
+			},
+			rate_limits: {},
+		},
+	};
+}
+
+function codexCompacted(timestamp: string) {
+	return {
+		type: "compacted",
+		timestamp,
+		payload: {
+			message: "summary of the conversation so far",
+			replacement_history: [],
+			window_number: 1,
+			first_window_id: "w0",
+			previous_window_id: "w0",
+			window_id: "w1",
+		},
+	};
+}
+
 function codexAssistant(text: string) {
 	return {
 		type: "response_item",
@@ -383,6 +414,78 @@ describe("readSessionPreview", () => {
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
 			expect(turns).toEqual([]);
+		});
+
+		it("draws a compaction marker carrying the last token_count figure before the compacted record (OW-bisubi)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				codexUser("Keep going."),
+				codexTokenCount(11095489, 190000),
+				codexTokenCount(11095489, 207782),
+				// Nearer the `compacted` record than the last token_count, and
+				// deliberately not used: this is the compaction call's own usage.
+				{ type: "token_usage_record", timestamp: "2026-08-28T07:30:00.000Z", payload: { usage: { total_tokens: 231383 } } },
+				codexCompacted("2026-08-28T07:30:01.000Z"),
+				// 0.150.1 also writes this a few milliseconds later; matching it too
+				// would draw a second marker for the one compaction.
+				{ type: "event_msg", timestamp: "2026-08-28T07:30:01.010Z", payload: { type: "context_compacted" } },
+				codexTokenCount(11095489, 6925),
+				codexAssistant("Carrying on."),
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "assistant"]);
+			expect(turns[1]).toMatchObject({
+				role: "compactionSummary",
+				summary: "",
+				tokensBefore: 207782,
+				timestamp: "2026-08-28T07:30:01.000Z",
+			});
+		});
+
+		it("keeps the last figure across a null info, and reports 0 when none precedes the compaction (OW-bisubi)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				codexUser("Keep going."),
+				// `codex-cli` 0.147.0's compaction is preceded only by a null info,
+				// so the first marker has no figure to draw.
+				{ type: "event_msg", timestamp: "2026-08-12T22:30:00.000Z", payload: { type: "token_count", info: null } },
+				codexCompacted("2026-08-12T22:30:01.000Z"),
+				codexTokenCount(11095489, 190000),
+				// A null info does not clear the figure, matching the live path,
+				// where tokenUsage keeps its last non-null value.
+				{ type: "event_msg", timestamp: "2026-08-12T22:31:00.000Z", payload: { type: "token_count", info: null } },
+				codexCompacted("2026-08-12T22:31:01.000Z"),
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "compactionSummary"]);
+			expect(turns[1]).toMatchObject({ tokensBefore: 0 });
+			expect(turns[2]).toMatchObject({ tokensBefore: 190000 });
+		});
+
+		it("never lends one compaction's figure to the next (OW-bisubi)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				codexUser("Keep going."),
+				codexTokenCount(11095489, 207782),
+				codexCompacted("2026-08-28T07:30:01.000Z"),
+				// No token_count between the two: the second marker reports nothing
+				// rather than borrowing 207782, which is why the live path keys its
+				// figure by item id.
+				codexCompacted("2026-08-28T07:31:01.000Z"),
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "compactionSummary"]);
+			expect(turns[1]).toMatchObject({ tokensBefore: 207782 });
+			expect(turns[2]).toMatchObject({ tokensBefore: 0 });
 		});
 
 		it("reads past line-reader's enumeration caps (200 lines, 512KB) to the real end of a long session (OW-43)", async () => {

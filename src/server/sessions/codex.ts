@@ -198,7 +198,7 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
  */
 export async function extractCodexPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
-	const toolNames = new Map<string, string>();
+	const context: PreviewContext = { toolNames: new Map(), tokensBefore: 0 };
 	let lineNo = 0;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
@@ -206,7 +206,7 @@ export async function extractCodexPreviewTurns(filePath: string): Promise<Sessio
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
 		if (lineNo === 1) continue;
-		const turn = extractStoreTurn(line, toolNames);
+		const turn = extractStoreTurn(line, context);
 		if (turn) turns.push(turn);
 	}
 	return turns;
@@ -219,8 +219,9 @@ export async function extractCodexPreviewTurns(filePath: string): Promise<Sessio
  */
 function extractStoreTurn(
 	line: string,
-	toolNames: Map<string, string>,
+	context: PreviewContext,
 ): SessionPreviewTurn | null {
+	const { toolNames } = context;
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
@@ -229,6 +230,9 @@ function extractStoreTurn(
 	}
 	if (typeof parsed !== "object" || parsed === null) return null;
 	const rec = parsed as Record<string, unknown>;
+
+	const compactionTurn = compactionTurnFor(rec, context);
+	if (compactionTurn) return compactionTurn;
 
 	let payload: Record<string, unknown> | null = null;
 	if (rec.type === "response_item" && typeof rec.payload === "object" && rec.payload !== null) {
@@ -339,16 +343,105 @@ function extractStoreTurn(
 		);
 	}
 
-	if (payload.type === "context_compaction" || payload.type === "compaction") {
-		return {
-			role: "compactionSummary",
-			summary: "",
-			tokensBefore: 0,
-			...(timestamp ? { timestamp } : {}),
-		} as SessionPreviewTurn;
+	return null;
+}
+
+/**
+ * State `extractStoreTurn` carries across lines: tool names by call id, and the
+ * standing context size for the next compaction marker.
+ */
+interface PreviewContext {
+	toolNames: Map<string, string>;
+	tokensBefore: number;
+}
+
+/**
+ * Compaction on disk, and the pre-compaction token figure that goes on its
+ * marker (OW-bisubi). Two record types matter, neither of them a
+ * `response_item`:
+ *
+ * - `{"type":"compacted","payload":{...}}` is the compaction itself, one per
+ *   event. Its payload has no `type` field at all; the keys are `message`,
+ *   `replacement_history`, `window_number`, `first_window_id`,
+ *   `previous_window_id`, `window_id` on `codex-cli` 0.147.0 and 0.150.1, plus
+ *   `compaction_response_id`, `guardian_history` and
+ *   `latest_token_usage_record` on 0.153.0. 0.154.0 is unmeasured -- it wrote
+ *   no compaction in any rollout on the home server as of 2026-09-13.
+ *   0.150.1 also writes an `event_msg`/`context_compacted` a few milliseconds
+ *   later; matching that too would draw two markers for one compaction, so
+ *   only `compacted` is matched.
+ * - `{"type":"event_msg","payload":{"type":"token_count","info":{...}}}`
+ *   carries the figure. `tokensBefore` is `info.last_token_usage.total_tokens`
+ *   of the last such record strictly before the `compacted` one, which is the
+ *   disk analogue of the live path's sample at `item/started
+ *   contextCompaction` (OW-kelomi, `adapters/codex/reducer.ts`) and has to mean
+ *   the same thing, because both markers can be on one screen. Those two
+ *   sampling points are not the same moment -- live samples before the
+ *   compaction runs, and the `compacted` record is written at its completion --
+ *   and they agree only because the intermediate updates the live path
+ *   deliberately refuses (16304 -> 14692 -> 4844 in `docs/MANUAL_TESTING.md`)
+ *   are not persisted as `token_count` records. Measured so on 0.150.1 and
+ *   0.153.0; a release that persists them would report the post-compaction
+ *   size here under a label that says "before".
+ *
+ * Two fields deliberately not used. `info.total_token_usage` is cumulative for
+ * the thread and climbs straight through a compaction (0.150.1: 11095489 on
+ * both sides), which is why the live path refused its `ThreadTokenUsage.total`
+ * counterpart. A top-level `token_usage_record` sits nearer the `compacted`
+ * record on 0.153.0 but reports the compaction call's own usage, not the
+ * standing context -- the disk analogue of the later sample the live path
+ * skips. Hence the filter to `event_msg`/`token_count`.
+ *
+ * Where no figure precedes the `compacted` record the marker reports 0, which
+ * is what the single 0.147.0 rollout on the home server does: the one
+ * `token_count` before its compaction carries `info: null`. That version does
+ * write a populated `info` on the two `token_count` records after it, so the
+ * null is not a property of the version so much as of that point in the file.
+ *
+ * A figure is *not* carried across a compaction: it is cleared as the marker is
+ * drawn, so a second compaction with no `token_count` between reports nothing
+ * rather than borrowing the first's figure. Same reason the live path keys its
+ * figure by item id (`adapters/codex/reducer.ts`). A `token_count` whose `info`
+ * is null does not clear it, matching the live path, where `tokenUsage` keeps
+ * its last non-null value.
+ *
+ * The vendored `resources/codex-protocol/ResponseItem.ts` does declare
+ * `compaction` and `context_compaction` variants, which is what the arm this
+ * replaced matched. They are wire shapes: across the 88 rollouts on the home
+ * server on 2026-09-13, no `response_item` payload carries either type, so
+ * matching them here drew nothing.
+ */
+function compactionTurnFor(
+	rec: Record<string, unknown>,
+	context: PreviewContext,
+): SessionPreviewTurn | null {
+	const payload = typeof rec.payload === "object" && rec.payload !== null
+		? rec.payload as Record<string, unknown>
+		: null;
+
+	if (rec.type === "event_msg" && payload?.type === "token_count") {
+		const info = typeof payload.info === "object" && payload.info !== null
+			? payload.info as Record<string, unknown>
+			: null;
+		const last = typeof info?.last_token_usage === "object" && info.last_token_usage !== null
+			? info.last_token_usage as Record<string, unknown>
+			: null;
+		if (typeof last?.total_tokens === "number") context.tokensBefore = last.total_tokens;
+		return null;
 	}
 
-	return null;
+	if (rec.type !== "compacted") return null;
+	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
+	const tokensBefore = context.tokensBefore;
+	context.tokensBefore = 0;
+	return {
+		role: "compactionSummary",
+		// Empty for the same reason as the live marker: the summary field stays
+		// blank there, and two surfaces showing one event must not differ.
+		summary: "",
+		tokensBefore,
+		...(timestamp ? { timestamp } : {}),
+	} as SessionPreviewTurn;
 }
 
 const CODEX_PREVIEW_IDENTITY = {
