@@ -1766,14 +1766,14 @@ The throwaway `PI_CODING_AGENT_DIR` is no longer forced by a read-only `~/.pi/ag
 What this leaves open.
 The evidence blob for *these two runs* records `pi --version` and never records which model answered: the probe sent no `--model`, so Pi resolved its own default out of the `settings.json` copied into the throwaway state home.
 That file was measured one section above, twice that same evening, selecting `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, and it was not edited between those readings and these runs — so the model is knowable with confidence for them, by inference rather than from the blob.
-The probe has since been taught to read it off the wire (see "The Pi smoke probe names the model that answered" below, OW-guvojo), so a run at `beb9b47` or later does record it and this gap is closed for future runs, not retroactively for these.
+The probe has since been taught to read it off the wire (see "The Pi smoke probe names the model that answered" below, OW-guvojo), so a run at `1c749a8` or later does record it and this gap is closed for future runs, not retroactively for these.
 It is also the reason these runs sit outside `AGENTS.md`'s model pin without violating it: nothing passed `--model`, and the settings file happened to name the pinned model anyway.
 The `--tool-check` run's abort phase is not clean evidence either: the probe posts the long prompt immediately after the `toolCall` block arrives, without waiting for that turn to reach idle, so what it aborted there may have been the tool turn — the bare run's abort is the one to cite, and OW-hahohi carries the defect.
 That same card carries the other half of it: the long prompt asks for the integers 1 through 10000 and the bare run's transcript stood at 472 characters when the abort landed, so the check exercises far less buffered output than its prompt implies.
 
 ## The Pi smoke probe names the model that answered (OW-guvojo)
 
-Run on the home server 2026-09-13, **`pi 0.85.1`**, at commit `beb9b47` — the probe as committed by that change, bare, no `--tool-check`.
+Run on the home server 2026-09-13, **`pi 0.85.1`**, at commit `1c749a8` — the probe as committed by that change, bare, no `--tool-check`.
 `"result": "pass"`, exit 0, 41 seconds wall clock (23:37:00.236 to 23:37:41.650 local, `-04:00`), client rebuilt rather than reused (`build.returncode: 0`) and `built_client` answering HTTP 200 with `has_app_mount: true`, so the commit named above is the code that served the run.
 
 **The model is on the SSE stream, and the evidence now carries it: `openrouter/deepseek/deepseek-v4.1-flash`.**
@@ -1788,3 +1788,7 @@ The two agree on the model, but a reader matching them literally would conclude 
 **The check fails loudly rather than recording an empty field.**
 `model` is `null` until `start()`'s `get_state` answers, so an early `status` event can legitimately carry nothing.
 Deliberately broken first, by reading a field name that does not exist: the run reported `"result": "fail"` with `RuntimeError: no settled snapshot or status event named the model Pi resolved`, exit 1, and `checks` stopping at `idle` — so the check has been seen red, and a future Pi that stops reporting a model will stop this probe instead of quietly dropping the field.
+
+**Reproduced once more from `main`, by a second hand.**
+The run above was made by the agent that wrote the change, on its own branch; the same probe was then run again from the main checkout at `9b0bfc1`, bare, and reported `"result": "pass"` with `checks.model` reading `{"result": "pass", "at": "2026-09-13T23:40:29.435-04:00", "model": "openrouter/deepseek/deepseek-v4.1-flash", "event_type": "snapshot"}`.
+Same model string, same event type, same settle point — so the field is not an artifact of one run's timing.
