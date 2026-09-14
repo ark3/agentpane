@@ -96,7 +96,8 @@ Work items are cards.
 Read those rather than a retelling; what follows is only what card cannot know about this repo.
 Run `card workflow` when cards come up in the session, and not before: there is no session-opening question to ask about which of card's procedures this session is going to be, and asking one was a defect.
 
-Card reads this deck through per-clone config that is deliberately not synced: `.git/card/card-config.toml`, exactly three lines — `prefix = "OW"`, `deck = "../../docs/work"` (resolved relative to `.git/card/`), and `public = true`, which stands card's commit-lint gate down and is what keeps citing `OW-` ids in commit subjects legal here.
+Card reads this deck through per-clone config that is deliberately not synced: `.git/card/card-config.toml` must carry `prefix = "OW"`, `deck = "../../docs/work"` (resolved relative to `.git/card/`), and `public = true`, which stands card's commit-lint gate down and is what keeps citing `OW-` ids in commit subjects legal here.
+It may also carry local card-runner settings, such as this work laptop's `[run]` block; those do not change the deck contract.
 Writing that file, like installing card or Bun, is the owner's provisioning of a machine, not any session's work.
 
 Do not take formatting from the cards already in the deck.

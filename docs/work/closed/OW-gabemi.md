@@ -1,5 +1,6 @@
 ---
 labels: [change, work-laptop]
+closed: done
 ---
 
 # Set the work laptop up for card: install the tool, write that clone's deck config, and verify the deck serves there.
@@ -37,3 +38,8 @@ Done when, all on the laptop:
 - The close note names the tool versions that mattered (bun, and the card
   checkout's commit) and anything the visit had to fix, and the close itself
   goes through card's close procedure — this machine's first.
+
+## Close note
+
+Verified on the work laptop with bun 1.4.2 and card checkout 2321344a6279fc79e9b60c81b2bb13bab07bf07e: card status identified the public /home/asa0717/src/agentpane/docs/work deck at 64 open and 157 closed cards, and card show OW-1 plus card show OW-gabemi both parsed.
+Updated AGENTS.md to state that the three deck settings are required while allowing the laptop's additional local [run] settings.
