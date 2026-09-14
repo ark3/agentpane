@@ -31,10 +31,16 @@ queue could drain without any `agent_settled` in between and look identical on
 the SSE stream.
 
 So the probe puts a `pi` shim first on the server's PATH that pipes the real
-binary's stdout through `tee`. The shim is transparent to the adapter (stdin,
-stdout and exit status pass through untouched) and the tap file is a verbatim
-copy of every line Pi wrote. `queue_update` is the load-bearing one: Pi names
-the queue it put the text in, `steering` or `followUp`.
+binary's stdout through `tee`. Stdin, stdout and stderr pass through untouched
+and the tap file is a verbatim copy of every line Pi wrote. `queue_update` is
+the load-bearing one: Pi names the queue it put the text in, `steering` or
+`followUp`.
+
+The one thing the shim does *not* pass through is Pi's exit status: `sh` reports
+a pipeline's last stage, so the server sees `tee`'s status and never Pi's. That
+costs this probe nothing -- it decides on positive evidence in the tap and never
+reads the agent's exit code -- but a probe copied from this one that wants to
+assert on how Pi exited has to take the status out of the pipeline first.
 
 The tap preserves **order**, not time -- `tee` stamps nothing. Every duration
 in the record is measured on the probe's side of the wire, from a stamp taken
