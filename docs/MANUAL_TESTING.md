@@ -229,7 +229,7 @@ deferred as manual are now automated; the fourth is partly closed.
 |---|---|
 | 1. `direnv -> sbox/bwrap -> pi` startup | Passed. Create returned HTTP 201 and attach HTTP 200, with exactly one Pi agent under the server. The chain is `bun -> bwrap -> bwrap -> pi`; `direnv` and the Python `sbox` wrapper exec into it rather than surviving beside it, the same shape Codex shows. |
 | 2. Virtual-id materialization and the `renamed` event | Passed, but **not where it was expected**: Pi names its session file during `start()`, so the rename lands during attach rather than on the first prompt (HANDOFF finding 41). The adopted id is a real `.jsonl` path, the superseded `virtual:` id still resolves, and it resolves to the new ref. A prompt sent through the superseded id returned HTTP 202. |
-| 3. Streaming and tool output | Passed at the transport boundary. 16 upserts with 16 distinct increasing lengths, then idle via an authoritative snapshot. With `--tool-check`, a turn produced `thinking` and `toolCall` blocks with no approval dialog. **Still not verified in a browser against a real backend** — the DOM half of the original check, open as OW-24. |
+| 3. Streaming and tool output | Passed at the transport boundary. 16 upserts with 16 distinct increasing lengths, then idle via an authoritative snapshot. With `--tool-check`, a turn produced `thinking` and `toolCall` blocks, and the run reported no approval dialog — a reading that run could not actually make, since the field it rests on was captured before the tool prompt was posted (see "The Pi smoke probe measures the tool turn's own requests" at the end of this file). **Still not verified in a browser against a real backend** — the DOM half of the original check, open as OW-24. |
 | 4. Abort and shutdown with no orphan | Passed. The long turn was streaming when abort was requested; abort returned HTTP 204 and idle followed, with the transcript unchanged 1.5s later. SIGTERM to the server exited it 0 with no run-scoped Pi worker remaining. |
 
 Cleanup was verified rather than assumed on every run: no orphaned worker, and
@@ -1751,16 +1751,16 @@ Waits budgeted at 60, 90, 120 and 180 seconds all resolved within seconds.
 **A shell tool call reaches the wire with no dialog request beside it — but this run cannot add to finding 42.**
 The `--tool-check` run saw a `toolCall` block at 23:13:06.302, in a message whose blocks were `["thinking", "toolCall"]`.
 That is a tool call reaching the client, not an executed command: no `toolResult` and no completion of that turn is recorded either here or in the probe's evidence.
-`agent_requests_seen` was the empty list in both runs, and in the `--tool-check` run that field is worthless: the probe assigns it once, immediately after the *first* turn goes idle and before the tool prompt is ever posted, so it was captured before the tool turn existed.
+`agent_requests_seen` was the empty list in both runs, and in the `--tool-check` run that field was worthless: the probe as it stood assigned it once, immediately after the *first* turn went idle and before the tool prompt was ever posted, so it was captured before the tool turn existed.
 Finding 42 rested on the same field with the same ordering; OW-lapuye scoped the field to each turn's window and measured it, and the finding now cites that run instead (see "The Pi smoke probe measures the tool turn's own requests" at the end of this file).
-Two limits hold whichever way that is repaired.
+Two limits held whichever way that was repaired, and both survive the repair.
 `agent_requests_seen` can only ever see an `extension_ui_request` carrying a dialog method — that is the Pi adapter's sole source of a `request` event (`src/server/adapters/pi/reducer.ts`) — so an approval delivered by any other mechanism is invisible to it by construction.
 And the probe's own comment beside that field, not `docs/DESIGN.md`, is what frames this as "whether these fire at all under the sandbox is an open question (D2a)"; D2a itself is written about Codex's `ServerRequest`, and that phrase is not in it.
 
 **Two of the five files the probe copies do not exist here, including `trust.json`.**
 `copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]`; `models.json` and `trust.json` are simply absent from `~/.pi/agent` on this machine.
 The `PI_STATE_FILES` comment calls that tuple "enough for a turn", and three of the five were.
-This matters for finding 42, which explicitly qualifies itself with "the harness copies `trust.json` into its temporary state dir": here it copied none, and both runs' first turns — the window `agent_requests_seen` does validly cover — still raised no dialog.
+This matters for finding 42, which qualifies itself on that file either way — it said "the harness copies `trust.json` into its temporary state dir" when these runs were made, and after OW-lapuye's rewrite says "the home server has no `trust.json` for the harness to copy": here it copied none, and both runs' first turns — the window `agent_requests_seen` does validly cover — still raised no dialog.
 The throwaway `PI_CODING_AGENT_DIR` is no longer forced by a read-only `~/.pi/agent` (see the section above), but the probe still sets one, and out of band after both runs `~/.pi/agent/sessions/` held only a JSONL predating them.
 
 What this leaves open.
@@ -1856,17 +1856,31 @@ The old `agent_requests_seen` was one whole-stream list assigned at the first tu
 The `--tool-check` run reported `{"first_turn": {"window": {"from_index": 6, "to_index": 54}, "requests": []}, "tool_turn": {"window": {"from_index": 54, "to_index": 81}, "requests": []}}`, and the bare run reported `first_turn` alone at `7`–`57` with no `tool_turn` key at all.
 The tool window opens where the tool prompt was posted and closes at the first cut after that turn reported idle — `checks.tool_output` carried `{"at": "2026-09-13T23:59:41.150-04:00", "blocks": ["thinking", "toolCall"], "turn_streaming_at": "2026-09-13T23:59:40.663-04:00", "turn_idle_at": "2026-09-13T23:59:41.833-04:00"}`, the idle wait OW-hahohi added being what gives the window an end.
 So this is the first run of anything that could have observed a dialog request raised by a Pi tool turn.
-The two windows are contiguous — 54 to 54 — so nothing between them falls outside both.
+The two windows are contiguous — 54 to 54 — so nothing between them fell outside both.
+Read that as a property of the run and not of the probe: `first_turn`'s end and `tool_start` are two separate `len(stream.snapshot())` calls, so an event arriving between them would land in neither window.
 
 **The empty window was shown to be a real slice rather than a slice of nothing.**
 An empty list is the same output whether the window is measuring correctly or is simply misaddressed, so the predicate was temporarily relaxed to `event.get("type") in ("request", "upsert")` for one throwaway run, which is not in the committed change.
 That run's two windows — `7`–`55` and `55`–`83` — carried 42 and 23 entries respectively, so both slices do cover live traffic and the tool window in particular is not an empty range.
+The throwaway also added a `_type` key to each entry so the relaxed matches were distinguishable, which `requests_in` does not emit; neither edit is in the committed change.
 That establishes the windowing, not the extraction: nothing here has ever seen a live `type: "request"` event from Pi, and the `kind` field's shape is believed from `src/server/adapters/pi/reducer.test.ts`, which asserts `result.request` for a `select` dialog method and its absence for a fire-and-forget `notify`.
 
-**Two limits stand, and neither is a defect.**
+**Three limits stand on the repaired field.**
 The field can only ever see an `extension_ui_request` carrying a dialog method — the Pi adapter's sole source of a `request` event — so "empty" will never mean "Pi asked nothing", only "no dialog request reached the wire"; the docstring at `requests_in` now says so at the site.
-And the abort and shutdown phases are still outside every window, exactly as they were before this change, because the card asked for the tool turn and nothing wider.
+The abort and shutdown phases are still outside every window, exactly as they were before this change, because the card asked for the tool turn and nothing wider.
+And the `tool_turn` key is written only after `tool_turn_idle` resolves, so it exists only on the happy path: a dialog request that actually *blocked* the turn is precisely what would stop that turn reaching idle, the 180-second wait would raise, and the blob would carry no `tool_turn` key at all — shape-identical to a bare run, though the run would report `"result": "fail"` naming that wait.
+So this window can witness a non-blocking `request` event during the tool turn, and cannot witness a blocking one; OW-johano carries that.
 
 **What this does to finding 42.**
 `docs/HANDOFF.md` finding 42 was rewritten in the same change to say what was measured rather than what the old field appeared to say.
-Its claim survives — a shell tool ran with no dialog request on the wire — but it is now dated to `pi 0.85.1` on this machine, where no `trust.json` was copied, rather than resting on the `pi 0.84.1` laptop run whose evidence column could not carry it.
+Its claim survives in narrowed form — a shell tool *call* reached the wire with no dialog request beside it — and is now dated to `pi 0.85.1` on this machine, where no `trust.json` was copied, rather than resting on the `pi 0.84.1` laptop run whose evidence column could not carry it.
+The headline previously read "Pi ran a shell tool", which nothing has ever measured: the probe's `tool_called` predicate matches a `toolCall` block and no run has recorded a `toolResult`, exactly as the OW-moradi section above already noted about the same predicate.
+That is now stated as a limit on the finding rather than left in its headline.
+
+**Reproduced from `main` after review, at `719a1b4`.**
+The two runs above were made by the agent that wrote the probe change, on its own branch; review then corrected finding 42's headline and this section's prose, and the probe was run again from the main checkout, once with `--tool-check` and once bare.
+Both reported `"result": "pass"` and exited 0, on `pi 0.85.1`, each naming `openrouter/deepseek/deepseek-v4.1-flash` and copying the same three credential files.
+The `--tool-check` run (2026-09-14 00:03:31.927 to 00:03:43.215 local, `-04:00`) reported `first_turn` at `7`–`63` and `tool_turn` at `63`–`95`, both with `"requests": []`, around a `checks.tool_output` of `{"at": "2026-09-14T00:03:40.655-04:00", "blocks": ["thinking", "toolCall"], "turn_streaming_at": "2026-09-14T00:03:40.206-04:00", "turn_idle_at": "2026-09-14T00:03:41.174-04:00"}`.
+The bare run (00:03:43.403 to 00:03:54.034) reported `first_turn` at `7`–`56` and again no `tool_turn` key.
+The windows are wider here than in the pair above and their boundaries fall at different indices, which is what a window pinned to stream position rather than to a fixed count should do; the two windows were again contiguous, at 63.
+So the tool window holds across two hands and four runs, and it has been empty in all of them.
