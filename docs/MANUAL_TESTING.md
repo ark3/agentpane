@@ -1688,3 +1688,33 @@ Both readings are correct for their moment, which is the only reason this paragr
 What this leaves open.
 `resources/probes/agentpane_pi_smoke.py` drives Pi through the built server and has never been run on this machine; nothing here exercised the server, the adapter, or a fork.
 Whether the read-only `~/.pi/agent` survives the next sandbox restart is unmeasured and expected to change — the owner intends to grant write access, and when that lands the `docs/HANDOFF.md` gotcha and the `AGENTS.md` note above both want re-measuring rather than editing from memory.
+
+## The sandbox restart makes the backend state directories writable (OW-vowire)
+
+Run on the home server 2026-09-13, later the same evening as the section above, after the owner restarted the sandbox.
+That section measured the opposite condition hours earlier, and both readings stand for their moment.
+
+**The sandbox is still on; three directories inside it are not read-only any more.**
+`$HOME` itself still refuses a write, which is the test `docs/HANDOFF.md` gives for whether the sandbox is running at all, so it is.
+Writable now: `~/.pi/agent`, `~/.codex`, `~/.claude`, alongside `/tmp` and the repo tree.
+`~/src` does not exist on this machine.
+
+**Pi resolves its configured model with no redirection, and runs a turn.**
+`pi --mode rpc` against the real `~/.pi/agent`, with `--session-dir` pointed at a throwaway so the corpus stays clean, answered `get_state` with `deepseek/deepseek-v4.1-flash`, provider `openrouter`, `thinkingLevel: "high"` — the values in `settings.json`, which Pi could not read at all a few hours earlier.
+The prompt `Say exactly: PONG` settled with `stopReason: "stop"`, text `PONG`, 1563 in / 4 out, $0.00024, and stderr was empty: the `Invalid settings file ... EROFS` warning is gone.
+`pi --version` no longer prints it either.
+
+**The same holds through `sbox`, which is the shape a real spawn takes.**
+`sbox -- pi --mode rpc`, run from the repo root so sbox can find its workspace, reported the same model and thinking level.
+Only `get_state` was asked there; no turn was driven through sbox.
+sbox requires a workspace it can identify — from `/tmp` it refuses with a marker-file and git-root diagnostic — so a probe that spawns it must set `cwd` to the repo.
+
+**Codex's sqlite failure no longer reproduces.**
+`codex app-server` with `/dev/null` on stdin exits 0 with empty stdout and empty stderr on `codex-cli 0.154.0`.
+Before the restart this path printed `failed to initialize sqlite state runtime`.
+That is the whole of what was checked: no thread was started and no turn was driven, so this says the state runtime initializes, and nothing more.
+
+What this closes and what it leaves.
+The three passages OW-vowire named — the `docs/HANDOFF.md` state-directory gotcha, its neighbouring sbox-profiles sentence, and the Pi sentence in `AGENTS.md`'s model pin — are reconciled with these readings in the same change, each keeping the date it was measured on.
+The model pin stays a flag on all three CLIs: the pre-restart reading is exactly the failure the flag exists to survive, and a readable settings file is still a mutable one.
+The throwaway `PI_CODING_AGENT_DIR` and `CODEX_HOME` keep their other purpose — keeping a probe off the real session corpus and credentials — which is why `fork_probe.py` should not drop them.

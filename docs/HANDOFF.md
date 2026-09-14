@@ -174,14 +174,16 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
   One consequence bites dispatch: a dispatched worktree must live *inside* the repo tree (`.worktrees/<id>`, gitignored), because it is the only path mounted read-write — a worktree anywhere outside it (`~/src/`, `/tmp`, a sibling of the repo) fails with `Read-only file system`.
   `card worktree <id>` satisfies this by construction: it puts the tree at `<main checkout>/.worktrees/<id>`.
   See `AGENTS.md`, "Dispatching an implementer".
-- **Pi and Codex each need a writable state directory, and sbox will not give them one from inside this sandbox.**
-  Codex initializes a sqlite state runtime under `~/.codex`; Pi takes a lock under `~/.pi/agent` merely to *read* its credential store.
-  Both are read-only here, and running through `sbox` does **not** fix it — an inner bubblewrap cannot re-mount read-write what the outer namespace mounted read-only.
-  Verified: `sbox -- codex app-server` fails with `failed to initialize sqlite state runtime`, and `sbox -- pi --mode rpc` returns `stopReason: "error"` with `EROFS ... auth.json.lock`.
-  The workaround, which `capture_fixtures.py` implements, is a throwaway state dir per backend with credentials copied in: `CODEX_HOME` for Codex, **`PI_CODING_AGENT_DIR`** for Pi (Pi's exact equivalent — see `ENV_AGENT_DIR` in `pi-coding-agent/dist`).
-  A failure here is quiet and looks like success: the turn "completes" in under a second with `stopReason: "error"` and empty content.
-  With that state dir, a **live spawn from inside this sandbox does work** — it is how `resources/probes/agentpane_codex_smoke.py` drives a real Codex through the built server, and how finding 34 was settled.
-  Earlier drafts of this document said the sandbox prevented one; what it prevents is a spawn that inherits the read-only `~/.codex`.
+- **Each backend needs a writable state directory, and since 2026-09-13 it has one.**
+  Codex initializes a sqlite state runtime under `~/.codex`; Pi takes a lock under `~/.pi/agent` merely to *read* its credential store and its settings.
+  Both of those directories were read-only until the owner widened the sandbox on 2026-09-13, and `~/.claude` came with them; `$HOME` itself is still read-only, so the sandbox is still on and that test for it still holds.
+  Measured after the change (OW-vowire, `pi 0.85.1`, `codex-cli 0.154.0`): `pi --mode rpc` against the real `~/.pi/agent` resolves its configured model and runs a turn to `stopReason: "stop"`, the same through `sbox --` from the repo root, and `codex app-server` starts with no sqlite error.
+  The sbox note below, which says its `pi` and `codex` profiles mount those directories rw, no longer contradicts this bullet — it did until that date, when the outer namespace was mounting them read-only underneath it.
+  **What was true before 2026-09-13**, and is why the probes are built the way they are: both directories were read-only, running through `sbox` did **not** fix it (an inner bubblewrap cannot re-mount read-write what the outer namespace mounted read-only), `sbox -- codex app-server` failed with `failed to initialize sqlite state runtime`, and `sbox -- pi --mode rpc` returned `stopReason: "error"` with `EROFS ... auth.json.lock`.
+  The workaround those runs used, which `capture_fixtures.py` still implements, is a throwaway state dir per backend with credentials copied in: `CODEX_HOME` for Codex, **`PI_CODING_AGENT_DIR`** for Pi (Pi's exact equivalent — see `ENV_AGENT_DIR` in `pi-coding-agent/dist`).
+  Keep it for anything that must not touch the real session corpus or credentials — `fork_probe.py` uses it for that reason, not for this one.
+  A failure of this kind is quiet and looks like success: the turn "completes" in under a second with `stopReason: "error"` and empty content, which is what to suspect first if a backend regresses here.
+  It is how `resources/probes/agentpane_codex_smoke.py` drove a real Codex through the built server, and how finding 34 was settled.
 - **`direnv` is the first link in every spawn, and the home server did not have it until 2026-09-13.**
   All three backends spawn as `direnv exec <cwd> sbox -- <agent>` (D7, and `src/server/adapters/types.ts` states it as the contract), so without `direnv` on `PATH` the first prompt fails with HTTP 500 and `Failed to spawn <backend> (direnv): Executable not found in $PATH: "direnv"` -- every backend, not one.
   The home server now has the real thing, `direnv 2.37.1` at `/sbin/direnv`, installed by the owner on 2026-09-13 (OW-naribu).
