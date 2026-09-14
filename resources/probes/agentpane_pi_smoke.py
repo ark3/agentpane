@@ -366,10 +366,11 @@ def main() -> int:
             tool = stream.wait_for(tool_called, 180, "a toolCall block to reach the wire")
 
             # A `toolCall` on the wire says the turn started, not that it ended,
-            # and section 4 posts its prompt the moment this block returns. On
-            # 2026-09-13 (`pi 0.85.1`) that block arrived at 23:13:06.302 and
-            # section 4 saw `streaming=true` 42 ms later -- the tool turn's own
-            # state, not a new turn's -- so what that run aborted is unknown.
+            # and section 4 posts its prompt the moment this block returns. In
+            # the OW-moradi `--tool-check` run, at `967b319` (2026-09-13,
+            # `pi 0.85.1`), that block arrived at 23:13:06.302 and section 4 saw
+            # `streaming=true` 42 ms later -- the tool turn's own state, not a
+            # new turn's -- so what that run aborted is unknown.
             # Wait for this turn to reach idle, and record the idle point, so
             # the abort below is provably issued against a fresh turn.
             def tool_turn_idle(events: list[tuple[str, dict[str, Any]]]) -> Any:
@@ -396,9 +397,10 @@ def main() -> int:
         # The abort is only evidence if the turn it lands on is the one this
         # prompt starts. `pre_abort_streaming` below cannot establish that: a
         # previous turn still running answers `True` exactly as this one does,
-        # which is how the 2026-09-13 `--tool-check` run passed while aborting
-        # an unknown turn. So assert the session is idle *before* the prompt is
-        # posted -- the reading that does distinguish them -- and record it.
+        # which is how the OW-moradi `--tool-check` run, at `967b319`, passed
+        # while aborting an unknown turn. So assert the session is idle *before*
+        # the prompt is posted -- the reading that does distinguish them -- and
+        # record it.
         pre_prompt_streaming = last_streaming(stream.snapshot(), real_ref)
         if pre_prompt_streaming is not False:
             raise RuntimeError(
@@ -409,10 +411,11 @@ def main() -> int:
         abort_start = len(stream.snapshot())
         # What this asks for and what it delivers are not the same thing, and the
         # gap is the phase's real reach. As of `pi 0.85.1` on 2026-09-13 the
-        # model declined the task and explained itself instead: 472 characters
-        # on the bare run and 467 under `--tool-check`, against a request for
-        # 10000 lines. So the phase establishes that `/abort` is accepted and
-        # that a streaming turn stops and stays stopped; it does not establish
+        # model declined the task and explained itself instead in every one of
+        # the four runs measured that day, leaving a pre-abort transcript of
+        # between 449 and 472 characters against a request for 10000 lines.
+        # So the phase establishes that `/abort` is accepted and that a
+        # streaming turn stops and stays stopped; it does not establish
         # anything about tearing down a large buffered transcript.
         # The prompt is left as written on purpose -- `agentpane_codex_smoke.py`
         # sends the same string and nothing has measured it there, so each run

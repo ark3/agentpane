@@ -1805,7 +1805,8 @@ Nothing passed `--model`; Pi resolved that from the `settings.json` copied into 
 **The tool turn and the aborted turn are now separated by a recorded idle point, not by a reader subtracting timestamps.**
 `checks.tool_output` gained the tool turn's own settle: `{"at": "2026-09-13T23:45:39.606-04:00", "blocks": ["thinking", "toolCall"], "turn_streaming_at": "2026-09-13T23:45:39.006-04:00", "turn_idle_at": "2026-09-13T23:45:40.138-04:00", "turn_idle_event_type": "snapshot"}`.
 `checks.abort` then carries `"streaming_before_long_prompt": false`, read immediately before the long prompt was posted, with the long turn's own `"streaming_at": "2026-09-13T23:45:40.166-04:00"` — 28 ms after the tool turn went idle.
-The bare run reports the same `"streaming_before_long_prompt": false`.
+The bare run reports the same `"streaming_before_long_prompt": false`, where it is structurally guaranteed rather than corroborating: `checks.idle` has just waited for `streaming=false` and no prompt intervenes.
+The field's whole force is as a tripwire — remove either idle wait and it fails, which is what the red run below shows.
 That field, not the interval, is the assertion: the previous `streaming_at_abort: true` guard answers `true` whichever turn is running, which is exactly how the OW-moradi run passed while aborting an unknown turn.
 
 **The new guard was seen red before it was believed.**
@@ -1818,9 +1819,11 @@ So the guard fails on precisely the condition the OW-moradi `--tool-check` run m
 Bare: requested at 23:45:58.251, idle at 23:45:58.268 — 17 ms — 467 characters, likewise unchanged through settling.
 Those two intervals are genuine request-to-event measurements because `abort_requested_at` is stamped immediately before the request is sent; no other pair of timestamps in the blob may be read as a duration, since the rest are SSE arrival stamps against waits whose events were often already buffered.
 The bare run's tree was `bun → bwrap → bwrap → pi`, one Pi descendant reporting `comm=pi`, and SIGTERM left `remaining_worker_pids: []`.
+What these runs do not close is the hole the probe's own comment at the `pre_abort` cut names: the cut is taken immediately before the request, so a turn that ended of its own accord during the abort's round trip satisfies every check in this phase.
+Here that is a live alternative reading rather than a theoretical one — the declined turn produced a few hundred characters and the abort was issued about 400 ms after `streaming=true` — and closing it needs a causal signal from the backend that the SSE stream does not carry.
 
 **The long prompt was deliberately left as it is, so what the phase establishes is narrower than the prompt reads.**
-The prompt asks for the integers 1 through 10000, one per line; as of `pi 0.85.1` the model declines and explains itself instead — 449 and 467 characters here, 472 and 467 in the OW-moradi runs.
+The prompt asks for the integers 1 through 10000, one per line; as of `pi 0.85.1` the model declines and explains itself instead — 449 under `--tool-check` and 467 bare here, against 472 bare and 467 under `--tool-check` in the OW-moradi runs.
 It was not reworded because `resources/probes/agentpane_codex_smoke.py` sends the same string, nothing has measured how that string behaves there, and changing one probe's prompt on a guess is worse than recording what the prompt delivers; a comment beside the prompt now says so at the site.
 The phase therefore establishes that `/abort` is accepted against a streaming turn and that the turn stops and stays stopped — and establishes nothing about tearing down a large buffered transcript.
 No threshold is asserted on the length, because the model's compliance is not something this probe can require.
@@ -1828,6 +1831,7 @@ No threshold is asserted on the length, because the model's compliance is not so
 **Read `assistant_length_at_abort` as an upper bound, not as the aborted turn's length.**
 It is `max_assistant_length` over the pre-abort snapshot, which is the longest assistant message *in the session* — matching the field `agentpane_codex_smoke.py` already reports, and carrying the same limit.
 Under `--tool-check` two turns precede the aborted one, so a longer earlier reply would stand in for it, and nothing in the blob attributes the number to a message.
-The first turn's transcript was still well short of it when `text_stream` last sampled it — 77 characters under `--tool-check` and 44 bare, against 449 and 467 — so the aborted turn is the likely owner in these two runs, by inference and not from the blob.
+The one bound the blob offers does not settle it: `text_stream` reports the first turn at 77 characters under `--tool-check` and 44 bare, but `growing_assistant_text` returns as soon as growth is established, so that is a mid-stream sample and not the finished reply — and under `--tool-check` the first turn then ran a further 8.5s (`streaming_at` 23:45:30.468 to `idle_at` 23:45:38.971), against roughly 400 ms of wire time for the aborted turn.
+So which message the number belongs to is unsettled in both runs, and reading it as the aborted turn's own length is exactly what this field cannot support.
 The post-abort growth check inherits the same shape: it compares that session maximum, so a *shorter* message arriving after the abort would not move it.
 Neither limit is a defect this change was asked to fix, and both are named here so the next reader does not rediscover them with a re-run.
