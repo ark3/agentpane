@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # disposeAll leaves the same #adoptRef-after-teardown window OW-yavewa closed for close()
@@ -25,3 +26,19 @@ Whether anything observable follows from that entry between `disposeAll()`'s wal
 ## Done when
 
 Either a test in `src/server/http/session-manager.test.ts` drives `disposeAll()` concurrently with a gated `fork()` and asserts whatever observable was found to be damaged, going red first and green after a fix -- the OW-yavewa test `"does not re-key a session that was closed while its fork was in flight"` is the pattern for gating the adapter call -- or this card closes `--declined` with the reachability reasoning recorded, naming the routes that were checked and found not to read the table in that window.
+
+## Close note
+
+Fixed, in ddcd24f on `main`: `disposeAll()` now sets `torndown` on every `ManagedSession` in its snapshot, before its first await, symmetric with `close()`, so `#adoptRef`'s existing guard covers both teardown paths.
+
+The card asked first whether anything observable follows from the re-inserted entry, and the answer is yes -- the counter-argument it recorded (that `#shuttingDown` stops `attach` handing it back out) does not hold, because `attach` is not the only way out.
+`liveRefs()` is reached from `GET /api/events` via `broadcaster.sendOpeningSnapshots` in `src/server/http/app.ts`, with no shutdown guard anywhere on that path; `adapterFor()` is reached from the `abort` and `compact` routes via `requireAttached`, likewise without `attach`.
+`app.close()` does run `broadcaster.closeAll()` before `disposeAll()`, so the clients connected at SIGTERM are cut -- but `addClient` has no guard and the stream writes `retry: 500`, so a browser reconnects into the shutdown window and is served a full snapshot of a session whose subprocess is dead.
+That is exactly the harm `#adoptRef`'s own docblock names ("where `liveRefs()` hands it to every reconnecting client"), which it claimed was guarded for both callers and was not.
+
+Verified by `"does not re-key a session that was disposed while its fork was in flight"` in `src/server/http/session-manager.test.ts`, the existing `close()` test of the same window with `disposeAll()` in its place, gating the fake adapter's `fork` on a `deferred()`.
+Shown red first with the fix line removed -- it fails on `expect(sessions.liveRefs()).toEqual([])`, returning the fork's re-keyed id -- and green with it.
+The fake's default `forkMode: "pi"` is load-bearing: on the other modes the adapter's ref never moves and `#adoptRef` returns at `oldKey === newKey`, proving nothing.
+`bun run check` clean on `main`: 49 files, 1066 tests.
+
+Filed OW-luwowo for what this does not fix: no route but `attach` consults `#shuttingDown`, so `/api/events`, `GET /api/sessions`, `abort`, `compact` and `DELETE` all serve normally for the whole of shutdown.
