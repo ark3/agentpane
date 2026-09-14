@@ -1752,7 +1752,7 @@ Waits budgeted at 60, 90, 120 and 180 seconds all resolved within seconds.
 The `--tool-check` run saw a `toolCall` block at 23:13:06.302, in a message whose blocks were `["thinking", "toolCall"]`.
 That is a tool call reaching the client, not an executed command: no `toolResult` and no completion of that turn is recorded either here or in the probe's evidence.
 `agent_requests_seen` was the empty list in both runs, and in the `--tool-check` run that field is worthless: the probe assigns it once, immediately after the *first* turn goes idle and before the tool prompt is ever posted, so it was captured before the tool turn existed.
-Finding 42 rests on the same field with the same ordering, and is left standing with that defect named against it; OW-lapuye carries it.
+Finding 42 rested on the same field with the same ordering; OW-lapuye scoped the field to each turn's window and measured it, and the finding now cites that run instead (see "The Pi smoke probe measures the tool turn's own requests" at the end of this file).
 Two limits hold whichever way that is repaired.
 `agent_requests_seen` can only ever see an `extension_ui_request` carrying a dialog method — that is the Pi adapter's sole source of a `request` event (`src/server/adapters/pi/reducer.ts`) — so an approval delivered by any other mechanism is invisible to it by construction.
 And the probe's own comment beside that field, not `docs/DESIGN.md`, is what frames this as "whether these fire at all under the sandbox is an open question (D2a)"; D2a itself is written about Codex's `ServerRequest`, and that phrase is not in it.
@@ -1842,3 +1842,31 @@ So the separation holds across two hands and four runs rather than one pair.
 The declined transcript came to 414 characters under `--tool-check` and 427 bare, against 449 and 467 in the pair above and 472 and 467 in the OW-moradi pair — six runs on `pi 0.85.1` that day, none above 472, which is the spread the comment at the prompt now cites instead of a single pair's numbers.
 That run also saw the `toolCall` block arrive alone, in a message whose blocks were `["toolCall"]` with no `thinking` beside it, where both runs above and OW-moradi's saw `["thinking", "toolCall"]` — the check asserts the `toolCall` block and not the shape of the message around it, which is why that variation passed unremarked.
 Neither limit is a defect this change was asked to fix, and both are named here so the next reader does not rediscover them with a re-run.
+
+## The Pi smoke probe measures the tool turn's own requests (OW-lapuye)
+
+Run on the home server, **`pi 0.85.1`**, from the `card/OW-lapuye` worktree at the commit that landed here as `2760e01` — the probe as that change committed it, twice: once with `--tool-check` and once bare.
+Both reported `"result": "pass"` with every check inside them passing, and both exited 0: the `--tool-check` run took 11.7 seconds (2026-09-13 23:59:32.105 to 23:59:43.829 local, `-04:00`), the bare run 10.1 seconds (23:59:51.798 to 2026-09-14 00:00:01.910).
+The client was rebuilt rather than reused in both (`build.returncode: 0`, no `--skip-build`) and each run's `checks.model` reported `openrouter/deepseek/deepseek-v4.1-flash` off a `snapshot` event, the wire spelling as OW-guvojo's section above explains.
+Nothing passed `--model`.
+`copied_credential_files` was again `["auth.json", "models-store.json", "settings.json"]`: this machine still has no `models.json` and no `trust.json`, which is the qualification finding 42 turns on.
+
+**The tool turn's requests are now inside a window that exists, and that window is empty.**
+The old `agent_requests_seen` was one whole-stream list assigned at the first turn's idle, before the `--tool-check` prompt was ever posted; it is now a dict of per-turn windows built by `requests_in`, each carrying the stream cuts it was taken between.
+The `--tool-check` run reported `{"first_turn": {"window": {"from_index": 6, "to_index": 54}, "requests": []}, "tool_turn": {"window": {"from_index": 54, "to_index": 81}, "requests": []}}`, and the bare run reported `first_turn` alone at `7`–`57` with no `tool_turn` key at all.
+The tool window opens where the tool prompt was posted and closes at the first cut after that turn reported idle — `checks.tool_output` carried `{"at": "2026-09-13T23:59:41.150-04:00", "blocks": ["thinking", "toolCall"], "turn_streaming_at": "2026-09-13T23:59:40.663-04:00", "turn_idle_at": "2026-09-13T23:59:41.833-04:00"}`, the idle wait OW-hahohi added being what gives the window an end.
+So this is the first run of anything that could have observed a dialog request raised by a Pi tool turn.
+The two windows are contiguous — 54 to 54 — so nothing between them falls outside both.
+
+**The empty window was shown to be a real slice rather than a slice of nothing.**
+An empty list is the same output whether the window is measuring correctly or is simply misaddressed, so the predicate was temporarily relaxed to `event.get("type") in ("request", "upsert")` for one throwaway run, which is not in the committed change.
+That run's two windows — `7`–`55` and `55`–`83` — carried 42 and 23 entries respectively, so both slices do cover live traffic and the tool window in particular is not an empty range.
+That establishes the windowing, not the extraction: nothing here has ever seen a live `type: "request"` event from Pi, and the `kind` field's shape is believed from `src/server/adapters/pi/reducer.test.ts`, which asserts `result.request` for a `select` dialog method and its absence for a fire-and-forget `notify`.
+
+**Two limits stand, and neither is a defect.**
+The field can only ever see an `extension_ui_request` carrying a dialog method — the Pi adapter's sole source of a `request` event — so "empty" will never mean "Pi asked nothing", only "no dialog request reached the wire"; the docstring at `requests_in` now says so at the site.
+And the abort and shutdown phases are still outside every window, exactly as they were before this change, because the card asked for the tool turn and nothing wider.
+
+**What this does to finding 42.**
+`docs/HANDOFF.md` finding 42 was rewritten in the same change to say what was measured rather than what the old field appeared to say.
+Its claim survives — a shell tool ran with no dialog request on the wire — but it is now dated to `pi 0.85.1` on this machine, where no `trust.json` was copied, rather than resting on the `pi 0.84.1` laptop run whose evidence column could not carry it.
