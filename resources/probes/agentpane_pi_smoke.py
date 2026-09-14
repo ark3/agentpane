@@ -364,10 +364,61 @@ def main() -> int:
                 return None
 
             tool = stream.wait_for(tool_called, 180, "a toolCall block to reach the wire")
-            evidence["checks"]["tool_output"] = {"result": "pass", **tool}
+
+            # A `toolCall` on the wire says the turn started, not that it ended,
+            # and section 4 posts its prompt the moment this block returns. On
+            # 2026-09-13 (`pi 0.85.1`) that block arrived at 23:13:06.302 and
+            # section 4 saw `streaming=true` 42 ms later -- the tool turn's own
+            # state, not a new turn's -- so what that run aborted is unknown.
+            # Wait for this turn to reach idle, and record the idle point, so
+            # the abort below is provably issued against a fresh turn.
+            def tool_turn_idle(events: list[tuple[str, dict[str, Any]]]) -> Any:
+                saw_true = False
+                true_at = None
+                for stamp, event in events[tool_start:]:
+                    value = streaming_value(event, real_ref)
+                    if value is True:
+                        saw_true = True
+                        true_at = stamp
+                    if saw_true and value is False:
+                        return {
+                            "turn_streaming_at": true_at,
+                            "turn_idle_at": stamp,
+                            "turn_idle_event_type": event.get("type"),
+                        }
+                return None
+
+            tool_idle = stream.wait_for(tool_turn_idle, 180, "the tool turn to return to idle")
+            evidence["checks"]["tool_output"] = {"result": "pass", **tool, **tool_idle}
 
         # -- 4. abort, then shutdown without an orphan ---------------------
+        #
+        # The abort is only evidence if the turn it lands on is the one this
+        # prompt starts. `pre_abort_streaming` below cannot establish that: a
+        # previous turn still running answers `True` exactly as this one does,
+        # which is how the 2026-09-13 `--tool-check` run passed while aborting
+        # an unknown turn. So assert the session is idle *before* the prompt is
+        # posted -- the reading that does distinguish them -- and record it.
+        pre_prompt_streaming = last_streaming(stream.snapshot(), real_ref)
+        if pre_prompt_streaming is not False:
+            raise RuntimeError(
+                "a turn was still active when the long prompt was posted, so the "
+                f"aborted turn would not be the long one (last reported state: {pre_prompt_streaming})"
+            )
+
         abort_start = len(stream.snapshot())
+        # What this asks for and what it delivers are not the same thing, and the
+        # gap is the phase's real reach. As of `pi 0.85.1` on 2026-09-13 the
+        # model declined the task and explained itself instead: 472 characters
+        # on the bare run and 467 under `--tool-check`, against a request for
+        # 10000 lines. So the phase establishes that `/abort` is accepted and
+        # that a streaming turn stops and stays stopped; it does not establish
+        # anything about tearing down a large buffered transcript.
+        # The prompt is left as written on purpose -- `agentpane_codex_smoke.py`
+        # sends the same string and nothing has measured it there, so each run
+        # reports its own `assistant_length_at_abort` below rather than this
+        # probe guessing at a wording the model would comply with. There is
+        # deliberately no assertion on that length: compliance is the model's.
         long_status, long_body = http.json(
             "POST",
             ref_path(real_ref, "/prompt"),
@@ -396,6 +447,11 @@ def main() -> int:
                 "long turn was not streaming when the abort was issued "
                 f"(last reported state: {pre_abort_streaming})"
             )
+        # The longest assistant message in the session so far, not this turn's
+        # own length: a prior turn's reply would stand in for it if it were
+        # longer. Under `--tool-check` there are two such turns ahead of this
+        # one, so read this as an upper bound on what the abort tore down.
+        length_at_abort = max_assistant_length(pre_abort, real_ref)
 
         abort_requested_at = now()
         abort_status, abort_body = http.json("POST", ref_path(real_ref, "/abort"))
@@ -419,12 +475,14 @@ def main() -> int:
         evidence["checks"]["abort"] = {
             "result": "pass",
             "prompt_http_status": long_status,
+            "streaming_before_long_prompt": pre_prompt_streaming,
             "streaming_at": active_at,
             "streaming_at_abort": pre_abort_streaming,
             "abort_requested_at": abort_requested_at,
             "abort_http_status": abort_status,
             "idle_at": aborted["timestamp"],
             "idle_event_type": aborted["event_type"],
+            "assistant_length_at_abort": length_at_abort,
             "assistant_length_when_idle": settled_length,
             "assistant_length_after_settling": after_length,
         }
