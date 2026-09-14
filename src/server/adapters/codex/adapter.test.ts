@@ -83,6 +83,7 @@ interface HappyServerOptions {
 	holdTurnStartAt?: number;
 	holdThreadStart?: boolean;
 	failCompact?: string;
+	failSteer?: string;
 }
 
 function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
@@ -121,7 +122,8 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 			case "turn/steer": {
 				// OW-tifuha, codex-cli 0.154.0: the result names the steered turn.
 				const params = message["params"] as { expectedTurnId?: string } | undefined;
-				proc.emit({ id, result: { turnId: params?.expectedTurnId } });
+				if (options.failSteer) proc.emit({ id, error: { code: -32603, message: options.failSteer } });
+				else proc.emit({ id, result: { turnId: params?.expectedTurnId } });
 				break;
 			}
 			case "turn/interrupt":
@@ -681,6 +683,18 @@ describe("CodexAdapter turns", () => {
 		expect(methods(proc).filter((method) => method === "turn/start")).toHaveLength(1);
 
 		await adapter.abort(); // leave the fixture's turn tidily interrupted
+	});
+
+	it("frames a rejected steer with the adapter and the turn id it sent (OW-gemawu)", async () => {
+		const { adapter } = await startedAdapter({
+			threadId: "thread-steer-fail",
+			failSteer: "expectedTurnId does not match the active turn",
+		});
+		await adapter.submit("first");
+
+		await expect(adapter.submit("second")).rejects.toThrow(
+			"codex adapter turn/steer rejected (expectedTurnId turn-1): expectedTurnId does not match the active turn",
+		);
 	});
 
 	it("keeps its abort target across a mid-turn steer", async () => {

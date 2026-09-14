@@ -80,6 +80,7 @@ const TURN_START_ABORTED_ERROR = "codex adapter submit aborted: disposed during 
 const TURN_START_PENDING_ERROR = "codex adapter cannot submit while turn/start is pending";
 const TURN_ACTIVE_ERROR = "codex adapter cannot submit while a turn is active";
 const TURN_INTERRUPTED_ERROR = "codex adapter cannot submit while an interrupted turn is ending";
+const TURN_STEER_REJECTED_ERROR = "codex adapter turn/steer rejected";
 
 /** JSON-RPC "method not found"; used when a blocking request's kind has no handler. */
 const UNSUPPORTED_REQUEST_CODE = -32601;
@@ -339,7 +340,25 @@ export class CodexAdapter implements BackendAdapter {
 			throw new Error(TURN_INTERRUPTED_ERROR);
 		}
 		if (this.turnId && !this.reducer.getState().compaction) {
-			await client.request("turn/steer", { threadId, input, expectedTurnId: this.turnId });
+			const expectedTurnId = this.turnId;
+			try {
+				await client.request("turn/steer", { threadId, input, expectedTurnId });
+			} catch (error) {
+				// `expectedTurnId` is only one of several preconditions app-server
+				// enforces on a steer, and `resources/codex-protocol/v2/
+				// TurnSteerParams.ts` documents them in prose with no structured
+				// code beside them, so the rejection arrives as wire text naming
+				// neither which precondition tripped nor the id this adapter sent.
+				// The guards above close every window known to reach here, so this
+				// is a backstop for the next one: it classifies nothing and retries
+				// nothing, only wrapping app-server's own message in a greppable
+				// frame that carries the attempted turn id (OW-gemawu). The cast
+				// holds because `CodexClient.request` rejects only with an `Error`:
+				// `Pending.reject` is typed to one, and every path in `jsonrpc.ts`
+				// that reaches it normalizes first.
+				const { message } = error as Error;
+				throw new Error(`${TURN_STEER_REJECTED_ERROR} (expectedTurnId ${expectedTurnId}): ${message}`);
+			}
 			return;
 		}
 		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
