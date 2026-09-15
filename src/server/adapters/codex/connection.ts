@@ -19,6 +19,17 @@
  * N, not two. A fork of a fork sends `thread/fork` over this same connection,
  * so its writer is this same child, and the count has no upper bound a pair
  * could express.
+ *
+ * A holder letting go does NOT let go of its thread. `thread/unsubscribe`
+ * answers `{"status":"unsubscribed"}` and leaves the writer lock exactly where
+ * it was -- a second app-server asking to resume that thread is still refused
+ * with `-32600`, on the thread this process resumed and on the thread it minted
+ * alike (home server, 2026-09-15, `codex-cli 0.154.0`; `docs/MANUAL_TESTING.md`,
+ * "`thread/unsubscribe` does not release a Codex thread's writer lock",
+ * OW-voyezi). Only the child's death releases anything, so while a sibling
+ * holds this connection open, every thread it has ever opened stays this
+ * child's. That is what `CodexConnectionRegistry` exists to say: re-attaching
+ * such a thread has to come back HERE rather than spawn.
  */
 
 import { CodexClient, type CodexClientView } from "./jsonrpc.ts";
@@ -37,10 +48,15 @@ export class CodexConnection {
 	readonly #holders: CodexConnectionHolder[] = [];
 	#kill: Promise<void> | null = null;
 
-	constructor(readonly proc: CodexProcess) {
+	constructor(
+		readonly proc: CodexProcess,
+		private readonly registry?: CodexConnectionRegistry,
+	) {
 		this.client = new CodexClient(proc, {
 			onMessage: (msg) => this.#deliver(msg),
 			onExit: (code, signal, error) => {
+				// A dead app-server holds nothing, so nothing may be sent back here.
+				this.registry?.forget(this);
 				// Every holder, not just the one that spawned the child: a dead
 				// app-server ends all of these sessions, and a holder that is not
 				// told ends silently, with no error banner and no explanation.
@@ -72,8 +88,23 @@ export class CodexConnection {
 			return Promise.resolve();
 		}
 		this.client.dispose(reason);
+		// The last holder out is the one that takes the threads with it: until
+		// now this child was still the writer for every thread it had opened,
+		// including those whose adapters are long gone.
+		this.registry?.forget(this);
 		this.#kill ??= this.proc.kill();
 		return this.#kill;
+	}
+
+	/**
+	 * Record that this child has opened `threadId`, so a later attach on it
+	 * borrows this connection instead of spawning an app-server that would be
+	 * refused. Called from `CodexConnectionHolder.claim`, which every path that
+	 * opens a thread -- `thread/start`, `thread/resume`, and the fork's
+	 * `adoptConnection` -- goes through.
+	 */
+	remember(threadId: string): void {
+		this.registry?.remember(threadId, this);
 	}
 
 	#deliver(msg: CodexServerMessage): void {
@@ -157,6 +188,7 @@ export class CodexConnectionHolder implements CodexClientView {
 
 	claim(threadId: string): void {
 		this.threadId = threadId;
+		this.connection.remember(threadId);
 	}
 
 	request<T = unknown>(method: string, params?: unknown): Promise<T> {
@@ -176,6 +208,44 @@ export class CodexConnectionHolder implements CodexClientView {
 		if (this.#released) return Promise.resolve();
 		this.#released = true;
 		return this.connection.release(this, reason);
+	}
+}
+
+/**
+ * Which live `codex app-server` holds a thread, for the attaches that must not
+ * spawn (OW-voyezi).
+ *
+ * A Codex thread's writer lock is the process that opened it and nothing short
+ * of that process dying gives it up -- not the adapter being disposed, and not
+ * `thread/unsubscribe` (see `CodexConnection`'s docblock). Before OW-lajehi
+ * that was invisible, because the only holder's disposal killed the child; a
+ * fork borrowing its parent's connection is what makes a thread outlive the
+ * adapter that opened it, and a re-attach on either side of that pair then
+ * meets a lock nobody is holding on agentpane's side of the wire.
+ *
+ * One instance per `CodexAdapterFactory`, handed to every adapter it builds and
+ * to the borrowers those adapters mint. It is deliberately NOT a module-level
+ * singleton: two factories in one process (the tests build several) must not
+ * see each other's children.
+ *
+ * Entries are dropped by the connection itself, on the last release and on the
+ * child's exit -- never by an adapter disposing, which is the whole point.
+ */
+export class CodexConnectionRegistry {
+	readonly #byThread = new Map<string, CodexConnection>();
+
+	remember(threadId: string, connection: CodexConnection): void {
+		this.#byThread.set(threadId, connection);
+	}
+
+	find(threadId: string): CodexConnection | undefined {
+		return this.#byThread.get(threadId);
+	}
+
+	forget(connection: CodexConnection): void {
+		for (const [threadId, held] of this.#byThread) {
+			if (held === connection) this.#byThread.delete(threadId);
+		}
 	}
 }
 

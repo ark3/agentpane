@@ -8,6 +8,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
 import { ClaudeAdapterFactory } from "../adapters/claude/adapter.ts";
 import { FakeClaudeProcess } from "../adapters/claude/test-support.ts";
+import { CodexAdapterFactory } from "../adapters/codex/adapter.ts";
+import type { CodexProcess } from "../adapters/codex/process.ts";
+import { FakeCodexProcess } from "../adapters/codex/test-support.ts";
 import { Broadcaster } from "./broadcaster.ts";
 import { SessionManager, UnknownBackendError, UnknownSessionError } from "./session-manager.ts";
 import type { SessionIndex } from "./deps.ts";
@@ -1282,5 +1285,162 @@ describe("turn boundaries", () => {
 				model: "opaque/accepted",
 			}),
 		]);
+	});
+});
+
+describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {
+	// The window OW-lajehi opened: a Codex fork borrows its parent's
+	// `codex app-server`, so closing one side of the pair leaves the other side's
+	// thread locked to a child nobody on agentpane's side is holding any more.
+	// As of `codex-cli` 0.154.0 nothing releases that lock short of the child
+	// dying -- `thread/unsubscribe` answers `unsubscribed` and changes nothing
+	// (`docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex
+	// thread's writer lock") -- so a re-attach that spawned would be refused.
+	//
+	// The real `CodexAdapterFactory` drives these, against a fake app-server
+	// cluster that enforces that lock: with `FakeAdapter` the sequence cannot
+	// fail, and a test that cannot fail measures nothing.
+	const parentRef: SessionRef = { backend: "codex", id: "thread-parent" };
+	const forkRef: SessionRef = { backend: "codex", id: "thread-forked" };
+
+	/** One fake app-server. Its kill releases every thread it was holding. */
+	class LockingProcess extends FakeCodexProcess implements CodexProcess {
+		readonly #errorAware: ((code: number | null, signal: string | null, error?: Error) => void)[] =
+			[];
+
+		constructor(private readonly release: (proc: LockingProcess) => void) {
+			super();
+		}
+
+		override onExit(
+			cb: (code: number | null, signal: string | null, error?: Error) => void,
+		): void {
+			this.#errorAware.push(cb);
+		}
+
+		override kill(): Promise<void> {
+			this.release(this);
+			for (const handler of [...this.#errorAware]) handler(0, null);
+			return super.kill();
+		}
+	}
+
+	/**
+	 * `codex app-server` reduced to the one rule this is about: a thread belongs
+	 * to the process that opened it, and a second process asking to resume it is
+	 * refused with `-32600 already has an active writer` -- measured on the home
+	 * server, 2026-09-15, `codex-cli 0.154.0`.
+	 */
+	class FakeCodexCluster {
+		readonly procs: LockingProcess[] = [];
+		readonly #locks = new Map<string, LockingProcess>();
+		#forks = 0;
+
+		spawn = (): CodexProcess => {
+			const proc = new LockingProcess((dead) => {
+				for (const [threadId, holder] of this.#locks) {
+					if (holder === dead) this.#locks.delete(threadId);
+				}
+			});
+			this.procs.push(proc);
+			proc.onWrite((message) => {
+				const id = message["id"];
+				if (typeof id !== "number") return;
+				const params = (message["params"] ?? {}) as Record<string, unknown>;
+				switch (message["method"]) {
+					case "initialize":
+						proc.emit({ id, result: { userAgent: "test" } });
+						break;
+					case "thread/resume": {
+						const threadId = String(params["threadId"]);
+						const holder = this.#locks.get(threadId);
+						if (holder && holder !== proc) {
+							proc.emit({
+								id,
+								error: { code: -32600, message: `thread ${threadId} already has an active writer` },
+							});
+							break;
+						}
+						this.#locks.set(threadId, proc);
+						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
+						break;
+					}
+					case "thread/read":
+						proc.emit({
+							id,
+							result: { thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }] } },
+						});
+						break;
+					case "thread/fork": {
+						this.#forks += 1;
+						const threadId = this.#forks === 1 ? forkRef.id : `${forkRef.id}-${this.#forks}`;
+						this.#locks.set(threadId, proc);
+						proc.emit({ id, result: { thread: { id: threadId, turns: [] } } });
+						break;
+					}
+				}
+			});
+			return proc;
+		};
+	}
+
+	let cluster: FakeCodexCluster;
+
+	beforeEach(() => {
+		cluster = new FakeCodexCluster();
+		index = new FakeSessionIndex([
+			storedSession(parentRef, WORKSPACE),
+			// Codex flushes the forked rollout at `thread/fork`, so the index can
+			// answer for the fork too -- which is exactly what sends a re-attach
+			// down the factory path.
+			storedSession(forkRef, WORKSPACE),
+		]);
+		sessions = new SessionManager(
+			{ index, adapters: { codex: new CodexAdapterFactory({ spawn: cluster.spawn }) } },
+			broadcaster,
+		);
+	});
+
+	async function attachedPair(): Promise<void> {
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "turn-1");
+		expect(forked).toEqual(forkRef);
+		await sessions.attach(forked);
+		expect(cluster.procs).toHaveLength(1);
+	}
+
+	it("re-attaches the parent on the child its fork is still holding", async () => {
+		await attachedPair();
+		await sessions.close(parentRef);
+
+		await expect(sessions.attach(parentRef)).resolves.toBeDefined();
+
+		expect(cluster.procs).toHaveLength(1);
+		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
+			[sessionKey(parentRef), sessionKey(forkRef)].sort(),
+		);
+	});
+
+	it("re-attaches the fork on the child its parent is still holding", async () => {
+		await attachedPair();
+		await sessions.close(forkRef);
+
+		await expect(sessions.attach(forkRef)).resolves.toBeDefined();
+
+		expect(cluster.procs).toHaveLength(1);
+		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
+			[sessionKey(parentRef), sessionKey(forkRef)].sort(),
+		);
+	});
+
+	it("spawns again once the last holder has killed the child", async () => {
+		await attachedPair();
+		await sessions.close(parentRef);
+		await sessions.close(forkRef);
+
+		// Nothing holds the threads now, so borrowing the dead child would be the
+		// worse bug: every request on it would go unanswered.
+		await expect(sessions.attach(parentRef)).resolves.toBeDefined();
+		expect(cluster.procs).toHaveLength(2);
 	});
 });

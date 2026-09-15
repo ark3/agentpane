@@ -575,8 +575,12 @@ export class SessionManager {
 		let adapter: BackendAdapter;
 		try {
 			// A fork whose adapter came from its parent is started as-is: only that
-			// parent's process can drive it, and the factory builds adapters that
-			// spawn their own (OW-lajehi).
+			// parent's process can drive it, and the factory's adapter would have
+			// to find its way back to that process (OW-lajehi). It can, since
+			// OW-voyezi -- a Codex adapter resuming a thread a live app-server
+			// still holds borrows that connection rather than spawning -- but the
+			// handle is still the direct route and the only one that works for a
+			// fork whose rollout the index cannot answer for.
 			adapter = forkStart?.adapter ?? factory.create(session.ref);
 			pending.adapter = adapter;
 			// Subscribe *before* start(): a backend can emit its first state during

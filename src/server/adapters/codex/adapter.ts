@@ -18,7 +18,7 @@ import type {
 	StartOptions,
 	Unsubscribe,
 } from "../types.ts";
-import { CodexConnection, type CodexConnectionHolder } from "./connection.ts";
+import { CodexConnection, CodexConnectionRegistry, type CodexConnectionHolder } from "./connection.ts";
 import type { CodexClientView } from "./jsonrpc.ts";
 import { spawnCodex, type CodexProcess, type CodexSpawner } from "./process.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
@@ -71,6 +71,13 @@ export interface CodexAdapterOptions {
 	approvalPolicy?: AskForApproval;
 	env?: NodeJS.ProcessEnv;
 	now?: () => number;
+	/**
+	 * The live app-servers this adapter may borrow, shared with every other
+	 * adapter its factory built (OW-voyezi). `CodexAdapterFactory` supplies one;
+	 * an adapter constructed without it simply never borrows, which is what the
+	 * tests that drive a single adapter want.
+	 */
+	connections?: CodexConnectionRegistry;
 }
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
@@ -193,10 +200,24 @@ export class CodexAdapter implements BackendAdapter {
 		if (opts.model) this.model = opts.model;
 		if (this.borrowed) return this.startBorrowed();
 
+		// Re-attaching a thread a live app-server still holds. That happens when
+		// one side of a fork pair is closed while the other keeps the child alive:
+		// the writer lock survives the adapter, and `thread/unsubscribe` does not
+		// release it (`connection.ts`, OW-voyezi), so a freshly spawned child
+		// asking to resume would be refused with `-32600 already has an active
+		// writer`. Resuming it a SECOND time on the process that holds it is
+		// allowed, and the thread is drivable afterwards -- measured on the home
+		// server, 2026-09-15, `codex-cli 0.154.0`.
+		const shared = opts.resumeId ? this.options.connections?.find(opts.resumeId) : undefined;
+		if (shared && opts.resumeId) {
+			this.adoptConnection(shared, opts.resumeId, opts.cwd);
+			return this.startBorrowed();
+		}
+
 		const spawner = this.options.spawn ?? spawnCodex;
 		const proc = spawner({ cwd: opts.cwd, env: this.options.env });
 		this.proc = proc;
-		const connection = new CodexConnection(proc);
+		const connection = new CodexConnection(proc, this.options.connections);
 		this.connection = connection;
 		const ownership: ClientOwnership = { proc, client: null, ready: false };
 		this.ownership = ownership;
@@ -926,7 +947,15 @@ function firstUserItem(items: { type: string }[]): { id: string; text: string } 
 }
 
 export class CodexAdapterFactory implements AdapterFactory {
-	constructor(private readonly options: CodexAdapterOptions = {}) {}
+	private readonly options: CodexAdapterOptions;
+
+	constructor(options: CodexAdapterOptions = {}) {
+		// One registry across every adapter this factory builds, and across the
+		// borrowers they mint in `fork()` -- which inherit these same options. It
+		// lives here rather than at module scope so two factories cannot see each
+		// other's app-servers (OW-voyezi).
+		this.options = { connections: new CodexConnectionRegistry(), ...options };
+	}
 
 	create(ref: SessionRef): BackendAdapter {
 		if (ref.backend !== "codex") {
