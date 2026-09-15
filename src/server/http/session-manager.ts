@@ -100,6 +100,16 @@ interface PendingStart {
 	disposal?: Promise<void>;
 }
 
+/**
+ * A fork that exists but is not attached yet. `start` is the `StartOptions`
+ * that open it; `adapter` is the fork's own adapter when only the parent could
+ * build one -- see `#pendingForks`.
+ */
+interface PendingFork {
+	start: StartOptions;
+	adapter?: BackendAdapter;
+}
+
 interface PendingDisposal {
 	promise: Promise<void>;
 	/** Canonical identity all refs covered by this disposal must resume under. */
@@ -119,21 +129,40 @@ export class SessionManager {
 	/** requestId -> the session whose agent is blocked on it (D2a). */
 	readonly #pendingRequests = new Map<string, string>();
 	/**
-	 * Fork ref -> the `StartOptions` that spawn it, for a fork that exists as
-	 * arguments and nothing else. Claude Code's fork writes no store file until
-	 * its first turn ends (OW-japuzo), so `#start`'s index lookup cannot answer
-	 * for it and would throw `UnknownSessionError` at the attach that follows
-	 * every fork.
+	 * Fork ref -> what it takes to open that fork, for a fork the session index
+	 * cannot answer for or cannot be opened from. Two backends need it, for
+	 * different reasons:
 	 *
-	 * An entry ends three ways: the attach that spawns the fork consumes it,
-	 * `close()` on that ref discards it, and `disposeAll()` drops the lot. An
-	 * attach that FAILS keeps it deliberately -- `#start`'s failure path
-	 * unregisters the container too, so the recipe is the whole of what a retry
-	 * has left to work from. An entry does outlive a fork nobody ever attaches
-	 * or closes, which is the abandoned fork D17 already declines to spend
-	 * anything on (OW-puduro).
+	 *  - Claude Code's fork writes no store file until its first turn ends
+	 *    (OW-japuzo), so `#start`'s index lookup would throw
+	 *    `UnknownSessionError` at the attach that follows every fork. Its entry
+	 *    is `start` alone: three strings, replayable.
+	 *  - Codex's fork IS on disk, but only the app-server that minted it may
+	 *    open it (`codex-cli` 0.154.0, OW-lajehi). Its entry also carries
+	 *    `adapter` -- the fork's own, built by the parent's adapter and already
+	 *    holding a share of the parent's child.
+	 *
+	 * That second shape changes what an abandoned entry costs, and D17's answer
+	 * with it. An abandoned recipe is three strings; an abandoned live handle is
+	 * a share of a running app-server, taken at fork time so that a `close()` on
+	 * the parent cannot kill the child out from under the attach. So `close()`
+	 * and `disposeAll()` do not merely drop these entries, they dispose the
+	 * adapter in them, which is what releases the share. What is left is a fork
+	 * that is never attached AND never closed while the server keeps running: it
+	 * pins one app-server until shutdown. That is deliberate, and it is the price
+	 * of the attach being reliable; D17 declines to spend anything on the
+	 * abandoned fork (OW-puduro) and this is the smallest thing that can be spent.
+	 *
+	 * An entry ends four ways: the attach that opens the fork consumes it,
+	 * `close()` on that ref discards it, `disposeAll()` drops the lot, and a
+	 * failed attach on a *handle* discards it. That last one is the difference
+	 * between the two shapes: a failed attach on a recipe KEEPS it deliberately,
+	 * because `#start`'s failure path unregisters the container too and the
+	 * recipe is the whole of what a retry has left to work from -- but a handle
+	 * is single-use, its adapter has been disposed by the reaping, and leaving it
+	 * parked would hand a retry a dead adapter and a released share.
 	 */
-	readonly #pendingForks = new Map<string, StartOptions>();
+	readonly #pendingForks = new Map<string, PendingFork>();
 	readonly #index: SessionIndex;
 	readonly #adapters: Partial<Record<BackendId, { create(ref: SessionRef): BackendAdapter }>>;
 	readonly #newId: () => string;
@@ -303,7 +332,10 @@ export class SessionManager {
 	 *    driving; its own `ref` is unchanged, so `#adoptRef` no-ops. The returned
 	 *    ref points at the freshly-flushed forked thread, which differs from
 	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
-	 *    `session.ref`.
+	 *    `session.ref`. Only the app-server that minted that thread may open it
+	 *    (OW-lajehi), so `fork()` also hands over the fork's own adapter, already
+	 *    sharing the parent's connection; `#pendingForks` holds it, with the
+	 *    resume that starts it, until the attach.
 	 *  - Claude Code's `fork` takes Codex's path -- its own ref is unchanged and
 	 *    the parent keeps its child and its turn (OW-razoki) -- but nothing has
 	 *    recorded the fork yet, so it also hands back the `StartOptions` its own
@@ -322,7 +354,12 @@ export class SessionManager {
 		if (!session?.adapter) throw new UnknownSessionError(ref);
 		try {
 			const forked = await session.adapter.fork(entryId);
-			if (forked.start) this.#pendingForks.set(sessionKey(forked.ref), forked.start);
+			if (forked.start) {
+				this.#pendingForks.set(sessionKey(forked.ref), {
+					start: forked.start,
+					...(forked.adapter ? { adapter: forked.adapter } : {}),
+				});
+			}
 			return forked.ref;
 		} finally {
 			this.#adoptRef(session, "fork");
@@ -433,12 +470,13 @@ export class SessionManager {
 		let addedAlias: [string, string] | undefined;
 		const forkStart = this.#pendingForks.get(sessionKey(ref));
 		if (!session && forkStart) {
-			// A fork this manager minted a moment ago. Its workspace and its spawn
-			// arguments came back from `fork()` because nothing on disk carries
-			// them yet -- see `#pendingForks`.
+			// A fork this manager minted a moment ago. Its workspace and the
+			// arguments that open it came back from `fork()`, because the index
+			// either cannot answer for it or cannot be acted on -- see
+			// `#pendingForks`.
 			session = {
 				ref,
-				cwd: forkStart.cwd,
+				cwd: forkStart.start.cwd,
 				virtual: false,
 				fromStore: false,
 				subscriptions: [],
@@ -536,7 +574,10 @@ export class SessionManager {
 		const bound = session;
 		let adapter: BackendAdapter;
 		try {
-			adapter = factory.create(session.ref);
+			// A fork whose adapter came from its parent is started as-is: only that
+			// parent's process can drive it, and the factory builds adapters that
+			// spawn their own (OW-lajehi).
+			adapter = forkStart?.adapter ?? factory.create(session.ref);
 			pending.adapter = adapter;
 			// Subscribe *before* start(): a backend can emit its first state during
 			// startup and we would otherwise miss it.
@@ -549,7 +590,7 @@ export class SessionManager {
 				adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
 			);
 			await adapter.start(
-				forkStart ?? {
+				forkStart?.start ?? {
 					cwd: bound.cwd,
 					// Only a session the backend itself stored can be resumed; a
 					// `virtual:` id means nothing to Pi or Codex.
@@ -570,6 +611,11 @@ export class SessionManager {
 			if (addedAlias && this.#aliases.get(addedAlias[0]) === addedAlias[1]) {
 				this.#aliases.delete(addedAlias[0]);
 			}
+			// A handle is single-use: `#terminate` below disposes its adapter, which
+			// releases the share it was holding, so the parked entry is no longer
+			// anything a retry could start. A recipe stays parked -- see
+			// `#pendingForks`.
+			if (forkStart?.adapter) this.#pendingForks.delete(sessionKey(ref));
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can
 			// leave a live sandboxed agent behind. Nothing else will ever reap it.
@@ -673,18 +719,29 @@ export class SessionManager {
 	}
 
 	/**
-	 * Explicit close: this is the only thing besides shutdown that kills an agent.
+	 * Explicit close: this and shutdown are the two things that let go of an
+	 * agent. Letting go is not always killing -- a Codex fork shares the parent's
+	 * app-server (OW-lajehi), so closing either of them releases a share and only
+	 * the last one out kills the child.
+	 *
 	 * D12's reaper (OW-33) inherits this path, including the disposal guard that
 	 * prevents a transparent re-attach from sharing a session file with the
 	 * adapter being evicted.
 	 */
 	async close(ref: SessionRef): Promise<void> {
 		const session = this.#lookup(ref);
-		// Before the `!session` return below, which is exactly a fork whose recipe
-		// is parked and which was never attached: leaving it would let a later
-		// attach spawn a child for a session this call deleted. The same line
-		// `#aliases` and `#pendingRequests` get further down, for the same reason.
+		// Before the `!session` return below, which is exactly a fork that is
+		// parked and was never attached: leaving it would let a later attach spawn
+		// a child for a session this call deleted. The same line `#aliases` and
+		// `#pendingRequests` get further down, for the same reason. Disposing its
+		// adapter is what releases the share a live handle holds -- without it,
+		// closing both the parent and an abandoned fork still leaves the
+		// app-server running with nobody to speak for it.
+		const parkedFork = this.#pendingForks.get(sessionKey(ref));
 		this.#pendingForks.delete(sessionKey(ref));
+		if (parkedFork?.adapter) {
+			await Promise.resolve(parkedFork.adapter.dispose()).catch(() => {});
+		}
 		// Flag the startup before anything else: an adapter that does not exist
 		// yet cannot be disposed, and this is what stops it being born at all.
 		const pending = this.#attaching.get(sessionKey(session?.ref ?? ref));
@@ -742,6 +799,12 @@ export class SessionManager {
 		this.#shuttingDown = true;
 		const sessions = [...this.#sessions.values()];
 		const starting = [...this.#attaching.values()];
+		// Forks nobody attached. Dropping a recipe on the floor costs nothing;
+		// dropping a live handle leaks the app-server share it holds (OW-lajehi),
+		// so they are disposed alongside everything else below.
+		const parkedForks = [...this.#pendingForks.values()].flatMap((fork) =>
+			fork.adapter ? [fork.adapter] : [],
+		);
 		this.#sessions.clear();
 		this.#aliases.clear();
 		this.#pendingRequests.clear();
@@ -765,6 +828,7 @@ export class SessionManager {
 			// and their `ManagedSession.adapter` is still undefined. Resolving
 			// without reaping them is exactly how shutdown orphans an agent.
 			...starting.map((pending) => this.#terminate(pending)),
+			...parkedForks.map((adapter) => adapter.dispose()),
 		]);
 	}
 

@@ -326,12 +326,14 @@ export function createApp(deps: AppDeps): App {
 				//     through `#adoptRef`. It broadcasts no `renamed`: the parent is a
 				//     second conversation, not an older name (OW-suhoto). The ref it
 				//     returns is the moved file.
-				//   * Codex's `thread/fork` mints a NEW thread this process is not
-				//     driving; Codex flushes that rollout to disk immediately, before
-				//     any turn, so the index finds it -- but as of `codex-cli`
-				//     0.154.0 the attach that follows is refused, because this
-				//     process still holds the fork's writer lock (OW-lajehi). The
-				//     current adapter's own ref is unchanged, so `#adoptRef` no-ops.
+				//   * Codex's `thread/fork` mints a NEW thread the parent's adapter is
+				//     not driving; Codex flushes that rollout to disk immediately,
+				//     before any turn. The index therefore finds it, but nothing else
+				//     may open it: as of `codex-cli` 0.154.0 the minting app-server
+				//     holds its writer lock and a second one is refused, so the fork's
+				//     adapter borrows the parent's connection and `fork()` hands that
+				//     adapter over for `SessionManager` to start (OW-lajehi). The
+				//     parent adapter's own ref is unchanged, so `#adoptRef` no-ops.
 				//   * Claude Code's fork mints the forked session's id and the
 				//     arguments that spawn it (`--resume --resume-session-at
 				//     --fork-session --session-id`, truncation inclusive of the named

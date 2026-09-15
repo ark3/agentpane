@@ -113,8 +113,37 @@ export interface FakeAdapterOptions {
 	 *  - "claude": like "codex", except that nothing has recorded the fork yet,
 	 *    so `fork()` also returns the `StartOptions` its own adapter needs
 	 *    (OW-razoki).
+	 *  - "shared": Codex's shape as of OW-lajehi -- the fork can only be driven
+	 *    by the process that minted it, so `fork()` hands back an adapter it
+	 *    built itself, already holding a share of that process, and the manager
+	 *    must start THAT rather than ask the factory for one.
 	 */
-	forkMode?: "pi" | "codex" | "claude";
+	forkMode?: "pi" | "codex" | "claude" | "shared";
+	/**
+	 * The subprocess this adapter shares with the adapters it forked. Present
+	 * only for `forkMode: "shared"`; a test reads `kills` to prove the last
+	 * holder out is the one that kills the child, and that it happens once.
+	 */
+	sharedChild?: FakeSharedChild;
+}
+
+/**
+ * A subprocess several `FakeAdapter`s hold at once, so a test can assert the
+ * refcount rather than the adapter count (OW-lajehi). A holder is taken at
+ * construction -- which for a fork means at fork time, not at attach.
+ */
+export class FakeSharedChild {
+	holders = 0;
+	kills = 0;
+
+	hold(): void {
+		this.holders += 1;
+	}
+
+	release(): void {
+		this.holders -= 1;
+		if (this.holders === 0) this.kills += 1;
+	}
 }
 
 /** A promise a test resolves by hand, to park an adapter mid-`start()`. */
@@ -161,6 +190,7 @@ export class FakeAdapter implements BackendAdapter {
 		private readonly options: FakeAdapterOptions = {},
 	) {
 		this.#ref = ref;
+		if (options.forkMode === "shared") options.sharedChild?.hold();
 	}
 
 	async start(opts: StartOptions): Promise<void> {
@@ -173,11 +203,13 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async dispose(): Promise<void> {
+		const first = !this.disposed;
 		this.disposed = true;
 		this.disposals++;
 		this.#updates.clear();
 		this.#requests.clear();
 		this.#errors.clear();
+		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release();
 		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
 
@@ -219,6 +251,15 @@ export class FakeAdapter implements BackendAdapter {
 			return {
 				ref: forkedRef,
 				start: { cwd: this.startOptions?.cwd ?? "", forkOf: { parentId, entryId } },
+			};
+		}
+		if (this.options.forkMode === "shared") {
+			// The fork's adapter is built HERE, already holding a share of this
+			// adapter's child, because only that child can drive the fork.
+			return {
+				ref: forkedRef,
+				start: { cwd: this.startOptions?.cwd ?? "", resumeId: forkedRef.id },
+				adapter: new FakeAdapter(forkedRef, this.options),
 			};
 		}
 		if (this.options.forkMode !== "codex") this.#ref = forkedRef;

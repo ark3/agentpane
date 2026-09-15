@@ -13,8 +13,10 @@ import { SessionManager, UnknownBackendError, UnknownSessionError } from "./sess
 import type { SessionIndex } from "./deps.ts";
 import {
 	deferred,
+	type FakeAdapter,
 	FakeAdapterFactory,
 	FakeSessionIndex,
+	FakeSharedChild,
 	storedSession,
 	userMessage,
 } from "./testing/fakes.ts";
@@ -418,7 +420,7 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.canonicalRef(claudeRef)).toEqual(claudeRef);
 		expect(sessions.adapterFor(claudeRef)).toBe(parent);
 
-		const forkAdapter = await sessions.attach(forked);
+		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
 
 		expect(forkAdapter).not.toBe(parent);
 		expect(claude.forRef(forked)?.startOptions).toEqual({
@@ -666,6 +668,107 @@ describe("fork (the third #adoptRef point)", () => {
 		await expect(sessions.fork({ backend: "pi", id: "/nope" }, "e1")).rejects.toBeInstanceOf(
 			UnknownSessionError,
 		);
+	});
+});
+
+describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
+	// Codex's shape as of `codex-cli` 0.154.0: a forked thread can only be
+	// opened by the app-server that minted it, so `fork()` hands back an adapter
+	// it built itself, already holding a share of the parent's child. The
+	// manager must start THAT adapter instead of asking the factory for one, and
+	// the child must outlive every holder but the last.
+	const parentRef: SessionRef = { backend: "codex", id: "thread-parent" };
+	const forkRef: SessionRef = { backend: "codex", id: "thread-parent#fork-e1" };
+	let child: FakeSharedChild;
+	let codex: FakeAdapterFactory;
+
+	beforeEach(() => {
+		child = new FakeSharedChild();
+		codex = new FakeAdapterFactory({ forkMode: "shared", sharedChild: child });
+		index = new FakeSessionIndex([storedSession(parentRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+	});
+
+	it("attaches the fork on the adapter fork() handed over, spawning nothing new", async () => {
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+		expect(forked).toEqual(forkRef);
+
+		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
+
+		// One adapter from the factory -- the parent's. The fork's came from the
+		// parent adapter, and the factory never saw the fork's ref.
+		expect(codex.created).toHaveLength(1);
+		expect(codex.createdFor).toEqual([parentRef]);
+		expect(forkAdapter).not.toBe(codex.created[0]);
+		expect(sessions.liveRefs()).toEqual([parentRef, forkRef]);
+		// Two live sessions, one child.
+		expect(child.holders).toBe(2);
+		expect(child.kills).toBe(0);
+		// Started as a resume of the already-flushed fork, in the parent's cwd.
+		expect(forkAdapter.startOptions).toEqual({ cwd: WORKSPACE, resumeId: forkRef.id });
+	});
+
+	it("keeps the fork driving the shared child after the parent is closed", async () => {
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+		const forkAdapter = (await sessions.attach(forked)) as FakeAdapter;
+
+		await sessions.close(parentRef);
+
+		expect(child.kills).toBe(0);
+		expect(child.holders).toBe(1);
+		await sessions.submit(forked, "still here");
+		expect(forkAdapter.prompts).toEqual([{ text: "still here", images: undefined }]);
+	});
+
+	it("keeps the parent driving the shared child after the fork is closed", async () => {
+		const parent = (await sessions.attach(parentRef)) as FakeAdapter;
+		const forked = await sessions.fork(parentRef, "e1");
+		await sessions.attach(forked);
+
+		await sessions.close(forked);
+
+		expect(child.kills).toBe(0);
+		await sessions.submit(parentRef, "still here");
+		expect(parent.prompts).toEqual([{ text: "still here", images: undefined }]);
+	});
+
+	it("kills the shared child exactly once when shutdown disposes both holders", async () => {
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+		await sessions.attach(forked);
+
+		await sessions.disposeAll();
+
+		expect(child.holders).toBe(0);
+		expect(child.kills).toBe(1);
+	});
+
+	it("releases a fork nobody ever attached, so the parent\'s child can still die", async () => {
+		// The share is taken at fork time, not at attach, so an abandoned fork
+		// pins the parent\'s process. `close()` on the fork\'s ref is the browser
+		// path out of that, and shutdown is the other.
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+		expect(child.holders).toBe(2);
+
+		await sessions.close(forked);
+		expect(child.holders).toBe(1);
+		expect(child.kills).toBe(0);
+
+		await sessions.close(parentRef);
+		expect(child.kills).toBe(1);
+	});
+
+	it("releases the share when shutdown drops a fork nobody attached", async () => {
+		await sessions.attach(parentRef);
+		await sessions.fork(parentRef, "e1");
+
+		await sessions.disposeAll();
+
+		expect(child.holders).toBe(0);
+		expect(child.kills).toBe(1);
 	});
 });
 
