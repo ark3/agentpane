@@ -272,6 +272,22 @@ Costs tokens: each cell drives two real model turns, one of them long.
 Verified with: `claude` 2.1.268 on explicit `--model haiku`.
 What it showed is `docs/MANUAL_TESTING.md`, "A mid-stream fork on Claude Code loses the partial reply, but only because agentpane kills the process (OW-japuzo)".
 
+## `codex_unsubscribe_probe.py`
+
+Proves: **`thread/unsubscribe` does not release a Codex thread's writer lock** (OW-voyezi).
+Two `codex app-server` processes, one parent thread and one fork of it, and the question that decided OW-voyezi's fix: once a fork borrows its parent's app-server (OW-lajehi), closing one side of the pair no longer kills the child, so something other than the kill has to let go of the closed side's thread.
+
+```bash
+python3 codex_unsubscribe_probe.py [--json <path>]
+```
+
+It answers, in one run: that the lock exists at all (a second process refused with `-32600`); that unsubscribe answers `{"status": "unsubscribed"}` and the second process is refused exactly as before, on a resumed thread and on a minted one alike; and that the holder can resume a thread it already holds and drive a turn on it, which is the fix that was left.
+Shaped after `codex_fork_same_process_probe.py`, whose vehicle it is, down to the temporary `CODEX_HOME` -- safe here, unlike in `fork_attach_probe.py`, because nothing in it consults agentpane's session index.
+Costs tokens: three real model turns.
+
+Verified with: `codex-cli` 0.154.0 on the home server, 2026-09-15.
+What it showed is `docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex thread's writer lock (OW-voyezi)".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's
