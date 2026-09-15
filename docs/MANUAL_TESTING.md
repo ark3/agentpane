@@ -2085,10 +2085,10 @@ What the second-entry fork newly excludes is that a mid-stream fork empties the 
 `midstream_state_after_fork` reported a different `sessionFile` (`…01a0a74b-0f21….jsonl`) and `isStreaming: false`, `midstream_turn_settled: true`, and `midstream_assistant_reply_preview: ""`.
 Reading `midstream_abandoned_file_messages` — the pre-fork file, which the 2026-08-20 run never opened — it holds eight messages: `ALPHA -> ALPHA -> DELTA -> DELTA -> EPSILON -> EPSILON`, then the streaming turn's user message `Write the numbers 1 through 400, one per line, with no prose.` and an assistant entry whose text is `""`.
 So what is proven is that the streamed-into file ends with the turn's own user message and an assistant entry carrying no text.
-That is stronger than the 0.84.2 run's settle alone, and it is still short of proving that streamed text was *discarded*.
-The instrument is why: this cell gates only on `agent_start` before it fires the fork, with no accumulating-delta threshold and no count of what had streamed, unlike its Codex sibling `codex_fork_mid_stream`, which waits on five deltas and reports `result: "unearned"` when the signals are missing (`resources/probes/README.md`, "the streaming discipline").
-The session files' own timestamps put the fork about 2.2s after the prompt, on a reasoning model at `thinkingLevel: "high"`, so "the fork threw away text that had been produced" and "no text had been produced yet" are both consistent with this record.
-A run that closed it would carry that cell's delta gate into this one (OW-sededi) — hold the fork until some number of assistant text deltas have accumulated, record the count, and re-read the buffer at the instant the fork request goes out — so that the empty entry on disk can be set against text known to have existed.
+That is stronger than the 0.84.2 run's settle alone, and it was short of proving that streamed text was *discarded*.
+The instrument was why: this cell gated only on `agent_start` before it fired the fork, with no accumulating-delta threshold and no count of what had streamed, unlike its Codex sibling `codex_fork_mid_stream`.
+The session files' own timestamps put the fork about 2.2s after the prompt, on a reasoning model at `thinkingLevel: "high"`, so "the fork threw away text that had been produced" and "no text had been produced yet" were both consistent with this record.
+OW-sededi then put the delta gate in and re-ran it, and the answer is the second one: with 47 text deltas confirmed on the wire at the instant of the fork, the streamed-into file holds the reply's first 447 characters rather than an empty entry, so the empty entry read here was a fork that landed before any text existed (see "Pi's mid-stream fork, measured against text known to have streamed" at the end of this file).
 Two smaller bounds: `pi_file_messages` projects text blocks only, so a reasoning-only entry would read empty here too, and nothing was read from that file before the fork.
 
 **`moved_file_on_disk_at_fork: true`, measured where the 2026-08-19 run measured it.**
@@ -2129,3 +2129,34 @@ The poll's own end-of-turn detection was broken by the `virtual:` rename, so the
 
 What this leaves open: no session with a compaction summary, a steered turn or an image prompt has been attached this way, and those are the shapes most likely to make the two views disagree.
 A reader who sees no pencils on an *attached* Claude or Pi session should read the `fork-points` response in the Network tab before anything else -- `{"points":[]}` is the strict check refusing, and the session id is the evidence to keep.
+
+## Pi's mid-stream fork, measured against text known to have streamed (OW-sededi)
+
+Run on the home server 2026-09-15, `pi 0.85.1`, by `python3 resources/probes/fork_probe.py --backend pi --no-fixtures`, which exited 0.
+As in the OW-gajesu section above, the probe copies `~/.pi/agent/settings.json` into a throwaway state home and launches `pi --mode rpc` with no `--model` flag; every state read in this record reports `deepseek/deepseek-v4.1-flash` ("DeepSeek: DeepSeek V4.1 Flash", provider `openrouter`) at `thinkingLevel: "high"`.
+This run exists because that section could not tell a discarded reply from one not yet begun: its cell gated on `agent_start` alone, forked about 2.2s into a reasoning turn, and read an assistant entry whose text was `""`.
+The cell now carries the streaming discipline of its Codex sibling — `agent_start` plus forty accumulated `message_update` events whose `assistantMessageEvent.type` is `text_delta`, re-read at the instant the `fork` request goes out — and reports `midstream_result`, which the probe's exit status reads the way it already read the Codex cell's `result`.
+
+**The event the adapter counts is the event on the wire.**
+`midstream_delta_census_before_fork` is recorded rather than assumed, and it reads `{"thinking_start": 1, "thinking_delta": 52, "text_start": 1, "text_delta": 40}`.
+So `pi 0.85.1` does stream assistant text as `message_update`/`text_delta`, which is what `src/server/adapters/pi/reducer.ts` accumulates, and it emits its reasoning on the same notification under `thinking_delta` — which is why only `text_delta` is counted, and why forty of them is a threshold a reasoning model's preamble cannot satisfy on its own.
+
+**The fork landed on a turn that had already streamed 47 lines of reply.**
+`midstream_streaming_confirmed_before_fork: true` at `midstream_deltas_before_fork: 40`, the threshold; re-read at the request itself, `midstream_deltas_at_the_fork_itself: 47` with `midstream_still_streaming_at_the_fork_itself: true` and `midstream_turn_settled_before_fork: false`.
+`midstream_state_before_fork` reported `isStreaming: true`, and the fork returned `success: true` with `{ "text": "Say exactly: DELTA", "cancelled": false }`.
+`midstream_result: "measured"`.
+
+**The streamed text is on disk in the abandoned file, not discarded.**
+`midstream_abandoned_file_messages` ends with the turn's own user message `Write the numbers 1 through 400, one per line, with no prose.` and an assistant entry that holds the reply's beginning — `1\n2\n3\n…` — where the OW-gajesu run read `""`.
+`midstream_abandoned_tail_chars`, the unprojected length of that entry, is 447, against 47 text deltas seen on the wire at the fork.
+So on this model and this version the fork ends the turn without destroying what the turn had already produced: the partial reply survives in the file the turn was streaming into, which is the pre-fork session file the fork moved off (`midstream_abandoned_file`, `…01a0a75f-1a2c….jsonl`).
+The turn does stop — `midstream_state_after_fork` reads `isStreaming: false` with `messageCount: 2`, `midstream_turn_settled: true`, and `midstream_messages_tail` is `ALPHA -> ALPHA`, the rewound branch with the streaming turn excluded — so what the fork costs is the rest of the reply and the branch it was on, not the bytes already written.
+An earlier run of the same code about a minute before this one, differing only in that it lacked the `midstream_abandoned_tail_chars` field, agreed on every other field: 75 deltas at the threshold, 147 at the fork, still streaming, and the same partial count on disk.
+
+**The gate was watched failing before it was believed.**
+The same run with the threshold raised to an unreachable 100000 — the only edit, made on a copy — let the turn finish before the fork: `midstream_streaming_confirmed_before_fork: false` at 134 deltas, `midstream_turn_settled_before_fork: true`, `midstream_still_streaming_at_the_fork_itself: false`, `midstream_result: "unearned"`, and the probe exited 1.
+So the refusal and the exit-status wiring both fire, and the fork in that run landed on a turn that had already settled — exactly the silent failure the gate exists to catch.
+
+Two bounds this run does not clear.
+Nothing was read from the streamed-into file *before* the fork, so whether that prefix was already on disk while the turn ran or was flushed when the fork cut it is not shown here — only that it is there afterwards.
+And the count is one model's: a turn that streams nothing before the fork still leaves the empty entry OW-gajesu read, so "no text on disk" and "no text produced" remain distinguishable only by the delta count this cell now carries.

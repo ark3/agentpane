@@ -493,11 +493,11 @@ This is not a window nobody enters.
 Asked directly on 2026-09-11 whether the workflow ever involves scrolling back and editing while a turn is running, the owner said it absolutely does.
 
 **Pi leaves no choice.**
-A mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and `agent_settled` arrives carrying no assistant text (work laptop, 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md`, OW-yudoni).
-That section retired a third observation from the same run as a tautology, and it rested on the settle alone because nobody had opened the file the abandoned turn was streaming into.
-Someone has now: on the home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`, that file ended with the turn's own user message and an assistant entry carrying no text (`docs/MANUAL_TESTING.md`, OW-gajesu).
-No partial reply was spared, then — but that run does not show one was destroyed either, because the Pi cell gates only on `agent_start` where its Codex sibling waits on accumulating deltas, and a fork about 2s into a reasoning turn cannot tell discarded text from text not yet produced.
-The decision does not turn on the difference: the abort's warning is worth its price under either reading, and what would settle it is this cell inheriting that delta gate.
+A mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and the turn settles (work laptop, 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md`, OW-yudoni).
+That much has held on every run since, and it is the whole of what this decision turns on: agentpane cannot keep the turn alive across a Pi fork, so the only choice left is whether the user is told.
+What the fork costs is now measured rather than inferred.
+OW-sededi gave the probe's Pi cell the delta gate its Codex sibling had and re-ran it (home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`): with 47 `text_delta`s on the wire at the instant the fork request went out, the file the turn was streaming into held the reply's first 447 characters, not the empty assistant entry the ungated run before it had read (`docs/MANUAL_TESTING.md`, OW-sededi).
+So the streamed prefix survives on the abandoned branch; what is lost is the rest of the reply and the branch it was on, and the earlier empty entry was a fork that landed before any text existed.
 The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
 
 **Codex's parent turn survives.**

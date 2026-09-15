@@ -793,17 +793,18 @@ export function createController(
 				//
 				// Pi is that backend. Its CLI stops the in-flight turn on a
 				// mid-stream fork whether or not we abort: `isStreaming` goes
-				// false, the settle carries no assistant text, and the file the
-				// turn was streaming into ends with that turn's user message and
-				// an assistant entry carrying no text (home server, 2026-09-15,
+				// false and the turn settles (home server, 2026-09-15,
 				// `pi 0.85.1`; `docs/MANUAL_TESTING.md` OW-gajesu, which is what
 				// the 2026-08-20 `pi 0.84.2` run in OW-yudoni had not earned).
-				// Neither run shows streamed text being DISCARDED -- the Pi probe
-				// cell has no delta gate -- so read this as the reply not
-				// surviving, not as bytes measured and thrown away. Either way
-				// the abort does not cause the loss; it makes it deliberate and
-				// visible, and the "Stop and ..." label is the only warning the
-				// user gets.
+				// What the fork costs is the REST of the reply, not the bytes
+				// already streamed: with the probe holding the fork until 47
+				// text deltas were on the wire, the file the turn was streaming
+				// into held the reply's first 447 characters (OW-sededi), where
+				// the ungated run before it -- forking ~2s into a reasoning turn
+				// -- had read an empty assistant entry. Either way the abort
+				// does not cause the loss; it makes it deliberate and visible,
+				// and the "Stop and ..." label is the only warning the user
+				// gets.
 				//
 				// Codex's parent turn survives: a mid-stream `thread/fork` leaves
 				// it running and it finishes with its whole reply durable on disk
