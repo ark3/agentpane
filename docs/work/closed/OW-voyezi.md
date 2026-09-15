@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Re-attaching a Codex session whose thread another session still holds open fails with "already has an active writer"
@@ -37,3 +38,32 @@ Whatever the answer, record it in `docs/MANUAL_TESTING.md` with the `codex-cli` 
 
 A test in `src/server/http/session-manager.test.ts` that attaches a Codex session, forks it, attaches the fork, closes the parent and re-attaches the parent -- red before the change, green after -- plus the same shape with the fork and parent swapped.
 The live confirmation is `resources/probes/fork_attach_probe.py --backend codex` extended to close one side and re-attach it, naming the `codex-cli` version the run records.
+
+## Close note
+
+Fixed, with both the unmeasured question the card turned on and the fix settled by live runs on the home server, 2026-09-15, `codex-cli 0.154.0` on `gpt-5.6-luna`.
+
+**The measurement: `thread/unsubscribe` releases nothing.**
+New probe `resources/probes/codex_unsubscribe_probe.py`, shaped after `codex_fork_same_process_probe.py` -- one owner process holding a parent thread and a fork of it, one intruder.
+Unsubscribe answers `{"status": "unsubscribed"}` and the intruder's `thread/resume` is refused with the identical `-32600 already has an active writer` afterwards, on the resumed thread and on the minted one alike.
+What *is* allowed: the holder may resume a thread it already holds and drive a turn on it, and unsubscribing one thread costs it nothing on the other -- unsubscribe is per-thread, not per-process.
+So the first of the two fixes the card named does not exist.
+`docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex thread's writer lock (OW-voyezi)".
+
+**The fix taken is the second shape.**
+`CodexConnectionRegistry` in `src/server/adapters/codex/connection.ts` maps thread id to the live connection holding it; `CodexAdapter.start` borrows that connection through the existing `adoptConnection`/`startBorrowed` path when `resumeId` names a held thread, instead of spawning.
+Entries are dropped by the connection itself, on the last release and on the child's exit -- never on an adapter disposing, which is the whole point.
+One registry per `CodexAdapterFactory`, not a module singleton.
+`session-manager.ts` changed only a comment that claimed the factory always builds adapters that spawn their own child.
+The `CodexConnection` docblock now records that a holder letting go does not let go of its thread.
+
+**Verification.**
+Three tests in `src/server/http/session-manager.test.ts` drive the real `CodexAdapterFactory` against a fake app-server cluster that enforces the writer lock (with `FakeAdapter` the sequence cannot fail).
+Confirmed red by the dispatching session against `main`'s `adapter.ts`/`connection.ts`: both re-attach orientations rejected with `thread <id> already has an active writer`.
+Green with the fix; `bun run check` 1094 passing.
+`resources/probes/fork_attach_probe.py --backend codex` grew step 5, close one side of the fork pair and re-attach it, both orientations, Codex-only.
+The dispatching session ran it both ways itself: fix held back, both new steps `500 internal_error … already has an active writer` and `second_fork_of_parent` failing as collateral; fix applied, every step passes with no orphaned workers.
+
+**Left open.** OW-wayovu: the fake app-server fires `onExit` synchronously inside `kill()`, so the registry's two `forget` call sites are redundant in the test and load-bearing only in production. Filed, not fixed.
+
+Landed on `main` as a01903a (probe), 1ae2164 (fix), 661319c (evidence), 078d0eb (review fixes: probe step numbering, one-sentence-per-line).
