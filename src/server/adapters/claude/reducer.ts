@@ -13,7 +13,9 @@
  * - Streaming assembly comes from `stream_event` lines
  *   (`--include-partial-messages`): `message_start` opens an assistant
  *   message, `content_block_start`/`content_block_delta` build blocks by
- *   index, and the `assistant` events replace them authoritatively.
+ *   index, and the `assistant` events replace them authoritatively. Tool-call
+ *   arguments are the exception: `input_json_delta` is a no-op and those
+ *   arguments come from the authoritative event alone (OW-bizulo).
  * - Multiple `message_start`/`message_stop` cycles occur inside one logical
  *   turn (one per API round-trip); only `result` ends the turn.
  * - Tool results come back as `user` events wrapping `tool_result` blocks,
@@ -53,7 +55,6 @@ import {
 } from "./mapping.ts";
 import {
 	asClaudeEvent,
-	isRecord,
 	type ClaudeApiMessage,
 	type ClaudeAssistantEvent,
 	type ClaudeCompactBoundaryEvent,
@@ -80,8 +81,6 @@ type AssistantBlock = TextContent | ThinkingContent | ToolCall;
 
 interface BlockState {
 	content: AssistantBlock;
-	/** Accumulated `input_json_delta` text for a streaming tool_use block. */
-	partialJson?: string;
 }
 
 /** One API message (one `message.id`), merged across its per-block events. */
@@ -257,10 +256,7 @@ export class ClaudeReducer {
 				const content = assistantBlockToContent(block);
 				if (!content) return [];
 				if (block.type === "tool_use") this.toolNames.set(block.id, block.name);
-				slot.blocks[body.index] = {
-					content,
-					...(block.type === "tool_use" ? { partialJson: "" } : {}),
-				};
+				slot.blocks[body.index] = { content };
 				return this.recompose(slot);
 			}
 			case "content_block_delta": {
@@ -299,24 +295,17 @@ export class ClaudeReducer {
 						};
 						return this.recompose(slot);
 					}
-					case "input_json_delta": {
-						if (typeof delta.partial_json !== "string" || state?.content.type !== "toolCall") {
-							return [];
-						}
-						const partialJson = (state.partialJson ?? "") + delta.partial_json;
-						let args = state.content.arguments;
-						try {
-							const parsed: unknown = JSON.parse(partialJson);
-							if (isRecord(parsed)) args = parsed;
-						} catch {
-							// Incomplete JSON mid-stream; keep the last good parse.
-						}
-						slot.blocks[body.index] = {
-							content: { ...state.content, arguments: args },
-							partialJson,
-						};
-						return this.recompose(slot);
-					}
+					case "input_json_delta":
+						// A prefix of a JSON object never parses, so accumulating this
+						// text bought one usable value -- on the last delta -- which the
+						// block's authoritative `assistant` event then overwrote anyway
+						// (see `handleAssistant`). A tool call's `arguments` therefore
+						// come from that event and from nowhere else; if a later Claude
+						// Code stops emitting per-block `assistant` events under
+						// `--include-partial-messages`, they would never populate.
+						// Emitting here upserted a message that had not changed (OW-bizulo),
+						// so this is a no-op rather than churn callers must filter out.
+						return [];
 					default:
 						return [];
 				}

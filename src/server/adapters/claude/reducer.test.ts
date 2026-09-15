@@ -62,6 +62,19 @@ function toolCallsOf(messages: AgentMessage[]): ToolCall[] {
 		.filter((block): block is ToolCall => block.type === "toolCall");
 }
 
+function isInputJsonDelta(line: ClaudeEvent): boolean {
+	if (line.type !== "stream_event") return false;
+	const body = line.event;
+	return body?.type === "content_block_delta" && body.delta?.type === "input_json_delta";
+}
+
+/** The first `assistant` event carrying a tool_use block. */
+function firstToolUseAssistant(line: ClaudeEvent): boolean {
+	if (line.type !== "assistant") return false;
+	const content = line.message?.content;
+	return Array.isArray(content) && content.some((b) => isRecord(b) && b.type === "tool_use");
+}
+
 describe.each(FIXTURES)("replaying the %s fixture", (name) => {
 	it("produces the expected roles in order", () => {
 		const { messages } = replay(name);
@@ -212,13 +225,38 @@ describe("tool use (tool-use fixture)", () => {
 		}
 	});
 
-	it("streams tool input via input_json_delta before the authoritative event", () => {
-		// Stop just before the first assistant event that carries a tool_use
-		// block: by then the deltas for that block have all arrived.
+	it("emits no message effect for any input_json_delta (OW-bizulo)", () => {
+		// A prefix of a JSON object never parses, so every one of these deltas
+		// recomposed a message whose payload was byte-identical to the last.
+		const reducer = new ClaudeReducer({ now: () => 1_000 });
+		let deltas = 0;
+		for (const line of readFixture("tool-use")) {
+			const effects = reducer.handle(line);
+			if (!isInputJsonDelta(line)) continue;
+			deltas++;
+			expect(effects.filter((effect) => effect.type === "message")).toEqual([]);
+		}
+		expect(deltas).toBeGreaterThan(1);
+	});
+
+	it("leaves tool arguments empty until the authoritative event arrives", () => {
+		// The coupling this reducer now depends on, as an assertion: arguments
+		// come from the `assistant` event and from nowhere else. Stop just
+		// before the first one carrying a tool_use block, by which point every
+		// delta for that block has already been fed.
+		const { messages } = replay("tool-use", firstToolUseAssistant);
+		const calls = toolCallsOf(messages);
+		expect(calls.length).toBe(1);
+		expect(calls[0]?.arguments).toEqual({});
+	});
+
+	it("fills those arguments completely once that event lands", () => {
+		let seen = false;
 		const { messages } = replay("tool-use", (line) => {
-			if (line.type !== "assistant") return false;
-			const content = line.message?.content;
-			return Array.isArray(content) && content.some((b) => isRecord(b) && b.type === "tool_use");
+			// Stop one line past the first tool_use assistant event.
+			if (seen) return true;
+			seen = firstToolUseAssistant(line);
+			return false;
 		});
 		const calls = toolCallsOf(messages);
 		expect(calls.length).toBe(1);
