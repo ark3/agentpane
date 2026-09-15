@@ -287,9 +287,12 @@ describe("CodexAdapter lifecycle", () => {
 
 		const forked = await adapter.fork("turn-stored");
 
-		// No `start`: Codex has already flushed the forked thread, so the manager
-		// reaches it through the index like any other stored session.
-		expect(forked).toEqual({ ref: { backend: "codex", id: "thread-forked" } });
+		// Codex has already flushed the forked thread, but only this app-server
+		// may open it, so `fork()` hands over the adapter that will drive it
+		// along with the resume to start it as (OW-lajehi).
+		expect(forked.ref).toEqual({ backend: "codex", id: "thread-forked" });
+		expect(forked.start).toEqual({ cwd: "/workspace", resumeId: "thread-forked" });
+		expect(forked.adapter).toBeDefined();
 		expect(request(proc, "thread/fork")["params"]).toEqual({
 			threadId: STORED_REF.id,
 			cwd: "/workspace",
@@ -1867,5 +1870,226 @@ describe("CodexAdapterFactory", () => {
 		expect(() => factory.create({ backend: "pi", id: "pi-session" })).toThrow(
 			'CodexAdapterFactory cannot create a "pi" adapter',
 		);
+	});
+});
+
+describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
+	// As of `codex-cli` 0.154.0 a forked thread can only be opened by the
+	// app-server that minted it: a second process answers `thread/resume` with
+	// JSON-RPC -32600, "already has an active writer" (docs/MANUAL_TESTING.md,
+	// "The app-server that mints a fork can also drive it"). So `fork()` hands
+	// back an adapter that borrows this one's connection, and everything below
+	// is about two adapters sharing one id space and one line stream.
+
+	/** A server that echoes back whatever thread id a resume asked for. */
+	function shareableServer(
+		proc: AdapterProcess,
+		options: { holdResume?: { promise: Promise<void> } } = {},
+	): void {
+		let forks = 0;
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			const params = (message["params"] ?? {}) as Record<string, unknown>;
+			switch (message["method"]) {
+				case "initialize":
+					proc.emit({ id, result: { userAgent: "test" } });
+					break;
+				case "thread/start":
+					proc.emit({ id, result: { thread: { id: "thread-parent", turns: [] }, model: "m" } });
+					break;
+				case "thread/resume": {
+					const threadId = params["threadId"];
+					const answer = (): void => {
+						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
+					};
+					if (options.holdResume) void options.holdResume.promise.then(answer);
+					else answer();
+					break;
+				}
+				case "thread/read":
+					proc.emit({
+						id,
+						result: { thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }] } },
+					});
+					break;
+				case "thread/fork":
+					forks += 1;
+					proc.emit({
+						id,
+						result: { thread: { id: forks === 1 ? "thread-forked" : `thread-forked-${forks}`, turns: [] } },
+					});
+					break;
+				case "turn/start":
+					proc.emit({ id, result: { turn: { id: "turn-x" } } });
+					break;
+			}
+		});
+	}
+
+	async function forkedPair(holdResume?: { promise: Promise<void> }) {
+		const proc = new AdapterProcess();
+		shareableServer(proc, holdResume ? { holdResume } : {});
+		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		await parent.start({ cwd: "/workspace" });
+		// `fork()` needs a turn to cut at; `thread/read` above answers one.
+		await parent.listForkPoints();
+		const forked = await parent.fork("turn-1");
+		const borrower = forked.adapter as CodexAdapter | undefined;
+		if (!borrower) throw new Error("fork() handed back no adapter to drive the fork with");
+		return { proc, parent, borrower, forked };
+	}
+
+	it("hands back an adapter to start as a plain resume of the flushed fork", async () => {
+		const { proc, forked, borrower } = await forkedPair();
+
+		expect(forked.ref).toEqual({ backend: "codex", id: "thread-forked" });
+		expect(forked.start).toEqual({ cwd: "/workspace", resumeId: "thread-forked" });
+		expect(borrower.ref).toEqual({ backend: "codex", id: "thread-forked" });
+
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+
+		// One `initialize`, not two: the handshake is per connection and the
+		// borrower is on the one the parent already shook hands over.
+		expect(methods(proc).filter((m) => m === "initialize")).toHaveLength(1);
+		expect(request(proc, "thread/resume")["params"]).toMatchObject({
+			threadId: "thread-forked",
+			cwd: "/workspace",
+			sandbox: "danger-full-access",
+			approvalPolicy: "never",
+		});
+	});
+
+	it("ignores the parent's live turn while its own resume is still in flight", async () => {
+		// The window the borrower fails OPEN in if its identity is not seeded
+		// before the shared line stream reaches it: a fork of a STREAMING parent
+		// (D15/OW-gojado) would otherwise take the parent's deltas as its own.
+		const gate = deferred<void>();
+		const { proc, borrower } = await forkedPair(gate);
+		const starting = borrower.start({ cwd: "/workspace", resumeId: "thread-forked" });
+
+		proc.emit({ method: "turn/started", params: { threadId: "thread-parent", turn: { id: "turn-live" } } });
+		proc.emit({
+			method: "item/started",
+			params: {
+				threadId: "thread-parent",
+				startedAtMs: 1,
+				item: { id: "item-1", type: "agentMessage", text: "" },
+			},
+		});
+		proc.emit({
+			method: "item/agentMessage/delta",
+			params: { threadId: "thread-parent", itemId: "item-1", delta: "parent's words" },
+		});
+
+		expect(borrower.getState().messages).toEqual([]);
+		expect(borrower.getState().isStreaming).toBe(false);
+
+		gate.resolve();
+		await starting;
+		expect(borrower.getState().messages).toEqual([]);
+	});
+
+	it("publishes a blocking request once across both adapters, and answers it once", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const seen: { who: string; request: AgentRequest }[] = [];
+		parent.onRequest((request) => seen.push({ who: "parent", request }));
+		borrower.onRequest((request) => seen.push({ who: "fork", request }));
+
+		proc.emit({
+			id: 77,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: "thread-parent", turnId: "t", itemId: "i", startedAtMs: 1 },
+		});
+
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.who).toBe("parent");
+
+		const before = responses(proc).length;
+		await parent.reply(seen[0]?.request.requestId as string, null);
+		expect(responses(proc).length - before).toBe(1);
+	});
+
+	it("routes a request for the fork's own thread to the fork alone", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const seen: string[] = [];
+		parent.onRequest(() => seen.push("parent"));
+		borrower.onRequest(() => seen.push("fork"));
+
+		proc.emit({
+			id: 78,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: "thread-forked", turnId: "t", itemId: "i", startedAtMs: 1 },
+		});
+
+		expect(seen).toEqual(["fork"]);
+	});
+
+	it("declines an unanswerable request exactly once, not once per adapter", async () => {
+		// `applyEffects` answers a kind with no decline shape at arrival (D18,
+		// OW-nujawi). Two adapters on one connection would write two JSON-RPC
+		// responses for one wire id.
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const errors: string[] = [];
+		parent.onError((message) => errors.push(message));
+		borrower.onError((message) => errors.push(message));
+		const before = responses(proc).length;
+
+		proc.emit({
+			id: 79,
+			method: "item/tool/requestUserInput",
+			params: { threadId: "thread-parent", turnId: "t", itemId: "i" },
+		});
+
+		expect(responses(proc).length - before).toBe(1);
+		expect(errors).toHaveLength(1);
+	});
+
+	it("kills the shared child only when the last holder lets go", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+
+		await parent.dispose();
+
+		expect(proc.killCount).toBe(0);
+		// And the fork can still reach the wire the parent opened.
+		const before = proc.written.length;
+		await borrower.submit("still here");
+		expect(proc.written.length).toBeGreaterThan(before);
+
+		await borrower.dispose();
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("counts N holders, so a fork of a fork keeps the child alive too", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		await borrower.listForkPoints();
+		const grandchild = (await borrower.fork("turn-1")).adapter as CodexAdapter | undefined;
+		if (!grandchild) throw new Error("a fork of a fork handed back no adapter");
+
+		await parent.dispose();
+		await borrower.dispose();
+		expect(proc.killCount).toBe(0);
+
+		await grandchild.dispose();
+		expect(proc.killCount).toBe(1);
+	});
+
+	it("tells both adapters when the shared child dies", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const errors: string[] = [];
+		parent.onError((message) => errors.push(`parent: ${message}`));
+		borrower.onError((message) => errors.push(`fork: ${message}`));
+
+		proc.exit(1, null, new Error("app-server died"));
+
+		expect(errors).toHaveLength(2);
+		expect(errors.some((m) => m.startsWith("parent:"))).toBe(true);
+		expect(errors.some((m) => m.startsWith("fork:"))).toBe(true);
 	});
 });

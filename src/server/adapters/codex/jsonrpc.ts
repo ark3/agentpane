@@ -25,9 +25,26 @@ interface Pending {
 	resolve: (value: unknown) => void;
 	reject: (error: Error) => void;
 	method: string;
+	/**
+	 * Who asked. One connection can carry several adapters (OW-lajehi), and an
+	 * adapter that lets go must not take the others' outstanding requests with
+	 * it -- nor leave its own hanging forever.
+	 */
+	owner?: object;
 }
 
-export class CodexClient {
+/**
+ * The half of `CodexClient` an adapter uses. A `CodexConnectionHolder` wears
+ * this face too, so an adapter borrowing a shared connection reads exactly like
+ * one that owns its own.
+ */
+export interface CodexClientView {
+	request<T = unknown>(method: string, params?: unknown): Promise<T>;
+	respond(id: RequestId, result: unknown): void;
+	respondError(id: RequestId, code: number, message: string): void;
+}
+
+export class CodexClient implements CodexClientView {
 	private nextId = 1;
 	private pending = new Map<string, Pending>();
 	private closed: Error | null = null;
@@ -75,12 +92,12 @@ export class CodexClient {
 		});
 	}
 
-	request<T = unknown>(method: string, params?: unknown): Promise<T> {
+	request<T = unknown>(method: string, params?: unknown, owner?: object): Promise<T> {
 		if (this.closed) return Promise.reject(this.closed);
 		const id = this.nextId++;
 		return new Promise<T>((resolve, reject) => {
 			const key = String(id);
-			this.pending.set(key, { resolve: resolve as (value: unknown) => void, reject, method });
+			this.pending.set(key, { resolve: resolve as (value: unknown) => void, reject, method, owner });
 			try {
 				this.send({ id, method, params: params ?? {} });
 			} catch (error) {
@@ -99,9 +116,25 @@ export class CodexClient {
 		this.send({ id, error: { code, message } });
 	}
 
-	/** Reject everything outstanding; further requests fail fast. */
-	dispose(reason = "adapter disposed"): void {
-		this.fail(new CodexRpcError(reason));
+	/**
+	 * Reject everything outstanding; further requests fail fast.
+	 *
+	 * With an `owner`, only that holder's requests are rejected and the client
+	 * stays open for the others -- which is what one adapter letting go of a
+	 * shared connection means (OW-lajehi). Without one, the client is closed for
+	 * everybody, which is what the last holder out does.
+	 */
+	dispose(reason = "adapter disposed", owner?: object): void {
+		const error = new CodexRpcError(reason);
+		if (owner === undefined) {
+			this.fail(error);
+			return;
+		}
+		for (const [key, pending] of [...this.pending]) {
+			if (pending.owner !== owner) continue;
+			this.pending.delete(key);
+			pending.reject(error);
+		}
 	}
 
 	private send(payload: unknown): void {

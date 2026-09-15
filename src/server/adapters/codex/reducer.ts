@@ -461,7 +461,18 @@ function appendAt(parts: string[], index: number, delta: string): void {
 	parts[index] = (parts[index] ?? "") + delta;
 }
 
-/** Thread-scoped notifications for spawned agents share the parent's connection. */
+/**
+ * The thread a notification is about, or null for one that names none.
+ *
+ * Load-bearing twice over, because more than one thread's notifications come
+ * down one connection: a spawned agent is a thread of its own sharing its
+ * parent's connection (D19), and since OW-lajehi a fork is too -- the parent's
+ * app-server is the only process that may drive it. The guard in
+ * `handleNotification` that reads this is what keeps one thread's stream out of
+ * another's transcript, and it is only armed once `threadId` is set, which is
+ * why `CodexAdapter.adoptConnection` seeds a borrower's identity before it
+ * joins the stream.
+ */
 function threadIdOf(message: CodexNotification): string | null {
 	if (message.method === "thread/started") return message.params.thread.id;
 	const params: unknown = message.params;

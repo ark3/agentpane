@@ -48,18 +48,25 @@ export interface StartOptions {
 }
 
 /**
- * What `fork()` hands back. `ref` is the new conversation; `start` is present
- * only when the fork exists as arguments rather than as anything the backend
- * has recorded, and is then the `StartOptions` its own adapter must be started
- * with. Codex flushes the forked thread to disk before `thread/fork` returns
- * and Pi's fork IS the live process, so both omit it and the fork is reachable
- * the ordinary way -- on Pi. On Codex the ordinary way is currently refused:
- * the parent's app-server holds the new thread's writer lock and the attach
- * cannot open it (`codex-cli` 0.154.0, OW-lajehi).
+ * What `fork()` hands back, in three shapes because the backends fork three
+ * ways. `ref` is always the new conversation.
+ *
+ * `start` is the `StartOptions` the fork's own adapter must be started with,
+ * present whenever the fork is not reachable by the ordinary attach path. Pi
+ * omits it: its fork IS the live process, which the adapter keeps driving.
+ *
+ * `adapter` is the fork's adapter, already constructed and holding whatever it
+ * shares with the parent, for a fork that cannot be driven by an adapter the
+ * factory would build. Codex is the one case: `thread/fork` flushes the rollout
+ * to disk immediately, but the minting app-server keeps its writer lock and a
+ * second one is refused (`codex-cli` 0.154.0, OW-lajehi), so the fork's adapter
+ * borrows the parent's connection and only `CodexAdapter.fork` can hand it
+ * over -- `AdapterFactory.create` takes a ref and could not.
  */
 export interface ForkResult {
 	ref: SessionRef;
 	start?: StartOptions;
+	adapter?: BackendAdapter;
 }
 
 export interface BackendAdapter {
@@ -69,9 +76,15 @@ export interface BackendAdapter {
 	/** Spawn via `direnv exec <cwd> sbox -- <agent>` (D7). */
 	start(opts: StartOptions): Promise<void>;
 	/**
-	 * Kill the subprocess. MUST be idempotent and MUST resolve only once the
-	 * child is actually gone -- the server's shutdown resolving is its licence
-	 * to exit, and it reaches one adapter from more than one direction: an
+	 * Kill the subprocess. MUST be idempotent, and the disposal of the adapters
+	 * sharing a child MUST resolve only once that child is actually gone -- the
+	 * server's shutdown resolving is its licence to exit. That is an invariant
+	 * over the SET, not over each adapter: a Codex fork shares the parent's
+	 * app-server (OW-lajehi), so every holder but the last resolves with the
+	 * child alive and the last one awaits the kill. Shutdown settles all of them,
+	 * so the licence still means what it says.
+	 *
+	 * Teardown reaches one adapter from more than one direction: an
 	 * explicit close and a failing `start()` can hold the same adapter, and
 	 * shutdown walks both the process table and the startups still in flight.
 	 * Repeat callers must await the first teardown rather than run a second,

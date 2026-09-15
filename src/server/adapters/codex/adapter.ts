@@ -18,7 +18,8 @@ import type {
 	StartOptions,
 	Unsubscribe,
 } from "../types.ts";
-import { CodexClient } from "./jsonrpc.ts";
+import { CodexConnection, type CodexConnectionHolder } from "./connection.ts";
+import type { CodexClientView } from "./jsonrpc.ts";
 import { spawnCodex, type CodexProcess, type CodexSpawner } from "./process.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import {
@@ -87,7 +88,7 @@ const UNSUPPORTED_REQUEST_CODE = -32601;
 
 interface ClientOwnership {
 	proc: CodexProcess;
-	client: CodexClient | null;
+	client: CodexClientView | null;
 	ready: boolean;
 }
 
@@ -103,8 +104,22 @@ export class CodexAdapter implements BackendAdapter {
 	private readonly approvalPolicy: AskForApproval;
 
 	private proc: CodexProcess | null = null;
-	private client: CodexClient | null = null;
+	private client: CodexClientView | null = null;
 	private ownership: ClientOwnership | null = null;
+	/** The app-server this adapter talks over, owned or borrowed (OW-lajehi). */
+	private connection: CodexConnection | null = null;
+	private holder: CodexConnectionHolder | null = null;
+	/**
+	 * True for a fork this adapter did not spawn a child for: it is driving a
+	 * thread minted inside the parent's app-server, which is the only process
+	 * that may open it. Set by `adoptConnection`.
+	 */
+	private borrowed = false;
+	/**
+	 * `start()` has been entered. Separate from `client`, which a borrower holds
+	 * from construction (`adoptConnection`) and therefore cannot stand in for.
+	 */
+	private startCalled = false;
 	private threadId: string | null = null;
 	/** A known-safe lifecycle id that `abort()` may interrupt. */
 	private turnId: string | null = null;
@@ -172,28 +187,22 @@ export class CodexAdapter implements BackendAdapter {
 
 	async start(opts: StartOptions): Promise<void> {
 		if (this.disposed) throw new Error("codex adapter disposed");
-		if (this.client) throw new Error("codex adapter already started");
+		if (this.startCalled) throw new Error("codex adapter already started");
+		this.startCalled = true;
 		this.cwd = opts.cwd;
 		if (opts.model) this.model = opts.model;
+		if (this.borrowed) return this.startBorrowed();
 
 		const spawner = this.options.spawn ?? spawnCodex;
 		const proc = spawner({ cwd: opts.cwd, env: this.options.env });
 		this.proc = proc;
+		const connection = new CodexConnection(proc);
+		this.connection = connection;
 		const ownership: ClientOwnership = { proc, client: null, ready: false };
 		this.ownership = ownership;
-		const client = new CodexClient(proc, {
-			onMessage: (msg) => {
-				if (!this.owns(ownership)) return;
-				this.onServerMessage(msg);
-			},
-			onExit: (code, signal, error) => {
-				if (!this.owns(ownership)) return;
-				this.emitError(
-					error?.message ??
-						`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-				);
-			},
-		});
+		const holder = this.joinConnection(connection, ownership);
+		const client = holder;
+		this.holder = holder;
 		ownership.client = client;
 		this.client = client;
 		ownership.ready = true;
@@ -244,20 +253,131 @@ export class CodexAdapter implements BackendAdapter {
 			assertOwned();
 			this.threadId = started.thread.id;
 			this.currentRef = { backend: "codex", id: started.thread.id };
+			holder.claim(started.thread.id);
 		} catch (error) {
-			client.dispose("codex adapter start failed");
 			this.clearPendingRequests();
 			if (this.ownership === ownership) {
 				ownership.ready = false;
 				this.ownership = null;
 			}
 			if (this.client === client) this.client = null;
-			if (this.proc === proc) {
-				this.proc = null;
-				await proc.kill();
-			}
+			if (this.holder === holder) this.holder = null;
+			if (this.connection === connection) this.connection = null;
+			if (this.proc === proc) this.proc = null;
+			this.startCalled = false;
+			// This holder is the only one -- nothing can have forked off a
+			// connection whose `start()` has not returned -- so the release kills
+			// the child, exactly as the explicit kill here used to.
+			await holder.release("codex adapter start failed");
 			throw error;
 		}
+	}
+
+	/**
+	 * Start as a fork driven over the parent's app-server.
+	 *
+	 * No `initialize`: that handshake is per connection and the parent already
+	 * made it. A second one on the same connection has never been measured, and
+	 * sending an unprobed request blind is not how this adapter learns things.
+	 * What remains is real work -- resume the thread, hydrate the transcript the
+	 * fork inherited, and learn the model the fork actually runs.
+	 *
+	 * Identity is NOT seeded here. `adoptConnection` did that synchronously at
+	 * fork time, because the shared line stream reaches this adapter from that
+	 * moment and the reducer's cross-thread guard is only armed once `threadId`
+	 * is set; see `adoptConnection`.
+	 *
+	 * A rejection leaves the share held. The caller disposes -- `SessionManager`
+	 * `#start` reaps a failed start through `#terminate` -- and that is what
+	 * releases it.
+	 */
+	private async startBorrowed(): Promise<void> {
+		const holder = this.holder;
+		const ownership = this.ownership;
+		const threadId = this.threadId;
+		if (!holder || !ownership || !threadId) throw new Error("codex adapter not started");
+		const assertOwned = (): void => {
+			if (!this.owns(ownership)) throw new Error(START_ABORTED_ERROR);
+		};
+
+		const resumed = await holder.request<ThreadResumeResponse>("thread/resume", {
+			threadId,
+			cwd: this.cwd,
+			sandbox: this.sandbox,
+			approvalPolicy: this.approvalPolicy,
+			...(this.model ? { model: this.model } : {}),
+		});
+		assertOwned();
+
+		this.model = resumed.model ?? this.model;
+		this.reducer.setIdentity({
+			threadId: resumed.thread.id,
+			model: resumed.model,
+			modelProvider: resumed.modelProvider,
+			reasoningEffort: resumed.reasoningEffort,
+		});
+		if (resumed.thread.turns?.length) {
+			this.applyEffects(this.reducer.hydrate(resumed.thread));
+			assertOwned();
+			this.rememberTurns(resumed.thread);
+		}
+		assertOwned();
+		// `thread/resume` answers with the id it was asked for, so this is the id
+		// `adoptConnection` already installed and `#adoptRef` no-ops on it -- no
+		// `renamed` for a fork, which is what D20/OW-suhoto requires.
+		this.threadId = resumed.thread.id;
+		this.currentRef = { backend: "codex", id: resumed.thread.id };
+		holder.claim(resumed.thread.id);
+	}
+
+	/**
+	 * Take a share of `connection` and start listening on it, for a fork the
+	 * parent has just minted. Synchronous and complete: the share is taken at
+	 * fork time, not at attach, so a `close()` on the parent landing between the
+	 * two cannot kill the child out from under the attach.
+	 *
+	 * The seeding order is load-bearing. `CodexReducer.handleNotification`'s
+	 * cross-thread guard short-circuits while its `threadId` is null and its
+	 * `thread/started` arm binds to whatever thread it sees first, so a borrower
+	 * that joined the stream unseeded would accept the PARENT's notifications
+	 * until its own `thread/resume` came back -- seeding the fork's transcript
+	 * with the parent's live deltas, which is exactly the D15/OW-gojado case of
+	 * forking a streaming parent. Seeding after `thread/resume` instead of
+	 * joining late is deliberate too: joining late drops whatever the fork's own
+	 * thread said in the meantime.
+	 */
+	private adoptConnection(connection: CodexConnection, threadId: string, cwd: string): void {
+		this.connection = connection;
+		this.borrowed = true;
+		this.cwd = cwd;
+		this.threadId = threadId;
+		this.currentRef = { backend: "codex", id: threadId };
+		this.reducer.setIdentity({ threadId });
+		const ownership: ClientOwnership = { proc: connection.proc, client: null, ready: false };
+		this.ownership = ownership;
+		const holder = this.joinConnection(connection, ownership);
+		holder.claim(threadId);
+		this.holder = holder;
+		this.client = holder;
+		this.proc = connection.proc;
+		ownership.client = holder;
+		ownership.ready = true;
+	}
+
+	private joinConnection(connection: CodexConnection, ownership: ClientOwnership): CodexConnectionHolder {
+		return connection.join({
+			onMessage: (msg) => {
+				if (!this.owns(ownership)) return;
+				this.onServerMessage(msg);
+			},
+			onExit: (code, signal, error) => {
+				if (!this.owns(ownership)) return;
+				this.emitError(
+					error?.message ??
+						`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+				);
+			},
+		});
 	}
 
 	dispose(): Promise<void> {
@@ -268,13 +388,13 @@ export class CodexAdapter implements BackendAdapter {
 	}
 
 	private async finishDisposal(): Promise<void> {
-		const client = this.client;
-		const proc = this.proc;
+		const holder = this.holder;
 		if (this.ownership) this.ownership.ready = false;
 		this.ownership = null;
 		this.client = null;
 		this.proc = null;
-		client?.dispose();
+		this.holder = null;
+		this.connection = null;
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
@@ -285,7 +405,13 @@ export class CodexAdapter implements BackendAdapter {
 		this.turnBusy = null;
 		this.pendingTurnCompletions.clear();
 		this.pendingTurnCompletionOverflow = false;
-		await proc?.kill();
+		// The child dies with the LAST holder, not with this one. A fork drives a
+		// thread only the parent's app-server may open, so killing on the first
+		// release would take the fork's session down with the parent's
+		// (OW-lajehi). `BackendAdapter.dispose`'s "resolves once the child is
+		// gone" therefore holds across the set: the last releaser awaits the kill
+		// and shutdown, which settles every adapter, waits for it.
+		await holder?.release();
 	}
 
 	// -- driving a turn -----------------------------------------------------
@@ -500,6 +626,7 @@ export class CodexAdapter implements BackendAdapter {
 
 	async fork(entryId: string): Promise<ForkResult> {
 		const client = this.requireClient();
+		const cwd = this.cwd;
 		if (!this.turnOrder.length) await this.listForkPoints();
 		const index = this.turnOrder.indexOf(entryId);
 		if (index < 0) throw new Error(`unknown fork point: ${entryId}`);
@@ -515,18 +642,27 @@ export class CodexAdapter implements BackendAdapter {
 		const forked = await client.request<ThreadForkResponse>("thread/fork", {
 			threadId: this.requireThread(),
 			...(lastTurnId ? { lastTurnId } : {}),
-			...(this.cwd ? { cwd: this.cwd } : {}),
+			...(cwd ? { cwd } : {}),
 			sandbox: this.sandbox,
 			approvalPolicy: this.approvalPolicy,
 			...(this.options.ephemeral ? { ephemeral: true } : {}),
 		});
-		// No `start`: Codex flushes the forked rollout to disk here, before any
-		// turn, so the index finds it. Finding it is not enough to attach it as
-		// of `codex-cli` 0.154.0 -- the fork is minted inside THIS process, which
-		// holds its writer lock, and the second app-server the attach spawns is
-		// refused with "already has an active writer" (OW-lajehi). That is a live
-		// defect, not a note: fork-and-edit does not work on Codex today.
-		return { ref: { backend: "codex", id: forked.thread.id } };
+		// Codex flushes the forked rollout to disk here, before any turn, so the
+		// index finds it -- but finding it is not enough to open it. As of
+		// `codex-cli` 0.154.0 the fork's writer lock is held by THIS process, and
+		// a second app-server asking to resume it is refused with
+		// `-32600 already has an active writer`, while this process resumes it,
+		// drives it, and keeps driving the parent (OW-lajehi,
+		// `docs/MANUAL_TESTING.md`). So the fork's adapter is built here, sharing
+		// this connection, and `start` is the plain resume it must be started
+		// with; `SessionManager` starts the adapter it is handed rather than
+		// asking the factory for one that would spawn.
+		const connection = this.connection;
+		if (!connection || !cwd) throw new Error("codex adapter not started");
+		const forkRef: SessionRef = { backend: "codex", id: forked.thread.id };
+		const borrower = new CodexAdapter(forkRef, this.options);
+		borrower.adoptConnection(connection, forked.thread.id, cwd);
+		return { ref: forkRef, start: { cwd, resumeId: forked.thread.id }, adapter: borrower };
 	}
 
 	// -- state --------------------------------------------------------------
@@ -741,7 +877,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.turnOrder = (thread.turns ?? []).map((turn) => turn.id);
 	}
 
-	private requireClient(): CodexClient {
+	private requireClient(): CodexClientView {
 		if (!this.client) throw new Error("codex adapter not started");
 		return this.client;
 	}

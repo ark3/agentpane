@@ -102,7 +102,15 @@ export function isCodexNotification(msg: CodexServerMessage): msg is CodexNotifi
 	return !("id" in msg) && "method" in msg;
 }
 
-/** A typed lookup key for one app-server's wire namespace (`0` !== `"0"`). */
+/**
+ * A typed lookup key for one app-server connection's wire namespace
+ * (`0` !== `"0"`).
+ *
+ * Per connection, not per adapter: a Codex fork shares the parent's app-server
+ * (OW-lajehi), so two adapters read one id space. They do not collide on it,
+ * because `CodexConnection` routes each blocking request to exactly one of them
+ * before either gets to make a key.
+ */
 export function wireRequestKey(id: RequestId): string {
 	return JSON.stringify([typeof id, id]);
 }
