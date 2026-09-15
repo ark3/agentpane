@@ -1,5 +1,6 @@
 ---
 labels: [defect, now]
+closed: done
 ---
 
 # Claude emits one upsert per input_json_delta whose payload is byte-identical to the last, for arguments the authoritative `assistant` event replaces anyway
@@ -57,3 +58,29 @@ A third case guards the coupling: assert that the arguments are absent until tha
 
 Do not close this on a timing measurement.
 The claim is that an upsert is emitted when the message did not change, and consecutive payloads being byte-identical is the observable; OW-detepa's docblock in `src/client/App.streaming-cost.test.ts` argues the counts-not-milliseconds choice for the client side of the same question, and the reasoning carries.
+
+## Close note
+
+Landed as e7078d3 on `main`.
+
+The `input_json_delta` arm of `handleStreamEvent` in `src/server/adapters/claude/reducer.ts` is now `return []`, with a comment at the site in the shape of Pi's `toolcall_delta` comment: it states that a prefix of a JSON object never parses, that the block's authoritative `assistant` event overwrote the one usable value anyway, and that tool-call `arguments` therefore come from that event and from nowhere else.
+`BlockState.partialJson` and its `{ partialJson: "" }` seeding in `content_block_start` are gone; that arm's own `recompose` was left alone, as the card scoped it.
+`isRecord` was dropped from the reducer's import list, orphaned by the deletion and still exported and used elsewhere.
+
+Verified by effect counts, not timing, per the card.
+`src/server/adapters/claude/reducer.test.ts` carries three cases, driven by the `tool-use` fixture:
+
+- `emits no message effect for any input_json_delta (OW-bizulo)` -- guards against vacuity with `expect(deltas).toBeGreaterThan(1)`; the fixture supplies 12 deltas across three blocks.
+- `leaves tool arguments empty until the authoritative event arrives` -- the coupling, as an assertion.
+- `fills those arguments completely once that event lands` -- proves the deletion lost nothing.
+
+The first two go red against the pre-change reducer; the implementer ran them there and reported both failures.
+The third cannot go red first by construction: it asserts behaviour the change preserves, which is its whole job.
+The card expected all of "two cases, both failing"; the second failure is the coupling case, not this one.
+The replaced test `streams tool input via input_json_delta before the authoritative event` asserted exactly the removed behaviour; its surviving assertions were carried into the two replacements.
+
+`bun run check` green on `main` after the cherry-pick: 49 files, 1068 tests, 22.5s.
+
+Two things came out of the adversarial read at the finished work.
+The file header's assembly rules still said `content_block_start`/`content_block_delta` "build blocks by index", which the deletion made false for `tool_use`; that copy was retired in the same commit, per AGENTS.md's rule that a correction reaches every copy.
+And the card's claim that an abort mid-arguments loses nothing turns out to have one exception -- a kill in the one-line window between a block's final delta, the only one whose parse succeeded, and its `assistant` event. Filed as OW-kahuni (deferral), which carries the reasoning and what would make it worth doing.
