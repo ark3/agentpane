@@ -26,11 +26,17 @@ OW-gojado for the fifth):
                        round-trip after the fork -- where OW-pifowo took it and
                        where its `false` was retired, one sample of a race
                        (OW-gajesu). A mid-stream fork also succeeds and the
-                       turn stops: the streamed-into file ends with the prompt
-                       and an assistant entry carrying no text, and the new
-                       branch sits at the fork point, idle. Whether text was
-                       DISCARDED is not shown -- this cell has no delta gate,
-                       unlike codex_fork_mid_stream. Proven by
+                       turn stops, and the new branch sits at the fork point,
+                       idle. Since OW-sededi this cell carries its Codex
+                       sibling's streaming discipline -- forty accumulated
+                       `text_delta`s before the fork, re-read at the instant
+                       the request goes out -- and on 0.85.1 the streamed-into
+                       file KEEPS the partial reply the turn had produced
+                       (447 characters at 47 deltas), so the fork ends the
+                       turn without discarding what it had already streamed.
+                       The empty assistant entry the 2026-09-15 OW-gajesu run
+                       read there was the ungated case: a fork that landed
+                       before any text existed. Proven by
                        inspection, not by the response --
                        an extension veto reports success:true with
                        cancelled:true, finding 30.
@@ -385,18 +391,100 @@ class PiSession:
                 return text_of(e["message"])
         return None
 
+    def _seen(self, event_type, since):
+        """The first event of `event_type` in the buffer since `since`, or None.
+
+        Non-blocking, so the streaming gate below can poll several signals in
+        one pass instead of serialising a wait on each.
+        """
+        for line in self.raw[since:]:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("type") == event_type:
+                return event
+        return None
+
     def wait_for_event(self, event_type, since=0, timeout=20):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            for line in self.raw[since:]:
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                if event.get("type") == event_type:
-                    return event
+            event = self._seen(event_type, since)
+            if event is not None:
+                return event
             time.sleep(0.15)
         return None
+
+    def stream_deltas(self, since):
+        """(streamed text deltas, census of every delta kind) since `since`.
+
+        `message_update` carrying an `assistantMessageEvent` of type
+        `text_delta` is what the adapter's own reducer accumulates as streamed
+        assistant text (src/server/adapters/pi/reducer.ts), so it is what the
+        count means here; thinking and tool-call deltas arrive on the same
+        notification and are deliberately NOT counted, because a reasoning
+        model at `thinkingLevel: "high"` emits plenty of them before the reply
+        starts and they are not the text whose fate the cell is asking about.
+        The census is reported beside the count so that the shape is read off
+        the wire on every run rather than assumed: if a Pi release streams
+        assistant text under some other event, a run whose census is all
+        `thinking_delta` and no `text_delta` says so instead of silently
+        timing out.
+        """
+        count = 0
+        census = {}
+        for line in self.raw[since:]:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("type") != "message_update":
+                continue
+            kind = (event.get("assistantMessageEvent") or {}).get("type")
+            census[kind] = census.get(kind, 0) + 1
+            if kind == "text_delta":
+                count += 1
+        return count, census
+
+    def await_streaming(self, mark, min_deltas, timeout):
+        """Block until the turn is positively observed streaming assistant text.
+
+        The sibling of `CodexSession.await_streaming`, and the same two
+        independent signals, both required: `agent_start` for the turn, and at
+        least `min_deltas` accumulated `text_delta`s. Waiting on `agent_start`
+        alone -- which is all this cell did before OW-sededi -- cannot tell a
+        fork that discarded streamed text from one that landed before any text
+        existed, and that failure mode is silent: the abandoned file holds an
+        empty assistant entry either way. Returns the observation either way;
+        the caller decides what an unmet signal means.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._seen("agent_settled", mark) is not None:
+                break
+            deltas, census = self.stream_deltas(mark)
+            if self._seen("agent_start", mark) is not None and deltas >= min_deltas:
+                return {"agent_start_seen": True, "deltas_before_fork": deltas,
+                        "delta_census_before_fork": census,
+                        "settled_before_fork": False, "streaming_confirmed": True}
+            time.sleep(0.1)
+        deltas, census = self.stream_deltas(mark)
+        return {
+            "agent_start_seen": self._seen("agent_start", mark) is not None,
+            "deltas_before_fork": deltas,
+            "delta_census_before_fork": census,
+            "settled_before_fork": self._seen("agent_settled", mark) is not None,
+            "streaming_confirmed": False,
+        }
+
+    def still_streaming(self, mark):
+        """Re-read the buffer at the instant of the action.
+
+        `await_streaming` returns the moment its threshold is met, and the turn
+        can settle in the gap before the fork request goes out. The sibling of
+        `CodexSession.still_streaming`, which carries the incident.
+        """
+        return self._seen("agent_settled", mark) is None
 
     def close(self):
         self.proc.terminate()
@@ -581,8 +669,21 @@ def run_pi(timeout, want_fixtures):
         stream_prompt = "Write the numbers 1 through 400, one per line, with no prose."
         stream_mark = len(pi.raw)
         prompt_resp = pi.response({"type": "prompt", "message": stream_prompt}, "prompt")
-        agent_started = pi.wait_for_event("agent_start", since=stream_mark, timeout=10)
+        # Forty deltas, not the Codex cell's five, for the reason
+        # `claude_fork_probe.py` uses forty: a low threshold cannot tell the
+        # reply streaming from a short coda after a tool call, and that run
+        # measured nothing and said nothing (resources/probes/README.md, "the
+        # streaming discipline"). Pi runs this prompt with its tools available,
+        # so the same shortcut is open to it. Forty `text_delta`s of a
+        # 400-line count is unambiguously the reply itself, and it is text the
+        # empty assistant entry on disk can then be set against.
+        streaming = pi.await_streaming(stream_mark, min_deltas=40, timeout=timeout)
         state_while_streaming = pi.response({"type": "get_state"}, "get_state")
+        # Re-read at the instant the request goes out: the threshold having
+        # been met is not the turn still running when the fork lands, and the
+        # `get_state` round-trip above sits in that gap.
+        deltas_at_fork, delta_census_at_fork = pi.stream_deltas(stream_mark)
+        streaming_at_fork = pi.still_streaming(stream_mark)
         stream_fork_resp = (
             pi.response({"type": "fork", "entryId": stream_entry}, "fork", timeout=10)
             if stream_entry else None
@@ -604,8 +705,25 @@ def run_pi(timeout, want_fixtures):
             "midstream_expected_message_count": stream_expected_messages,
             "midstream_abandoned_file": Path(streaming_file).name if streaming_file else None,
             "midstream_abandoned_file_messages": abandoned_messages,
+            # Unprojected length of that file's last assistant entry, because
+            # the messages above are previewed at 120 characters and the whole
+            # question is how much of the streamed reply is there.
+            "midstream_abandoned_tail_chars": (
+                len(pi_last_message_text(streaming_file) or "")
+                if streaming_file and Path(streaming_file).exists() else None
+            ),
             "midstream_prompt_admitted": prompt_resp is not None and prompt_resp.get("success") is True,
-            "midstream_agent_start_seen": agent_started is not None,
+            # Earned, or not reported: a fork fired before any assistant text
+            # existed measures nothing about text being discarded.
+            "midstream_agent_start_seen": streaming["agent_start_seen"],
+            "midstream_min_deltas_required": 40,
+            "midstream_streaming_confirmed_before_fork": streaming["streaming_confirmed"],
+            "midstream_deltas_before_fork": streaming["deltas_before_fork"],
+            "midstream_delta_census_before_fork": streaming["delta_census_before_fork"],
+            "midstream_turn_settled_before_fork": streaming["settled_before_fork"],
+            "midstream_deltas_at_the_fork_itself": deltas_at_fork,
+            "midstream_delta_census_at_the_fork_itself": delta_census_at_fork,
+            "midstream_still_streaming_at_the_fork_itself": streaming_at_fork,
             "midstream_state_before_fork": state_while_streaming.get("data") if state_while_streaming else None,
             "midstream_fork_return": stream_fork_resp,
             "midstream_state_after_fork": state_after_stream_fork.get("data") if state_after_stream_fork else None,
@@ -613,6 +731,13 @@ def run_pi(timeout, want_fixtures):
             "midstream_state_after_turn": post_stream_state.get("data") if post_stream_state else None,
             "midstream_assistant_reply_preview": preview(pi.last_assistant_text(stream_mark)),
             "midstream_messages_tail": summarize_messages(post_stream_messages[-4:]),
+            # The cell's own verdict, read by main() for the exit status. The
+            # finding is an ABSENCE on disk, so the read of the abandoned file
+            # is gated too: a streamed-into file the cell could not open
+            # produces the same empty answer as one that holds no text.
+            "midstream_result": ("measured" if (streaming["streaming_confirmed"]
+                                                and streaming_at_fork
+                                                and abandoned_messages is not None) else "unearned"),
         })
     finally:
         pi.close()
@@ -1195,9 +1320,9 @@ def main():
 
     print(json.dumps(record, indent=2))
     # Non-zero if any new-session cell failed to drive a turn -- that is the
-    # one criterion that a returned id cannot fake -- or if the mid-stream cell
-    # reported anything but "measured", which is that cell's own verdict on
-    # whether it earned what it reports. Read through `result` rather than by
+    # one criterion that a returned id cannot fake -- or if either mid-stream
+    # cell reported anything but "measured", which is that cell's own verdict
+    # on whether it earned what it reports. Read through `result` rather than by
     # re-listing its conditions here, so a condition added there reaches the
     # exit code without a second edit.
     ok = True
@@ -1205,9 +1330,11 @@ def main():
         cell = record["cells"].get(name)
         if cell is not None and not cell.get("drove_turn_in_fork" if "codex" in name else "drove_turn_in_clone"):
             ok = False
-    mid = record["cells"].get("codex_fork_mid_stream")
-    if mid is not None and mid.get("result") != "measured":
-        ok = False
+    for name, field in (("codex_fork_mid_stream", "result"),
+                        ("pi_rewind", "midstream_result")):
+        mid = record["cells"].get(name)
+        if mid is not None and mid.get(field) != "measured":
+            ok = False
     return 0 if ok else 1
 
 

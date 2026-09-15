@@ -145,6 +145,8 @@ exists, what it returned, and what it left on disk:
 - **Pi rewind** (`fork`): copy-on-write on 0.84.2 — original file untouched, the
   re-ask spins off a new `parentSession`-linked file, so the abandoned tail
   survives (HANDOFF 43).
+  The same cell also forks *mid-stream*, and since OW-sededi it carries the streaming discipline below: forty accumulated `message_update`/`text_delta` events after `agent_start`, re-read at the instant the fork request goes out, a census of every delta kind beside the count, and its own `midstream_result` that the exit status reads.
+  Forty rather than the Codex cell's five for the same reason `claude_fork_probe.py` uses forty, and because a reasoning model at `thinkingLevel: "high"` emits its thinking deltas on that same notification — only `text_delta` is counted.
 - **Pi new session** (`clone` + `switch_session`): `clone` takes no entry id;
   it copies the whole active branch to a new file and the process is switched
   into it to drive a real turn (HANDOFF 44).
@@ -173,12 +175,14 @@ session discipline as `capture_fixtures.py`; Codex threads are deliberately NOT
 ephemeral here because the on-disk residue is the question. New-session cells
 end with a completed assistant turn inside the fork, so a returned id alone
 cannot pass the check.
-Exit non-zero if either new-session cell failed to drive a turn, or if the mid-stream cell's own `result` is anything but `measured`.
+Exit non-zero if either new-session cell failed to drive a turn, or if either mid-stream cell's own verdict — `codex_fork_mid_stream.result`, `pi_rewind.midstream_result` — is anything but `measured`.
 
 Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the Pi cells again with
 `pi` 0.85.1 on the home server, 2026-09-15 (`docs/MANUAL_TESTING.md`, "Pi's
 mid-stream fork, and the forked file on disk, re-measured at the instrument
-(OW-gajesu)"); the Codex mid-stream cell with
+(OW-gajesu)", and again with the Pi mid-stream gate in place, 2026-09-15,
+"Pi's mid-stream fork, measured against text known to have streamed
+(OW-sededi)"); the Codex mid-stream cell with
 `codex-cli` 0.154.0, on which the rollout no longer writes an
 `event_msg`/`agent_message` beside each assistant `response_item` — so
 `fork.jsonl`, captured on 0.147.0, is a version behind on line shapes. What that cell showed is `docs/MANUAL_TESTING.md`,
