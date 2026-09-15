@@ -494,7 +494,8 @@ Asked directly on 2026-09-11 whether the workflow ever involves scrolling back a
 
 **Pi leaves no choice.**
 A mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and `agent_settled` arrives carrying no assistant text (work laptop, 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md`, OW-yudoni).
-That section retired a third observation from the same run as a tautology, and the two above are what it says survives; nobody has yet read the file the abandoned turn was streaming into, so the conclusion rests on the settle rather than on a search for a partial reply.
+That section retired a third observation from the same run as a tautology, and it rested on the settle alone because nobody had opened the file the abandoned turn was streaming into.
+Someone has now: on the home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`, that file held the turn's user message and an assistant entry with no text, so there is no partial reply on disk to have been spared (`docs/MANUAL_TESTING.md`, OW-gajesu).
 The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
 
 **Codex's parent turn survives.**

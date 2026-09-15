@@ -392,9 +392,12 @@ export class PiAdapter implements BackendAdapter {
 		// `sessionFile` MOVES to a new file at the fork call. So the id we hold
 		// has diverged from Pi's active file and must be re-adopted -- otherwise
 		// a later turn is keyed to the abandoned pre-fork branch and a listing
-		// indexes a stale id. Whether that new file is on disk by the time the
-		// fork returns is NOT settled -- two runs read opposite answers
-		// (OW-gajesu) -- so do not build on either answer here. Unlike
+		// indexes a stale id. That new file IS on disk by the time the fork
+		// returns, already carrying the rewound prefix (measured on 0.85.1,
+		// MANUAL_TESTING.md OW-gajesu, with the `get_state` taken as the first
+		// round-trip after the `fork`; the earlier `false` reading is retired).
+		// Nothing here depends on that, but a discarded fork does leave a real
+		// session file behind for the picker to walk. Unlike
 		// `adoptSessionFile` (the one-time virtual->real materialisation, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file

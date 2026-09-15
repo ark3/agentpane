@@ -20,13 +20,15 @@ OW-gojado for the fifth):
                        `sessionFile` MOVES to that new file at the fork call
                        itself (OW-pifowo). On the 2026-08-20 second-message
                        run the rewound branch stops BEFORE the forked-at user
-                       message, matching Codex's edit contract. Whether the
-                       moved-to file is on disk AT the fork is UNSETTLED: the
-                       two runs read opposite answers and did not measure at
-                       the same point (OW-gajesu), so the get_state re-query is
-                       back ahead of get_messages where OW-pifowo took it. A
-                       mid-stream fork also succeeds, but it aborts the running
-                       turn and leaves the new branch empty/idle. Proven by
+                       message, matching Codex's edit contract. The moved-to
+                       file IS on disk at the fork, carrying the rewound
+                       prefix: read that way on 0.85.1 with the get_state re-
+                       query as the first round-trip after the fork, where
+                       OW-pifowo took it and where its `false` was retired
+                       (OW-gajesu). A mid-stream fork also succeeds, but it
+                       aborts the running turn -- the streamed-into file keeps
+                       the prompt and an assistant entry with no text -- and
+                       leaves the new branch at the fork point, idle. Proven by
                        inspection, not by the response --
                        an extension veto reports success:true with
                        cancelled:true, finding 30.
@@ -438,8 +440,9 @@ def run_pi(timeout, want_fixtures):
         #     It also settles OW-pifowo's ref question: the process's active
         #     `sessionFile` MOVES to the new file at the fork call itself,
         #     BEFORE any re-ask (`active_file_moves_at_fork`). On the
-        #     2026-08-20 run the moved-to file was already present on disk by
-        #     the immediate `get_state` re-query, so the adapter concern is
+        #     2026-08-20 and 2026-09-15 runs the moved-to file was already
+        #     present on disk by the immediate `get_state` re-query, holding the
+        #     rewound prefix, so the adapter concern is
         #     simply to re-adopt the file Pi reports after a fork rather than
         #     keep steering the abandoned pre-fork branch. ---
         beta_entry = forks[1]["entryId"]
@@ -449,20 +452,21 @@ def run_pi(timeout, want_fixtures):
         pre_fork_files = {p.name for p in sessdir.rglob("*.jsonl")}
         fork_resp = pi.response({"type": "fork", "entryId": beta_entry}, "fork")
         # OW-pifowo: re-query get_state the moment the fork returns, before any
-        # re-ask, to catch the active file moving and to see whether the moved-to
-        # file is on disk yet. This must stay the FIRST round-trip after `fork`:
-        # the 2026-08-20 run put a get_messages ahead of it and read the opposite
-        # answer from 2026-08-19, which leaves that extra latency as a candidate
-        # explanation and makes the two runs incomparable (OW-gajesu).
+        # re-ask, to catch the active file moving and to read the moved-to file
+        # on disk. This must stay the FIRST round-trip after `fork`: the
+        # 2026-08-20 run put a get_messages ahead of it and read the opposite
+        # answer from 2026-08-19, which made those two runs incomparable. Moved
+        # back here, the 2026-09-15 run read `true` at 2026-08-19's own
+        # instrument, retiring the `false` (OW-gajesu).
         active_after_fork = pi.response({"type": "get_state"}, "get_state")["data"]["sessionFile"]
         files_at_fork = {p.name for p in sessdir.rglob("*.jsonl")}
         rewound_messages = pi.response({"type": "get_messages"}, "get_messages")["data"]["messages"]
         moved_on_disk_at_fork = (
             active_after_fork is not None and Path(active_after_fork).name in files_at_fork
         )
-        # If it IS there, what does it hold before any prompt? That is what a
-        # fork the user then discards would leave behind for the session picker
-        # to list (OW-gajesu).
+        # It IS there; what it holds before any prompt is the rewound prefix,
+        # which is what a fork the user then discards leaves behind for the
+        # session picker to list (OW-gajesu).
         moved_file_messages_at_fork = (
             pi_file_messages(active_after_fork) if moved_on_disk_at_fork else None
         )
@@ -500,9 +504,9 @@ def run_pi(timeout, want_fixtures):
                 message["role"] == "user" and message["text"] == beta_text
                 for message in rewound_file_messages
             ),
-            # OW-pifowo ref question: the active file moves at the fork call.
-            # Whether it is on disk by then is unsettled -- the two runs disagree
-            # (OW-gajesu). The move itself is the stable fact the adapter needs.
+            # OW-pifowo ref question: the active file moves at the fork call,
+            # and is on disk by then (OW-gajesu). The move itself is the stable
+            # fact the adapter needs.
             "active_file_moves_at_fork": active_after_fork != active,
             "active_file_after_fork": Path(active_after_fork).name if active_after_fork else None,
             "moved_file_on_disk_at_fork": moved_on_disk_at_fork,
@@ -564,8 +568,10 @@ def run_pi(timeout, want_fixtures):
         # exclusive semantics proved above leave the new branch empty whatever
         # became of the running turn, so `messageCount: 0` after the fork says
         # nothing -- which is how the 2026-08-20 run recorded it (OW-gajesu).
-        # Here the rewound branch should carry the first turn, so an empty one
-        # is a result rather than a tautology.
+        # Here the rewound branch carries the first turn, so an empty one is a
+        # result rather than a tautology; the 2026-09-15 run read the expected
+        # two messages, and the abandoned file's own tail as the prompt plus an
+        # assistant entry with no text.
         stream_forks = pi.response({"type": "get_fork_messages"}, "get_fork_messages")["data"]["messages"]
         stream_entry = stream_forks[1]["entryId"] if len(stream_forks) > 1 else None
         stream_expected_messages = 2 if stream_entry else None

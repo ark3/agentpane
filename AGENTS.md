@@ -60,8 +60,10 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The scarce resource is trips, not minutes once you are there, so never rank such an item's contents by urgency or name the half that matters most: that is an excuse to do part of it and come back, and the second question usually costs almost nothing while the CLI is already running.
   The triage hint that would help on any other item is a defect on this one.
   Proposed for OW-yudoni on 2026-08-19 and declined by the owner for exactly this reason.
-- Pi fork behavior settled live on the work laptop (2026-08-20, `pi 0.84.2`): forking at a user message is exclusive of that message, while forking during a streaming turn succeeds but abandons the in-flight turn.
-  See `docs/MANUAL_TESTING.md` OW-yudoni.
+- Pi fork behaviour, first measured on the work laptop (2026-08-20, `pi 0.84.2`) and re-measured on the home server (2026-09-15, `pi 0.85.1`, on `deepseek/deepseek-v4.1-flash`): forking at a user message is exclusive of that message, and forking during a streaming turn succeeds but abandons the in-flight turn — the file that turn was streaming into keeps its prompt and an assistant entry with no text, so no part of the reply is durable.
+  The 0.84.2 run did not earn that second half: it forked at the first user message, where exclusivity empties the new branch whatever became of the turn, and it never opened the streamed-into file.
+  The 0.85.1 run forked at the second entry and read that file, and it also settled the fork's moved-to session file as already on disk when `fork` returns, carrying the rewound prefix.
+  See `docs/MANUAL_TESTING.md` OW-gajesu, and OW-yudoni for what the earlier run did and did not show.
 - Claude Code mid-turn handling settled live on the home server (2026-09-10, `claude 2.1.267`, explicit `--model haiku`): a stream-json user message written during a turn is acknowledged only after the first `result` and runs as a second turn, while a `steer` control request errors as unsupported.
   The adapter therefore rejects `submit()` and `/compact` while a turn is active; see `docs/MANUAL_TESTING.md` OW-jihete.
 - Claude Code mid-stream fork behaviour settled live on the home server (2026-09-11, `claude 2.1.268`, explicit `--model haiku`): sampled at four marks spanning 41 to 160 text deltas and again at `result`, the parent's store gains no assistant content until after the turn ends, so a kill mid-turn loses all of it — but the parent turn itself survives a fork spawned as a second child and writes its whole reply durably.
