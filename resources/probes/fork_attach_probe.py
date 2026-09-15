@@ -21,6 +21,15 @@ What it drives, per backend:
   3. attach the fork, prompt it, and read the reply back off the wire
   4. re-attach that fork once its store file exists
   5. fork the fork, and fork the parent a second time at the same point
+  6. on Codex only: close one side of the fork pair and attach it again while
+     the other side is still live (OW-voyezi)
+
+Step 6 is Codex's alone because the lock is Codex's alone.  A Codex fork shares
+its parent's `codex app-server` (OW-lajehi) and a thread stays locked to the
+process that opened it even after the adapter holding it is disposed, so this is
+the sequence that used to answer `500 internal_error`,
+`already has an active writer`.  Pi and Claude Code spawn a child per session
+and have nothing to re-borrow.
 
 Every backend runs against its REAL state directory, and this run therefore
 leaves three or four small sessions in each store it touches.  That is not
@@ -261,6 +270,29 @@ def fork_at_last_point(
     return step
 
 
+def close_and_reattach(http: Http, ref: dict[str, str], holder: dict[str, str]) -> dict[str, Any]:
+    """Close one side of a fork pair and attach it again while `holder` still lives.
+
+    The window OW-lajehi opened and OW-voyezi closed.  `DELETE` releases this
+    session's share of the shared `codex app-server` but cannot kill it, and as
+    of `codex-cli 0.154.0` nothing else releases the thread's writer lock --
+    `thread/unsubscribe` answers `unsubscribed` and leaves it exactly where it
+    was (`codex_unsubscribe_probe.py`).  So the attach has to come back to that
+    same child; a fresh app-server would be refused.
+    """
+    step: dict[str, Any] = {"at": now(), "closed": ref, "still_open": holder}
+    close_status, _ = http.request("DELETE", ref_path(ref))
+    step["close_http"] = close_status
+    # The close is answered before the adapter has finished letting go; nothing
+    # observable marks that, so this waits rather than races it.
+    time.sleep(2)
+    status, body = http.json("GET", ref_path(ref))
+    step["attach_http"] = status
+    step["attach_body"] = body if status != 200 else {"ref": body["session"]["ref"]}
+    step["result"] = "pass" if status == 200 else "reattach failed"
+    return step
+
+
 def run_backend(backend: str, workspace: Path, port: int, args: argparse.Namespace) -> dict[str, Any]:
     spec = BACKENDS[backend]
     http = Http(HOST, port)
@@ -364,7 +396,17 @@ def run_backend(backend: str, workspace: Path, port: int, args: argparse.Namespa
                 http, stream, fork_ref, backend=backend, store_root=store_root
             )
 
-        # 5. And the parent a second time at the same point it was forked at.
+            # 5. Close one side of the pair and re-attach it while the other
+            #    still holds the shared child (OW-voyezi).
+            if backend == "codex":
+                evidence["steps"]["reattach_parent_after_closing_it"] = close_and_reattach(
+                    http, ref, fork_ref
+                )
+                evidence["steps"]["reattach_fork_after_closing_it"] = close_and_reattach(
+                    http, fork_ref, ref
+                )
+
+        # 6. And the parent a second time at the same point it was forked at.
         evidence["steps"]["parent_still_attaches"] = {"http": http.json("GET", ref_path(ref))[0]}
         evidence["steps"]["second_fork_of_parent"] = fork_at_last_point(
             http, stream, ref, backend=backend, store_root=store_root
