@@ -2100,3 +2100,32 @@ A fork the user then discards therefore costs a real session file carrying the b
 `active_file_moves_at_fork: true` again, unchanged across all three runs.
 
 The rest of the cell reproduced 0.84.2's findings on 0.85.1 unchanged: `copy_on_write: true`, `original_file_unchanged: true`, the original's tail still the abandoned `GAMMA`, `new_file_parentSession` pointing back at the pre-fork file, and `forked_message_present_in_get_messages: false` with `ALPHA -> ALPHA -> DELTA -> DELTA` on disk after the re-ask — the exclusive fork contract.
+
+## Fork points on sessions agentpane did not write
+
+Run on the home server 2026-09-15, `claude 2.1.270` and `pi 0.85.1`, through a throwaway `bun run src/server/index.ts` on port 4199 against the real stores, with no card behind it.
+The owner reported no Edit control on any message in Claude and Pi sessions while Codex sessions had them; the cause was that the sessions were detached and a detached preview draws no control at all (`src/client/render/Transcript.svelte`, `onedit`), so nothing here is a defect.
+What the detour measured is worth keeping because the symptom has a second, real cause that nothing had ruled out.
+
+Under D20 the Edit control appears only on a user message some `GET fork-points` answer names, and the Pi and Claude derivations both answer **nothing at all** when their two views of the transcript disagree -- Pi on a length mismatch between `get_fork_messages` and the user messages in its state (`pi/process.ts` `listForkPoints`), Claude when a replayed store prompt does not land on a user message in the live reducer (`claude/adapter.ts` `listForkPoints`).
+An empty answer hides every pencil in the session, which is exactly what the owner saw.
+Until this run the only evidence those checks pass was their unit tests and `fork_attach_probe.py`'s two-turn sessions, every one of which the server itself had authored through the stream-json path.
+Neither had met a store written by the interactive CLI.
+
+**Attached from the index, one real session per backend, every human prompt got a point.**
+The Claude session was `ed4e69f4-bebd-4187-ba0f-d5c557e11504`, a Claude Code terminal session that executed OW-voyezi: tool calls, tool results, hook and meta lines in its store, 73 transcript messages before its second prompt.
+`GET .../fork-points` answered two points, at indices 0 and 73.
+The Pi session was `2026-09-14T02-20-43-164Z_01a09db7-7d1a-7685-a8d2-e44b0e902efc.jsonl`, driven from Pi's own TUI; it answered two points, at indices 0 and 2.
+Both store files were then read directly and each holds exactly two human prompts -- the Claude count taken over `type: "user"` lines that are not `isMeta` or `isCompactSummary` and carry text rather than only `tool_result` blocks, the Pi count over `type: "message"` entries with `role: "user"` -- so neither strict check dropped a point.
+The two probe-authored sessions from the OW-lajehi run were attached alongside as controls and answered as that run recorded.
+
+**On fresh sessions the points arrive when the client asks for them.**
+`controller.ts` `refreshForkPoints` runs at attach, at each turn boundary and on any snapshot.
+A fresh Claude session on `haiku` and a fresh Pi session on `openrouter/deepseek/deepseek-v4.1-flash:high` each took two prompts through the server while a poll read `fork-points` every quarter second.
+Claude answered `[]` at 0.9 s after the first prompt -- its store file did not exist yet -- and `[0]` from 2.7 s on, while the reply was still streaming; Pi answered `[0]` at the first poll.
+After the second turn both answered `[0, 2]`.
+That is consistent with OW-japuzo above, where the prompt's own lines were in the store by the first mark and only the assistant content waited for the turn to end: the point for the newest prompt is derivable before the turn boundary the client refreshes at.
+The poll's own end-of-turn detection was broken by the `virtual:` rename, so the run does not carry a number for how far ahead of the boundary the point lands, only that it did.
+
+What this leaves open: no session with a compaction summary, a steered turn or an image prompt has been attached this way, and those are the shapes most likely to make the two views disagree.
+A reader who sees no pencils on an *attached* Claude or Pi session should read the `fork-points` response in the Network tab before anything else -- `{"points":[]}` is the strict check refusing, and the session id is the evidence to keep.
