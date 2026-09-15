@@ -64,9 +64,9 @@ export class CodexConnection {
 	 * gone" across the set rather than breaking it -- see `BackendAdapter.dispose`.
 	 */
 	release(holder: CodexConnectionHolder, reason: string): Promise<void> {
-		const index = this.#holders.indexOf(holder);
-		if (index < 0) return this.#kill ?? Promise.resolve();
-		this.#holders.splice(index, 1);
+		// `CodexConnectionHolder.release` latches before delegating and nothing
+		// else touches `#holders`, so this runs exactly once per holder.
+		this.#holders.splice(this.#holders.indexOf(holder), 1);
 		if (this.#holders.length > 0) {
 			this.client.dispose(reason, holder);
 			return Promise.resolve();
@@ -110,13 +110,21 @@ export class CodexConnection {
 	 * no approval request has been observed reaching agentpane at all as of
 	 * `codex-cli 0.154.0` (D18, OW-zogogo), so this routes an input that does not
 	 * currently arrive and the cheap deterministic rule is the right size.
+	 *
+	 * Only an `answerable` holder is ever a candidate, for the fork's own thread
+	 * as much as for the fallback. A holder joins at fork time -- that is what
+	 * takes the share early enough to survive a `close()` on the parent -- but
+	 * nothing has subscribed to it until it is started, so a parked borrower
+	 * publishes to zero listeners and answers nothing. Handing it a blocking
+	 * request is D2a's silent stall, and it would pin this connection with it.
 	 */
 	#recipientFor(threadId: string | null): CodexConnectionHolder | undefined {
+		const answerable = this.#holders.filter((holder) => holder.answerable);
 		if (threadId) {
-			const owner = this.#holders.find((holder) => holder.threadId === threadId);
+			const owner = answerable.find((holder) => holder.threadId === threadId);
 			if (owner) return owner;
 		}
-		return this.#holders[0];
+		return answerable[0];
 	}
 }
 
@@ -129,6 +137,13 @@ export class CodexConnection {
 export class CodexConnectionHolder implements CodexClientView {
 	/** The thread this holder drives, once it is known. Set before it can matter. */
 	threadId: string | null = null;
+	/**
+	 * Whether this holder's adapter can actually field a blocking request: it has
+	 * been started, so whoever attached it has subscribed, and it has not been
+	 * disposed. False for the whole of the window between a fork minting a
+	 * borrower and that borrower being attached -- see `#recipientFor`.
+	 */
+	answerable = false;
 	#released = false;
 
 	constructor(
@@ -165,10 +180,19 @@ export class CodexConnectionHolder implements CodexClientView {
 }
 
 /**
- * The thread a `ServerRequest` came from. Every approval kind in
- * `ServerRequest.ts` carries `threadId`; the two deprecated legacy kinds
- * (`applyPatchApproval`, `execCommandApproval`) do not, and answer null.
+ * The thread a `ServerRequest` came from, under either of the two names the
+ * generated params use for it.
+ *
+ * Six of the ten kinds in `ServerRequest.ts` carry `threadId`. The two
+ * deprecated ones -- `applyPatchApproval` and `execCommandApproval` -- name the
+ * same thing `conversationId: ThreadId`, so reading only `threadId` would send
+ * a fork's own legacy approval to the fallback and attribute it to the parent.
+ * The remaining two carry no thread at all and answer null:
+ * `account/chatgptAuthTokens/refresh` has only a `reason`, and
+ * `attestation/generate` is `Record<string, never>`.
  */
 function threadIdOfParams(params: unknown): string | null {
-	return isRecord(params) && typeof params.threadId === "string" ? params.threadId : null;
+	if (!isRecord(params)) return null;
+	if (typeof params.threadId === "string") return params.threadId;
+	return typeof params.conversationId === "string" ? params.conversationId : null;
 }

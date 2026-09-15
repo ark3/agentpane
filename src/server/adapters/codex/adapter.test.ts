@@ -1884,7 +1884,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 	/** A server that echoes back whatever thread id a resume asked for. */
 	function shareableServer(
 		proc: AdapterProcess,
-		options: { holdResume?: { promise: Promise<void> } } = {},
+		options: { holdResume?: { promise: Promise<void> }; refuseResume?: string } = {},
 	): void {
 		let forks = 0;
 		proc.onWrite((message) => {
@@ -1901,6 +1901,10 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				case "thread/resume": {
 					const threadId = params["threadId"];
 					const answer = (): void => {
+						if (options.refuseResume && threadId !== "thread-parent") {
+							proc.emit({ id, error: { code: -32600, message: options.refuseResume } });
+							return;
+						}
 						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
 					};
 					if (options.holdResume) void options.holdResume.promise.then(answer);
@@ -1927,9 +1931,11 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		});
 	}
 
-	async function forkedPair(holdResume?: { promise: Promise<void> }) {
+	async function forkedPair(
+		options: { holdResume?: { promise: Promise<void> }; refuseResume?: string } = {},
+	) {
 		const proc = new AdapterProcess();
-		shareableServer(proc, holdResume ? { holdResume } : {});
+		shareableServer(proc, options);
 		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
 		await parent.start({ cwd: "/workspace" });
 		// `fork()` needs a turn to cut at; `thread/read` above answers one.
@@ -1965,7 +1971,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		// before the shared line stream reaches it: a fork of a STREAMING parent
 		// (D15/OW-gojado) would otherwise take the parent's deltas as its own.
 		const gate = deferred<void>();
-		const { proc, borrower } = await forkedPair(gate);
+		const { proc, borrower } = await forkedPair({ holdResume: gate });
 		const starting = borrower.start({ cwd: "/workspace", resumeId: "thread-forked" });
 
 		proc.emit({ method: "turn/started", params: { threadId: "thread-parent", turn: { id: "turn-live" } } });
@@ -2046,6 +2052,87 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 
 		expect(responses(proc).length - before).toBe(1);
 		expect(errors).toHaveLength(1);
+	});
+
+	it("routes a legacy approval by the `conversationId` it names its thread with", async () => {
+		// `ApplyPatchApprovalParams` and `ExecCommandApprovalParams` are the two
+		// deprecated kinds, and they DO name their thread -- under
+		// `conversationId: ThreadId` rather than `threadId`. Reading only
+		// `threadId` attributes the fork's own approval to the parent.
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		// Neither legacy kind has a decline shape, so the recipient answers it at
+		// arrival and raises a session error (D18, OW-nujawi) -- which is what
+		// names who received it.
+		const seen: string[] = [];
+		parent.onError(() => seen.push("parent"));
+		borrower.onError(() => seen.push("fork"));
+		const before = responses(proc).length;
+
+		proc.emit({
+			id: 80,
+			method: "applyPatchApproval",
+			params: { conversationId: "thread-forked", callId: "c", fileChanges: {} },
+		});
+
+		expect(seen).toEqual(["fork"]);
+		expect(responses(proc).length - before).toBe(1);
+	});
+
+	it("does not hand a blocking request to a fork nobody has started yet", async () => {
+		// A borrower joins the stream at fork time so the share is taken before
+		// any `close()` can land, but `SessionManager` does not subscribe to it
+		// until `start()`. Close the parent while the fork is still parked and
+		// the parked borrower would otherwise become the fallback recipient for a
+		// thread nobody drives (D19's subagent): registered as pending, published
+		// to nobody, answered by nobody -- D2a's silent stall, now pinning the
+		// shared app-server too.
+		const { proc, parent, borrower } = await forkedPair();
+		const seen: string[] = [];
+		parent.onRequest(() => seen.push("parent"));
+		borrower.onRequest(() => seen.push("fork"));
+		await parent.dispose();
+		const before = responses(proc).length;
+
+		proc.emit({
+			id: 81,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: "thread-of-a-subagent", turnId: "t", itemId: "i", startedAtMs: 1 },
+		});
+
+		expect(seen).toEqual([]);
+		expect(responses(proc).length - before).toBe(0);
+	});
+
+	it("refuses to drive a borrower that was never started", async () => {
+		// A borrower holds a live client from the moment it is built, so "do I
+		// have a client" stopped meaning "have I been started". Without the
+		// stronger guard these write real JSON-RPC for a thread no `thread/resume`
+		// has ever opened, under an error message that says the opposite.
+		const { proc, borrower } = await forkedPair();
+
+		await expect(borrower.submit("hello")).rejects.toThrow("codex adapter not started");
+		await expect(borrower.compact()).rejects.toThrow("codex adapter not started");
+		await expect(borrower.listForkPoints()).rejects.toThrow("codex adapter not started");
+		await expect(borrower.fork("turn-1")).rejects.toThrow("codex adapter not started");
+		expect(proc.lastRequest("turn/start")).toBeUndefined();
+		expect(proc.lastRequest("thread/compact/start")).toBeUndefined();
+	});
+
+	it("lets go of the share when its own resume is refused", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair({ refuseResume: "fork refused" });
+
+		await expect(borrower.start(forked.start as { cwd: string; resumeId: string })).rejects.toThrow(
+			"fork refused",
+		);
+
+		// The failed borrower still holds its share until someone disposes it --
+		// `SessionManager.#start` does -- and it is no longer a recipient for
+		// anything, because it never became answerable.
+		await parent.dispose();
+		expect(proc.killCount).toBe(0);
+		await borrower.dispose();
+		expect(proc.killCount).toBe(1);
 	});
 
 	it("kills the shared child only when the last holder lets go", async () => {

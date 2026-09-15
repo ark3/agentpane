@@ -206,6 +206,10 @@ export class CodexAdapter implements BackendAdapter {
 		ownership.client = client;
 		this.client = client;
 		ownership.ready = true;
+		// This adapter is attached before it is started -- `SessionManager.#start`
+		// subscribes ahead of `start()` -- so it can field a blocking request for
+		// the whole of startup, as it always could.
+		holder.answerable = true;
 		const assertOwned = (): void => {
 			if (!this.owns(ownership)) throw new Error(START_ABORTED_ERROR);
 		};
@@ -299,6 +303,10 @@ export class CodexAdapter implements BackendAdapter {
 		const assertOwned = (): void => {
 			if (!this.owns(ownership)) throw new Error(START_ABORTED_ERROR);
 		};
+		// Not at `adoptConnection`: the share is taken at fork time, but nothing
+		// has subscribed to this adapter until the attach that reaches here, and a
+		// holder with no listeners must not be handed a blocking request.
+		holder.answerable = true;
 
 		const resumed = await holder.request<ThreadResumeResponse>("thread/resume", {
 			threadId,
@@ -877,8 +885,17 @@ export class CodexAdapter implements BackendAdapter {
 		this.turnOrder = (thread.turns ?? []).map((turn) => turn.id);
 	}
 
+	/**
+	 * The client, and the assertion that this adapter has been started.
+	 *
+	 * Both halves are needed. A borrower holds a live client from the moment
+	 * `adoptConnection` builds it, and its `threadId` is seeded there too, so
+	 * `client`-and-`threadId` alone would let `submit`, `compact`, `abort`,
+	 * `fork`, `listForkPoints` and `reply` write real JSON-RPC for a thread no
+	 * `thread/resume` has opened -- past a guard whose message says the opposite.
+	 */
 	private requireClient(): CodexClientView {
-		if (!this.client) throw new Error("codex adapter not started");
+		if (!this.client || !this.startCalled) throw new Error("codex adapter not started");
 		return this.client;
 	}
 

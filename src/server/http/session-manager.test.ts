@@ -761,6 +761,60 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		expect(child.kills).toBe(1);
 	});
 
+	it("discards the handle and releases the share when the fork's own start fails", async () => {
+		// A handle is single-use: the reaping disposes its adapter, which releases
+		// the share, so leaving it parked would hand a retry a dead adapter. A
+		// recipe is replayable and is deliberately kept -- this is where the two
+		// shapes part company.
+		codex = new FakeAdapterFactory({
+			forkMode: "shared",
+			sharedChild: child,
+			forkOptions: { failStart: "fork refused" },
+		});
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+
+		await expect(sessions.attach(forked)).rejects.toThrow("fork refused");
+
+		// The share the failed borrower held is back, so the parent's child is
+		// the parent's alone again.
+		expect(child.holders).toBe(1);
+		expect(child.kills).toBe(0);
+		// And the parked entry is gone: the index has never heard of the fork, so
+		// a retry gets the honest 404 rather than a dead adapter.
+		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
+		await sessions.close(parentRef);
+		expect(child.kills).toBe(1);
+	});
+
+	it("survives the parent being closed while the fork's attach is in flight", async () => {
+		// The interleaving the "share taken at fork time" decision exists to make
+		// safe. `#disposing` is keyed per session, so `close(parent)` does not gate
+		// `attach(fork)`: without the share already held, the parent's release
+		// would kill the child under the borrower's resume.
+		const gate = deferred();
+		codex = new FakeAdapterFactory({
+			forkMode: "shared",
+			sharedChild: child,
+			forkOptions: { holdStart: gate.promise },
+		});
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "e1");
+
+		const attaching = sessions.attach(forked);
+		await sessions.close(parentRef);
+		expect(child.kills).toBe(0);
+		gate.resolve();
+
+		const forkAdapter = (await attaching) as FakeAdapter;
+		expect(forkAdapter.started).toBe(true);
+		expect(child.holders).toBe(1);
+		expect(child.kills).toBe(0);
+		expect(sessions.liveRefs()).toEqual([forkRef]);
+	});
+
 	it("releases the share when shutdown drops a fork nobody attached", async () => {
 		await sessions.attach(parentRef);
 		await sessions.fork(parentRef, "e1");

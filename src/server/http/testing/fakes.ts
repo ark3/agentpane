@@ -125,6 +125,12 @@ export interface FakeAdapterOptions {
 	 * holder out is the one that kills the child, and that it happens once.
 	 */
 	sharedChild?: FakeSharedChild;
+	/**
+	 * Options the borrower `forkMode: "shared"` builds is given on top of these,
+	 * so a test can make the FORK's `start()` fail or hang without touching the
+	 * parent's.
+	 */
+	forkOptions?: FakeAdapterOptions;
 }
 
 /**
@@ -259,7 +265,7 @@ export class FakeAdapter implements BackendAdapter {
 			return {
 				ref: forkedRef,
 				start: { cwd: this.startOptions?.cwd ?? "", resumeId: forkedRef.id },
-				adapter: new FakeAdapter(forkedRef, this.options),
+				adapter: new FakeAdapter(forkedRef, { ...this.options, ...this.options.forkOptions }),
 			};
 		}
 		if (this.options.forkMode !== "codex") this.#ref = forkedRef;

@@ -62,12 +62,20 @@ export interface StartOptions {
  * second one is refused (`codex-cli` 0.154.0, OW-lajehi), so the fork's adapter
  * borrows the parent's connection and only `CodexAdapter.fork` can hand it
  * over -- `AdapterFactory.create` takes a ref and could not.
+ *
+ * A union rather than two optional fields, because an `adapter` without a
+ * `start` is a shape nothing can act on: `SessionManager.fork` parks an entry
+ * only when there is something to start it with, so such an adapter would be
+ * silently dropped -- never started, never disposed, holding its share of the
+ * parent's child for the life of the server. The type refuses to express it.
  */
-export interface ForkResult {
-	ref: SessionRef;
-	start?: StartOptions;
-	adapter?: BackendAdapter;
-}
+export type ForkResult =
+	/** Reachable the ordinary way: the backend has recorded it, or Pi's live process IS it. */
+	| { ref: SessionRef; start?: undefined; adapter?: undefined }
+	/** Opened by its own adapter, from arguments the backend has not recorded. */
+	| { ref: SessionRef; start: StartOptions; adapter?: undefined }
+	/** Opened by the adapter handed over here, which shares something live with the parent. */
+	| { ref: SessionRef; start: StartOptions; adapter: BackendAdapter };
 
 export interface BackendAdapter {
 	readonly ref: SessionRef;
