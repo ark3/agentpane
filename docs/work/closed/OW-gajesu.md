@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # AGENTS.md states that a mid-stream Pi fork abandons the in-flight turn, on evidence that run itself does not carry
@@ -52,3 +53,27 @@ Whatever the mid-stream fields say, AGENTS.md's sentence under "Evidence" is bro
 Leaving that sentence untouched because the run agreed with it is not a close: the defect is that it asserts more than its evidence, and a second thin run does not repair that.
 
 The OW-pifowo section's two flagged passages resolve to whichever reading the disk fields support, rather than staying "unsettled", and `src/server/adapters/pi/process.ts`'s `fork()` docblock says the same thing and is corrected with them.
+
+## Close note
+
+Ran `python3 resources/probes/fork_probe.py --backend pi --no-fixtures` once on the home server, 2026-09-15, `pi 0.85.1`, exit 0.
+The probe copies `~/.pi/agent/settings.json` into a throwaway state home and passes no `--model`, and `get_state` reported `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"` in every state read the record carries.
+The write-up is `docs/MANUAL_TESTING.md`, "Pi's mid-stream fork, and the forked file on disk, re-measured at the instrument (OW-gajesu)"; the run landed in 73415d8, 9f310be, 6c448e8 and 969cb5f.
+
+The four values the card asked for: `midstream_expected_message_count: 2` against an observed `messageCount: 2` (forked at entry `52938741`, `Say exactly: DELTA`, the second user message); `midstream_abandoned_file_messages` = eight messages ending with the streaming turn's own user message and an assistant entry whose text is `""`; `moved_file_on_disk_at_fork: true`; `moved_file_messages_at_fork` = the rewound prefix `ALPHA -> ALPHA`.
+`active_file_moves_at_fork: true` for the third run running.
+
+**AGENTS.md was narrowed, not confirmed.**
+The run earns that a mid-stream fork stops the turn and that the streamed-into file ends with the prompt plus an empty assistant entry — stronger than the 0.84.2 settle alone.
+It does not earn "abandons the in-flight turn" in the sense the sentence implied, because the `pi_rewind` cell fires its fork on `agent_start` alone, with no accumulating-delta gate and no count of what had streamed, where its sibling `codex_fork_mid_stream` waits on five deltas and reports `unearned` without them.
+The session files' timestamps put this fork ~2.2s after the prompt on a reasoning model, so a discarded reply and a reply not yet begun are indistinguishable in the record.
+That gap is filed as **OW-sededi**, which carries the delta gate and the sentences that land on its answer.
+The narrowing reached AGENTS.md, `docs/DESIGN.md` D15, the new MANUAL_TESTING section, the probe's module docstring, and `src/client/controller.ts` `forkAndSubmit` — the site `src/client/App.svelte` names as where that evidence lives, which had still been citing the 0.84.2 run alone.
+
+**The disk-timing flag is settled enough to retire `false`.**
+This run read `true` with the `get_state` back as the first round-trip after the `fork`, where the 2026-08-19 run took it and read `false`.
+Recorded as what it is: `false` did not survive a run at its own instrument, but `pi` and the machine both changed between the two runs, so this is not a disproof of the latency hypothesis and one sample of a race is not an invariant.
+Both flagged passages in the OW-pifowo section and the contested paragraph in OW-yudoni now say that, as do the `fork()` docblock in `src/server/adapters/pi/process.ts` and the probe's own comments.
+The consequence — a discarded fork leaves a real session file for `src/server/sessions/walk.ts` to walk into the picker — is recorded as live and pointed at **OW-vezipo**, which owns that argument; no picker decision was taken here.
+
+Adversarially read by a dispatched reader against the raw record, which is what caught the missing delta gate and the `controller.ts` citation; `bun run check` passes on `main` (50 files, 1094 tests).
