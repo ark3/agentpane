@@ -20,15 +20,17 @@ OW-gojado for the fifth):
                        `sessionFile` MOVES to that new file at the fork call
                        itself (OW-pifowo). On the 2026-08-20 second-message
                        run the rewound branch stops BEFORE the forked-at user
-                       message, matching Codex's edit contract. The moved-to
-                       file IS on disk at the fork, carrying the rewound
-                       prefix: read that way on 0.85.1 with the get_state re-
-                       query as the first round-trip after the fork, where
-                       OW-pifowo took it and where its `false` was retired
-                       (OW-gajesu). A mid-stream fork also succeeds, but it
-                       aborts the running turn -- the streamed-into file keeps
-                       the prompt and an assistant entry with no text -- and
-                       leaves the new branch at the fork point, idle. Proven by
+                       message, matching Codex's edit contract. On 0.85.1 the
+                       moved-to file was on disk at the fork, carrying the
+                       rewound prefix, with the get_state re-query as the first
+                       round-trip after the fork -- where OW-pifowo took it and
+                       where its `false` was retired, one sample of a race
+                       (OW-gajesu). A mid-stream fork also succeeds and the
+                       turn stops: the streamed-into file ends with the prompt
+                       and an assistant entry carrying no text, and the new
+                       branch sits at the fork point, idle. Whether text was
+                       DISCARDED is not shown -- this cell has no delta gate,
+                       unlike codex_fork_mid_stream. Proven by
                        inspection, not by the response --
                        an extension veto reports success:true with
                        cancelled:true, finding 30.
@@ -464,9 +466,10 @@ def run_pi(timeout, want_fixtures):
         moved_on_disk_at_fork = (
             active_after_fork is not None and Path(active_after_fork).name in files_at_fork
         )
-        # It IS there; what it holds before any prompt is the rewound prefix,
-        # which is what a fork the user then discards leaves behind for the
-        # session picker to list (OW-gajesu).
+        # If it IS there, what does it hold before any prompt? That is what a
+        # fork the user then discards would leave behind for the session picker
+        # to list. The 2026-09-15 run answered the rewound prefix (OW-gajesu),
+        # one sample -- the question stays the field's, not this comment's.
         moved_file_messages_at_fork = (
             pi_file_messages(active_after_fork) if moved_on_disk_at_fork else None
         )
@@ -505,8 +508,8 @@ def run_pi(timeout, want_fixtures):
                 for message in rewound_file_messages
             ),
             # OW-pifowo ref question: the active file moves at the fork call,
-            # and is on disk by then (OW-gajesu). The move itself is the stable
-            # fact the adapter needs.
+            # and on the 2026-09-15 run it was on disk by then (OW-gajesu). The
+            # move itself is the stable fact the adapter needs.
             "active_file_moves_at_fork": active_after_fork != active,
             "active_file_after_fork": Path(active_after_fork).name if active_after_fork else None,
             "moved_file_on_disk_at_fork": moved_on_disk_at_fork,

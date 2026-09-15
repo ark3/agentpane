@@ -791,12 +791,19 @@ export function createController(
 				// OW-bakosi): it stands only where the backend destroys the turn
 				// whatever agentpane does.
 				//
-				// Pi is that backend. Its CLI abandons the in-flight turn on a
-				// mid-stream fork whether or not we abort (work laptop,
-				// 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md` OW-yudoni),
-				// so the abort does not cause the loss -- it makes it deliberate
-				// and visible, and the "Stop and ..." label is the only warning
-				// the user gets.
+				// Pi is that backend. Its CLI stops the in-flight turn on a
+				// mid-stream fork whether or not we abort: `isStreaming` goes
+				// false, the settle carries no assistant text, and the file the
+				// turn was streaming into ends with that turn's user message and
+				// an assistant entry carrying no text (home server, 2026-09-15,
+				// `pi 0.85.1`; `docs/MANUAL_TESTING.md` OW-gajesu, which is what
+				// the 2026-08-20 `pi 0.84.2` run in OW-yudoni had not earned).
+				// Neither run shows streamed text being DISCARDED -- the Pi probe
+				// cell has no delta gate -- so read this as the reply not
+				// surviving, not as bytes measured and thrown away. Either way
+				// the abort does not cause the loss; it makes it deliberate and
+				// visible, and the "Stop and ..." label is the only warning the
+				// user gets.
 				//
 				// Codex's parent turn survives: a mid-stream `thread/fork` leaves
 				// it running and it finishes with its whole reply durable on disk
