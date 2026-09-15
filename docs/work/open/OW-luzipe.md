@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+blocked-by: [OW-lisaye]
 ---
 
 # D3 calls the tail upsert "O(1) per token", but it re-sends the whole message, so a turn is quadratic in its own length.
