@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Block from "./Block.svelte";
 import Markdown from "./Markdown.svelte";
 import Thinking from "./Thinking.svelte";
+import { openToolCards } from "./tools/test-support.ts";
 import type { ContentBlock } from "./types.ts";
 
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
@@ -119,6 +120,7 @@ describe("copy", () => {
 	it("copies the whole of a tool result, not the truncated preview", async () => {
 		const { block, results } = toolCallWithResult(longOutput);
 		const { container } = render(Block, { props: { block, results } });
+		openToolCards(container);
 
 		// The card really is showing less than it copies.
 		expect(container.querySelector(".clipped")).not.toBeNull();
@@ -131,6 +133,7 @@ describe("copy", () => {
 	it("keeps a card's blocks apart: the command it ran is not the output it produced", async () => {
 		const { block, results } = toolCallWithResult(longOutput);
 		const { container } = render(Block, { props: { block, results } });
+		openToolCards(container);
 
 		await fireEvent.click(copyButton(container, "output", 0));
 
@@ -244,6 +247,7 @@ describe("expand", () => {
 	it("copies the whole source from the panel, past what the card would show", async () => {
 		const { block, results } = toolCallWithResult(longOutput);
 		const { container } = render(Block, { props: { block, results } });
+		openToolCards(container);
 		await fireEvent.click(expandButton(container, "output", -1));
 
 		const copyAll = dialog(container)?.querySelector("button[data-copy]") as HTMLButtonElement;

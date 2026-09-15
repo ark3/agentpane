@@ -18,6 +18,7 @@ import {
 } from "./registry.ts";
 import DefaultTool from "./DefaultTool.svelte";
 import BashTool from "./BashTool.svelte";
+import { openToolCards } from "./test-support.ts";
 
 function call(name: string, args: Record<string, unknown> = {}, id = "call_1"): ToolCall {
 	return { type: "toolCall", id, name, arguments: args };
@@ -105,6 +106,7 @@ describe("tool cards", () => {
 			props: { call: call("bash", { command: "false" }), result: result("boom", true) },
 		});
 		expect(card(container).dataset.state).toBe("error");
+		openToolCards(container);
 		expect(container.querySelector("pre.output.error")?.textContent).toContain("boom");
 	});
 
@@ -117,6 +119,7 @@ describe("tool cards", () => {
 		});
 		expect(card(container).dataset.tool).toBe("weather__forecast");
 		expect(summaryLine(container)).toContain("city: Boston");
+		openToolCards(container);
 		expect(container.textContent).toContain('"city": "Boston"');
 		expect(container.textContent).toContain('{"today":"rain"}');
 	});
@@ -130,6 +133,7 @@ describe("tool cards", () => {
 		});
 		expect(summaryLine(container)).toContain("greet.ts");
 		expect(summaryLine(container)).toContain("offset 10");
+		openToolCards(container);
 		expect(container.textContent).toContain("export function greet() {}");
 	});
 
@@ -153,6 +157,7 @@ describe("tool cards", () => {
 				} satisfies ToolResultMessage,
 			},
 		});
+		openToolCards(container);
 		expect(container.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAAA");
 	});
 
@@ -165,6 +170,7 @@ describe("tool cards", () => {
 		});
 		expect(summaryLine(container)).toContain("notes.md");
 		expect(summaryLine(container)).toContain("3 lines");
+		openToolCards(container);
 		expect(container.textContent).toContain("one\ntwo\nthree");
 	});
 
@@ -177,6 +183,7 @@ describe("tool cards", () => {
 			props: { call: call("bash", { command: "ls" }), result: landed },
 		});
 
+		openToolCards(container);
 		const body = card(container).querySelector(".body");
 		expect(body?.querySelector("time")?.textContent?.trim()).toBe("2026-08-11 09:14:15");
 		expect(card(container).querySelector("summary time")).toBeNull();
@@ -197,6 +204,7 @@ describe("tool output", () => {
 		const { container } = render(ToolCallBlock, {
 			props: { call: call("bash", { command: "cat big" }), result: result(huge) },
 		});
+		openToolCards(container);
 		const shown = container.querySelector("pre.output:last-of-type")?.textContent ?? "";
 		expect(shown.length).toBeLessThan(huge.length);
 		expect(container.querySelector(".clipped")?.textContent).toContain("300,000");
@@ -220,6 +228,7 @@ describe("the edit card", () => {
 				result: result("Successfully replaced 2 block(s) in src/greet.ts."),
 			},
 		});
+		openToolCards(container);
 		const added = [...container.querySelectorAll(".line.add .text")].map((e) => e.textContent);
 		const removed = [...container.querySelectorAll(".line.del .text")].map((e) => e.textContent);
 		expect(removed).toEqual(['return "hello";', "greet();"]);
@@ -242,6 +251,7 @@ describe("the edit card", () => {
 				}),
 			},
 		});
+		openToolCards(container);
 		expect(container.querySelector(".line.add .text")?.textContent).toBe("goodbye");
 		expect(container.querySelector(".line.del .text")?.textContent).toBe("hello");
 	});
@@ -250,6 +260,7 @@ describe("the edit card", () => {
 		const { container } = render(ToolCallBlock, {
 			props: { call: call("edit", { path: "src/greet.ts", patch: "@@ -1 +1 @@" }) },
 		});
+		openToolCards(container);
 		expect(summaryLine(container)).toContain("greet.ts");
 		expect(container.querySelectorAll(".line").length).toBe(0);
 	});

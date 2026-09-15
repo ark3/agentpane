@@ -14,6 +14,7 @@ import { previewMessages } from "../preview.ts";
 import type { SessionPreviewTurn } from "$shared/protocol.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
+import { openToolCards } from "./tools/test-support.ts";
 import { CodexReducer } from "$server/adapters/codex/reducer.ts";
 import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
 
@@ -386,6 +387,7 @@ describe("Transcript", () => {
 		const { container } = render(Transcript, { props: { messages: toolRead } });
 		// user, assistant(with the call), assistant -- the result is inside the card.
 		expect(roles(container)).toEqual(["user", "assistant", "assistant"]);
+		openToolCards(container);
 		expect(container.textContent).toContain("The quick brown fox");
 	});
 

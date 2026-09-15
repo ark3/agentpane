@@ -16,6 +16,7 @@ import ToolCallBlock from "../ToolCallBlock.svelte";
 import { CODEX_TOOL_NAMES } from "$server/adapters/codex/mapping.ts";
 import { resolveToolRenderer, defaultToolRenderer } from "./registry.ts";
 import SubagentTool from "./SubagentTool.svelte";
+import { openToolCards } from "./test-support.ts";
 
 const CHILD = "01a086ce-039d-7720-86cb-ceb8ec8f3774";
 
@@ -56,17 +57,20 @@ describe("the subagent card", () => {
 			props: { call: call("wait"), result: result("Hello! How can I help?") },
 		});
 		const card = container.querySelector("details.tool");
+		// Collapsed like every other tool card (D5), and its body is not built
+		// until it is opened (OW-lisaye).
+		expect((card as HTMLDetailsElement).open).toBe(false);
+		openToolCards(container);
 		expect(card?.textContent).toContain("wait");
 		expect(card?.textContent).toContain(CHILD);
 		expect(card?.textContent).toContain("Hello! How can I help?");
-		// Collapsed like every other tool card (D5).
-		expect((card as HTMLDetailsElement).open).toBe(false);
 	});
 
 	it("shows the spawn prompt", () => {
 		const { container } = render(ToolCallBlock, {
 			props: { call: call("spawnAgent", { prompt: "Please reply with a short greeting." }) },
 		});
+		openToolCards(container);
 		expect(container.textContent).toContain("Please reply with a short greeting.");
 	});
 
@@ -75,6 +79,7 @@ describe("the subagent card", () => {
 		const { container } = render(ToolCallBlock, {
 			props: { call: call("wait"), result: result("done"), onopensession },
 		});
+		openToolCards(container);
 		const open = container.querySelector<HTMLButtonElement>("button.open-thread");
 		if (!open) throw new Error("no open-thread control rendered");
 		open.click();
@@ -86,6 +91,7 @@ describe("the subagent card", () => {
 		// session, so the handler is optional and this card has to read as fine
 		// without it.
 		const { container } = render(ToolCallBlock, { props: { call: call("wait") } });
+		openToolCards(container);
 		expect(container.querySelector("button.open-thread")).toBeNull();
 	});
 
@@ -97,6 +103,7 @@ describe("the subagent card", () => {
 				onopensession: vi.fn(),
 			},
 		});
+		openToolCards(container);
 		expect(container.querySelector("button.open-thread")).toBeNull();
 	});
 });

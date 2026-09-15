@@ -16,6 +16,7 @@ import { createController, type AgentpaneController, type ControllerView } from 
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
 import { assistant, toolRead, toolResult, user } from "./render/samples.ts";
+import { openToolCards } from "./render/tools/test-support.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
 const codexSession: SessionRef = { backend: "codex", id: "codex-1" };
@@ -649,8 +650,10 @@ describe("App", () => {
 		const controller = new FakeController(view({
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
 		}));
-		render(App, { props: { controller } });
+		const { container } = render(App, { props: { controller } });
 		await tick();
+		// The door is in the card's body, which a collapsed card does not build.
+		openToolCards(container);
 
 		await fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
 

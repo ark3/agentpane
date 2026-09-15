@@ -6,6 +6,7 @@ import { render } from "@testing-library/svelte";
 import { tick } from "svelte";
 import { describe, expect, it } from "vitest";
 import Block from "./Block.svelte";
+import { openToolCards } from "./tools/test-support.ts";
 import type { ContentBlock } from "./types.ts";
 
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
@@ -56,6 +57,7 @@ describe("Block", () => {
 			{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls" } },
 			{ results },
 		);
+		openToolCards(container);
 		expect(container.textContent).toContain("a-file.txt");
 	});
 

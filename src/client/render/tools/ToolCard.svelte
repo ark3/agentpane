@@ -16,7 +16,9 @@
 	let {
 		name,
 		summary = "",
-		state = "ok",
+		// Renamed locally: with a `state` binding in scope Svelte reads `$state(...)`
+		// below as a store subscription, not the rune.
+		state: cardState = "ok",
 		open = false,
 		timestamp,
 		children,
@@ -36,18 +38,41 @@
 	} = $props();
 
 	const time = $derived(formatTimestamp(timestamp));
+
+	/**
+	 * Has this card ever been open? A native `<details>` only hides a body it
+	 * has already built, so rendering the children unconditionally makes every
+	 * collapsed card pay for highlighting and sanitizing an output nobody asked
+	 * to see -- and by D5 above, that is nearly all of them (OW-lisaye).
+	 *
+	 * Ever-open, not open-now: a reader who closes a card and opens it again
+	 * should not buy the same highlight twice. Native toggling never writes back
+	 * through the one-way `open` prop, so the `ontoggle` handler is how Svelte
+	 * learns the card was opened at all, and `open` is kept in the test so a
+	 * caller that starts a card expanded still gets a body.
+	 */
+	let opened = $state(false);
+	const built = $derived(open || opened);
 </script>
 
-<details class="tool" data-tool={name} data-state={state} {open}>
+<details
+	class="tool"
+	data-tool={name}
+	data-state={cardState}
+	{open}
+	ontoggle={(event) => {
+		if (event.currentTarget.open) opened = true;
+	}}
+>
 	<summary>
 		<span class="chevron" aria-hidden="true">›</span>
 		<span class="name">{name}</span>
 		{#if summary}<span class="summary" title={summary}>{summary}</span>{/if}
-		{#if state === "running"}<span class="status running">running</span>{/if}
-		{#if state === "error"}<span class="status error">error</span>{/if}
+		{#if cardState === "running"}<span class="status running">running</span>{/if}
+		{#if cardState === "error"}<span class="status error">error</span>{/if}
 	</summary>
 	<div class="body">
-		{@render children?.()}
+		{#if built}{@render children?.()}{/if}
 		{#if time}
 			<time class="time" datetime={timestampIso(timestamp)}>{time}</time>
 		{/if}
