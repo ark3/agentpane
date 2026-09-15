@@ -677,7 +677,11 @@ def run_pi(timeout, want_fixtures):
         # so the same shortcut is open to it. Forty `text_delta`s of a
         # 400-line count is unambiguously the reply itself, and it is text the
         # empty assistant entry on disk can then be set against.
-        streaming = pi.await_streaming(stream_mark, min_deltas=40, timeout=timeout)
+        #
+        # One name, because the record reports this number back: written twice,
+        # a run with the threshold changed kept reporting the old one.
+        stream_min_deltas = 40
+        streaming = pi.await_streaming(stream_mark, min_deltas=stream_min_deltas, timeout=timeout)
         state_while_streaming = pi.response({"type": "get_state"}, "get_state")
         # Re-read at the instant the request goes out: the threshold having
         # been met is not the turn still running when the fork lands, and the
@@ -716,7 +720,7 @@ def run_pi(timeout, want_fixtures):
             # Earned, or not reported: a fork fired before any assistant text
             # existed measures nothing about text being discarded.
             "midstream_agent_start_seen": streaming["agent_start_seen"],
-            "midstream_min_deltas_required": 40,
+            "midstream_min_deltas_required": stream_min_deltas,
             "midstream_streaming_confirmed_before_fork": streaming["streaming_confirmed"],
             "midstream_deltas_before_fork": streaming["deltas_before_fork"],
             "midstream_delta_census_before_fork": streaming["delta_census_before_fork"],

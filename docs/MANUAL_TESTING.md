@@ -2151,10 +2151,11 @@ So `pi 0.85.1` does stream assistant text as `message_update`/`text_delta`, whic
 `midstream_abandoned_tail_chars`, the unprojected length of that entry, is 447, against 47 text deltas seen on the wire at the fork.
 So on this model and this version the fork ends the turn without destroying what the turn had already produced: the partial reply survives in the file the turn was streaming into, which is the pre-fork session file the fork moved off (`midstream_abandoned_file`, `…01a0a75f-1a2c….jsonl`).
 The turn does stop — `midstream_state_after_fork` reads `isStreaming: false` with `messageCount: 2`, `midstream_turn_settled: true`, and `midstream_messages_tail` is `ALPHA -> ALPHA`, the rewound branch with the streaming turn excluded — so what the fork costs is the rest of the reply and the branch it was on, not the bytes already written.
-An earlier run of the same code about a minute before this one, differing only in that it lacked the `midstream_abandoned_tail_chars` field, agreed on every other field: 75 deltas at the threshold, 147 at the fork, still streaming, and the same partial count on disk.
+A run of the same code about a minute earlier, lacking only the `midstream_abandoned_tail_chars` field, agreed on every other field — 75 deltas at the threshold, 147 at the fork, still streaming, and the same partial count on disk — but its output was not kept: this run's `tee` overwrote that log, so those figures are quoted from the session transcript and not from a file anyone can re-read.
+Read it as a note that the run above was not a one-off, and the run above as the measurement.
 
 **The gate was watched failing before it was believed.**
-The same run with the threshold raised to an unreachable 100000 — the only edit, made on a copy — let the turn finish before the fork: `midstream_streaming_confirmed_before_fork: false` at 134 deltas, `midstream_turn_settled_before_fork: true`, `midstream_still_streaming_at_the_fork_itself: false`, `midstream_result: "unearned"`, and the probe exited 1.
+The same run with the threshold raised to an unreachable 100000 — the only edit, made on a copy — let the turn finish before the fork: `midstream_min_deltas_required: 100000`, `midstream_streaming_confirmed_before_fork: false` at 134 deltas, `midstream_turn_settled_before_fork: true`, `midstream_still_streaming_at_the_fork_itself: false`, `midstream_result: "unearned"`, and the probe exited 1.
 So the refusal and the exit-status wiring both fire, and the fork in that run landed on a turn that had already settled — exactly the silent failure the gate exists to catch.
 
 Two bounds this run does not clear.
