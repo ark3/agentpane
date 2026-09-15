@@ -12,7 +12,10 @@ This card carried `work-laptop` until then; the run it asks for no longer needs 
 `#onUpdate` broadcasts `broadcaster.upsert(session.ref, changedIndex, message)`
 with the **entire** `AgentMessage`, and Pi emits one `message_update` per token
 (`adapters/pi/process.ts:435`). So a 40KB assistant turn is re-serialised and
-re-`JSON.parse`d in full on every delta. D3's claim is true per *transcript* —
+re-`JSON.parse`d in full on every delta.
+
+**This is not Pi's alone.** `recompose` in `src/server/adapters/claude/reducer.ts` returns a `message` effect carrying the whole message on every `content_block_delta`, reaching the same `#onUpdate` through `emitUpdate` in that adapter; Codex arrives there too, by the path OW-nitima describes.
+The card named only Pi until 2026-09-15, which is enough to let someone fix one of three backends and believe the card was finished. D3's claim is true per *transcript* —
 streaming only ever touches the tail, and completed messages are never re-sent —
 but not per *message*, and the document reads as though it were both.
 
@@ -22,6 +25,17 @@ production build with `e2e/perf-harness.ts`: the client-side render cost
 nothing in the serialisation path reached the top of any profile. This is real
 and it is not what makes the UI sluggish. Fix OW-detepa first and re-measure
 before spending anything here.
+
+## What 2026-09-15 measured, and what it rules out
+
+Driving `ClaudeReducer` directly with a synthetic 40KB `Write` chunked at 200 characters: 1002 deltas, 1002 upserts, **386KB of payload in total** -- not megabytes, and not quadratic.
+The reason is specific to tool arguments and is OW-bizulo's subject: the `arguments` object cannot change until the JSON that carries it closes, so the message being re-sent is the same small message a thousand times over.
+
+So this card's mechanism holds for **growing text** -- an assistant message accumulating tokens, and Codex's `aggregatedOutput` accumulating a command's output -- and does not hold for a streaming tool call's arguments at all.
+Anyone starting here should not reach for a delta protocol on the strength of a large file write; that case is not what it appears to be.
+
+The same day's client-side measurement is the more useful redirection, and it agrees with the 2026-08-19 profile above rather than overturning it: the render cost that buried this is still what dominates, and OW-lisaye is now the card that names it.
+Read OW-lisaye and OW-bizulo before this one.
 
 ## What settling it would involve, when it is worth it
 

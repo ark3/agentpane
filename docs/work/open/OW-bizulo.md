@@ -17,8 +17,10 @@ A thousand of those upserts assert a change that did not happen and burn a `seq`
 The reason only two payloads exist is that a prefix of a JSON object never parses, so the `JSON.parse` inside that arm can succeed only on the delta that closes the object, and `arguments` is pinned at its previous value until then.
 That is not an artefact of the synthetic input: in `resources/fixtures/claude/tool-use.jsonl` (`claude 2.1.238`) the `Edit` block is 5 deltas with 1 successful parse and the `Read` block is 4 with 1.
 
-This is Claude-only.
-Neither `src/server/adapters/codex/reducer.ts` nor `src/server/adapters/pi/reducer.ts` performs a per-delta `JSON.parse`, and both append to content that genuinely differs on every delta.
+This is Claude-only, and Pi already does what this card asks for.
+`reduceAssistantDelta`'s `toolcall_delta` arm in `src/server/adapters/pi/reducer.ts` returns the same state reference unchanged, and its comment gives this card's reasoning almost word for word -- partial argument text "is not valid JSON until `toolcall_end` supplies the parsed, complete `ToolCall`", so the arm is "a no-op (same state reference) rather than churn callers must filter out".
+Read that arm before writing the Claude one; the shape of the fix is already in the repository.
+Codex does not perform a per-delta `JSON.parse` either.
 That asymmetry is part of the defect and not incidental to it: the owner's stated reason for valuing agentpane is not having to track which backend is underneath, and this is one backend behaving unlike the other two beneath an abstraction that promises otherwise.
 
 ## Why the fix is a deletion rather than a guard
