@@ -2021,3 +2021,21 @@ The probe first relocated each backend's state with `CODEX_HOME`, `PI_CODING_AGE
 That moves the CLI and not the server: agentpane derives its session roots from `homedir()` and reads none of those variables (`src/server/sessions/index.ts`, `claude/adapter.ts`'s `DEFAULT_CLAUDE_ROOT`), and the attach this probe measures is exactly the request that consults that index.
 Relocated, Claude reported **no fork points at all** and Codex's fork attach answered **404 `no such session`** on a rollout demonstrably on disk -- a plausible, entirely false, second defect.
 The run therefore uses the real stores, which OW-vowire made writable; the cost is that it leaves its small sessions in them.
+
+## The app-server that mints a fork can also drive it, and keep the parent (OW-lajehi)
+
+Run on the home server 2026-09-15, `codex-cli 0.154.0` on `gpt-5.6-luna`, by `resources/probes/codex_fork_same_process_probe.py`, against `codex app-server` directly with no agentpane in the picture.
+The section above establishes that a second process is refused; this one asks whether the first process can do the work instead, which is what decides OW-lajehi's fix.
+
+One process, one JSON-RPC client, two turns on a parent thread, then `thread/fork` keeping the first turn.
+
+**The control reproduces the refusal away from agentpane.** A second `codex app-server`, started while the first still lives, answering `thread/resume` on the forked thread with JSON-RPC `-32600`, `thread <id> already has an active writer`. The error code is worth recording: it is `InvalidRequest`, not a transport failure, so it is a decision the server is making.
+
+**A. `thread/resume` on the fork succeeds in the process that minted it**, returning the forked thread with its own `sessionId`.
+
+**B. `turn/start` against that forked thread completes there**, `status: "completed"`, the reply being the word the prompt asked for.
+
+**C. The parent is still drivable afterwards.** A further `turn/start` on the parent thread id, after the fork had been resumed and driven in the same process, completed with its own reply. So one app-server holds both threads at once and visiting the fork costs nothing on the parent -- previously an inference from the reducer's `threadId` filtering (`codex/reducer.ts`, the notification arm that drops a foreign `threadId`), now measured.
+
+What this settles for OW-lajehi: the fork is drivable, by exactly one process, and that process is the parent's.
+The fix is therefore to let the fork's adapter borrow the parent's client rather than spawn its own, and the cheap alternative that card carried -- disposing the parent at fork time -- is declined on this evidence rather than on taste, since nothing needs the parent's process to go away.

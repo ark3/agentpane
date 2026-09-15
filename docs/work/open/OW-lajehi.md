@@ -25,15 +25,18 @@ The disk half of that still holds; what has changed is that a *second* app-serve
 `thread/fork` mints the fork inside the parent's process, and 0.154.0 exposes no `thread/close` or `thread/release` to hand it back: `rg -a -o "thread/[a-zA-Z]+"` over the same binary lists `start`, `resume`, `fork`, `archive` and no release verb.
 Nothing here establishes which version introduced the lock; only 0.154.0 is installed on this machine, and OW-wujuda is the standing card about that version drift.
 
-## Two directions, neither chosen
+## The fix, and why the other one is declined
 
-Drive the fork from the parent's app-server client rather than a new process.
-Codex's app-server is multi-thread by construction and `CodexAdapter` is one-process-per-session by construction, so this is the honest fix and the expensive one: `src/server/adapters/codex/adapter.ts` would have to separate "a thread" from "a process", and `SessionManager.#start` would have to be able to start an adapter that borrows another's child.
+Measured 2026-09-15 by `resources/probes/codex_fork_same_process_probe.py`, same CLI version (`docs/MANUAL_TESTING.md`, "The app-server that mints a fork can also drive it, and keep the parent"): in the process that minted the fork, `thread/resume` on it succeeds, `turn/start` against it completes, and the parent thread is still drivable afterwards in that same process.
+A second process is refused there too, with JSON-RPC `-32600` -- a decision, not a transport failure.
 
-Or release the parent before attaching the fork -- dispose the parent's adapter in `SessionManager.fork` for Codex only, the way Pi's fork already leaves the parent with no live process.
-Cheap, and it costs the parent's in-flight turn, which D15 and OW-japuzo deliberately preserve on this backend; it also has to leave the parent re-attachable, since its rollout is untouched on disk.
+So the fork's adapter must borrow the parent's client instead of spawning its own.
+The demultiplexing this needs already exists: `src/server/adapters/codex/reducer.ts` drops any notification whose `threadId` is not its own, and `CodexAdapter.onServerMessage` does the same on the `turn/started` and `turn/completed` arms, so two adapters on one client already ignore each other's traffic.
+What does not exist is the lifetime: `ClientOwnership` and `dispose()` assume the adapter owns the child and kill it, so a borrowed client needs a refcount or a host object such that disposing the borrower leaves the owner's agent alive and disposing the owner does not strand the borrower.
+The manager needs the matching seam -- `#pendingForks` carries `StartOptions` for a fork that exists only as arguments, and this case has to carry a live handle instead, with `SessionManager.#start` able to start an adapter that spawns nothing.
+`onExit` also fans out to one adapter today, and one dead child now ends two sessions.
 
-Whichever is taken, record the reasoning in `docs/DESIGN.md` beside D15 if it changes what a fork does to the parent.
+Disposing the parent at fork time was the cheap alternative and is **declined**: nothing needs the parent's process to go away, and it would make agentpane destroy a turn OW-gojado measured surviving on this very version, which is exactly what D15 was reframed on 2026-09-13 to stop.
 
 ## Done
 
