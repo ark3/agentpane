@@ -16,15 +16,16 @@ and body and the run continues to the next one.
 
 What it drives, per backend:
 
-  1. two real turns, so "the most recent turn" is not also the first
-  2. fork at the LAST fork point -- the "edit last message" case
-  3. attach the fork, prompt it, and read the reply back off the wire
-  4. re-attach that fork once its store file exists
-  5. fork the fork, and fork the parent a second time at the same point
-  6. on Codex only: close one side of the fork pair and attach it again while
+  1. fork at the LAST fork point -- the "edit last message" case, after two
+     real turns, so "the most recent turn" is not also the first
+  2. attach the fork, prompt it, and read the reply back off the wire
+  3. re-attach that fork once its store file exists
+  4. fork the fork at ITS most recent turn
+  5. on Codex only: close one side of the fork pair and attach it again while
      the other side is still live (OW-voyezi)
+  6. fork the parent a second time at the same point it was forked at
 
-Step 6 is Codex's alone because the lock is Codex's alone.  A Codex fork shares
+Step 5 is Codex's alone because the lock is Codex's alone.  A Codex fork shares
 its parent's `codex app-server` (OW-lajehi) and a thread stays locked to the
 process that opened it even after the adapter holding it is disposed, so this is
 the sequence that used to answer `500 internal_error`,

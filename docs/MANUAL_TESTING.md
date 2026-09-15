@@ -2050,11 +2050,17 @@ This is the question OW-voyezi turned on: once a fork borrows its parent's app-s
 
 The vehicle is `codex_fork_same_process_probe.py`'s: one owner process with a parent thread and a fork of it, one intruder process, and every question answered by which of `result` and `error` comes back.
 
-**The control holds.** With the owner holding both threads, the intruder's `thread/resume` on the parent is refused with `-32600`, `thread <id> already has an active writer`.
+**The control holds.**
+With the owner holding both threads, the intruder's `thread/resume` on the parent is refused with `-32600`, `thread <id> already has an active writer`.
 
-**`thread/unsubscribe` answers `{"status": "unsubscribed"}` and changes nothing the lock cares about.** The intruder's next `thread/resume` on that same parent thread is refused with the identical `-32600`. The symmetric half is the same: the fork -- the thread the owner *minted* rather than resumed -- is refused to the intruder before the unsubscribe and refused again after it.
+**`thread/unsubscribe` answers `{"status": "unsubscribed"}` and changes nothing the lock cares about.**
+The intruder's next `thread/resume` on that same parent thread is refused with the identical `-32600`.
+The symmetric half is the same: the fork -- the thread the owner *minted* rather than resumed -- is refused to the intruder before the unsubscribe and refused again after it.
 
-**The owner can resume a thread it already holds, and drive it.** `thread/resume` on the parent a second time, with no unsubscribe in between, returns the thread; a `turn/start` on it then completes and answers. It also succeeds after the owner has unsubscribed that thread itself. And unsubscribing the parent costs the owner nothing on the fork: a turn on the fork completes afterwards, so unsubscribe is per-thread, not per-process.
+**The owner can resume a thread it already holds, and drive it.**
+`thread/resume` on the parent a second time, with no unsubscribe in between, returns the thread; a `turn/start` on it then completes and answers.
+It also succeeds after the owner has unsubscribed that thread itself.
+And unsubscribing the parent costs the owner nothing on the fork: a turn on the fork completes afterwards, so unsubscribe is per-thread, not per-process.
 
 What this settles: of the two fixes OW-voyezi named, the `thread/unsubscribe` one does not exist.
 Nothing short of the child dying releases a Codex thread as of 0.154.0, so a re-attach on a thread a live app-server still holds has to come back to *that* app-server -- which the second measurement above says is allowed.
@@ -2065,7 +2071,9 @@ Nothing short of the child dying releases a Codex thread as of 0.154.0, so a re-
 Run on the home server 2026-09-15, `codex-cli 0.154.0` on `gpt-5.6-luna`, by `resources/probes/fork_attach_probe.py --backend codex`, which grew a step for this: close one side of the fork pair and attach it again while the other side is still live, in both orientations.
 Both orientations were run against the same tree with the fix held back and again with it applied, so the step is known to discriminate.
 
-**Without the fix, both fail with the defect's own sentence.** Closing the parent and re-attaching it answered `500 internal_error`, `thread <parentId> already has an active writer`; closing the fork and re-attaching it answered the same on the fork's id. `second_fork_of_parent` failed with them, as collateral -- the parent could not be attached, so nothing could be forked out of it.
+**Without the fix, both fail with the defect's own sentence.**
+Closing the parent and re-attaching it answered `500 internal_error`, `thread <parentId> already has an active writer`; closing the fork and re-attaching it answered the same on the fork's id.
+`second_fork_of_parent` failed with them, as collateral -- the parent could not be attached, so nothing could be forked out of it.
 
 **With the fix, every step passes**, including the two new ones and the whole of the sequence OW-lajehi established: `fork_http` 201, `attach_http` 200, a turn in the fork, the re-attach, the fork of the fork, the second fork of the parent, and no orphaned workers.
 
