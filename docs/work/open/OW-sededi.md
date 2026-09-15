@@ -25,7 +25,8 @@ D15 is not in doubt — Pi abandons the turn either way — but "nothing of the 
 ## Done when
 
 The `pi_rewind` mid-stream cell gates on accumulating assistant text the way the Codex cell does — `agent_start` plus a threshold of streaming text deltas observed on the wire before the `fork` request goes out, re-read at the instant it goes out, with the count recorded in the cell's output and a refusal to report a result the run did not earn.
-The Pi RPC event whose accumulation counts as that signal is part of the work: `PiSession` in the probe already buffers every raw line, and `rpc.md` on the home server is the reference for which event carries streamed assistant text.
+The Pi RPC event to accumulate is `message_update` carrying an `assistantMessageEvent` of type `text_delta`, which is what the adapter's own reducer counts as streamed assistant text (`src/server/adapters/pi/reducer.ts`, and `reducer.test.ts` "goes streaming after agent_start"); `PiSession` in the probe already buffers every raw line, so the count is a filter over `self.raw`.
+Confirm that against the live stream rather than taking it from here.
 
 Then one run of `python3 resources/probes/fork_probe.py --backend pi --no-fixtures` on the home server, with the observed pre-fork text count and the resulting abandoned-file contents written up in `docs/MANUAL_TESTING.md`, naming the `pi` version it measured.
 
