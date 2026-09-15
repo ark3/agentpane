@@ -498,6 +498,7 @@ That much has held on every run since, and it is the whole of what this decision
 What the fork costs is now measured rather than inferred.
 OW-sededi gave the probe's Pi cell the delta gate its Codex sibling had and re-ran it (home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`): with 47 `text_delta`s on the wire at the instant the fork request went out, the file the turn was streaming into held the reply's first 447 characters, not the empty assistant entry the ungated run before it had read (`docs/MANUAL_TESTING.md`, OW-sededi).
 So the streamed prefix survives on the abandoned branch; what is lost is the rest of the reply and the branch it was on, and the earlier empty entry was a fork that landed before any text existed.
+That makes the loss this decision warns about partial, and whether the "Stop and ..." framing should say so is open in OW-lukaju; the decision below is not waiting on it.
 The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
 
 **Codex's parent turn survives.**
