@@ -526,7 +526,7 @@ observed.
 What a fork with no subsequent prompt costs is therefore a real file, settled against this section's own reading.
 The 2026-09-15 run read `moved_file_on_disk_at_fork: true` and `moved_file_messages_at_fork: ALPHA -> ALPHA`, so F2 was in the sessions directory before any prompt, carrying the branch up to the fork point.
 `src/server/sessions/walk.ts` readdir-walks that directory to build the picker, so a user who opens an edit, forks, and changes their mind leaves a session there to be listed.
-Whether the listing should filter it is a separate question and not settled here.
+Whether the listing should filter it is a separate question, and OW-vezipo is where it lives.
 
 ### Settling second-message semantics and mid-stream fork behavior (OW-yudoni)
 
@@ -2088,7 +2088,7 @@ So what is proven is that the streamed-into file ends with the turn's own user m
 That is stronger than the 0.84.2 run's settle alone, and it is still short of proving that streamed text was *discarded*.
 The instrument is why: this cell gates only on `agent_start` before it fires the fork, with no accumulating-delta threshold and no count of what had streamed, unlike its Codex sibling `codex_fork_mid_stream`, which waits on five deltas and reports `result: "unearned"` when the signals are missing (`resources/probes/README.md`, "the streaming discipline").
 The session files' own timestamps put the fork about 2.2s after the prompt, on a reasoning model at `thinkingLevel: "high"`, so "the fork threw away text that had been produced" and "no text had been produced yet" are both consistent with this record.
-A run that closed it would carry that cell's delta gate into this one — hold the fork until some number of assistant text deltas have accumulated, record the count, and re-read the buffer at the instant the fork request goes out — so that the empty entry on disk can be set against text known to have existed.
+A run that closed it would carry that cell's delta gate into this one (OW-sededi) — hold the fork until some number of assistant text deltas have accumulated, record the count, and re-read the buffer at the instant the fork request goes out — so that the empty entry on disk can be set against text known to have existed.
 Two smaller bounds: `pi_file_messages` projects text blocks only, so a reasoning-only entry would read empty here too, and nothing was read from that file before the fork.
 
 **`moved_file_on_disk_at_fork: true`, measured where the 2026-08-19 run measured it.**

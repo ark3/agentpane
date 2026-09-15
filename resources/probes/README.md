@@ -175,7 +175,10 @@ end with a completed assistant turn inside the fork, so a returned id alone
 cannot pass the check.
 Exit non-zero if either new-session cell failed to drive a turn, or if the mid-stream cell's own `result` is anything but `measured`.
 
-Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the mid-stream cell with
+Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the Pi cells again with
+`pi` 0.85.1 on the home server, 2026-09-15 (`docs/MANUAL_TESTING.md`, "Pi's
+mid-stream fork, and the forked file on disk, re-measured at the instrument
+(OW-gajesu)"); the Codex mid-stream cell with
 `codex-cli` 0.154.0, on which the rollout no longer writes an
 `event_msg`/`agent_message` beside each assistant `response_item` — so
 `fork.jsonl`, captured on 0.147.0, is a version behind on line shapes. What that cell showed is `docs/MANUAL_TESTING.md`,

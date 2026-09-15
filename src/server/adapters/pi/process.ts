@@ -398,8 +398,7 @@ export class PiAdapter implements BackendAdapter {
 		// `false` is retired, but this is one sample of a race, not an
 		// invariant). Nothing here depends on it -- the consequence is that a
 		// discarded fork can leave a real session file for the picker to walk.
-		// Unlike
-		// `adoptSessionFile` (the one-time virtual->real materialisation, gated
+		// Unlike `adoptSessionFile` (the one-time virtual->real materialisation, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file
 		// unconditionally.
