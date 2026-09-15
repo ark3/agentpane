@@ -328,7 +328,9 @@ export function createApp(deps: AppDeps): App {
 				//     returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread this process is not
 				//     driving; Codex flushes that rollout to disk immediately, before
-				//     any turn, so a fresh attach on the returned ref finds it. The
+				//     any turn, so the index finds it -- but as of `codex-cli`
+				//     0.154.0 the attach that follows is refused, because this
+				//     process still holds the fork's writer lock (OW-lajehi). The
 				//     current adapter's own ref is unchanged, so `#adoptRef` no-ops.
 				//   * Claude Code's fork mints the forked session's id and the
 				//     arguments that spawn it (`--resume --resume-session-at

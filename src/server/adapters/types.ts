@@ -53,7 +53,9 @@ export interface StartOptions {
  * has recorded, and is then the `StartOptions` its own adapter must be started
  * with. Codex flushes the forked thread to disk before `thread/fork` returns
  * and Pi's fork IS the live process, so both omit it and the fork is reachable
- * the ordinary way.
+ * the ordinary way -- on Pi. On Codex the ordinary way is currently refused:
+ * the parent's app-server holds the new thread's writer lock and the attach
+ * cannot open it (`codex-cli` 0.154.0, OW-lajehi).
  */
 export interface ForkResult {
 	ref: SessionRef;

@@ -496,10 +496,16 @@ open in OW-gajesu; take nothing below from it.
 **Codex: the forked rollout is flushed to disk before any turn.**
 `forked_on_disk_before_turn: true`, `thread_read_forked_before_turn_ok: true`,
 `forked_from_id_before_turn` set — Codex mints a new thread the current adapter
-is NOT driving and flushes its rollout immediately, so a fresh attach on the
-returned ref finds it. The adapter therefore correctly returns the new thread's
-ref while leaving its own `currentRef`/`threadId` on the parent thread; nothing
-to re-key.
+is NOT driving and flushes its rollout immediately. The adapter therefore
+correctly returns the new thread's ref while leaving its own
+`currentRef`/`threadId` on the parent thread; nothing to re-key.
+
+**The conclusion drawn here — "so a fresh attach on the returned ref finds it" —
+did not survive `codex-cli` 0.154.0**, where a second app-server process cannot
+open a thread the parent's process still holds. See "Forking the most recent
+turn and attaching the fork, on all three backends" at the end of this file, and
+OW-lajehi. The flush itself still measures true; it is the inference that is
+retired.
 
 **Correlator bug fixed in the probe.** `resources/probes/fork_probe.py`'s
 `PiSession.response()` scanned `self.raw` from the start on every call, so a
@@ -1990,3 +1996,28 @@ Six runs now, on two checkouts, none of which left the turn.
 
 **Cleanup held.** All six runs reported `cleanup.result: "pass"` with no orphaned worker pids, so the `sh` and `tee` the stdout tap adds to the sandbox tree are reaped with the agent.
 The orphan check is not vacuous here: `agentpane_live_support.py` enumerates the server's descendants through the probe's own `worker_filter` *before* killing the server and then polls those recorded pids for liveness, so reparenting at teardown cannot hide one, and the filter matches `tee` by `comm` and the shim's `sh` by the `--mode rpc` in its argv.
+
+## Forking the most recent turn and attaching the fork, on all three backends (OW-lajehi)
+
+Run on the home server 2026-09-15 by `resources/probes/fork_attach_probe.py`, against `pi 0.85.1` on `openrouter/deepseek/deepseek-v4.1-flash:high`, `codex-cli 0.154.0` on `gpt-5.6-luna`, and `claude 2.1.270` on `haiku` -- each model named to the create route rather than inherited from a settings file.
+The owner's report is what it was built for: editing the last message sometimes fails to attach to the fork, on a backend nobody could name.
+
+The probe is the missing middle between the two vehicles that already existed.
+`fork_probe.py` drives the CLIs directly and never sees agentpane's session manager; the browser suite in `e2e/` runs the real client against a synthetic backend and has no server at all (OW-24).
+This one drives the production HTTP server: two real turns, `GET fork-points`, `POST fork` at the **last** point, `GET` the fork -- which is `controller.ts` `forkAndSubmit`'s sequence -- then a turn inside the fork, a re-attach, a fork of the fork, and a second fork of the parent at the same point.
+It reports rather than asserts, so a failing attach is recorded with its status and body and the run continues.
+
+**Codex fails at the attach, every time.**
+`POST .../fork` answers 201 and the forked rollout is on disk within a millisecond, but the attach answers `500 internal_error`, `thread <forkId> already has an active writer` -- and still does five seconds later.
+The holder is the parent session's own app-server process: `DELETE` the parent, and the identical attach on the same fork ref answers 200.
+That is OW-lajehi, and in the browser it is the whole of "edit the last message" on Codex: `forkAndSubmit` throws at `api.attach` and publishes the app-server's sentence into the error banner.
+
+**Pi and Claude Code pass the whole sequence**, including the fork of the fork and a second fork of the parent, each fork's transcript correctly truncated at the edited message with the new reply in its place, and the parent still attachable afterwards.
+
+**This retires half of OW-22.** That card settled on `codex-cli 0.148.0` that Codex "flushes the forked rollout to disk before any turn, so a fresh attach on the returned ref finds it", and the disk half still measures true; what has stopped being true on 0.154.0 is the inference, because a second app-server process may not open a thread the first still holds. The three code comments that carried that inference -- `codex/adapter.ts` `fork`, the `fork` route in `http/app.ts`, and `ForkResult` in `adapters/types.ts` -- were corrected in the same commit as this section.
+
+**Two harness defects, both worth the words, because both look exactly like the product failing.**
+The probe first relocated each backend's state with `CODEX_HOME`, `PI_CODING_AGENT_DIR` and `CLAUDE_CONFIG_DIR`, the way the two smoke harnesses do.
+That moves the CLI and not the server: agentpane derives its session roots from `homedir()` and reads none of those variables (`src/server/sessions/index.ts`, `claude/adapter.ts`'s `DEFAULT_CLAUDE_ROOT`), and the attach this probe measures is exactly the request that consults that index.
+Relocated, Claude reported **no fork points at all** and Codex's fork attach answered **404 `no such session`** on a rollout demonstrably on disk -- a plausible, entirely false, second defect.
+The run therefore uses the real stores, which OW-vowire made writable; the cost is that it leaves its small sessions in them.

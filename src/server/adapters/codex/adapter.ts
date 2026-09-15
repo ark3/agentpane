@@ -521,7 +521,11 @@ export class CodexAdapter implements BackendAdapter {
 			...(this.options.ephemeral ? { ephemeral: true } : {}),
 		});
 		// No `start`: Codex flushes the forked rollout to disk here, before any
-		// turn, so a fresh attach on this ref finds it in the index.
+		// turn, so the index finds it. Finding it is not enough to attach it as
+		// of `codex-cli` 0.154.0 -- the fork is minted inside THIS process, which
+		// holds its writer lock, and the second app-server the attach spawns is
+		// refused with "already has an active writer" (OW-lajehi). That is a live
+		// defect, not a note: fork-and-edit does not work on Codex today.
 		return { ref: { backend: "codex", id: forked.thread.id } };
 	}
 
