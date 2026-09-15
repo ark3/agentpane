@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Can the app-server that minted a fork also drive it? (OW-lajehi)
 
-`fork_attach_probe.py` measured the half agentpane already suffers: a SECOND
-`codex app-server` process cannot open a thread the first one holds, so the
-attach after `POST .../fork` fails with "already has an active writer".
-This probe asks the question that decides the fix, and it asks it of the CLI
-directly, with no agentpane in the picture.
+`fork_attach_probe.py` measured the half agentpane suffered before OW-lajehi
+was fixed: a SECOND `codex app-server` process cannot open a thread the first
+one holds, so the attach after `POST .../fork` failed with "already has an
+active writer".
+This probe asked the question that decided the fix, and it asked it of the CLI
+directly, with no agentpane in the picture.  The answer -- yes, the minting
+process can drive the fork and keep the parent -- is why the fork's adapter now
+borrows the parent's connection (`src/server/adapters/codex/connection.ts`).
 
 Three questions, in one process, on one JSON-RPC client:
 

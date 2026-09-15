@@ -2007,14 +2007,17 @@ The probe is the missing middle between the two vehicles that already existed.
 This one drives the production HTTP server: two real turns, `GET fork-points`, `POST fork` at the **last** point, `GET` the fork -- which is `controller.ts` `forkAndSubmit`'s sequence -- then a turn inside the fork, a re-attach, a fork of the fork, and a second fork of the parent at the same point.
 It reports rather than asserts, so a failing attach is recorded with its status and body and the run continues.
 
-**Codex fails at the attach, every time.**
-`POST .../fork` answers 201 and the forked rollout is on disk within a millisecond, but the attach answers `500 internal_error`, `thread <forkId> already has an active writer` -- and still does five seconds later.
-The holder is the parent session's own app-server process: `DELETE` the parent, and the identical attach on the same fork ref answers 200.
-That is OW-lajehi, and in the browser it is the whole of "edit the last message" on Codex: `forkAndSubmit` throws at `api.attach` and publishes the app-server's sentence into the error banner.
+**Codex failed at the attach, every time, and now passes.**
+Measured before the fix: `POST .../fork` answered 201 and the forked rollout was on disk within a millisecond, but the attach answered `500 internal_error`, `thread <forkId> already has an active writer` -- and still did five seconds later.
+The holder was the parent session's own app-server process: `DELETE` the parent, and the identical attach on the same fork ref answered 200.
+In the browser that was the whole of "edit the last message" on Codex -- `forkAndSubmit` threw at `api.attach` and published the app-server's sentence into the error banner -- and it is what OW-lajehi was filed for.
 
-**Pi and Claude Code pass the whole sequence**, including the fork of the fork and a second fork of the parent, each fork's transcript correctly truncated at the edited message with the new reply in its place, and the parent still attachable afterwards.
+The same probe was re-run on the home server later that day, against the same `codex-cli 0.154.0`, once the fix had landed on `main`, and **every step passes**: `fork_http` 201, `attach_http` 200, a turn landing in the fork, the re-attach, the fork of the fork, and a second fork of the parent, with the parent still attachable after all of it.
+The fork's transcript is correctly truncated -- the parent answered ONE and TWO, the fork keeps ONE, replaces TWO's turn, and answers THREE -- and the run left no orphaned worker processes.
+The fix is that the fork's adapter borrows the parent's app-server instead of spawning its own: `src/server/adapters/codex/connection.ts` holds one child for N adapters and kills it only when the last one lets go.
+What it does **not** cover is re-attaching one side of a fork pair after closing it while the other still lives; nothing releases that side's thread, so the factory path spawns a second app-server and is refused exactly as above (OW-voyezi).
 
-**This retires half of OW-22.** That card settled on `codex-cli 0.148.0` that Codex "flushes the forked rollout to disk before any turn, so a fresh attach on the returned ref finds it", and the disk half still measures true; what has stopped being true on 0.154.0 is the inference, because a second app-server process may not open a thread the first still holds. The three code comments that carried that inference -- `codex/adapter.ts` `fork`, the `fork` route in `http/app.ts`, and `ForkResult` in `adapters/types.ts` -- were corrected in the same commit as this section.
+**This retires half of OW-22.** That card settled on `codex-cli 0.148.0` that Codex "flushes the forked rollout to disk before any turn, so a fresh attach on the returned ref finds it", and the disk half still measures true; what stopped being true on 0.154.0 is the inference, because a second app-server process may not open a thread the first still holds. The three code comments that carried that inference -- `codex/adapter.ts` `fork`, the `fork` route in `http/app.ts`, and `ForkResult` in `adapters/types.ts` -- were corrected first to record the defect and then again, by the fix, to describe the borrow.
 
 **Two harness defects, both worth the words, because both look exactly like the product failing.**
 The probe first relocated each backend's state with `CODEX_HOME`, `PI_CODING_AGENT_DIR` and `CLAUDE_CONFIG_DIR`, the way the two smoke harnesses do.
