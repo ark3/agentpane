@@ -618,6 +618,16 @@ describe("App", () => {
 				sessions: { [sessionKey(piSession)]: live },
 			}),
 		});
+		// Mid-compaction: `close()` would kill the subprocess running it, which
+		// is the loss the streaming conjunct exists to prevent (OW-pehile), and
+		// the Compact item three lines away already refuses on the same field.
+		refusedWhen({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: { [sessionKey(piSession)]: { ...live, compaction: "running" } },
+			}),
+		});
 		// Already detached -- there is no subprocess to end, and this client is
 		// only holding a stale live view of one.
 		refusedWhen({

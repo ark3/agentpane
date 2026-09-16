@@ -256,7 +256,12 @@
 	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
 	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
 	 * for the same reason: the turn a prompt POST starts is not streaming yet,
-	 * so `isStreaming` alone would leave that window open.
+	 * so `isStreaming` alone would leave that window open. `compaction` is the
+	 * same loss by another name -- a kill lands on the subprocess running it --
+	 * and the Compact item three lines below already refuses on that field, so
+	 * this conjunct is what makes the two agree (OW-pehile). Whether any backend
+	 * reaches it unseen by `isStreaming` is unmeasured; the guard is one line
+	 * either way.
 	 *
 	 * The streaming truth is the live `state.sessions` entry, as the list row
 	 * reads it (OW-furinu), not `selectedSummary.isStreaming`, which is only as
@@ -266,7 +271,8 @@
 		(selectedSummary?.status === "attached" || selectedSummary?.status === "virtual") &&
 			!streamingNow &&
 			(selectedSession?.requests.length ?? 0) === 0 &&
-			!view.sending,
+			!view.sending &&
+			compaction === null,
 	);
 	/**
 	 * The streaming truth the action row may *act* on. Codex and Claude expose a
