@@ -1,5 +1,5 @@
 ---
-labels: [change, emacs]
+labels: [change, emacs, emacs-native]
 ---
 
 # A pure projection turns agentpane transcripts into the section nodes a native Emacs mode draws, one node per message, for replay and streaming alike

@@ -1,5 +1,5 @@
 ---
-labels: [change, emacs]
+labels: [change, emacs, emacs-native]
 blocked-by: [OW-mutufa]
 ---
 
