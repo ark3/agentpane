@@ -2,19 +2,29 @@
 labels: [defect]
 ---
 
-# Detaching a virtual session strands the selection on an Attach button that can only 404
+# A virtual detach should clear the selection and land on the startup view, not preview a session that has nothing to preview
+
+`src/client/controller.ts` (`detach()`), `src/client/App.svelte` (the `{#if previewing}` branch).
 
 Found while reviewing OW-tewave, which decided deliberately that Detach is offered for a `virtual` selection and that its row then vanishes from the listing, because `list()` is disk plus the table and a virtual session has nothing on disk.
-That much the owner accepted on 2026-09-16.
-What that card did not name, and what this one is for, is the state the user is left in.
+That much the owner accepted on 2026-09-16 and it is not in question here.
 
-`readSessionPreview` answers a `virtual:` ref with `[]` rather than an error -- `resolvePiSessionPath` returns null -- so `view.preview` is non-null and `src/client/App.svelte` swaps to the `{#if previewing}` branch, whose whole composer is one Attach button.
-Meanwhile the row is gone, so `selectedSummary` is `undefined`, which also disables New through `newSessionWorkspace`.
-Pressing that Attach button calls `api.attach` on a ref the session manager no longer holds: `no such session`, a 404 into the error banner.
+`detach()` calls `controller.preview(selected)` unconditionally.
+For a virtual session there is nothing to preview: `readSessionPreview` answers a `virtual:` ref with `[]` rather than an error, because `resolvePiSessionPath` returns null.
+An empty *non-null* preview is what manufactures the problem -- `view.preview` is set, so `App.svelte` swaps to its `{#if previewing}` branch, whose whole composer is one Attach button.
+The row is gone by then, so `selectedSummary` is `undefined`, which also disables New through `newSessionWorkspace`, and pressing that Attach button calls `api.attach` on a ref the session manager no longer holds: `no such session`, a 404 into the error banner.
+The only control on screen is one that can only fail.
 
-So the only control on screen is one that can only fail, which is a dead end rather than the accepted cost of a vanishing row.
+The place to land already exists and needs no design.
+`initialClientState()` returns `selected: null`, and the controller's initial view has `preview: null`, so `previewing` is false and the app renders the ordinary composer over an empty transcript, with its buttons disabled on `selected === null`.
+That is where every user starts every session.
 
-OW-tewave already names one revisit for the virtual case -- a `Discard` label when the selection is virtual -- and that is a different question; this one is about where the user lands, whatever the label says.
+So: on a detach whose session was virtual, skip the preview and clear the selection, landing exactly there.
+The non-virtual path is untouched -- it has a transcript to show and OW-tewave's whole point is that the user ends where a click on that row would have put them.
 
-Done when detaching a virtual selection leaves the user somewhere they can act from, asserted in `src/client/App.test.ts` or `src/client/controller.test.ts` and red first.
-Clearing the selection outright is the obvious candidate and is not the decided answer.
+What is load-bearing is the unconditional `preview()` call, not the enablement decision and not the vanishing row.
+
+Done when a controller test detaches a virtual selection and asserts `state.selected` and `preview` are both null afterwards, red first against today's `detach()`.
+
+OW-tewave names a separate revisit for this case -- a `Discard` label when the selection is virtual, if the vanishing row ever surprises.
+That is a labelling question and this card does not settle it.
