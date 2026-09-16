@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # The Tools menu gets a Detach item that closes the selected session's subprocess and leaves its transcript on screen read-only
@@ -69,3 +70,25 @@ Whatever the implementer observes when prompting a session just detached from th
 5. `rg -n 'end.session|no such button' docs/DESIGN.md docs/work -g '!*tewave*'` finds no copy of the retired claim.
    This card quotes the three copies in order to name them, so it matches itself and is excluded; every other match is a copy that has to go.
 6. `bun run check` passes, and `bun run test:browser` has been run by hand before the commit, as `AGENTS.md` requires for a change to the composer's action row.
+
+## Close note
+
+Landed as 44429d7 on main: a `Detach` item in the composer's Tools popover, after Compact.
+
+What was built, as the card specified it.
+`api.close(ref)` issues `DELETE` to `ROUTES.session(ref)` through `requestNoContent`.
+`controller.detach()` closes the selected session, drops its live view from `state.sessions` deterministically rather than waiting for the `sessions-changed` re-list, then loads the read-only preview -- so the user ends where a click on that row would have put them.
+The `detachable` predicate in `App.svelte` is D12's reaper exemption minus the `virtual` exemption, plus `!view.sending`; streaming is read from the live `state.sessions` entry, not the summary.
+All three copies of "no client control invokes the DELETE route" are retired, in D12, OW-33 and OW-35.
+
+Verified: `bun run check` green (50 files, 1100 tests) and `bun run test:browser` green (21 tests) by the landing session's own hand, and each new test shown red first -- the three the card asked for could not even resolve against the base commit, and the enablement cases were each proven by mutating the conjunct they pin.
+
+Two things review changed, and both are worth knowing if you touch this code.
+First, the implementer's `detach()` had no `selectionIntent` guard, alone among the awaiting selection paths in `controller.ts`.
+`api.close` awaits the subprocess's disposal, so the window is wide: a row clicked during it had the selection snapped back when the close resolved, and a row clicked that *attached* had `detach()`'s own `preview()` bump the intent past the in-flight `attachAndSelect`, leaving the client selected on a dead session while the server had spawned the live one. The intent is now captured, not bumped, and the fix is pinned by a test.
+Second, the card asked for a by-hand `hidePopover()` "for the reason `compactSession`'s docblock gives"; that reason does not transfer -- nothing disables Detach synchronously within its own click -- so the declarative `popovertargetaction="hide"` carries it, as it does for `New conversation`, and the dead call is gone.
+
+Six cards came out of the review and are open: OW-sugome (a sequence-gap `recover()` respawning what was just detached), OW-pezazo (a late SSE event re-lighting the streaming dot), OW-lejahi (the stripe staying lit when the SSE is down, since nothing forces a re-list), OW-vasubu (a virtual detach stranding the selection on an Attach button that can only 404), OW-pehile (whether a compaction belongs in the predicate, which needs a Pi measurement first), and OW-jamoyi.
+
+OW-jamoyi carries this card's conditional about prompting a just-detached session.
+It fired neither way: that observation needs a live server with a real backend subprocess, which neither jsdom nor the Playwright vehicle has, so nothing was observed and OW-35 carries only the retirement edit.
