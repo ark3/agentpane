@@ -997,8 +997,32 @@ export function createController(
 				delete sessions[key];
 				publish({ state: { ...view.state, sessions } });
 			}
-			// A closed session previews as empty rather than as an error when it had
-			// nothing on disk, which is the `virtual` case (`sessions/preview.ts`).
+			// A virtual session has nothing to preview and no row to go back to:
+			// `readSessionPreview` answers its ref with an empty-but-*non-null*
+			// transcript rather than an error, which is enough to put `App.svelte`
+			// on its preview branch, whose one control is an Attach that can only
+			// 404 on a ref the session manager no longer holds (OW-vasubu). Land on
+			// the startup view instead -- selection cleared, no preview -- which is
+			// where every user starts anyway. Bumping the intent here is safe and
+			// makes this the last word on the selection, as `preview` below would
+			// have been: the intent is unchanged, so nothing the user started
+			// during the close is in flight.
+			//
+			// Read off the ref, not `summaries[].status`: a virtual session this
+			// client has attached lists as `attached` -- the status is about the
+			// process, not the store (`session-manager.ts`, `#liveOverlay`) -- so
+			// the status would miss the commonest case of all, a session created
+			// here and detached before its first prompt. The `virtual:` id
+			// `createVirtual` mints is replaced by a `renamed` event the moment a
+			// first prompt materialises a file, so it is true exactly while there
+			// is nothing on disk.
+			if (selected.id.startsWith("virtual:")) {
+				++selectionIntent;
+				publish({ state: { ...view.state, selected: null }, preview: null });
+				return;
+			}
+			// A non-virtual session has a transcript on disk, so it ends where a
+			// click on its now-detached row would have put the user (OW-tewave).
 			await controller.preview(selected);
 		},
 		clearError() {

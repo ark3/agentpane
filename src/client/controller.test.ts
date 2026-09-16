@@ -761,6 +761,32 @@ describe("client controller", () => {
 		});
 	}
 
+	// A virtual session has nothing on disk, so `preview` would answer with an
+	// empty-but-non-null transcript and strand the user on a screen whose only
+	// control is an Attach the session manager can no longer honour (OW-vasubu).
+	// Attached here first, which is how a session created in this client reaches
+	// Detach: it lists as `attached` while its id is still virtual.
+	it("clears the selection onto the startup view when the detached session was virtual", async () => {
+		const virtualRef: SessionRef = { backend: "pi", id: "virtual:a" };
+		const api = new FakeApi();
+		api.listSessions.mockResolvedValue([summary(virtualRef)]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(virtualRef);
+		api.emit({ type: "snapshot", session: virtualRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+
+		await controller.detach();
+		await settle();
+
+		const detachedView = controller.getView();
+		expect(api.close).toHaveBeenCalledWith(virtualRef);
+		expect(api.preview).not.toHaveBeenCalled();
+		expect(detachedView.state.selected).toBeNull();
+		expect(detachedView.preview).toBeNull();
+		expect(detachedView.state.sessions[sessionKey(virtualRef)]).toBeUndefined();
+		controller.dispose();
+	});
+
 	it("leaves the selection where a click landed it while the detach's close was still in flight", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
