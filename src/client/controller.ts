@@ -143,6 +143,17 @@ export interface AgentpaneController {
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
+	/**
+	 * End the selected session's subprocess and leave the user on its read-only
+	 * preview (OW-tewave), which is where a click on that row would have put
+	 * them. No-op with nothing selected.
+	 *
+	 * The caller decides *when* this is offered -- the composer's Tools menu
+	 * gates it on the exemption predicate D12 wrote for its reaper, because
+	 * `close()` kills mid-turn and on Claude Code that loses the whole reply
+	 * (OW-japuzo). Nothing is re-checked here.
+	 */
+	detach(): Promise<void>;
 	setModel(model: string): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
@@ -585,7 +596,7 @@ export function createController(
 		},
 	};
 
-	return {
+	const controller: AgentpaneController = {
 		getView() {
 			return view;
 		},
@@ -954,10 +965,48 @@ export function createController(
 				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
 			}
 		},
+		async detach() {
+			const selected = view.state.selected;
+			if (!selected) return;
+			// Captured rather than bumped: a detach is not a selection change, and
+			// bumping would retract a preview or attach the user started before
+			// clicking it. `api.close` awaits the subprocess's disposal, so the
+			// window is wide enough to matter twice over -- the preview below would
+			// snap the selection back off a row clicked during it, and its own bump
+			// would drop an `attachAndSelect` for that row into the branch that
+			// publishes no live view, leaving the client selected on a session the
+			// server has already spawned. Bailing costs nothing: the re-list the
+			// close broadcasts drops the dead view on its own.
+			const intent = selectionIntent;
+			publish({ error: null });
+			try {
+				await api.close(selected);
+			} catch (error: unknown) {
+				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
+				return;
+			}
+			if (disposed || intent !== selectionIntent) return;
+			// Drop the live view here rather than waiting for the `sessions-changed`
+			// re-list to do it through `replaceSessionSummaries`. That re-list is
+			// asynchronous, and `preview` below short-circuits on a session this
+			// client still has attached -- so letting the two race leaves the dead
+			// view on screen whenever the preview wins.
+			const key = sessionKey(selected);
+			if (view.state.sessions[key] !== undefined) {
+				const sessions = { ...view.state.sessions };
+				delete sessions[key];
+				publish({ state: { ...view.state, sessions } });
+			}
+			// A closed session previews as empty rather than as an error when it had
+			// nothing on disk, which is the `virtual` case (`sessions/preview.ts`).
+			await controller.preview(selected);
+		},
 		clearError() {
 			const selected = view.state.selected;
 			const state = selected ? clearSessionError(view.state, selected) : view.state;
 			publish({ error: null, state });
 		},
 	};
+
+	return controller;
 }

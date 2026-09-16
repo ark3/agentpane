@@ -114,6 +114,8 @@ class PublishingController implements AgentpaneController {
 	}
 	async abort() {}
 	async compact() {}
+
+	async detach() {}
 	async setModel(_model: string) {}
 	async refreshSessions() {}
 	async refreshPreview() {}

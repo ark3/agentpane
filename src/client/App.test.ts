@@ -106,6 +106,7 @@ class FakeController implements AgentpaneController {
 	submitted = 0;
 	aborted = 0;
 	compacted = 0;
+	detached = 0;
 	modelSets: string[] = [];
 	externalEdits: string[] = [];
 	externalEditResult = "edited externally";
@@ -213,6 +214,10 @@ class FakeController implements AgentpaneController {
 
 	async compact() {
 		this.compacted += 1;
+	}
+
+	async detach() {
+		this.detached += 1;
 	}
 
 	async setModel(model: string) {
@@ -565,6 +570,94 @@ describe("App", () => {
 		await fireEvent.click(screen.getByRole("menuitem", { name: "Compact", hidden: true }));
 
 		expect(controller.compacted).toBe(1);
+	});
+
+	it("disables the composer's Detach for every case outside its enablement predicate (OW-tewave)", async () => {
+		const detachItem = () => screen.getByRole("menuitem", { name: "Detach", hidden: true });
+		const live = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		/** One render per case, torn down before the next, so `screen` sees one menu. */
+		function refusedWhen(overrides: Partial<ControllerView>): void {
+			const controller = new FakeController(view(overrides));
+			const { unmount } = render(App, { props: { controller } });
+			expect(detachItem()).toBeDisabled();
+			unmount();
+		}
+
+		refusedWhen({});
+		// Streaming reads the live `state.sessions` entry, never the summary
+		// (OW-furinu), so this case says the opposite in each: a summary from a
+		// listing taken before the turn started, and a live entry that is current.
+		refusedWhen({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P", { isStreaming: false })],
+				sessions: { [sessionKey(piSession)]: { ...live, isStreaming: true } },
+			}),
+		});
+		// A pending request is a turn the agent is blocked inside, so the wire
+		// says `isStreaming: false` and only `requests` marks it.
+		refusedWhen({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: {
+					[sessionKey(piSession)]: {
+						...live,
+						requests: [{ requestId: "r1", session: piSession, kind: "permission", payload: null }],
+					},
+				},
+			}),
+		});
+		// A prompt POST in flight: the turn it starts is not streaming yet, so
+		// nothing on the session says so and only `sending` does.
+		refusedWhen({
+			sending: true,
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: { [sessionKey(piSession)]: live },
+			}),
+		});
+		// Already detached -- there is no subprocess to end, and this client is
+		// only holding a stale live view of one.
+		refusedWhen({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P", { status: "detached" })],
+				sessions: { [sessionKey(piSession)]: live },
+			}),
+		});
+	});
+
+	it("the composer's Detach tool detaches an attached selection, and is offered for a virtual one too (OW-tewave)", async () => {
+		const idle = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: { [sessionKey(piSession)]: idle },
+			}),
+		}));
+		const { unmount } = render(App, { props: { controller } });
+
+		const item = screen.getByRole("menuitem", { name: "Detach", hidden: true });
+		expect(item).toBeEnabled();
+		await fireEvent.click(item);
+		expect(controller.detached).toBe(1);
+		unmount();
+
+		// Virtual is deliberately offered (owner, 2026-09-16): nothing on disk
+		// means no transcript to lose, so D12's virtual exemption does not apply.
+		const virtualController = new FakeController(view({
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, null, { status: "virtual" })],
+				sessions: { [sessionKey(piSession)]: idle },
+			}),
+		}));
+		render(App, { props: { controller: virtualController } });
+
+		expect(screen.getByRole("menuitem", { name: "Detach", hidden: true })).toBeEnabled();
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {
@@ -1793,6 +1886,7 @@ describe("App", () => {
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
+			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
 			forkPoints: async () => [],
@@ -2301,6 +2395,7 @@ describe("App", () => {
 			editDraft: async (body) => ({ text: body.text }),
 			abort: async () => {},
 			compact: async () => {},
+			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],

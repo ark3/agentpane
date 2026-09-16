@@ -218,6 +218,7 @@ const api: AgentpaneApi = {
 			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model });
 		});
 	},
+	async close() {},
 	async listModels() {
 		return [
 			{ id: "harness/default", label: "Harness Default" },

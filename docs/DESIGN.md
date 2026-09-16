@@ -372,8 +372,11 @@ It is unbuilt, which is a different thing, and the reasoning behind each of its 
 The first draft tied a subprocess's life to the *server's*: killed only on an explicit close or on shutdown, never otherwise.
 That does not bound resource use — a day of browsing leaves a sandboxed agent alive per session touched, each holding its workspace.
 This decision reverses that: subprocesses are reclaimed automatically, on two triggers.
-(There is no explicit "end session" control in the UI to retire — the `DELETE` route exists but nothing in the client invokes it; idle+LRU is simply the reclamation that was missing.
-The route stays: it is useful programmatically and shutdown-adjacent code leans on it.)
+(This decision was originally read as refusing a by-hand detach control, because managing subprocess lifetime by hand is what it replaces.
+The owner settled on 2026-09-16 that the two are not exclusive, and OW-tewave put a Detach item in the composer's Tools menu: the reaper clears a session's attached stripe fifteen minutes after its last activity, and Detach clears it when the user decides the conversation is done.
+What that item is for is a truthful indicator, not reclamation — the stripe OW-lepoki draws claims a live agent for the life of the server process, and until Detach landed nothing took it down at all.
+Detach starts from the exemption predicate below and departs from it twice: it drops the `virtual` exemption, which guards a session the *reaper* would remove out from under a user who just created it and has nothing to say about a deliberate click, and it adds a fourth condition D12 has no reason to carry — no prompt POST of this client's own in flight, since the turn such a POST starts is not streaming yet.
+The `DELETE` route it calls was always going to stay: it is useful programmatically and shutdown-adjacent code leans on it.)
 
 **Why this is safe at all.**
 Eviction is not a new capability — it is the `attached → detached` transition D9 already defines, fired automatically instead of by hand.

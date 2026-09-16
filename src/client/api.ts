@@ -61,6 +61,13 @@ export interface AgentpaneApi {
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	abort(ref: SessionRef): Promise<void>;
 	compact(ref: SessionRef): Promise<void>;
+	/**
+	 * Kill this session's subprocess and drop it from the server's table
+	 * (OW-tewave). The on-disk transcript survives, so the session comes back as
+	 * `detached` in the next listing -- unless it was `virtual`, which has
+	 * nothing on disk and so leaves the listing altogether.
+	 */
+	close(ref: SessionRef): Promise<void>;
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
 	setModel(ref: SessionRef, model: string): Promise<void>;
 	/**
@@ -129,6 +136,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		compact(ref) {
 			return requestNoContent(ROUTES.compact(ref), { method: "POST" });
+		},
+		close(ref) {
+			return requestNoContent(ROUTES.session(ref), { method: "DELETE" });
 		},
 		listModels(backend) {
 			return request(`${ROUTES.models}?backend=${encodeURIComponent(backend)}`, { method: "GET" }, (body) => {

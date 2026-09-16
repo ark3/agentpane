@@ -78,6 +78,16 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("closes a session with a DELETE and resolves on no content", async () => {
+		const fetch = fetchRecorder(new Response(null, { status: 204 }));
+		const api = createAgentpaneApi({ fetch });
+
+		await expect(api.close(ref)).resolves.toBeUndefined();
+		expect(fetch).toHaveBeenCalledWith(ROUTES.session(ref), {
+			method: "DELETE",
+		});
+	});
+
 	it("fetches a read-only preview by ref without a request body", async () => {
 		const preview = { ref, turns: [{ role: "user" as const, content: "hi" }] };
 		const fetch = fetchRecorder(response(preview));

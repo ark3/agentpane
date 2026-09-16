@@ -246,6 +246,29 @@
 	 */
 	const compaction = $derived(selectedSession?.compaction ?? null);
 	/**
+	 * Whether the Tools menu may offer Detach (OW-tewave). This is D12's
+	 * exemption predicate for its reaper, minus the `virtual` exemption, which
+	 * the owner lifted on 2026-09-16: a virtual session is a workspace choice
+	 * with nothing on disk, so there is no transcript to lose, and what that
+	 * exemption guarded against was a reaper removing a session the user had
+	 * just created -- which a deliberate click is not.
+	 *
+	 * The rest is kept because `close()` kills mid-turn, and on Claude Code a
+	 * kill mid-turn loses the whole reply (OW-japuzo). `view.sending` is in it
+	 * for the same reason: the turn a prompt POST starts is not streaming yet,
+	 * so `isStreaming` alone would leave that window open.
+	 *
+	 * The streaming truth is the live `state.sessions` entry, as the list row
+	 * reads it (OW-furinu), not `selectedSummary.isStreaming`, which is only as
+	 * fresh as the last listing.
+	 */
+	const detachable = $derived(
+		(selectedSummary?.status === "attached" || selectedSummary?.status === "virtual") &&
+			!streamingNow &&
+			(selectedSession?.requests.length ?? 0) === 0 &&
+			!view.sending,
+	);
+	/**
 	 * The streaming truth the action row may *act* on. Codex and Claude expose a
 	 * compaction through their generic active-turn signals, so `isStreaming`
 	 * stays true on the wire while one runs -- but that turn is not
@@ -976,6 +999,11 @@
 		void controller.compact();
 	}
 
+	/** End the selected conversation's subprocess and stay on its transcript, now read-only (OW-tewave). */
+	function detachSession(): void {
+		void controller.detach();
+	}
+
 	/**
 	 * Open a session the transcript points at (OW-benige): Codex's subagent card
 	 * names a child thread, which is a real session with its own rollout.
@@ -1397,6 +1425,20 @@
 						onclick={compactSession}
 						disabled={view.state.selected === null || view.busy === "compacting" || compaction !== null}
 					>Compact</button>
+					<!-- The rare thing this menu is for (OW-relehi): a conversation
+					     that is well and truly done, whose attached stripe in the list
+					     (OW-lepoki) would otherwise claim a live agent until the server
+					     restarts. A truthful indicator, not resource management --
+					     D12's reaper still owns the latter, and the two are not
+					     exclusive (owner, 2026-09-16). -->
+					<button
+						type="button"
+						role="menuitem"
+						popovertarget="tools-menu"
+						popovertargetaction="hide"
+						onclick={detachSession}
+						disabled={!detachable}
+					>Detach</button>
 				</div>
 				<!-- Acknowledges the whole backend operation, not just the request
 				     (OW-natiha): it stands beside Tools, where the click came from,

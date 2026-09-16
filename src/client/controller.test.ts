@@ -75,6 +75,7 @@ class FakeApi implements AgentpaneApi {
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
+	readonly close = vi.fn(async (_session: SessionRef) => {});
 	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
 	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
@@ -712,6 +713,74 @@ describe("client controller", () => {
 		api.preview.mockClear();
 		await controller.preview(ref);
 		expect(api.preview).toHaveBeenCalledWith(ref);
+	});
+
+	// Both orderings, because the detach must not depend on the broadcast: the
+	// re-list is what `replaceSessionSummaries` drops a live view from, and
+	// `preview` short-circuits on a session this client still has attached, so
+	// whichever wins the race the view has to be gone and the preview on screen.
+	for (const relistFirst of [true, false]) {
+		const when = relistFirst ? "before" : "after";
+		it(`detaches the selected session onto its read-only preview, with the re-list landing ${when} the preview`, async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			await controller.select(ref);
+			api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+			const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
+			api.listSessions.mockResolvedValue([detachedSummary]);
+			const turns: SessionPreviewTurn[] = [{ role: "user", content: "done" }];
+			const previewed = deferred<SessionPreviewResponse>();
+			// The re-list refreshes whatever preview is on screen, so a second read
+			// can follow the first; both answer with the same stored transcript.
+			api.preview.mockResolvedValue({ ref, turns });
+			api.preview.mockReturnValueOnce(previewed.promise);
+
+			const detaching = controller.detach();
+			await settle();
+
+			expect(api.close).toHaveBeenCalledWith(ref);
+			expect(api.preview).toHaveBeenCalledWith(ref);
+			if (relistFirst) {
+				api.emit({ type: "sessions-changed" });
+				await settle();
+			}
+			previewed.resolve({ ref, turns });
+			await detaching;
+			if (!relistFirst) {
+				api.emit({ type: "sessions-changed" });
+				await settle();
+			}
+
+			const detachedView = controller.getView();
+			expect(detachedView.state.sessions[sessionKey(ref)]).toBeUndefined();
+			expect(detachedView.state.selected).toEqual(ref);
+			expect(detachedView.preview).toEqual({ ref, turns });
+			expect(detachedView.state.summaries).toEqual([detachedSummary]);
+			controller.dispose();
+		});
+	}
+
+	it("leaves the selection where a click landed it while the detach's close was still in flight", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		const closing = deferred<void>();
+		api.close.mockReturnValueOnce(closing.promise);
+
+		const detaching = controller.detach();
+		await settle();
+		await controller.preview(attachedRef);
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+
+		closing.resolve();
+		await detaching;
+
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(api.preview).not.toHaveBeenCalledWith(ref);
+		controller.dispose();
 	});
 
 	it("does not forget or demote a session updated while a detached listing is in flight", async () => {
