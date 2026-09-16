@@ -201,6 +201,8 @@ export function createController(
 	let refreshInFlight: Promise<void> | undefined;
 	/** Whether the event stream has ever been up: every open after the first is a reconnect. */
 	let opened = false;
+	/** Whether any listing has ever landed. `refreshSessions` swallows its failures, so success is not the default. */
+	let listedOk = false;
 	let refreshSurfacing = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
@@ -376,6 +378,7 @@ export function createController(
 				const summaries = await api.listSessions(undefined);
 				if (!disposed) {
 					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed) });
+					listedOk = true;
 				}
 			} catch (error: unknown) {
 				if (!disposed && refreshSurfacing) publish({ error: errorMessage(error) });
@@ -601,18 +604,25 @@ export function createController(
 		 * attached until the user pressed Refresh, and that was one visible case
 		 * of a general loss.
 		 *
-		 * Not on the first open. `EventSource` fires `onopen` on the initial
-		 * connect as well as on every re-establish, and `start()` already lists
-		 * there; `refreshInFlight` coalesces only listings that overlap, so an
-		 * open landing after the startup listing resolves would list a second
-		 * time for nothing.
+		 * Not on the first open, whose listing `start()` already owns.
+		 * `EventSource` fires `onopen` on the initial connect as well as on every
+		 * re-establish, and `refreshInFlight` coalesces only listings that
+		 * overlap, so an open landing after the startup listing resolves would
+		 * list a second time for nothing.
+		 *
+		 * `listedOk` and not the open count, because the predicate is that a
+		 * listing has *landed*: `refreshSessions` swallows its own failure and
+		 * resolves, so a page that loaded while the server was away gets its
+		 * first `onopen` ever when the server returns -- with an empty sidebar
+		 * under a `connected` indicator, the one open where skipping the re-list
+		 * costs the most.
 		 *
 		 * `false`: nobody asked for this listing, so it owns neither the status
 		 * line nor the error slot.
 		 */
 		onOpen() {
 			publish({ connection: "connected" });
-			if (opened) void refreshSessions(false);
+			if (opened || !listedOk) void refreshSessions(false);
 			opened = true;
 		},
 		onDisconnect() {
@@ -1044,6 +1054,18 @@ export function createController(
 			// first prompt materialises a file, so it is true exactly while there
 			// is nothing on disk.
 			if (selected.id.startsWith("virtual:")) {
+				// This exit asks for the listing itself, and the non-virtual one below
+				// does not (D21). The difference is what the stale row means. A
+				// detached stored session lists with the wrong `status` -- the stripe
+				// says attached when it is not -- which is merely untrue and can wait
+				// for the reconnect re-list. A detached *virtual* session is gone
+				// everywhere: nothing on disk, and dropped from the manager's table.
+				// Its row nonetheless lives on in `summaries`, which is what the
+				// sidebar renders, and a click on it strands the user on the
+				// empty-but-non-null preview OW-vasubu exists to keep them off. So
+				// the phantom is removed now rather than whenever the stream next
+				// comes up. Not awaited, and `false`: nobody asked for this listing.
+				void refreshSessions(false);
 				++selectionIntent;
 				publish({ state: { ...view.state, selected: null }, preview: null });
 				return;

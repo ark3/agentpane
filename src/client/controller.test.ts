@@ -831,6 +831,10 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		// Load-bearing, not decoration: it drains `refreshInFlight`, so the open
+		// below lands after the startup listing rather than inside it. Without it
+		// an ungated `onOpen` would be coalesced and this would pass for the wrong
+		// reason.
 		await settle();
 		expect(api.listSessions).toHaveBeenCalledOnce();
 
@@ -838,6 +842,51 @@ describe("client controller", () => {
 		await settle();
 
 		expect(api.listSessions).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
+	// The gate is "a listing has already covered this open", and a startup
+	// listing that failed covered nothing: `refreshSessions` swallows the
+	// rejection and resolves, so counting opens alone would skip the re-list on
+	// the one open where the sidebar is emptiest -- the page loaded, the server
+	// was away for both the listing and the connect, and the first `onopen` of
+	// all is the server coming back (OW-vukoku).
+	it("lists on the first open when the startup listing failed", async () => {
+		const api = new FakeApi();
+		api.listSessions.mockRejectedValueOnce(new Error("offline"));
+		const controller = createController(api);
+		await controller.start();
+		await settle();
+		expect(controller.getView().state.summaries).toEqual([]);
+
+		api.open();
+		await settle();
+
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+		controller.dispose();
+	});
+
+	// A detached virtual session is gone everywhere -- nothing on disk, dropped
+	// from the manager's table -- but its row lives on in `summaries`, which is
+	// what the sidebar renders, and clicking it lands on exactly the screen
+	// OW-vasubu exists to prevent. So this exit asks for the listing itself
+	// rather than waiting for the reconnect the stripe waits for (D21). The
+	// stream is down here and no event is emitted.
+	it("drops a detached virtual session's phantom row with no broadcast to ride on", async () => {
+		const virtualRef: SessionRef = { backend: "pi", id: "virtual:b" };
+		const api = new FakeApi();
+		api.listSessions.mockResolvedValue([summary(virtualRef)]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(virtualRef);
+		api.emit({ type: "snapshot", session: virtualRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		api.listSessions.mockResolvedValue([]);
+
+		api.drop();
+		await controller.detach();
+		await settle();
+
+		expect(controller.getView().state.summaries).toEqual([]);
 		controller.dispose();
 	});
 
@@ -864,6 +913,9 @@ describe("client controller", () => {
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
 		expect(detachedView.state.sessions[sessionKey(virtualRef)]).toBeUndefined();
+		// The re-list is on this exit, and only this one: the row it removes is
+		// not merely stale, it points at a session that exists nowhere (D21).
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		controller.dispose();
 	});
 
