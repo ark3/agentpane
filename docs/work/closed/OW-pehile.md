@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Detach's enablement predicate should refuse a session mid-compaction, as the Compact item's already does
@@ -22,3 +23,16 @@ What is load-bearing: the inconsistency with the Compact item sitting three line
 The Pi behaviour is incidental to this card, and a version-stamped measurement in `docs/MANUAL_TESTING.md` is still worth having whenever someone is on that backend anyway.
 
 Done when `detachable` carries `compaction === null` and `src/client/App.test.ts` refuses Detach for a selection whose session reports a compaction, in the `refusedWhen` case list OW-tewave left there -- shown red against the predicate as it stands first.
+
+## Close note
+
+`detachable` in `src/client/App.svelte` gained a fourth conjunct, `compaction === null`, so the Detach menuitem now refuses a session mid-compaction exactly as the Compact menuitem three lines below it always has.
+`close()` kills the subprocess, so a compaction running when the click landed died with it -- the same loss the `isStreaming` conjunct exists to prevent (OW-japuzo).
+The docblock above `detachable` was extended in the same voice, naming the reason and recording that the reachability is unmeasured.
+
+Verified: a new case in the `refusedWhen` list in `src/client/App.test.ts` (the list OW-tewave left there) renders a selection whose live session reports `compaction: "running"` and asserts the Detach item is disabled.
+It was shown red first against the predicate as it stood -- `expect(element).toBeDisabled()` failed, the item rendered enabled -- and green after the conjunct.
+`bun run check` passes on main: 50 files, 1100 tests.
+Landed as 702d84e.
+
+Still unmeasured and deliberately not gated on: whether any backend reaches a compaction that `isStreaming` does not already cover. `streamingAction`'s docblock says Codex and Claude expose one through their generic active-turn signals and implies Pi does not; a version-stamped run in `docs/MANUAL_TESTING.md` is worth having whenever someone is on Pi anyway. That decides only whether this guard is live or inert.
