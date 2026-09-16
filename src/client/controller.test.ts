@@ -92,6 +92,15 @@ class FakeApi implements AgentpaneApi {
 	emit(event: ServerEvent): void {
 		this.handlers?.onEvent(event);
 	}
+
+	/** The stream coming up. `connect` above does not fire this, so every open a test wants is explicit. */
+	open(): void {
+		this.handlers?.onOpen();
+	}
+
+	drop(): void {
+		this.handlers?.onDisconnect();
+	}
 }
 
 describe("client controller", () => {
@@ -765,20 +774,70 @@ describe("client controller", () => {
 	// moves that -- so a detach whose `sessions-changed` broadcast never arrives,
 	// the SSE connection being down, left the row lit as attached until the user
 	// pressed Refresh: the exact untruthful indicator Detach exists to clear
-	// (OW-lejahi). No event is emitted here at all.
-	it("re-lists after a detach that no sessions-changed broadcast follows", async () => {
+	// (OW-lejahi). The detach itself no longer asks for that listing; the
+	// reconnect does (D21), so the stripe clears when the stream comes back and
+	// no broadcast is needed anywhere in this test.
+	it("clears a detached row's stripe at the reconnect when no broadcast followed the detach", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
 		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		api.listSessions.mockResolvedValue([detachedSummary]);
 
+		api.drop();
 		await controller.detach();
+		await settle();
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+
+		api.open();
 		await settle();
 
 		expect(controller.getView().state.summaries).toEqual([detachedSummary]);
+		controller.dispose();
+	});
+
+	// Of the seven `SessionSummary` fields, `status` and `updatedAt` move only
+	// when a listing moves them, and every `sessions-changed` that fanned out
+	// while the stream was down is gone: there is no `Last-Event-ID` cursor and
+	// no replay buffer, and the opening snapshots carry neither field
+	// (OW-vukoku). So the re-established stream is the whole trigger here -- no
+	// event is emitted at all.
+	it("re-lists when the event stream comes back up", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await settle();
+		const missed = { ...summary(ref), status: "detached" as const, updatedAt: "2026-09-16T04:00:00.000Z" };
+		api.listSessions.mockResolvedValue([missed]);
+
+		api.drop();
+		api.open();
+		await settle();
+
+		expect(controller.getView().state.summaries).toEqual([missed]);
+		controller.dispose();
+	});
+
+	// The first open is `start()`'s own listing arriving by another door: the
+	// native `EventSource` fires `onopen` on the initial connect as well as on
+	// every re-establish, and `refreshInFlight` only coalesces listings that
+	// overlap -- an open landing after the startup listing resolves would list a
+	// second time (OW-vukoku).
+	it("does not list a second time on the first open", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await settle();
+		expect(api.listSessions).toHaveBeenCalledOnce();
+
+		api.open();
+		await settle();
+
+		expect(api.listSessions).toHaveBeenCalledOnce();
 		controller.dispose();
 	});
 
@@ -805,9 +864,6 @@ describe("client controller", () => {
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
 		expect(detachedView.state.sessions[sessionKey(virtualRef)]).toBeUndefined();
-		// The re-list is on this exit too, not just the preview one: the stripe is
-		// about the listing, not about which screen the user lands on (OW-lejahi).
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		controller.dispose();
 	});
 

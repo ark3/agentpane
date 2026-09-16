@@ -199,6 +199,8 @@ export function createController(
 	let modelLoadStartedForSelection: number | null = null;
 	const pendingModelSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
+	/** Whether the event stream has ever been up: every open after the first is a reconnect. */
+	let opened = false;
 	let refreshSurfacing = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
@@ -585,8 +587,33 @@ export function createController(
 			for (const ref of result.recover) void recover(ref);
 			if (result.refreshSessions) void refreshSessions(false);
 		},
+		/**
+		 * A re-established stream heals its transcripts and nothing else: the
+		 * opening snapshots go out only for sessions with a live adapter and carry
+		 * `{ messages, isStreaming, compaction, model }`, never `status`,
+		 * `updatedAt`, `cwd` or `preview`. There is no `Last-Event-ID` cursor and
+		 * no replay buffer either, so every `sessions-changed` that fanned out
+		 * while the socket was down is simply gone -- and `status` (the sidebar's
+		 * attached stripe, the header's Detach) and `updatedAt` (the whole sidebar
+		 * ordering) move for no other reason than a listing. So the reconnect asks
+		 * for one (D21, OW-vukoku), which generalises OW-lejahi's narrow fix: a
+		 * detach performed while the stream was down used to leave the row lit as
+		 * attached until the user pressed Refresh, and that was one visible case
+		 * of a general loss.
+		 *
+		 * Not on the first open. `EventSource` fires `onopen` on the initial
+		 * connect as well as on every re-establish, and `start()` already lists
+		 * there; `refreshInFlight` coalesces only listings that overlap, so an
+		 * open landing after the startup listing resolves would list a second
+		 * time for nothing.
+		 *
+		 * `false`: nobody asked for this listing, so it owns neither the status
+		 * line nor the error slot.
+		 */
 		onOpen() {
 			publish({ connection: "connected" });
+			if (opened) void refreshSessions(false);
+			opened = true;
 		},
 		onDisconnect() {
 			publish({ connection: "reconnecting" });
@@ -997,17 +1024,6 @@ export function createController(
 				delete sessions[key];
 				publish({ state: { ...view.state, sessions } });
 			}
-			// Ask for the re-list rather than only waiting for the one the close
-			// broadcasts: the sidebar's attached stripe reads `summary.status`,
-			// which nothing but a listing moves, so a detach with no
-			// `sessions-changed` to ride on -- the SSE connection down -- left the
-			// row lit as attached until the user pressed Refresh (OW-lejahi). Not
-			// awaited, for the same reason the drop above does not wait on the
-			// broadcast: the view is already truthful without it. Above both exits
-			// below, because the stripe is about the listing and not about which
-			// screen the user lands on. `false`: nobody asked for this listing, so
-			// it owns neither the status line nor the error slot.
-			void refreshSessions(false);
 			// A virtual session has nothing to preview and no row to go back to:
 			// `readSessionPreview` answers its ref with an empty-but-*non-null*
 			// transcript rather than an error, which is enough to put `App.svelte`
