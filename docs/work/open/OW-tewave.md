@@ -66,5 +66,6 @@ Whatever the implementer observes when prompting a session just detached from th
 2. `src/client/controller.test.ts` asserts `detach()` on the selected attached session calls the API's close, then the session is gone from `state.sessions`, its preview is fetched and shown, and `isStreaming` is false, whether the broadcast re-list lands before or after the preview; sibling of "forgets a cached live session when a fresh listing reports it detached".
 3. `src/client/App.test.ts` asserts the Tools menu holds a `Detach` menuitem that is disabled with nothing selected, while streaming, and with a pending request, enabled for an attached and for a virtual selection, and that clicking it invokes the controller's detach; siblings of "disables the composer's New conversation and Compact when nothing is selected (OW-72)" and "the composer's Compact tool compacts the selected session (OW-72)".
 4. Each test is shown red against the unmodified source first.
-5. `rg -n 'end.session|no such button' docs/DESIGN.md docs/work` finds no copy of the retired claim.
+5. `rg -n 'end.session|no such button' docs/DESIGN.md docs/work -g '!*tewave*'` finds no copy of the retired claim.
+   This card quotes the three copies in order to name them, so it matches itself and is excluded; every other match is a copy that has to go.
 6. `bun run check` passes, and `bun run test:browser` has been run by hand before the commit, as `AGENTS.md` requires for a change to the composer's action row.
