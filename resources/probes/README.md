@@ -295,6 +295,22 @@ Costs tokens: three real model turns.
 Verified with: `codex-cli` 0.154.0 on the home server, 2026-09-15.
 What it showed is `docs/MANUAL_TESTING.md`, "`thread/unsubscribe` does not release a Codex thread's writer lock (OW-voyezi)".
 
+## `session_name_probe.py`
+
+Proves: **all three backends rename an attached session over the wire, mid-session, with no restart** -- the fact D13's write-through decision for names rests on.
+One backend per run: `pi --mode rpc` and `set_session_name`; `claude -p` in stream-json and both the `rename_session` control request and a `/rename` user message; `codex app-server` and `thread/name/set`, which is the method's name on 0.154.0 where the vendored bindings still say `setName`.
+Each run then reads back where the name landed: Pi's `session_info` lines, Claude's `custom-title` lines, and for Codex `thread/read`, `thread/list`, `session_index.jsonl`, the sqlite `threads.name` column and the rollout file.
+
+```bash
+python3 session_name_probe.py --backend pi|claude|codex
+```
+
+Sessions are created under a scratch cwd in `/var/tmp` and their store files are left where each CLI put them.
+Costs tokens: one real model turn, two on Claude.
+
+Verified with: `pi 0.85.1`, `claude 2.1.270` and `codex-cli 0.154.0` on the home server, 2026-09-15, each on its AGENTS.md pin.
+What it showed is `docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's
