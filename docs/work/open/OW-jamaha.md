@@ -28,11 +28,15 @@ Renaming a detached session is out of scope by the owner's decision, not by omis
 - `name: string | null` on `SessionSummary`.
   This card owns the field; the walk fills it with `null` here, and reading backend names into the list is other cards' work, which are blocked on this one for the field.
   An attached session's summary carries the name its adapter last set, and for Codex the name a `thread/name/updated` notification last reported, so the list shows the rename without a refetch of the store.
-- A control in the client, drawn where the session's other controls sit, present only while the session is attached and not mid-turn, per D14 reachable by pointer.
-  Its exact shape is incidental; a first cut is fine.
+  It also carries a name the backend already had when the session was attached, where the adapter has that in hand at no extra cost: Pi's `get_state` round trip at start reports `sessionName`, and Codex's `thread/resume` response carries `thread.name`.
+  Claude Code has no in-process read of its title, so a pre-existing Claude title waits for the card that reads store files; do not add a read here for it.
+  Between this card and the two reader cards, a name therefore shows only while the session is attached, and a server restart drops it from the list until the session is attached again; that is expected, not a defect.
+- A control in the client, present only while the session is attached and not mid-turn, per D14 reachable by pointer.
+  The owner chose the Tools popover in `src/client/App.svelte` for it on 2026-09-15, beside New conversation and Compact, which are already gated on a selected session.
+  What the item opens, an inline edit of the selected row or a prompt, is a first cut, and whichever it is has a visible way out (D14).
 
 Load-bearing: write-through with no copy of agentpane's own, no control on a detached session, the Codex method spelling, and the Claude control request rather than the slash command.
-Incidental: where the control sits, whether the rename is inline editing of the row or a prompt, and how an empty name is treated (Pi clears on empty and Codex accepts any string; pick one behaviour and say which in the close note).
+Incidental: whether the rename is inline editing of the row or a prompt, and how an empty name is treated (Pi clears on empty and Codex accepts any string; pick one behaviour and say which in the close note).
 
 ## Done when
 
@@ -40,7 +44,8 @@ Each watched red first.
 
 1. A test per adapter, against that adapter's fake in `test-support.ts`, asserts the exact command or request written for a rename and that the adapter's state carries the name after the response.
    For Codex, a second test feeds a `thread/name/updated` notification and asserts the state follows it.
+   For Pi and Codex, a third test has the fake answer the attach-time `get_state` or `thread/resume` with a name and asserts the state carries it before any rename.
 2. A route test asserts the rename endpoint refuses a session that is not attached and forwards to the adapter for one that is.
-3. A client test asserts the control is absent for a detached session and present for an attached one, and that a `SessionSummary` carrying a name renders it in place of the preview.
+3. A client test asserts the Tools menu item is absent for a detached session and present for an attached one, and that a `SessionSummary` carrying a name renders it in place of the preview.
 
 `bun run check` passes.
