@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # Should the SSE reconnect path re-list, so state missed while the connection was down heals on its own?
@@ -74,3 +75,30 @@ Adding an `onOpen()` method to the fake is two lines, and the body has an exact 
 It goes red first because today's `onOpen` publishes only `{ connection: "connected" }`.
 Assert on `state.summaries` rather than on `listSessions` call count -- the startup listing already satisfies a count -- and `settle()` past the microtask, since a re-list would be `void`-ed.
 The fake's `deferred()` helper can hold the startup listing open to pin the double-list race deterministically, which is the companion test for whether `onOpen` should skip the first open.
+
+## Close note
+
+Answered yes: a re-established event stream asks for one unsurfaced session listing, and the first open does not.
+Recorded as D21 in `docs/DESIGN.md` and in the docblock at `handlers.onOpen`; the owner took the decision on 2026-09-16 off the measurement below.
+
+What made the answer yes.
+Reconnection heals transcripts and nothing else: `openEventStream` sends opening snapshots only for sessions holding a live adapter, a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }`, and `Last-Event-ID` appears nowhere in `src/`, so a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
+Of the seven `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible -- `status` lights the sidebar's attached stripe and gates the composer Tools menu's Detach, `updatedAt` drives the whole sidebar ordering -- and a listing is the only thing that moves either.
+`isStreaming` is the one field reconnection effectively heals, and only because the UI reads it live-first.
+The argument that would have licensed no was D20's "an affordance and may be briefly stale; nothing is decided on it", and it does not fit: `status` gates a control.
+
+The cost, for whoever revisits this.
+One `GET /api/sessions` per reconnect, uncached by design, at a per-call cost this repo does not measure: the route was timed at 0.16-0.24s warm over 1001 sessions on 2026-08-14 and OW-23 measured ~0.01s to walk 973 files and ~0.27s to read the first line of each in Python on the work laptop on 2026-08-10, but both predate the Claude Code store joining the enumeration.
+Frequency is bounded rather than cost: `addClient` pushes `retry: 500` with no backoff or cap on either side, so a flap costs roughly two listings a second.
+A debounce was declined -- that storm arrives only when the server is already failing to hold a stream open.
+
+Two defects the adversarial read caught, both fixed before landing.
+The gate's predicate is that a listing has *landed*, not that an open has been counted: `refreshSessions` swallows its own failure, so counting opens alone skipped the re-list on the one open where the sidebar is emptiest -- a page loaded while the server was away, whose first `onopen` of all is the server returning.
+And OW-lejahi's `refreshSessions(false)` came out of `detach()`'s ordinary path but stays on its virtual exit: a detached stored session merely lists with an untrue `status`, whereas a detached virtual session is gone everywhere while its row still renders, and a click on that phantom strands the user on the screen OW-vasubu exists to prevent.
+The deleted `toHaveBeenCalledTimes(2)` assertion in the OW-vasubu test had been the only guard on that second one; it is restored.
+
+Verified by `bun run check` green on `main` at 1106 tests, and by four tests in `src/client/controller.test.ts` each shown red first: "re-lists when the event stream comes back up", "does not list a second time on the first open" (red against an ungated variant), "lists on the first open when the startup listing failed", and "drops a detached virtual session's phantom row with no broadcast to ride on".
+`FakeApi` gained `open()` and `drop()` doors; `onOpen` and `onDisconnect` had been invoked nowhere in that file before this.
+
+Left open deliberately as OW-dekuri: the re-list hangs off `onopen`, so a fatally closed `EventSource` -- which fires no further `onopen`, and which `onerror` cannot distinguish from a retryable drop -- still heals nothing until Refresh.
+That is also the one gesture where this change regresses against OW-lejahi, whose `detach()` call succeeded over HTTP whatever the SSE was doing.
