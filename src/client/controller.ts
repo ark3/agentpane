@@ -997,6 +997,17 @@ export function createController(
 				delete sessions[key];
 				publish({ state: { ...view.state, sessions } });
 			}
+			// Ask for the re-list rather than only waiting for the one the close
+			// broadcasts: the sidebar's attached stripe reads `summary.status`,
+			// which nothing but a listing moves, so a detach with no
+			// `sessions-changed` to ride on -- the SSE connection down -- left the
+			// row lit as attached until the user pressed Refresh (OW-lejahi). Not
+			// awaited, for the same reason the drop above does not wait on the
+			// broadcast: the view is already truthful without it. Above both exits
+			// below, because the stripe is about the listing and not about which
+			// screen the user lands on. `false`: nobody asked for this listing, so
+			// it owns neither the status line nor the error slot.
+			void refreshSessions(false);
 			// A virtual session has nothing to preview and no row to go back to:
 			// `readSessionPreview` answers its ref with an empty-but-*non-null*
 			// transcript rather than an error, which is enough to put `App.svelte`

@@ -761,6 +761,27 @@ describe("client controller", () => {
 		});
 	}
 
+	// The sidebar's attached stripe reads `summary.status`, and only a listing
+	// moves that -- so a detach whose `sessions-changed` broadcast never arrives,
+	// the SSE connection being down, left the row lit as attached until the user
+	// pressed Refresh: the exact untruthful indicator Detach exists to clear
+	// (OW-lejahi). No event is emitted here at all.
+	it("re-lists after a detach that no sessions-changed broadcast follows", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
+		api.listSessions.mockResolvedValue([detachedSummary]);
+
+		await controller.detach();
+		await settle();
+
+		expect(controller.getView().state.summaries).toEqual([detachedSummary]);
+		controller.dispose();
+	});
+
 	// A virtual session has nothing on disk, so `preview` would answer with an
 	// empty-but-non-null transcript and strand the user on a screen whose only
 	// control is an Attach the session manager can no longer honour (OW-vasubu).
@@ -784,6 +805,9 @@ describe("client controller", () => {
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
 		expect(detachedView.state.sessions[sessionKey(virtualRef)]).toBeUndefined();
+		// The re-list is on this exit too, not just the preview one: the stripe is
+		// about the listing, not about which screen the user lands on (OW-lejahi).
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		controller.dispose();
 	});
 
