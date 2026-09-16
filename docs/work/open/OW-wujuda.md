@@ -14,6 +14,13 @@ The only rollout fixture is `fork.jsonl`, and no Codex reducer test reads it; th
 On that wire the one data point already in the repo points the other way: `subagent.meta.json`, captured on `0.153.4`, carries the same event-type set as the `0.147.0` `text` capture.
 So whether the tests are asserting a shape the installed CLI no longer produces is open, and this card's first job is to find out rather than to assume.
 
+## Two drifts already seen on the request side, 2026-09-15
+
+Both came out of the session-name work (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire") and are the vendored bindings under `resources/codex-protocol/v2/` disagreeing with `codex-cli 0.154.0`, not fixture drift; they are recorded here because this is the card asking whether the wire moved.
+The rename method is `thread/name/set`: `thread/setName`, the spelling `ThreadSetNameParams.ts` implies, was rejected with `-32600 unknown variant` and a list of every method the server accepts, and `thread/name/updated` is the matching notification.
+A `thread/list` row carries `model` (`"gpt-5.6-luna"` in that run) and `reasoningEffort`, neither of which `Thread.ts` declares.
+Whatever the fixture diff shows, record what it means for re-vendoring the bindings: the method census in `docs/HANDOFF.md` finding 48 counted 133 client methods, and the rejection listed noticeably more.
+
 ## Why this is filed as a defect rather than left to age
 
 D18 allows most backend facts to rot and be corrected on contact.
