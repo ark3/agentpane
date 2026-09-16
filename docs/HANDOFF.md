@@ -199,6 +199,11 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
   **Do not count on the sandbox to contain this.**
   That session survived reaching only itself because it ran one `bwrap` deeper than its siblings -- measured the same day: its inner `claude` sat in PID namespace `4026532772` while a sibling agent session two days old, and the outer wrapper of the session itself, shared `4026532490`.
   Sessions at that outer level see each other, so the same `pkill` run from one of them takes out the others.
+- **`sbox` refuses a `cwd` it cannot detect a workspace for, and a scratch directory under `/tmp` is exactly that case.**
+  Measured on the home server 2026-09-16 driving a live Pi session with its `cwd` at `/tmp/ow-resume-probe` (`docs/MANUAL_TESTING.md`, OW-jamoyi); `sbox` carries no `--version`, so which build this was is not recorded.
+  `direnv exec /tmp/ow-resume-probe sbox --dry-run -- pi --version` failed with `Could not detect workspace`, listing the three things it tries in order: the `--workspace` flag, then the marker files `.sandbox-workspace`, `.sandbox-root`, `.sandboxrc`, `.workspace-root` and `WORKSPACE`, then a git root.
+  `touch /tmp/<dir>/.sandbox-workspace` is enough and the spawn then works, nested inside the session's own sandbox, `pi --version` answering `0.85.1` through it.
+  The repo's own tree never hits this because it is a git root, so a live run pointed anywhere else is where it surfaces -- and it surfaces before the backend is reached at all, so the error names sbox and says nothing about the agent.
 - **Pi RPC framing is LF-only.**
   Split on `\n` only; do not use Node `readline` (it also splits on U+2028/U+2029, which are valid inside JSON strings).
   See Pi's `docs/rpc.md` "Framing".

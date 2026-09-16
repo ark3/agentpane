@@ -2190,3 +2190,49 @@ So the D9 walk, which reads rollouts, cannot see a Codex name, and only a runnin
 **Read alongside, from the same day's source reading rather than a run.**
 The `threads` table on 0.154.0 also carries `is_pinned` and `archived`, and the protocol has `thread/archive` and `thread/unarchive`; on this machine both columns were zero across 101 threads.
 That is recorded in D13, where it belongs, since it bears on a decision rather than on a card.
+
+## `DELETE` then attach resumes a real Pi session, and the resumed spawn drops the model (OW-jamoyi)
+
+Run on the home server 2026-09-16 against `pi 0.85.1`, driven at the HTTP routes with `curl` against `bun run start` on port 4173, with `/api/events` captured throughout.
+The capture and the server log were scratch files under `/tmp` and **did not survive the run**, so what is below is the whole of the record; the session file it wrote is still at `~/.pi/agent/sessions/--tmp-ow-resume-probe--/2026-09-16T23-33-27-765Z_01a0ac91-*.jsonl` unless something has since cleaned `/tmp`.
+No browser was open at any point.
+The two gestures in the old heading were a `DELETE` and a `GET`: the Attach button was never pressed, so every claim about the pane below is derived from the observed events and none of it is a UI observation.
+The sequence was create, attach, one prompt planting two facts, `DELETE`, attach again, and a second prompt asking for those facts back.
+Nobody had watched this; OW-tewave asked for it, observed nothing, and OW-jamoyi corrected and re-asked.
+What rests on it is OW-35, D12's transparent re-attach, which assumes a resume it had never seen work.
+
+**The resume is clean, and the backend itself has the context.**
+The re-attach's first snapshot carried both of turn 1's messages, identical to the pre-`DELETE` snapshot in `timestamp`, `usage` and `responseId`.
+That those fields match does not by itself exclude an agentpane cache -- a cache would reproduce them exactly -- but the code does: `close()` deletes the record from `#sessions`, unsubscribes it and disposes the adapter that held the reducer state, so by the re-attach there is nothing left in the server to replay from and the messages can only have come back off Pi's JSONL.
+The claim that matters is the other one, since `--session <resumeId>` exists for it: the second turn, on a process spawned after the kill, answered both planted facts, and a process handed only turn 2's prompt over RPC could have read them nowhere but the resumed file.
+Its usage corroborates rather than proves -- `input: 89`, `cacheRead: 1536`, `cacheWrite: 0` -- and `input: 89` is far too small to have carried turn 1, so read those numbers as consistent with a rehydrated prefix, not as the proof.
+Both turns appended to one session file, 8 lines, parent-linked across the detach as `10a9228f` -> `c16442a7` -> `4e5e067d` -> `aa85de1c`.
+The `DELETE` returned 204 in 0.028s and the kill was synchronous with it: `kill -0` and `/proc` both reported pids 206475, 206481 and 206482 -- the whole `bwrap`->`bwrap`->`pi` chain -- already gone when the response landed.
+
+**The resumed spawn carries `--session` and no `--model`.**
+The first spawn's argv ended `pi --mode rpc --model openrouter/deepseek/deepseek-v4.1-flash:high`; the second ended `pi --mode rpc --session <path>`, with no model flag at all.
+This is structural rather than a fluke of the run: `close()` drops the session from the manager's table, so the re-attach takes `#start`'s `!session` branch, which rebuilds the record from the index with `fromStore: true` and no `model` key, and the spawn's `...(bound.model ? { model: bound.model } : {})` then contributes nothing.
+It could not do otherwise as things stand -- `SessionSummary` carries no `model` field, so the store path has no model to restore even if it asked.
+What the resumed process actually ran on is **not** established by this run, and could not have been: `~/.pi/agent/settings.json` held the same model *and* the same `thinkingLevel: high` the flag had asked for, so neither axis could have shown a difference.
+Pi writes a `model_change` entry into its session file, and whether a resume replays it was not tested; settling this needs a resume whose logged model differs deliberately from the settings default, read back through `get_state`.
+Filed as OW-pubulu.
+Also found on the way, on this version: `POST /api/sessions/:backend/:id/model` accepted `provider/modelId` but rejected the `:thinkingLevel` suffix that `--model` takes, answering 500 with `Model not found: openrouter/deepseek/deepseek-v4.1-flash:high` -- a 400 case surfacing as a 500.
+Filed as OW-pizaki.
+
+**Finding 41 re-confirmed on 0.85.1, and through the resume path.**
+The `renamed` event replacing the minted `virtual:` id with Pi's own file path arrived on the first attach, before any prompt existed.
+This is not new: `docs/HANDOFF.md` finding 41 measured it on `pi 0.84.1` -- "Pi names its session file during `start()`, not on the first prompt" -- and warned that code written for only the prompt-time rename will miss it.
+What this run adds is the same behaviour on 0.85.1 and the resume half finding 41 could not see: no second `renamed` ever appeared, because the re-attach used the already-final id, so a re-attach is not a rename point at all.
+`createdAt` did change source across the detach, from the virtual mint time `2026-09-16T23:33:23.898Z` to the file header's `2026-09-16T23:33:27.765Z`, about 3.9s later.
+What changed on 2026-09-16 is not the fact but its cost: D9's first-prompt contract is restated in roughly 23 non-test places, `src/server/http/session-manager.ts`'s `markPrompted` docblock and four copies in D9 among them, and OW-tewave's Detach item with D12's reaper behind it make re-attach a routine user-reachable path -- so this stops being trivia about dead code and starts licensing the resume logic.
+Filed as OW-bohodu.
+Note finding 41's own caution, which still stands: do not read this as licence to delete the first-prompt path, since a `virtual` session whose backend has not written a file is exactly what D9 describes.
+
+**What a client would have to render, in the order the events arrived.**
+The *first* attach delivered `sessions-changed`, `sessions-changed`, `renamed`, a `snapshot` with empty `messages`, `sessions-changed`, then the real `snapshot` -- so a pane painting the first snapshot flashes an empty transcript one frame before the populated one, and one attach cost three `sessions-changed` fanouts, two of them back to back before anything had happened.
+That last part bears on D21's re-list cost, since each fanout is a listing at every connected client.
+`DELETE` emitted one `sessions-changed` and nothing else, which is D21's already-recorded shape rather than a new hazard: there is no per-session closed event in the `ServerEvent` union, so a pane infers removal from the re-list and goes on showing turn 1 until it re-lists.
+The re-attach then delivered `status` *before* the `snapshot`, so a pane painting a model badge or a running indicator off `status` paints it against whatever transcript it still held, and the authoritative repaint is the snapshot one frame later.
+That snapshot carried `seq: 0`, which `broadcastSnapshot` sets unconditionally -- not, as this section first said, something `broadcaster.forget()` did at close; the run cannot distinguish the two, and the reset is the documented contract either way.
+The re-attach took 1.138s, one sample on this machine's four cores, with no intermediate event.
+Turn 2 streamed as roughly six `upsert`s at one index and then a `snapshot`, with no `status` event marking either streaming transition, so a spinner has to come off the snapshot's `isStreaming`.
