@@ -719,20 +719,30 @@ The owner took this on 2026-09-16 (OW-vukoku).
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
 `Last-Event-ID` appears nowhere in `src/`, so there is no cursor and no replay buffer either: a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
-Of the seven `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible -- `status` lights the sidebar's attached stripe and gates the header's Detach, `updatedAt` is the file's mtime and drives the whole sidebar ordering -- and a listing is the only thing that moves either.
+Of the seven `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
+`status` lights the sidebar's attached stripe and is the first conjunct of the composer Tools menu's `detachable`, which reads `"attached"` or `"virtual"`.
+`updatedAt` drives the whole sidebar ordering; it is the session file's mtime for a stored session, and `session.createdAt` for one the manager minted itself, which `#ownSummary` reports as both stamps.
 `isStreaming` is the one field reconnection effectively heals, and only because the UI reads it live-first.
 
 What it replaces is OW-lejahi, landed one commit earlier and narrower: `detach()` asked for its own re-list because a detach performed while the stream was down left the row lit as attached until the user pressed Refresh.
 That was one visible instance of a general loss.
-The reconnect re-list subsumes it -- a detach with the stream up rides the `sessions-changed` the close broadcasts, and a detach with it down heals at the next open -- so that call and its docblock came back out with this decision.
+The reconnect re-list subsumes it for a stored session -- a detach with the stream up rides the `sessions-changed` the close broadcasts, and a detach with it down heals at the next open -- so that call came out of the ordinary path with this decision.
+
+It stays on `detach()`'s virtual exit, because the row a virtual detach leaves behind is a different kind of wrong.
+A detached stored session lists with an untrue `status` and is otherwise real: the transcript is on disk and a click reaches it.
+A detached virtual session is gone everywhere -- nothing on disk, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and `readSessionPreview` answers a `virtual:` ref with an empty-but-non-null transcript, so a click strands the user on precisely the screen OW-vasubu exists to keep them off.
+A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 
 Not on the first open, which is the whole of the mechanism's subtlety.
 `EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions`'s only guard is `refreshInFlight`, which coalesces listings that overlap and not ones that follow each other.
 An open landing after the startup listing resolved would therefore list a second time for nothing.
-One boolean in the controller's closure separates the two cases.
+The predicate is that a listing has *landed*, not that an open has been counted: `refreshSessions` swallows its own failure and resolves, so a page that loads while the server is away -- listing rejected, connect failing, `EventSource` retrying -- gets its first `onopen` of all when the server returns, and that is the open where the sidebar is emptiest and the skip costs most.
+Two booleans in the controller's closure, then: the stream has been up, and a listing has landed.
 
 The cost is one `GET /api/sessions` per reconnect, and what that costs today is not measured here.
-The route was timed at 0.16-0.24s warm over 1001 stored sessions on 2026-08-14 (`docs/MANUAL_TESTING.md`, "Observed preview and listing timing"), matching OW-23's ~0.28s walk of 973 files in Python on the work laptop on 2026-08-10 -- but both predate the Claude Code store joining the enumeration, so neither describes the current route and nothing has re-measured it.
+The route was timed at 0.16-0.24s warm over 1001 stored sessions on 2026-08-14, against a running production server whose machine that record does not name (`docs/MANUAL_TESTING.md`, "Observed preview and listing timing").
+Behind it is OW-23, which separates the walk from the read: enumerating 583 Codex and 390 Pi files across 28 workspaces took ~0.01s and reading the first line of all 973 of them ~0.27s, in Python, on the work laptop on 2026-08-10 (`docs/HANDOFF.md`, finding 19) -- and the shipped parsers read further than the first line, so that figure understates the read rather than describing it.
+Both predate the Claude Code store joining the enumeration, so neither describes the current route and nothing has re-measured it.
 What is bounded is the frequency: `addClient` pushes `retry: 500` as the stream's first bytes, with no backoff and no cap on either side, so a flap costs roughly two listings a second.
 
 Declined: any debounce, throttle or minimum interval on the re-list.
