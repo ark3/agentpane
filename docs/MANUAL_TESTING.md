@@ -2161,3 +2161,32 @@ So the refusal and the exit-status wiring both fire, and the fork in that run la
 Two bounds this run does not clear.
 Nothing was read from the streamed-into file *before* the fork, so whether that prefix was already on disk while the turn ran or was flushed when the fork cut it is not shown here — only that it is there afterwards.
 And the count is one model's: a turn that streams nothing before the fork still leaves the empty entry OW-gajesu read, so "no text on disk" and "no text produced" remain distinguishable only by the delta count this cell now carries.
+
+## All three backends rename an attached session over the wire
+
+Run on the home server 2026-09-15, one backend per invocation of `python3 resources/probes/session_name_probe.py --backend <b>`, each exiting 0: `pi 0.85.1` on `openrouter/deepseek/deepseek-v4.1-flash:high`, `claude 2.1.270` on `--model haiku`, `codex-cli 0.154.0` on `gpt-5.6-luna`.
+Each cell ran one real turn first, so every rename below landed on a session that already existed in the backend's store, which is the case agentpane's attached sessions are in.
+The question was whether a name can be set and then changed on such a session without a restart, and where the backend puts it; the owner's decision that names are written through rather than kept in the D13 file (`docs/DESIGN.md`, D13, "Names are not marks") rests on the first half, and the cards for reading names back rest on the second.
+
+**Pi appends a `session_info` entry per rename, and the latest wins.**
+`set_session_name` answered `success: true` twice, `get_state` read `sessionName: null` before and `"probe name two"` after, and the session file gained lines 6 and 7, each `{"type": "session_info", "name": ...}` chained by `parentId` after the turn's messages.
+`pi`'s own reader takes the last such entry, and an empty name clears (`dist/core/session-manager.js`, `appendSessionInfo` and `getSessionName`, read at the source on 0.85.1).
+This is a file `src/server/sessions/pi.ts` already opens, but past the first user message where its enumeration read stops.
+
+**Claude Code accepts both a control request and a slash command in print mode.**
+A `control_request` of subtype `rename_session` with a `title` field answered a `control_response` of subtype `success`.
+The binary carries the string `rename_session is not supported in this context (onRenameSession callback not registered)`, so this could have failed the way `steer` does (OW-jihete); it did not.
+A user message reading `/rename probe name two` then ran as a turn and returned a `result` whose text was `Session renamed to: probe name two`, so the slash path works too and costs a turn cycle.
+Each rename appended a `custom-title` line to the store file (lines 20 and 22), and the file then repeated the last title at line 33 beside a fresh `ai-title`, so titles are re-emitted rather than written once.
+Nothing here was tried before the first turn or during one.
+
+**Codex keeps the name beside the rollout, never in it.**
+The method is `thread/name/set`: a `thread/setName` request, the name the vendored `ThreadSetNameParams.ts` suggests, was rejected with `-32600 unknown variant` and a list of every method the server knows, in a hand run preceding the probe.
+Two `thread/name/set` calls each answered `{}`; a `thread/name/updated` notification carried each name in the hand run, and the probe run caught the first before its read loop moved on.
+`thread/read` and `thread/list` both reported `"probe name two"` afterwards, and the list row also carried `"model": "gpt-5.6-luna"`, a field the vendored `Thread.ts` does not declare.
+On disk, `~/.codex/session_index.jsonl` gained one `{"id", "thread_name", "updated_at"}` line per rename, and `threads.name` in `state_5.sqlite` held the second name; the rollout file under `~/.codex/sessions/` contained neither string.
+So the D9 walk, which reads rollouts, cannot see a Codex name, and only a running app-server or Codex's own sqlite can.
+
+**Read alongside, from the same day's source reading rather than a run.**
+The `threads` table on 0.154.0 also carries `is_pinned` and `archived`, and the protocol has `thread/archive` and `thread/unarchive`; on this machine both columns were zero across 101 threads.
+That is recorded in D13, where it belongs, since it bears on a decision rather than on a card.
