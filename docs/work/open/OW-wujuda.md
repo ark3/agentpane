@@ -19,7 +19,7 @@ So whether the tests are asserting a shape the installed CLI no longer produces 
 Both came out of the session-name work (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire") and are the vendored bindings under `resources/codex-protocol/v2/` disagreeing with `codex-cli 0.154.0`, not fixture drift; they are recorded here because this is the card asking whether the wire moved.
 The rename method is `thread/name/set`: `thread/setName`, the spelling `ThreadSetNameParams.ts` implies, was rejected with `-32600 unknown variant` and a list of every method the server accepts, and `thread/name/updated` is the matching notification.
 A `thread/list` row carries `model` (`"gpt-5.6-luna"` in that run) and `reasoningEffort`, neither of which `Thread.ts` declares.
-Whatever the fixture diff shows, record what it means for re-vendoring the bindings: the method census in `docs/HANDOFF.md` finding 48 counted 133 client methods, and the rejection listed noticeably more.
+Whatever the fixture diff shows, record what it means for re-vendoring the bindings: the method census in `docs/HANDOFF.md` finding 48 counted 133 client methods on the schema it was taken from, and the 0.154.0 rejection listed 162.
 
 ## Why this is filed as a defect rather than left to age
 
