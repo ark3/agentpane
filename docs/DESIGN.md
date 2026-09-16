@@ -711,6 +711,33 @@ Knowing the set at render time costs a round trip the old client did not make: t
 That set is an affordance and may be briefly stale; nothing is decided on it.
 `forkAndSubmit` refetches at submit and resolves by index, refusing rather than falling back — so the worst a stale affordance can produce is a refusal, never a fork somewhere the user did not point.
 
+### D21. A re-established event stream asks for a session listing, and the first open does not
+
+Every re-establish of the SSE stream asks for one unsurfaced session listing, so state that moved while the connection was down heals without a gesture.
+The owner took this on 2026-09-16 (OW-vukoku).
+
+Reconnection before this healed transcripts and nothing else.
+`openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
+`Last-Event-ID` appears nowhere in `src/`, so there is no cursor and no replay buffer either: a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
+Of the seven `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible -- `status` lights the sidebar's attached stripe and gates the header's Detach, `updatedAt` is the file's mtime and drives the whole sidebar ordering -- and a listing is the only thing that moves either.
+`isStreaming` is the one field reconnection effectively heals, and only because the UI reads it live-first.
+
+What it replaces is OW-lejahi, landed one commit earlier and narrower: `detach()` asked for its own re-list because a detach performed while the stream was down left the row lit as attached until the user pressed Refresh.
+That was one visible instance of a general loss.
+The reconnect re-list subsumes it -- a detach with the stream up rides the `sessions-changed` the close broadcasts, and a detach with it down heals at the next open -- so that call and its docblock came back out with this decision.
+
+Not on the first open, which is the whole of the mechanism's subtlety.
+`EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions`'s only guard is `refreshInFlight`, which coalesces listings that overlap and not ones that follow each other.
+An open landing after the startup listing resolved would therefore list a second time for nothing.
+One boolean in the controller's closure separates the two cases.
+
+The cost is one `GET /api/sessions` per reconnect, and what that costs today is not measured here.
+The route was timed at 0.16-0.24s warm over 1001 stored sessions on 2026-08-14 (`docs/MANUAL_TESTING.md`, "Observed preview and listing timing"), matching OW-23's ~0.28s walk of 973 files in Python on the work laptop on 2026-08-10 -- but both predate the Claude Code store joining the enumeration, so neither describes the current route and nothing has re-measured it.
+What is bounded is the frequency: `addClient` pushes `retry: 500` as the stream's first bytes, with no backoff and no cap on either side, so a flap costs roughly two listings a second.
+
+Declined: any debounce, throttle or minimum interval on the re-list.
+That storm arrives only when the server is already failing to hold a stream open, and a guard sized for it would be untested code defending a state in which the listing it protects is the least of the user's problems.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.
