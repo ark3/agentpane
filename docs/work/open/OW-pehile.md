@@ -1,19 +1,24 @@
 ---
-labels: [question]
+labels: [defect]
 ---
 
-# Detach is offered during a compaction the backend does not report as streaming
+# Detach's enablement predicate should refuse a session mid-compaction, as the Compact item's already does
+
+`src/client/App.svelte` (`detachable`, and the Compact menuitem's `disabled` three lines from it), `src/client/App.test.ts`.
 
 Found while reviewing OW-tewave.
 
-The Compact item in the composer's Tools menu guards on `compaction !== null`; the Detach item added by OW-tewave does not.
-Its predicate is D12's reaper exemption -- attached or virtual, not streaming, no pending request -- plus `!view.sending`, and the owner chose exactly that on 2026-09-16.
+The Compact item guards on `compaction !== null`.
+The Detach item OW-tewave added does not: its predicate is D12's reaper exemption -- attached or virtual, not streaming, no pending request -- plus `!view.sending`.
+`close()` kills the subprocess, so a compaction running when the click lands is killed with it, and that is the same loss the `isStreaming` conjunct exists to prevent (OW-japuzo).
 
-`streamingAction`'s docblock in `src/client/App.svelte`, a few lines below `detachable`, says Codex and Claude expose a compaction through their generic active-turn signals.
-Read against that, a backend that does *not* -- Pi is the candidate -- would sit mid-compaction with `isStreaming: false`, `requests: []`, `sending: false` and an `attached` summary, and Detach would be offered.
-`close()` then kills the subprocess mid-compaction, which is the same class of loss the `isStreaming` conjunct exists to prevent (OW-japuzo).
+Whether any backend can actually reach that state is unmeasured.
+`streamingAction`'s docblock, a few lines below `detachable`, says Codex and Claude expose a compaction through their generic active-turn signals, which would mean `isStreaming` already covers them; it implies Pi does not, and that has never been run.
+The fix does not wait on that.
+The conjunct is one line, it reads a field the session already carries, it licenses no new code, and it makes two items in the same menu agree -- so the measurement decides only whether the guard is live or inert, never whether to write it.
+The owner settled that framing on 2026-09-16 after the predicate was first filed as a question gated on the measurement.
 
-This is filed as a question and not a defect because the Pi half is read from that adjacent docblock and has never been measured, and because the predicate is an owner decision that a fifth conjunct would amend.
+What is load-bearing: the inconsistency with the Compact item sitting three lines away.
+The Pi behaviour is incidental to this card, and a version-stamped measurement in `docs/MANUAL_TESTING.md` is still worth having whenever someone is on that backend anyway.
 
-Done when the measurement exists and the decision is recorded: run a compaction on Pi on the home server (`pi --model openrouter/deepseek/deepseek-v4.1-flash:high`, naming the version) and read whether `isStreaming` covers it, record that in `docs/MANUAL_TESTING.md`, and then either add `compaction === null` to `detachable` with a test that goes red first, or record in `docs/DESIGN.md` D12 why the predicate stays at four conjuncts.
-Both branches close this card; neither is a skip.
+Done when `detachable` carries `compaction === null` and `src/client/App.test.ts` refuses Detach for a selection whose session reports a compaction, in the `refusedWhen` case list OW-tewave left there -- shown red against the predicate as it stands first.
