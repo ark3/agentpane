@@ -1321,7 +1321,12 @@
 			     lets the buttons stay short, and it is where the cancel control
 			     lives: a bare glyph reads as "dismiss this notice", not "abandon my
 			     edit". "conversation", not "session" -- the Tools menu already says
-			     "New conversation", and `session` is the protocol's word. -->
+			     "New conversation", and `session` is the protocol's word.
+
+			     The sentence says nothing about the partial reply a stopped Pi
+			     turn leaves in the kept conversation, which is a decision and not
+			     an omission: the owner took it on 2026-09-15 with that
+			     measurement in hand (D15, OW-lukaju). -->
 			{#if editing}
 				<p class="edit-banner" role="status">
 					<span>Editing an earlier message. Forking starts a new conversation from here and keeps this one.</span>

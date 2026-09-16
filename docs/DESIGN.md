@@ -508,8 +508,16 @@ That much has held on every run since, and it is the whole of what this decision
 What the fork costs is now measured rather than inferred.
 OW-sededi gave the probe's Pi cell the delta gate its Codex sibling had and re-ran it (home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`): with 47 `text_delta`s on the wire at the instant the fork request went out, the file the turn was streaming into held the reply's first 447 characters, not the empty assistant entry the ungated run before it had read (`docs/MANUAL_TESTING.md`, OW-sededi).
 So the streamed prefix survives on the abandoned branch; what is lost is the rest of the reply and the branch it was on, and the earlier empty entry was a fork that landed before any text existed.
-That makes the loss this decision warns about partial, and whether the "Stop and ..." framing should say so is open in OW-lukaju; the decision below is not waiting on it.
+That makes the loss this decision warns about partial.
 The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
+
+**The warning stays as it is, and says nothing about the surviving prefix.**
+Put to the owner on 2026-09-15 with the measurement above (OW-lukaju), the alternative being to extend the edit banner's sentence to "... and keeps this one, with whatever the running turn had already written".
+He chose to keep the sentence: he is agentpane's only user and knows what the fork costs, so copy bought nothing he needed.
+That settles the framing question this passage used to leave open, buttons included: only the banner was ever on the table, because "Stop and fork" and "Stop and edit" name the consequence the user acts on and the banner is where this UI does its explaining (the docblock above it in `src/client/App.svelte` says so).
+Two things the writer put in front of him that did not decide it, recorded because they are what to re-read if this reopens.
+The banner's prose is pinned by no test, while both button strings are pinned in `src/client/App.test.ts` and "Stop and edit" again in `e2e/composer-shortcut.spec.ts` — so the cheap change was the one on offer, and a button rewrite would not have been.
+And the surviving prefix sits in the pre-fork session, which `list()` does keep (OW-kekoji), but whose row carries the same preview label, backend and workspace as its fork's and nothing that says which is the pre-fork branch (OW-vezipo) — so a sentence promising the text was there would have pointed at a row nobody can pick out.
 
 **Codex's parent turn survives.**
 OW-gojado ran the probe this decision asked for on 2026-09-11 (home server, `codex-cli 0.154.0`, `gpt-5.6-luna`), firing `thread/fork` into a parent whose turn was positively confirmed streaming — `turn/started` seen, five `item/agentMessage/delta`s accumulated against a threshold of five, no `turn/completed`.
