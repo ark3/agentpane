@@ -469,6 +469,16 @@ Reporting it needs a session-less `notice` arm on the `ServerEvent` union, since
 It lands with this feature rather than ahead of it, following the pattern the compaction work used for `compact()`, and it is small because `sessions-changed` is already a session-less, seq-less arm.
 It will not stay single-use: a D12 reaper eviction and a spawn that fails before any session exists are both server-global and both currently unreportable.
 
+**Codex has slots of its own for both marks, and the decision stands anyway.**
+As of `codex-cli 0.154.0` (home server, 2026-09-15), the `threads` table in `~/.codex/state_5.sqlite` carries `is_pinned` and `archived` columns, the protocol has `thread/archive` and `thread/unarchive` with matching notifications, and `thread/list` filters on archived state.
+Pi and Claude Code have nothing equivalent, so a mark that lived in Codex's store would cover one backend of three; and D9's walk reads rollout files, which do not carry those columns, so even Codex's marks would be invisible to the list without a running app-server.
+The file is the only place a mark can live uniformly, and this paragraph exists so that the next reader who finds `is_pinned` does not reopen the question.
+
+**Names are not marks, and this file does not hold them.**
+The owner decided on 2026-09-15 that a session name set in agentpane is written through to the backend and kept nowhere else: Pi's `set_session_name`, Claude Code's `rename_session` control request, and Codex's `thread/name/set` all accept a rename mid-session on an attached session, measured live that day (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire").
+The reasons are the ones this decision already weighs: no server-side copy to keep coherent, and agentpane stays one more UI over the underlying agent rather than a store beside it.
+The cost accepted with it is that a detached session cannot be renamed, since there is no wire to write through; the owner does not want that, so the D13 file is not asked to carry a name it could.
+
 ### D14. Every affordance is reachable with a pointer; the keyboard types text
 
 The owner's rule, stated on 2026-08-19: **nothing in this UI requires the keyboard except typing text into the composer.**
