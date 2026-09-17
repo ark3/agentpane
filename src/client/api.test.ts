@@ -251,6 +251,26 @@ describe("agentpane API", () => {
 		vi.unstubAllGlobals();
 	});
 
+	// Measured in Chromium 151.0.7922.34 on 2026-09-16 (`e2e/event-stream.spec.ts`):
+	// a drop the browser is already retrying reports `readyState === CONNECTING`,
+	// while a 404 or a wrong content type leaves the source at `CLOSED`, where no
+	// `onopen` will ever follow. The controller rebuilds on the second and waits
+	// on the first, so the flag carried here is the whole of what it can tell
+	// them apart by (OW-dekuri).
+	it("reports whether the native source is fatally closed at the disconnect", () => {
+		vi.stubGlobal("EventSource", FakeNativeEventSource);
+		const api = createAgentpaneApi({ fetch: fetchRecorder() });
+		const onDisconnect = vi.fn();
+		api.connect({ onEvent: vi.fn(), onOpen: vi.fn(), onDisconnect, onMalformed: vi.fn() });
+
+		FakeNativeEventSource.instance?.emitError(FakeNativeEventSource.CONNECTING);
+		expect(onDisconnect).toHaveBeenLastCalledWith(false);
+
+		FakeNativeEventSource.instance?.emitError(FakeNativeEventSource.CLOSED);
+		expect(onDisconnect).toHaveBeenLastCalledWith(true);
+		vi.unstubAllGlobals();
+	});
+
 	it("does not report an onEvent exception as malformed JSON", () => {
 		vi.stubGlobal("EventSource", FakeNativeEventSource);
 		const api = createAgentpaneApi({ fetch: fetchRecorder() });
@@ -290,8 +310,8 @@ class FakeEventConnection implements EventConnection {
 		this.handlers.onOpen();
 	}
 
-	emitError(): void {
-		this.handlers.onDisconnect();
+	emitError(fatal = false): void {
+		this.handlers.onDisconnect(fatal);
 	}
 
 	close(): void {
@@ -301,10 +321,14 @@ class FakeEventConnection implements EventConnection {
 
 class FakeNativeEventSource {
 	static instance: FakeNativeEventSource | undefined;
+	/** The two `readyState` values an `onerror` is observed at -- see `api.ts` and OW-dekuri. */
+	static readonly CONNECTING = 0;
+	static readonly CLOSED = 2;
 	onmessage: ((event: { data: string }) => void) | null = null;
 	onopen: (() => void) | null = null;
 	onerror: (() => void) | null = null;
 	closed = false;
+	readyState: number = FakeNativeEventSource.CONNECTING;
 
 	constructor(readonly url: string) {
 		FakeNativeEventSource.instance = this;
@@ -318,7 +342,8 @@ class FakeNativeEventSource {
 		this.onopen?.();
 	}
 
-	emitError(): void {
+	emitError(readyState: number = FakeNativeEventSource.CONNECTING): void {
+		this.readyState = readyState;
 		this.onerror?.();
 	}
 

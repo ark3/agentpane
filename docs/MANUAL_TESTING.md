@@ -2236,3 +2236,23 @@ The re-attach then delivered `status` *before* the `snapshot`, so a pane paintin
 That snapshot carried `seq: 0`, which `broadcastSnapshot` sets unconditionally -- not, as this section first said, something `broadcaster.forget()` did at close; the run cannot distinguish the two, and the reset is the documented contract either way.
 The re-attach took 1.138s, one sample on this machine's four cores, with no intermediate event.
 Turn 2 streamed as roughly six `upsert`s at one index and then a `snapshot`, with no `status` event marking either streaming transition, so a spinner has to come off the snapshot's `isStreaming`.
+
+## What an `EventSource` error says about itself (OW-dekuri)
+
+Measured on the home server 2026-09-16, in Chromium 151.0.7922.34 driven by Playwright 1.62.1.
+The first four cases come from a standalone probe that served the endpoints from `node:http`, run against both the vehicle's `chromium-headless-shell` build and Playwright's default `chrome-linux64` build, which agreed on every value; the two load-bearing ones were then re-measured in the vehicle itself, where they are pinned as `e2e/event-stream.spec.ts`, and the middle two were re-measured the same way with `page.route` standing in for the probe server.
+What rests on this is the OW-dekuri repair: the client heals a dropped stream at the re-open D21 put in `onOpen`, which reaches only the drops the browser retries by itself, and a stream the browser has given up on had nothing moving it at all.
+
+**`readyState`, read inside `onerror`, separates the fatal close from the retried drop.**
+An endpoint answering 404 fired exactly one `error`, at `readyState === 2` (`CLOSED`), and never opened.
+So did a 200 whose `Content-Type` was `text/plain`: one `error` at 2, nothing after it in the two seconds the probe waited.
+A stream that opened as `text/event-stream` and was then cut by the server fired `error` at `readyState === 0` (`CONNECTING`) and opened again, indefinitely, which is the browser's own retry and the case D21 already covers.
+The card this came from had claimed `onerror` cannot tell the two apart; that is what measured false, and the repair is built on the distinction instead.
+
+**Fatality is sometimes only knowable on a later error.**
+A stream opened, cut, and then answered 503 on the retry fired its first `error` at 0 and its second at 2.
+The client therefore cannot decide at the first error and does not try to: every error reports its own `readyState`, and the rebuild is armed by whichever one arrives at `CLOSED`.
+
+**A server that vanishes is a case `readyState` does not name.**
+With the probe's process gone entirely, `error` fired at 0 forever: the browser is still retrying, against nothing.
+Telling that apart from a healthy retry needs an attempt count or a deadline, neither of which this repair carries, and it is deliberately out of its scope.

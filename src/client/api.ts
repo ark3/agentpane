@@ -28,7 +28,12 @@ export interface EventConnection {
 export interface EventHandlers {
 	onEvent(event: ServerEvent): void;
 	onOpen(): void;
-	onDisconnect(): void;
+	/**
+	 * `fatal` is the source having reached `CLOSED`, where the browser has given
+	 * up and no `onopen` can follow; an ordinary drop reports `CONNECTING`,
+	 * the browser's own retry already under way (OW-dekuri).
+	 */
+	onDisconnect(fatal: boolean): void;
 	onMalformed(error: Error): void;
 }
 
@@ -208,7 +213,7 @@ function defaultOpenEvents(url: string, handlers: EventHandlers): EventConnectio
 		handlers.onEvent(parsed);
 	};
 	source.onopen = () => handlers.onOpen();
-	source.onerror = () => handlers.onDisconnect();
+	source.onerror = () => handlers.onDisconnect(source.readyState === EventSource.CLOSED);
 	return {
 		close() {
 			source.close();

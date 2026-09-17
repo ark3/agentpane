@@ -83,9 +83,12 @@ class FakeApi implements AgentpaneApi {
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
+	/** How many times the controller has built an event connection -- a reconnect is a second call. */
+	connects = 0;
 
 	connect(handlers: EventHandlers): EventConnection {
 		this.handlers = handlers;
+		this.connects += 1;
 		return this.connection;
 	}
 
@@ -98,8 +101,9 @@ class FakeApi implements AgentpaneApi {
 		this.handlers?.onOpen();
 	}
 
-	drop(): void {
-		this.handlers?.onDisconnect();
+	/** `fatal` is the source having reached `CLOSED`, where no `onopen` can ever follow (OW-dekuri). */
+	drop(fatal = false): void {
+		this.handlers?.onDisconnect(fatal);
 	}
 }
 
@@ -820,6 +824,76 @@ describe("client controller", () => {
 
 		expect(controller.getView().state.summaries).toEqual([missed]);
 		controller.dispose();
+	});
+
+	// A fatally closed `EventSource` -- the server answered 404, or answered
+	// with the wrong content type -- never fires `onopen` again, so D21's
+	// re-list at the open cannot heal anything and the client would sit in
+	// `reconnecting` until the user pressed Refresh (OW-dekuri). Nothing here
+	// re-opens on its own: the only opens are the ones the rebuilt connections
+	// earn, and the healed sidebar at the end is the whole claim.
+	it("rebuilds a fatally closed event stream until one opens, and heals with no user gesture", async () => {
+		vi.useFakeTimers();
+		try {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.connects).toBe(1);
+			const missed = { ...summary(ref), status: "detached" as const, updatedAt: "2026-09-16T04:00:00.000Z" };
+			api.listSessions.mockResolvedValue([missed]);
+
+			api.drop(true);
+			expect(controller.getView().connection).toBe("reconnecting");
+			await vi.advanceTimersByTimeAsync(4_999);
+			expect(api.connects).toBe(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(api.connects).toBe(2);
+			expect(api.connection.close).toHaveBeenCalledOnce();
+
+			// Still fatal: the retry keeps going rather than stopping at one try.
+			api.drop(true);
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(api.connects).toBe(3);
+
+			api.open();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(controller.getView().connection).toBe("connected");
+			expect(controller.getView().state.summaries).toEqual([missed]);
+
+			// A pending retry does not outlive the controller.
+			api.drop(true);
+			controller.dispose();
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(api.connects).toBe(3);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	// An error at `readyState === CONNECTING` is the browser's own retry already
+	// under way, and the `onopen` it earns is what D21 heals at. Rebuilding
+	// there would race that retry and double the request rate against a server
+	// that is merely restarting (OW-dekuri).
+	it("leaves a recoverable drop to the browser's own retry", async () => {
+		vi.useFakeTimers();
+		try {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await vi.advanceTimersByTimeAsync(0);
+
+			api.drop();
+			await vi.advanceTimersByTimeAsync(60_000);
+
+			expect(api.connects).toBe(1);
+			expect(api.connection.close).not.toHaveBeenCalled();
+			controller.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	// The first open is `start()`'s own listing arriving by another door: the

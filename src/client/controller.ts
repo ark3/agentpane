@@ -169,6 +169,21 @@ export interface AgentpaneController {
 }
 
 /**
+ * How long to wait before rebuilding an event stream the browser gave up on
+ * (OW-dekuri).
+ *
+ * A fatal close means the server answered *wrongly* -- a 404, or a body that
+ * was not `text/event-stream` -- rather than going quiet, so the retry is
+ * aimed at a server that is restarting or half-up, and hammering it is the
+ * failure mode to avoid: unlike the browser's own retry there is nothing
+ * backing this one off. 5s is longer than the browser's ~3s default for the
+ * drops it does handle, costs at most twelve requests a minute from a tab left
+ * open against a server that never comes back, and still clears a restart
+ * within one cycle of it finishing.
+ */
+const FATAL_STREAM_RETRY_MS = 5_000;
+
+/**
  * `isVisible` is *injected* rather than read from `document` because this module
  * has no DOM dependency and must not acquire one (OW-76): the timer and the
  * refresh live here, where they can be driven by a fake api, while the
@@ -193,6 +208,8 @@ export function createController(
 		forkIndices: null,
 	};
 	let connection: EventConnection | undefined;
+	/** Pending rebuild of a fatally closed stream -- see `FATAL_STREAM_RETRY_MS`. */
+	let fatalRetryTimer: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
 	let started = false;
 	let selectionIntent = 0;
@@ -568,6 +585,16 @@ export function createController(
 		}
 	}
 
+	function scheduleReconnect(): void {
+		if (disposed || fatalRetryTimer !== undefined) return;
+		fatalRetryTimer = setTimeout(() => {
+			fatalRetryTimer = undefined;
+			if (disposed) return;
+			connection?.close();
+			connection = api.connect(handlers);
+		}, FATAL_STREAM_RETRY_MS);
+	}
+
 	const handlers: EventHandlers = {
 		onEvent(event: ServerEvent) {
 			if (disposed) return;
@@ -637,8 +664,22 @@ export function createController(
 			if (opened || !listedOk) void refreshSessions(false);
 			opened = true;
 		},
-		onDisconnect() {
+		/**
+		 * A `fatal` disconnect is a source at `CLOSED`: the browser has stopped
+		 * retrying and will never fire `onopen` again, so the re-list above -- the
+		 * only thing that moves `status` and `updatedAt` -- can never run and the
+		 * sidebar stays wrong until the user presses Refresh (OW-dekuri). So
+		 * rebuild the connection instead of waiting on an open that cannot come.
+		 * A rebuilt stream that opens fires `onOpen`, and D21's re-list there is
+		 * the healing; one that closes fatally again lands back here, which is
+		 * what keeps the retry going while the server is still answering wrongly.
+		 *
+		 * An ordinary drop reports `CONNECTING`: the browser's own retry is
+		 * already under way and rebuilding would only race it.
+		 */
+		onDisconnect(fatal: boolean) {
 			publish({ connection: "reconnecting" });
+			if (fatal) scheduleReconnect();
 		},
 		onMalformed(error: Error) {
 			publish({ error: error.message });
@@ -669,6 +710,7 @@ export function createController(
 			if (disposed) return;
 			disposed = true;
 			stopPoll();
+			clearTimeout(fatalRetryTimer);
 			connection?.close();
 			listeners.clear();
 		},
