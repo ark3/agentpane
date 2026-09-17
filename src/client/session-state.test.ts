@@ -186,8 +186,9 @@ describe("client session state", () => {
 		expect(result.state.sessions[sessionKey(ref)]?.messages).toEqual([replacement]);
 	});
 
-	it("accepts the first sequenced event for a session without a snapshot", () => {
-		const result = reduceServerEvent(initialClientState(), {
+	it("ignores a status event for a session it holds no view of, rather than resurrecting one (OW-pezazo)", () => {
+		const state = initialClientState();
+		const result = reduceServerEvent(state, {
 			type: "status",
 			session: ref,
 			seq: 4,
@@ -196,14 +197,10 @@ describe("client session state", () => {
 			model: null,
 		});
 
-		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
-			ref,
-			seq: 4,
-			isStreaming: true,
-			compaction: null,
-			model: null,
-			messages: [],
-		});
+		expect(result.state.sessions[sessionKey(ref)]).toBeUndefined();
+		expect(result.state).toBe(state);
+		// No recovery either: this client dropped the view on purpose, and an
+		// attach here is the re-spawn OW-sugome exists to prevent.
 		expect(result.recover).toEqual([]);
 	});
 

@@ -182,12 +182,48 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 		});
 	}
 
+	// From here on the arms only *update* a view; none of them may create one
+	// (OW-pezazo). Creating was resurrecting sessions this client had deliberately
+	// dropped: `detach` in `controller.ts` removes the live view while events for
+	// it are still on the wire -- `broadcaster.forget` only stops the counter, it
+	// cannot recall what has been fanned out -- and a late `status` rebuilt the
+	// entry, re-lighting the session list's streaming dot on a dead row until the
+	// next re-list healed it.
+	//
+	// A snapshot is how the server introduces a session to a client --
+	// `sendOpeningSnapshots` on connect for every live ref, and `broadcastSnapshot`
+	// on both branches of `attach` (`session-manager.ts`) -- so the `snapshot` arm
+	// above is the one that must create, and does. `renamed` keeps its own creation
+	// too: it is followed immediately by `broadcastSnapshot(to)` (`broadcaster.ts`),
+	// so the entry it builds is filled a moment later rather than left hollow.
+	//
+	// These four arms are not, however, unreachable before that introduction, and
+	// what they drop there is worth naming. `#start` subscribes `onUpdate`,
+	// `onRequest` and `onError` before it awaits `adapter.start(...)`, and
+	// `#adoptRef(session, "fork")` re-keys a live Pi container onto the fork's ref
+	// with no snapshot behind it (D20, OW-suhoto), so all four can fan out under a
+	// key no client holds a view of. For `upsert` and `status` that costs nothing:
+	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and
+	// `model` wholesale. For `error` and `requests` it is a real loss, because no
+	// snapshot carries either field -- but that loss is the pre-existing one, not a
+	// new class: neither field survives an SSE reconnect or reaches a client that
+	// connects later, and `AttachSessionResponse` does not carry them either. Closing
+	// it means putting them in the snapshot or publishing the adapter earlier, on the
+	// server (OW-bipume); it does not mean letting an event resurrect a dead view
+	// here, which costs more than it buys -- a resurrecting `error` lights the alert
+	// banner over a session the user just detached, where the `status` above only
+	// lit a dot.
+	//
+	// Ignoring is silent on purpose: no recovery is requested either. A recovery
+	// here would `api.attach` the session and spawn the subprocess again behind
+	// the user, which is the defect OW-sugome closed from the other side.
 	const key = sessionKey(event.session);
 	const previous = state.sessions[key];
+	if (previous === undefined) return result(state);
 	if (!acceptsSequence(previous, event.seq)) return result(state, [event.session]);
 
 	const view: SessionView = {
-		...(previous ?? emptySession(event.session)),
+		...previous,
 		ref: event.session,
 		seq: event.seq,
 	};
