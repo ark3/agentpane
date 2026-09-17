@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # A fatally closed event stream never re-lists, so nothing heals until the user presses Refresh
@@ -37,3 +38,21 @@ The shapes available, none of them costed: poll while `connection` reads "reconn
 
 Done when a client that has seen a fatal close reaches a truthful sidebar without a gesture, pinned by a controller test that drops the stream, never re-opens it, and still sees freshened summaries -- red first.
 If the decision instead is that a fatal close is the user's to resolve with Refresh, that closes this card too, recorded in the docblock at `handlers.onOpen` beside D21's own reasoning, and then the indicator's wording is the thing to fix.
+
+## Close note
+
+Fixed on `main` as e02faaf (implemented on a worktree branch as ca57b65).
+
+The card's original load-bearing claim -- that `onerror` cannot tell a fatal close from a retryable drop -- measured false, and the card was amended with the measurement before dispatch (03e054b).
+Measured on the home server on 2026-09-16, Chromium 151.0.7922.34 under Playwright 1.62.1, agreeing across the vehicle's `chromium-headless-shell` build and Playwright's default: a 404 or a `text/plain` body fires exactly one `error` at `readyState === 2` (`CLOSED`) with no further open; a stream cut mid-flight fires `error` at 0 (`CONNECTING`) and re-opens indefinitely; a cut whose retry is answered 503 reads 0 then 2, so fatality is sometimes only knowable on a later error.
+Recorded in `docs/MANUAL_TESTING.md` under "What an `EventSource` error says about itself (OW-dekuri)" and pinned in the vehicle as `e2e/event-stream.spec.ts`.
+
+So the repair is the one the original card ruled out.
+`EventHandlers.onDisconnect` now carries `fatal`, which `defaultOpenEvents` reads off `source.readyState === EventSource.CLOSED`; on a fatal disconnect the controller rebuilds the connection after `FATAL_STREAM_RETRY_MS` (5s -- above the browser's ~3s default for the drops it does handle, twelve requests a minute at worst against a server that never returns, one cycle to clear a restart), repeating while it stays fatal, closing the old connection first and cleared at `dispose()`.
+No second healing path: a rebuilt stream that opens fires `onOpen`, and D21's re-list there is the healing, so the detach regression the card named -- the attached stripe left lit -- goes with it.
+`connection` still publishes "reconnecting" for both cases; whether a fatal close deserves a fourth visible state was out of scope and stays unmade.
+
+Red first, each confirmed: the controller test "rebuilds a fatally closed event stream until one opens, and heals with no user gesture" failed `expected 1 to be 2` against today's controller (re-run in the dispatching session with the `if (fatal)` branch stubbed out, same failure); "leaves a recoverable drop to the browser's own retry" was forced red by dropping the `fatal` gate, `expected 2 to be 1`; the api test "reports whether the native source is fatally closed at the disconnect" failed with the spy called with no args; the e2e spec was inverted to produce `Expected: 0 / Received: 2`, which is the measurement itself.
+Green: `bun run check` 1110 tests in 50 files, 22.6s; `bun run test:browser` 22 passed, 1.1m -- both re-run in the dispatching session before landing.
+
+Out of scope and filed as OW-vipito: a server that has gone away entirely reads `readyState === 0` forever, which is indistinguishable from a healthy retry, so that tab still sits in "reconnecting" with a stale sidebar. That needs an attempt count or a deadline, and may turn out to heal unaided the moment the server returns.
