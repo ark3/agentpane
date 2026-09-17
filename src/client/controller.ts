@@ -207,6 +207,8 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const recoveries = new Map<string, Promise<void>>();
+	/** Keys whose `detach` is between `api.close` and the live view being dropped -- see `recover` (OW-sugome). */
+	const detaching = new Set<string>();
 	const forkPointsInFlight = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
@@ -514,9 +516,19 @@ export function createController(
 	 * remedy is automatic anyway: the next event for that session gaps again and
 	 * retries, and a Refresh re-lists regardless. A background attach that reports
 	 * nothing is the intended behaviour, not an oversight.
+	 *
+	 * The one session it must not re-attach is one the user is detaching
+	 * (OW-sugome). A gap dropped inside `detach`'s window -- `api.close` awaits
+	 * the subprocess's disposal, and the live view goes only after that returns
+	 * -- would reach `api.attach` here and spawn the subprocess again behind the
+	 * user, leaving a read-only preview on screen over a session that is live on
+	 * the server. Outside that window the gap is harmless: the detach has already
+	 * dropped the view, so the reducer has no `seq` to compare against and asks
+	 * for no recovery at all.
 	 */
 	async function recover(ref: SessionRef): Promise<void> {
 		const key = sessionKey(ref);
+		if (detaching.has(key)) return;
 		const inFlight = recoveries.get(key);
 		if (inFlight) return inFlight;
 		const request = (async () => {
@@ -1015,12 +1027,19 @@ export function createController(
 			// server has already spawned. Bailing costs nothing: the re-list the
 			// close broadcasts drops the dead view on its own.
 			const intent = selectionIntent;
+			const key = sessionKey(selected);
 			publish({ error: null });
+			// Held across the close and released before the view is dropped, with
+			// nothing awaited in between: a gap arriving in that window must not
+			// re-attach what is being closed (`recover`, OW-sugome).
+			detaching.add(key);
 			try {
 				await api.close(selected);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 				return;
+			} finally {
+				detaching.delete(key);
 			}
 			if (disposed || intent !== selectionIntent) return;
 			// Drop the live view here rather than waiting for the `sessions-changed`
@@ -1028,7 +1047,6 @@ export function createController(
 			// asynchronous, and `preview` below short-circuits on a session this
 			// client still has attached -- so letting the two race leaves the dead
 			// view on screen whenever the preview wins.
-			const key = sessionKey(selected);
 			if (view.state.sessions[key] !== undefined) {
 				const sessions = { ...view.state.sessions };
 				delete sessions[key];

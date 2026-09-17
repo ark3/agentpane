@@ -941,6 +941,33 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
+	// A dropped SSE event lands as a sequence gap, and the reducer answers a gap
+	// by asking for a re-attach -- which, inside a detach's window, would spawn
+	// the subprocess the user just asked to be rid of (OW-sugome).
+	it("does not re-attach a session whose detach is still in flight when its sequence gaps", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		const closing = deferred<void>();
+		api.close.mockReturnValueOnce(closing.promise);
+
+		const detaching = controller.detach();
+		await settle();
+		api.attach.mockClear();
+		api.emit({ type: "status", session: ref, seq: 7, isStreaming: true, compaction: null, model: null });
+		await settle();
+
+		closing.resolve();
+		await detaching;
+		await settle();
+
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(controller.getView().state.sessions[sessionKey(ref)]).toBeUndefined();
+		controller.dispose();
+	});
+
 	it("does not forget or demote a session updated while a detached listing is in flight", async () => {
 		const api = new FakeApi();
 		const listed = deferred<SessionSummary[]>();
