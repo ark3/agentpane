@@ -19,41 +19,31 @@ Both may also be explored: the reader who has used both for a week is the one th
 
 ## Fork is not a differentiator between the streams
 
-Measured 2026-09-21 by reading the installed `agent-shell` at 7377ba8 and `acp.el` 0.15.1 against `src/shared/protocol.ts`.
+Measured 2026-09-21 by reading the installed `agent-shell` at 7377ba8 and `acp.el` 0.15.1 against `src/shared/protocol.ts`, then against the shim cards.
 
-ACP's own fork cannot serve agentpane: `acp-make-session-fork-request` sends `sessionId`, `cwd`, `mcpServers` and `_meta` and nothing else, so there is no fork point, and `agent-shell-fork` branches from the session as it stands.
-Its forked buffer also renders no history -- the replay machinery is wired to `session/resume` and `session/load` only.
-That is what OW-mutufa's case rests on, and it holds as far as the ACP channel goes.
+OW-mutufa's case names the fork point first among what ACP has to smuggle, and the raw protocol bears that out: `acp-make-session-fork-request` sends `sessionId`, `cwd`, `mcpServers` and `_meta` and nothing else, so ACP's own fork has no point and `agent-shell-fork` branches from the tip.
+Its forked buffer also renders no history, because the replay machinery is wired to `session/resume` and `session/load` only.
 
-It stops holding once the fork leaves that channel.
-Nothing requires the Emacs side to fork over ACP: it can call `GET /fork-points` and `POST /fork` directly, then start a shell attached to the returned ref, and the shim serves `session/load` for it.
-The replay is then the genuine truncated history, because the forked session really is the prefix -- no faking and no `_meta` extension.
-Step three is `agent-shell-resume-session`, which already exists.
+But OW-limejo already answers this, and answers it well: `_meta.agentpane.entryId` on `session/fork`, with the points fetched through an `_agentpane/forkPoints` extension method and offered in a `completing-read`.
+`_meta` is the field ACP provides for exactly this, `agent-shell-fork` keeps working from the tip unmodified, and the cost is one command in `emacs/agentpane.el`.
+So the fork point is not smuggled so much as carried in the envelope ACP has for it, and this card should not be decided on fork.
+The model gate and `request` events are untouched by this reading and remain OW-mutufa's case.
 
-So the fork point is reachable from the shim stream, and this card should not be decided on it.
-The model gate and `request` events are untouched by this finding and remain OW-mutufa's case.
+Two things to keep whichever stream wins.
+The fork point must come from `/fork-points`, never counted from the buffer, which OW-limejo already does: `agent-shell-ui-state` at point yields `:namespace-id`, which is `shell-maker`'s buffer-local request counter, and `ForkPoint.index`'s docblock records that counting user messages was already falsified by Codex steering and failed silently.
+A picker over the points is also the only shape that can decline to fork on a message no point names.
 
-One trap to carry into whichever stream wins.
-The fork point must come from `/fork-points`, never counted from the buffer: `agent-shell-ui-state` at point yields `:namespace-id`, which is `shell-maker`'s buffer-local request counter, and `ForkPoint.index`'s docblock records that counting user messages was already falsified by Codex steering and fails silently.
-Since `/fork-points` returns each point's `text`, a picker over that list is both correct and the only shape that can decline to fork on a message no point names.
+## What the shim cards do not yet cover
 
-## What does not map onto ACP
+The rest of the ACP mismatch is already answered -- OW-basoga re-keys on `renamed`, re-snapshots on a `seq` gap, enforces the model gate itself, serves `session/load` from `GET .../preview` so preview costs no Emacs rendering, and puts the backend on the shim's command line so one `agent-shell` config per backend carries what `SessionRef` carries.
+Four gaps remain, and they are the shim stream's real cost rather than fork:
 
-Named so the shim stream's cost is argued from the real list rather than from fork.
-
-- Multi-backend identity.
-  `SessionRef` is (backend, id) across pi, codex and claude in one surface; ACP is one agent per connection and `agent-shell` is one agent per buffer, so `backend` has nowhere to live but inside the id string.
-- The session list.
-  `SessionSummary` carries cwd, preview, createdAt, updatedAt, `status` and `isStreaming`; `agent-shell` reads `sessionId`, `title`, `cwd`, `updatedAt`, `createdAt` off ACP's, and `virtual`/`detached`/`attached` has no ACP analogue at all.
-- `sessions-changed`.
-  A server push that the session list changed has no ACP carrier, because ACP notifications are session-scoped; Emacs would poll.
-- `renamed`.
-  A session id changing under the client is the normal life of a new Pi session, and ACP has no event for it.
-  A shim would have to hide it behind the stable virtual id the server already honours indefinitely on REST routes.
-- Preview.
-  `GET /:id/preview` is read-only and spawns nothing, which is D9's requirement that looking at a session cost what listing one costs; ACP's only way to see a transcript is `session/load`, which is an attach.
 - Compaction.
-  `compaction: "requesting" | "running" | null` rides on `snapshot` and `status`, and ACP has no compaction method or state.
+  `compaction: "requesting" | "running" | null` rides on `snapshot` and `status`, and ACP has no compaction method or state; a slash command loses the state signal.
+- `sessions-changed`.
+  A server push that the list changed has no ACP carrier, because ACP notifications are session-scoped, so Emacs would poll.
+- `status` and `isStreaming` in the list.
+  ACP's session entries have no field for either -- `agent-shell` reads `sessionId`, `title`, `cwd`, `updatedAt` and `createdAt` -- so the shim's list cannot show which sessions are live or attached, which `SessionSummary` exists to show.
 - `issuerThreadId`, which routes a spawned Codex child's blocking request through the parent adapter, and `AssistantTurn.effort`.
 
 ## Done when
