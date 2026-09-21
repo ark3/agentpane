@@ -44,15 +44,11 @@ The module imports `$client/render/transcript.ts`, `$client/render/types.ts`, `$
 D10 holds: the pi packages are `import type` only, and `src/import-boundaries.test.ts` names any file that breaks that.
 Add one sentence to `AGENTS.md` under Code saying `src/emacs/` runs in node and imports client modules by design.
 
-## The recorded fixtures are the wrong shape for this
-
-Noted 2026-09-21 while filing OW-dekate.
-The docblock of `src/server/sessions/preview.test.ts` says the recordings under `resources/fixtures/` are RPC-stream captures, a different shape from the on-disk store `readSessionPreview` reads, and that test synthesizes store-format JSONL by hand for that reason.
-So the tests below cannot stage those recordings through `readSessionPreview` as written; either synthesize store lines the way that test's helpers do, or feed the projection `AgentMessage[]` built directly, and say which in the test file.
-
 ## Done when
 
-Tests in `src/emacs/` assert on structure, never on model wording, over the captured stores under `resources/fixtures/` for Codex and Claude, read through `readSessionPreview` in `src/server/sessions/preview.ts` the way `src/server/sessions/preview.test.ts` stages a store directory.
+Tests in `src/emacs/` assert on structure, never on model wording, over the recorded turns for Codex and Claude.
+Fixture input comes from the recordings under `resources/fixtures/` replayed through each adapter's reducer, the way the `replay` helper in `src/server/adapters/claude/reducer.test.ts` and `src/server/adapters/codex/reducer.test.ts` does it: `readFixture` from the sibling `test-support.ts`, every line through `CodexReducer.handle` or `ClaudeReducer.handle`, and `getState().messages` as the transcript.
+Those recordings are RPC-stream captures, not store files, so `readSessionPreview` cannot read them; `src/server/sessions/preview.test.ts` says so in its docblock and synthesizes store lines by hand for that reason (corrected 2026-09-21, the card first said otherwise).
 A replayed fixture yields nodes in transcript order whose indices are the original message indices with folded results absent, an Edit call yields a tool part carrying diff lines, a thinking block yields a thinking part, and an aborted turn yields a meta line saying so.
 A sequence of upserts for one tail index yields nodes whose last text part equals the final message's text.
 `bun run check` passes.

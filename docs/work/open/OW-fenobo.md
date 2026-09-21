@@ -38,6 +38,8 @@ D10 holds: the pi packages are `import type` only, and `src/import-boundaries.te
 
 ## Done when
 
-Tests in `src/acp/` assert on structure over the captured stores under `resources/fixtures/` for both Codex and Claude: a replayed fixture yields user and agent chunks in transcript order with each tool call paired to its update, an Edit call yields a `diff` content item, and a sequence of upserts yields chunks whose concatenation equals the final text.
+Tests in `src/acp/` assert on structure over the recorded turns for both Codex and Claude: a replayed fixture yields user and agent chunks in transcript order with each tool call paired to its update, an Edit call yields a `diff` content item, and a sequence of upserts yields chunks whose concatenation equals the final text.
+Fixture input comes from the recordings under `resources/fixtures/` replayed through each adapter's reducer, the way the `replay` helper in `src/server/adapters/claude/reducer.test.ts` and `src/server/adapters/codex/reducer.test.ts` does it: `readFixture` from the sibling `test-support.ts`, every line through `CodexReducer.handle` or `ClaudeReducer.handle`, and `getState().messages` as the transcript.
+Those recordings are RPC-stream captures, not store files, so `readSessionPreview` cannot read them; `src/server/sessions/preview.test.ts` says so in its docblock and synthesizes store lines by hand for that reason (corrected 2026-09-21, the card first said otherwise).
 The replay test and the streaming test share the mapping function, which is the point.
 `bun run check` passes.
