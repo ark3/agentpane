@@ -32,5 +32,6 @@ const loopback = ((input: RequestInfo | URL, init?: RequestInit) =>
 const api = createAgentpaneApi({ fetch: loopback });
 
 const preview = await api.preview(ref);
-const nodes = projectTranscript(previewMessages(preview.turns));
+// A preview is a stored session, never live, so nothing in it is running.
+const nodes = projectTranscript(previewMessages(preview.turns), false);
 process.stdout.write(`${JSON.stringify(nodes, null, 2)}\n`);

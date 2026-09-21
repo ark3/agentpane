@@ -37,7 +37,9 @@
  *   whole message as JSON text so nothing is silently dropped.
  * - `{ type: "thinking", text, redacted }` -- `text` (string) is the thinking
  *   as streamed, empty when `redacted` (boolean) is true and the provider
- *   withheld it.
+ *   withheld it. `text` may also be empty with `redacted` false: Pi emits
+ *   thinking blocks carrying only a signature, and the browser draws nothing
+ *   for such a part unless the turn is still streaming.
  * - `{ type: "tool", name, summary, args, result, state, diff? }` -- one tool
  *   call with its answer folded in. `name` (string) is the backend's own tool
  *   name, casing preserved. `summary` (string) is the one-line description the
@@ -46,16 +48,19 @@
  *   empty. `args` (string) is the call's arguments pretty-printed as JSON,
  *   empty when there were none. `result` (string) is the text of the result,
  *   empty when none has arrived; a result's image parts are not carried.
- *   `state` (string) is `"running"` while the turn that owns the call is
- *   still streaming and no result has arrived, `"error"` when the result
- *   reported failure, `"ok"` otherwise -- including a call whose result never
- *   arrived in a finished turn. `diff` (array) is present only for a call
- *   named `edit` or `write` (case-insensitive) and holds the unified diff the
- *   browser draws, as `{ type, text }` lines where `type` is `"add"`, `"del"`,
- *   `"ctx"` (unchanged, kept as context), or `"gap"` (a marker standing in for
- *   a run of unchanged lines; its `text` says how many). A `write` diffs from
- *   the empty file, so every line is an `"add"`. An orphan `tool-result` node
- *   carries one of these parts too, with `args` empty and no `diff`.
+ *   `state` (string) is `"running"` while the session is streaming, the
+ *   call's node is the last one, and no result has arrived -- the browser's
+ *   own rule; `"error"` when the result reported failure; `"ok"` otherwise,
+ *   including a call whose result never arrived in a finished turn. `diff`
+ *   (array) is present only for a call named `edit` or `write`
+ *   (case-insensitive), as `{ type, text }` lines where `type` is `"add"`,
+ *   `"del"`, `"ctx"` (unchanged, kept as context), or `"gap"` (a marker
+ *   standing in for a run of unchanged lines; its `text` says how many). For
+ *   `edit` it is the unified diff the browser draws. For `write` it is the
+ *   whole written content as `"add"` lines: the browser shows a write as
+ *   plain content, never a diff, and the lines are here so one drawer serves
+ *   both. An orphan `tool-result` node carries one of these parts too, with
+ *   `args` empty and no `diff`.
  * - `{ type: "image", mimeType, data }` -- an image the user attached.
  *   `mimeType` (string) such as `"image/png"`; `data` (string) is base64.
  *

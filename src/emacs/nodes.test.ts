@@ -57,7 +57,7 @@ describe.each([
 	["codex", "tool-edit", replayCodex("tool-edit")],
 	["codex", "tool-read", replayCodex("tool-read")],
 ] as const)("replaying %s %s", (_backend, _name, messages) => {
-	const nodes = projectTranscript(messages);
+	const nodes = projectTranscript(messages, false);
 
 	it("yields one node per visible entry, in order, keyed by the original index", () => {
 		const indices = nodes.map((node) => node.index);
@@ -86,7 +86,7 @@ describe.each([
 
 describe("tool parts", () => {
 	it("gives a Claude Edit call a diff with add and del lines", () => {
-		const edits = toolParts(projectTranscript(replayClaude("tool-use"))).filter(
+		const edits = toolParts(projectTranscript(replayClaude("tool-use"), false)).filter(
 			(part) => part.name.toLowerCase() === "edit",
 		);
 		expect(edits.length).toBeGreaterThan(0);
@@ -98,7 +98,7 @@ describe("tool parts", () => {
 	});
 
 	it("gives a Codex fileChange, mapped to edit with nested hunks, a diff too", () => {
-		const edits = toolParts(projectTranscript(replayCodex("tool-edit"))).filter((part) => part.name === "edit");
+		const edits = toolParts(projectTranscript(replayCodex("tool-edit"), false)).filter((part) => part.name === "edit");
 		expect(edits.length).toBeGreaterThan(0);
 		for (const part of edits) {
 			expect(part.diff?.length).toBeGreaterThan(0);
@@ -107,7 +107,7 @@ describe("tool parts", () => {
 	});
 
 	it("gives a Read call no diff and a non-empty summary", () => {
-		const reads = toolParts(projectTranscript(replayClaude("tool-use"))).filter(
+		const reads = toolParts(projectTranscript(replayClaude("tool-use"), false)).filter(
 			(part) => part.name.toLowerCase() === "read",
 		);
 		expect(reads.length).toBeGreaterThan(0);
@@ -121,34 +121,43 @@ describe("tool parts", () => {
 		const messages = replayClaude("tool-use");
 		const result = messages.find((message) => message.role === "toolResult");
 		if (!result) throw new Error("tool-use fixture has no tool result");
-		const nodes = projectTranscript([result]);
+		const nodes = projectTranscript([result], false);
 		expect(nodes).toHaveLength(1);
 		expect(nodes[0]).toMatchObject({ index: 0, role: "tool-result" });
 		expect(nodes[0]!.parts).toHaveLength(1);
 		expect(nodes[0]!.parts[0]).toMatchObject({ type: "tool", state: "ok", args: "" });
 	});
 
-	it("marks a call running only while its turn is pending and unanswered", () => {
+	it("marks a call running only while the session streams and its turn is the last visible entry", () => {
 		const messages = replayClaude("tool-use");
 		const callIndex = messages.findIndex(
 			(message) => message.role === "assistant" && message.content.some((block) => block.type === "toolCall"),
 		);
 		const call = messages[callIndex] as AssistantMessage;
-		const pending = { ...call, stopReason: "pending" } as PaneMessage;
+		// The result's slot is still empty, so the call is the last visible entry.
+		const upToCall = messages.slice(0, callIndex + 1);
 
-		const running = toolParts(projectTranscript([pending]));
+		const running = toolParts(projectTranscript(upToCall, true));
 		expect(running.length).toBeGreaterThan(0);
 		for (const part of running) expect(part.state).toBe("running");
 
-		const finished = toolParts(projectTranscript([call]));
-		for (const part of finished) expect(part.state).toBe("ok");
+		for (const part of toolParts(projectTranscript(upToCall, false))) expect(part.state).toBe("ok");
+
+		// Streaming, but a later turn is the tail: an earlier call is never running.
+		const whole = projectTranscript(messages, true);
+		const earlier = whole.find((node) => node.index === callIndex)!;
+		for (const part of earlier.parts) if (part.type === "tool") expect(part.state).toBe("ok");
+
+		// The upsert path reads the same two facts.
+		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, true)])[0]?.state).toBe("running");
+		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, false)])[0]?.state).toBe("ok");
 	});
 });
 
 describe("assistant turns", () => {
 	it("yields a thinking part for a thinking block", () => {
 		const messages = replayClaude("thinking");
-		const nodes = projectTranscript(messages);
+		const nodes = projectTranscript(messages, false);
 		const thinking = nodes.flatMap((node) => node.parts.filter((part) => part.type === "thinking"));
 		expect(thinking.length).toBeGreaterThan(0);
 		for (const part of thinking) {
@@ -159,7 +168,7 @@ describe("assistant turns", () => {
 
 	it("keeps part order as block order", () => {
 		const messages = replayClaude("tool-use");
-		for (const node of projectTranscript(messages)) {
+		for (const node of projectTranscript(messages, false)) {
 			const message = messages[node.index]!;
 			if (message.role !== "assistant") continue;
 			const kinds = message.content.map((block) => (block.type === "toolCall" ? "tool" : block.type));
@@ -169,7 +178,7 @@ describe("assistant turns", () => {
 
 	it("says so in the meta line when a turn was aborted", () => {
 		const messages = replayClaude("interrupt");
-		const nodes = projectTranscript(messages);
+		const nodes = projectTranscript(messages, false);
 		const last = nodes.at(-1);
 		expect(last?.role).toBe("assistant");
 		expect(last?.meta?.stopReason).toBe("aborted");
@@ -177,7 +186,7 @@ describe("assistant turns", () => {
 
 	it("omits stopReason from the meta of a turn that finished normally", () => {
 		const messages = replayCodex("text");
-		const turn = projectTranscript(messages).find((node) => node.role === "assistant");
+		const turn = projectTranscript(messages, false).find((node) => node.role === "assistant");
 		expect(turn?.meta).toBeDefined();
 		expect(turn?.meta?.stopReason).toBeUndefined();
 		expect(turn?.meta?.usage.totalTokens).toBeGreaterThan(0);
@@ -191,7 +200,7 @@ describe("assistant turns", () => {
 			stopReason: "error",
 			errorMessage: "boom",
 		} as PaneMessage;
-		const [node] = projectTranscript([turn]);
+		const [node] = projectTranscript([turn], false);
 		expect(node?.meta).toMatchObject({
 			model: base.model,
 			effort: "high",
@@ -199,12 +208,20 @@ describe("assistant turns", () => {
 			errorMessage: "boom",
 		});
 	});
+
+	it("drops errorMessage from an aborted turn: the banner for aborted is fixed wording", () => {
+		const base = replayClaude("interrupt").find((m) => m.role === "assistant") as AssistantMessage;
+		expect(base.stopReason).toBe("aborted");
+		const [node] = projectTranscript([{ ...base, errorMessage: "boom" } as PaneMessage], false);
+		expect(node?.meta?.stopReason).toBe("aborted");
+		expect(node?.meta?.errorMessage).toBeUndefined();
+	});
 });
 
 describe("other roles", () => {
 	it("yields a compactionSummary node with its summary as text", () => {
 		const messages = replayClaude("compact");
-		const nodes = projectTranscript(messages);
+		const nodes = projectTranscript(messages, false);
 		const marker = nodes.find((node) => node.role === "compactionSummary");
 		expect(marker).toBeDefined();
 		expect(marker!.meta).toBeUndefined();
@@ -221,7 +238,7 @@ describe("other roles", () => {
 				{ type: "image", data: "AAAA", mimeType: "image/png" },
 			],
 		} as PaneMessage;
-		const [node] = projectTranscript([withImage]);
+		const [node] = projectTranscript([withImage], false);
 		expect(node?.role).toBe("user");
 		expect(node?.parts.map((part) => part.type)).toEqual(["text", "image"]);
 		expect(node?.parts[1]).toMatchObject({ type: "image", mimeType: "image/png", data: "AAAA" });
@@ -244,7 +261,7 @@ describe("streaming upserts", () => {
 			stopReason: i === steps.length - 1 ? final.stopReason : "pending",
 		})) as PaneMessage[];
 
-		const nodes = upserts.map((message) => projectUpsert(before, tail, message));
+		const nodes = upserts.map((message) => projectUpsert(before, tail, message, true));
 		expect(nodes).toHaveLength(upserts.length);
 		for (const node of nodes) expect(node.index).toBe(tail);
 
@@ -267,17 +284,24 @@ describe("streaming upserts", () => {
 		expect(callIndex).toBeGreaterThanOrEqual(0);
 
 		const before = messages.slice(0, resultIndex);
-		const node = projectUpsert(before, resultIndex, result);
+		const node = projectUpsert(before, resultIndex, result, true);
 		expect(node.index).toBe(callIndex);
 		expect(node.role).toBe("assistant");
 		const part = node.parts.find((p): p is ToolPart => p.type === "tool" && p.result !== "");
 		expect(part).toBeDefined();
 	});
 
+	it("rejects an index past the end of the transcript", () => {
+		const messages = replayCodex("text");
+		const message = messages.at(-1)!;
+		expect(() => projectUpsert(messages, messages.length + 1, message, false)).toThrow(RangeError);
+		expect(() => projectUpsert(messages, -1, message, false)).toThrow(RangeError);
+	});
+
 	it("leaves the transcript it was given untouched", () => {
 		const messages = replayCodex("text");
 		const copy = structuredClone(messages);
-		projectUpsert(messages, messages.length, messages.at(-1)!);
+		projectUpsert(messages, messages.length, messages.at(-1)!, false);
 		expect(messages).toEqual(copy);
 	});
 });

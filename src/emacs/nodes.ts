@@ -16,9 +16,13 @@
  *   applies the upsert to a copy, and answers with the node that changed --
  *   the call's, for a folded result; its own otherwise.
  *
- * `streaming` for a tool call is read off the message that owns it:
- * `stopReason === "pending"` is how a live turn is marked (`isPending`), on a
- * replayed transcript and an upserted message alike.
+ * `streaming` for a tool call is the browser's rule, verbatim from
+ * `Transcript.svelte`: the session's own `isStreaming` status, and the entry
+ * is the last visible one. Not `stopReason === "pending"` -- Pi marks a live
+ * turn that way, but the Claude reducer opens every assistant slot with
+ * `"stop"`, so a rule read off the message alone says `ok` for a live Claude
+ * call the browser draws as `running`. Both callers therefore take
+ * `isStreaming`, the value a `snapshot` or `status` event carries.
  */
 
 import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -27,20 +31,29 @@ import { buildTranscript, type TranscriptEntry, type TranscriptView } from "$cli
 import { argString, editHunks, prettyArgs } from "$client/render/tools/args.ts";
 import { buildDiff } from "$client/render/tools/diff.ts";
 import { toolSummary } from "$client/render/tools/summary.ts";
-import { isPending, oneLine, resultText, toolState, userBlocks } from "$client/render/types.ts";
+import { oneLine, resultText, toolState, userBlocks } from "$client/render/types.ts";
 import type { NodeDiffLine, NodePart, ToolPart, TranscriptNode, TurnMeta } from "./protocol.ts";
 
-export function projectTranscript(messages: PaneMessage[]): TranscriptNode[] {
+export function projectTranscript(messages: PaneMessage[], isStreaming: boolean): TranscriptNode[] {
 	const view = buildTranscript(messages);
-	return view.entries.map((entry) => nodeFor(view, entry));
+	return view.entries.map((entry) => nodeFor(view, entry, isStreaming));
 }
 
 /**
  * The node an `upsert` replaces. `messages` is the transcript before the
  * upsert and is not mutated; the caller applies the same upsert to its own
- * copy. `index` may equal `messages.length` to append, as on the wire.
+ * copy. `index` may equal `messages.length` to append, as on the wire, and
+ * nothing beyond: `session-state.ts` accepts the same range.
  */
-export function projectUpsert(messages: PaneMessage[], index: number, message: PaneMessage): TranscriptNode {
+export function projectUpsert(
+	messages: PaneMessage[],
+	index: number,
+	message: PaneMessage,
+	isStreaming: boolean,
+): TranscriptNode {
+	if (!Number.isInteger(index) || index < 0 || index > messages.length) {
+		throw new RangeError(`upsert index ${index} is outside a transcript of ${messages.length} messages`);
+	}
 	const next = messages.slice();
 	next[index] = message;
 	const view = buildTranscript(next);
@@ -55,12 +68,13 @@ export function projectUpsert(messages: PaneMessage[], index: number, message: P
 						),
 				)
 			: undefined;
-	const entry = owner ?? view.entries.find((candidate) => candidate.index === index);
-	if (!entry) throw new Error(`upsert at ${index} produced no visible entry`);
-	return nodeFor(view, entry);
+	// Always found: a non-result message is its own entry, and a result is
+	// either folded into its owner above or kept as an orphan entry.
+	const entry = owner ?? view.entries.find((candidate) => candidate.index === index)!;
+	return nodeFor(view, entry, isStreaming);
 }
 
-function nodeFor(view: TranscriptView, entry: TranscriptEntry): TranscriptNode {
+function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: boolean): TranscriptNode {
 	const { index, message } = entry;
 	switch (message.role) {
 		case "user":
@@ -75,7 +89,7 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry): TranscriptNode {
 			};
 		case "assistant": {
 			const turn = message as AssistantTurn;
-			const streaming = isPending(turn);
+			const streaming = isStreaming && index === view.lastIndex;
 			const parts: NodePart[] = turn.content.map((block) => {
 				if (block.type === "text") return { type: "text", text: block.text };
 				if (block.type === "thinking") {
@@ -116,7 +130,11 @@ function toolPart(call: ToolCall, result: ToolResultMessage | undefined, streami
 	return part;
 }
 
-/** The lines `EditTool.svelte` draws; a write is the whole content added to an empty file. */
+/**
+ * For `edit`, the lines `EditTool.svelte` draws. For `write`, the whole
+ * content as added lines -- the browser shows a write as plain content, not a
+ * diff, but one drawer on the Emacs side then serves both.
+ */
 function diffFor(call: ToolCall): NodeDiffLine[] | undefined {
 	const name = call.name.toLowerCase();
 	if (name === "edit") {
@@ -149,7 +167,7 @@ function metaFor(turn: AssistantTurn): TurnMeta {
 	if (turn.effort) meta.effort = turn.effort;
 	if (turn.stopReason === "error" || turn.stopReason === "aborted") {
 		meta.stopReason = turn.stopReason;
-		if (turn.errorMessage) meta.errorMessage = turn.errorMessage;
+		if (turn.stopReason === "error" && turn.errorMessage) meta.errorMessage = turn.errorMessage;
 	}
 	return meta;
 }
