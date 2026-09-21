@@ -26,6 +26,9 @@ Images are out of scope for this card; `PromptRequest.images` exists on the wire
 
 `agentpane-compact` sends `sessions/compact`.
 
+Owner, 2026-09-21: both of `agent-shell`'s prompt modes are handy in different cases -- typing at the bottom of the transcript buffer, and the separate composer buffer -- so this mode carries both, with `RET` inserting a newline and `C-RET` sending in either.
+The composer above is the second; the first is a prompt region below the last node of the transcript buffer, editable while the rest stays read-only, sending through the same `sessions/prompt` path.
+
 ## New session and model
 
 `agentpane-new-session` asks for a backend with `completing-read`, then a model from `models/list` for it, then `sessions/create` with the calling buffer's project directory as `cwd`, and opens the buffer attached.

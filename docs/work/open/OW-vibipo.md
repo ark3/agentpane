@@ -46,6 +46,14 @@ Four gaps remain, and they are the shim stream's real cost rather than fork:
   ACP's session entries have no field for either -- `agent-shell` reads `sessionId`, `title`, `cwd`, `updatedAt` and `createdAt` -- so the shim's list cannot show which sessions are live or attached, which `SessionSummary` exists to show.
 - `issuerThreadId`, which routes a spawned Codex child's blocking request through the parent adapter, and `AssistantTurn.effort`.
 
+## The trial narrowed the question to rendering
+
+Owner, 2026-09-21, after some days on `agent-shell` bare, without the shim.
+What was missed was the fast session list and fork, which the shim cards would restore, so the trial stands as a fair test of the shim route with those two back.
+What was disliked was the rendering, which the shim cannot touch, and which by then had needed significant tuning to look okay.
+The interaction model the owner likes -- staying in Emacs, Magit and back, long messages edited in place, `RET` and `C-RET`, inline prompt or separate composer -- is Emacs's, not `agent-shell`'s, and a native mode carries it at the cost of a keymap.
+So the streams now differ on rendering alone, and OW-dekate is the rough cut that answers it: its verdict is recorded here under a dated heading before this card closes.
+
 ## Done when
 
 The decision is recorded in `docs/DESIGN.md` as D21, with the reason, on the same day the other stream's open cards close `--declined` citing D21.
