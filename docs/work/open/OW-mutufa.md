@@ -44,6 +44,13 @@ The module imports `$client/render/transcript.ts`, `$client/render/types.ts`, `$
 D10 holds: the pi packages are `import type` only, and `src/import-boundaries.test.ts` names any file that breaks that.
 Add one sentence to `AGENTS.md` under Code saying `src/emacs/` runs in node and imports client modules by design.
 
+## A dump script rides along
+
+Added 2026-09-21 for OW-dekate, the rendering spike that runs live with the owner and wants its input on disk before it starts.
+Alongside the module, a script `src/emacs/dump-nodes.ts`, run as `bun run src/emacs/dump-nodes.ts <backend>/<id> > /tmp/nodes.json`, that fetches `GET /api/sessions/:backend/:id/preview` from the running server (`ROUTES` in `src/shared/protocol.ts`, `createAgentpaneApi` in `src/client/api.ts`, base URL loopback on `DEFAULT_PORT`), stamps the turns through `previewMessages` in `src/client/preview.ts`, runs the projection, and writes the node list as JSON to stdout.
+It is a script, not a module: no test, no alias work beyond what the module already needs, and `bun run check` need only still pass with it present.
+Its one verification is running it against a stored session on the home server and seeing well-formed nodes; record the command and the session ref in the commit message.
+
 ## Done when
 
 Tests in `src/emacs/` assert on structure, never on model wording, over the recorded turns for Codex and Claude.
