@@ -16,6 +16,7 @@ import ToolCallBlock from "../ToolCallBlock.svelte";
 import { CODEX_TOOL_NAMES } from "$server/adapters/codex/mapping.ts";
 import { resolveToolRenderer, defaultToolRenderer } from "./registry.ts";
 import SubagentTool from "./SubagentTool.svelte";
+import { toolSummary } from "./summary.ts";
 import { openToolCards } from "./test-support.ts";
 
 const CHILD = "01a086ce-039d-7720-86cb-ceb8ec8f3774";
@@ -50,6 +51,23 @@ describe("the subagent card", () => {
 		// nothing follows it into the bundle.
 		expect(resolveToolRenderer(CODEX_TOOL_NAMES.collabAgentToolCall)).toBe(SubagentTool);
 		expect(resolveToolRenderer(CODEX_TOOL_NAMES.collabAgentToolCall)).not.toBe(defaultToolRenderer);
+	});
+
+	it("heads the card with the shared one-line summary: the operation, then the short child id", () => {
+		// The header is `toolSummary`'s, not the card's own, so the Emacs
+		// projection and reading view show the same line (OW-mokuku).
+		const summaryLine = (container: HTMLElement) =>
+			container.querySelector("details.tool > summary")?.textContent?.replace(/\s+/g, " ").trim();
+		const wait = call("wait");
+		const { container } = render(ToolCallBlock, { props: { call: wait } });
+		expect(summaryLine(container)).toContain(toolSummary(wait));
+		expect(summaryLine(container)).toContain("wait · 01a086ce");
+		expect(summaryLine(container)).not.toContain(CHILD);
+
+		const spawn: ToolCall = { type: "toolCall", id: "exec-1", name: "subagent", arguments: { tool: "spawnAgent", threadIds: [] } };
+		const spawned = render(ToolCallBlock, { props: { call: spawn } });
+		expect(summaryLine(spawned.container)).toContain(toolSummary(spawn));
+		expect(toolSummary(spawn)).toBe("spawnAgent");
 	});
 
 	it("names the operation and the child thread, and shows the child's reply", () => {

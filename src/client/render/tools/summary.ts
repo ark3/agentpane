@@ -43,5 +43,20 @@ export function toolSummary(call: ToolCall): string {
 			.join(" · ");
 	}
 
+	if (name === "subagent") {
+		// A Codex collab call: the operation, then enough of each child thread's
+		// uuid to tell two apart without eating the line. Empty thread ids on a
+		// spawn's `item/started` leave just the operation.
+		return [argString(call.arguments, "tool"), ...subagentThreadIds(call).map((id) => id.slice(0, 8))].join(
+			" · ",
+		);
+	}
+
 	return oneLine(summarizeArgs(call.arguments));
+}
+
+/** The child threads a collab call names: only the string entries, none when absent. */
+export function subagentThreadIds(call: ToolCall): string[] {
+	const ids = call.arguments["threadIds"];
+	return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
 }

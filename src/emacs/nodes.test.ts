@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import type { PaneMessage } from "$shared/protocol.ts";
 import { ClaudeReducer } from "$server/adapters/claude/reducer.ts";
 import {
@@ -17,6 +17,7 @@ import {
 	readFixture as readCodexFixture,
 	type FixtureName as CodexFixtureName,
 } from "$server/adapters/codex/test-support.ts";
+import { toolSummary } from "$client/render/tools/summary.ts";
 import { projectTranscript, projectUpsert } from "./nodes.ts";
 import type { TextPart, ToolPart, TranscriptNode } from "./protocol.ts";
 
@@ -114,6 +115,32 @@ describe("tool parts", () => {
 		for (const part of reads) {
 			expect(part.diff).toBeUndefined();
 			expect(part.summary).not.toBe("");
+		}
+	});
+
+	it("gives a Codex subagent call the header the browser card shows", () => {
+		// `toolSummary` is the one vocabulary, so the node has to read as the
+		// card does: the collab operation, then each child thread's short id.
+		const messages = replayCodex("subagent");
+		const calls = new Map<string, ToolCall>();
+		for (const message of messages) {
+			if (message.role !== "assistant") continue;
+			for (const block of message.content) if (block.type === "toolCall") calls.set(block.id, block);
+		}
+		const parts = toolParts(projectTranscript(messages, false)).filter((part) => part.name === "subagent");
+		expect(parts.length).toBeGreaterThan(0);
+		for (const part of parts) {
+			const call = [...calls.values()].find((candidate) => toolSummary(candidate) === part.summary);
+			if (!call) throw new Error(`no subagent call summarises as ${JSON.stringify(part.summary)}`);
+			const tool = call.arguments["tool"];
+			if (typeof tool !== "string") throw new Error("subagent call without a tool argument");
+			expect(part.summary.startsWith(tool)).toBe(true);
+			const threadIds = call.arguments["threadIds"];
+			if (!Array.isArray(threadIds)) continue;
+			for (const id of threadIds) {
+				if (typeof id !== "string") continue;
+				expect(part.summary).toContain(id.slice(0, 8));
+			}
 		}
 	});
 

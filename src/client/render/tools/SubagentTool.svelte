@@ -17,30 +17,21 @@
 	import { toolState } from "../types.ts";
 	import { argString } from "./args.ts";
 	import ResultBody from "./ResultBody.svelte";
+	import { subagentThreadIds, toolSummary } from "./summary.ts";
 	import ToolCard from "./ToolCard.svelte";
 
 	let { call, result, streaming = false, onopensession }: ToolRenderProps = $props();
 
-	/** The collab operation. `mapping.ts` always puts it here; every card is the same otherwise. */
-	const tool = $derived(argString(call.arguments, "tool"));
 	const prompt = $derived(argString(call.arguments, "prompt"));
 	/**
 	 * The child threads this call names. Empty on a spawn's `item/started` --
 	 * Codex only reports the new thread's id on the completion -- so the card
 	 * has to read as fine with none.
 	 */
-	const threadIds = $derived(
-		Array.isArray(call.arguments["threadIds"])
-			? call.arguments["threadIds"].filter((id): id is string => typeof id === "string")
-			: [],
-	);
+	const threadIds = $derived(subagentThreadIds(call));
 	const state = $derived(toolState({ call, result, streaming }));
-	const summary = $derived([tool, ...threadIds.map(shortId)].join(" · "));
-
-	/** Enough of a uuid to tell two children apart without eating the summary line. */
-	function shortId(id: string): string {
-		return id.slice(0, 8);
-	}
+	/** The header is `toolSummary`'s, so the Emacs projection reads the same line (OW-mokuku). */
+	const summary = $derived(toolSummary(call));
 
 	function open(id: string): void {
 		const ref: SessionRef = { backend: "codex", id };
