@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, emacs-native]
+closed: done
 ---
 
 # A pure projection turns agentpane transcripts into the section nodes a native Emacs mode draws, one node per message, for replay and streaming alike
@@ -59,3 +60,15 @@ Those recordings are RPC-stream captures, not store files, so `readSessionPrevie
 A replayed fixture yields nodes in transcript order whose indices are the original message indices with folded results absent, an Edit call yields a tool part carrying diff lines, a thinking block yields a thinking part, and an aborted turn yields a meta line saying so.
 A sequence of upserts for one tail index yields nodes whose last text part equals the final message's text.
 `bun run check` passes.
+
+## Close note
+
+Closed 2026-09-21. Landed on main as 78f6f00, 35ae830 and 2fb173a.
+
+Built: `src/emacs/protocol.ts`, the frozen node contract whose docblock names every field, its JSON type and when it is present, written for the elisp author; `src/emacs/nodes.ts` with `projectTranscript(messages, isStreaming)` and `projectUpsert(messages, index, message, isStreaming)` sharing one per-entry projection over `buildTranscript`, `toolSummary`, `prettyArgs`, `buildDiff`, `resultText` and `toolState`; `src/emacs/dump-nodes.ts`, run as `bun run src/emacs/dump-nodes.ts <backend>/<id> > /tmp/nodes.json` against the loopback server; the `$emacs/*` alias in `tsconfig.json` and `vite.config.ts`, the node-project include, and one sentence in `AGENTS.md` under Code.
+
+Verified: 25 structural tests in `src/emacs/nodes.test.ts` over the Claude `tool-use`, `thinking`, `interrupt`, `compact` and Codex `text`, `tool-read`, `tool-edit` fixtures replayed through the reducers, each seen red first against a stub and then against nine single-line mutations; `bun run check` green on main, 51 files, 1135 tests. The dump script was run twice against a server started from the tree, on `claude/91093a8e-a77d-4d13-bd68-989124755d96` and `codex/01a08e83-7a9e-7f50-891a-b8a42b235ce3`, yielding 20 and 17 well-formed nodes; the first run's counts are in 35ae830's message and the second confirmed them.
+
+Decisions the review forced, recorded in the code: tool `state` uses the browser's rule from `Transcript.svelte` (`isStreaming && index === view.lastIndex`), not `stopReason === "pending"`, because the Claude reducer never writes `pending`; `errorMessage` rides only with `stopReason: "error"`; a `write` diff is the whole content as `add` lines, which the browser draws as plain content; empty non-redacted thinking parts are emitted and documented, not filtered; `projectUpsert` range-checks `index` up front.
+
+Left outside: OW-mokuku (subagent tool header lives in `SubagentTool.svelte`, not `toolSummary`, so that summary drifts) and OW-fokisa (timestamps, `tokensBefore`, tool-result images and other facts the browser shows that a node does not carry).
