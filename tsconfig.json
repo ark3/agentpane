@@ -31,7 +31,8 @@
     "paths": {
       "$shared/*": ["src/shared/*"],
       "$server/*": ["src/server/*"],
-      "$client/*": ["src/client/*"]
+      "$client/*": ["src/client/*"],
+      "$emacs/*": ["src/emacs/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "e2e/**/*.ts", "vite.config.ts", "vitest.setup.ts", "playwright.config.ts"],

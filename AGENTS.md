@@ -24,6 +24,7 @@ That vehicle cannot report a page as unfocused: it drives `chromium-headless-she
   Imports carry `.ts`.
 - Two test projects: `src/server/**` and `src/shared/**` run in node, `src/client/**` in jsdom.
   Put the file in the right place instead of writing a per-file environment docblock.
+- `src/emacs/**` runs in node too and imports client modules by design: the projection in `src/emacs/nodes.ts` reuses `$client/render/` and `$client/preview.ts`, which are plain TypeScript with no DOM dependency, and vitest picks the environment by the test file's path, not by what it imports.
 - The `@earendil-works/pi-*` packages are types-only (D10).
   `import type` only; `src/import-boundaries.test.ts` fails the build and names your file.
 - Assert on structure, never on model wording — fixture text varies per capture.

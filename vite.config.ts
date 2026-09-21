@@ -12,6 +12,7 @@ export default defineConfig({
 			$shared: resolve("./src/shared"),
 			$server: resolve("./src/server"),
 			$client: resolve("./src/client"),
+			$emacs: resolve("./src/emacs"),
 		},
 	},
 	server: {
@@ -46,7 +47,12 @@ export default defineConfig({
 					name: "server",
 					environment: "node",
 					globals: true,
-					include: ["src/server/**/*.{test,spec}.ts", "src/shared/**/*.{test,spec}.ts", "src/*.{test,spec}.ts"],
+					include: [
+						"src/server/**/*.{test,spec}.ts",
+						"src/shared/**/*.{test,spec}.ts",
+						"src/emacs/**/*.{test,spec}.ts",
+						"src/*.{test,spec}.ts",
+					],
 				},
 			},
 			{
