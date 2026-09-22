@@ -421,6 +421,28 @@ nothing; a fork that failed, or finished, frees the buffer for another."
         (should (equal (car (car sent)) 'sessions/attach))
         (should (= 3 (seq-count (lambda (s) (eq (car s) 'sessions/forkPoints)) sent)))))))
 
+(ert-deftest agentpane-test-fork-shows-in-the-parents-window ()
+  "The fork is shown in the window that showed the parent when the fork
+began, not in whichever window is selected when its reply lands."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (forked '(:backend "codex" :id "t2")))
+    (agentpane-test--forking
+        [(:id "turn-0" :text "Fix the bug" :index 0)]
+        forked
+      (agentpane-test--with-session ref
+        (delete-other-windows)
+        (switch-to-buffer buffer)
+        (let ((parent-window (selected-window))
+              (notes (get-buffer-create " *agentpane-test notes*")))
+          (setq hold '(sessions/fork))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (select-window (split-window))
+          (switch-to-buffer notes)
+          (funcall (cdr (assq 'sessions/fork held)) t)
+          (should (eq (window-buffer parent-window) (agentpane--buffer-for forked)))
+          (should (eq (window-buffer (selected-window)) notes)))))))
+
 (defun agentpane-test--fork-streaming (backend)
   "Fork a BACKEND session at index 0 while a `session/status' says it is
 streaming, holding any abort's reply.  Return the methods sent before that

@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 22 tests, 22 results as expected, 0 unexpected
+;;     Ran 23 tests, 23 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1187,13 +1187,17 @@ snapshot under the parent's ref and the parent buffer draws it.  Once the
 server keys that snapshot to the fork, the redraw is redundant.
 
 One fork at a time per buffer, as the browser allows one send at a time
-\(OW-kelede): a second press while one is in flight sends nothing."
+\(OW-kelede): a second press while one is in flight sends nothing.  The fork
+is shown in the window that showed this buffer when the fork began, if it
+is still live, rather than in whichever window is selected when the reply
+lands."
   (interactive)
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
   (let* ((index (agentpane-index-at-point))
          (parent (agentpane--ref agentpane--session))
          (pi-backend (equal (plist-get parent :backend) "pi"))
+         (window (get-buffer-window))
          (failed (lambda () (setq agentpane--forking nil))))
     (unless index
       (user-error "No message at point"))
@@ -1208,14 +1212,15 @@ One fork at a time per buffer, as the browser allows one send at a time
            (message "agentpane: the message at point is not forkable"))
           ((and pi-backend agentpane--streaming)
            (agentpane--request 'sessions/abort (list :session parent)
-                               (lambda (_) (agentpane--fork-at parent point failed))
+                               (lambda (_) (agentpane--fork-at parent point window failed))
                                t failed))
-          (t (agentpane--fork-at parent point failed)))))
+          (t (agentpane--fork-at parent point window failed)))))
      t failed)))
 
-(defun agentpane--fork-at (parent point failed)
+(defun agentpane--fork-at (parent point window failed)
   "Fork the session PARENT at the fork POINT, and open the fork attached in a
-buffer of its own; FAILED runs if the fork fails.  See `agentpane-fork'."
+buffer of its own, shown in WINDOW if it is still live; FAILED runs if the
+fork fails.  See `agentpane-fork'."
   (agentpane--request
    'sessions/fork (list :session parent :entryId (plist-get point :id))
    (lambda (forked)
@@ -1228,7 +1233,9 @@ buffer of its own; FAILED runs if the fork fails.  See `agentpane-fork'."
        (with-current-buffer buffer
          (agentpane--draw [] (agentpane--transcript-header summary))
          (agentpane--attach))
-       (pop-to-buffer buffer '(display-buffer-same-window))))
+       (if (window-live-p window)
+           (set-window-buffer window buffer)
+         (pop-to-buffer buffer '(display-buffer-same-window)))))
    t failed))
 
 ;;;###autoload
