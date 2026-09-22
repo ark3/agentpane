@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 21 tests, 21 results as expected, 0 unexpected
+;;     Ran 22 tests, 22 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -277,13 +277,16 @@ that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
 (defvar-local agentpane--session nil
   "The summary plist of the session this transcript buffer shows.")
 
-(defun agentpane--request (method params callback &optional always)
+(defun agentpane--request (method params callback &optional always failed)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
 is the one it wants.  An error or a timeout is reported in the echo area.
 With no PARAMS the request carries no `params' at all: a null one would
 reach the helper as a JSON null, which is not the absence it tests for.
+
+FAILED, when given, runs with no arguments in this buffer, if it is still
+live, after an error or a timeout has been reported, whatever ALWAYS says.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -309,10 +312,19 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                            (funcall callback result)))))
                    :error-fn
                    (lambda (error)
-                     (message "agentpane: %s failed: %s" method (plist-get error :message)))
+                     (message "agentpane: %s failed: %s" method (plist-get error :message))
+                     (agentpane--failed buffer failed))
                    :timeout-fn
-                   (lambda () (message "agentpane: %s timed out" method)))))
+                   (lambda ()
+                     (message "agentpane: %s timed out" method)
+                     (agentpane--failed buffer failed)))))
     (setq agentpane--latest-request id)))
+
+(defun agentpane--failed (buffer failed)
+  "Call FAILED, if non-nil, in BUFFER, if it is still live."
+  (when (and failed (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (funcall failed))))
 
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
@@ -1139,6 +1151,9 @@ Allowed only before the first prompt, while the buffer has no nodes."
                            (list :session (agentpane--ref agentpane--session) :model model)
                            #'ignore t)))))
 
+(defvar-local agentpane--forking nil
+  "Non-nil while a fork this buffer began is in flight.")
+
 (defun agentpane-fork ()
   "Fork this buffer's session at the user message at point, and open the fork
 in a transcript buffer of its own, attached.  The fork holds the history
@@ -1169,33 +1184,42 @@ draws a detached session.  That is there because of the server's ordering:
 fork and re-reads the fork's shortened transcript before
 `SessionManager.fork' re-keys the session, so that transcript goes out as a
 snapshot under the parent's ref and the parent buffer draws it.  Once the
-server keys that snapshot to the fork, the redraw is redundant."
+server keys that snapshot to the fork, the redraw is redundant.
+
+One fork at a time per buffer, as the browser allows one send at a time
+\(OW-kelede): a second press while one is in flight sends nothing."
   (interactive)
+  (when agentpane--forking
+    (user-error "A fork of this session is already in flight"))
   (let* ((index (agentpane-index-at-point))
          (parent (agentpane--ref agentpane--session))
-         (pi-backend (equal (plist-get parent :backend) "pi")))
+         (pi-backend (equal (plist-get parent :backend) "pi"))
+         (failed (lambda () (setq agentpane--forking nil))))
     (unless index
       (user-error "No message at point"))
+    (setq agentpane--forking t)
     (agentpane--request
      'sessions/forkPoints (list :session parent)
      (lambda (points)
        (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
          (cond
           ((not point)
+           (setq agentpane--forking nil)
            (message "agentpane: the message at point is not forkable"))
           ((and pi-backend agentpane--streaming)
            (agentpane--request 'sessions/abort (list :session parent)
-                               (lambda (_) (agentpane--fork-at parent point))
-                               t))
-          (t (agentpane--fork-at parent point)))))
-     t)))
+                               (lambda (_) (agentpane--fork-at parent point failed))
+                               t failed))
+          (t (agentpane--fork-at parent point failed)))))
+     t failed)))
 
-(defun agentpane--fork-at (parent point)
+(defun agentpane--fork-at (parent point failed)
   "Fork the session PARENT at the fork POINT, and open the fork attached in a
-buffer of its own; see `agentpane-fork'."
+buffer of its own; FAILED runs if the fork fails.  See `agentpane-fork'."
   (agentpane--request
    'sessions/fork (list :session parent :entryId (plist-get point :id))
    (lambda (forked)
+     (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (setq agentpane--attached nil)
        (agentpane-refetch))
@@ -1205,7 +1229,7 @@ buffer of its own; see `agentpane-fork'."
          (agentpane--draw [] (agentpane--transcript-header summary))
          (agentpane--attach))
        (pop-to-buffer buffer '(display-buffer-same-window))))
-   t))
+   t failed))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)

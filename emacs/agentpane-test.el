@@ -397,6 +397,30 @@ stored transcript."
         (with-current-buffer buffer
           (should (equal (agentpane-test--indices) '(0 1))))))))
 
+(ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
+  "A second `agentpane-fork' while one is in flight says so and sends
+nothing; a fork that failed, or finished, frees the buffer for another."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking
+        [(:id "turn-0" :text "Fix the bug" :index 0)]
+        '(:backend "codex" :id "t2")
+      (agentpane-test--with-session ref
+        (setq hold '(sessions/forkPoints))
+        (agentpane-test--goto-index 0)
+        (agentpane-fork)
+        (should-error (agentpane-fork) :type 'user-error)
+        (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+        (funcall (cdr (pop held)) nil)
+        (agentpane-fork)
+        (should (equal (mapcar #'car sent) '(sessions/forkPoints sessions/forkPoints)))
+        (setq hold nil)
+        (funcall (cdr (pop held)) t)
+        (with-current-buffer buffer
+          (agentpane-test--goto-index 0)
+          (agentpane-fork))
+        (should (equal (car (car sent)) 'sessions/attach))
+        (should (= 3 (seq-count (lambda (s) (eq (car s) 'sessions/forkPoints)) sent)))))))
+
 (defun agentpane-test--fork-streaming (backend)
   "Fork a BACKEND session at index 0 while a `session/status' says it is
 streaming, holding any abort's reply.  Return the methods sent before that
