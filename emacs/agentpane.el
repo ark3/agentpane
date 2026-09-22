@@ -6,14 +6,14 @@
 
 ;;; Commentary:
 
-;; The read-only half of the native agentpane mode (OW-wavone, D22): a
-;; session picker and a transcript buffer, with no attach and no composer.
-;; It talks to the helper `bun run src/emacs/main.ts' -- JSON-RPC 2.0 with
-;; Content-Length framing over stdio, which Emacs's bundled `jsonrpc.el'
-;; speaks -- and the helper is a client of the agentpane HTTP API on
-;; loopback.  One helper per Emacs, started lazily and shared by every
-;; buffer; nothing here spawns an agent subprocess, since `sessions/preview'
-;; reads the stored transcript and opens no stream.
+;; The native agentpane mode (D22): a session picker (OW-wavone) and a
+;; transcript buffer that is also a client (OW-gunuke).  It talks to the
+;; helper `bun run src/emacs/main.ts' -- JSON-RPC 2.0 with Content-Length
+;; framing over stdio, which Emacs's bundled `jsonrpc.el' speaks -- and the
+;; helper is a client of the agentpane HTTP API on loopback.  One helper per
+;; Emacs, started lazily and shared by every buffer.  Browsing spawns no
+;; agent subprocess, since `sessions/preview' reads the stored transcript
+;; and opens no stream; attaching a session does, on the server's side.
 ;;
 ;; Set `agentpane-project-directory' to the agentpane checkout and run
 ;;
@@ -24,9 +24,22 @@
 ;; list is filtered to the project of the buffer the command was called
 ;; from, as the browser's `?cwd=' query is; a prefix argument lifts the
 ;; filter.  The notification only flows once a buffer in this Emacs has
-;; attached a session, which no command in this slice does: the helper
-;; opens its event stream from `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n' and `p' step between nodes, `TAB'
-;; toggles the fold at point, `g' refetches, and `q' buries.
+;; attached a session: the helper opens its event stream from
+;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
+;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
+;; refetches, and `q' buries.
+;;
+;; `M-x agentpane-new-session' asks for a backend, creates a session in the
+;; current buffer's project, opens it attached and asks for one of the
+;; backend's models; the first prompt on a previewed transcript attaches it.  Once attached,
+;; the helper's notifications drive the buffer: a snapshot redraws every
+;; node, a node update redraws the node with its index or appends it, and
+;; the mode line shows streaming, compaction and the model.  A prompt is
+;; typed in the region below the last node, or in the composer
+;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
+;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
+;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' sets the
+;; model, but only before the first prompt.
 ;; `M-x agentpane-shutdown' stops the helper; the next command that needs
 ;; it starts a fresh one.
 ;;
@@ -38,9 +51,10 @@
 ;; keyword keys, arrays as vectors, JSON null as nil and false as
 ;; `:json-false', and the drawing functions below take exactly that shape.
 ;;
-;; Drawing a fixed node list into a buffer, the helper connection against a
-;; fake helper (emacs/fake-helper.ts), and `agentpane-shutdown' against the
-;; real one are covered by `ert' tests in agentpane-test.el, which need `bun'
+;; Drawing a fixed node list into a buffer, notifications driving it through
+;; no process at all, the helper connection against a fake helper
+;; (emacs/fake-helper.ts), and `agentpane-shutdown' against the real one
+;; are covered by `ert' tests in agentpane-test.el, which need `bun'
 ;; on the PATH and `bun install' done, run from the repository root with
 ;;
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
@@ -259,13 +273,22 @@ that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
 (defvar-local agentpane--latest-request nil
   "The id of this buffer's most recent request to the helper.")
 
-(defun agentpane--request (method params callback)
+(defvar-local agentpane--session nil
+  "The summary plist of the session this transcript buffer shows.")
+
+(defun agentpane--request (method params callback &optional always)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
 is the one it wants.  An error or a timeout is reported in the echo area.
 With no PARAMS the request carries no `params' at all: a null one would
 reach the helper as a JSON null, which is not the absence it tests for.
+
+With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
+since: for a command -- attach, prompt, abort -- whose reply is not a view
+that the later request's replaces.  Such a request still supersedes every
+earlier one, so a preview refetch still in flight when the buffer attaches
+is not drawn over the live transcript.
 
 Asynchronous because a synchronous `jsonrpc-request' stalled when another
 one nested inside it, as the picker refetch that `sessions/changed' runs
@@ -281,7 +304,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                    (lambda (result)
                      (when (buffer-live-p buffer)
                        (with-current-buffer buffer
-                         (when (eql id agentpane--latest-request)
+                         (when (or always (eql id agentpane--latest-request))
                            (funcall callback result)))))
                    :error-fn
                    (lambda (error)
@@ -290,11 +313,27 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                    (lambda () (message "agentpane: %s timed out" method)))))
     (setq agentpane--latest-request id)))
 
-(defun agentpane--on-notification (_conn method _params)
-  "Handle notification METHOD from the helper.
-Only `sessions/changed' is acted on in this slice."
-  (when (eq method 'sessions/changed)
-    (agentpane--revert-pickers)))
+(defun agentpane--on-notification (_conn method params)
+  "Handle notification METHOD, with PARAMS, from the helper.
+Every one but `sessions/changed' is about one session, and goes to the
+transcript buffer holding it, if there is one."
+  (if (eq method 'sessions/changed)
+      (agentpane--revert-pickers)
+    (let ((buffer (agentpane--buffer-for
+                   (plist-get params (if (eq method 'session/renamed) :from :session)))))
+      (when buffer
+        (with-current-buffer buffer
+          (pcase method
+            ('session/snapshot
+             (agentpane--set-status params)
+             (agentpane--keeping-points
+              (lambda ()
+                (agentpane--draw (plist-get params :nodes)
+                                 (agentpane--transcript-header agentpane--session)))))
+            ('session/node (agentpane--upsert (plist-get params :node)))
+            ('session/status (agentpane--set-status params))
+            ('session/error (agentpane--upsert (list :error (plist-get params :message))))
+            ('session/renamed (agentpane--rekey (plist-get params :to)))))))))
 
 ;;;; Rendering HTML through shr
 
@@ -436,6 +475,14 @@ list rows their hanging indent."
 
 (defvar-local agentpane--ewoc nil
   "The ewoc drawing this buffer's nodes.")
+
+(defvar-local agentpane--prompt-separator nil
+  "Marker at the start of the line between the nodes and the prompt region.
+It advances past text inserted at it, so nodes drawn there stay above it.")
+
+(defvar-local agentpane--prompt-start nil
+  "Marker at the start of the prompt region, the editable text at the end of
+a transcript buffer.")
 
 (defvar-local agentpane--folds nil
   "Hash table of fold keys (INDEX . ORDINAL) that are currently expanded.
@@ -610,7 +657,19 @@ The layout follows the browser's `Message.svelte': an assistant turn is plain
 text on the page, closed by its small meta line and nothing else, so
 consecutive assistant turns run together the way they do there; a user turn
 is the one raised surface, a tinted box with an accent bar down its left
-edge, with a blank line on either side.  Neither carries a role label."
+edge, with a blank line on either side.  Neither carries a role label.
+NODE may instead be `(:error MESSAGE)', a `session/error' drawn as a
+warning line where it arrived.  Everything drawn is read-only, so only the
+prompt region below the nodes takes typing."
+  (let ((start (point)))
+    (if (plist-member node :error)
+        (insert (propertize (concat "⚠ " (plist-get node :error)) 'face 'agentpane-warning)
+                "\n")
+      (agentpane--pp-node node))
+    (add-text-properties start (point) '(read-only t front-sticky (read-only)))))
+
+(defun agentpane--pp-node (node)
+  "Pretty-print NODE, one transcript node plist, at point; see `agentpane--pp'."
   (let* ((index (plist-get node :index))
          (role (plist-get node :role))
          (userp (equal role "user"))
@@ -637,13 +696,19 @@ edge, with a blank line on either side.  Neither carries a role label."
 
 (defun agentpane--draw (nodes &optional header)
   "Draw NODES, a sequence of node plists, as this buffer's ewoc under HEADER.
-Replaces whatever the buffer held; expanded folds survive the redraw, since
-they are keyed by node index and part ordinal rather than by position."
+Replaces every node the buffer held and leaves the prompt region below them
+as it was; expanded folds survive the redraw, since they are keyed by node
+index and part ordinal rather than by position.  Point goes to the first
+node."
   (let ((inhibit-read-only t))
-    (erase-buffer)
+    (delete-region (point-min) agentpane--prompt-separator)
+    (goto-char (point-min))
     (setq agentpane--ewoc
           (ewoc-create #'agentpane--pp
-                       (and header (propertize (concat header "\n") 'face 'agentpane-dim))
+                       (and header (propertize (concat header "\n")
+                                               'face 'agentpane-dim
+                                               'read-only t
+                                               'front-sticky '(read-only)))
                        nil
                        t))
     (seq-doseq (node nodes)
@@ -652,10 +717,64 @@ they are keyed by node index and part ordinal rather than by position."
     (when (ewoc-nth agentpane--ewoc 0)
       (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))
 
+(defun agentpane--upsert (node)
+  "Redraw the drawn node whose index is NODE's in place, or append NODE.
+A node's `index' is its place in the session's flat message array, so the
+match is by that and never by position; an `(:error MESSAGE)' has no index
+and always appends.  Text after the redrawn node, the prompt region
+included, moves with it, and so does a point there: at the end of the
+buffer before, at the end after."
+  (let* ((index (plist-get node :index))
+         (drawn (and index
+                     (let ((at (ewoc-nth agentpane--ewoc -1)))
+                       (while (and at (not (eql index (plist-get (ewoc-data at) :index))))
+                         (setq at (ewoc-prev agentpane--ewoc at)))
+                       at)))
+         (inhibit-read-only t))
+    (if drawn
+        (progn
+          (ewoc-set-data drawn node)
+          (ewoc-invalidate agentpane--ewoc drawn))
+      (ewoc-enter-last agentpane--ewoc node))))
+
+(defun agentpane--keeping-points (redraw)
+  "Call REDRAW, which replaces every node, keeping point and each window's point.
+A point in the prompt region, the end of the buffer included, stays the same
+distance from the end, and any other stays at its position.  That is the
+whole of follow mode, deliberately less than the browser's."
+  (let* ((separator (marker-position agentpane--prompt-separator))
+         (saved (mapcar (lambda (window)
+                          (let ((pos (if window (window-point window) (point))))
+                            (list window pos (and (>= pos separator) (- (point-max) pos)))))
+                        (cons nil (get-buffer-window-list nil nil t)))))
+    (funcall redraw)
+    (pcase-dolist (`(,window ,pos ,from-end) saved)
+      (let ((target (if from-end
+                        (- (point-max) from-end)
+                      (min pos agentpane--prompt-separator))))
+        (if window (set-window-point window target) (goto-char target))))))
+
 ;;;; The transcript buffer
 
-(defvar-local agentpane--session nil
-  "The summary plist of the session this transcript buffer shows.")
+(defvar-local agentpane--attached nil
+  "The helper connection this buffer attached its session through, or nil.
+Attached only while that is still the running connection: a fresh helper
+has attached nothing.")
+
+(defvar agentpane-prompt-region-map
+  (let ((map (make-keymap)))
+    (set-char-table-range (nth 1 map) (cons ?\s ?~) #'self-insert-command)
+    ;; `special-mode-map' is suppressed, remapping this to `undefined'.
+    (define-key map [remap self-insert-command] #'self-insert-command)
+    (define-key map (kbd "RET") #'newline)
+    (define-key map (kbd "DEL") #'delete-backward-char)
+    (define-key map (kbd "S-SPC") (lambda () (interactive) (insert " ")))
+    (define-key map (kbd "TAB") #'indent-for-tab-command)
+    (define-key map (kbd "<tab>") #'indent-for-tab-command)
+    map)
+  "Keymap over the prompt region, so typing there inserts text rather than
+running the transcript's single-key commands.  Keys it leaves unbound, such
+as `C-RET', fall through to `agentpane-transcript-mode-map'.")
 
 (defvar agentpane-transcript-mode-map
   (let ((map (make-sparse-keymap)))
@@ -665,12 +784,34 @@ they are keyed by node index and part ordinal rather than by position."
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
     (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "C-<return>") #'agentpane-send)
+    (define-key map (kbd "C-c C-a") #'agentpane-abort)
     map)
   "Keymap for `agentpane-transcript-mode'.")
 
+(defun agentpane--insert-prompt-region ()
+  "Insert the separator line and an empty prompt region into this empty buffer.
+The separator is read-only and does not stick to text typed after it, so
+the prompt region below it is the one place the buffer takes typing."
+  (let ((inhibit-read-only t))
+    (insert (propertize "── prompt · C-RET sends ──\n"
+                        'face 'agentpane-dim
+                        'read-only t
+                        'front-sticky '(read-only)
+                        'rear-nonsticky '(read-only)))
+    (setq agentpane--prompt-separator (copy-marker (point-min) t))
+    (setq agentpane--prompt-start (point-marker))
+    (overlay-put (make-overlay (point) (point) nil nil t)
+                 'keymap agentpane-prompt-region-map)))
+
 (define-derived-mode agentpane-transcript-mode special-mode "agentpane"
-  "Major mode for a read-only agentpane transcript.
+  "Major mode for an agentpane transcript, read-only but for the prompt
+region at its end, where `RET' inserts a newline and `C-RET' sends.
 \\{agentpane-transcript-mode-map}"
+  ;; The drawn nodes carry the `read-only' property instead, so the prompt
+  ;; region below them can take typing.
+  (setq buffer-read-only nil)
+  (agentpane--insert-prompt-region)
   (setq-local agentpane--folds (make-hash-table :test #'equal))
   (add-to-invisibility-spec '(agentpane . t))
   ;; Proportional prose and word wrap at the window edge; code, tables and
@@ -760,36 +901,277 @@ buffer resolve to the first and last."
             (or (plist-get summary :cwd) ""))))
 
 (defun agentpane-refetch ()
-  "Refetch this buffer's transcript through `sessions/preview' and redraw it."
+  "Refetch this buffer's transcript and redraw it.
+A stored transcript is read through `sessions/preview'; an attached one is
+attached again, which answers with a fresh `session/snapshot', since a
+preview would draw the stored transcript over the live one."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
-  (agentpane--request 'sessions/preview
-                      (list :session (agentpane--ref agentpane--session))
-                      (lambda (nodes)
-                        (agentpane--draw nodes (agentpane--transcript-header agentpane--session)))))
+  (if (agentpane--attached-p)
+      (agentpane--attach)
+    (agentpane--request 'sessions/preview
+                        (list :session (agentpane--ref agentpane--session))
+                        (lambda (nodes)
+                          (agentpane--draw nodes (agentpane--transcript-header agentpane--session))))))
+
+(defun agentpane--same-ref-p (a b)
+  "Non-nil when session refs A and B name the same session."
+  (and (equal (plist-get a :backend) (plist-get b :backend))
+       (equal (plist-get a :id) (plist-get b :id))))
+
+(defun agentpane--buffer-for (ref)
+  "The transcript buffer holding the session REF, or nil."
+  (seq-find (lambda (buffer)
+              (let ((held (buffer-local-value 'agentpane--session buffer)))
+                (and held (agentpane--same-ref-p (agentpane--ref held) ref))))
+            (buffer-list)))
+
+(defun agentpane--buffer-name (summary)
+  "The transcript buffer name for SUMMARY: the backend and the preview, or
+the session id where there is no preview yet."
+  (let ((ref (agentpane--ref summary))
+        (preview (plist-get summary :preview)))
+    (format "*agentpane %s: %s*"
+            (plist-get ref :backend)
+            (truncate-string-to-width
+             (if (or (null preview) (string-empty-p preview))
+                 (plist-get ref :id)
+               preview)
+             60 nil nil "…"))))
 
 (defun agentpane--transcript-buffer (summary)
   "The transcript buffer for SUMMARY's session, created if there is none.
 One buffer per session ref, named after the backend and the summary's preview."
-  (let ((ref (agentpane--ref summary)))
-    (or (seq-find (lambda (buffer)
-                    (let ((held (buffer-local-value 'agentpane--session buffer)))
-                      (and held (equal (agentpane--ref held) ref))))
-                  (buffer-list))
-        (let* ((preview (plist-get summary :preview))
-               (name (format "*agentpane %s: %s*"
-                             (plist-get ref :backend)
-                             (truncate-string-to-width
-                              (if (or (null preview) (string-empty-p preview))
-                                  (plist-get ref :id)
-                                preview)
-                              60 nil nil "…")))
-               (buffer (generate-new-buffer name)))
-          (with-current-buffer buffer
-            (agentpane-transcript-mode)
-            (setq agentpane--session summary))
-          buffer))))
+  (or (agentpane--buffer-for (agentpane--ref summary))
+      (let ((buffer (generate-new-buffer (agentpane--buffer-name summary))))
+        (with-current-buffer buffer
+          (agentpane-transcript-mode)
+          (setq agentpane--session summary))
+        buffer)))
+
+(defun agentpane--rekey (ref)
+  "Make this buffer hold the session REF, renaming it to match.
+For a `session/renamed', and for an attach whose reply names another ref."
+  (unless (agentpane--same-ref-p ref (agentpane--ref agentpane--session))
+    (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
+    (rename-buffer (agentpane--buffer-name agentpane--session) t)))
+
+(defun agentpane--set-status (params)
+  "Show the streaming, compaction and model fields of PARAMS in the mode line."
+  (let ((fields (delq nil
+                      (list (and (eq (plist-get params :isStreaming) t) "streaming")
+                            (let ((compaction (plist-get params :compaction)))
+                              (and compaction (concat "compaction " compaction)))
+                            (plist-get params :model)))))
+    (setq mode-line-process
+          (and fields (concat " [" (mapconcat #'identity fields " · ") "]")))
+    (force-mode-line-update)))
+
+;;;; Driving the session
+
+(defun agentpane--attached-p ()
+  "Non-nil when this buffer's session is attached through the running helper."
+  (and agentpane--attached (eq agentpane--attached agentpane--connection)
+       (jsonrpc-running-p agentpane--attached)))
+
+(defun agentpane--attach (&optional then)
+  "Attach this buffer's session through `sessions/attach', then call THEN.
+From here on the helper sends this session's notifications, starting with a
+`session/snapshot' that redraws the buffer."
+  (agentpane--request 'sessions/attach
+                      (list :session (agentpane--ref agentpane--session))
+                      (lambda (summary)
+                        (setq agentpane--attached agentpane--connection)
+                        ;; The route's ref is authoritative and may differ.
+                        (agentpane--rekey (agentpane--ref summary))
+                        (when then (funcall then)))
+                      t))
+
+(defun agentpane--attached-then (fn)
+  "Call FN in this buffer once its session is attached, attaching it first
+if it is only a preview."
+  (if (agentpane--attached-p)
+      (funcall fn)
+    (agentpane--attach fn)))
+
+(defvar-local agentpane--composer nil
+  "This transcript's composer buffer, once `agentpane-prompt' has made one.")
+
+(defvar-local agentpane--composer-transcript nil
+  "The transcript buffer this composer sends to.")
+
+(defun agentpane--transcript ()
+  "The transcript buffer a command in the current buffer is about."
+  (cond ((and (derived-mode-p 'agentpane-transcript-mode) agentpane--session)
+         (current-buffer))
+        ((and (derived-mode-p 'agentpane-composer-mode)
+              (buffer-live-p agentpane--composer-transcript))
+         agentpane--composer-transcript)
+        (t (user-error "Not an agentpane transcript or composer buffer"))))
+
+(defun agentpane--send-prompt (text sent)
+  "Send TEXT as a prompt to the session of the current buffer's transcript,
+then call SENT.  A prompt the server refuses, such as one sent mid-turn
+\(DESIGN D16), shows the server's text in the echo area and SENT is not
+called, so the draft stays where it was."
+  (when (string-blank-p text)
+    (user-error "Nothing to send"))
+  (with-current-buffer (agentpane--transcript)
+    (agentpane--attached-then
+     (lambda ()
+       (agentpane--request 'sessions/prompt
+                           (list :session (agentpane--ref agentpane--session) :text text)
+                           (lambda (_) (funcall sent))
+                           t)))))
+
+(defun agentpane--clear-sent (buffer beg text)
+  "Delete TEXT from BEG to the end of BUFFER, if it is still exactly there."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (equal (buffer-substring-no-properties beg (point-max)) text)
+        (delete-region beg (point-max))))))
+
+(defun agentpane-send ()
+  "Send the prompt region's text as a prompt, and clear the region once sent.
+The first prompt on a previewed session attaches it."
+  (interactive)
+  (let ((buffer (agentpane--transcript)))
+    (with-current-buffer buffer
+      (let ((start agentpane--prompt-start)
+            (text (buffer-substring-no-properties agentpane--prompt-start (point-max))))
+        (agentpane--send-prompt
+         text (lambda () (agentpane--clear-sent buffer start text)))))))
+
+(defun agentpane-abort ()
+  "Abort the running turn of this buffer's session through `sessions/abort'."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (agentpane--request 'sessions/abort
+                        (list :session (agentpane--ref agentpane--session))
+                        #'ignore t)))
+
+(defun agentpane-compact ()
+  "Compact this buffer's session through `sessions/compact'."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (agentpane--attached-then
+     (lambda ()
+       (agentpane--request 'sessions/compact
+                           (list :session (agentpane--ref agentpane--session))
+                           #'ignore t)))))
+
+(defun agentpane--read-model (backend)
+  "Read a model id for BACKEND from its `models/list', with completion.
+Synchronous, since the answer is what the minibuffer offers; the stall
+`agentpane--request' describes needs a second synchronous request nested
+inside this one, and nothing the notifications run is synchronous."
+  (let ((models (jsonrpc-request (agentpane--connection) 'models/list
+                                 (list :backend backend))))
+    (completing-read (format "Model for %s: " backend)
+                     (mapcar (lambda (model) (plist-get model :id)) models)
+                     nil t)))
+
+(defun agentpane--check-model-gate ()
+  "Signal a user error unless this buffer's session has no nodes yet.
+The model is chosen at conversation start, never switched later (owner,
+2026-09-13); the browser enforces the same in `loadModelsForSelected'
+\(src/client/controller.ts), and neither the server nor the helper does."
+  (with-current-buffer (agentpane--transcript)
+    (when (and agentpane--ewoc
+               (ewoc-collect agentpane--ewoc (lambda (data) (plist-get data :index))))
+      (user-error "The model is chosen before the first prompt"))))
+
+(defun agentpane-set-model (model)
+  "Set this buffer's session's MODEL through `sessions/setModel'.
+Allowed only before the first prompt, while the buffer has no nodes."
+  (interactive
+   (progn
+     (agentpane--check-model-gate)
+     (list (agentpane--read-model
+            (plist-get (agentpane--ref (buffer-local-value 'agentpane--session
+                                                           (agentpane--transcript)))
+                       :backend)))))
+  (agentpane--check-model-gate)
+  (with-current-buffer (agentpane--transcript)
+    (agentpane--attached-then
+     (lambda ()
+       (agentpane--request 'sessions/setModel
+                           (list :session (agentpane--ref agentpane--session) :model model)
+                           #'ignore t)))))
+
+;;;###autoload
+(defun agentpane-new-session (backend)
+  "Create a session on BACKEND in the current buffer's project, open its
+buffer attached, and read its model from `models/list' with completion.
+The model is read after the attach, as the browser reads it: at 118a46a
+`sessions/create' records the session without spawning anything, and the
+server answers `models/list' for Codex or Pi only from a live adapter,
+failing with \"codex adapter not started\" before one exists (measured
+2026-09-22).  The attach is synchronous for the same reason the model
+list is; see `agentpane--read-model'."
+  (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
+  (let* ((cwd (agentpane--current-cwd))
+         (ref (jsonrpc-request (agentpane--connection) 'sessions/create
+                               (list :cwd cwd :backend backend)))
+         (summary (list :ref ref :cwd cwd))
+         (buffer (agentpane--transcript-buffer summary)))
+    (with-current-buffer buffer
+      (agentpane--draw [] (agentpane--transcript-header summary))
+      (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
+                                       (list :session ref) :timeout 60)))
+        (setq agentpane--attached agentpane--connection)
+        ;; The route's ref is authoritative: attaching is where a new session
+        ;; takes its backend's own id.
+        (agentpane--rekey (agentpane--ref attached))))
+    (pop-to-buffer buffer '(display-buffer-same-window))
+    (agentpane-set-model (agentpane--read-model backend))))
+
+;;;; The composer
+
+(defvar agentpane-composer-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'agentpane-composer-send)
+    (define-key map (kbd "C-<return>") #'agentpane-composer-send)
+    (define-key map (kbd "C-c C-k") #'agentpane-composer-discard)
+    (define-key map (kbd "C-c C-a") #'agentpane-abort)
+    map)
+  "Keymap for `agentpane-composer-mode'.")
+
+(define-derived-mode agentpane-composer-mode text-mode "agentpane-composer"
+  "Major mode for drafting a prompt to an agentpane session, as for a commit
+message: `C-c C-c' or `C-RET' sends, `C-c C-k' discards, `C-c C-a' aborts
+the running turn.
+\\{agentpane-composer-mode-map}")
+
+(defun agentpane-prompt ()
+  "Open this transcript's composer in a small window below it."
+  (interactive)
+  (let* ((transcript (agentpane--transcript))
+         (composer
+          (with-current-buffer transcript
+            (unless (buffer-live-p agentpane--composer)
+              (setq agentpane--composer
+                    (generate-new-buffer (format "*agentpane composer: %s*" (buffer-name))))
+              (with-current-buffer agentpane--composer
+                (agentpane-composer-mode)
+                (setq agentpane--composer-transcript transcript)))
+            agentpane--composer)))
+    (select-window (display-buffer composer '(display-buffer-below-selected
+                                              (window-height . 8))))))
+
+(defun agentpane-composer-send ()
+  "Send the composer's text as a prompt, and clear the composer once sent."
+  (interactive)
+  (let ((composer (current-buffer))
+        (text (buffer-substring-no-properties (point-min) (point-max))))
+    (agentpane--send-prompt
+     text (lambda () (agentpane--clear-sent composer 1 text)))))
+
+(defun agentpane-composer-discard ()
+  "Discard the draft: kill the composer and its window."
+  (interactive)
+  (quit-window t))
 
 (defun agentpane-show-transcript (summary)
   "Show the stored transcript of the session SUMMARY describes."
