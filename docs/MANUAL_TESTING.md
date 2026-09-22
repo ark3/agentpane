@@ -2271,3 +2271,19 @@ No `dynamicToolCall` and no `mcpToolCall` arrived; the turn's item types were `u
 The rollout held `{"type":"custom_tool_call","name":"exec","input":"const r = await tools.exec_command({cmd:\"echo probe-ow-jakahe\\npwd\",workdir:\"/var/tmp/...\",yield_time_ms:10000,max_output_tokens:1000}); text(r.output);\n"}` followed by a `custom_tool_call_output` whose `output` is two `input_text` blocks, the first reading `Script completed\nWall time 0.2 seconds\nOutput:\n` and the second the command's output.
 A scan of every rollout under this machine's `~/.codex/sessions` found 2280 items of that shape and no `function_call` named `exec_command` or `local_shell_call` at all; the oldest carry `cli_version` 0.150.1 from 2026-08-31, and in some of those the object's keys are quoted, `{"cmd":"...","workdir":...}`, where the 0.155.1 run wrote them bare.
 The `function_call` named `exec_command` with JSON `arguments` that OW-jakahe was filed from, on the work laptop's 0.155.1 session of 2026-09-21, is therefore a second stored shape of the same tool, not the only one, and a preview fix that reads only it leaves every session on the home server showing `exec value`.
+
+## The native Emacs picker and transcript spawn nothing (OW-wavone)
+
+Measured on the home server 2026-09-22, Emacs 31.1 in `--batch`, `bun 1.4.0`, agentpane at 4cf9947 with the server started by `bun run src/server/index.ts` on its default port and left logging to a file.
+`emacs/agentpane.el` was loaded with `agentpane-project-directory` pointed at the checkout, `agentpane-sessions` called with `default-directory` inside the agentpane project, the first Codex row carrying a preview opened with `agentpane-sessions-open`, and the process table read while the transcript buffer was open.
+
+**The picker lists what the browser lists.**
+The buffer held 211 rows, and `GET /api/sessions?cwd=/home/ark3/projects/agentpane` answered 211 summaries at the same moment; the rows read backend, status, the streaming mark, the local updated time and the preview, newest first.
+
+**`RET` on a stored Codex session draws its transcript from the store.**
+The buffer `*agentpane codex: Reply with exactly the word THREE and nothing else.*` opened read-only in `agentpane-transcript-mode`, headed by the ref and cwd, holding two nodes: the user turn's text, then the assistant's `THREE` closed by its meta line.
+`n` twice from the top left `agentpane-index-at-point` at 1.
+
+**Nothing was spawned.**
+With the transcript open, `ps` showed exactly two agentpane processes beside the sandbox: `bun run src/server/index.ts` and `bun run src/emacs/main.ts`, the helper Emacs started, and no `codex` process at all.
+The server logs no spawn (nothing under `src/server/adapters/` writes to the console), so the process table is the whole of the evidence, read once while the buffer was open.
