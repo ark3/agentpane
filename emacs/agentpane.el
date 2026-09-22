@@ -36,8 +36,10 @@
 ;; keyword keys, arrays as vectors, JSON null as nil and false as
 ;; `:json-false', and the drawing functions below take exactly that shape.
 ;;
-;; The pure half -- drawing a fixed node list into a buffer -- is covered by
-;; `ert' tests in agentpane-test.el, run from the repository root with
+;; Drawing a fixed node list into a buffer, and the helper connection
+;; against a fake helper (emacs/fake-helper.ts, which needs `bun' on the
+;; PATH), are covered by `ert' tests in agentpane-test.el, run from the
+;; repository root with
 ;;
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
@@ -45,7 +47,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 4 tests, 4 results as expected, 0 unexpected
+;;     Ran 6 tests, 6 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -238,19 +240,45 @@ connection named \"agentpane\", so the helper's own stderr lands there."
                          :on-shutdown (lambda (_conn) (setq agentpane--connection nil)))))
   agentpane--connection)
 
-(defun agentpane--request (method &optional params)
-  "Send METHOD with PARAMS, a plist, to the helper and wait for its result.
+(defvar-local agentpane--latest-request nil
+  "The id of this buffer's most recent request to the helper.")
+
+(defun agentpane--request (method params callback)
+  "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
+Return at once; CALLBACK runs later with the result, in this buffer, unless
+the buffer has been killed or has sent a later request since, whose reply
+is the one it wants.  An error or a timeout is reported in the echo area.
 With no PARAMS the request carries no `params' at all: a null one would
-reach the helper as a JSON null, which is not the absence it tests for."
-  (jsonrpc-request (agentpane--connection) method (or params :jsonrpc-omit)))
+reach the helper as a JSON null, which is not the absence it tests for.
+
+Asynchronous because a synchronous `jsonrpc-request' stalled when another
+one nested inside it, as the picker refetch that `sessions/changed' runs
+does whenever it lands during a transcript refetch: on Emacs 31.1 with
+jsonrpc.el 1.0.29 both replies were in by 0.3s and the outer call still
+returned only at its own timeout's deadline, 10s later (OW-bonode; the
+ert tests `agentpane-test-nested-refetch-*' provoke it)."
+  (let ((buffer (current-buffer))
+        id)
+    (setq id (car (jsonrpc-async-request
+                   (agentpane--connection) method (or params :jsonrpc-omit)
+                   :success-fn
+                   (lambda (result)
+                     (when (buffer-live-p buffer)
+                       (with-current-buffer buffer
+                         (when (eql id agentpane--latest-request)
+                           (funcall callback result)))))
+                   :error-fn
+                   (lambda (error)
+                     (message "agentpane: %s failed: %s" method (plist-get error :message)))
+                   :timeout-fn
+                   (lambda () (message "agentpane: %s timed out" method)))))
+    (setq agentpane--latest-request id)))
 
 (defun agentpane--on-notification (_conn method _params)
   "Handle notification METHOD from the helper.
-Only `sessions/changed' is acted on in this slice.  The refetch is scheduled
-rather than run here: this runs inside the process filter, and the refetch
-is a synchronous request that waits on that same process."
+Only `sessions/changed' is acted on in this slice."
   (when (eq method 'sessions/changed)
-    (run-at-time 0 nil #'agentpane--revert-pickers)))
+    (agentpane--revert-pickers)))
 
 ;;;; Rendering HTML through shr
 
@@ -720,9 +748,10 @@ buffer resolve to the first and last."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
-  (let ((nodes (agentpane--request 'sessions/preview
-                                   (list :session (agentpane--ref agentpane--session)))))
-    (agentpane--draw nodes (agentpane--transcript-header agentpane--session))))
+  (agentpane--request 'sessions/preview
+                      (list :session (agentpane--ref agentpane--session))
+                      (lambda (nodes)
+                        (agentpane--draw nodes (agentpane--transcript-header agentpane--session)))))
 
 (defun agentpane--transcript-buffer (summary)
   "The transcript buffer for SUMMARY's session, created if there is none.
@@ -781,11 +810,15 @@ One buffer per session ref, named after the backend and the summary's preview."
                   (agentpane--format-time (plist-get summary :updatedAt))
                   (or (plist-get summary :preview) "")))))
 
-(defun agentpane--session-entries ()
-  "Fetch the listing through `sessions/list' under this buffer's filter."
-  (let ((summaries (agentpane--request 'sessions/list
-                                       (and agentpane--cwd (list :cwd agentpane--cwd)))))
-    (mapcar #'agentpane--session-entry (append summaries nil))))
+(defun agentpane--refetch-sessions (&rest _)
+  "Refetch the listing through `sessions/list' under this buffer's filter,
+and redraw it when the reply lands.  The picker's `revert-buffer-function'."
+  (agentpane--request 'sessions/list
+                      (and agentpane--cwd (list :cwd agentpane--cwd))
+                      (lambda (summaries)
+                        (setq tabulated-list-entries
+                              (mapcar #'agentpane--session-entry (append summaries nil)))
+                        (tabulated-list-print t))))
 
 (define-derived-mode agentpane-sessions-mode tabulated-list-mode "agentpane-sessions"
   "Major mode listing agentpane sessions.
@@ -797,7 +830,7 @@ One buffer per session ref, named after the backend and the summary's preview."
          ("Updated" 17 t)
          ("Preview" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
-  (setq tabulated-list-entries #'agentpane--session-entries)
+  (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
 
 (defun agentpane--revert-pickers ()

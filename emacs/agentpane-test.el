@@ -6,9 +6,10 @@
 
 ;;; Commentary:
 
-;; `ert' tests for the pure half of agentpane.el: drawing a fixed list of
-;; nodes into a buffer, with no helper process.  Run from the repository
-;; root with
+;; `ert' tests for agentpane.el: drawing a fixed list of nodes into a
+;; buffer, with no helper process, and the helper connection, against
+;; emacs/fake-helper.ts in place of the real helper, so no agentpane server
+;; is needed.  Run from the repository root with
 ;;
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
@@ -97,6 +98,81 @@
     (should (memq 'diff-context (agentpane-test--faces-at " before")))
     (should-not (memq 'diff-added (agentpane-test--faces-at "-old line")))
     (kill-buffer)))
+
+;;;; The helper connection, against a fake helper
+
+(defconst agentpane-test--root
+  (file-name-directory
+   (directory-file-name (file-name-directory (or load-file-name buffer-file-name))))
+  "The repository root, where the fake helper's relative imports resolve.")
+
+(defun agentpane-test--wait-for (predicate deadline)
+  "Accept process output until PREDICATE answers non-nil or DEADLINE, a
+`float-time', passes.  Return PREDICATE's last answer."
+  (let (answer)
+    (while (and (not (setq answer (funcall predicate)))
+                (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    answer))
+
+(defmacro agentpane-test--with-fake-helper (order &rest body)
+  "Run BODY with the mode's helper replaced by emacs/fake-helper.ts ORDER.
+The connection is torn down afterwards, and every buffer BODY made with it."
+  (declare (indent 1))
+  `(let ((agentpane--connection nil)
+         (buffers (buffer-list)))
+     (cl-letf (((symbol-function 'agentpane--start-helper)
+                (lambda ()
+                  (let ((default-directory agentpane-test--root))
+                    (make-process :name "agentpane fake helper"
+                                  :command (list "bun" "run" "emacs/fake-helper.ts" ,order)
+                                  :connection-type 'pipe
+                                  :noquery t
+                                  :stderr (get-buffer-create "*agentpane stderr*"))))))
+       (unwind-protect (progn ,@body)
+         (when agentpane--connection
+           (delete-process (jsonrpc--process agentpane--connection)))
+         (dolist (buffer (buffer-list))
+           (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(defun agentpane-test--nested-refetch (order)
+  "Refetch a transcript while the helper's `sessions/changed' refetches the
+picker, the two replies arriving in ORDER, and check both land promptly.
+The fake answers both within 200ms of the refetch, so two seconds is ample.
+When every request was a synchronous `jsonrpc-request', the picker's nested
+inside the transcript's, both landed but only after about 10 seconds,
+`jsonrpc-default-request-timeout' (OW-bonode)."
+  (agentpane-test--with-fake-helper order
+    (let ((picker (save-window-excursion
+                    (agentpane-sessions t)
+                    (current-buffer))))
+      (should (agentpane-test--wait-for
+               (lambda () (with-current-buffer picker (string-search "list 1" (buffer-string))))
+               (+ (float-time) 10)))
+      (let* ((summary (list :ref (list :backend "pi" :id "session-1")))
+             (start (float-time))
+             (deadline (+ start 2)))
+        (save-window-excursion (agentpane-show-transcript summary))
+        (let ((transcript (agentpane--transcript-buffer summary)))
+          (should (agentpane-test--wait-for
+                   (lambda () (with-current-buffer transcript (string-search "hello" (buffer-string))))
+                   deadline)))
+        (should (agentpane-test--wait-for
+                 (lambda () (with-current-buffer picker (string-search "list 2" (buffer-string))))
+                 deadline))
+        ;; A wait that began past the deadline still answers true, so the
+        ;; clock is asked outright.
+        (should (< (- (float-time) start) 2))))))
+
+(ert-deftest agentpane-test-nested-refetch-outer-reply-first ()
+  "A picker refetch started during a transcript refetch lands promptly, the
+transcript's reply arriving first."
+  (agentpane-test--nested-refetch "outer-first"))
+
+(ert-deftest agentpane-test-nested-refetch-inner-reply-first ()
+  "A picker refetch started during a transcript refetch lands promptly, the
+picker's reply arriving first."
+  (agentpane-test--nested-refetch "inner-first"))
 
 (provide 'agentpane-test)
 
