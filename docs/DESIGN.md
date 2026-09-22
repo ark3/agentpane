@@ -771,7 +771,7 @@ What decided it is a rough cut looked at, which is the owner's practice for a UI
 OW-dekate drew OW-mutufa's nodes into an `ewoc` buffer over two evenings, 2026-09-21 and 2026-09-22, the owner at a live Emacs 31.1.50 on the work laptop beside the browser, with two stored sessions dumped through `src/emacs/dump-nodes.ts`, one Claude with Edit diffs and a markdown table and one Codex with fenced shell.
 A `markdown-mode` backend got everything but tables, and a wide table wrapped at the window edge into nothing readable.
 An `shr` backend drawing the browser's own HTML -- the sanitized string `renderMarkdown` in `src/client/render/markdown.ts` returns, produced under a jsdom window -- got headings, code, tints and real fitted columns; the owner's verdict was "this approach using shr is absolutely 100% a success", and what the card draws from it is that a native buffer now draws closer to the browser than tuned `agent-shell` does.
-What it got right and wrong in detail, and the three Emacs facts the spike works around plus a fourth about the reload loop, are under "Rendering verdict, 2026-09-22" in OW-vibipo; the spike itself is `emacs/agentpane-spike.el`.
+What it got right and wrong in detail, and the three Emacs facts the spike works around plus a fourth about the reload loop, are under "Rendering verdict, 2026-09-22" in OW-vibipo; the spike itself was `emacs/agentpane-spike.el`, absorbed into `emacs/agentpane.el` and deleted by OW-wavone.
 
 What follows from it.
 The shim stream's cards closed `--declined` on 2026-09-22 citing this decision, OW-mikuyo among them because the shim it was to be judged from is not built, and the standalone read-only browser it deferred is OW-wavone's first deliverable.
