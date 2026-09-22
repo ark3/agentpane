@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, emacs-native]
 blocked-by: [OW-wavone]
+closed: done
 ---
 
 # agentpane-mode attaches a session, streams the tail into the transcript buffer, and prompts, aborts and compacts from a composer buffer, with the model chosen before the first prompt
@@ -60,3 +61,14 @@ The live run against Codex did not happen.
 That session's sandbox mounted `~/.codex` read-only, and `codex app-server` exited at attach with `failed to initialize sqlite state runtime under /home/ark3/.codex`, though 8468a02 (OW-vowire) records the backend state dirs as normally read-write.
 What remains is the second paragraph of "Done when", in a session whose sandbox can write `~/.codex`.
 Findings from the adversarial read went to OW-yoyiya, OW-kisemu, OW-nuwive and OW-gunaza, none of which the live run waits on.
+
+## Close note
+
+Built: `emacs/agentpane.el` attaches a session and drives its transcript buffer from `session/snapshot`, `session/node`, `session/status`, `session/renamed` and `session/error`; prompts from both a prompt region under the last node (`C-RET`) and an `agentpane-composer-mode` buffer (`C-c C-c`); aborts with `C-c C-a`; compacts; and `agentpane-new-session` creates, attaches, then picks the model via `models/list` and `sessions/setModel` before the first prompt, with `agentpane-set-model` refused once the buffer has nodes.
+The code and the ert tests landed on 2026-09-22 (4b3f15f, 3417bd5, 34cc455, cd6c245): `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit` ran 16 of 16 as expected, each new test shown red first.
+
+The live run against Codex was done in a second session on the home server, once `~/.codex` was mounted read-write: Emacs 31.1 in `--batch`, `codex-cli 0.156.0`, `bun 1.4.0`, agentpane at 74ca1d8, recorded in `docs/MANUAL_TESTING.md`, "The native Emacs mode drives a Codex session live (OW-gunuke)" (362671d).
+A session was created with `gpt-5.6-luna` chosen in the picker (the rollout's `turn_context` confirms it for both turns), a prompt sent from the prompt region streamed into the buffer (62 `session/node` notifications, the buffer growing across samples, the mode line reading `streaming` until the turn ended at 2.9s), and a second prompt sent from the composer was aborted 3.2s in, with `isStreaming: false` arriving 0.03s later and the partial reply left drawn.
+
+What the run found went to cards: the aborted Codex turn carries no aborted mark live or in the stored preview and takes the previous turn's token figure (OW-yobuyi), and ordered-list markers render without a period (OW-futipo).
+A session stays attached, with its app-server running, after the helper that attached it exits; that is D12's deliberately unbuilt reaper, not a new finding.
