@@ -324,6 +324,26 @@ with the face on top."
     (shr-generic dom)
     (add-face-text-property start (point) 'agentpane-spike-th)))
 
+(defun agentpane-spike--lift-emphasis (beg end)
+  "Move `bold' and `italic' to the front of every face list between BEG and END.
+shr prepends `shr-text' to a run after the emphasis face is already on it,
+so the list reads `(shr-text bold)'; `shr-text' inherits `variable-pitch',
+and the owner's `variable-pitch' sets `:weight regular' outright, which
+then beats `bold' (measured 2026-09-22: the bold run drew in IBM Plex Sans
+at weight regular).  In front, the emphasis face wins."
+  (let ((pos beg))
+    (while (< pos end)
+      (let ((next (or (next-single-property-change pos 'face nil end) end))
+            (faces (get-text-property pos 'face)))
+        (when (and (consp faces) (not (keywordp (car faces))))
+          (let ((lifted faces))
+            (dolist (face '(italic bold))
+              (when (memq face lifted)
+                (setq lifted (cons face (delq face (copy-sequence lifted))))))
+            (unless (equal lifted faces)
+              (put-text-property pos next 'face lifted))))
+        (setq pos next)))))
+
 (defun agentpane-spike--insert-html (html)
   "Draw HTML, the browser's rendering of one text part, through shr at point.
 Filling is left to `visual-line-mode', as the markdown backend does, and
@@ -347,6 +367,7 @@ the same visual-wrap pass gives wrapped list rows their hanging indent."
            (th . agentpane-spike--shr-th)))
         (start (point)))
     (shr-insert-document dom)
+    (agentpane-spike--lift-emphasis start (point))
     ;; `shr-tag-table' sets `truncate-lines' in the buffer it draws into, so
     ;; one table would switch the whole transcript from wrapping to
     ;; truncation (Emacs 31.1.50, measured 2026-09-21). Wide tables then wrap
@@ -582,6 +603,10 @@ edge, with a blank line on either side.  Neither carries a role label."
   ;; code and table faces inherit `fixed-pitch', so they stay monospace
   ;; under the remapped default.
   (buffer-face-set 'agentpane-spike-prose)
+  ;; A little more leading than Emacs's default, toward the browser's 1.55
+  ;; line height; the owner asked for "slightly" on 2026-09-22, and 0.15 is
+  ;; the value their agent-shell setup already uses.
+  (setq-local line-spacing 0.15)
   ;; `fixed-pitch' carries a family and no height, so under the proportional
   ;; default above it would take the prose face's size, larger than the
   ;; default face's (measured 2026-09-22: 19px against 15px in an ordinary
