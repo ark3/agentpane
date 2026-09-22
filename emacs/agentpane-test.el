@@ -192,6 +192,31 @@ sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
         (agentpane-set-model "gpt-5.6-luna")
         (should (equal (reverse sent) '(sessions/attach sessions/setModel)))))))
 
+(ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
+  "Undo in the prompt region undoes the draft, never a node redraw that
+arrived while it was being typed."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (buffer-enable-undo)
+      (goto-char (point-max))
+      (insert "hello")
+      (undo-boundary)
+      (agentpane--on-notification
+       nil 'session/node
+       (list :session ref :node (agentpane-test--assistant 1 "<p>Streaming more.</p>")))
+      (undo-boundary)
+      (let ((last-command nil)) (undo))
+      (should (string-search "Streaming more." (buffer-string)))
+      (should-not (string-search "Looking." (buffer-string)))
+      (should-not (string-search "hello" (buffer-string))))))
+
+(ert-deftest agentpane-test-typed-prompt-is-not-dim ()
+  "Text typed into the prompt region does not inherit the separator's face."
+  (agentpane-test--with-session '(:backend "codex" :id "t1")
+    (goto-char (point-max))
+    (let ((last-command-event ?h)) (self-insert-command 1))
+    (should-not (get-text-property (1- (point-max)) 'face))))
+
 ;;;; The helper connection, against a fake helper
 
 (defconst agentpane-test--root

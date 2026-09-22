@@ -63,7 +63,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 12 tests, 12 results as expected, 0 unexpected
+;;     Ran 14 tests, 14 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -700,22 +700,23 @@ Replaces every node the buffer held and leaves the prompt region below them
 as it was; expanded folds survive the redraw, since they are keyed by node
 index and part ordinal rather than by position.  Point goes to the first
 node."
-  (let ((inhibit-read-only t))
-    (delete-region (point-min) agentpane--prompt-separator)
-    (goto-char (point-min))
-    (setq agentpane--ewoc
-          (ewoc-create #'agentpane--pp
-                       (and header (propertize (concat header "\n")
-                                               'face 'agentpane-dim
-                                               'read-only t
-                                               'front-sticky '(read-only)))
-                       nil
-                       t))
-    (seq-doseq (node nodes)
-      (ewoc-enter-last agentpane--ewoc node))
-    (goto-char (point-min))
-    (when (ewoc-nth agentpane--ewoc 0)
-      (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))
+  (agentpane--above-prompt
+   (lambda ()
+     (delete-region (point-min) agentpane--prompt-separator)
+     (goto-char (point-min))
+     (setq agentpane--ewoc
+           (ewoc-create #'agentpane--pp
+                        (and header (propertize (concat header "\n")
+                                                'face 'agentpane-dim
+                                                'read-only t
+                                                'front-sticky '(read-only)))
+                        nil
+                        t))
+     (seq-doseq (node nodes)
+       (ewoc-enter-last agentpane--ewoc node))
+     (goto-char (point-min))
+     (when (ewoc-nth agentpane--ewoc 0)
+       (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0))))))
 
 (defun agentpane--upsert (node)
   "Redraw the drawn node whose index is NODE's in place, or append NODE.
@@ -729,13 +730,40 @@ buffer before, at the end after."
                      (let ((at (ewoc-nth agentpane--ewoc -1)))
                        (while (and at (not (eql index (plist-get (ewoc-data at) :index))))
                          (setq at (ewoc-prev agentpane--ewoc at)))
-                       at)))
-         (inhibit-read-only t))
-    (if drawn
-        (progn
-          (ewoc-set-data drawn node)
-          (ewoc-invalidate agentpane--ewoc drawn))
-      (ewoc-enter-last agentpane--ewoc node))))
+                       at))))
+    (agentpane--above-prompt
+     (lambda ()
+       (if drawn
+           (progn
+             (ewoc-set-data drawn node)
+             (ewoc-invalidate agentpane--ewoc drawn))
+         (ewoc-enter-last agentpane--ewoc node))))))
+
+(defun agentpane--above-prompt (redraw)
+  "Call REDRAW, which changes only the read-only text above the prompt region.
+The change is kept out of `buffer-undo-list', whose entries are then all the
+draft's and are shifted by the change in size, since they record absolute
+positions: otherwise undo in the prompt region would reverse a node redraw,
+or a node that grew would leave the draft's entries pointing into it."
+  (let ((size (buffer-size)))
+    (let ((buffer-undo-list t)
+          (inhibit-read-only t))
+      (funcall redraw))
+    (let ((delta (- (buffer-size) size)))
+      (unless (or (zerop delta) (eq buffer-undo-list t))
+        (setq buffer-undo-list
+              (mapcar (lambda (entry)
+                        (pcase entry
+                          ((pred integerp) (+ entry delta))
+                          (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                           (cons (+ beg delta) (+ end delta)))
+                          ;; A negative position records point at the text's end.
+                          (`(,(and text (pred stringp)) . ,(and pos (pred integerp)))
+                           (cons text (if (< pos 0) (- pos delta) (+ pos delta))))
+                          (`(nil ,prop ,value ,beg . ,end)
+                           `(nil ,prop ,value ,(+ beg delta) . ,(+ end delta)))
+                          (_ entry)))
+                      buffer-undo-list))))))
 
 (defun agentpane--keeping-points (redraw)
   "Call REDRAW, which replaces every node, keeping point and each window's point.
@@ -798,7 +826,7 @@ the prompt region below it is the one place the buffer takes typing."
                         'face 'agentpane-dim
                         'read-only t
                         'front-sticky '(read-only)
-                        'rear-nonsticky '(read-only)))
+                        'rear-nonsticky t))
     (setq agentpane--prompt-separator (copy-marker (point-min) t))
     (setq agentpane--prompt-start (point-marker))
     (overlay-put (make-overlay (point) (point) nil nil t)
@@ -885,8 +913,7 @@ buffer resolve to the first and last."
     (if (agentpane--expanded-p key)
         (remhash key agentpane--folds)
       (puthash key t agentpane--folds))
-    (let ((inhibit-read-only t))
-      (ewoc-invalidate ewoc node))
+    (agentpane--above-prompt (lambda () (ewoc-invalidate ewoc node)))
     (agentpane--goto-fold key)))
 
 (defun agentpane--ref (summary)
