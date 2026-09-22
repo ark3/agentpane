@@ -2297,7 +2297,18 @@ OW-bonode was filed on a reading of `jsonrpc.el` that a picker refetch, started 
 `emacs/fake-helper.ts` provokes exactly that nesting: `sessions/preview` pushes `sessions/changed` and holds its reply until the refetch's `sessions/list` arrives, then answers both, in either order.
 Against the synchronous code of 7b35eab the picker did draw the second listing, because 1.0.29 parks an outer reply that arrives during an inner request as an "anxious continuation" and runs it after the inner one (bug#67945); the events buffer read `anxious continuation to 2 can't run, held up by ((:local 3) (:local 2))` and then `anxious continuation to 2 running now`.
 The outer call, though, returned at 10.07s with both replies in by 0.3s, preview first or listing first alike, and with `jsonrpc-default-request-timeout` set to 3 it returned at 3.07s: it waits out its own timeout's deadline before its continuation runs.
-The mode's requests are asynchronous since 11fe27d, and the ert tests `agentpane-test-nested-refetch-*` hold the pair to two seconds; both failed against 7b35eab at 9.8s and 10.0s.
+The mode's requests are asynchronous since 11fe27d, and the ert tests `agentpane-test-nested-refetch-*` hold the pair to two seconds.
+Both fail against the synchronous code.
+7b35eab has no `agentpane-shutdown`, which the tests' cleanup calls, so the red run loads 7b35eab's `emacs/agentpane.el` and defines one that only deletes the helper's process:
+
+```
+mkdir -p /tmp/old && git show 7b35eab:emacs/agentpane.el > /tmp/old/agentpane.el
+emacs --batch -L /tmp/old -L emacs -l ert -l agentpane \
+  --eval '(defun agentpane-shutdown () (when agentpane--connection (delete-process (jsonrpc--process agentpane--connection))))' \
+  -l emacs/agentpane-test.el --eval '(ert-run-tests-batch-and-exit "nested")'
+```
+
+It ended `Ran 2 tests, 0 results as expected, 2 unexpected`, each failing `(should (< (- (float-time) start) 2))`, at 10.01s and 9.82s.
 
 **The helper exits on stdin close, event stream open or not.**
 Driven from a Python 3.14 script that started `bun run src/emacs/main.ts` on a pipe, slept, closed its stdin and timed the exit: after sleeping 2s or 3s it exited with code 0 in 0.016s; after 0s or 0.5s it exited with code 0 in 1.216s and 0.715s, since it reads nothing until its markdown renderer has loaded, about 1.2s after start.
