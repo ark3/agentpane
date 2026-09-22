@@ -130,8 +130,7 @@ The connection is torn down afterwards, and every buffer BODY made with it."
                                   :noquery t
                                   :stderr (get-buffer-create "*agentpane stderr*"))))))
        (unwind-protect (progn ,@body)
-         (when agentpane--connection
-           (delete-process (jsonrpc--process agentpane--connection)))
+         (agentpane-shutdown)
          (dolist (buffer (buffer-list))
            (unless (memq buffer buffers) (kill-buffer buffer)))))))
 
@@ -173,6 +172,28 @@ transcript's reply arriving first."
   "A picker refetch started during a transcript refetch lands promptly, the
 picker's reply arriving first."
   (agentpane-test--nested-refetch "inner-first"))
+
+(ert-deftest agentpane-test-shutdown-ends-the-helper ()
+  "The real helper the mode starts exits cleanly on `agentpane-shutdown' and
+is gone from the process table.  Needs `bun install' in the checkout, and
+no agentpane server: the request that shows the helper is reading its
+input is one it answers itself."
+  (let ((agentpane--connection nil)
+        (agentpane-project-directory agentpane-test--root))
+    (let* ((connection (agentpane--connection))
+           (process (jsonrpc--process connection))
+           (pid (process-id process)))
+      ;; Until the helper has loaded its renderer, about a second, it is not
+      ;; reading stdin, and its exit would miss `jsonrpc-shutdown''s grace.
+      (should (eq 'jsonrpc-error
+                  (car (should-error (jsonrpc-request connection 'agentpane-test/unknown
+                                                      :jsonrpc-omit :timeout 10)))))
+      (should (process-attributes pid))
+      (agentpane-shutdown)
+      (should-not agentpane--connection)
+      (should (eq (process-status process) 'exit))
+      (should (eql (process-exit-status process) 0))
+      (should-not (process-attributes pid)))))
 
 (provide 'agentpane-test)
 

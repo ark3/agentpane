@@ -27,6 +27,8 @@
 ;; attached a session, which no command in this slice does: the helper
 ;; opens its event stream from `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n' and `p' step between nodes, `TAB'
 ;; toggles the fold at point, `g' refetches, and `q' buries.
+;; `M-x agentpane-shutdown' stops the helper; the next command that needs
+;; it starts a fresh one.
 ;;
 ;; Nothing beyond what Emacs ships is required: text parts are drawn through
 ;; `shr' from the HTML the helper sends beside each part's markdown source,
@@ -36,10 +38,10 @@
 ;; keyword keys, arrays as vectors, JSON null as nil and false as
 ;; `:json-false', and the drawing functions below take exactly that shape.
 ;;
-;; Drawing a fixed node list into a buffer, and the helper connection
-;; against a fake helper (emacs/fake-helper.ts, which needs `bun' on the
-;; PATH), are covered by `ert' tests in agentpane-test.el, run from the
-;; repository root with
+;; Drawing a fixed node list into a buffer, the helper connection against a
+;; fake helper (emacs/fake-helper.ts), and `agentpane-shutdown' against the
+;; real one are covered by `ert' tests in agentpane-test.el, which need `bun'
+;; on the PATH and `bun install' done, run from the repository root with
 ;;
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
@@ -47,7 +49,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 6 tests, 6 results as expected, 0 unexpected
+;;     Ran 7 tests, 7 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -239,6 +241,18 @@ connection named \"agentpane\", so the helper's own stderr lands there."
                          :notification-dispatcher #'agentpane--on-notification
                          :on-shutdown (lambda (_conn) (setq agentpane--connection nil)))))
   agentpane--connection)
+
+(defun agentpane-shutdown ()
+  "Stop the helper, if one is running.
+Its stdin is closed first, since that is what the helper exits on
+\(`runHelper' in src/emacs/helper.ts); `jsonrpc-shutdown' does not close
+it, and after 0.3s without an exit it warns and kills the process.  Once
+the helper is reading its input, it exited within 0.1s of the close, event
+stream open or not (Emacs 31.1, bun 1.4.0, measured 2026-09-22)."
+  (interactive)
+  (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
+    (process-send-eof (jsonrpc--process agentpane--connection))
+    (jsonrpc-shutdown agentpane--connection)))
 
 (defvar-local agentpane--latest-request nil
   "The id of this buffer's most recent request to the helper.")
