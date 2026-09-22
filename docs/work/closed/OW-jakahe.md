@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A stored Codex session whose shell runs arrived as exec_command function calls previews every one of them as an argument-key list instead of the command
@@ -32,3 +33,17 @@ Tests in `src/server/sessions/preview.test.ts`, beside the existing `function_ca
 A `function_call` under any other name still previews under its raw name, so the `wait_agent` and `spawn_agent` calls in the same sessions are untouched.
 The `docs/DESIGN.md` note that names `commandExecution` as the shell item states the version it was measured on and adds the `exec_command` observation with its version.
 Rerun `bun run src/emacs/dump-nodes.ts codex/01a0c449-2767-73e2-8b2b-dd67cf4d6c1a` on the laptop and the summary lines carry the commands.
+
+## Close note
+
+Closed 2026-09-22 on the home server.
+
+Measured first, since the card left open what the live path calls the run: one live `codex app-server` turn on `codex-cli 0.155.1` presented it as `commandExecution`, which `CODEX_TOOL_NAMES` already renames to `bash`, so the preview was the side to fix.
+The same measurement found the home server's rollouts store the run not as the laptop's `function_call` named `exec_command` but as a `custom_tool_call` named `exec` whose input is a script calling `tools.exec_command({cmd, workdir, ...})`, 2280 of them and none of the other shape; the card was amended with that before dispatch.
+Evidence: `docs/MANUAL_TESTING.md`, "A Codex shell run is `commandExecution` live and `exec` or `exec_command` on disk (OW-jakahe)"; `docs/DESIGN.md` gained a note beside the Codex item table naming the version.
+
+Built, in `src/server/sessions/codex.ts`: both stored shapes preview as a `toolCall` named `bash` with `{command, cwd}` and record `bash` for the following output item; the `exec` script's `cmd` and `workdir` are lifted by matching the key, bare or quoted, followed by one JSON-escaped string literal; a script without `cmd` previews as before.
+Tests in `src/server/sessions/preview.test.ts`: shape A, shape B with bare and with quoted keys, and a non-`exec_command` script left alone; the first three were red before the fix.
+`bun run check` passed (51 files, 1141 tests).
+Rerunning `bun run src/emacs/dump-nodes.ts` on a home-server session with three `exec_command` runs shows each as `bash` with its command; the `write_stdin` and patch scripts under the same `exec` tool still show the raw script, and the stored result's `Script completed` preamble remains, both filed as OW-zabiko.
+Commits 2716a77, 79ac7b5, 7cc91bf.
