@@ -87,10 +87,13 @@ browser's `border-left' on `.msg.user', in its `--ap-accent' for each theme.")
   "Face for an assistant turn's meta line: the browser's `.meta', small and subtle.")
 
 (defface agentpane-spike-code-block
-  '((((background dark)) :background "#161b22" :extend t)
-    (((background light)) :background "#f4f6f8" :extend t))
+  '((((background dark)) :background "#1b1f27" :extend t)
+    (((background light)) :background "#f5f6f8" :extend t))
   "Background behind a fenced code block drawn through shr, after the
-browser's tinted `pre.ap-code'.")
+browser's tinted `pre.ap-code'.  The browser sinks it below its page; the
+owner's dark theme is already darker than that page, so here the block
+lifts instead, a step under the user turn's surface.  The first tint,
+\"#161b22\", was too close to the theme's \"#0E1415\" to read (2026-09-22).")
 
 ;; The shr backend's typography copies `Markdown.svelte''s stylesheet, each
 ;; number a ratio to the browser's body size (`--ap-text-md', 0.9375rem):
@@ -267,8 +270,11 @@ copy is insurance for an Emacs where font-lock does get switched on there."
       (add-face-text-property start (point) face))))
 
 (defun agentpane-spike--shr-pre (dom)
-  "Draw DOM, a pre block, as shr does, in code on the code-block background."
-  (shr-ensure-newline)
+  "Draw DOM, a pre block, as shr does, in code on the code-block background.
+Opened with a paragraph break rather than shr's bare newline: after a
+table, shr's own `pre' sat flush against the last row (2026-09-22), where
+the browser gives both blocks a margin."
+  (shr-ensure-paragraph)
   (let ((start (point))
         (agentpane-spike--in-pre t))
     (shr-tag-pre dom)
