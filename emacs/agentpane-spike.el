@@ -33,20 +33,13 @@
 (require 'diff-mode)
 (require 'markdown-mode)
 (require 'text-property-search)
+(require 'visual-wrap)
 
 ;;;; Faces
 
 (defgroup agentpane-spike nil
   "Rendering spike for agentpane transcript nodes."
   :group 'applications)
-
-(defface agentpane-spike-role-user
-  '((t :inherit font-lock-keyword-face :weight bold))
-  "Face for the role line of a user node.")
-
-(defface agentpane-spike-role-assistant
-  '((t :inherit font-lock-function-name-face :weight bold))
-  "Face for the role line of an assistant node.")
 
 (defface agentpane-spike-role-other
   '((t :inherit font-lock-type-face :weight bold))
@@ -67,6 +60,31 @@
 (defface agentpane-spike-warning
   '((t :inherit warning))
   "Face for an aborted or errored turn and an errored tool call.")
+
+(defface agentpane-spike-prose
+  '((t :inherit variable-pitch))
+  "Face the buffer's `default' is remapped to: proportional prose at the same
+size as the owner's markdown buffers.  Code, tables and diffs stay monospace
+by inheriting `fixed-pitch'.")
+
+(defface agentpane-spike-user-box
+  '((((background dark)) :background "#1f2733" :extend t)
+    (((background light)) :background "#eef2f8" :extend t))
+  "Face tinting a user turn, the browser's one raised surface in the transcript.
+Appended under the markdown faces, so it supplies only the background.")
+
+(defface agentpane-spike-user-bar
+  '((t :inherit font-lock-keyword-face))
+  "Face for the accent bar down the left edge of a user turn, after the
+browser's `border-left' on `.msg.user'.")
+
+(defface agentpane-spike-meta
+  '((t :inherit shadow :height 0.8))
+  "Face for an assistant turn's meta line: the browser's `.meta', small and subtle.")
+
+(defconst agentpane-spike--bar "▌ "
+  "The accent bar and the gap after it, carried as `line-prefix' and
+`wrap-prefix' on every line of a user turn so wrapped rows keep it.")
 
 ;;;; State
 
@@ -114,8 +132,21 @@ copy is insurance for an Emacs where font-lock does get switched on there."
   "Return TEXT, markdown source, fontified with `markdown-mode's keywords."
   (with-temp-buffer
     (insert text)
-    (delay-mode-hooks (markdown-mode))
+    ;; Bound around the mode call, since the mode reads both when it starts:
+    ;; hidden markup (`**', backticks, `#') is how the browser reads, where
+    ;; the source characters never show, and native fences are what the
+    ;; owner's init sets globally but batch runs do not.
+    (let ((markdown-hide-markup t)
+          (markdown-fontify-code-blocks-natively t))
+      (delay-mode-hooks (markdown-mode)))
     (font-lock-ensure)
+    ;; Hanging indents for list items and block quotes, as the owner's
+    ;; markdown buffers get from `visual-wrap-prefix-mode'. Run here, over
+    ;; markdown-mode's adaptive-fill settings, rather than in the ewoc
+    ;; buffer: there the mode would also rewrite the user turn's bar prefix.
+    ;; The `wrap-prefix' and `min-width' properties it leaves are plain text
+    ;; properties and travel with the string.
+    (visual-wrap-prefix-function (point-min) (point-max))
     (agentpane-spike--freeze-faces (point-min) (point-max))
     (buffer-string)))
 
@@ -175,7 +206,12 @@ either, and BODY is invisible unless KEY is expanded."
                       result
                     (propertize "(none)" 'face 'agentpane-spike-dim)))
           chunks)
-    (mapconcat #'identity (nreverse chunks) "\n")))
+    (let ((body (mapconcat #'identity (nreverse chunks) "\n")))
+      ;; Arguments, results and diffs are column-aligned text: keep them
+      ;; monospace under the buffer's proportional default. Appended, so the
+      ;; diff faces already on the text keep every attribute but the family.
+      (add-face-text-property 0 (length body) 'fixed-pitch t body)
+      body)))
 
 (defun agentpane-spike--insert-tool (key part)
   "Insert a tool PART under fold KEY."
@@ -202,9 +238,10 @@ either, and BODY is invisible unless KEY is expanded."
      (redacted
       (agentpane-spike--insert-fold
        key (propertize "thinking (redacted)" 'face 'agentpane-spike-thinking) nil))
-     ((string-empty-p text)
-      (agentpane-spike--insert-fold
-       key (propertize "thinking (empty)" 'face 'agentpane-spike-thinking) nil))
+     ;; A signature-only block, which is every thinking part a Claude Code
+     ;; store carried on 2026-09-21: the browser's `Thinking.svelte' renders
+     ;; nothing for it, so neither does this.
+     ((string-empty-p text) nil)
      (t
       (let* ((split (string-search "\n" text))
              (head (if split (substring text 0 split) text))
@@ -234,16 +271,17 @@ either, and BODY is invisible unless KEY is expanded."
                            'face 'agentpane-spike-warning)
                "\n")))))
 
-(defun agentpane-spike--insert-meta (meta)
-  "Insert the meta line for an assistant node from META."
+(defun agentpane-spike--insert-meta (index meta)
+  "Insert the meta line for the assistant node at INDEX from META."
   (let* ((usage (agentpane-spike--get 'usage meta))
          (stop (agentpane-spike--get 'stopReason meta))
          (error-message (agentpane-spike--get 'errorMessage meta))
          (effort (agentpane-spike--get 'effort meta))
-         (face (if stop 'agentpane-spike-warning 'agentpane-spike-dim))
+         (face (if stop 'agentpane-spike-warning 'agentpane-spike-meta))
          (fields
           (delq nil
-                (list (let ((model (agentpane-spike--get 'model meta)))
+                (list (format "#%s" index)
+                      (let ((model (agentpane-spike--get 'model meta)))
                         (if (or (null model) (string-empty-p model)) "model ?" model))
                       (and effort (format "effort %s" effort))
                       (format "%s tokens" (or (agentpane-spike--get 'totalTokens usage) 0))
@@ -253,27 +291,58 @@ either, and BODY is invisible unless KEY is expanded."
     (insert (propertize (concat "— " (mapconcat #'identity fields " · ")) 'face face)
             "\n")))
 
-(defun agentpane-spike--role-face (role)
-  "The face for a role line naming ROLE."
-  (pcase role
-    ("user" 'agentpane-spike-role-user)
-    ("assistant" 'agentpane-spike-role-assistant)
-    (_ 'agentpane-spike-role-other)))
+(defun agentpane-spike--bar-wrap-prefixes (beg end bar)
+  "Give every line between BEG and END a `wrap-prefix' that starts with BAR.
+Where a text part already carries visual-wrap's hanging indent, the bar goes
+in front of a space as wide as the indent, so a wrapped list item still lines
+up under its own first line, whose marker visual-wrap gave that same
+`min-width'; where there is none, the wrapped row gets the bar alone.  The
+space is `:width', not `:align-to': an `:align-to' inside a prefix string did
+not resolve against the text area on Emacs 31.1.50 (measured 2026-09-21),
+and a fixed width needs no position."
+  (let ((pos beg))
+    (while (< pos end)
+      (let* ((next (or (next-single-property-change pos 'wrap-prefix nil end) end))
+             (existing (get-text-property pos 'wrap-prefix))
+             (prefix
+              (pcase existing
+                ((pred stringp) (concat bar existing))
+                (`(space :align-to ,col)
+                 (concat bar (propertize " " 'display `(space :width ,col))))
+                (_ bar))))
+        (put-text-property pos next 'wrap-prefix prefix)
+        (setq pos next)))))
 
 (defun agentpane-spike--pp (node)
-  "Pretty-print NODE, one transcript node alist, at point."
-  (let ((index (agentpane-spike--get 'index node))
-        (role (agentpane-spike--get 'role node))
-        (ordinal 0))
-    (insert (propertize role 'face (agentpane-spike--role-face role))
-            (propertize (format " #%s" index) 'face 'agentpane-spike-dim)
-            "\n")
-    (dolist (part (agentpane-spike--get 'parts node))
-      (agentpane-spike--insert-part index ordinal part)
-      (setq ordinal (1+ ordinal)))
-    (let ((meta (agentpane-spike--get 'meta node)))
-      (when meta (agentpane-spike--insert-meta meta)))
-    (insert "\n")))
+  "Pretty-print NODE, one transcript node alist, at point.
+The layout follows the browser's `Message.svelte': an assistant turn is plain
+text on the page, closed by its small meta line and nothing else, so
+consecutive assistant turns run together the way they do there; a user turn
+is the one raised surface, a tinted box with an accent bar down its left
+edge, with a blank line on either side.  Neither carries a role label."
+  (let* ((index (agentpane-spike--get 'index node))
+         (role (agentpane-spike--get 'role node))
+         (userp (equal role "user"))
+         (ordinal 0))
+    (when userp (insert "\n"))
+    (unless (or userp (equal role "assistant"))
+      (insert (propertize role 'face 'agentpane-spike-role-other) "\n"))
+    (let ((body-start (point)))
+      (dolist (part (agentpane-spike--get 'parts node))
+        (agentpane-spike--insert-part index ordinal part)
+        (setq ordinal (1+ ordinal)))
+      (let ((meta (agentpane-spike--get 'meta node)))
+        (when meta (agentpane-spike--insert-meta index meta)))
+      (when userp
+        ;; The bar runs down the box's left edge, and `wrap-prefix' carries it
+        ;; onto the rows `visual-line-mode' wraps. Nothing here uses
+        ;; `visual-wrap-prefix-mode', which would write its own `wrap-prefix'
+        ;; over this one; hanging indents for wrapped list items are the price.
+        (let ((bar (propertize agentpane-spike--bar 'face 'agentpane-spike-user-bar)))
+          (put-text-property body-start (point) 'line-prefix bar)
+          (agentpane-spike--bar-wrap-prefixes body-start (point) bar)
+          (add-face-text-property body-start (point) 'agentpane-spike-user-box t))))
+    (when userp (insert "\n"))))
 
 ;;;; Mode and commands
 
@@ -292,7 +361,20 @@ either, and BODY is invisible unless KEY is expanded."
 \\{agentpane-spike-mode-map}"
   (setq-local agentpane-spike--folds (make-hash-table :test #'equal))
   (add-to-invisibility-spec '(agentpane-spike . t))
-  (setq truncate-lines nil))
+  ;; The markup markdown-mode hid when it fontified each text part stays
+  ;; hidden here only if this buffer's spec names the same symbol.
+  (add-to-invisibility-spec 'markdown-markup)
+  ;; Proportional prose and word wrap at the window edge; markdown-mode's
+  ;; code and table faces inherit `fixed-pitch', so they stay monospace
+  ;; under the remapped default.
+  (buffer-face-set 'agentpane-spike-prose)
+  (setq truncate-lines nil)
+  (visual-line-mode 1)
+  ;; The owner's init hooks `visual-wrap-prefix-mode' onto `visual-line-mode',
+  ;; and that mode rewrites `wrap-prefix' with its own hanging indent, which
+  ;; erased the gutter bar from every wrapped row (measured 2026-09-21).
+  (when (bound-and-true-p visual-wrap-prefix-mode)
+    (visual-wrap-prefix-mode -1)))
 
 (defun agentpane-spike--ewoc ()
   "This buffer's ewoc, or signal an error outside a rendered buffer."
