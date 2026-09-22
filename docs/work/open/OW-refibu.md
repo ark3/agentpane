@@ -6,6 +6,7 @@ blocked-by: [OW-mutufa]
 # A Bun helper speaks JSON-RPC over stdio to Emacs, as a client of the HTTP API, exposing the REST verbs and pushing projected nodes as notifications
 
 Filed 2026-09-15, the native-mode stream (see OW-mutufa for the stream and its reason).
+D22 chose this stream on 2026-09-22, on OW-dekate's evidence; the shim cards it names are closed and read only for prior art.
 The counterpart of OW-basoga: the same process in the same place, speaking to a different client.
 OW-basoga's paragraphs on shape, on why the process lives outside `src/server/`, and on the event-stream rules are all true here and are not repeated; read them, then this.
 
@@ -37,6 +38,13 @@ Names and payloads in `src/emacs/protocol.ts` beside the node shape from OW-mutu
 Errors: an `ApiClientError` becomes the JSON-RPC error with the server's `error` and `detail` text carried through untouched, so a mid-turn prompt rejection (D16) reads in Emacs exactly as it does in the browser.
 The helper enforces nothing the server does not; the one gate the browser adds in `src/client/controller.ts` `loadModelsForSelected`, model choice only before the first prompt, is the mode's to enforce, and the mode card says how.
 
+## Text parts carry the browser's HTML
+
+Every text part in a node the helper sends, in `sessions/preview` and in the notifications below alike, carries an `html` field beside `text`: the sanitized string `renderMarkdown` in `src/client/render/markdown.ts` returns for that markdown, which is what OW-wavone's buffer draws through `shr` (D22).
+`src/emacs/dump-nodes.ts` already produces it outside a browser, under a jsdom window, for the OW-dekate spike; lift that into the projection so `TextPart` in `src/emacs/protocol.ts` gains the field and the dump script's own `SpikeTextPart` goes away.
+`protocol.ts` is a frozen interface in D11's sense and this card is the raise: the change retires its text-part comment "Nothing on this path renders HTML; Emacs fontifies" and the `dump-nodes.ts` docblock's "not part of the node contract in `protocol.ts`, and `projectTranscript` never produces it", both of which the field makes false.
+Where the jsdom window is created, and its cost per node on a long transcript, is the implementer's to measure and record in the docblock: the projection runs on every upsert while a turn streams, and `src/emacs/nodes.test.ts` runs in node, so the tests need the window the projection needs.
+
 ## Notifications, one per reduced event
 
 The helper feeds every `ServerEvent` through `reduceServerEvent` in `src/client/session-state.ts` and emits what the buffer needs after the reducer has applied the rules the browser learned: re-key on `renamed`, re-snapshot on a `seq` gap, REST and SSE unordered (D2).
@@ -50,6 +58,6 @@ The helper feeds every `ServerEvent` through `reduceServerEvent` in `src/client/
 
 ## Done when
 
-Tests in `src/emacs/` drive the stdio loop against an injected fetch and event source, in node: a list request returns summaries; a preview request returns nodes and opens no event stream; an attach followed by a snapshot and two upserts yields one `session/snapshot` and two `session/node` notifications in order; a `seq` gap yields a fresh snapshot; a `renamed` event yields `session/renamed` before the snapshot that follows it; a prompt whose server rejection arrives yields a JSON-RPC error carrying the server's text.
+Tests in `src/emacs/` drive the stdio loop against an injected fetch and event source, in node: a list request returns summaries; a preview request returns nodes, each text part carrying a non-empty `html` alongside its `text`, and opens no event stream; an attach followed by a snapshot and two upserts yields one `session/snapshot` and two `session/node` notifications in order; a `seq` gap yields a fresh snapshot; a `renamed` event yields `session/renamed` before the snapshot that follows it; a prompt whose server rejection arrives yields a JSON-RPC error carrying the server's text.
 A framing test feeds two messages in one chunk and one message across two chunks and reads both back intact.
 `bun run check` passes; `bun run test:browser` is not involved.
