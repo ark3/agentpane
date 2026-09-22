@@ -63,7 +63,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 14 tests, 14 results as expected, 0 unexpected
+;;     Ran 16 tests, 16 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -744,26 +744,29 @@ buffer before, at the end after."
 The change is kept out of `buffer-undo-list', whose entries are then all the
 draft's and are shifted by the change in size, since they record absolute
 positions: otherwise undo in the prompt region would reverse a node redraw,
-or a node that grew would leave the draft's entries pointing into it."
+or a node that grew would leave the draft's entries pointing into it.  The
+shift is in place, since undo tracks the list by its cells: `undo-equiv-table'
+and `pending-undo-list' hold them, and a fresh list breaks consecutive undo
+and `undo-redo' across a redraw."
   (let ((size (buffer-size)))
     (let ((buffer-undo-list t)
           (inhibit-read-only t))
       (funcall redraw))
     (let ((delta (- (buffer-size) size)))
       (unless (or (zerop delta) (eq buffer-undo-list t))
-        (setq buffer-undo-list
-              (mapcar (lambda (entry)
-                        (pcase entry
-                          ((pred integerp) (+ entry delta))
-                          (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
-                           (cons (+ beg delta) (+ end delta)))
-                          ;; A negative position records point at the text's end.
-                          (`(,(and text (pred stringp)) . ,(and pos (pred integerp)))
-                           (cons text (if (< pos 0) (- pos delta) (+ pos delta))))
-                          (`(nil ,prop ,value ,beg . ,end)
-                           `(nil ,prop ,value ,(+ beg delta) . ,(+ end delta)))
-                          (_ entry)))
-                      buffer-undo-list))))))
+        (let ((cell buffer-undo-list))
+          (while (consp cell)
+            (let ((entry (car cell)))
+              (pcase entry
+                ((pred integerp) (setcar cell (+ entry delta)))
+                (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                 (setcar cell (cons (+ beg delta) (+ end delta))))
+                ;; A negative position records point at the text's end.
+                (`(,(and text (pred stringp)) . ,(and pos (pred integerp)))
+                 (setcar cell (cons text (if (< pos 0) (- pos delta) (+ pos delta)))))
+                (`(nil ,prop ,value ,beg . ,end)
+                 (setcar cell `(nil ,prop ,value ,(+ beg delta) . ,(+ end delta))))))
+            (setq cell (cdr cell))))))))
 
 (defun agentpane--keeping-points (redraw)
   "Call REDRAW, which replaces every node, keeping point and each window's point.
@@ -820,8 +823,10 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
 (defun agentpane--insert-prompt-region ()
   "Insert the separator line and an empty prompt region into this empty buffer.
 The separator is read-only and does not stick to text typed after it, so
-the prompt region below it is the one place the buffer takes typing."
-  (let ((inhibit-read-only t))
+the prompt region below it is the one place the buffer takes typing.  It is
+kept out of undo, which would otherwise delete it past the last draft edit."
+  (let ((inhibit-read-only t)
+        (buffer-undo-list t))
     (insert (propertize "── prompt · C-RET sends ──\n"
                         'face 'agentpane-dim
                         'read-only t

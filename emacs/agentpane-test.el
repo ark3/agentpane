@@ -210,6 +210,53 @@ arrived while it was being typed."
       (should-not (string-search "Looking." (buffer-string)))
       (should-not (string-search "hello" (buffer-string))))))
 
+(defun agentpane-test--command (command)
+  "Run COMMAND as the command loop would, after an undo boundary."
+  (let ((this-command command))
+    (undo-boundary)
+    (call-interactively command)
+    (setq last-command this-command)))
+
+(ert-deftest agentpane-test-undo-chain-survives-a-redraw ()
+  "Consecutive undo keeps walking back, and `undo-redo' still redoes, across
+a node redraw that changed the buffer's size between the presses."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (grow (lambda (text)
+                (agentpane--on-notification
+                 nil 'session/node
+                 (list :session '(:backend "codex" :id "t1")
+                       :node (agentpane-test--assistant 1 text))))))
+    (agentpane-test--with-session ref
+      (buffer-enable-undo)
+      (setq last-command nil)
+      (goto-char (point-max))
+      (insert "hello ")
+      (undo-boundary)
+      (insert "world")
+      (agentpane-test--command 'undo)
+      (funcall grow "<p>Streaming a good deal more text than before.</p>")
+      (agentpane-test--command 'undo)
+      (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max)) ""))
+      (funcall grow "<p>Shorter.</p>")
+      (setq last-command 'ignore)
+      (agentpane-test--command 'undo-redo)
+      (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                     "hello ")))))
+
+(ert-deftest agentpane-test-undo-past-the-draft-keeps-the-prompt ()
+  "Undo past everything typed leaves the separator, and the prompt region
+still takes typing."
+  (agentpane-test--with-session '(:backend "codex" :id "t1")
+    (setq last-command nil)
+    (goto-char (point-max))
+    (insert "a")
+    (agentpane-test--command 'undo)
+    (ignore-errors (agentpane-test--command 'undo))
+    (should (string-search "── prompt" (buffer-string)))
+    (goto-char (point-max))
+    (insert "b")
+    (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max)) "b"))))
+
 (ert-deftest agentpane-test-typed-prompt-is-not-dim ()
   "Text typed into the prompt region does not inherit the separator's face."
   (agentpane-test--with-session '(:backend "codex" :id "t1")
