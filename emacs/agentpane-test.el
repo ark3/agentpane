@@ -264,6 +264,99 @@ still takes typing."
     (let ((last-command-event ?h)) (self-insert-command 1))
     (should-not (get-text-property (1- (point-max)) 'face))))
 
+;;;; Forking, against a stub connection
+
+(defmacro agentpane-test--forking (points forked &rest body)
+  "Run BODY with every request answered at once, as the helper would: POINTS
+for `sessions/forkPoints', FORKED for `sessions/fork', and a summary of the
+ref asked for for `sessions/attach'.  Each request is pushed onto `sent' as
+\(METHOD . PARAMS), and each `message' onto `said'; BODY sees both.  Every
+buffer BODY made is killed afterwards."
+  (declare (indent 2))
+  `(let ((sent nil)
+         (said nil)
+         (buffers (buffer-list)))
+     (cl-letf (((symbol-function 'agentpane--request)
+                (lambda (method params callback &optional _always)
+                  (push (cons method params) sent)
+                  (funcall callback
+                           (pcase method
+                             ('sessions/forkPoints ,points)
+                             ('sessions/fork ,forked)
+                             ('sessions/attach (list :ref (plist-get params :session)))))))
+               ((symbol-function 'message)
+                (lambda (format-string &rest args)
+                  (push (apply #'format format-string args) said))))
+       (unwind-protect (save-window-excursion ,@body)
+         (dolist (buffer (buffer-list))
+           (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(defun agentpane-test--goto-index (index)
+  "Move point to the drawn node whose index is INDEX."
+  (ewoc-goto-node agentpane--ewoc
+                  (seq-find (lambda (node) (eql (plist-get (ewoc-data node) :index) index))
+                            (let (nodes (node (ewoc-nth agentpane--ewoc 0)))
+                              (while node
+                                (push node nodes)
+                                (setq node (ewoc-next agentpane--ewoc node)))
+                              nodes))))
+
+(ert-deftest agentpane-test-fork-at-a-fork-point ()
+  "`agentpane-fork' on the node a fork point names sends `sessions/fork'
+with that point's id, and opens the fork in a buffer of its own, attached,
+leaving this one holding its session."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (forked '(:backend "codex" :id "t2")))
+    (agentpane-test--forking
+        [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
+        forked
+      (agentpane-test--with-session ref
+        (agentpane-test--goto-index 0)
+        (agentpane-fork)
+        (should (equal (assq 'sessions/fork sent)
+                       `(sessions/fork :session ,ref :entryId "turn-0")))
+        (should (equal (assq 'sessions/attach sent)
+                       `(sessions/attach :session ,forked)))
+        (let ((fork-buffer (agentpane--buffer-for forked)))
+          (should fork-buffer)
+          (should-not (eq fork-buffer buffer))
+          (should (agentpane--same-ref-p
+                   (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref)))))))
+
+(ert-deftest agentpane-test-fork-at-no-fork-point ()
+  "`agentpane-fork' on a node no fork point names sends no `sessions/fork'
+and says the message is not forkable."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking
+        [(:id "turn-0" :text "Fix the bug" :index 0)]
+        '(:backend "codex" :id "t2")
+      (agentpane-test--with-session ref
+        (agentpane-test--goto-index 1)
+        (agentpane-fork)
+        (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+        (should (seq-some (lambda (text) (string-search "not forkable" text)) said))))))
+
+(ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
+  "After a Pi fork, which leaves its parent detached on the server, the
+parent buffer attaches again before compacting, since the compact route
+answers only for an attached session."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl"))
+        (agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (setq sent nil)
+          (with-current-buffer buffer (agentpane-compact))
+          (should (equal (reverse sent)
+                         `((sessions/attach :session ,ref)
+                           (sessions/compact :session ,ref)))))))))
+
 ;;;; The helper connection, against a fake helper
 
 (defconst agentpane-test--root
