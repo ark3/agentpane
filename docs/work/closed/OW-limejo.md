@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs]
 blocked-by: [OW-basoga, OW-razoki]
+closed: declined
 ---
 
 # The ACP shim advertises fork so agent-shell-fork works from the tip, and a _meta entry id plus one Emacs command forks at an earlier message
@@ -27,3 +28,9 @@ That copy is the wrinkle; keep the command short and say in its docstring why th
 
 On the home server against Codex: `agent-shell-fork` opens a second shell whose transcript is the parent's, both shells accept a prompt afterwards, and the new command forks at a chosen earlier message and shows only the history up to it.
 A shim test asserts that `session/fork` with an entry id in `_meta` posts that id, and without one posts the last fork point.
+
+## Close note
+
+Declined 2026-09-22 under D22 in `docs/DESIGN.md`, decided in OW-vibipo: no ACP shim is built, so there is no `session/fork` to advertise.
+The reading this card did stands and moved the decision: the `_meta.agentpane.entryId` answer showed fork was not a differentiator between the streams (OW-vibipo, "Fork is not a differentiator between the streams").
+The two rules to keep whichever stream won are now OW-fojike's: the fork point comes from `sessions/forkPoints`, matched to the node at point by `index` and never counted from the buffer, and a message no point names is refused rather than forked from the tip.

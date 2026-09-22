@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: declined
 ---
 
 # A standalone read-only session browser in Emacs, talking to the HTTP API directly, is judged from use of the shim rather than built now
@@ -16,3 +17,9 @@ Its cost is a second renderer for message blocks in elisp, which will not share 
 
 Decide after using OW-basoga for a while.
 Done when the decision is recorded here on close: either the picker was enough and this is declined, or the tool is filed as its own `change` card with the browsing need it met written down.
+
+## Close note
+
+Declined 2026-09-22 under D22 in `docs/DESIGN.md`, decided in OW-vibipo: the shim this card deferred behind is not built, so there is no use of it to judge from.
+The browsing need it recorded, fast non-attaching previews over many sessions, is met head-on by the native stream: OW-wavone's first deliverable is a `tabulated-list-mode` session list and a read-only transcript buffer that spawns nothing, which is this card's deferred tool built as the mode's foundation rather than beside a shim.
+The second-renderer cost this card named is the cost OW-dekate measured and the owner accepted.

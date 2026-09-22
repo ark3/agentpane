@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: declined
 ---
 
 # A pure mapping turns agentpane transcripts into ACP session/update notifications, for replay and for streaming alike
@@ -43,3 +44,10 @@ Fixture input comes from the recordings under `resources/fixtures/` replayed thr
 Those recordings are RPC-stream captures, not store files, so `readSessionPreview` cannot read them; `src/server/sessions/preview.test.ts` says so in its docblock and synthesizes store lines by hand for that reason (corrected 2026-09-21, the card first said otherwise).
 The replay test and the streaming test share the mapping function, which is the point.
 `bun run check` passes.
+
+## Close note
+
+Declined 2026-09-22 under D22 in `docs/DESIGN.md`, decided in OW-vibipo: the Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, not `agent-shell` over an ACP shim, so no transcript-to-ACP mapping is written.
+What decided it was OW-dekate's rendering spike, not anything about this mapping.
+The pure-mapping shape survives in the native stream as OW-mutufa's node projection, already landed, and the streaming rules this card carried are in OW-refibu.
+Read for prior art if an ACP client is ever wanted again.

@@ -17,7 +17,7 @@ What they disliked was the rendering, which after significant tuning "now looks 
 Everything else the owner named liking is a property of Emacs rather than of `agent-shell`: staying in one editor, jumping to Magit and back, editing long messages in place, `RET` for newline and `C-RET` to submit, and a choice between typing at the bottom of the transcript and a separate composer buffer.
 A native mode gets all of those for a keymap and two commands (OW-gunuke carries the prompt modes).
 So the streams differ on rendering alone, and the claim this card tests is that an `ewoc` buffer drawing OW-mutufa's nodes with `markdown-mode` faces, folded tool results and `diff-mode` faces looks closer to the browser transcript than the tuned `agent-shell` does.
-That is a hypothesis, and D14's own history in `docs/DESIGN.md` says a UI decision comes from a rough cut looked at, not from argument.
+That is a hypothesis, and the owner's practice says a UI decision comes from a rough cut looked at, not from argument (this line cited D14's history when filed, which records no such thing; corrected 2026-09-22).
 
 ## How this card runs
 

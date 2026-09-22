@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D20 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
+Decisions D1–D22 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
 Work items are cards, in the deck at `docs/work/`, read and written through the `card` CLI — see "Cards" below, and run `card status`.
 
 ## Commands
@@ -124,8 +124,9 @@ Five cross-cutting labels may follow that kind.
 `work-laptop` marks work that needs the work laptop itself — that clone's provisioning, or the reference material addressed there by absolute path — as described under "Evidence"; it stopped gating live Pi evidence when the home server got `pi` on 2026-09-13.
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
-`emacs` groups the Emacs client work, an ACP shim over the HTTP API driven by `agent-shell`, filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo, OW-wawipu and OW-mikuyo; `card list --open --label emacs` is that set, blockers and all.
-`emacs-native` rides on top of `emacs` and marks the second stream, a native `agentpane-mode` over a JSON-RPC helper agentpane owns, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike; `card list --open --label emacs-native` is that stream alone, and OW-vibipo is the question card that chooses between the two.
+`emacs` groups the Emacs client work; `card list --open --label emacs` is the open set, blockers and all.
+D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 2026-09-22, and the ACP-shim stream filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` under it; OW-vibipo is the question card that chose.
+`emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
 
 `now` marks the cards to execute next, and `card list --open --label now` is that queue.
 It is the deck's only priority signal: card has no priority axis, and `--ready` cannot serve as one here because nearly every open card is unblocked, so a listing that selects everything selects nothing.

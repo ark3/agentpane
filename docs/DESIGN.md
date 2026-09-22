@@ -496,6 +496,9 @@ Escape as well is right; Escape only is the failure.
 
 So: when an interaction introduces a mode, the control that leaves it is visible and clickable, and it is drawn where the mode announces itself rather than somewhere the user has to go looking.
 
+This rule binds the browser client.
+The Emacs client D22 chose is keyboard-first by the nature of its host, and a command reachable only by key is the ordinary shape of an Emacs mode, so it is not held to this; added 2026-09-22 under OW-vibipo, as OW-basoga had planned and OW-vibipo carried to either stream.
+
 ### D15. agentpane stops a streaming turn before forking it only where the backend abandons that turn anyway, which is Pi
 
 Submitting an edit of an earlier message forks the session, and where a turn is streaming at that moment `forkAndSubmit` aborts it first — on Pi, and only there.
@@ -747,6 +750,34 @@ What is bounded is the frequency: `addClient` pushes `retry: 500` as the stream'
 
 Declined: any debounce, throttle or minimum interval on the re-list.
 That storm arrives only when the server is already failing to hold a stream open, and a guard sized for it would be untested code defending a state in which the listing it protects is the least of the user's problems.
+
+### D22. The Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, not `agent-shell` over an ACP shim
+
+The owner took this on 2026-09-22 (OW-vibipo), on the evidence OW-dekate produced.
+
+Two streams of cards described an Emacs client, filed 2026-09-13 and 2026-09-15.
+The shim stream -- OW-fenobo, OW-basoga, OW-limejo, with OW-mikuyo deferred behind it -- put `agent-shell` over an ACP shim that is a client of the HTTP API, on the case that no Emacs rendering is written and every fork and session fact stays agentpane's.
+The native stream -- OW-mutufa, OW-refibu, OW-wavone, OW-gunuke, OW-fojike -- put a native major mode over a JSON-RPC protocol agentpane owns, on the case that such a protocol has a field for everything ACP had to smuggle: the fork point, the model gate and `request` events.
+OW-wawipu belongs to neither and stands.
+
+What narrowed it, recorded in OW-vibipo before the verdict.
+Fork was not a differentiator: ACP's `session/fork` carries no point, but OW-limejo already answered that with `_meta.agentpane.entryId` and a picker over `/fork-points`, so the shim would have forked at a message as well as the native mode.
+The shim's real cost was four gaps ACP has no carrier for -- compaction state, `sessions-changed`, `status` and `isStreaming` in the session list, and `issuerThreadId` with `effort` -- which the card left as cost, not verdict.
+The owner then ran `agent-shell` bare on the home server for some days, without any shim, and reported on 2026-09-21: what was missed was the fast session list and fork, which the shim cards would have restored, and what was disliked was the rendering, which after significant tuning looked okay and which the shim could not touch.
+Everything liked -- staying in Emacs, Magit and back, long messages edited in place, `RET` and `C-RET`, inline prompt or separate composer -- is Emacs's, not `agent-shell`'s, and a native mode carries it for a keymap.
+So the streams differed on rendering alone, and the shim's case, that no rendering is written, was gone the moment rendering was being tuned anyway.
+
+What decided it is a rough cut looked at, which is the owner's practice for a UI decision and the reason OW-dekate existed: a renderer is judged by eye over rounds, not by argument.
+OW-dekate drew OW-mutufa's nodes into an `ewoc` buffer over two evenings, 2026-09-21 and 2026-09-22, the owner at a live Emacs 31.1.50 on the work laptop beside the browser, with two stored sessions dumped through `src/emacs/dump-nodes.ts`, one Claude with Edit diffs and a markdown table and one Codex with fenced shell.
+A `markdown-mode` backend got everything but tables, and a wide table wrapped at the window edge into nothing readable.
+An `shr` backend drawing the browser's own HTML -- the sanitized string `renderMarkdown` in `src/client/render/markdown.ts` returns, produced under a jsdom window -- got headings, code, tints and real fitted columns; the owner's verdict was "this approach using shr is absolutely 100% a success", and what the card draws from it is that a native buffer now draws closer to the browser than tuned `agent-shell` does.
+What it got right and wrong in detail, and the three Emacs facts the spike works around plus a fourth about the reload loop, are under "Rendering verdict, 2026-09-22" in OW-vibipo; the spike itself is `emacs/agentpane-spike.el`.
+
+What follows from it.
+The shim stream's cards closed `--declined` on 2026-09-22 citing this decision, OW-mikuyo among them because the shim it was to be judged from is not built, and the standalone read-only browser it deferred is OW-wavone's first deliverable.
+The helper of OW-refibu sends that HTML beside each text part's markdown source, since the buffer draws from it, and OW-wavone's Drawing list names `shr` and that field.
+The spike's pretty-printer is the seed of OW-wavone's drawing and the spike file is deleted there.
+D14 gained its sentence scoping the pointer rule to the browser client in the same change.
 
 ## The backend adapter contract
 

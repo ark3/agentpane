@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs]
 blocked-by: [OW-fenobo]
+closed: declined
 ---
 
 # An ACP shim over the HTTP API lets agent-shell list, load, create, prompt and cancel agentpane sessions, with the model chosen only before the first prompt
@@ -51,3 +52,11 @@ Note in `AGENTS.md` under Code that `src/acp/` runs in node and imports client m
 On the home server, in `agent-shell` with the config from `emacs/agentpane.el`: pick a stored Codex session and see its transcript with no child process spawned (check `ps` or the server log), then send a prompt on a new session created with a chosen model and watch the reply stream in.
 `src/acp/` tests cover the stdio loop against an injected fetch and event source: list, load without attach, the model gate rejecting after the first message, and a prompt whose events arrive before the POST resolves.
 `bun run check` passes; `bun run test:browser` is not involved.
+
+## Close note
+
+Declined 2026-09-22 under D22 in `docs/DESIGN.md`, decided in OW-vibipo: the Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns.
+The owner's trial of `agent-shell` bare, reported 2026-09-21, missed only the session list and fork this card would have restored and disliked the rendering it could not touch; OW-dekate then showed an `shr` buffer over the browser's own HTML draws closer to the browser than tuned `agent-shell` does, which removed this card's case that no rendering need be written.
+What this card designed is largely reused: the helper of OW-refibu is the same process in the same place as the shim described here, a client of the HTTP API outside `src/server/`, and its event-stream rules and model gate are carried there.
+The D14 sentence this card planned was written under OW-vibipo, scoped to the browser client.
+OW-limejo, which this card blocked, is declined with it.
