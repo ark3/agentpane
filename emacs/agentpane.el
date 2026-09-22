@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 19 tests, 19 results as expected, 0 unexpected
+;;     Ran 20 tests, 20 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -991,8 +991,13 @@ For a `session/renamed', and for an attach whose reply names another ref."
     (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
     (rename-buffer (agentpane--buffer-name agentpane--session) t)))
 
+(defvar-local agentpane--streaming nil
+  "Non-nil while the last status this buffer heard said a turn is streaming.")
+
 (defun agentpane--set-status (params)
-  "Show the streaming, compaction and model fields of PARAMS in the mode line."
+  "Show the streaming, compaction and model fields of PARAMS in the mode line,
+and keep the streaming field in `agentpane--streaming'."
+  (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
   (let ((fields (delq nil
                       (list (and (eq (plist-get params :isStreaming) t) "streaming")
                             (let ((compaction (plist-get params :compaction)))
@@ -1146,35 +1151,52 @@ puts two user messages in one turn, which is one point, so the set moves
 under the transcript (OW-roveze).  A message no point names is not
 forkable, and nothing is forked, as the browser offers no Edit there.
 
-A Pi fork moves the parent's live process onto the fork and leaves the
-parent detached, with no `session/renamed' (`SessionManager.fork' in
-src/server/http/session-manager.ts), so this buffer then counts itself
+A Pi fork of a streaming session stops the turn whether or not anything
+aborts it, so the turn is aborted first, the loss made deliberate, as the
+browser's `forkAndSubmit' does; that abort is the client's under D15, and
+the server's fork route aborts nothing.  It goes after the points are
+matched, so a message that is not forkable costs the turn nothing.  Codex
+and Claude Code keep a parent turn running through a fork, and are not
+aborted.  A Pi fork also moves the parent's live process onto the fork and
+leaves the parent detached, with no `session/renamed' (`SessionManager.fork'
+in src/server/http/session-manager.ts), so this buffer then counts itself
 detached too, and its next command that needs the session attaches it
 again.  Codex and Claude Code leave the parent attached."
   (interactive)
-  (let ((index (agentpane-index-at-point))
-        (parent (agentpane--ref agentpane--session)))
+  (let* ((index (agentpane-index-at-point))
+         (parent (agentpane--ref agentpane--session))
+         (pi-backend (equal (plist-get parent :backend) "pi")))
     (unless index
       (user-error "No message at point"))
     (agentpane--request
      'sessions/forkPoints (list :session parent)
      (lambda (points)
        (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
-         (if (not point)
-             (message "agentpane: the message at point is not forkable")
-           (agentpane--request
-            'sessions/fork (list :session parent :entryId (plist-get point :id))
-            (lambda (forked)
-              (when (equal (plist-get parent :backend) "pi")
-                (setq agentpane--attached nil))
-              (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
-                     (buffer (agentpane--transcript-buffer summary)))
-                (with-current-buffer buffer
-                  (agentpane--draw [] (agentpane--transcript-header summary))
-                  (agentpane--attach))
-                (pop-to-buffer buffer '(display-buffer-same-window))))
-            t))))
+         (cond
+          ((not point)
+           (message "agentpane: the message at point is not forkable"))
+          ((and pi-backend agentpane--streaming)
+           (agentpane--request 'sessions/abort (list :session parent)
+                               (lambda (_) (agentpane--fork-at parent point))
+                               t))
+          (t (agentpane--fork-at parent point)))))
      t)))
+
+(defun agentpane--fork-at (parent point)
+  "Fork the session PARENT at the fork POINT, and open the fork attached in a
+buffer of its own; see `agentpane-fork'."
+  (agentpane--request
+   'sessions/fork (list :session parent :entryId (plist-get point :id))
+   (lambda (forked)
+     (when (equal (plist-get parent :backend) "pi")
+       (setq agentpane--attached nil))
+     (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
+            (buffer (agentpane--transcript-buffer summary)))
+       (with-current-buffer buffer
+         (agentpane--draw [] (agentpane--transcript-header summary))
+         (agentpane--attach))
+       (pop-to-buffer buffer '(display-buffer-same-window))))
+   t))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)

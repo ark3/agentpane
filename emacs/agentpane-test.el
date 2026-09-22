@@ -357,6 +357,28 @@ answers only for an attached session."
                          `((sessions/attach :session ,ref)
                            (sessions/compact :session ,ref)))))))))
 
+(defun agentpane-test--fork-streaming (backend)
+  "Fork a BACKEND session at index 0 while a `session/status' says it is
+streaming, and return the methods sent, in order."
+  (let ((ref (list :backend backend :id "parent")))
+    (agentpane-test--forking
+        [(:id "entry-0" :text "Fix the bug" :index 0)]
+        (list :backend backend :id "fork")
+      (agentpane-test--with-session ref
+        (agentpane--on-notification
+         nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+        (agentpane-test--goto-index 0)
+        (agentpane-fork)
+        (mapcar #'car (reverse sent))))))
+
+(ert-deftest agentpane-test-fork-aborts-a-streaming-pi-turn ()
+  "A fork of a streaming Pi session aborts the turn before forking, as the
+browser does (D15); a streaming Codex session is forked with no abort."
+  (should (equal (agentpane-test--fork-streaming "pi")
+                 '(sessions/forkPoints sessions/abort sessions/fork sessions/attach)))
+  (should (equal (agentpane-test--fork-streaming "codex")
+                 '(sessions/forkPoints sessions/fork sessions/attach))))
+
 ;;;; The helper connection, against a fake helper
 
 (defconst agentpane-test--root
