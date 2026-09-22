@@ -374,6 +374,29 @@ answers only for an attached session."
                          `((sessions/attach :session ,ref)
                            (sessions/compact :session ,ref)))))))))
 
+(ert-deftest agentpane-test-pi-fork-redraws-the-parent-from-the-store ()
+  "A snapshot of the fork's shortened transcript that reaches the parent
+during a Pi fork is replaced, once the fork's reply lands, by the parent's
+stored transcript."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--forking
+        [(:id "entry-0" :text "Fix the bug" :index 0)]
+        forked
+      (agentpane-test--with-session ref
+        (setq hold '(sessions/fork))
+        (agentpane-test--goto-index 0)
+        (agentpane-fork)
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :nodes [] :isStreaming :json-false :compaction nil :model nil))
+        (with-current-buffer buffer
+          (should (equal (agentpane-test--indices) nil)))
+        (funcall (cdr (assq 'sessions/fork held)) t)
+        (should (equal (assq 'sessions/preview sent) `(sessions/preview :session ,ref)))
+        (with-current-buffer buffer
+          (should (equal (agentpane-test--indices) '(0 1))))))))
+
 (defun agentpane-test--fork-streaming (backend)
   "Fork a BACKEND session at index 0 while a `session/status' says it is
 streaming, holding any abort's reply.  Return the methods sent before that
@@ -399,7 +422,7 @@ abort has answered, as the browser does (D15); a streaming Codex session is
 forked with no abort."
   (should (equal (agentpane-test--fork-streaming "pi")
                  '((sessions/forkPoints sessions/abort)
-                   (sessions/fork sessions/attach))))
+                   (sessions/fork sessions/preview sessions/attach))))
   (should (equal (agentpane-test--fork-streaming "codex")
                  '((sessions/forkPoints sessions/fork sessions/attach) nil))))
 

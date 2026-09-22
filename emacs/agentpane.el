@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 20 tests, 20 results as expected, 0 unexpected
+;;     Ran 21 tests, 21 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1161,7 +1161,15 @@ aborted.  A Pi fork also moves the parent's live process onto the fork and
 leaves the parent detached, with no `session/renamed' (`SessionManager.fork'
 in src/server/http/session-manager.ts), so this buffer then counts itself
 detached too, and its next command that needs the session attaches it
-again.  Codex and Claude Code leave the parent attached."
+again.  Codex and Claude Code leave the parent attached.
+
+The parent buffer is then redrawn from the store, as `agentpane-refetch'
+draws a detached session.  That is there because of the server's ordering:
+`PiAdapter.fork' (src/server/adapters/pi/process.ts) moves its ref to the
+fork and re-reads the fork's shortened transcript before
+`SessionManager.fork' re-keys the session, so that transcript goes out as a
+snapshot under the parent's ref and the parent buffer draws it.  Once the
+server keys that snapshot to the fork, the redraw is redundant."
   (interactive)
   (let* ((index (agentpane-index-at-point))
          (parent (agentpane--ref agentpane--session))
@@ -1189,7 +1197,8 @@ buffer of its own; see `agentpane-fork'."
    'sessions/fork (list :session parent :entryId (plist-get point :id))
    (lambda (forked)
      (when (equal (plist-get parent :backend) "pi")
-       (setq agentpane--attached nil))
+       (setq agentpane--attached nil)
+       (agentpane-refetch))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
