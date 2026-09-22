@@ -1,6 +1,7 @@
 ---
 labels: [unverified, emacs]
 blocked-by: [OW-mutufa]
+closed: done
 ---
 
 # A one-transcript spike draws OW-mutufa nodes into an ewoc buffer so the owner can judge native rendering against agent-shell and the browser before D21
@@ -59,3 +60,13 @@ That verdict is recorded in OW-vibipo under a dated heading, naming the backend 
 Whatever the verdict, OW-vibipo's own done condition then applies: D21 is written and the other stream's cards close `--declined` citing it.
 If the verdict is that no round got close enough, this card closes `--done` all the same, since the evidence is what it promised, and the native-stream cards are the ones that close `--declined`.
 No test suite gates this card: the spike's elisp is judged by eye, and its TypeScript half is a script rather than a module, so `bun run check` need only still pass with it present.
+
+## Close note
+
+Done 2026-09-22 on the work laptop, over two evenings with the owner at a live Emacs 31.1.50 and the agent redrawing through `emacsclient`, which the sandbox could reach.
+Built: `emacs/agentpane-spike.el`, an ewoc renderer over OW-mutufa's nodes with two text backends, markdown-mode and shr, flipped with `b`; and `src/emacs/dump-nodes.ts` extended to write the browser's own HTML beside each text part, produced by `renderMarkdown` under a jsdom window.
+Rounds are the commits da83c81 through 2e50164; the first cut and the dump-script change were dispatched implementers, the rest were edited on `main` in the loop.
+Verdict, the owner's, recorded in OW-vibipo under "Rendering verdict, 2026-09-22": shr drawing the browser's HTML is the backend, "absolutely 100% a success"; markdown-mode got everything but tables.
+OW-wavone's Drawing list is rewritten to match in the same change.
+Left for others: the HTML field the helper must send beside each text part is not yet in OW-refibu's payloads; OW-jakahe was filed from the first render for the Codex `exec_command` summary; and the empty-thinking finding is that Claude Code stores carried no thinking text at all on 2026-09-21, so the folded-thinking path was exercised by code, not data.
+Not run: `bun run check` for the elisp commits, which touch nothing under `src/`; the one `src/` commit ran it green.
