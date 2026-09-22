@@ -2320,3 +2320,57 @@ The ert test `agentpane-test-shutdown-ends-the-helper` covers the no-stream case
 In the first run of that stand-in, every `GET` was held open, the attach's `GET /api/sessions/pi/nope` included; closing stdin aborted the event stream but the helper was still running 30s later.
 `runHelper` aborts its event stream when its input ends but not a request still in flight, so a server that never answers keeps the helper up past stdin close.
 `agentpane-shutdown` still ends it, by the kill `jsonrpc-shutdown` falls back to: run in `--batch` against the same stand-in with that attach in flight, it printed `Sentinel for agentpane helper still hasn't run, deleting it!` and returned after 0.332s with the process at status `signal`, code 9, and `process-attributes` finding no such pid.
+
+## The native Emacs mode drives a Codex session live (OW-gunuke)
+
+Measured on the home server 2026-09-22, Emacs 31.1 in `--batch`, `codex-cli 0.156.0`, `bun 1.4.0`, agentpane at 74ca1d8, with `~/.codex` mounted read-write.
+The server was started from the checkout with `bun run src/server/index.ts` on its default port, logging to a file under `/tmp`, and stopped afterwards by its pid.
+The driver was an elisp script run as `emacs --batch -L emacs -l agentpane -l <script>`, which set `agentpane-project-directory` to the checkout and then, in order:
+
+- called `agentpane-new-session` with `"codex"` and `default-directory` at the checkout, with `completing-read` bound to a function that logged the candidates it was offered and answered `gpt-5.6-luna`;
+- inserted a short prompt at the end of the transcript buffer and called `agentpane-send`, the command `C-RET` runs in the prompt region;
+- opened the composer with `agentpane-prompt`, inserted a prompt asking for a count to 300 in words, one per line, and called `agentpane-composer-send`;
+- called `agentpane-abort` from the composer once at least 400 more characters had been drawn above the separator;
+- read the server's summary of the session through `GET /api/sessions?cwd=`, and called `agentpane-shutdown`.
+
+Throughout, it pumped `accept-process-output` in 0.05s steps, logged every notification the helper sent through `:before` advice on `agentpane--on-notification`, and every 0.3s or 0.4s sampled the length of the text above the prompt separator, the last line of that text, and `mode-line-process`.
+The process table was read after the create, mid-turn and at the end.
+The run recorded here is the second of two; the first had a driver defect that waited out a 120s deadline after the first turn, and showed the same things.
+
+**The session was created with the chosen model.**
+`sessions/create` answered a `virtual:` id, and the attach renamed it: a `session/renamed` notification carried the Codex thread id, and the buffer came up as `*agentpane codex: <thread id>*` headed by the ref and the checkout path.
+Only then was the model read: the picker offered four ids, `gpt-6-luna`, `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-5.5`, and `sessions/setModel` sent the chosen `gpt-5.6-luna`.
+From the first snapshot on, the mode line read ` [gpt-5.6-luna]`.
+That by itself does not show the pick took, since this machine's `~/.codex/config.toml` names the same model as its default and the first snapshot, sent before the pick, already carried it.
+The Codex adapter keeps the model and sends it on `turn/start`, and the thread's rollout recorded `gpt-5.6-luna` in the `turn_context` of both turns and in a `thread_settings_applied` event written between them.
+
+**The attach spawned one app-server, before any prompt.**
+Right after the create, `ps` showed the helper `bun run src/emacs/main.ts` and, under the server, two nested `bwrap` layers and `codex --sandbox danger-full-access app-server` with the checkout as its working directory.
+The first run's app-server was still running beside it: after its helper exited, the server's summary of that session still read `status: "attached"`.
+Killing the server's pid ended every one of them.
+
+**The first reply streamed into the buffer.**
+Sent from the prompt region, which was empty again when the turn ended, it brought a snapshot with `isStreaming: true` 0.06s later, turning the mode line to ` [streaming · gpt-5.6-luna]`.
+The user turn was drawn 0.44s after the send; the assistant node's text then grew from 266 to 292 characters of buffer between samples 0.44s apart, with a meta line reading `#1 · gpt-5.6-luna · effort medium · 0 tokens`.
+The helper sent 62 `session/node` notifications for that one node.
+2.9s after the send a snapshot with `isStreaming: false` redrew the buffer, the mode line went back to ` [gpt-5.6-luna]`, and the meta line's token count went from 0 to 15694.
+
+**The second prompt was aborted mid-turn.**
+Sent from the composer, which was empty by the time of the abort, it drew its user turn 0.3s later and the first assistant text 1.9s after the send; five samples 0.3s apart then read 513, 557, 607, 655 and 711 characters of buffer, and the helper sent 94 `session/node` notifications for the node in all.
+The abort went out 3.2s after the send.
+0.03s later a snapshot of four nodes arrived with `isStreaming: false`, the mode line dropped `streaming`, and nothing more arrived; the buffer ended at 715 characters, the partial reply's 30 lines still drawn.
+
+**The aborted turn carries no aborted mark.**
+The partial reply's meta line read `#3 · gpt-5.6-luna · effort medium · 15694 tokens · $0.0000`: no `aborted` field, and the face `agentpane-meta`, not the warning face the mode gives a turn whose `stopReason` is `aborted`.
+The mode draws the mark when the node carries it; the node never did, because the Codex adapter builds assistant messages with `stopReason` `pending`, `stop` or `toolUse` only (`src/server/adapters/codex/mapping.ts`), and nothing on `turn/completed` marks an interrupted turn.
+The browser renders from the same adapter's messages, so, read from the code rather than observed, it has none to show either.
+The token count, too, was the first turn's figure exactly.
+
+**Codex does not keep the partial reply.**
+The rollout, as `codex-cli 0.156.0` wrote it, held a `turn_aborted` event with `reason: "interrupted"` and no assistant message for the second turn at all; after the second user prompt it held a user-role message wrapping a `<turn_aborted>` notice instead.
+`bun run src/emacs/dump-nodes.ts codex/<thread id>`, the stored transcript as a preview projects it, answered four nodes: the two prompts, the first reply, and at index 3 a `user` node carrying that notice, where the live buffer had drawn the partial reply.
+That same projection gave the first reply a meta of model `codex` and 0 tokens, where the live one had `gpt-5.6-luna` and 15694.
+
+**Smaller things.**
+The helper's stderr buffer was empty.
+A markdown numbered list came through shr with its markers as bare numbers, a number and a space before each item with no period after it.
