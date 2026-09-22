@@ -80,7 +80,105 @@
  *   re-sending the node, not by anything in it.
  * - `errorMessage` (string, only when the backend supplied one alongside
  *   `stopReason: "error"`).
+ *
+ * ---------------------------------------------------------------------------
+ *
+ * The JSON-RPC 2.0 link the helper speaks (OW-refibu), `Content-Length`
+ * framed over stdio as `jsonrpc-process-connection` expects. Emacs sends
+ * requests; the helper answers each and pushes notifications on its own.
+ * `session` in every payload is a ref, `{ backend, id }`, exactly as the HTTP
+ * API's `SessionRef`; `compaction` is `"requesting"`, `"running"` or `null`;
+ * `model` is a string or `null`.
+ *
+ * Requests, by `method`, with `params` and `result`:
+ *
+ * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the HTTP
+ *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
+ *   `status`, `isStreaming`).
+ * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
+ *   stored transcript; spawns nothing and opens no stream.
+ * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
+ * - `models/list` -- `{ backend }` -> array of `{ id, label }`.
+ * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
+ *   route answers, whose `ref` is authoritative and may differ from the one
+ *   asked for. Opens the event stream if it is not open yet, and from here on
+ *   the notifications below flow for this session.
+ * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
+ * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
+ *   -> `null`. `close` kills the subprocess and stops this session's
+ *   notifications.
+ * - `sessions/setModel` -- `{ session, model }` -> `null`.
+ * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
+ * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
+ * - `requests/reply` -- `{ requestId, response }` -> `null`.
+ *
+ * Errors: a request the server refused answers with the HTTP status as
+ * `code`, the server's text as `message`, and `{ status, error, detail }` as
+ * `data`, `error` and `detail` being the HTTP body's own fields, so a
+ * mid-turn prompt rejection reads in Emacs as it does in the browser. Any
+ * other failure is `-32603` with its message; an unknown method is `-32601`.
+ *
+ * Notifications, by `method`, with `params`; each names the session it is
+ * about, and none arrives for a session Emacs has not attached, except
+ * `sessions/changed`:
+ *
+ * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model }`.
+ *   Replaces everything the buffer holds; also how a session first appears
+ *   after `sessions/attach`, and how a missed event is healed.
+ * - `session/node` -- `{ session, node }`. One node to replace by `index`.
+ * - `session/status` -- `{ session, isStreaming, compaction, model }`.
+ * - `session/error` -- `{ session, message }`. A turn error, or an agent
+ *   request nothing in Emacs answers yet, as text saying what kind arrived.
+ *   Not carried by a snapshot, so a re-snapshot does not replay it.
+ * - `session/renamed` -- `{ from, to }`. Re-key the buffer; a
+ *   `session/snapshot` for `to` follows.
+ * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
+ *   time the helper reopens a dropped event stream, since a listing change
+ *   while it was down is gone.
  */
+
+import type {
+	AgentRequestReply,
+	BackendId,
+	CreateSessionRequest,
+	ForkPoint,
+	ForkRequest,
+	ModelInfo,
+	PromptRequest,
+	SessionRef,
+	SessionSummary,
+} from "$shared/protocol.ts";
+
+export interface HelperRequests {
+	"sessions/list": { params: { cwd?: string }; result: SessionSummary[] };
+	"sessions/preview": { params: { session: SessionRef }; result: TranscriptNode[] };
+	"sessions/create": { params: CreateSessionRequest; result: SessionRef };
+	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
+	"sessions/attach": { params: { session: SessionRef }; result: SessionSummary };
+	"sessions/prompt": { params: { session: SessionRef } & PromptRequest; result: null };
+	"sessions/abort": { params: { session: SessionRef }; result: null };
+	"sessions/compact": { params: { session: SessionRef }; result: null };
+	"sessions/close": { params: { session: SessionRef }; result: null };
+	"sessions/setModel": { params: { session: SessionRef; model: string }; result: null };
+	"sessions/forkPoints": { params: { session: SessionRef }; result: ForkPoint[] };
+	"sessions/fork": { params: { session: SessionRef } & ForkRequest; result: SessionRef };
+	"requests/reply": { params: AgentRequestReply; result: null };
+}
+
+export interface SessionStatusParams {
+	session: SessionRef;
+	isStreaming: boolean;
+	compaction: "requesting" | "running" | null;
+	model: string | null;
+}
+
+export type HelperNotification =
+	| { method: "session/snapshot"; params: SessionStatusParams & { nodes: TranscriptNode[] } }
+	| { method: "session/node"; params: { session: SessionRef; node: TranscriptNode } }
+	| { method: "session/status"; params: SessionStatusParams }
+	| { method: "session/error"; params: { session: SessionRef; message: string } }
+	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef } }
+	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {
 	index: number;
