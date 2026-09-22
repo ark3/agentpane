@@ -267,23 +267,38 @@ still takes typing."
 ;;;; Forking, against a stub connection
 
 (defmacro agentpane-test--forking (points forked &rest body)
-  "Run BODY with every request answered at once, as the helper would: POINTS
-for `sessions/forkPoints', FORKED for `sessions/fork', and a summary of the
-ref asked for for `sessions/attach'.  Each request is pushed onto `sent' as
-\(METHOD . PARAMS), and each `message' onto `said'; BODY sees both.  Every
-buffer BODY made is killed afterwards."
+  "Run BODY with every request answered as the helper would: POINTS for
+`sessions/forkPoints', FORKED for `sessions/fork', a summary of the ref
+asked for for `sessions/attach', and the fixed nodes for `sessions/preview'.
+Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
+onto `said'.  A request whose method BODY has put in `hold' is not answered
+at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
+ANSWER with t to deliver the reply, or with nil to fail the request as
+`agentpane--request' reports an error.  Either way the answer runs in the
+buffer that sent the request.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
          (said nil)
+         (hold nil)
+         (held nil)
          (buffers (buffer-list)))
      (cl-letf (((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always)
+                (lambda (method params callback &optional _always failed)
                   (push (cons method params) sent)
-                  (funcall callback
-                           (pcase method
-                             ('sessions/forkPoints ,points)
-                             ('sessions/fork ,forked)
-                             ('sessions/attach (list :ref (plist-get params :session)))))))
+                  (let* ((from (current-buffer))
+                         (reply (pcase method
+                                  ('sessions/forkPoints ,points)
+                                  ('sessions/fork ,forked)
+                                  ('sessions/attach (list :ref (plist-get params :session)))
+                                  ('sessions/preview agentpane-test--nodes)))
+                         (answer (lambda (ok)
+                                   (with-current-buffer from
+                                     (if ok
+                                         (funcall callback reply)
+                                       (when failed (funcall failed)))))))
+                    (if (memq method hold)
+                        (setq held (append held (list (cons method answer))))
+                      (funcall answer t)))))
                ((symbol-function 'message)
                 (lambda (format-string &rest args)
                   (push (apply #'format format-string args) said))))
@@ -304,13 +319,14 @@ buffer BODY made is killed afterwards."
 (ert-deftest agentpane-test-fork-at-a-fork-point ()
   "`agentpane-fork' on the node a fork point names sends `sessions/fork'
 with that point's id, and opens the fork in a buffer of its own, attached,
-leaving this one holding its session."
+leaving this one holding its session, and on Codex still attached."
   (let ((ref '(:backend "codex" :id "t1"))
         (forked '(:backend "codex" :id "t2")))
     (agentpane-test--forking
         [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
         forked
       (agentpane-test--with-session ref
+        (setq agentpane--attached 'connection)
         (agentpane-test--goto-index 0)
         (agentpane-fork)
         (should (equal (assq 'sessions/fork sent)
@@ -321,7 +337,8 @@ leaving this one holding its session."
           (should fork-buffer)
           (should-not (eq fork-buffer buffer))
           (should (agentpane--same-ref-p
-                   (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref)))))))
+                   (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref))
+          (should (eq (buffer-local-value 'agentpane--attached buffer) 'connection)))))))
 
 (ert-deftest agentpane-test-fork-at-no-fork-point ()
   "`agentpane-fork' on a node no fork point names sends no `sessions/fork'
@@ -359,25 +376,32 @@ answers only for an attached session."
 
 (defun agentpane-test--fork-streaming (backend)
   "Fork a BACKEND session at index 0 while a `session/status' says it is
-streaming, and return the methods sent, in order."
+streaming, holding any abort's reply.  Return the methods sent before that
+reply is released, and those sent after, in order."
   (let ((ref (list :backend backend :id "parent")))
     (agentpane-test--forking
         [(:id "entry-0" :text "Fix the bug" :index 0)]
         (list :backend backend :id "fork")
       (agentpane-test--with-session ref
+        (setq hold '(sessions/abort))
         (agentpane--on-notification
          nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
         (agentpane-test--goto-index 0)
         (agentpane-fork)
-        (mapcar #'car (reverse sent))))))
+        (let ((before (mapcar #'car (reverse sent))))
+          (setq sent nil)
+          (dolist (entry held) (funcall (cdr entry) t))
+          (list before (mapcar #'car (reverse sent))))))))
 
 (ert-deftest agentpane-test-fork-aborts-a-streaming-pi-turn ()
-  "A fork of a streaming Pi session aborts the turn before forking, as the
-browser does (D15); a streaming Codex session is forked with no abort."
+  "A fork of a streaming Pi session aborts the turn and forks only once the
+abort has answered, as the browser does (D15); a streaming Codex session is
+forked with no abort."
   (should (equal (agentpane-test--fork-streaming "pi")
-                 '(sessions/forkPoints sessions/abort sessions/fork sessions/attach)))
+                 '((sessions/forkPoints sessions/abort)
+                   (sessions/fork sessions/attach))))
   (should (equal (agentpane-test--fork-streaming "codex")
-                 '(sessions/forkPoints sessions/fork sessions/attach))))
+                 '((sessions/forkPoints sessions/fork sessions/attach) nil))))
 
 ;;;; The helper connection, against a fake helper
 
