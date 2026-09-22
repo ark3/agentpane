@@ -27,7 +27,8 @@
 ;; attached a session: the helper opens its event stream from
 ;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
 ;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
-;; refetches, and `q' buries.
+;; refetches, `f' forks at the user message at point into a buffer of its
+;; own, and `q' buries.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
@@ -814,6 +815,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "TAB") #'agentpane-toggle)
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
+    (define-key map (kbd "f") #'agentpane-fork)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "C-<return>") #'agentpane-send)
     (define-key map (kbd "C-c C-a") #'agentpane-abort)
@@ -1131,6 +1133,48 @@ Allowed only before the first prompt, while the buffer has no nodes."
        (agentpane--request 'sessions/setModel
                            (list :session (agentpane--ref agentpane--session) :model model)
                            #'ignore t)))))
+
+(defun agentpane-fork ()
+  "Fork this buffer's session at the user message at point, and open the fork
+in a transcript buffer of its own, attached.  The fork holds the history
+before that message, without the message itself: every backend's fork point
+excludes the user message it names.  This buffer stays as it was.
+
+The points are fetched through `sessions/forkPoints' each time and matched
+by the transcript index each names, never counted or kept: a Codex steer
+puts two user messages in one turn, which is one point, so the set moves
+under the transcript (OW-roveze).  A message no point names is not
+forkable, and nothing is forked, as the browser offers no Edit there.
+
+A Pi fork moves the parent's live process onto the fork and leaves the
+parent detached, with no `session/renamed' (`SessionManager.fork' in
+src/server/http/session-manager.ts), so this buffer then counts itself
+detached too, and its next command that needs the session attaches it
+again.  Codex and Claude Code leave the parent attached."
+  (interactive)
+  (let ((index (agentpane-index-at-point))
+        (parent (agentpane--ref agentpane--session)))
+    (unless index
+      (user-error "No message at point"))
+    (agentpane--request
+     'sessions/forkPoints (list :session parent)
+     (lambda (points)
+       (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
+         (if (not point)
+             (message "agentpane: the message at point is not forkable")
+           (agentpane--request
+            'sessions/fork (list :session parent :entryId (plist-get point :id))
+            (lambda (forked)
+              (when (equal (plist-get parent :backend) "pi")
+                (setq agentpane--attached nil))
+              (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
+                     (buffer (agentpane--transcript-buffer summary)))
+                (with-current-buffer buffer
+                  (agentpane--draw [] (agentpane--transcript-header summary))
+                  (agentpane--attach))
+                (pop-to-buffer buffer '(display-buffer-same-window))))
+            t))))
+     t)))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)
