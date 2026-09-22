@@ -12,8 +12,8 @@ It is also the tool OW-mikuyo deferred, built as the front door rather than as a
 ## Files
 
 One file, `emacs/agentpane.el`, with the helper started through `jsonrpc-process-connection` from Emacs's bundled `jsonrpc.el` on the command `bun run src/emacs/main.ts` resolved against a customizable project directory.
-No package dependencies beyond what Emacs 30 ships plus `markdown-mode`, which is installed on the home server at `~/.emacs.d/straight/repos/markdown-mode/`.
-The home server runs Emacs 30.2; keep `lexical-binding` on and prefer the built-in libraries named here over anything from `straight`.
+No package dependencies beyond what Emacs ships: the `shr` backend OW-dekate settled on needs no `markdown-mode`, and the `ert` command under "Done when" loads nothing from `straight`, so `agentpane.el` must not require it; the spike's markdown fallback goes with the spike (amended 2026-09-22 at execution, when this card still named `markdown-mode` as a dependency).
+The home server runs Emacs 31.1, measured 2026-09-22 with `emacs --version` (the card said 30.2 when filed); keep `lexical-binding` on and use the built-in libraries named here.
 
 ## Picker
 
