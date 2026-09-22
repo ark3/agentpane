@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, emacs-native]
 blocked-by: [OW-mutufa]
+closed: done
 ---
 
 # A Bun helper speaks JSON-RPC over stdio to Emacs, as a client of the HTTP API, exposing the REST verbs and pushing projected nodes as notifications
@@ -88,3 +89,18 @@ Each point below overrides the paragraph above it where they differ.
 Tests in `src/emacs/` drive the stdio loop against an injected fetch and event source, in node: a list request returns summaries; a preview request returns nodes, each text part carrying a non-empty `html` alongside its `text`, and opens no event stream; an attach followed by a snapshot and two upserts yields one `session/snapshot` and two `session/node` notifications in order; a `seq` gap makes the helper call attach, and the snapshot the event source then delivers yields a fresh `session/snapshot`; a snapshot for a session Emacs never attached yields nothing; a `renamed` event yields `session/renamed` before the snapshot that follows it; a prompt whose server rejection arrives yields a JSON-RPC error carrying the server's text.
 A framing test feeds two messages in one chunk and one message across two chunks and reads both back intact.
 `bun run check` passes; `bun run test:browser` is not involved.
+
+## Close note
+
+Closed 2026-09-22 on the home server.
+
+Amended before dispatch from a cold read against the code (commit 701feb4): `EventSource` is not a global under `bun 1.4.0`, so the SSE reader is hand-rolled; the loop is split from the Bun binding so vitest can drive it in node; the projection takes a `render` parameter and one module owns the jsdom window; the reducer's result is read beside the raw event; a seq gap is healed by `api.attach` as the browser does it; one stream, opened at the first attach and filtered to attached refs; `reply()` added to the api client and `sessions/close` added to the verbs; JSON-RPC errors carry the HTTP status as `code` and `{ status, error, detail }` as `data`.
+
+Built, in `src/emacs/`: `framing.ts` (Content-Length frames over bytes), `sse.ts` (the reader over fetch), `render.ts` (jsdom window plus dynamic import of `renderMarkdown`, loaded through `process.getBuiltinModule("node:module").createRequire` because vitest's vmThreads loader cannot load jsdom's `@exodus/bytes`), `helper.ts` (the loop), `main.ts` (the Bun binding, `bun run src/emacs/main.ts [base-url]`); `protocol.ts` documents every request and notification and `TextPart` gained a required `html`; `dump-nodes.ts` lost its spike types and uses the same renderer; `AGENTS.md` gained one clause on the renderer's window.
+Tests: `framing.test.ts`, `sse.test.ts`, `helper.test.ts` (every done-when case, including the seq gap scripted through attach and the unattached snapshot yielding nothing), `nodes.test.ts` with a stub renderer and one real-renderer case, `api.test.ts` for `reply`; each new module's tests were red before the module existed.
+Measured render cost, in the `render.ts` docblock: about 1.1s to load once, then about 0.5ms per short text part and about 2ms for a 2.3k-char summary, under `bun 1.4.0`.
+`bun run check` passed on `main` after the cherry-pick: 54 files, 1167 tests, 0 svelte-check errors.
+Smoked live against a server on port 4199: `sessions/list` answered 314 summaries, `sessions/preview` of a stored Codex session answered 149 nodes with HTML on all 44 text parts, and an abort of a nonexistent session answered `code: 404` with the server's `not_found` text; clean exit on stdin EOF.
+
+Left as built and noted here rather than filed: a seq gap on a session Emacs never attached still triggers an `api.attach`, as in the browser, which re-attaches a session the server already holds live; the attached set keeps a virtual ref's key after the rename until `sessions/close`, harmless.
+Commits 701feb4, 3d9d697, ab1e95d, f6a1f4f, e5d75cf, ab0278c.
