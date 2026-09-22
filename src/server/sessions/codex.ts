@@ -272,8 +272,28 @@ function extractStoreTurn(
 		const name = typeof payload.namespace === "string"
 			? `${payload.namespace}__${payload.name}`
 			: payload.name;
-		toolNames.set(payload.call_id, name);
 		const rawArguments = payload.type === "function_call" ? payload.arguments : payload.input;
+		// A shell run is `commandExecution` on the live wire, which
+		// `adapters/codex/mapping.ts` already names `bash`, but the rollout on
+		// disk stores it as either of two shapes: a `function_call` named
+		// `exec_command` with JSON arguments, or a `custom_tool_call` named
+		// `exec` whose input is a script calling `tools.exec_command({...})`.
+		// Measured 2026-09-22 on `codex-cli` 0.155.1 (`docs/MANUAL_TESTING.md`,
+		// "A Codex shell run is `commandExecution` live and `exec` or
+		// `exec_command` on disk (OW-jakahe)"). Both fold to `bash` here so the
+		// preview and the live transcript name one run the same way.
+		const shell = name === "exec_command" && payload.type === "function_call"
+			? shellArguments(parseArguments(rawArguments))
+			: name === "exec" && payload.type === "custom_tool_call"
+				? execScriptArguments(rawArguments)
+				: null;
+		if (shell) {
+			toolNames.set(payload.call_id, "bash");
+			return assistantPreview([
+				{ type: "toolCall", id: payload.call_id, name: "bash", arguments: shell },
+			], timestamp, "toolUse");
+		}
+		toolNames.set(payload.call_id, name);
 		return assistantPreview([
 			{
 				type: "toolCall",
@@ -508,6 +528,34 @@ function parseArguments(value: unknown): Record<string, unknown> {
 	} catch {
 		return { value };
 	}
+}
+
+/** `{command, cwd}` as the `local_shell_call` branch shapes it, or null without a `cmd`. */
+function shellArguments(args: Record<string, unknown>): Record<string, unknown> | null {
+	if (typeof args.cmd !== "string") return null;
+	return { command: args.cmd, cwd: typeof args.workdir === "string" ? args.workdir : null };
+}
+
+/**
+ * `cmd` and `workdir` lifted out of a stored `tools.exec_command({...})`
+ * script. The key is bare in newer rollouts and double-quoted in older ones;
+ * the value is one double-quoted literal with JSON's escapes, so the matched
+ * literal decodes with `JSON.parse`.
+ */
+function execScriptArguments(script: unknown): Record<string, unknown> | null {
+	if (typeof script !== "string" || !script.includes("tools.exec_command(")) return null;
+	const literal = (key: string): string | null => {
+		const match = new RegExp(`(?:^|[{,\\s])"?${key}"?\\s*:\\s*("(?:[^"\\\\]|\\\\.)*")`).exec(script);
+		if (!match?.[1]) return null;
+		try {
+			const value: unknown = JSON.parse(match[1]);
+			return typeof value === "string" ? value : null;
+		} catch {
+			return null;
+		}
+	};
+	const cmd = literal("cmd");
+	return cmd === null ? null : { command: cmd, cwd: literal("workdir") };
 }
 
 function outputContent(value: unknown): Record<string, unknown>[] {

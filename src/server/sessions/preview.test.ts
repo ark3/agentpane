@@ -369,6 +369,84 @@ describe("readSessionPreview", () => {
 			expect(turns[3]).toMatchObject({ role: "toolResult", toolCallId: "c1" });
 		});
 
+		it("previews a stored function_call named exec_command as bash with the command and cwd (OW-jakahe)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				{
+					type: "response_item",
+					payload: {
+						type: "function_call",
+						call_id: "c1",
+						name: "exec_command",
+						arguments: "{\"cmd\":\"echo probe\\npwd\",\"workdir\":\"/var/tmp/x\",\"yield_time_ms\":10000,\"max_output_tokens\":20000}",
+					},
+				},
+				{ type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "probe\n/var/tmp/x" } },
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns[0]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "echo probe\npwd", cwd: "/var/tmp/x" } }],
+			});
+			expect(turns[1]).toMatchObject({ role: "toolResult", toolCallId: "c1", toolName: "bash" });
+		});
+
+		it.each([
+			["bare", "{cmd:\"echo probe\\npwd\",workdir:\"/var/tmp/x\",yield_time_ms:10000,max_output_tokens:1000}"],
+			["double-quoted", "{\"cmd\":\"echo probe\\npwd\",\"workdir\":\"/var/tmp/x\",\"yield_time_ms\":10000,\"max_output_tokens\":1000}"],
+		])("previews a stored custom_tool_call named exec wrapping tools.exec_command with %s keys as bash (OW-jakahe)", async (_keys, object) => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				{
+					type: "response_item",
+					payload: {
+						type: "custom_tool_call",
+						call_id: "c1",
+						name: "exec",
+						input: `const r = await tools.exec_command(${object}); text(r.output);\n`,
+					},
+				},
+				{
+					type: "response_item",
+					payload: {
+						type: "custom_tool_call_output",
+						call_id: "c1",
+						output: [{ type: "input_text", text: "Script completed\nWall time 0.2 seconds\nOutput:\n" }, { type: "input_text", text: "probe\n/var/tmp/x" }],
+					},
+				},
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns[0]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "echo probe\npwd", cwd: "/var/tmp/x" } }],
+			});
+			expect(turns[1]).toMatchObject({ role: "toolResult", toolCallId: "c1", toolName: "bash" });
+		});
+
+		it("leaves a custom_tool_call named exec whose input is not a tools.exec_command script previewing under its raw name (OW-jakahe)", async () => {
+			const file = join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`);
+			await writeJsonl(file, [
+				codexHeader(THREAD),
+				{
+					type: "response_item",
+					payload: { type: "custom_tool_call", call_id: "c1", name: "exec", input: "text(\"hello\");\n" },
+				},
+			]);
+
+			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns[0]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "toolCall", id: "c1", name: "exec", arguments: { value: "text(\"hello\");\n" } }],
+			});
+		});
+
 		it("returns an empty preview when no file carries the thread id, rather than throwing", async () => {
 			await writeJsonl(join(root, "2026", "08", "12", "rollout-someone-else.jsonl"), [
 				codexHeader("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
