@@ -2256,3 +2256,18 @@ The client therefore cannot decide at the first error and does not try to: every
 **A server that vanishes is a case `readyState` does not name.**
 With the probe's process gone entirely, `error` fired at 0 forever: the browser is still retrying, against nothing.
 Telling that apart from a healthy retry needs an attempt count or a deadline, neither of which this repair carries, and it is deliberately out of its scope.
+
+## A Codex shell run is `commandExecution` live and `exec` or `exec_command` on disk (OW-jakahe)
+
+Measured on the home server 2026-09-22, `codex-cli 0.155.1`, `gpt-5.6-luna`, by a throwaway `codex app-server` driver modelled on `resources/probes/codex_turn_probe.py`: a temporary `CODEX_HOME` carrying the real `auth.json` and `config.toml`, one `thread/start` with default params in an empty git repo, one `turn/start` asking for `echo probe-ow-jakahe` then `pwd` through the shell tool, then a dump of every `response_item` the rollout under that home had written.
+What rests on this is where OW-jakahe's fix goes: the card had left open whether the live path names the same run `commandExecution` or a raw `exec_command`.
+
+**Live, the run is `commandExecution`, and nothing else.**
+`item/started` and `item/completed` each carried one item of that type, with `command: "/bin/bash -lc 'echo probe-ow-jakahe\npwd'"`, `cwd`, `source: "unifiedExecStartup"`, `commandActions: [{type: "unknown", command: "echo probe-ow-jakahe\npwd"}]`, and on completion `aggregatedOutput` and `exitCode: 0`.
+No `dynamicToolCall` and no `mcpToolCall` arrived; the turn's item types were `userMessage`, `reasoning`, `commandExecution`, `reasoning`, `agentMessage`.
+`CODEX_TOOL_NAMES` in `src/server/adapters/codex/mapping.ts` already renames that to `bash`, so the live transcript shows the command.
+
+**On disk, the same run is a `custom_tool_call` named `exec`.**
+The rollout held `{"type":"custom_tool_call","name":"exec","input":"const r = await tools.exec_command({cmd:\"echo probe-ow-jakahe\\npwd\",workdir:\"/var/tmp/...\",yield_time_ms:10000,max_output_tokens:1000}); text(r.output);\n"}` followed by a `custom_tool_call_output` whose `output` is two `input_text` blocks, the first reading `Script completed\nWall time 0.2 seconds\nOutput:\n` and the second the command's output.
+A scan of every rollout under this machine's `~/.codex/sessions` found 2280 items of that shape and no `function_call` named `exec_command` or `local_shell_call` at all; the oldest carry `cli_version` 0.150.1 from 2026-08-31, and in some of those the object's keys are quoted, `{"cmd":"...","workdir":...}`, where the 0.155.1 run wrote them bare.
+The `function_call` named `exec_command` with JSON `arguments` that OW-jakahe was filed from, on the work laptop's 0.155.1 session of 2026-09-21, is therefore a second stored shape of the same tool, not the only one, and a preview fix that reads only it leaves every session on the home server showing `exec value`.
