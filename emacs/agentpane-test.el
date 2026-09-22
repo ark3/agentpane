@@ -7,9 +7,10 @@
 ;;; Commentary:
 
 ;; `ert' tests for agentpane.el: drawing a fixed list of nodes into a
-;; buffer, with no helper process, and the helper connection, against
-;; emacs/fake-helper.ts in place of the real helper, so no agentpane server
-;; is needed.  Run from the repository root with
+;; buffer and driving it with notifications, with no helper process, and
+;; the helper connection, against emacs/fake-helper.ts in place of the real
+;; helper, so no agentpane server is needed.  Run from the repository root
+;; with
 ;;
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
@@ -98,6 +99,98 @@
     (should (memq 'diff-context (agentpane-test--faces-at " before")))
     (should-not (memq 'diff-added (agentpane-test--faces-at "-old line")))
     (kill-buffer)))
+
+;;;; Notifications driving an attached buffer, with no process
+
+(defmacro agentpane-test--with-session (ref &rest body)
+  "Run BODY in a fresh transcript buffer holding the session REF, drawn with
+the fixed nodes, and kill the buffer afterwards.  Every pretty-printed node
+index is pushed onto `drawn', which BODY sees."
+  (declare (indent 1))
+  `(let ((buffer (agentpane--transcript-buffer (list :ref ,ref)))
+         (drawn nil))
+     (unwind-protect
+         (with-current-buffer buffer
+           (agentpane--draw agentpane-test--nodes)
+           (let ((pp (symbol-function 'agentpane--pp)))
+             (cl-letf (((symbol-function 'agentpane--pp)
+                        (lambda (node)
+                          (push (plist-get node :index) drawn)
+                          (funcall pp node))))
+               ,@body)))
+       (kill-buffer buffer))))
+
+(defun agentpane-test--indices ()
+  "The indices of the nodes drawn in the current buffer, in order."
+  (mapcar (lambda (data) (plist-get data :index))
+          (ewoc-collect agentpane--ewoc (lambda (_) t))))
+
+(defun agentpane-test--assistant (index html)
+  "An assistant node at INDEX whose one text part renders as HTML."
+  (list :index index :role "assistant"
+        :parts (vector (list :type "text" :text html :html html))
+        :meta '(:model "luna" :usage (:totalTokens 1 :cost 0))))
+
+(ert-deftest agentpane-test-node-redraws-in-place ()
+  "A `session/node' for a drawn index redraws that node where it is, and no other."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node
+       (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+      (should (equal drawn '(1)))
+      (should (equal (agentpane-test--indices) '(0 1)))
+      (should (string-search "Done now." (buffer-string)))
+      (should-not (string-search "Looking." (buffer-string)))
+      (should (< (agentpane-test--position "Fix the bug")
+                 (agentpane-test--position "Done now.")
+                 (agentpane-test--position "── prompt"))))))
+
+(ert-deftest agentpane-test-node-for-new-index-appends ()
+  "A `session/node' for an index no drawn node carries appends a node after
+the last, above the prompt region."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node
+       (list :session ref :node (agentpane-test--assistant 3 "<p>Appended.</p>")))
+      (should (equal drawn '(3)))
+      (should (equal (agentpane-test--indices) '(0 1 3)))
+      (should (< (agentpane-test--position "Looking.")
+                 (agentpane-test--position "Appended.")
+                 (agentpane-test--position "── prompt"))))))
+
+(ert-deftest agentpane-test-renamed-rekeys-the-buffer ()
+  "A `session/renamed' moves the buffer to the new ref and renames it."
+  (let ((from '(:backend "claude" :id "pending-1"))
+        (to '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-session from
+      (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+      (should (eq (agentpane--buffer-for to) (current-buffer)))
+      (should-not (agentpane--buffer-for from))
+      (should (string-search "real-2" (buffer-name))))))
+
+(ert-deftest agentpane-test-set-model-only-before-the-first-prompt ()
+  "`agentpane-set-model' on a buffer with nodes signals the gate's error and
+sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (sent nil))
+    (cl-letf (((symbol-function 'agentpane--request)
+               (lambda (method _params callback &optional _always)
+                 (push method sent)
+                 (funcall callback (list :ref ref))))
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (&rest _) (push 'jsonrpc-async-request sent)))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (&rest _) (push 'jsonrpc-request sent))))
+      (agentpane-test--with-session ref
+        (should (equal (cadr (should-error (agentpane-set-model "gpt-5.6-luna")
+                                           :type 'user-error))
+                       "The model is chosen before the first prompt"))
+        (should-not sent)
+        (agentpane--draw [])
+        (agentpane-set-model "gpt-5.6-luna")
+        (should (equal (reverse sent) '(sessions/attach sessions/setModel)))))))
 
 ;;;; The helper connection, against a fake helper
 
