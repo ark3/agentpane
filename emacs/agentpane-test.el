@@ -173,6 +173,23 @@ transcript's reply arriving first."
 picker's reply arriving first."
   (agentpane-test--nested-refetch "inner-first"))
 
+(ert-deftest agentpane-test-stale-reply-does-not-overwrite ()
+  "Of two refetches from one picker answered in reverse order, the later
+request's listing is the one left drawn, not the reply that landed last."
+  (agentpane-test--with-fake-helper "lists-reversed"
+    (let ((picker (save-window-excursion
+                    (agentpane-sessions t)
+                    (current-buffer))))
+      (with-current-buffer picker (revert-buffer))
+      ;; The helper answers `list 2' and then `list 1'; wait until neither
+      ;; reply is outstanding before looking.
+      (should (agentpane-test--wait-for
+               (lambda () (zerop (jsonrpc-continuation-count agentpane--connection)))
+               (+ (float-time) 10)))
+      (with-current-buffer picker
+        (should (string-search "list 2" (buffer-string)))
+        (should-not (string-search "list 1" (buffer-string)))))))
+
 (ert-deftest agentpane-test-shutdown-ends-the-helper ()
   "The real helper the mode starts exits cleanly on `agentpane-shutdown' and
 is gone from the process table.  Needs `bun install' in the checkout, and

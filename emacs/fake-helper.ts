@@ -12,7 +12,10 @@
  * `sessions/changed` at once, holds its own reply until the refetch that
  * notification causes arrives as a second `sessions/list`, then answers
  * both in ORDER -- `outer-first` (the preview, then the listing 200ms
- * later) or `inner-first`.  Exits when stdin ends, as the real helper does.
+ * later) or `inner-first`.  ORDER `lists-reversed` instead holds each odd
+ * `sessions/list` until the next one arrives and answers that one first,
+ * as the real helper may when two of its HTTP calls finish out of order.
+ * Exits when stdin ends, as the real helper does.
  */
 
 import { FrameDecoder, encodeFrame } from "../src/emacs/framing.ts";
@@ -28,6 +31,7 @@ const log = (text: string): void => void process.stderr.write(`fake-helper: ${te
 
 let listings = 0;
 let heldPreview: Request | null = null;
+let heldListing: object | null = null;
 
 const listing = () => [
 	{
@@ -47,6 +51,17 @@ const onRequest = (request: Request): void => {
 		case "sessions/list": {
 			listings += 1;
 			const reply = { id: request.id, result: listing() };
+			if (order === "lists-reversed") {
+				const first = heldListing;
+				if (first === null) {
+					heldListing = reply;
+					return;
+				}
+				heldListing = null;
+				send(reply);
+				send(first);
+				return;
+			}
 			const held = heldPreview;
 			if (held === null) return send(reply);
 			heldPreview = null;
