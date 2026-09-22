@@ -49,3 +49,14 @@ A node's `index` is its position in the session's flat message array, not in the
 
 The composer derived from `markdown-mode`.
 That package is not installed on the home server, and Emacs 31.1's bundled `markdown-ts-mode` has no markdown grammar there (`treesit-language-available-p` answers nil), so the composer derives from `text-mode` and the mode takes no new dependency.
+
+The model order: `agentpane-new-session` creates, attaches, then reads the model from `models/list` and sends `sessions/setModel` — still before the first prompt, and the browser's order.
+Reading the model before `sessions/create` cannot work: `sessions/create` spawns nothing, and `listModels` in `src/server/http/app.ts` asks an unstarted adapter when no live one exists, which Codex refuses with "codex adapter not started" (measured 2026-09-22 against a fresh server).
+
+## Landed 2026-09-22, live run outstanding
+
+The code and the first done condition landed on `main` in 4b3f15f, 3417bd5 and 34cc455: `Ran 14 tests, 14 results as expected, 0 unexpected`, each new test shown red first.
+The live run against Codex did not happen.
+That session's sandbox mounted `~/.codex` read-only, and `codex app-server` exited at attach with `failed to initialize sqlite state runtime under /home/ark3/.codex`, though 8468a02 (OW-vowire) records the backend state dirs as normally read-write.
+What remains is the second paragraph of "Done when", in a session whose sandbox can write `~/.codex`.
+Findings from the adversarial read went to OW-yoyiya, OW-kisemu, OW-nuwive and OW-gunaza, none of which the live run waits on.
