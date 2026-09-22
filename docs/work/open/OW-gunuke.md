@@ -55,7 +55,7 @@ Reading the model before `sessions/create` cannot work: `sessions/create` spawns
 
 ## Landed 2026-09-22, live run outstanding
 
-The code and the first done condition landed on `main` in 4b3f15f, 3417bd5 and 34cc455: `Ran 14 tests, 14 results as expected, 0 unexpected`, each new test shown red first.
+The code and the first done condition landed on `main` in 4b3f15f, 3417bd5, 34cc455 and cd6c245: `Ran 16 tests, 16 results as expected, 0 unexpected`, each new test shown red first.
 The live run against Codex did not happen.
 That session's sandbox mounted `~/.codex` read-only, and `codex app-server` exited at attach with `failed to initialize sqlite state runtime under /home/ark3/.codex`, though 8468a02 (OW-vowire) records the backend state dirs as normally read-write.
 What remains is the second paragraph of "Done when", in a session whose sandbox can write `~/.codex`.

@@ -13,6 +13,9 @@ Snapshots are rare — attach, `g` on an attached buffer, and the helper's resyn
 
 Also cosmetic and found at the same time: the composer buffer is named from its transcript buffer's name when `agentpane-prompt` creates it, and does not follow `agentpane--rekey` renaming the transcript.
 
+Also low, from the read of cd6c245's predecessor, in `agentpane--above-prompt` in `emacs/agentpane.el`: an `(apply DELTA BEG END FUN . ARGS)` undo entry is not shifted, though nothing in the prompt region makes one today; undo with the region active builds its own `pending-undo-list` copy, which the shift does not reach; and a redraw that signals partway through changes the size without shifting.
+Each needs a test that fails before it is fixed, or a sentence here saying why it is not worth one.
+
 ## Done when
 
 An ert test in `emacs/agentpane-test.el` shows a window's `window-start` survives a `session/snapshot` delivered through `agentpane--on-notification` (a window can be made in batch with `set-window-buffer` on the selected window), failing before the fix.
