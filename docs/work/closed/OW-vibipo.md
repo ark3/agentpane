@@ -1,8 +1,9 @@
 ---
 labels: [question, emacs]
+closed: done
 ---
 
-# Which Emacs client agentpane builds, agent-shell over an ACP shim or a native mode over its own JSON-RPC helper, is undecided and closes as D21
+# Which Emacs client agentpane builds, agent-shell over an ACP shim or a native mode over its own JSON-RPC helper, is undecided and closes as D22
 
 Filed 2026-09-15.
 Two streams of cards now describe an Emacs client, and nothing records which one the project is building.
@@ -15,7 +16,7 @@ Two streams of cards now describe an Emacs client, and nothing records which one
 OW-wawipu belongs to neither stream and stands whichever is chosen.
 
 The two streams share their first module in all but output type, so the cost of deciding late is small until either stream's second card starts.
-Both may also be explored: the reader who has used both for a week is the one this card is written for, and a rough cut of each is what `docs/DESIGN.md` D14's own history says UI decisions come from.
+Both may also be explored: the reader who has used both for a week is the one this card is written for, and a rough cut of each is what the owner's practice for UI decisions asks for; this line pointed at D14's history when filed, which records no such thing, corrected 2026-09-22.
 
 ## Fork is not a differentiator between the streams
 
@@ -77,10 +78,18 @@ Three Emacs facts the code records where it works around them, each measured on 
 A fourth is about the loop itself: `defface` does not redefine an existing face on reload, so a face change reaches a running Emacs only after its `face-defface-spec` is cleared.
 
 What this decides: the streams differed on rendering alone, and a native buffer can now draw closer to the browser than tuned `agent-shell` does, from HTML the browser already produces.
-The native stream is the one to build, and D21 is this card's own act under "Done when".
+The native stream is the one to build, and D22 is this card's own act under "Done when".
+The card said D21 when filed, but D21 was taken by the reconnect re-list decision (OW-vukoku, 2026-09-16) before this one was written; amended 2026-09-22 at execution.
 OW-wavone's Drawing list was rewritten in the same change to name shr and the HTML it needs; that HTML is a field the helper has to send beside each text part, which OW-refibu's `sessions/preview` and `session/node` do not yet say.
 
 ## Done when
 
-The decision is recorded in `docs/DESIGN.md` as D21, with the reason, on the same day the other stream's open cards close `--declined` citing D21.
+The decision is recorded in `docs/DESIGN.md` as D22, with the reason, on the same day the other stream's open cards close `--declined` citing D22.
 The closing act also writes the sentence OW-basoga planned for D14, scoping it to the browser client, since it is true of both streams.
+
+## Close note
+
+Decided 2026-09-22: the Emacs client is a native `agentpane-mode` over a JSON-RPC helper agentpane owns, recorded as D22 in `docs/DESIGN.md` (D21 had been taken by OW-vukoku, so the number this card was filed with moved by one).
+The evidence is OW-dekate's rendering spike and its verdict under "Rendering verdict, 2026-09-22" above: the streams had narrowed to rendering alone, and an `shr` buffer over the browser's own HTML settled it.
+The same day OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` citing D22, D14 gained the sentence OW-basoga planned scoping the pointer rule to the browser client, `AGENTS.md`'s label notes now say which stream was chosen, and OW-refibu was amended to send the `html` field beside each text part that OW-wavone's Drawing list needs.
+Reviewed by a dispatched adversarial reader before commit; its findings, chiefly that D14 carries no "rough cut" history despite this card and OW-dekate citing one, were fixed in the same change.
