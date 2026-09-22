@@ -2374,3 +2374,50 @@ That same projection gave the first reply a meta of model `codex` and 0 tokens, 
 **Smaller things.**
 The helper's stderr buffer was empty.
 A markdown numbered list came through shr with its markers as bare numbers, a number and a space before each item with no period after it.
+
+## The native Emacs mode forks a Codex session live (OW-fojike)
+
+Measured on the home server 2026-09-22, Emacs 31.1 in `--batch`, `codex-cli 0.156.0`, `bun 1.4.0`, agentpane at 096c6d9.
+The server was started from the worktree with `bun run src/server/index.ts` on its default port, logging to a file under `/tmp`, and stopped afterwards by its pid; the process table afterwards held none of the run's processes.
+The driver was an elisp script run as `emacs --batch -L emacs -l agentpane -l <script>`, adapted from OW-gunuke's, which set `agentpane-project-directory` to the worktree and then, in order:
+
+- called `agentpane-new-session` with `"codex"`, with `completing-read` answering `gpt-5.6-luna`;
+- sent two one-word prompts from the prompt region with `agentpane-send`, waiting for each turn's snapshot to report `isStreaming: false`;
+- read the session's fork points with a `sessions/forkPoints` request of its own, for the record;
+- moved point to the first assistant node and called `agentpane-fork`;
+- moved point to the second user node and called `agentpane-fork`, then waited for a second transcript buffer to report itself attached;
+- sent a one-word prompt from the fork's buffer, then another from the original's;
+- read both sessions' summaries through `GET /api/sessions?cwd=`, and called `agentpane-shutdown`.
+
+`:before` advice logged every request the mode sent with its params, every notification the helper sent, and every `message`, and each step logged each buffer's drawn nodes as index, role and first text, whether it counted itself attached, and `mode-line-process`.
+The run recorded here is the second of two; the first stopped on a driver defect after its two turns, before forking anything.
+
+**The session had one fork point per user message.**
+`sessions/forkPoints` answered two points, at indices 0 and 2, the two user nodes; neither assistant node was named.
+
+**A fork at a message no point names forks nothing.**
+With point on the assistant node at index 1, `agentpane-fork` sent `sessions/forkPoints` and nothing else, the echo area read `agentpane: the message at point is not forkable`, and three seconds later the only transcript buffer was still the original.
+
+**A fork at the second user message held only the first exchange.**
+With point on the user node at index 2, `agentpane-fork` sent `sessions/forkPoints`, then `sessions/fork` with the index-2 point's id 0.02s later, and 0.18s after that the new buffer `*agentpane codex: <fork id>*` sent `sessions/attach` for the ref the fork answered.
+The snapshot that followed carried two nodes, the first prompt at index 0 and its reply at index 1, and the new buffer was the one the window showed.
+The original buffer kept its four nodes and still counted itself attached; the only notifications for it were two unchanged snapshots, one each from the `fork-points` and `fork` routes, which attach the session they are asked about first.
+
+**The fork ran on the parent's app-server.**
+The process table after the fork held one `codex app-server` for this run's sessions, the one the create had spawned, as OW-lajehi has the fork's adapter borrow the parent's connection.
+Beside it was the first run's, still attached until the server stopped.
+
+**Both buffers answered afterwards.**
+A prompt from the fork's buffer streamed there and left it with four nodes, the first exchange and then the new one, while the original's four were untouched.
+A prompt from the original's buffer then streamed there and left it with six, the fork's four untouched.
+The fork's turn took 1.78s from send to the idle snapshot and the original's 1.24s, and each buffer's prompt region was empty afterwards.
+The server's listing then read both sessions `status: "attached"`, `isStreaming: false`.
+
+**The fork's stored transcript lacks what it inherited.**
+`bun run src/emacs/dump-nodes.ts codex/<fork id>`, the stored transcript as a preview projects it, answered two nodes, the fork's own prompt and reply, where the live buffer had drawn four; the parent's answered all six.
+The fork's rollout, as `codex-cli 0.156.0` wrote it, opens with a `session_meta` whose `forked_from_id` names the parent and holds only the turn sent after the fork, and the listing's preview for the fork was that turn's prompt rather than the first prompt it inherited.
+So a Codex fork reopened from the picker, which previews without attaching, would draw only its own turns; this run did not open one that way.
+
+**Smaller things.**
+The helper's stderr buffer was empty.
+The fork buffer is named after its id: its summary carries no preview, the fork having none the mode knows of.
