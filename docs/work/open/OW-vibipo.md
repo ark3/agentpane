@@ -54,6 +54,32 @@ What was disliked was the rendering, which the shim cannot touch, and which by t
 The interaction model the owner likes -- staying in Emacs, Magit and back, long messages edited in place, `RET` and `C-RET`, inline prompt or separate composer -- is Emacs's, not `agent-shell`'s, and a native mode carries it at the cost of a keymap.
 So the streams now differ on rendering alone, and OW-dekate is the rough cut that answers it: its verdict is recorded here under a dated heading before this card closes.
 
+## Rendering verdict, 2026-09-22
+
+OW-dekate ran on the work laptop over two evenings, 2026-09-21 and 2026-09-22, the owner at a live Emacs 31.1.50 beside the browser, the agent editing `emacs/agentpane-spike.el` on `main` and redrawing through `emacsclient`.
+Two stored sessions were dumped through `src/emacs/dump-nodes.ts`: `claude/a4caf4c9-5567-4718-a77e-984ebe319b4e`, with Edit diffs and a markdown table, and `codex/01a0c449-2767-73e2-8b2b-dd67cf4d6c1a`, with fenced shell.
+The rounds are the commits from da83c81 to 2e50164.
+
+**The backend is shr, drawing the browser's own HTML.**
+The dump script writes beside each text part the exact sanitized string `renderMarkdown` in `src/client/render/markdown.ts` returns, under a jsdom window, and the spike hands that to `shr` with filling off so `visual-line-mode` wraps it.
+The owner's words: "this approach using shr is absolutely 100% a success".
+
+What the markdown-mode backend got, over four rounds, and what it could not: proportional wrapped prose at the owner's markdown-buffer size, hidden markup, hanging indents for lists, code and diffs monospace, and the browser's layout of turns; but a table is aligned monospace source, and a wide one wraps at the window edge into nothing readable.
+That was the owner's remaining objection to it, and it is the case shr exists for.
+
+What shr got right: headings at the stylesheet's three ratios and weight, inline code and fenced code at the code size on the browser's tints, highlight.js token classes mapped to font-lock faces so fenced code is coloured by role, and tables as real columns fitted to the window in proportional text at a smaller size, cells folding inside their own column.
+Everything the markdown-mode rounds had settled carries over unchanged: assistant turns plain on the page closed by one small meta line, user turns on the dark theme's raised surface with its accent bar, tool and thinking parts folded behind a summary line, signature-only thinking drawn as nothing.
+
+What shr got wrong and the owner accepted: numbered lists read `1 ` rather than `1.`, which is shr's list drawing.
+What was tuned rather than accepted: the stylesheet's exact table ratio landed on 14px under 18px prose and read too small, so the face says 0.95, which is the 16px step between the code size and the prose; a raised surface behind table header cells was tried and removed as not fitting the look.
+
+Three Emacs facts the code records where it works around them, each measured on 31.1.50: `shr-tag-table` sets `truncate-lines` in the buffer it draws into; `shr-tag-pre` binds the current font to `default`, so block code comes out without `shr-code`; and `fixed-pitch` carries no height of its own, so under a proportional buffer face it inherits the prose size and has to be pinned to the default face's absolute height.
+A fourth is about the loop itself: `defface` does not redefine an existing face on reload, so a face change reaches a running Emacs only after its `face-defface-spec` is cleared.
+
+What this decides: the streams differed on rendering alone, and a native buffer can now draw closer to the browser than tuned `agent-shell` does, from HTML the browser already produces.
+The native stream is the one to build, and D21 is this card's own act under "Done when".
+OW-wavone's Drawing list was rewritten in the same change to name shr and the HTML it needs; that HTML is a field the helper has to send beside each text part, which OW-refibu's `sessions/preview` and `session/node` do not yet say.
+
 ## Done when
 
 The decision is recorded in `docs/DESIGN.md` as D21, with the reason, on the same day the other stream's open cards close `--declined` citing D21.
