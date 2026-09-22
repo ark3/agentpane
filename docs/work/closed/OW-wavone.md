@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, emacs-native]
 blocked-by: [OW-refibu]
+closed: done
 ---
 
 # A native agentpane-mode in Emacs lists sessions in a tabulated buffer and shows any one as a read-only transcript, spawning nothing
@@ -51,3 +52,11 @@ D14 does not bind an Emacs client; OW-basoga already planned the sentence scopin
 `ert` tests in `emacs/agentpane-test.el`, run with `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit` from the repository root, cover the pure half with no helper process: rendering a fixed list of nodes into a buffer yields the role lines and summary lines in order, a tool part's result is invisible until toggled, and a diff part's added and removed lines carry the diff faces.
 That command and its expected output are recorded in the file's commentary; it is not part of `bun run check`, which stays Bun-only.
 On the home server: `agentpane-sessions` lists the stored sessions the browser lists, `RET` on a stored Codex session shows its transcript with no child process spawned (check `ps` or the server log), and the observation is recorded in `docs/MANUAL_TESTING.md` with the Emacs and agentpane versions.
+
+## Close note
+
+Landed on main 2026-09-22 as 5cfd5e4, dbed691, 713af5a and 69642ea.
+`emacs/agentpane.el` is the native mode: a lazily started `jsonrpc-process-connection` on `bun run src/emacs/main.ts` in `agentpane-project-directory`, `agentpane-sessions` as a `tabulated-list-mode` picker over `sessions/list` filtered to the current project (prefix argument lifts it), and `agentpane-transcript-mode` drawing `sessions/preview` nodes into an ewoc with the shr backend, faces, folds and workarounds carried over byte-for-byte from the OW-dekate spike, which is deleted; the markdown backend went with it and nothing outside Emacs's own libraries is required.
+Verified by four ert tests in `emacs/agentpane-test.el`, each shown red with the behaviour removed, and by a batch drive against a live server recorded in `docs/MANUAL_TESTING.md` under "The native Emacs picker and transcript spawn nothing (OW-wavone)": 211 picker rows against 211 from the API for the same cwd, a stored Codex session opened read-only, and only the server and the helper in the process table.
+A dispatched adversarial reader found the fold test asserted the property rather than the display and that the commentary claimed `sessions/changed` refetches now, when the helper opens no stream until something attaches; both fixed in 713af5a.
+What survives it is filed: the nested synchronous request and the helper that outlives `jsonrpc-shutdown`, and the orphaned `src/emacs/dump-nodes.ts`.
