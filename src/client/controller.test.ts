@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+	AgentRequestReply,
 	BackendId,
 	ForkPoint,
 	ForkRequest,
@@ -80,6 +81,7 @@ class FakeApi implements AgentpaneApi {
 	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
+	readonly reply = vi.fn(async (_requestId: string, _body: AgentRequestReply) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;

@@ -1901,6 +1901,7 @@ describe("App", () => {
 			setModel: async () => {},
 			forkPoints: async () => [],
 			fork: async () => piSession,
+			reply: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
 				return { close: () => {} };
@@ -2416,6 +2417,7 @@ describe("App", () => {
 					resolveFork = resolve;
 				});
 			},
+			reply: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
 				return { close: () => {} };
