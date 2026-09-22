@@ -2287,3 +2287,25 @@ The buffer `*agentpane codex: Reply with exactly the word THREE and nothing else
 **Nothing was spawned.**
 With the transcript open, `ps` showed exactly two agentpane processes beside the sandbox: `bun run src/server/index.ts` and `bun run src/emacs/main.ts`, the helper Emacs started, and no `codex` process at all.
 The server logs no spawn (nothing under `src/server/adapters/` writes to the console), so the process table is the whole of the evidence, read once while the buffer was open.
+
+## The Emacs helper connection: a nested request stalls, and the helper exits on stdin close (OW-bonode)
+
+Measured on the home server 2026-09-22, Emacs 31.1 in `--batch` with its bundled `jsonrpc.el` 1.0.29, `bun 1.4.0`, the helper's source as of 7b35eab.
+
+**A synchronous request nested in another is not dropped; it stalls the outer one.**
+OW-bonode was filed on a reading of `jsonrpc.el` that a picker refetch, started by `sessions/changed` while a transcript refetch waited in `jsonrpc-request`, would be dropped when the outer reply unwound it.
+`emacs/fake-helper.ts` provokes exactly that nesting: `sessions/preview` pushes `sessions/changed` and holds its reply until the refetch's `sessions/list` arrives, then answers both, in either order.
+Against the synchronous code of 7b35eab the picker did draw the second listing, because 1.0.29 parks an outer reply that arrives during an inner request as an "anxious continuation" and runs it after the inner one (bug#67945); the events buffer read `anxious continuation to 2 can't run, held up by ((:local 3) (:local 2))` and then `anxious continuation to 2 running now`.
+The outer call, though, returned at 10.07s with both replies in by 0.3s, preview first or listing first alike, and with `jsonrpc-default-request-timeout` set to 3 it returned at 3.07s: it waits out its own timeout's deadline before its continuation runs.
+The mode's requests are asynchronous since 11fe27d, and the ert tests `agentpane-test-nested-refetch-*` hold the pair to two seconds; both failed against 7b35eab at 9.8s and 10.0s.
+
+**The helper exits on stdin close, event stream open or not.**
+Driven from a Python 3.14 script that started `bun run src/emacs/main.ts` on a pipe, slept, closed its stdin and timed the exit: after sleeping 2s or 3s it exited with code 0 in 0.016s; after 0s or 0.5s it exited with code 0 in 1.216s and 0.715s, since it reads nothing until its markdown renderer has loaded, about 1.2s after start.
+`bun run` started no child process; `pgrep -P` on its pid was empty.
+With the helper pointed at a stand-in server that holds `GET /api/events` open and answers anything else 404, a `sessions/attach` opened the stream and failed its REST call, and closing stdin one second later aborted the stream and exited the helper with code 0 in 0.034s.
+The ert test `agentpane-test-shutdown-ends-the-helper` covers the no-stream case through `agentpane-shutdown`, against the real helper.
+
+**An HTTP request that never completes holds the helper alive.**
+In the first run of that stand-in, every `GET` was held open, the attach's `GET /api/sessions/pi/nope` included; closing stdin aborted the event stream but the helper was still running 30s later.
+`runHelper` aborts its event stream when its input ends but not a request still in flight, so a server that never answers keeps the helper up past stdin close.
+`agentpane-shutdown` still ends it, by the kill `jsonrpc-shutdown` falls back to: run in `--batch` against the same stand-in with that attach in flight, it printed `Sentinel for agentpane helper still hasn't run, deleting it!` and returned after 0.332s with the process at status `signal`, code 9, and `process-attributes` finding no such pid.
