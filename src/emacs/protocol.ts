@@ -30,8 +30,11 @@
  *
  * Parts, by `type`:
  *
- * - `{ type: "text", text }` -- `text` (string) is markdown source, exactly as
- *   the model wrote it. Nothing on this path renders HTML; Emacs fontifies.
+ * - `{ type: "text", text, html }` -- `text` (string) is markdown source,
+ *   exactly as the model wrote it; `html` (string) is the sanitized HTML the
+ *   browser renders for that markdown, the very string `renderMarkdown` in
+ *   `$client/render/markdown.ts` returns, for the buffer to draw through
+ *   `shr` (D22, OW-refibu). Empty when `text` is empty.
  *   A `compactionSummary` node carries its summary as one of these when the
  *   backend supplied any; a role the projection does not know carries the
  *   whole message as JSON text so nothing is silently dropped.
@@ -91,6 +94,7 @@ export type NodePart = TextPart | ThinkingPart | ToolPart | ImagePart;
 export interface TextPart {
 	type: "text";
 	text: string;
+	html: string;
 }
 
 export interface ThinkingPart {

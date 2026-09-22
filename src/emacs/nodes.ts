@@ -32,11 +32,14 @@ import { argString, editHunks, prettyArgs } from "$client/render/tools/args.ts";
 import { buildDiff } from "$client/render/tools/diff.ts";
 import { toolSummary } from "$client/render/tools/summary.ts";
 import { oneLine, resultText, toolState, userBlocks } from "$client/render/types.ts";
-import type { NodeDiffLine, NodePart, ToolPart, TranscriptNode, TurnMeta } from "./protocol.ts";
+import type { NodeDiffLine, NodePart, TextPart, ToolPart, TranscriptNode, TurnMeta } from "./protocol.ts";
 
-export function projectTranscript(messages: PaneMessage[], isStreaming: boolean): TranscriptNode[] {
+/** Markdown source to the sanitized HTML a text part carries; `loadRenderer` in `render.ts` supplies the browser's. */
+export type Render = (markdown: string) => string;
+
+export function projectTranscript(messages: PaneMessage[], isStreaming: boolean, render: Render): TranscriptNode[] {
 	const view = buildTranscript(messages);
-	return view.entries.map((entry) => nodeFor(view, entry, isStreaming));
+	return view.entries.map((entry) => nodeFor(view, entry, isStreaming, render));
 }
 
 /**
@@ -50,6 +53,7 @@ export function projectUpsert(
 	index: number,
 	message: PaneMessage,
 	isStreaming: boolean,
+	render: Render,
 ): TranscriptNode {
 	if (!Number.isInteger(index) || index < 0 || index > messages.length) {
 		throw new RangeError(`upsert index ${index} is outside a transcript of ${messages.length} messages`);
@@ -71,11 +75,12 @@ export function projectUpsert(
 	// Always found: a non-result message is its own entry, and a result is
 	// either folded into its owner above or kept as an orphan entry.
 	const entry = owner ?? view.entries.find((candidate) => candidate.index === index)!;
-	return nodeFor(view, entry, isStreaming);
+	return nodeFor(view, entry, isStreaming, render);
 }
 
-function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: boolean): TranscriptNode {
+function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: boolean, render: Render): TranscriptNode {
 	const { index, message } = entry;
+	const text = (markdown: string): TextPart => ({ type: "text", text: markdown, html: render(markdown) });
 	switch (message.role) {
 		case "user":
 			return {
@@ -84,14 +89,14 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 				parts: userBlocks(message.content).map((block) =>
 					block.type === "image"
 						? { type: "image", mimeType: block.mimeType, data: block.data }
-						: { type: "text", text: block.type === "text" ? block.text : "" },
+						: text(block.type === "text" ? block.text : ""),
 				),
 			};
 		case "assistant": {
 			const turn = message as AssistantTurn;
 			const streaming = isStreaming && index === view.lastIndex;
 			const parts: NodePart[] = turn.content.map((block) => {
-				if (block.type === "text") return { type: "text", text: block.text };
+				if (block.type === "text") return text(block.text);
 				if (block.type === "thinking") {
 					return { type: "thinking", text: block.thinking, redacted: block.redacted === true };
 				}
@@ -105,13 +110,13 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 			return {
 				index,
 				role: "compactionSummary",
-				parts: message.summary ? [{ type: "text", text: message.summary }] : [],
+				parts: message.summary ? [text(message.summary)] : [],
 			};
 		default:
 			return {
 				index,
 				role: String((message as { role: unknown }).role),
-				parts: [{ type: "text", text: JSON.stringify(message, null, 2) }],
+				parts: [text(JSON.stringify(message, null, 2))],
 			};
 	}
 }

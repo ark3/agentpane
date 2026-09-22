@@ -20,6 +20,10 @@ import {
 import { toolSummary } from "$client/render/tools/summary.ts";
 import { projectTranscript, projectUpsert } from "./nodes.ts";
 import type { TextPart, ToolPart, TranscriptNode } from "./protocol.ts";
+import { loadRenderer } from "./render.ts";
+
+/** A stand-in for `renderMarkdown`: the structure tests only need to see it was called with the part's text. */
+const render = (markdown: string): string => `stub:${markdown}`;
 
 function replayClaude(name: ClaudeFixtureName): PaneMessage[] {
 	const reducer = new ClaudeReducer({ now: () => 1_000 });
@@ -58,7 +62,7 @@ describe.each([
 	["codex", "tool-edit", replayCodex("tool-edit")],
 	["codex", "tool-read", replayCodex("tool-read")],
 ] as const)("replaying %s %s", (_backend, _name, messages) => {
-	const nodes = projectTranscript(messages, false);
+	const nodes = projectTranscript(messages, false, render);
 
 	it("yields one node per visible entry, in order, keyed by the original index", () => {
 		const indices = nodes.map((node) => node.index);
@@ -87,7 +91,7 @@ describe.each([
 
 describe("tool parts", () => {
 	it("gives a Claude Edit call a diff with add and del lines", () => {
-		const edits = toolParts(projectTranscript(replayClaude("tool-use"), false)).filter(
+		const edits = toolParts(projectTranscript(replayClaude("tool-use"), false, render)).filter(
 			(part) => part.name.toLowerCase() === "edit",
 		);
 		expect(edits.length).toBeGreaterThan(0);
@@ -99,7 +103,7 @@ describe("tool parts", () => {
 	});
 
 	it("gives a Codex fileChange, mapped to edit with nested hunks, a diff too", () => {
-		const edits = toolParts(projectTranscript(replayCodex("tool-edit"), false)).filter((part) => part.name === "edit");
+		const edits = toolParts(projectTranscript(replayCodex("tool-edit"), false, render)).filter((part) => part.name === "edit");
 		expect(edits.length).toBeGreaterThan(0);
 		for (const part of edits) {
 			expect(part.diff?.length).toBeGreaterThan(0);
@@ -108,7 +112,7 @@ describe("tool parts", () => {
 	});
 
 	it("gives a Read call no diff and a non-empty summary", () => {
-		const reads = toolParts(projectTranscript(replayClaude("tool-use"), false)).filter(
+		const reads = toolParts(projectTranscript(replayClaude("tool-use"), false, render)).filter(
 			(part) => part.name.toLowerCase() === "read",
 		);
 		expect(reads.length).toBeGreaterThan(0);
@@ -127,7 +131,7 @@ describe("tool parts", () => {
 			if (message.role !== "assistant") continue;
 			for (const block of message.content) if (block.type === "toolCall") calls.set(block.id, block);
 		}
-		const parts = toolParts(projectTranscript(messages, false)).filter((part) => part.name === "subagent");
+		const parts = toolParts(projectTranscript(messages, false, render)).filter((part) => part.name === "subagent");
 		expect(parts.length).toBeGreaterThan(0);
 		for (const part of parts) {
 			const call = [...calls.values()].find((candidate) => toolSummary(candidate) === part.summary);
@@ -148,7 +152,7 @@ describe("tool parts", () => {
 		const messages = replayClaude("tool-use");
 		const result = messages.find((message) => message.role === "toolResult");
 		if (!result) throw new Error("tool-use fixture has no tool result");
-		const nodes = projectTranscript([result], false);
+		const nodes = projectTranscript([result], false, render);
 		expect(nodes).toHaveLength(1);
 		expect(nodes[0]).toMatchObject({ index: 0, role: "tool-result" });
 		expect(nodes[0]!.parts).toHaveLength(1);
@@ -164,27 +168,27 @@ describe("tool parts", () => {
 		// The result's slot is still empty, so the call is the last visible entry.
 		const upToCall = messages.slice(0, callIndex + 1);
 
-		const running = toolParts(projectTranscript(upToCall, true));
+		const running = toolParts(projectTranscript(upToCall, true, render));
 		expect(running.length).toBeGreaterThan(0);
 		for (const part of running) expect(part.state).toBe("running");
 
-		for (const part of toolParts(projectTranscript(upToCall, false))) expect(part.state).toBe("ok");
+		for (const part of toolParts(projectTranscript(upToCall, false, render))) expect(part.state).toBe("ok");
 
 		// Streaming, but a later turn is the tail: an earlier call is never running.
-		const whole = projectTranscript(messages, true);
+		const whole = projectTranscript(messages, true, render);
 		const earlier = whole.find((node) => node.index === callIndex)!;
 		for (const part of earlier.parts) if (part.type === "tool") expect(part.state).toBe("ok");
 
 		// The upsert path reads the same two facts.
-		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, true)])[0]?.state).toBe("running");
-		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, false)])[0]?.state).toBe("ok");
+		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, true, render)])[0]?.state).toBe("running");
+		expect(toolParts([projectUpsert(upToCall.slice(0, -1), callIndex, call, false, render)])[0]?.state).toBe("ok");
 	});
 });
 
 describe("assistant turns", () => {
 	it("yields a thinking part for a thinking block", () => {
 		const messages = replayClaude("thinking");
-		const nodes = projectTranscript(messages, false);
+		const nodes = projectTranscript(messages, false, render);
 		const thinking = nodes.flatMap((node) => node.parts.filter((part) => part.type === "thinking"));
 		expect(thinking.length).toBeGreaterThan(0);
 		for (const part of thinking) {
@@ -195,7 +199,7 @@ describe("assistant turns", () => {
 
 	it("keeps part order as block order", () => {
 		const messages = replayClaude("tool-use");
-		for (const node of projectTranscript(messages, false)) {
+		for (const node of projectTranscript(messages, false, render)) {
 			const message = messages[node.index]!;
 			if (message.role !== "assistant") continue;
 			const kinds = message.content.map((block) => (block.type === "toolCall" ? "tool" : block.type));
@@ -205,7 +209,7 @@ describe("assistant turns", () => {
 
 	it("says so in the meta line when a turn was aborted", () => {
 		const messages = replayClaude("interrupt");
-		const nodes = projectTranscript(messages, false);
+		const nodes = projectTranscript(messages, false, render);
 		const last = nodes.at(-1);
 		expect(last?.role).toBe("assistant");
 		expect(last?.meta?.stopReason).toBe("aborted");
@@ -213,7 +217,7 @@ describe("assistant turns", () => {
 
 	it("omits stopReason from the meta of a turn that finished normally", () => {
 		const messages = replayCodex("text");
-		const turn = projectTranscript(messages, false).find((node) => node.role === "assistant");
+		const turn = projectTranscript(messages, false, render).find((node) => node.role === "assistant");
 		expect(turn?.meta).toBeDefined();
 		expect(turn?.meta?.stopReason).toBeUndefined();
 		expect(turn?.meta?.usage.totalTokens).toBeGreaterThan(0);
@@ -227,7 +231,7 @@ describe("assistant turns", () => {
 			stopReason: "error",
 			errorMessage: "boom",
 		} as PaneMessage;
-		const [node] = projectTranscript([turn], false);
+		const [node] = projectTranscript([turn], false, render);
 		expect(node?.meta).toMatchObject({
 			model: base.model,
 			effort: "high",
@@ -239,16 +243,48 @@ describe("assistant turns", () => {
 	it("drops errorMessage from an aborted turn: the banner for aborted is fixed wording", () => {
 		const base = replayClaude("interrupt").find((m) => m.role === "assistant") as AssistantMessage;
 		expect(base.stopReason).toBe("aborted");
-		const [node] = projectTranscript([{ ...base, errorMessage: "boom" } as PaneMessage], false);
+		const [node] = projectTranscript([{ ...base, errorMessage: "boom" } as PaneMessage], false, render);
 		expect(node?.meta?.stopReason).toBe("aborted");
 		expect(node?.meta?.errorMessage).toBeUndefined();
+	});
+});
+
+describe("text parts", () => {
+	function textParts(nodes: TranscriptNode[]): TextPart[] {
+		return nodes.flatMap((node) => node.parts.filter((part): part is TextPart => part.type === "text"));
+	}
+
+	it("fills html from the renderer it is given, on every text part and nothing else", () => {
+		const messages = replayClaude("tool-use");
+		const nodes = projectTranscript(messages, false, render);
+		const parts = textParts(nodes);
+		expect(parts.length).toBeGreaterThan(0);
+		for (const part of parts) expect(part.html).toBe(`stub:${part.text}`);
+		for (const node of nodes) {
+			for (const part of node.parts) if (part.type !== "text") expect("html" in part).toBe(false);
+		}
+		const tail = messages.length - 1;
+		const upserted = projectUpsert(messages.slice(0, tail), tail, messages[tail]!, false, render);
+		for (const part of textParts([upserted])) expect(part.html).toBe(`stub:${part.text}`);
+	});
+
+	it("carries the browser's own HTML when given the real renderer", async () => {
+		const real = await loadRenderer();
+		const parts = textParts(projectTranscript(replayClaude("tool-use"), false, real)).filter(
+			(part) => part.text !== "",
+		);
+		expect(parts.length).toBeGreaterThan(0);
+		for (const part of parts) {
+			expect(part.html.length).toBeGreaterThan(0);
+			expect(part.html).not.toBe(part.text);
+		}
 	});
 });
 
 describe("other roles", () => {
 	it("yields a compactionSummary node with its summary as text", () => {
 		const messages = replayClaude("compact");
-		const nodes = projectTranscript(messages, false);
+		const nodes = projectTranscript(messages, false, render);
 		const marker = nodes.find((node) => node.role === "compactionSummary");
 		expect(marker).toBeDefined();
 		expect(marker!.meta).toBeUndefined();
@@ -265,7 +301,7 @@ describe("other roles", () => {
 				{ type: "image", data: "AAAA", mimeType: "image/png" },
 			],
 		} as PaneMessage;
-		const [node] = projectTranscript([withImage], false);
+		const [node] = projectTranscript([withImage], false, render);
 		expect(node?.role).toBe("user");
 		expect(node?.parts.map((part) => part.type)).toEqual(["text", "image"]);
 		expect(node?.parts[1]).toMatchObject({ type: "image", mimeType: "image/png", data: "AAAA" });
@@ -277,8 +313,8 @@ describe("streaming upserts", () => {
 		const messages = replayCodex("text");
 		const tail = messages.length - 1;
 		const final = messages[tail] as AssistantMessage;
-		const finalText = final.content.find((block): block is TextPart & { type: "text" } => block.type === "text");
-		if (!finalText) throw new Error("text fixture's final turn has no text");
+		const finalText = final.content.find((block) => block.type === "text");
+		if (finalText?.type !== "text") throw new Error("text fixture's final turn has no text");
 		const before = messages.slice(0, tail);
 
 		const steps = [1, Math.floor(finalText.text.length / 2), finalText.text.length];
@@ -288,7 +324,7 @@ describe("streaming upserts", () => {
 			stopReason: i === steps.length - 1 ? final.stopReason : "pending",
 		})) as PaneMessage[];
 
-		const nodes = upserts.map((message) => projectUpsert(before, tail, message, true));
+		const nodes = upserts.map((message) => projectUpsert(before, tail, message, true, render));
 		expect(nodes).toHaveLength(upserts.length);
 		for (const node of nodes) expect(node.index).toBe(tail);
 
@@ -311,7 +347,7 @@ describe("streaming upserts", () => {
 		expect(callIndex).toBeGreaterThanOrEqual(0);
 
 		const before = messages.slice(0, resultIndex);
-		const node = projectUpsert(before, resultIndex, result, true);
+		const node = projectUpsert(before, resultIndex, result, true, render);
 		expect(node.index).toBe(callIndex);
 		expect(node.role).toBe("assistant");
 		const part = node.parts.find((p): p is ToolPart => p.type === "tool" && p.result !== "");
@@ -321,14 +357,14 @@ describe("streaming upserts", () => {
 	it("rejects an index past the end of the transcript", () => {
 		const messages = replayCodex("text");
 		const message = messages.at(-1)!;
-		expect(() => projectUpsert(messages, messages.length + 1, message, false)).toThrow(RangeError);
-		expect(() => projectUpsert(messages, -1, message, false)).toThrow(RangeError);
+		expect(() => projectUpsert(messages, messages.length + 1, message, false, render)).toThrow(RangeError);
+		expect(() => projectUpsert(messages, -1, message, false, render)).toThrow(RangeError);
 	});
 
 	it("leaves the transcript it was given untouched", () => {
 		const messages = replayCodex("text");
 		const copy = structuredClone(messages);
-		projectUpsert(messages, messages.length, messages.at(-1)!, false);
+		projectUpsert(messages, messages.length, messages.at(-1)!, false, render);
 		expect(messages).toEqual(copy);
 	});
 });
