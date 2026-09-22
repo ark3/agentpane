@@ -34,6 +34,8 @@
 (require 'markdown-mode)
 (require 'text-property-search)
 (require 'visual-wrap)
+(require 'shr)
+(require 'dom)
 
 ;;;; Faces
 
@@ -68,19 +70,118 @@ size as the owner's markdown buffers.  Code, tables and diffs stay monospace
 by inheriting `fixed-pitch'.")
 
 (defface agentpane-spike-user-box
-  '((((background dark)) :background "#1f2733" :extend t)
-    (((background light)) :background "#eef2f8" :extend t))
-  "Face tinting a user turn, the browser's one raised surface in the transcript.
+  '((((background dark)) :background "#21252c" :extend t)
+    (((background light)) :background "#f1f3f6" :extend t))
+  "Face tinting a user turn, the browser's one raised surface in the transcript:
+its `--ap-surface-raised' for each theme (`src/client/app.css').
 Appended under the markdown faces, so it supplies only the background.")
 
 (defface agentpane-spike-user-bar
-  '((t :inherit font-lock-keyword-face))
+  '((((background dark)) :foreground "#7f9dff")
+    (((background light)) :foreground "#3959d9"))
   "Face for the accent bar down the left edge of a user turn, after the
-browser's `border-left' on `.msg.user'.")
+browser's `border-left' on `.msg.user', in its `--ap-accent' for each theme.")
 
 (defface agentpane-spike-meta
   '((t :inherit shadow :height 0.8))
   "Face for an assistant turn's meta line: the browser's `.meta', small and subtle.")
+
+(defface agentpane-spike-code-block
+  '((((background dark)) :background "#161b22" :extend t)
+    (((background light)) :background "#f4f6f8" :extend t))
+  "Background behind a fenced code block drawn through shr, after the
+browser's tinted `pre.ap-code'.")
+
+;; The shr backend's typography copies `Markdown.svelte''s stylesheet, each
+;; number a ratio to the browser's body size (`--ap-text-md', 0.9375rem):
+;; headings at 1.25rem, 1.0625rem and the body size, all weight 600; tables
+;; at 0.8125rem; code at 0.9em, inline code on the raised surface; table
+;; headers on the raised surface.  Emacs `:height' floats compose the same
+;; way `em' does, so each face states its ratio and inherits the rest.
+
+(defface agentpane-spike-h1
+  '((t :weight bold :height 1.333))
+  "Face for a level-one heading drawn through shr: the browser's `h1'.")
+
+(defface agentpane-spike-h2
+  '((t :weight bold :height 1.133))
+  "Face for a level-two heading drawn through shr: the browser's `h2'.")
+
+(defface agentpane-spike-h3
+  '((t :weight bold))
+  "Face for a heading of level three or below drawn through shr: the browser
+gives those the body size and only the weight.")
+
+(defface agentpane-spike-table
+  '((t :height 0.95))
+  "Face for a table's cells drawn through shr, a little under the prose size,
+after the browser's `table' at `--ap-text-sm'.  The stylesheet's exact ratio,
+0.867, gave 14px under 18px prose and read too small to the owner on
+2026-09-22, and 0.9 of the 10pt prose is 9pt, the code size, 15px; 0.95 is
+the step between, 16px.  Bound as shr's current font while the table is laid
+out, so the column widths are measured at this size.")
+
+(defface agentpane-spike-th
+  '((t :inherit bold))
+  "Face for a table header cell drawn through shr: bold, and nothing else.
+The browser's raised surface behind it was tried on 2026-09-22 and the
+owner found it did not fit the look.")
+
+(defface agentpane-spike-code
+  '((t :inherit fixed-pitch))
+  "Face for code drawn through shr, inline or fenced.
+Its size comes from the buffer-local remap of `fixed-pitch' that
+`agentpane-spike-mode' installs; see there.")
+
+(defface agentpane-spike-inline-code
+  '((((background dark)) :inherit agentpane-spike-code :background "#1f2733")
+    (((background light)) :inherit agentpane-spike-code :background "#eef2f8"))
+  "Face for inline code drawn through shr: `agentpane-spike-code' on the
+raised surface, after the browser's `:not(pre) > code'.")
+
+(defvar agentpane-spike--in-pre nil
+  "Non-nil while shr draws the inside of a pre block, so the `code' handler
+leaves a fenced block on the block's own face rather than the inline one.")
+
+(defvar agentpane-spike-text-backend 'markdown
+  "How a text part is drawn.
+`markdown' fontifies the markdown source with `markdown-mode'; `shr' renders
+the HTML the browser shows for it, the dump's `html' field, through `shr',
+and falls back to `markdown' on a part that carries no `html'.
+`b' in a rendered buffer flips this and redraws.")
+
+(defconst agentpane-spike--hljs-faces
+  '(("hljs-keyword" . font-lock-keyword-face)
+    ("hljs-built_in" . font-lock-builtin-face)
+    ("hljs-type" . font-lock-type-face)
+    ("hljs-literal" . font-lock-constant-face)
+    ("hljs-number" . font-lock-constant-face)
+    ("hljs-symbol" . font-lock-constant-face)
+    ("hljs-string" . font-lock-string-face)
+    ("hljs-regexp" . font-lock-string-face)
+    ("hljs-comment" . font-lock-comment-face)
+    ("hljs-doctag" . font-lock-doc-face)
+    ("hljs-meta" . font-lock-preprocessor-face)
+    ("hljs-title" . font-lock-function-name-face)
+    ("hljs-function" . font-lock-function-name-face)
+    ("hljs-section" . font-lock-function-name-face)
+    ("hljs-name" . font-lock-function-name-face)
+    ("hljs-tag" . font-lock-function-name-face)
+    ("hljs-attr" . font-lock-variable-name-face)
+    ("hljs-attribute" . font-lock-variable-name-face)
+    ("hljs-variable" . font-lock-variable-name-face)
+    ("hljs-params" . font-lock-variable-name-face)
+    ("hljs-property" . font-lock-property-name-face)
+    ("hljs-selector-tag" . font-lock-keyword-face)
+    ("hljs-selector-class" . font-lock-type-face)
+    ("hljs-selector-id" . font-lock-type-face)
+    ("hljs-addition" . diff-added)
+    ("hljs-deletion" . diff-removed)
+    ("hljs-emphasis" . italic)
+    ("hljs-strong" . bold))
+  "The highlight.js class names the browser's code blocks carry, each with
+the face it draws in here, since `shr' ignores classes and there is no
+stylesheet.  Roughly the browser's theme, by role rather than by colour.")
 
 (defconst agentpane-spike--bar "▌ "
   "The accent bar and the gap after it, carried as `line-prefix' and
@@ -149,6 +250,114 @@ copy is insurance for an Emacs where font-lock does get switched on there."
     (visual-wrap-prefix-function (point-min) (point-max))
     (agentpane-spike--freeze-faces (point-min) (point-max))
     (buffer-string)))
+
+;;;; Rendering HTML through shr
+
+(defun agentpane-spike--hljs-face (classes)
+  "The face for the first highlight.js class in CLASSES, a class attribute, or nil."
+  (seq-some (lambda (class) (cdr (assoc class agentpane-spike--hljs-faces)))
+            (split-string (or classes ""))))
+
+(defun agentpane-spike--shr-span (dom)
+  "Draw DOM, a span, as shr does, then colour it by its highlight.js class."
+  (let ((start (point))
+        (face (agentpane-spike--hljs-face (dom-attr dom 'class))))
+    (shr-tag-span dom)
+    (when face
+      (add-face-text-property start (point) face))))
+
+(defun agentpane-spike--shr-pre (dom)
+  "Draw DOM, a pre block, as shr does, in code on the code-block background."
+  (shr-ensure-newline)
+  (let ((start (point))
+        (agentpane-spike--in-pre t))
+    (shr-tag-pre dom)
+    ;; `shr-tag-pre' binds the current font to `default', so the text of a
+    ;; block comes out without `shr-code' even inside `<code>' (Emacs
+    ;; 31.1.50, measured 2026-09-21); an inline `<code>' does get it.
+    (add-face-text-property start (point) 'agentpane-spike-code t)
+    (add-face-text-property start (point) 'agentpane-spike-code-block t)))
+
+(defun agentpane-spike--shr-code (dom)
+  "Draw DOM, a code element: inline code on its raised surface, unless inside a
+pre block, where the block's own face already applies."
+  (let ((start (point)))
+    (shr-tag-code dom)
+    (unless agentpane-spike--in-pre
+      (add-face-text-property start (point) 'agentpane-spike-inline-code))))
+
+(defun agentpane-spike--shr-heading (dom face)
+  "Draw DOM, a heading, as its own paragraph in FACE."
+  (shr-ensure-paragraph)
+  (let ((start (point)))
+    (shr-generic dom)
+    (add-face-text-property start (point) face))
+  (shr-ensure-paragraph))
+
+(defun agentpane-spike--shr-h1 (dom)
+  "Draw DOM, an h1, in `agentpane-spike-h1'."
+  (agentpane-spike--shr-heading dom 'agentpane-spike-h1))
+
+(defun agentpane-spike--shr-h2 (dom)
+  "Draw DOM, an h2, in `agentpane-spike-h2'."
+  (agentpane-spike--shr-heading dom 'agentpane-spike-h2))
+
+(defun agentpane-spike--shr-h3 (dom)
+  "Draw DOM, a heading of level three or below, in `agentpane-spike-h3'."
+  (agentpane-spike--shr-heading dom 'agentpane-spike-h3))
+
+(defun agentpane-spike--shr-table (dom)
+  "Draw DOM, a table, as shr does, with its cells measured and drawn at
+`agentpane-spike-table' size."
+  ;; Filling is off for prose, which wraps live; a table needs it on, so each
+  ;; cell folds inside its own column instead of the row wrapping as one long
+  ;; line at the window edge and the last cell landing under the first.
+  (let ((shr-current-font 'agentpane-spike-table)
+        (shr-fill-text t))
+    (shr-tag-table dom)))
+
+(defun agentpane-spike--shr-th (dom)
+  "Draw DOM, a header cell, on `agentpane-spike-th'.
+shr has no `shr-tag-th' and renders the cell generically; this is the same
+with the face on top."
+  (let ((start (point)))
+    (shr-generic dom)
+    (add-face-text-property start (point) 'agentpane-spike-th)))
+
+(defun agentpane-spike--insert-html (html)
+  "Draw HTML, the browser's rendering of one text part, through shr at point.
+Filling is left to `visual-line-mode', as the markdown backend does, and
+the same visual-wrap pass gives wrapped list rows their hanging indent."
+  (let ((dom (with-temp-buffer
+               (insert html)
+               (libxml-parse-html-region (point-min) (point-max))))
+        (shr-fill-text nil)
+        (shr-inhibit-images t)
+        (shr-external-rendering-functions
+         '((span . agentpane-spike--shr-span)
+           (pre . agentpane-spike--shr-pre)
+           (code . agentpane-spike--shr-code)
+           (h1 . agentpane-spike--shr-h1)
+           (h2 . agentpane-spike--shr-h2)
+           (h3 . agentpane-spike--shr-h3)
+           (h4 . agentpane-spike--shr-h3)
+           (h5 . agentpane-spike--shr-h3)
+           (h6 . agentpane-spike--shr-h3)
+           (table . agentpane-spike--shr-table)
+           (th . agentpane-spike--shr-th)))
+        (start (point)))
+    (shr-insert-document dom)
+    ;; `shr-tag-table' sets `truncate-lines' in the buffer it draws into, so
+    ;; one table would switch the whole transcript from wrapping to
+    ;; truncation (Emacs 31.1.50, measured 2026-09-21). Wide tables then wrap
+    ;; where the browser would scroll them; that is the price of prose that
+    ;; wraps at all.
+    (setq truncate-lines nil)
+    (unless (bolp) (insert "\n"))
+    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\|[-–*•‣⁃◦]\\)[ \t]+\\)?"))
+      (save-restriction
+        (narrow-to-region start (point))
+        (visual-wrap-prefix-function (point-min) (point-max))))))
 
 ;;;; Drawing
 
@@ -258,8 +467,12 @@ either, and BODY is invisible unless KEY is expanded."
         (type (agentpane-spike--get 'type part)))
     (pcase type
       ("text"
-       (insert (agentpane-spike--fontify-markdown (agentpane-spike--get 'text part)))
-       (unless (bolp) (insert "\n")))
+       (let ((html (agentpane-spike--get 'html part)))
+         (if (and (eq agentpane-spike-text-backend 'shr)
+                  html (not (string-empty-p html)))
+             (agentpane-spike--insert-html html)
+           (insert (agentpane-spike--fontify-markdown (agentpane-spike--get 'text part)))
+           (unless (bolp) (insert "\n")))))
       ("thinking" (agentpane-spike--insert-thinking key part))
       ("tool" (agentpane-spike--insert-tool key part))
       ("image"
@@ -353,6 +566,7 @@ edge, with a blank line on either side.  Neither carries a role label."
     (define-key map (kbd "TAB") #'agentpane-spike-toggle)
     (define-key map (kbd "<tab>") #'agentpane-spike-toggle)
     (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "b") #'agentpane-spike-toggle-backend)
     map)
   "Keymap for `agentpane-spike-mode'.")
 
@@ -368,6 +582,15 @@ edge, with a blank line on either side.  Neither carries a role label."
   ;; code and table faces inherit `fixed-pitch', so they stay monospace
   ;; under the remapped default.
   (buffer-face-set 'agentpane-spike-prose)
+  ;; `fixed-pitch' carries a family and no height, so under the proportional
+  ;; default above it would take the prose face's size, larger than the
+  ;; default face's (measured 2026-09-22: 19px against 15px in an ordinary
+  ;; buffer). Pin it to the default face's absolute height, and everything
+  ;; monospace here -- code through either backend, tool bodies, diffs --
+  ;; is the size monospace text has elsewhere, and smaller than the prose
+  ;; beside it as the browser's 0.9em code is.
+  (face-remap-add-relative 'fixed-pitch
+                           `(:height ,(face-attribute 'default :height nil t)))
   (setq truncate-lines nil)
   (visual-line-mode 1)
   ;; The owner's init hooks `visual-wrap-prefix-mode' onto `visual-line-mode',
@@ -424,6 +647,17 @@ edge, with a blank line on either side.  Neither carries a role label."
       (ewoc-invalidate ewoc node))
     (agentpane-spike--goto-fold key)))
 
+(defun agentpane-spike-toggle-backend ()
+  "Flip `agentpane-spike-text-backend' and redraw this buffer from its file."
+  (interactive)
+  (unless agentpane-spike--file
+    (user-error "Not an agentpane-spike buffer"))
+  (setq agentpane-spike-text-backend
+        (if (eq agentpane-spike-text-backend 'shr) 'markdown 'shr))
+  (let ((file agentpane-spike--file))
+    (agentpane-spike-render file)
+    (message "Text parts drawn by %s" agentpane-spike-text-backend)))
+
 ;;;###autoload
 (defun agentpane-spike-render (file)
   "Render FILE, a JSON array of agentpane transcript nodes, in a new buffer."
@@ -438,7 +672,9 @@ edge, with a blank line on either side.  Neither carries a role label."
         (setq agentpane-spike--file file)
         (setq agentpane-spike--ewoc
               (ewoc-create #'agentpane-spike--pp
-                           (propertize (format "%s — %d nodes\n" file (length nodes))
+                           (propertize (format "%s — %d nodes — text by %s\n"
+                                               file (length nodes)
+                                               agentpane-spike-text-backend)
                                        'face 'agentpane-spike-dim)
                            nil
                            t))
@@ -448,7 +684,10 @@ edge, with a blank line on either side.  Neither carries a role label."
         (when nodes
           (ewoc-goto-node agentpane-spike--ewoc
                           (ewoc-nth agentpane-spike--ewoc 0)))))
-    (pop-to-buffer buffer)
+    ;; In the selected window, not another one: driven over `emacsclient'
+    ;; during the live session, the default `display-buffer' kept taking the
+    ;; owner's other window, the one holding the buffer being compared against.
+    (pop-to-buffer buffer '(display-buffer-same-window))
     buffer))
 
 (provide 'agentpane-spike)
