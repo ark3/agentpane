@@ -11,7 +11,7 @@ The live slice: what turns the read-only transcript buffer of OW-wavone into a c
 ## Attach and stream
 
 Opening a session for use, or the first prompt on a previewed one, sends `sessions/attach`.
-From then on the buffer's ewoc is driven by notifications: `session/snapshot` replaces every node, `session/node` calls `ewoc-invalidate` on the node whose `index` matches or appends when the index equals the count, `session/status` updates a mode-line segment showing streaming, compaction and model, and `session/renamed` re-keys the buffer's ref and renames the buffer.
+From then on the buffer's ewoc is driven by notifications: `session/snapshot` replaces every node, `session/node` calls `ewoc-invalidate` on the node whose `index` matches or appends when no drawn node carries that index, `session/status` updates a mode-line segment showing streaming, compaction and model, and `session/renamed` re-keys the buffer's ref and renames the buffer.
 `session/error` inserts a warning line at the tail; a `request` reported that way names the kind and does not imply the user can act on it, the same rule OW-nujawi set for the browser.
 
 Follow behaviour: when point is at the end of the buffer before a redraw, keep it there after; otherwise leave it alone.
@@ -19,7 +19,7 @@ That is the whole of follow mode here and it is deliberately less than `App.svel
 
 ## Composer
 
-`agentpane-prompt` opens a small window below the transcript, a buffer in `markdown-mode` derived mode `agentpane-composer-mode`, the way `magit` and `with-editor` do for a commit message.
+`agentpane-prompt` opens a small window below the transcript, a buffer in `text-mode` derived mode `agentpane-composer-mode`, the way `magit` and `with-editor` do for a commit message.
 `C-c C-c` sends its contents through `sessions/prompt` and clears it, `C-c C-k` discards it, and `C-c C-a` aborts the turn from either buffer.
 A prompt rejected mid-turn (D16) shows the server's text in the echo area and leaves the draft in place.
 Images are out of scope for this card; `PromptRequest.images` exists on the wire and a later card may wire it.
@@ -40,3 +40,12 @@ Owner, 2026-09-13: choosing at conversation start is required, switching later i
 
 `ert` tests in `emacs/agentpane-test.el`, alongside OW-wavone's, drive the buffer with notifications through a stub connection and no process: a `session/node` for an existing index redraws that node in place and no other, one for the append index adds a node, a `session/renamed` re-keys the buffer, and `agentpane-set-model` on a buffer with nodes signals the gate's error without sending.
 On the home server, against Codex (`-m gpt-5.6-luna` is the pin, though the model is chosen in the picker): create a session with a chosen model, send a prompt, watch the reply stream into the buffer, abort a second prompt mid-turn, and record it in `docs/MANUAL_TESTING.md` with versions.
+
+## Amended 2026-09-22 at execution
+
+The append rule read "appends when the index equals the count".
+A node's `index` is its position in the session's flat message array, not in the node list (`src/emacs/protocol.ts`, "Replace by `index`, never by array position"), and the buffer holds no message count, so the rule is now: replace the node whose `index` matches, else append.
+`projectUpsert` in `src/emacs/nodes.ts` answers a folded tool result with its owning call's node, so a result never arrives as a stray append.
+
+The composer derived from `markdown-mode`.
+That package is not installed on the home server, and Emacs 31.1's bundled `markdown-ts-mode` has no markdown grammar there (`treesit-language-available-p` answers nil), so the composer derives from `text-mode` and the mode takes no new dependency.
