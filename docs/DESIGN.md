@@ -849,6 +849,10 @@ The registry is `src/server/adapters/codex/mapping.ts` — `mapItem`'s switch an
 Two mapped types are missing here, `imageGeneration` and `imageView`, both of which produce output.
 The table is deliberately not kept complete: Codex adds `ThreadItem` variants between releases, and `mapItem`'s doc comment says what happens to the ones nobody has taught it about.
 
+**The `commandExecution` row is the live shape only.**
+As of `codex-cli 0.155.1`, measured 2026-09-22, the live wire presents a shell run as `commandExecution`, while the rollout on disk stores it as a `custom_tool_call` named `exec` wrapping `tools.exec_command(...)` or as a `function_call` named `exec_command`.
+The preview in `src/server/sessions/codex.ts` folds both stored shapes to `bash` so preview and live transcript agree; see `docs/MANUAL_TESTING.md`, "A Codex shell run is `commandExecution` live and `exec` or `exec_command` on disk (OW-jakahe)".
+
 Content-block mapping (Codex `UserInput` → Pi content), done by `userInputToContent`: `text` → `TextContent`; `image` → `ImageContent` when the URL is a `data:` URL and a text reference otherwise; `localImage`, `audio`, `localAudio`, `skill` and `mention` → text references.
 Why the two local variants degrade rather than load is recorded at `userInputToContent`.
 (`ContentItem`, with its `input_text`/`input_image` variants, is the *legacy* type — v2's `userMessage` does not carry it.)
