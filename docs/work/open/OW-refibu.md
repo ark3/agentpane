@@ -56,8 +56,35 @@ The helper feeds every `ServerEvent` through `reduceServerEvent` in `src/client/
 - `session/renamed` with `from` and `to`, so the buffer re-keys itself.
 - `sessions/changed` with no payload, so the picker refetches.
 
+## Amended 2026-09-22 before dispatch, from a cold read against the code
+
+Each point below overrides the paragraph above it where they differ.
+
+- **SSE reader.** `EventSource` is not a global under the installed `bun 1.4.0` (`bun -e 'console.log(typeof EventSource)'` prints `undefined`, measured 2026-09-22 on the home server), and `defaultOpenEvents` in `src/client/api.ts` would throw at runtime while `svelte-check` passes on the DOM lib types.
+  So the hand-rolled reader over `fetch` is the only choice; record that measurement in the docblock.
+  A hand-rolled reader does not retry by itself, so the helper reopens the stream after a short delay when it drops, and every open after the first emits `sessions/changed`, which is D21 for this client.
+- **Relative paths.** `api.connect` hands `openEvents` the relative `ROUTES.events`, and every request hands `fetch` a relative route, so the helper prefixes its base URL inside both injected functions; `src/emacs/dump-nodes.ts` does it for `fetch` only.
+- **Framing and the loop are testable in node.** Nothing in the repo or its dependencies frames `Content-Length` JSON-RPC; write it.
+  `bun run test` runs vitest under node, where `Bun.stdin` is undefined, so `src/emacs/main.ts` is only the Bun binding, the way `src/server/index.ts` is, and the loop lives in a sibling module that takes its input and output as injectable streams beside `fetch` and `openEvents`; the tests drive that module.
+- **Where the HTML comes from.** `src/client/render/markdown.ts` binds `DOMPurify` to `globalThis.window` at evaluation, so a static import from the projection would bind to no window in node and `sanitize` would throw; `dump-nodes.ts` sets a jsdom window on the global and then imports by dynamic `import()`, and that is the shape to keep.
+  Lift it into one module in `src/emacs/` that creates the window and returns `renderMarkdown` as a function, and give `projectTranscript` and `projectUpsert` a `render: (markdown: string) => string` parameter that fills `html`; the projection stays pure and `src/emacs/nodes.test.ts` passes a stub renderer for its structure tests, with one test that loads the real renderer through that module and asserts the `html` a fixture text part carries is non-empty and differs from its `text`.
+  `html` is required on `TextPart`; the three places in `nodes.test.ts` that build a `{ type: "text", text }` against `TextPart` are the test's own and change with it.
+  Every `Spike*` type in `dump-nodes.ts` goes, not only `SpikeTextPart`.
+  `sessions/preview` runs `api.preview` through `previewMessages` in `src/client/preview.ts` before the projection, as `dump-nodes.ts` does.
+- **What the reducer does and does not tell the helper.** `ReduceResult` in `src/client/session-state.ts` is `{ state, recover, refreshSessions }` and nothing more.
+  The helper dispatches on the raw event's `type` beside that result: the node an `upsert` replaced comes from `projectUpsert` over the pre-reduce view's messages and the event; `session/renamed` carries the event's `from` and `session`; `refreshSessions` true is `sessions/changed`; and an event the reducer ignored, which it signals by returning the same `state` object, emits nothing.
+- **A seq gap is healed by an attach, not locally.** The reducer returns the ref in `recover` with state unchanged, and the browser's `recover` in `src/client/controller.ts` answers by calling `api.attach(ref)`, after which the server broadcasts a fresh snapshot over the stream.
+  The helper does the same, and the test for it scripts both halves: the injected fetch answers the attach, the injected event source then delivers the snapshot, and that snapshot is what yields `session/snapshot`.
+- **One stream, filtered.** The stream opens lazily at the first `sessions/attach`, before that attach's REST call, and stays open; `openEventStream` in `src/server/http/app.ts` sends an opening snapshot for every session holding a live adapter and broadcasts every event to every client, so views Emacs never attached also form in the reducer.
+  Notifications are emitted only for refs Emacs attached through the helper, a set the helper keeps and re-keys on `renamed`; `sessions/changed` is unfiltered.
+- **Verbs.** `AgentpaneApi` has no `reply` method because the browser never answers a request (OW-bijera); add `reply(requestId, body)` to the api client as the thin wrapper over `ROUTES.reply` it is, then forward `requests/reply` through it.
+  Add `sessions/close` forwarding to `api.close`, since a killed buffer needs it; `edit-draft` is the browser composer's and is left out on purpose.
+  `sessions/attach` returns the `SessionSummary` the route returns.
+- **Errors on the wire.** A JSON-RPC error from an `ApiClientError` carries the HTTP status as `code`, the error's `message` as `message`, and `{ status, error, detail }` as `data`; any other failure is `-32603` with the message.
+  A `session/error` is not carried by a snapshot, so a re-snapshot after a gap does not replay it; the mode should not expect it to.
+
 ## Done when
 
-Tests in `src/emacs/` drive the stdio loop against an injected fetch and event source, in node: a list request returns summaries; a preview request returns nodes, each text part carrying a non-empty `html` alongside its `text`, and opens no event stream; an attach followed by a snapshot and two upserts yields one `session/snapshot` and two `session/node` notifications in order; a `seq` gap yields a fresh snapshot; a `renamed` event yields `session/renamed` before the snapshot that follows it; a prompt whose server rejection arrives yields a JSON-RPC error carrying the server's text.
+Tests in `src/emacs/` drive the stdio loop against an injected fetch and event source, in node: a list request returns summaries; a preview request returns nodes, each text part carrying a non-empty `html` alongside its `text`, and opens no event stream; an attach followed by a snapshot and two upserts yields one `session/snapshot` and two `session/node` notifications in order; a `seq` gap makes the helper call attach, and the snapshot the event source then delivers yields a fresh `session/snapshot`; a snapshot for a session Emacs never attached yields nothing; a `renamed` event yields `session/renamed` before the snapshot that follows it; a prompt whose server rejection arrives yields a JSON-RPC error carrying the server's text.
 A framing test feeds two messages in one chunk and one message across two chunks and reads both back intact.
 `bun run check` passes; `bun run test:browser` is not involved.
