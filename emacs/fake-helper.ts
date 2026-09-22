@@ -85,7 +85,10 @@ const onRequest = (request: Request): void => {
 };
 
 const decoder = new FrameDecoder();
-for await (const chunk of Bun.stdin.stream()) {
+const reader = Bun.stdin.stream().getReader();
+for (;;) {
+	const { done, value: chunk } = await reader.read();
+	if (done) break;
 	for (const message of decoder.push(chunk)) onRequest(message as Request);
 }
 log("stdin ended");
