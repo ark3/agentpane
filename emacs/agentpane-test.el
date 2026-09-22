@@ -72,15 +72,16 @@
   "A tool part's result is invisible until TAB on its summary line, then visible."
   (with-current-buffer (agentpane-test--render)
     (let ((result (agentpane-test--position "const x = 1;")))
-      (should (eq (get-text-property result 'invisible) 'agentpane))
+      ;; `invisible-p' asks the display, through the buffer's invisibility
+      ;; spec; the property alone would read the same with the spec gone.
+      (should (invisible-p result))
       (goto-char (agentpane-test--position "Read app.ts"))
       (agentpane-toggle)
-      (should-not (get-text-property (agentpane-test--position "const x = 1;") 'invisible))
+      (should-not (invisible-p (agentpane-test--position "const x = 1;")))
       ;; `agentpane-toggle' leaves point on the summary line, so a second TAB
       ;; folds it again.
       (agentpane-toggle)
-      (should (eq (get-text-property (agentpane-test--position "const x = 1;") 'invisible)
-                  'agentpane)))
+      (should (invisible-p (agentpane-test--position "const x = 1;"))))
     (kill-buffer)))
 
 (defun agentpane-test--faces-at (text)

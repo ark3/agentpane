@@ -23,7 +23,9 @@
 ;; `g' refetches, and a `sessions/changed' notification refetches too.  The
 ;; list is filtered to the project of the buffer the command was called
 ;; from, as the browser's `?cwd=' query is; a prefix argument lifts the
-;; filter.  In a transcript buffer `n' and `p' step between nodes, `TAB'
+;; filter.  The notification only flows once a buffer in this Emacs has
+;; attached a session, which no command in this slice does: the helper
+;; opens its event stream from `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n' and `p' step between nodes, `TAB'
 ;; toggles the fold at point, `g' refetches, and `q' buries.
 ;;
 ;; Nothing beyond what Emacs ships is required: text parts are drawn through
@@ -40,11 +42,12 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-22) ends with
+;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
+;; per test, with a line beginning
 ;;
 ;;     Ran 4 tests, 4 results as expected, 0 unexpected
 ;;
-;; after one "passed" line per test.  It is not part of `bun run check',
+;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
 
 ;;; Code:
@@ -221,7 +224,6 @@ connection named \"agentpane\", so the helper's own stderr lands there."
     (make-process :name "agentpane helper"
                   :command '("bun" "run" "src/emacs/main.ts")
                   :connection-type 'pipe
-                  :coding 'utf-8-emacs-unix
                   :noquery t
                   :stderr (get-buffer-create "*agentpane stderr*"))))
 
@@ -440,7 +442,8 @@ either, and BODY is invisible unless KEY is expanded."
         (args (plist-get part :args))
         (result (plist-get part :result))
         (chunks nil))
-    (when diff
+    ;; A `write' of empty content arrives as an empty vector, which is not nil.
+    (when (and diff (> (length diff) 0))
       (push (agentpane--diff-text diff) chunks))
     (when (and args (not (string-empty-p args)))
       (push (concat (propertize "args:" 'face 'agentpane-dim) "\n" args) chunks))
@@ -667,7 +670,9 @@ they are keyed by node index and part ordinal rather than by position."
   (ewoc-goto-prev (agentpane--ewoc) (or n 1)))
 
 (defun agentpane-index-at-point ()
-  "The transcript index of the node at point, or nil between nodes."
+  "The transcript index of the node at point, or nil when the buffer has no nodes.
+`ewoc-locate' answers the nearest node, so the header and the end of the
+buffer resolve to the first and last."
   (let* ((ewoc (agentpane--ewoc))
          (node (ewoc-locate ewoc)))
     (and node (plist-get (ewoc-data node) :index))))
