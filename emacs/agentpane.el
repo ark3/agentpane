@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 29 tests, 29 results as expected, 0 unexpected
+;;     Ran 30 tests, 30 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1089,6 +1089,20 @@ From here on the helper sends this session's notifications, starting with a
                         (when failed (funcall failed)))
                       agentpane--spawn-timeout))
 
+(defun agentpane--attach-now ()
+  "Attach this buffer's session through `sessions/attach', and return only
+once the attach has answered, for a command that must then read from the
+session's live adapter; see `agentpane-new-session'.  It blocks Emacs for
+up to `agentpane--spawn-timeout', and a timeout, an error or a quit
+signals, leaving the buffer unattached."
+  (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
+                                   (list :session (agentpane--ref agentpane--session))
+                                   :timeout agentpane--spawn-timeout)))
+    (setq agentpane--attached agentpane--connection)
+    ;; The route's ref is authoritative: attaching is where a new session
+    ;; takes its backend's own id.
+    (agentpane--rekey (agentpane--ref attached))))
+
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
 if it is only a preview; call FAILED instead if that attach fails."
@@ -1233,14 +1247,24 @@ The model is chosen at conversation start, never switched later (owner,
 
 (defun agentpane-set-model (model)
   "Set this buffer's session's MODEL through `sessions/setModel'.
-Allowed only before the first prompt, while the buffer has no nodes."
+Allowed only before the first prompt, while the buffer has no nodes.
+
+Interactively a session not yet attached is attached before the models
+are read, and synchronously, as `agentpane-new-session' does and for its
+reason: the server answers `models/list' from a live adapter of the
+backend, or else from an unstarted one, which for Codex or Pi fails.
+Read first, they were unreadable for a created session never prompted
+whenever no other session of its backend was live, as after a server
+restart (OW-kisemu, read from `listModels' in src/server/http/app.ts at
+daf5f52, not run live)."
   (interactive
    (progn
      (agentpane--check-model-gate)
-     (list (agentpane--read-model
-            (plist-get (agentpane--ref (buffer-local-value 'agentpane--session
-                                                           (agentpane--transcript)))
-                       :backend)))))
+     (with-current-buffer (agentpane--transcript)
+       (unless (agentpane--attached-p)
+         (agentpane--attach-now))
+       (list (agentpane--read-model (plist-get (agentpane--ref agentpane--session)
+                                               :backend))))))
   (agentpane--check-model-gate)
   (with-current-buffer (agentpane--transcript)
     (agentpane--attached-then
@@ -1362,13 +1386,7 @@ stayed hidden, holding the session."
     (pop-to-buffer buffer '(display-buffer-same-window))
     (with-current-buffer buffer
       (agentpane--draw [] (agentpane--transcript-header summary))
-      (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
-                                       (list :session ref)
-                                       :timeout agentpane--spawn-timeout)))
-        (setq agentpane--attached agentpane--connection)
-        ;; The route's ref is authoritative: attaching is where a new session
-        ;; takes its backend's own id.
-        (agentpane--rekey (agentpane--ref attached))))
+      (agentpane--attach-now))
     (agentpane-set-model (agentpane--read-model backend))))
 
 ;;;; The composer

@@ -192,6 +192,38 @@ sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
         (agentpane-set-model "gpt-5.6-luna")
         (should (equal (reverse sent) '(sessions/attach sessions/setModel)))))))
 
+(defun agentpane-test--set-model-interactively (choice)
+  "Call `agentpane-set-model' interactively on an empty, unattached buffer
+whose model prompt answers CHOICE, and return the methods sent, in order."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection)
+        (sent nil))
+    (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+              ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
+               (lambda (method _params callback &rest _)
+                 (push method sent)
+                 (funcall callback (list :ref ref))))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (_connection method &rest _)
+                 (push method sent)
+                 (pcase method
+                   ('sessions/attach (list :ref ref))
+                   ('models/list [(:id "gpt-5.6-luna")]))))
+              ((symbol-function 'completing-read) (lambda (&rest _) choice)))
+      (agentpane-test--with-session ref
+        (agentpane--draw [])
+        (call-interactively #'agentpane-set-model)
+        ;; Before the kill, whose detach would join them.
+        (reverse sent)))))
+
+(ert-deftest agentpane-test-set-model-attaches-before-listing-models ()
+  "`M-x agentpane-set-model' on an unattached session attaches it before it
+reads `models/list', which the server answers for Codex or Pi only from a
+live adapter, and then sets the model without attaching again."
+  (should (equal (agentpane-test--set-model-interactively "gpt-5.6-luna")
+                 '(sessions/attach models/list sessions/setModel))))
+
 (ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
   "Undo in the prompt region undoes the draft, never a node redraw that
 arrived while it was being typed."
