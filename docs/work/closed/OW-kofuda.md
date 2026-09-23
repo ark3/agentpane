@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, emacs-native]
+closed: done
 ---
 
 # The Emacs helper outlives its stdin while an HTTP request to the server is still in flight
@@ -20,3 +21,15 @@ A likely shape is an `AbortController` owned by `runHelper` whose signal the hel
 
 Done when a test in `src/emacs/helper.test.ts` fails before the change and passes after: with an injected `fetch` that never resolves on its own and a request in flight, ending `input` aborts that fetch (its signal fires, or its promise rejects with an abort).
 Record in `docs/MANUAL_TESTING.md`, beside the paragraph named above, a rerun of that stand-in showing the helper exits with code 0 after stdin closes, naming the bun version, and retire the "holds the helper alive" claim there and the in-flight caveat in `agentpane-shutdown`'s docstring in the same change.
+
+## Close note
+
+Landed on main as the one OW-kofuda commit after 1b9cb66 ("fix: abort the helper's in-flight requests when its stdin ends").
+
+`runHelper` in `src/emacs/helper.ts` owns an `AbortController`, wraps the injected `fetch` so every api call carries its signal, and aborts it after `closeStream()` when input ends; `src/client/api.ts` is untouched, so the browser client is unchanged, and no api method passes a signal of its own to combine with.
+An aborted request is still answered, since stdout stays open: Emacs receives `-32603 "The operation was aborted."`.
+
+Verified: `bun run check`, 1180 tests; the new test in `src/emacs/helper.test.ts` ("aborts a request still waiting on the server when the input ends…") was red on the old code with no signal on the fetch.
+Rerun of OW-bonode's stand-in (a server holding every `GET` open) on the home server, `bun 1.4.0`, Emacs 31.1: before the fix the helper was alive 30s after stdin closed; after it, it exited with code 0 in 0.03–0.07s over three runs, and `agentpane-shutdown` ended with status `exit` and no sentinel warning.
+Recorded in `docs/MANUAL_TESTING.md` beside "An HTTP request that never completes holds the helper alive", which is now past tense, and the in-flight caveat in `agentpane-shutdown`'s docstring is retired.
+Not probed: a write of the abort answer after Emacs has already closed stdout.
