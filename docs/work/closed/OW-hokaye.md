@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-kokalo]
+closed: done
 ---
 
 # Claude Code conversations get the effort picker, once a live run shows how claude 2.1.280 takes an effort level
@@ -55,3 +56,15 @@ Record the run in `docs/MANUAL_TESTING.md` with the CLI version and where `low` 
 - A test in `src/server/adapters/claude/adapter.test.ts` asserts the chosen effort reaches the CLI by whichever path the run chose, shown red first.
 - The offered levels come from the `initialize` model entries, pinned by a test.
 - `bun run check` passes.
+
+## Close note
+
+Landed in 34c9b7e (feat) and 2ca56bb (docs) on main.
+`ClaudeAdapter.listModels` offers each `initialize` entry's `supportedEffortLevels` (haiku lists none; `defaultEffort` null, since no entry names one); `setEffort` sends `apply_flag_settings` with `effortLevel` to the running process, and the effort in force is always read back from `get_settings`'s `applied.effort` -- at start, after `setEffort`, after `setModel` -- because `claude 2.1.280` accepts an unknown level silently and applies null on haiku while holding the choice.
+Live turns are stamped with the effort in force at submit (neither `init` nor stream `assistant` events carry one), hydrated turns with their store line's `effort`.
+The module doc records that a `--resume` or `--fork-session` spawn runs at the default, not the chosen level.
+
+Verified: the measurements and the owner-granted Sonnet turn are in `docs/MANUAL_TESTING.md` under OW-hokaye -- `low` read back from `get_settings`, from `CLAUDE_EFFORT=low` echoed by the turn's Bash tool, and from the store's `effort` field.
+Adapter tests pin the listing, the request shape, the read-back (an unknown level leaves `high` standing), the `set_model` re-read and the turn stamps, each shown red first; `bun run check` passes.
+Review removed an uncited try/catch around the read-back and retired the stale "Claude Code does not" effort line in `src/emacs/protocol.ts`.
+Follow-ups filed: OW-kakide (no effort control on the default model before a model is named) and OW-nabano (a resume or fork drops the chosen effort); OW-tewofe amended for Claude Code's new unchecked path.
