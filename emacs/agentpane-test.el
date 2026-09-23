@@ -551,17 +551,17 @@ again."
 ;;;; Killing a transcript buffer, against a stub connection
 
 (ert-deftest agentpane-test-kill-detaches-the-session ()
-  "Killing a transcript buffer whose session is attached, or attaching,
-sends `sessions/detach' for it and nothing else, so the helper stops its
-notifications and the session keeps running; killing a previewed one sends
-nothing."
+  "Killing a transcript buffer while a helper is running sends
+`sessions/detach' for its session and nothing else, so the helper stops its
+notifications and the session keeps running: whether the session is
+attached, attaching, or its attach failed on this side, as a timeout does
+while the helper's attach goes on to succeed.  With no helper running a
+kill sends nothing, even in the moment before a dead helper's error
+handlers clear a buffer's attaching flag."
   (let ((ref '(:backend "codex" :id "t1"))
         (agentpane--connection 'connection))
     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
       (agentpane-test--forking nil nil
-        (agentpane-test--with-session ref
-          (kill-buffer buffer)
-          (should-not sent))
         (agentpane-test--with-session ref
           (agentpane--attach)
           (setq sent nil)
@@ -572,7 +572,34 @@ nothing."
           (agentpane--attach)
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref)))))))))
+          (should (equal sent `((sessions/detach :session ,ref)))))
+        (setq held nil)
+        (agentpane-test--with-session ref
+          (setq hold '(sessions/attach))
+          (agentpane--attach)
+          (funcall (cdr (pop held)) nil)
+          (setq sent nil)
+          (kill-buffer buffer)
+          (should (equal sent `((sessions/detach :session ,ref)))))
+        (agentpane-test--with-session ref
+          (setq agentpane--attaching t)
+          (setq sent nil)
+          (let ((agentpane--connection nil))
+            (kill-buffer buffer))
+          (should-not sent))))))
+
+(ert-deftest agentpane-test-kill-completes-when-the-detach-signals ()
+  "A detach that signals, as a send to a pipe that has just broken does,
+does not stop the transcript buffer from being killed."
+  (let ((agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
+               (lambda (&rest _) (error "Process agentpane helper not running")))
+              ((symbol-function 'message) #'ignore))
+      (agentpane-test--with-session '(:backend "codex" :id "t1")
+        (setq agentpane--attached agentpane--connection)
+        (kill-buffer buffer)
+        (should-not (buffer-live-p buffer))))))
 
 ;;;; A new session whose attach fails, against a stub jsonrpc
 

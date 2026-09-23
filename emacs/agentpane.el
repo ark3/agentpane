@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 28 tests, 28 results as expected, 0 unexpected
+;;     Ran 29 tests, 29 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1097,9 +1097,9 @@ if it is only a preview; call FAILED instead if that attach fails."
     (agentpane--attach fn failed)))
 
 (defun agentpane--detach ()
-  "Stop the helper sending this buffer's session's notifications, as the
-buffer is killed; the buffer-local `kill-buffer-hook' of a transcript.
-Without this the helper went on sending them after the kill, since only
+  "Stop the helper sending this buffer's session's notifications.
+The buffer-local `kill-buffer-hook' of a transcript.
+Without it the helper went on sending them after a kill, since only
 `sessions/close' removed a session from its attached set, and a buffer
 reopened from the picker drew them over its preview: a node that arrived
 before the preview's reply signalled on the missing ewoc, and the reopened
@@ -1107,15 +1107,23 @@ buffer, not attached, took `g' to preview a live session.
 `sessions/detach' rather than `sessions/close', which closes the session
 on the server and lets go of its agent (`SessionManager.close' in
 src/server/http/session-manager.ts): killing a buffer leaves the session
-running, as closing a browser tab does.  An attach still in flight is
-detached too, and the helper keeps its reply from attaching it again.
-Neither holds without a running helper, so a kill never starts one: a
-helper that dies runs every pending request's error handler (jsonrpc.el's
-process sentinel), which clears `agentpane--attaching'."
-  (when (or (agentpane--attached-p) agentpane--attaching)
-    (agentpane--request 'sessions/detach
-                        (list :session (agentpane--ref agentpane--session))
-                        #'ignore t)))
+running, as closing a browser tab does.
+
+Sent whenever a helper is running, whatever this buffer believes: an
+attach that failed here -- timed out, or quit in `agentpane-new-session'
+-- may still have succeeded in the helper, which then holds the session,
+and a detach of a session it does not hold changes nothing.  Never sent
+without one, so a kill never starts a helper, as `agentpane--connection'
+would.  An error sending it, such as a pipe that has just broken, is
+reported and goes no further, since an error in `kill-buffer-hook' stops
+the kill; not through `with-demoted-errors', which lets it through under
+`debug-on-error'."
+  (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
+    (condition-case err
+        (agentpane--request 'sessions/detach
+                            (list :session (agentpane--ref agentpane--session))
+                            #'ignore t)
+      (error (message "agentpane: sessions/detach failed: %s" (error-message-string err))))))
 
 (defvar-local agentpane--composer nil
   "This transcript's composer buffer, once `agentpane-prompt' has made one.")
