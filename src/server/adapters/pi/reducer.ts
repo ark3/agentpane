@@ -25,7 +25,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { AgentRequest, AssistantTurn } from "../../../shared/protocol.ts";
+import type { AgentRequest, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
 import { PI_DIALOG_METHODS, type PiCommand, type PiDialogMethod, type PiNotification } from "./protocol.ts";
 
 export interface PiReducerState {
@@ -88,8 +88,12 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 				const messages = [withEffort(event.message, state.effort)];
 				return { state: { ...state, messages }, changedIndex: 0 };
 			}
+			// The level the turn started at, not the one in force as it ends: a
+			// `thinking_level_changed` can land mid-stream (OW-ruzuhu).
+			const replaced = state.messages[index] as PaneMessage | undefined;
+			const started = replaced?.role === "assistant" ? replaced.effort : undefined;
 			const messages = state.messages.slice();
-			messages[index] = withEffort(event.message, state.effort);
+			messages[index] = withEffort(event.message, started ?? state.effort);
 			return { state: { ...state, messages }, changedIndex: index };
 		}
 
@@ -167,7 +171,8 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 /**
  * Name the level on an assistant message, as Codex's reducer names its effort.
  * Deltas keep it by spreading the message they extend, so only the two events
- * that bring a whole message need this.
+ * that bring a whole message need this, and `message_end` passes on the level
+ * its slot started with.
  */
 function withEffort(message: AgentMessage, effort: string | null): AgentMessage {
 	if (effort === null || message.role !== "assistant") return message;

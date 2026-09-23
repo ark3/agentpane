@@ -778,6 +778,19 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(user).not.toHaveProperty("effort");
 	});
 
+	it("keeps the level a turn started at when the level changes before it ends", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "low" });
+
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		// A direct POST .../effort, or an extension, while the turn streams.
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.emitLine({ type: "message_end", message: assistantMessage("hi") });
+
+		expect((h.adapter.getState().messages[0] as AssistantTurn).effort).toBe("low");
+		expect(h.adapter.getState().effort).toBe("high");
+	});
+
 	it("names no level on the turns of a model that does not reason", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: PLAIN, thinkingLevel: "off" });
