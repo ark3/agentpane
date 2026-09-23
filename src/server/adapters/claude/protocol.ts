@@ -134,6 +134,11 @@ export interface ClaudeAssistantEvent {
 	type: "assistant";
 	message?: ClaudeApiMessage;
 	timestamp?: string;
+	/**
+	 * The effort the turn ran at. Read on store lines, which as of `claude
+	 * 2.1.280` carry it on every assistant entry of a model with effort.
+	 */
+	effort?: unknown;
 }
 
 export interface ClaudeUserEvent {
@@ -233,4 +238,7 @@ export interface ClaudeModelDescriptor {
 	resolvedModel?: string;
 	displayName?: string;
 	description?: string;
+	/** Absent, with `supportedEffortLevels`, on a model without effort (haiku, as of `claude 2.1.280`). */
+	supportsEffort?: boolean;
+	supportedEffortLevels?: unknown[];
 }

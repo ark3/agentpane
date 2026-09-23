@@ -137,9 +137,10 @@ describe("Message", () => {
 	});
 
 	it("names only the model when no effort was reported", () => {
-		// Claude Code reports no effort, and Pi none on a model that does not
-		// reason: no placeholder, no "unknown", nothing extra in the meta line. The row's
-		// timestamp (OW-67) is a <time>, not a <span>, so it is not in this list.
+		// Claude Code names none on a model without effort, such as haiku, and Pi
+		// none on a model that does not reason: no placeholder, no "unknown",
+		// nothing extra in the meta line. The row's timestamp (OW-67) is a
+		// <time>, not a <span>, so it is not in this list.
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "done" }]) },
 		});

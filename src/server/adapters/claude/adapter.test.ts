@@ -60,6 +60,8 @@ function harness(options: {
 	ids?: string[];
 	/** The ref the adapter is constructed with; a fork's adapter is built on the id `fork()` minted. */
 	ref?: SessionRef;
+	/** What each child's `get_settings` reports as `applied.effort`. */
+	appliedEffort?: string | null;
 } = {}): Harness {
 	const procs: FakeClaudeProcess[] = [];
 	const spawns: ClaudeSpawnOptions[] = [];
@@ -68,6 +70,7 @@ function harness(options: {
 		spawn: (opts) => {
 			spawns.push(opts);
 			const proc = new FakeClaudeProcess();
+			proc.appliedEffort = options.appliedEffort ?? null;
 			procs.push(proc);
 			return proc;
 		},
@@ -306,6 +309,40 @@ describe("ClaudeAdapter turns", () => {
 		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 	});
 
+	it("names each assistant turn with the effort in force when it started", async () => {
+		const h = harness({ appliedEffort: "low" });
+		await h.adapter.start({ cwd: "/workspace", model: "sonnet" });
+		await h.adapter.submit("prompt");
+
+		// A change landing mid-turn does not relabel the turn already running.
+		const setting = h.adapter.setEffort("high");
+		const request = h.proc().lastControlRequest("apply_flag_settings");
+		h.proc().appliedEffort = "high";
+		h.proc().emit({ type: "control_response", response: { subtype: "success", request_id: request?.request_id } });
+		await setting;
+		for (const event of readFixture("text-turn")) h.proc().emit(event);
+
+		const assistant = h.adapter.getState().messages.find((m) => m.role === "assistant");
+		expect(assistant && "effort" in assistant ? assistant.effort : undefined).toBe("low");
+		expect(h.adapter.getState().effort).toBe("high");
+	});
+
+	it("names a resumed turn with the effort its store line records", async () => {
+		const entries = storedEntries();
+		const last = entries.at(-1);
+		if (last) last.record = { ...last.record, effort: "max" };
+		const h = harness({ entries, appliedEffort: "high" });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+
+		const efforts = h.adapter
+			.getState()
+			.messages.filter((m) => m.role === "assistant")
+			.map((m) => ("effort" in m ? m.effort : undefined));
+		expect(efforts).toEqual([undefined, "max"]);
+		expect(h.adapter.getState().effort).toBe("high");
+	});
+
 	it("aborts via the interrupt control request and tolerates an error reply", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
@@ -370,7 +407,13 @@ describe("ClaudeAdapter session controls", () => {
 				request_id: request?.request_id,
 				response: {
 					models: [
-						{ value: "default", displayName: "Default (recommended)" },
+						{
+							value: "default",
+							displayName: "Default (recommended)",
+							supportsEffort: true,
+							supportedEffortLevels: ["low", "medium", "high"],
+						},
+						// As `claude 2.1.280` lists haiku: neither effort field.
 						{ value: "haiku" },
 					],
 				},
@@ -378,9 +421,78 @@ describe("ClaudeAdapter session controls", () => {
 		});
 
 		expect(await listing).toEqual([
-			{ id: "default", label: "Default (recommended)", efforts: [], defaultEffort: null },
+			{
+				id: "default",
+				label: "Default (recommended)",
+				efforts: [
+					{ id: "low", description: "" },
+					{ id: "medium", description: "" },
+					{ id: "high", description: "" },
+				],
+				defaultEffort: null,
+			},
 			{ id: "haiku", label: "haiku", efforts: [], defaultEffort: null },
 		]);
+	});
+
+	it("reports the effort get_settings applies at start, before anything is chosen", async () => {
+		const h = harness({ appliedEffort: "high" });
+		await h.adapter.start({ cwd: "/workspace" });
+
+		expect(h.proc().lastControlRequest("get_settings")).toBeDefined();
+		expect(h.adapter.getState().effort).toBe("high");
+	});
+
+	it("sends a chosen effort as apply_flag_settings and reports what the CLI then applies", async () => {
+		const h = harness({ appliedEffort: "high" });
+		await h.adapter.start({ cwd: "/workspace", model: "sonnet" });
+		const updates = vi.fn();
+		h.adapter.onUpdate(updates);
+
+		const setting = h.adapter.setEffort("low");
+		const request = h.proc().lastControlRequest("apply_flag_settings");
+		expect(request?.request).toEqual({ subtype: "apply_flag_settings", settings: { effortLevel: "low" } });
+		h.proc().appliedEffort = "low";
+		h.proc().emit({
+			type: "control_response",
+			response: { subtype: "success", request_id: request?.request_id },
+		});
+		await setting;
+
+		expect(h.adapter.getState().effort).toBe("low");
+		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), undefined);
+	});
+
+	it("reports the effort the CLI applies, not the one requested", async () => {
+		// As `claude 2.1.280` answers an unknown level: success, and nothing applied.
+		const h = harness({ appliedEffort: "high" });
+		await h.adapter.start({ cwd: "/workspace", model: "sonnet" });
+
+		const setting = h.adapter.setEffort("bogus");
+		const request = h.proc().lastControlRequest("apply_flag_settings");
+		h.proc().emit({
+			type: "control_response",
+			response: { subtype: "success", request_id: request?.request_id },
+		});
+		await setting;
+
+		expect(h.adapter.getState().effort).toBe("high");
+	});
+
+	it("re-reads the effort after set_model, since a model without effort applies none", async () => {
+		const h = harness({ appliedEffort: "low" });
+		await h.adapter.start({ cwd: "/workspace", model: "sonnet" });
+
+		const setting = h.adapter.setModel("haiku");
+		const request = h.proc().lastControlRequest("set_model");
+		h.proc().appliedEffort = null;
+		h.proc().emit({
+			type: "control_response",
+			response: { subtype: "success", request_id: request?.request_id },
+		});
+		await setting;
+
+		expect(h.adapter.getState().effort).toBeNull();
 	});
 
 	it("sets the model via set_model and hands it to a fork", async () => {

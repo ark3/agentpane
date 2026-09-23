@@ -98,11 +98,16 @@ export function authoritativeBlocks(lines: ClaudeEvent[], type: string): Record<
 /**
  * A `ClaudeProcess` that never spawns anything. `written` sees every line the
  * adapter sends; `emit` pushes an event back as if the CLI had written it.
+ *
+ * `get_settings` is the one control request it answers itself, reporting
+ * `appliedEffort` as `applied.effort`: every `start()` sends one, and a test
+ * that had to answer it by hand would be about that, not about its subject.
  */
 export class FakeClaudeProcess {
 	readonly written: Record<string, unknown>[] = [];
 	killed = false;
 	killCount = 0;
+	appliedEffort: string | null = null;
 
 	private lineHandlers: ((line: string) => void)[] = [];
 	private spawnHandlers: (() => void)[] = [];
@@ -125,7 +130,24 @@ export class FakeClaudeProcess {
 
 	write(line: string): void {
 		if (this.killed) throw new Error("Claude Code process is not running");
-		this.written.push(JSON.parse(line) as Record<string, unknown>);
+		const message = JSON.parse(line) as Record<string, unknown>;
+		this.written.push(message);
+		if (
+			message.type === "control_request" &&
+			isRecord(message.request) &&
+			message.request.subtype === "get_settings"
+		) {
+			queueMicrotask(() =>
+				this.emit({
+					type: "control_response",
+					response: {
+						subtype: "success",
+						request_id: message.request_id,
+						response: { applied: { effort: this.appliedEffort } },
+					},
+				}),
+			);
+		}
 	}
 
 	onLine(cb: (line: string) => void): void {

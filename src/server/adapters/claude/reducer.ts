@@ -43,6 +43,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 } from "@earendil-works/pi-ai";
+import type { AssistantTurn } from "../../../shared/protocol.ts";
 import { isSyntheticClaudeUserText } from "../../sessions/claude-user.ts";
 import {
 	assistantBlockToContent,
@@ -108,6 +109,14 @@ export class ClaudeReducer {
 	private streaming = false;
 	private compaction: "requesting" | "running" | null = null;
 	private model: string = DEFAULT_MODEL;
+	/**
+	 * The effort the current turn started at, named on every assistant message
+	 * it opens -- the `AssistantTurn.effort` the footer shows. As of `claude
+	 * 2.1.280` neither `init` nor the `assistant` events carry one
+	 * (MANUAL_TESTING OW-hokaye), so the adapter hands it in at `beginTurn`, and
+	 * a change landing mid-turn does not relabel the turn already running.
+	 */
+	private turnEffort: string | null = null;
 	private readonly now: () => number;
 
 	constructor(options: ClaudeReducerOptions = {}) {
@@ -134,16 +143,20 @@ export class ClaudeReducer {
 		this.pendingCompactionIndex = null;
 		this.streaming = false;
 		this.compaction = null;
+		this.turnEffort = null;
 	}
 
 	/**
 	 * The human's own prompt, added locally at submit time -- the CLI never
-	 * echoes it back on the stream (OW-yilabe).
+	 * echoes it back on the stream (OW-yilabe). `effort` is the one the turn
+	 * starts at, or null for a model that runs without one.
 	 */
 	beginTurn(
 		text: string,
 		images?: { mimeType: string; base64: string }[],
+		effort: string | null = null,
 	): ClaudeEffect[] {
+		this.turnEffort = effort;
 		const content: UserMessage["content"] = [];
 		if (text) content.push({ type: "text", text });
 		for (const image of images ?? []) {
@@ -349,7 +362,9 @@ export class ClaudeReducer {
 		if (!slot) {
 			// No stream events preceded this (hydration replay, or a stream
 			// without --include-partial-messages): open the message here.
-			slot = this.openSlot(apiId, message, parseTimestamp(event.timestamp));
+			// A store line names the effort it ran at; hydration has no turn of its own.
+			const effort = typeof event.effort === "string" ? event.effort : this.turnEffort;
+			slot = this.openSlot(apiId, message, parseTimestamp(event.timestamp), effort);
 		}
 		for (const block of contentBlocksOf(message.content)) {
 			const position = slot.authoritativeCount++;
@@ -461,8 +476,9 @@ export class ClaudeReducer {
 		apiId: string,
 		message: ClaudeApiMessage | undefined,
 		timestamp?: number,
+		effort: string | null = this.turnEffort,
 	): Slot {
-		const assistant: AssistantMessage = {
+		const assistant: AssistantTurn = {
 			role: "assistant",
 			content: [],
 			api: API,
@@ -472,6 +488,7 @@ export class ClaudeReducer {
 			usage: message?.usage ? usageFromClaude(message.usage) : emptyUsage(),
 			stopReason: "stop",
 			timestamp: timestamp ?? this.now(),
+			...(effort ? { effort } : {}),
 		};
 		this.messages.push(assistant);
 		const slot: Slot = {

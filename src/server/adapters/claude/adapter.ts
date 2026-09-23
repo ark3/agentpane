@@ -30,6 +30,24 @@
  *   itself tolerates two live children on one workspace (MANUAL_TESTING
  *   OW-japuzo). The parent's store
  *   file is untouched and no lineage marker exists on disk (OW-mayuza).
+ * - The effort is set on the running process, not at spawn: `setEffort`
+ *   sends `apply_flag_settings` with `effortLevel`, and what the CLI then runs
+ *   at is read back from `get_settings`'s `applied.effort` -- at start, after
+ *   `setEffort` and after `setModel` -- rather than assumed. Measured on the
+ *   home server, 2026-09-23, `claude 2.1.280` (docs/MANUAL_TESTING.md,
+ *   OW-hokaye): `low` applied at once; a model without effort (haiku)
+ *   applied null with the choice still held, and it came back on a
+ *   `set_model` to one with effort; an unknown level was accepted and
+ *   ignored, which is why nothing here trusts the request alone.
+ *   The choice lives in the process's flag-settings layer. The store names
+ *   the effort each turn ran at, but a `--resume` spawn does not restore it
+ *   and runs at the settings or model default: a sonnet session whose turn
+ *   ran at `low`, and a copy of one whose every stored turn ran at `max`,
+ *   each resumed at `high`, and a `--fork-session` spawn of the latter read
+ *   `high` too. So a fork starts at that default; the start read is what
+ *   makes `getState().effort` true for both.
+ *   Each assistant turn is named with the effort in force when it started,
+ *   and a resumed one with the `effort` its store line records.
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
@@ -118,6 +136,8 @@ export class ClaudeAdapter implements BackendAdapter {
 	private ownership: Ownership | null = null;
 	private cwd: string | null = null;
 	private model: string | null = null;
+	/** `get_settings`'s `applied.effort` as last read: null for a model without effort (see module doc). */
+	private effort: string | null = null;
 	private started = false;
 	private turnActive = false;
 	private disposed = false;
@@ -196,6 +216,8 @@ export class ClaudeAdapter implements BackendAdapter {
 			await this.attachProcess({ cwd: opts.cwd, sessionId });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		}
+		await this.readEffort();
+		if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 	}
 
 	dispose(): Promise<void> {
@@ -232,7 +254,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		// Admission is the stdin write; the active gate keeps this single-flight.
 		proc.write(JSON.stringify(buildUserMessageLine(content)));
 		this.turnActive = true;
-		this.applyEffects(this.reducer.beginTurn(text, images));
+		this.applyEffects(this.reducer.beginTurn(text, images, this.effort));
 	}
 
 	async abort(): Promise<void> {
@@ -356,7 +378,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model, effort: null };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -384,18 +406,27 @@ export class ClaudeAdapter implements BackendAdapter {
 		// Only on success (a bogus id rejects above): remembered so `fork()` can
 		// hand it to the fork's own adapter.
 		this.model = model;
+		// A chosen effort outlives the switch, applied only while the model has
+		// effort at all (module doc), so what is in force is read, not kept.
+		await this.readEffort();
 		this.emitUpdate();
 	}
 
-	/** Not yet: `listModels` offers no efforts, so there is nothing to choose. */
-	async setEffort(_effort: string): Promise<void> {
-		throw new Error("claude adapter offers no reasoning effort to set");
+	/** Sent now over the control channel; the effort in force is then read back (module doc). */
+	async setEffort(effort: string): Promise<void> {
+		await this.sendControl({ subtype: "apply_flag_settings", settings: { effortLevel: effort } });
+		await this.readEffort();
+		this.emitUpdate();
 	}
 
 	/**
 	 * The `initialize` control response carries the model list (the `init`
 	 * event does not). It also carries the operator's account email -- never
 	 * record this response in a fixture (OW-yilabe).
+	 *
+	 * Each entry's `supportedEffortLevels` are its efforts. No entry names a
+	 * default, so `defaultEffort` is null; the CLI's pick for the current model
+	 * is what `get_settings` reports and `getState().effort` carries.
 	 */
 	async listModels(): Promise<ModelInfo[]> {
 		const response = await this.sendControl({ subtype: "initialize" });
@@ -403,12 +434,27 @@ export class ClaudeAdapter implements BackendAdapter {
 		const out: ModelInfo[] = [];
 		for (const model of models as ClaudeModelDescriptor[]) {
 			if (typeof model?.value !== "string") continue;
-			out.push({ id: model.value, label: model.displayName || model.value, efforts: [], defaultEffort: null });
+			const levels = Array.isArray(model.supportedEffortLevels) ? model.supportedEffortLevels : [];
+			out.push({
+				id: model.value,
+				label: model.displayName || model.value,
+				efforts: levels
+					.filter((level): level is string => typeof level === "string")
+					.map((id) => ({ id, description: "" })),
+				defaultEffort: null,
+			});
 		}
 		return out;
 	}
 
 	// -- internals ----------------------------------------------------------
+
+	/** Adopt the effort the CLI will send on its next request. */
+	private async readEffort(): Promise<void> {
+		const response = await this.sendControl({ subtype: "get_settings" });
+		const applied = isRecord(response) && isRecord(response.applied) ? response.applied : null;
+		if (applied) this.effort = typeof applied.effort === "string" ? applied.effort : null;
+	}
 
 	private mintSessionId(): string {
 		return this.options.newSessionId?.() ?? randomUUID();
