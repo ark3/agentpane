@@ -71,7 +71,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 74 tests, 74 results as expected, 0 unexpected
+;;     Ran 76 tests, 76 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -555,7 +555,8 @@ Per buffer and not kept, where the browser's is one global boolean (owner,
 
 (defvar-local agentpane--tail-overlay nil
   "Overlay on the prompt separator whose `before-string' is the reading-view
-tail status, when there is one; see `agentpane--show-reading-tail'.")
+tail status, or the line saying reading view hides every node, when there
+is one; see `agentpane--show-reading-tail'.")
 
 (defvar-local agentpane--prompt-separator nil
   "Marker at the start of the line between the nodes and the prompt region.
@@ -1241,12 +1242,27 @@ thinking part met is named.  Other nodes and parts are walked past."
                (setq at (ewoc-prev agentpane--ewoc at))))
            nil))))
 
+(defun agentpane--hiding-everything-p ()
+  "Non-nil when reading view is on and elides every node, of which there is
+at least one; the browser's `data-reading-elided' condition."
+  (let ((first (and agentpane--reading agentpane--ewoc (ewoc-nth agentpane--ewoc 0))))
+    (and first (not (agentpane--shown agentpane--ewoc first #'ewoc-next)))))
+
 (defun agentpane--show-reading-tail ()
   "Show `agentpane--reading-tail' as the line above the prompt separator, or
-no line when it is nil.  An overlay string rather than buffer text, so it
-moves no node and no draft, and is in no one's undo."
+when it is nil and `agentpane--hiding-everything-p', the browser's line
+saying so, since the buffer would otherwise hold only its header; or no
+line.  An overlay string rather than buffer text, so it moves no node and
+no draft, is in no one's undo, and is no node `n', `p' or
+`agentpane-index-at-point' can land on.  Called wherever the nodes, reading
+view or the streaming status change."
   (when agentpane--tail-overlay
-    (overlay-put agentpane--tail-overlay 'before-string (agentpane--reading-tail))))
+    (overlay-put agentpane--tail-overlay 'before-string
+                 (or (agentpane--reading-tail)
+                     (and (agentpane--hiding-everything-p)
+                          (propertize
+                           "Reading view is hiding this session's tool activity and thinking.\n"
+                           'face 'agentpane-dim))))))
 
 (defun agentpane--show-mode-line ()
   "Show the status fields, after `reading' when reading view is on, in the

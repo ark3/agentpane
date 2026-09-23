@@ -902,11 +902,25 @@ the tool header that would carry it is not drawn."
     (should (< (agentpane-test--position "Checking.")
                (agentpane-test--position "claude-opus-5")))))
 
-(defun agentpane-test--tail-status ()
-  "The reading-view tail status line shown in the current buffer, or nil."
+(defconst agentpane-test--hiding-line
+  "Reading view is hiding this session's tool activity and thinking.\n"
+  "The line reading view shows in place of a session whose every node it elides.")
+
+(defun agentpane-test--above-prompt ()
+  "The overlay string shown in the current buffer, without properties, or nil."
   (let ((shown (seq-some (lambda (overlay) (overlay-get overlay 'before-string))
                          (overlays-in (point-min) (point-max)))))
     (and shown (substring-no-properties shown))))
+
+(defun agentpane-test--tail-status ()
+  "The reading-view tail status line shown in the current buffer, or nil.
+Not `agentpane-test--hiding-line', which the same overlay may carry."
+  (let ((shown (agentpane-test--above-prompt)))
+    (and (not (equal shown agentpane-test--hiding-line)) shown)))
+
+(defun agentpane-test--hiding-p ()
+  "Non-nil when the current buffer shows `agentpane-test--hiding-line'."
+  (equal (agentpane-test--above-prompt) agentpane-test--hiding-line))
 
 (ert-deftest agentpane-test-reading-view-names-the-running-tool ()
   "With reading view on and the session streaming, a line above the prompt
@@ -943,6 +957,66 @@ once the turn's text arrives or the streaming ends."
       (should (equal (agentpane-test--tail-status) "Bash again … running\n"))
       (agentpane-test--press-r)
       (should-not (agentpane-test--tail-status)))))
+
+(defconst agentpane-test--all-chrome-nodes
+  [(:index 1 :role "tool-result"
+    :parts [(:type "tool" :name "Grep" :summary "orphan" :args "" :result "hit" :state "ok")])
+   (:index 2 :role "assistant"
+    :parts [(:type "tool" :name "Bash" :summary "ls -la" :args "" :result "." :state "ok")]
+    :meta (:model "luna" :usage (:totalTokens 3 :cost 0)))
+   (:index 3 :role "assistant"
+    :parts [(:type "thinking" :text "Tail thought" :redacted :json-false)]
+    :meta (:model "luna" :usage (:totalTokens 2 :cost 0)))]
+  "A transcript that so far holds only tool calls and thinking.")
+
+(ert-deftest agentpane-test-reading-view-says-it-hides-everything ()
+  "With reading view on and every node elided, a line above the prompt says
+so, where the buffer would otherwise show only its header; it is no buffer
+text, and goes when reading view does.  With one node drawn it never shows."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw agentpane-test--all-chrome-nodes)
+    (should-not (agentpane-test--hiding-p))
+    (agentpane-test--press-r)
+    (should (agentpane-test--hiding-p))
+    (should-not (string-search "Reading view" (buffer-string)))
+    (agentpane-test--press-r)
+    (should-not (agentpane-test--hiding-p))
+    (agentpane--draw (vconcat agentpane-test--all-chrome-nodes
+                              (vector (agentpane-test--assistant 4 "<p>Done.</p>"))))
+    (agentpane-test--press-r)
+    (should-not (agentpane-test--hiding-p))))
+
+(ert-deftest agentpane-test-reading-view-hiding-line-follows-the-nodes ()
+  "The line saying reading view hides every node follows the notifications
+that change the nodes: a snapshot of chrome alone brings it, a drawn node
+arriving takes it away, and it gives way to the tail status while that
+shows.  A session with no nodes never shows it."
+  (let ((ref '(:backend "claude" :id "c1")))
+    (agentpane-test--with-session ref
+      (agentpane-test--press-r)
+      (should-not (agentpane-test--hiding-p))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming :json-false :nodes agentpane-test--all-chrome-nodes))
+      (should (agentpane-test--hiding-p))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 4 "<p>Done.</p>")))
+      (should-not (agentpane-test--hiding-p))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming t
+             :nodes (vector (list :index 1 :role "assistant"
+                                  :parts (vector (list :type "tool" :name "Bash"
+                                                       :summary "bun test" :args ""
+                                                       :result "" :state "running"))))))
+      (should (equal (agentpane-test--above-prompt) "Bash bun test … running\n"))
+      (agentpane--on-notification
+       nil 'session/status (list :session ref :isStreaming :json-false))
+      (should (agentpane-test--hiding-p))
+      (agentpane--on-notification
+       nil 'session/snapshot (list :session ref :isStreaming :json-false :nodes []))
+      (should-not (agentpane-test--above-prompt)))))
 
 ;;;; Forking, against a stub connection
 
