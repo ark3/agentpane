@@ -101,8 +101,10 @@
  * - `models/list` -- `{ backend }` -> array of `{ id, label }`.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, whose `ref` is authoritative and may differ from the one
- *   asked for. Opens the event stream if it is not open yet, and from here on
- *   the notifications below flow for this session.
+ *   asked for; when it does, a `session/renamed` from the one asked for has
+ *   gone out before the reply, from the stream or else from the helper.
+ *   Opens the event stream if it is not open yet, and from here on the
+ *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
  * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
  *   -> `null`. `close` kills the subprocess and stops this session's

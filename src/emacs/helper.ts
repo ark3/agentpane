@@ -83,6 +83,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		model: view.model,
 	});
 
+	const notifySnapshot = (view: SessionView): void => {
+		notify({
+			method: "session/snapshot",
+			params: { ...statusOf(view), nodes: projectTranscript(view.messages, view.isStreaming, render) },
+		});
+	};
+
 	const onEvent = (event: ServerEvent): void => {
 		const before = state;
 		const result = reduceServerEvent(before, event);
@@ -105,10 +112,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		const view = state.sessions[key]!;
 		switch (event.type) {
 			case "snapshot":
-				notify({
-					method: "session/snapshot",
-					params: { ...statusOf(view), nodes: projectTranscript(view.messages, view.isStreaming, render) },
-				});
+				notifySnapshot(view);
 				return;
 			case "upsert": {
 				const previous = before.sessions[key]!;
@@ -177,8 +181,26 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			attached.add(key);
 			try {
 				const summary = await api.attach(session);
-				// The route's ref is authoritative and may differ from the one asked for.
-				attached.add(sessionKey(summary.ref));
+				// The route's ref is authoritative and may differ from the one asked
+				// for with no `renamed` reaching this stream: an attach through an
+				// alias an earlier rename left behind answers the new ref and
+				// broadcasts only its snapshot, and the `renamed` a first start
+				// broadcasts misses a stream the server has not yet registered, whose
+				// opening snapshot then carries the new ref alone (`SessionManager`'s
+				// `attach` and `#adoptRef`, src/server/http/session-manager.ts).
+				// Filtered by the asked-for key, that snapshot was dropped, so the
+				// rename is said here, before the reply, with the snapshot the reducer
+				// holds for the new ref if one has arrived; one still on its way is
+				// forwarded when it does. A key already gone was re-keyed by a
+				// `renamed` that did arrive.
+				const next = sessionKey(summary.ref);
+				if (next !== key && attached.has(key)) {
+					attached.delete(key);
+					attached.add(next);
+					notify({ method: "session/renamed", params: { from: session, to: summary.ref } });
+					const view = state.sessions[next];
+					if (view) notifySnapshot(view);
+				}
 				return summary;
 			} catch (error: unknown) {
 				attached.delete(key);

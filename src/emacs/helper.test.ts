@@ -296,6 +296,42 @@ describe("notifications", () => {
 		expect(io.notifications()[2]).toMatchObject({ params: { session: pi, isStreaming: true } });
 	});
 
+	it("says the rename an attach reply reveals with no renamed event, with the snapshot it dropped, before the reply", async () => {
+		// An attach through an alias: the route answers the new ref and
+		// broadcasts only its snapshot, which lands before the reply.
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(alias)}`]: () => {
+				source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: true, compaction: null, model: null });
+				return json({ session: summary(pi) });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await io.until(3);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/renamed", "session/snapshot", 1]);
+		expect(io.out[0]).toEqual({ jsonrpc: "2.0", method: "session/renamed", params: { from: alias, to: pi } });
+		expect(io.out[1]).toMatchObject({ params: { session: pi, isStreaming: true } });
+
+		source.emit({ type: "status", session: pi, seq: 2, isStreaming: false, compaction: null, model: null });
+		await io.until(4);
+		expect(io.out[3]).toMatchObject({ method: "session/status", params: { session: pi, isStreaming: false } });
+	});
+
+	it("says a rename the stream already carried once, when the attach reply repeats it", async () => {
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(virtual)}`]: () => {
+				source.emit({ type: "snapshot", session: virtual, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+				source.emit({ type: "renamed", session: pi, seq: 2, from: virtual });
+				return json({ session: summary(pi) });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await io.until(3);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/renamed", 1]);
+	});
+
 	it("passes status and error through, and turns an agent request into an error naming its kind", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
