@@ -53,8 +53,8 @@ beforeEach(() => {
 		storedSession(CLAUDE_SESSION, "/home/u/src/other", "2026-08-09T12:00:00.000Z"),
 		storedSession(CODEX_SESSION, "/home/u/src/other", "2026-08-09T10:00:00.000Z"),
 	]);
-	pi = new FakeAdapterFactory({ models: [{ id: "pi-1", label: "Pi One" }] });
-	codex = new FakeAdapterFactory({ models: [{ id: "cx-1", label: "Codex One" }] });
+	pi = new FakeAdapterFactory({ models: [{ id: "pi-1", label: "Pi One", efforts: [], defaultEffort: null }] });
+	codex = new FakeAdapterFactory({ models: [{ id: "cx-1", label: "Codex One", efforts: [], defaultEffort: null }] });
 	let n = 0;
 	app = createApp({
 		index,
@@ -772,9 +772,43 @@ describe("fork, model, and enumeration routes", () => {
 		expect(pi.forRef(PI_SESSION)?.model).toBe("pi-2");
 	});
 
+	it("sets the effort, and lists each model's effort options (OW-kokalo)", async () => {
+		const withEfforts = new FakeAdapterFactory({
+			models: [
+				{
+					id: "cx-1",
+					label: "Codex One",
+					efforts: [
+						{ id: "low", description: "Fast" },
+						{ id: "medium", description: "Balanced" },
+					],
+					defaultEffort: "medium",
+				},
+			],
+		});
+		app = createApp({ index, adapters: { pi, codex: withEfforts } });
+
+		const listed = (await (await get(`${ROUTES.models}?backend=codex`)).json()) as ModelsResponse;
+		expect(listed.models).toEqual([
+			{
+				id: "cx-1",
+				label: "Codex One",
+				efforts: [
+					{ id: "low", description: "Fast" },
+					{ id: "medium", description: "Balanced" },
+				],
+				defaultEffort: "medium",
+			},
+		]);
+
+		expect((await post(ROUTES.effort(CODEX_SESSION), { effort: "low" })).status).toBe(204);
+		expect(withEfforts.forRef(CODEX_SESSION)?.effort).toBe("low");
+		expect((await post(ROUTES.effort(CODEX_SESSION), {})).status).toBe(400);
+	});
+
 	it("lists models per backend, and merged when unfiltered", async () => {
 		const one = (await (await get(`${ROUTES.models}?backend=codex`)).json()) as ModelsResponse;
-		expect(one.models).toEqual([{ id: "cx-1", label: "Codex One" }]);
+		expect(one.models).toEqual([{ id: "cx-1", label: "Codex One", efforts: [], defaultEffort: null }]);
 
 		const all = (await (await get(ROUTES.models)).json()) as ModelsResponse;
 		expect(all.models.map((m) => m.id).sort()).toEqual(["cx-1", "pi-1"]);
@@ -785,7 +819,7 @@ describe("fork, model, and enumeration routes", () => {
 		// rejects with "Pi process is not running". So the offline answer is
 		// nothing, and this route lives or dies on using the live session.
 		const offline = new FakeAdapterFactory({
-			models: [{ id: "pi-1", label: "Pi One" }],
+			models: [{ id: "pi-1", label: "Pi One", efforts: [], defaultEffort: null }],
 			modelsNeedStart: true,
 		});
 		app = createApp({ index, adapters: { pi: offline } });
@@ -801,7 +835,7 @@ describe("fork, model, and enumeration routes", () => {
 		await get(ROUTES.session(PI_SESSION));
 
 		const after = (await (await get(`${ROUTES.models}?backend=pi`)).json()) as ModelsResponse;
-		expect(after.models).toEqual([{ id: "pi-1", label: "Pi One" }]);
+		expect(after.models).toEqual([{ id: "pi-1", label: "Pi One", efforts: [], defaultEffort: null }]);
 	});
 
 	it("a backend that cannot answer does not take out the other's list", async () => {
@@ -811,7 +845,7 @@ describe("fork, model, and enumeration routes", () => {
 		const response = await get(ROUTES.models);
 		expect(response.status).toBe(200);
 		expect(((await response.json()) as ModelsResponse).models).toEqual([
-			{ id: "cx-1", label: "Codex One" },
+			{ id: "cx-1", label: "Codex One", efforts: [], defaultEffort: null },
 		]);
 	});
 

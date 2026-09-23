@@ -141,6 +141,8 @@ export type ServerEvent =
 			isStreaming: boolean;
 			compaction: "requesting" | "running" | null;
 			model: string | null;
+			/** The reasoning effort governing the conversation's next turn, or null when there is none to report. */
+			effort: string | null;
 	  }
 	| {
 			/**
@@ -154,7 +156,7 @@ export type ServerEvent =
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null }
+	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null }
 	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }
 	| {
 			/** A turn ended in an error the transcript alone would not convey. */
@@ -293,10 +295,33 @@ export interface SetModelRequest {
 	model: string;
 }
 
+/**
+ * POST /api/sessions/:backend/:id/effort -- one of the model's `efforts` ids,
+ * taking effect from the next turn. A backend that lists no efforts rejects it.
+ */
+export interface SetEffortRequest {
+	effort: string;
+}
+
 /** GET /api/models?backend=pi|codex */
 export interface ModelInfo {
 	id: string;
 	label: string;
+	/**
+	 * The reasoning efforts this model accepts, in the backend's order. Per
+	 * model, not per backend, so a client can follow a model change without
+	 * guessing: setting a model whose list lacks the effort in force falls back
+	 * to that model's `defaultEffort`. Empty when the model or its backend
+	 * offers no effort control, and then a client shows none.
+	 */
+	efforts: EffortInfo[];
+	/** The effort the backend picks for this model when none is chosen; null when it names none. */
+	defaultEffort: string | null;
+}
+export interface EffortInfo {
+	/** What `SetEffortRequest.effort` takes, and what a turn's `effort` names. */
+	id: string;
+	description: string;
 }
 export interface ModelsResponse {
 	models: ModelInfo[];
@@ -333,6 +358,7 @@ export const ROUTES = {
 	forkPoints: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,
 	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
+	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
 	reply: (requestId: string) => `/api/requests/${encodeURIComponent(requestId)}`,
 } as const;
 

@@ -354,7 +354,7 @@ describe("PiAdapter command correlation", () => {
 
 		expect(await forkPoints).toEqual([{ id: "e1", text: "first prompt", index: 0 }]);
 		// ModelInfo.id is `provider/modelId` -- the bridge to Pi's split set_model.
-		expect(await models).toEqual([{ id: "anthropic/claude-opus-5", label: "Opus 5" }]);
+		expect(await models).toEqual([{ id: "anthropic/claude-opus-5", label: "Opus 5", efforts: [], defaultEffort: null }]);
 	});
 
 	it("rejects the caller with Pi's own error text on success:false", async () => {

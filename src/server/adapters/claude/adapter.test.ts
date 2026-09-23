@@ -378,8 +378,8 @@ describe("ClaudeAdapter session controls", () => {
 		});
 
 		expect(await listing).toEqual([
-			{ id: "default", label: "Default (recommended)" },
-			{ id: "haiku", label: "haiku" },
+			{ id: "default", label: "Default (recommended)", efforts: [], defaultEffort: null },
+			{ id: "haiku", label: "haiku", efforts: [], defaultEffort: null },
 		]);
 	});
 

@@ -21,6 +21,11 @@ export interface AdapterState {
 	compaction: "requesting" | "running" | null;
 	/** The backend-accepted model id currently governing this conversation. */
 	model: string | null;
+	/**
+	 * The reasoning effort the next turn runs at: the one `setEffort` chose, or
+	 * else the one the backend reported; null for a backend that reports none.
+	 */
+	effort: string | null;
 }
 
 export type Unsubscribe = () => void;
@@ -162,6 +167,13 @@ export interface BackendAdapter {
 
 	// -- session controls ---------------------------------------------------
 	setModel(model: string): Promise<void>;
+	/**
+	 * Choose the reasoning effort from the next turn on, one of the current
+	 * model's `ModelInfo.efforts`. An adapter whose `listModels` offers no
+	 * efforts rejects. Like `setModel`, nothing here refuses it after the first
+	 * prompt; before-the-first-prompt-only is the clients' rule.
+	 */
+	setEffort(effort: string): Promise<void>;
 	listModels(): Promise<ModelInfo[]>;
 }
 

@@ -93,7 +93,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort: null });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -105,7 +105,7 @@ function upsert(index: number, message: AgentMessage): void {
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model });
+	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort: null });
 }
 
 function summary(): SessionSummary {
@@ -215,20 +215,21 @@ const api: AgentpaneApi = {
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {
 			seq += 1;
-			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model });
+			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort: null });
 		});
 	},
 	async close() {},
 	async listModels() {
 		return [
-			{ id: "harness/default", label: "Harness Default" },
-			{ id: "harness/model", label: "Harness Model" },
+			{ id: "harness/default", label: "Harness Default", efforts: [], defaultEffort: null },
+			{ id: "harness/model", label: "Harness Model", efforts: [], defaultEffort: null },
 		];
 	},
 	async setModel(_ref, next) {
 		model = next;
 		queueMicrotask(() => status(false));
 	},
+	async setEffort() {},
 	/**
 	 * One point per user message, each naming that message's transcript index
 	 * (OW-roveze) -- the Pi shape, and the one a backend answers with when every

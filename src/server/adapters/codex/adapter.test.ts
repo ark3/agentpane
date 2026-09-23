@@ -79,6 +79,9 @@ interface HappyServerOptions {
 	turns?: unknown[];
 	model?: string;
 	modelProvider?: string;
+	reasoningEffort?: string;
+	/** `model/list`'s `data`, answered in one page. */
+	models?: unknown[];
 	holdTurnStart?: boolean;
 	holdTurnStartAt?: number;
 	holdThreadStart?: boolean;
@@ -104,8 +107,12 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 						thread: { id: options.threadId ?? "thread-real", turns: options.turns ?? [] },
 						model: options.model ?? "gpt-started",
 						modelProvider: options.modelProvider ?? "openai",
+						reasoningEffort: options.reasoningEffort ?? null,
 					},
 				});
+				break;
+			case "model/list":
+				proc.emit({ id, result: { data: options.models ?? [], nextCursor: null } });
 				break;
 			case "turn/start":
 				turn += 1;
@@ -424,7 +431,7 @@ describe("CodexAdapter lifecycle", () => {
 		});
 		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started" });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null });
 		expect(updates).not.toHaveBeenCalled();
 		expect(requests).not.toHaveBeenCalled();
 	});
@@ -457,7 +464,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null });
 		expect(requests).not.toHaveBeenCalled();
 		expect(proc.killCount).toBe(1);
 	});
@@ -1416,7 +1423,92 @@ describe("CodexAdapter turns", () => {
 
 		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-selected" });
 	});
+
+	it("sends no effort until one is chosen, and reports the thread's own meanwhile", async () => {
+		const { adapter, proc } = await startedAdapter({ reasoningEffort: "medium" });
+
+		expect(adapter.getState().effort).toBe("medium");
+		await adapter.submit("go");
+
+		expect(request(proc, "turn/start")["params"]).not.toHaveProperty("effort");
+	});
+
+	it("applies a chosen effort to subsequent turns (OW-kokalo)", async () => {
+		const { adapter, proc } = await startedAdapter({ reasoningEffort: "medium" });
+		const updates = vi.fn();
+		adapter.onUpdate(updates);
+
+		await adapter.setEffort("low");
+		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), undefined);
+		await adapter.submit("use it");
+
+		expect(request(proc, "turn/start")["params"]).toMatchObject({ effort: "low" });
+	});
+
+	it("names the chosen effort on the turn it ran, not the one the thread started at (OW-kokalo)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-effort", reasoningEffort: "medium" });
+
+		await adapter.setEffort("low");
+		await adapter.submit("go");
+		proc.emit({
+			method: "item/completed",
+			params: {
+				threadId: "thread-effort",
+				turnId: "turn-1",
+				item: { type: "agentMessage", id: "answer", text: "ok", phase: "final_answer", memoryCitation: null },
+				completedAtMs: 10,
+			},
+		});
+
+		const [answer] = adapter.getState().messages;
+		expect(answer).toMatchObject({ role: "assistant", effort: "low" });
+	});
+
+	it("falls back to the new model's default when it does not list the chosen effort", async () => {
+		const { adapter, proc } = await startedAdapter({
+			models: [
+				codexModel("gpt-wide", ["low", "medium", "max"], "medium"),
+				codexModel("gpt-narrow", ["low", "high"], "high"),
+			],
+		});
+
+		await adapter.setEffort("max");
+		await adapter.setModel("gpt-wide");
+		expect(adapter.getState().effort).toBe("max");
+		await adapter.setModel("gpt-narrow");
+		expect(adapter.getState().effort).toBe("high");
+		await adapter.submit("go");
+
+		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-narrow", effort: "high" });
+	});
+
+	it("lists each model's efforts and default", async () => {
+		const { adapter } = await startedAdapter({ models: [codexModel("gpt-wide", ["low", "max"], "low")] });
+
+		expect(await adapter.listModels()).toEqual([
+			{
+				id: "gpt-wide",
+				label: "gpt-wide display",
+				efforts: [
+					{ id: "low", description: "low effort" },
+					{ id: "max", description: "max effort" },
+				],
+				defaultEffort: "low",
+			},
+		]);
+	});
 });
+
+/** The fields of a `model/list` entry (`v2/Model.ts`) the adapter reads. */
+function codexModel(id: string, efforts: string[], defaultEffort: string): Record<string, unknown> {
+	return {
+		id,
+		model: id,
+		displayName: `${id} display`,
+		supportedReasoningEfforts: efforts.map((effort) => ({ reasoningEffort: effort, description: `${effort} effort` })),
+		defaultReasoningEffort: defaultEffort,
+	};
+}
 
 describe("CodexAdapter fork points", () => {
 	/**
@@ -1623,7 +1715,7 @@ describe("CodexAdapter reducer effects", () => {
 			},
 		});
 
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started" }, undefined);
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null }, undefined);
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

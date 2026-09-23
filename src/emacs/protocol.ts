@@ -105,7 +105,8 @@
  * requests; the helper answers each and pushes notifications on its own.
  * `session` in every payload is a ref, `{ backend, id }`, exactly as the HTTP
  * API's `SessionRef`; `compaction` is `"requesting"`, `"running"` or `null`;
- * `model` is a string or `null`.
+ * `model` is a string or `null`; so is `effort`, the reasoning effort the
+ * session's next turn runs at, `null` when the backend reports none.
  *
  * Requests, by `method`, with `params` and `result`:
  *
@@ -115,7 +116,12 @@
  * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
  *   stored transcript; spawns nothing and opens no stream.
  * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
- * - `models/list` -- `{ backend }` -> array of `{ id, label }`.
+ * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
+ *   defaultEffort }`, the HTTP listing unchanged. `efforts` is an array of
+ *   `{ id, description }`, the reasoning efforts that model accepts, empty
+ *   when the model or its backend offers none -- and then there is no effort
+ *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
+ *   at when none is chosen.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, whose `ref` is authoritative and may differ from the one
  *   asked for; when it does, a `session/renamed` from the one asked for has
@@ -130,7 +136,12 @@
  * - `sessions/detach` -- `{ session }` -> `null`. Stops this session's
  *   notifications and does nothing else: no HTTP call, and the session goes
  *   on running on the server. Sent when Emacs stops showing a session.
- * - `sessions/setModel` -- `{ session, model }` -> `null`.
+ * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
+ *   new model does not list falls back to that model's `defaultEffort`, which
+ *   the `session/status` that follows reports.
+ * - `sessions/setEffort` -- `{ session, effort }` -> `null`. `effort` is one of
+ *   the session's model's `efforts` ids, taking effect from the next turn; a
+ *   backend that lists none refuses it.
  * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
  * - `requests/reply` -- `{ requestId, response }` -> `null`.
@@ -145,11 +156,12 @@
  * about, and none arrives for a session Emacs has not attached, except
  * `sessions/changed`:
  *
- * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model }`.
+ * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model,
+ *   effort }`.
  *   Replaces everything the buffer holds; also how a session first appears
  *   after `sessions/attach`, and how a missed event is healed.
  * - `session/node` -- `{ session, node }`. One node to replace by `index`.
- * - `session/status` -- `{ session, isStreaming, compaction, model }`.
+ * - `session/status` -- `{ session, isStreaming, compaction, model, effort }`.
  * - `session/error` -- `{ session, message }`. A turn error, or an agent
  *   request nothing in Emacs answers yet, as text saying what kind arrived.
  *   Not carried by a snapshot, so a re-snapshot does not replay it.
@@ -184,6 +196,7 @@ export interface HelperRequests {
 	"sessions/close": { params: { session: SessionRef }; result: null };
 	"sessions/detach": { params: { session: SessionRef }; result: null };
 	"sessions/setModel": { params: { session: SessionRef; model: string }; result: null };
+	"sessions/setEffort": { params: { session: SessionRef; effort: string }; result: null };
 	"sessions/forkPoints": { params: { session: SessionRef }; result: ForkPoint[] };
 	"sessions/fork": { params: { session: SessionRef } & ForkRequest; result: SessionRef };
 	"requests/reply": { params: AgentRequestReply; result: null };
@@ -194,6 +207,7 @@ export interface SessionStatusParams {
 	isStreaming: boolean;
 	compaction: "requesting" | "running" | null;
 	model: string | null;
+	effort: string | null;
 }
 
 export type HelperNotification =

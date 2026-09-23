@@ -141,6 +141,7 @@ function state(): ClientState {
 		messages: [],
 		isStreaming: false,
 		model: null,
+		effort: null,
 		seq: 1,
 		error: null,
 		requests: [],

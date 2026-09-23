@@ -42,7 +42,7 @@ export function formatSseFrame(event: ServerEvent): string {
 
 /** State the broadcaster needs to build a snapshot, supplied by the session manager. */
 export interface SnapshotSource {
-	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null } | null;
+	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null } | null;
 }
 
 export class Broadcaster {
@@ -93,6 +93,7 @@ export class Broadcaster {
 			isStreaming: state.isStreaming,
 			compaction: state.compaction,
 			model: state.model,
+			effort: state.effort,
 		});
 	}
 
@@ -110,6 +111,7 @@ export class Broadcaster {
 			isStreaming: state.isStreaming,
 			compaction: state.compaction,
 			model: state.model,
+			effort: state.effort,
 		});
 	}
 
@@ -117,8 +119,14 @@ export class Broadcaster {
 		this.#fanout({ type: "upsert", session: ref, seq: this.#bump(ref), index, message });
 	}
 
-	status(ref: SessionRef, isStreaming: boolean, compaction: "requesting" | "running" | null, model: string | null): void {
-		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction, model });
+	status(
+		ref: SessionRef,
+		isStreaming: boolean,
+		compaction: "requesting" | "running" | null,
+		model: string | null,
+		effort: string | null,
+	): void {
+		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction, model, effort });
 	}
 
 	request(ref: SessionRef, request: AgentRequest): void {

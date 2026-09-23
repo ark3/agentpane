@@ -159,6 +159,7 @@ const api: AgentpaneApi = {
 				isStreaming: false,
 				compaction: null,
 				model: null,
+				effort: null,
 			});
 		});
 		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
@@ -177,6 +178,7 @@ const api: AgentpaneApi = {
 		return [];
 	},
 	async setModel() {},
+	async setEffort() {},
 	/**
 	 * One point per user message, each naming that message's transcript index
 	 * -- the same shape `harness.ts` answers, and the reason is the cost being
@@ -313,6 +315,7 @@ const harness: PerfHarness = {
 			isStreaming: true,
 			compaction: null,
 			model: null,
+			effort: null,
 		});
 		await controller!.select(refFor("a"));
 		// The attach snapshot arrives in a microtask; let it, and let layout settle.
@@ -335,7 +338,7 @@ const harness: PerfHarness = {
 			index,
 			message: entry.messages[index]!,
 		});
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: true, compaction: null, model: null });
+		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: true, compaction: null, model: null, effort: null });
 
 		const samples: number[] = [];
 		let body = "";
@@ -353,7 +356,7 @@ const harness: PerfHarness = {
 				timed({ type: "upsert", session: entry.ref, seq: ++entry.seq, index, message }),
 			);
 		}
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: false, compaction: null, model: null });
+		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: false, compaction: null, model: null, effort: null });
 		// `MutationObserver` delivers its records in a microtask, which `flushSync`
 		// does not wait for, so the queue is drained by hand rather than trusted to
 		// have been delivered by the time this returns.

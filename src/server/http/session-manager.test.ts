@@ -1386,6 +1386,17 @@ describe("turn boundaries", () => {
 			}),
 		]);
 	});
+
+	it("broadcasts an effort change as status, as it does a model change (OW-kokalo)", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+
+		await adapter.setEffort("low");
+
+		expect(events).toEqual([expect.objectContaining({ type: "status", effort: "low" })]);
+	});
 });
 
 describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {

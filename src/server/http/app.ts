@@ -35,6 +35,7 @@ import {
 	type SessionPreviewResponse,
 	type SessionRef,
 	type SessionSummary,
+	type SetEffortRequest,
 	type SetModelRequest,
 	sessionKey,
 } from "../../shared/protocol.ts";
@@ -361,6 +362,17 @@ export function createApp(deps: AppDeps): App {
 				}
 				const adapter = await sessions.attach(ref);
 				await adapter.setModel(body.value.model);
+				return noContent();
+			}
+			case "effort": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<SetEffortRequest>(request);
+				if (!body.ok) return body.response;
+				if (typeof body.value.effort !== "string") {
+					return error(400, "bad_request", "effort is required");
+				}
+				const adapter = await sessions.attach(ref);
+				await adapter.setEffort(body.value.effort);
 				return noContent();
 			}
 			default:

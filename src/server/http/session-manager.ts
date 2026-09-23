@@ -70,6 +70,7 @@ interface ManagedSession {
 	lastStreaming: boolean;
 	lastCompaction: "requesting" | "running" | null;
 	lastModel: string | null;
+	lastEffort: string | null;
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
@@ -255,6 +256,7 @@ export class SessionManager {
 			lastStreaming: false,
 			lastCompaction: null,
 			lastModel: null,
+			lastEffort: null,
 			forking: 0,
 			createdAt: this.#now(),
 		});
@@ -493,6 +495,7 @@ export class SessionManager {
 				lastStreaming: false,
 				lastCompaction: null,
 				lastModel: null,
+				lastEffort: null,
 				forking: 0,
 				createdAt: this.#now(),
 			};
@@ -557,6 +560,7 @@ export class SessionManager {
 				lastStreaming: false,
 				lastCompaction: null,
 				lastModel: null,
+				lastEffort: null,
 				forking: 0,
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
@@ -656,6 +660,7 @@ export class SessionManager {
 		bound.lastStreaming = initialState.isStreaming;
 		bound.lastCompaction = initialState.compaction;
 		bound.lastModel = initialState.model;
+		bound.lastEffort = initialState.effort;
 		// The first of the two points at which the id can change (D9).
 		this.#adoptRef(bound, "rename");
 		return bound;
@@ -669,10 +674,12 @@ export class SessionManager {
 	#onUpdate(session: ManagedSession, state: AdapterState, changedIndex?: number): void {
 		const streamingChanged = state.isStreaming !== session.lastStreaming;
 		const compactionChanged = state.compaction !== session.lastCompaction;
-		const modelChanged = state.model !== session.lastModel;
+		// The effort rides with the model: a model change can move it (OW-kokalo).
+		const settingsChanged = state.model !== session.lastModel || state.effort !== session.lastEffort;
 		session.lastStreaming = state.isStreaming;
 		session.lastCompaction = state.compaction;
 		session.lastModel = state.model;
+		session.lastEffort = state.effort;
 
 		// An update from inside a fork, after the adapter moved onto it but before
 		// `fork()`'s `finally` re-keys this container, describes the FORK while
@@ -687,8 +694,8 @@ export class SessionManager {
 		if (session.forking > 0 && session.adapter && sessionKey(session.adapter.ref) !== sessionKey(session.ref)) return;
 
 		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
-		if (modelChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
-			this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model);
+		if (settingsChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
+			this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model, state.effort);
 		} else if (hasChangedMessage && compactionChanged) {
 			// Compaction completion changes the transcript marker and operation state
 			// together. Keep that reducer-level atomicity on the wire rather than let
@@ -697,7 +704,7 @@ export class SessionManager {
 		} else if (hasChangedMessage) {
 			const message = state.messages[changedIndex];
 			if (message) this.broadcaster.upsert(session.ref, changedIndex, message);
-			if (streamingChanged || modelChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model);
+			if (streamingChanged || settingsChanged) this.broadcaster.status(session.ref, state.isStreaming, state.compaction, state.model, state.effort);
 		} else {
 			// A snapshot carries isStreaming and compaction, so no separate status event.
 			this.broadcaster.broadcastSnapshot(session.ref);

@@ -153,6 +153,28 @@ export class CodexAdapter implements BackendAdapter {
 	/** Candidate overflow makes an unknown response unsafe to install as active. */
 	private pendingTurnCompletionOverflow = false;
 	private model: string | null = null;
+	/**
+	 * The effort `setEffort` chose, sent on every `turn/start` like `model` --
+	 * `TurnStartParams.effort` is the only way to set one, overriding it "for
+	 * this turn and subsequent turns". Null until chosen, and then nothing is
+	 * sent and the thread runs at what `thread/start` or `thread/resume`
+	 * reported, which is what `getState` names instead.
+	 *
+	 * Held here and nowhere else, and that is enough only because it is resent
+	 * each turn. Measured on the home server, 2026-09-23, `codex-cli 0.156.0`
+	 * with `gpt-5.6-luna` (`docs/MANUAL_TESTING.md`, OW-kokalo): `low` sent on
+	 * one `turn/start` carried to the next turn sent without an effort on the
+	 * same app-server, but a `thread/resume` of that thread in a fresh
+	 * app-server answered `reasoningEffort: "medium"`, not the override, and a
+	 * turn sent after it without an effort ran at `medium`. So a conversation
+	 * reopened after its app-server exits runs at the default again, and
+	 * `getState` says so. That default was both the model's
+	 * `defaultReasoningEffort` and `config.toml`'s `model_reasoning_effort`, so
+	 * the run cannot say which one a resume restores. A resume on the
+	 * app-server that still holds the thread -- a fork's borrower, or a
+	 * re-attach through the registry -- was not measured.
+	 */
+	private effort: string | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
 	private disposal: Promise<void> | null = null;
@@ -517,6 +539,10 @@ export class CodexAdapter implements BackendAdapter {
 			return;
 		}
 		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
+		// The turn's messages carry the reducer's identity, which otherwise knows
+		// only the effort `thread/start` or `thread/resume` reported. Set before
+		// the request, since the turn's first deltas can arrive with its response.
+		if (this.effort) this.reducer.setIdentity({ reasoningEffort: this.effort });
 		this.turnStartPending = true;
 		this.turnBusy = { source: "submission", turnId: null };
 		let responseTurnId: string | undefined;
@@ -529,6 +555,7 @@ export class CodexAdapter implements BackendAdapter {
 				// turns" -- Codex has no standalone set-model request, so this is
 				// where `setModel` takes effect.
 				...(this.model ? { model: this.model } : {}),
+				...(this.effort ? { effort: this.effort } : {}),
 			});
 			if (ownership.client !== client || !this.owns(ownership)) {
 				throw new Error(TURN_START_ABORTED_ERROR);
@@ -697,7 +724,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -739,9 +766,23 @@ export class CodexAdapter implements BackendAdapter {
 
 	// -- session controls ---------------------------------------------------
 
-	/** Takes effect on the next `turn/start`; Codex has no standalone set-model call. */
+	/**
+	 * Takes effect on the next `turn/start`; Codex has no standalone set-model
+	 * call. A chosen effort the new model does not list falls back to that
+	 * model's default rather than going out on a turn it would not suit.
+	 */
 	async setModel(model: string): Promise<void> {
+		if (this.effort) {
+			const info = (await this.listModels()).find((candidate) => candidate.id === model);
+			if (info && !info.efforts.some((option) => option.id === this.effort)) this.effort = info.defaultEffort;
+		}
 		this.model = model;
+		this.emitUpdate();
+	}
+
+	/** Takes effect on the next `turn/start`, like `setModel`. */
+	async setEffort(effort: string): Promise<void> {
+		this.effort = effort;
 		this.emitUpdate();
 	}
 
@@ -756,7 +797,15 @@ export class CodexAdapter implements BackendAdapter {
 				...(cursor ? { cursor } : {}),
 			});
 			for (const model of response.data ?? []) {
-				models.push({ id: model.id, label: model.displayName || model.id });
+				models.push({
+					id: model.id,
+					label: model.displayName || model.id,
+					efforts: model.supportedReasoningEfforts.map((option) => ({
+						id: option.reasoningEffort,
+						description: option.description,
+					})),
+					defaultEffort: model.defaultReasoningEffort,
+				});
 			}
 			cursor = response.nextCursor ?? null;
 			if (!cursor) break;

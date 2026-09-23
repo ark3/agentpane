@@ -356,7 +356,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model };
+		return { ...this.reducer.getState(), model: this.model, effort: null };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -387,6 +387,11 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.emitUpdate();
 	}
 
+	/** Not yet: `listModels` offers no efforts, so there is nothing to choose. */
+	async setEffort(_effort: string): Promise<void> {
+		throw new Error("claude adapter offers no reasoning effort to set");
+	}
+
 	/**
 	 * The `initialize` control response carries the model list (the `init`
 	 * event does not). It also carries the operator's account email -- never
@@ -398,7 +403,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		const out: ModelInfo[] = [];
 		for (const model of models as ClaudeModelDescriptor[]) {
 			if (typeof model?.value !== "string") continue;
-			out.push({ id: model.value, label: model.displayName || model.value });
+			out.push({ id: model.value, label: model.displayName || model.value, efforts: [], defaultEffort: null });
 		}
 		return out;
 	}

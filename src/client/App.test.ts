@@ -38,7 +38,7 @@ function summary(
 	};
 }
 
-type TestSessionView = Omit<SessionView, "model"> & { model?: string | null };
+type TestSessionView = Omit<SessionView, "model" | "effort"> & { model?: string | null; effort?: string | null };
 
 function state(
 	overrides: Omit<Partial<ClientState>, "sessions"> & { sessions?: Record<string, TestSessionView> } = {},
@@ -47,7 +47,7 @@ function state(
 	const sessions: Record<string, SessionView> = Object.fromEntries(
 		Object.entries(suppliedSessions ?? {}).map(([key, session]) => [
 			key,
-			{ ...session, model: session.model ?? null } satisfies SessionView,
+			{ ...session, model: session.model ?? null, effort: session.effort ?? null } satisfies SessionView,
 		]),
 	);
 	return { ...initialClientState(), ...rest, ...(suppliedSessions ? { sessions } : {}) };
@@ -174,7 +174,7 @@ class FakeController implements AgentpaneController {
 				selected: ref,
 				sessions: {
 					...this.current.state.sessions,
-					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, seq: 1, error: null, requests: [] },
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, requests: [] },
 				},
 			},
 		});
@@ -352,7 +352,7 @@ describe("App", () => {
 	it("shows the server-reported model in the selected empty conversation's picker", () => {
 		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
 		const controller = new FakeController(view({
-			models: [{ id: "opaque/current", label: "Current Model" }],
+			models: [{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null }],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		}));
 
@@ -377,7 +377,7 @@ describe("App", () => {
 		render(App, { props: { controller: new FakeController(view({
 			draft: "still sendable",
 			modelSetting: true,
-			models: [{ id: "opaque/current", label: "Current" }],
+			models: [{ id: "opaque/current", label: "Current", efforts: [], defaultEffort: null }],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		})) } });
 
@@ -390,8 +390,8 @@ describe("App", () => {
 		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
 		const controller = new FakeController(view({
 			models: [
-				{ id: "opaque/current", label: "Current Model" },
-				{ id: "opaque/next", label: "Next Model" },
+				{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null },
+				{ id: "opaque/next", label: "Next Model", efforts: [], defaultEffort: null },
 			],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		}));
@@ -413,7 +413,7 @@ describe("App", () => {
 	it("locks a messaged conversation to a plain model label", () => {
 		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
 		const controller = new FakeController(view({
-			models: [{ id: "opaque/current", label: "Current Model" }],
+			models: [{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null }],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		}));
 
@@ -442,6 +442,7 @@ describe("App", () => {
 			isStreaming: false,
 			compaction: null,
 			model: "backend/reported",
+			effort: null,
 		}).state;
 
 		render(App, { props: { controller: new FakeController(view({ state: attached })) } });
@@ -710,6 +711,7 @@ describe("App", () => {
 			isStreaming: false,
 			compaction: null,
 			model: null,
+			effort: null,
 		}).state;
 
 		const controller = new FakeController(view({ state: current }));
@@ -1899,6 +1901,7 @@ describe("App", () => {
 			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
+			setEffort: async () => {},
 			forkPoints: async () => [],
 			fork: async () => piSession,
 			reply: async () => {},
@@ -1911,7 +1914,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		// The composer only replaces the Attach button once the session is live,
 		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -2409,6 +2412,7 @@ describe("App", () => {
 			close: async () => {},
 			listModels: async () => [],
 			setModel: async () => {},
+			setEffort: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => {
 				forks += 1;
@@ -2429,7 +2433,7 @@ describe("App", () => {
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null });
+			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null });
 			await controller.select(piSession);
 			await tick();
 
@@ -2445,7 +2449,7 @@ describe("App", () => {
 
 			// The fork's own turn, start to finish, with the tab in the background.
 			const turn = (isStreaming: boolean) =>
-				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null });
+				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null });
 			turn(true);
 			await tick();
 			turn(false);

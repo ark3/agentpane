@@ -16,6 +16,7 @@ import {
 	type ModelsResponse,
 	type PromptRequest,
 	type ServerEvent,
+	type SetEffortRequest,
 	type SetModelRequest,
 	type SessionPreviewResponse,
 	type SessionRef,
@@ -76,6 +77,7 @@ export interface AgentpaneApi {
 	close(ref: SessionRef): Promise<void>;
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
 	setModel(ref: SessionRef, model: string): Promise<void>;
+	setEffort(ref: SessionRef, effort: string): Promise<void>;
 	/**
 	 * The points a session can be forked at (OW-hezidi), each naming the
 	 * transcript index of the user message it forks at (OW-roveze).
@@ -160,6 +162,10 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		setModel(ref, model) {
 			const body: SetModelRequest = { model };
 			return requestNoContent(ROUTES.model(ref), jsonRequest(body));
+		},
+		setEffort(ref, effort) {
+			const body: SetEffortRequest = { effort };
+			return requestNoContent(ROUTES.effort(ref), jsonRequest(body));
 		},
 		forkPoints(ref) {
 			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => {

@@ -419,7 +419,7 @@ export class PiAdapter implements BackendAdapter {
 	// -- state ----------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model };
+		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model, effort: null };
 	}
 
 	onUpdate(cb: UpdateListener): Unsubscribe {
@@ -456,9 +456,14 @@ export class PiAdapter implements BackendAdapter {
 		this.emitUpdate();
 	}
 
+	/** Not yet: `listModels` offers no efforts, so there is nothing to choose. */
+	async setEffort(_effort: string): Promise<void> {
+		throw new Error("pi adapter offers no reasoning effort to set");
+	}
+
 	async listModels(): Promise<ModelInfo[]> {
 		const resp = await this.sendCommand<PiResponseFor<"get_available_models">>({ type: "get_available_models" });
-		return resp.data.models.map((m: Model<any>) => modelToInfo(m));
+		return resp.data.models.map((m: Model<any>) => ({ ...modelToInfo(m), efforts: [], defaultEffort: null }));
 	}
 
 	// -- stdio plumbing ---------------------------------------------------------
@@ -564,6 +569,7 @@ export class PiAdapter implements BackendAdapter {
 			isStreaming: this.state.isStreaming,
 			compaction: this.state.compaction,
 			model: this.model,
+			effort: null,
 		};
 		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
 	}

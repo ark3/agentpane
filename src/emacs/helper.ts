@@ -91,6 +91,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		isStreaming: view.isStreaming,
 		compaction: view.compaction ?? null,
 		model: view.model,
+		effort: view.effort,
 	});
 
 	const notifySnapshot = (view: SessionView): void => {
@@ -244,6 +245,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/setModel": async ({ session, model }) => {
 			await api.setModel(session, model);
+			return null;
+		},
+		"sessions/setEffort": async ({ session, effort }) => {
+			await api.setEffort(session, effort);
 			return null;
 		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),

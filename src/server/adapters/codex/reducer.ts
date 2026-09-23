@@ -144,7 +144,11 @@ export class CodexReducer {
 		return this.identity.provider;
 	}
 
-	/** From the `thread/start` / `thread/resume` / `thread/fork` response. */
+	get effort(): string | null {
+		return this.identity.effort;
+	}
+
+	/** From the `thread/start` / `thread/resume` / `thread/fork` response, and the effort a `turn/start` overrides. */
 	setIdentity(id: {
 		threadId?: string | null;
 		model?: string | null;

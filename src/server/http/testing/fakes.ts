@@ -174,6 +174,7 @@ export class FakeAdapter implements BackendAdapter {
 	aborts = 0;
 	compactions = 0;
 	model?: string;
+	effort?: string;
 
 	// -- state ---------------------------------------------------------------
 	messages: AgentMessage[] = [];
@@ -273,7 +274,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	getState(): AdapterState {
-		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null };
+		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
@@ -293,6 +294,11 @@ export class FakeAdapter implements BackendAdapter {
 
 	async setModel(model: string): Promise<void> {
 		this.model = model;
+		this.#emit(undefined);
+	}
+
+	async setEffort(effort: string): Promise<void> {
+		this.effort = effort;
 		this.#emit(undefined);
 	}
 
