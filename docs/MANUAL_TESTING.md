@@ -2476,3 +2476,36 @@ Run against the store through `readSessionPreview` in a one-off `bun` script, th
 **Not established.**
 No agentpane fork on the store was written by a version between 0.147.0 and 0.154.0, so when forks stopped copying their history is unknown.
 Whether the attached view of a fork survives a server restart, which reads through `thread/resume` rather than the rollout, was not tried.
+
+## A Codex turn at a chosen reasoning effort, and what a resume keeps of it (OW-kokalo)
+
+Run on the home server 2026-09-23, `codex-cli 0.156.0`, every turn on `gpt-5.6-luna`, in two parts: one turn driven through agentpane at a non-default effort, and a bare `codex app-server` probe for what `thread/resume` reports afterwards.
+Both used a temporary `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, because `~/.codex` refused a write in this session's sandbox that day.
+The copied `config.toml` sets `model = "gpt-5.6-luna"` and `model_reasoning_effort = "medium"`, which matters below.
+Neither driver was kept; each was a throwaway Python script, and what follows is how they ran.
+
+**Through agentpane, the chosen effort reaches `turn/start`, the rollout and the wire.**
+The driver started `bun run start` on port 44191 with that `CODEX_HOME` and a `codex` shim first on `PATH` that `tee`d the app-server's stdin to a file and passed stdout through untouched, the tap shape `agentpane_pi_steer_probe.py` uses for Pi's stdout.
+It created a Codex session with the worktree as `cwd`, attached it, and read `GET /api/models?backend=codex`.
+That listed `gpt-5.6-luna` with `efforts` `low`, `medium`, `high`, `xhigh` and `max`, and `defaultEffort: "medium"`; the other three models the bare probe's `model/list` returned were `gpt-6-luna` (same five, default `medium`), `gpt-5.6-terra` (those five plus `ultra`, default `medium`) and `gpt-5.5` (`low` through `xhigh`, default `medium`).
+Before any choice the attach snapshot carried `effort: "medium"`, which is `thread/start`'s `reasoningEffort`.
+`POST .../model` with `gpt-5.6-luna` and `POST .../effort` with `low` each answered 204, and the `status` event that followed carried `model: "gpt-5.6-luna"` and `effort: "low"`.
+The prompt `Do not use any tools. Reply with exactly: ok` answered `ok`, and the tap shows the one `turn/start` that ran it carried `model: "gpt-5.6-luna"` and `effort: "low"`.
+The effort was read back from three places: the assistant message on the SSE wire carried `effort: "low"`, the settled snapshot carried `effort: "low"`, and the rollout's `turn_context` record for that turn carried `model: "gpt-5.6-luna"` and `effort: "low"`.
+The driver ran twice, on threads `01a0d045-f945-...` and `01a0d046-65c1-...`, with the same readings.
+No `thread/settings/updated` notification arrived after the overriding `turn/start` in the bare probe below, whose notifications were all listed, so as of this version the notification the generated types offer does not report a `turn/start` override, and the rollout's `turn_context` is where the effort a turn ran at is written down.
+
+**A resume in a fresh app-server reports the default, not the override.**
+The second driver's attempt to measure this through agentpane failed for a reason of the run's own making: after `DELETE`, the re-attach answered 404, because the session index walks `~/.codex/sessions` and the thread's rollout was under the temporary `CODEX_HOME`.
+So it was measured on `codex app-server` directly, with the adapter's own request shapes, over two app-server processes on one temporary `CODEX_HOME`.
+The first run read the resume's answer; a second added the `thread/read` and the third turn below, and agreed with the first on everything both read.
+In the first process, `thread/start` with `model: "gpt-5.6-luna"` answered `reasoningEffort: "medium"`; a `turn/start` with `effort: "low"` ran at `low` by its `turn_context`; a second `turn/start` with no effort also ran at `low`; and `thread/read` then answered `reasoningEffort: "low"`.
+That process was terminated, and in a fresh one `thread/resume` with the same `model` and no effort -- `ThreadResumeParams` has no effort field -- answered `reasoningEffort: "medium"`.
+The rollout recorded a `thread_settings_applied` event with `reasoning_effort: "medium"` at the resume, and a third turn sent with no effort ran at `medium` by its `turn_context`.
+So an override lasts as long as the app-server that received it, and a resume elsewhere falls back to the default.
+That default was named by both the model's `defaultReasoningEffort` and the config's `model_reasoning_effort`, so this run cannot say which of the two a resume restores.
+The adapter holds the chosen effort for its own lifetime and resends it on every `turn/start`, so within one attach this changes nothing; a conversation reopened after its app-server exits runs, and reports, the default again (`private effort` in `src/server/adapters/codex/adapter.ts`).
+
+**Not established.**
+A resume on the app-server that still holds the thread, which is what a fork's borrower and a re-attach through the connection registry do, was not tried.
+Nor was a model change mid-conversation without a chosen effort, where the thread's reported effort may not be one the new model lists.
