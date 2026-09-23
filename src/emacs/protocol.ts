@@ -109,6 +109,9 @@
  * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
  *   -> `null`. `close` kills the subprocess and stops this session's
  *   notifications.
+ * - `sessions/detach` -- `{ session }` -> `null`. Stops this session's
+ *   notifications and does nothing else: no HTTP call, and the session goes
+ *   on running on the server. Sent when Emacs stops showing a session.
  * - `sessions/setModel` -- `{ session, model }` -> `null`.
  * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
@@ -161,6 +164,7 @@ export interface HelperRequests {
 	"sessions/abort": { params: { session: SessionRef }; result: null };
 	"sessions/compact": { params: { session: SessionRef }; result: null };
 	"sessions/close": { params: { session: SessionRef }; result: null };
+	"sessions/detach": { params: { session: SessionRef }; result: null };
 	"sessions/setModel": { params: { session: SessionRef; model: string }; result: null };
 	"sessions/forkPoints": { params: { session: SessionRef }; result: ForkPoint[] };
 	"sessions/fork": { params: { session: SessionRef } & ForkRequest; result: SessionRef };

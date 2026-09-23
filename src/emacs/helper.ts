@@ -24,8 +24,8 @@
  * sends an opening snapshot for every live session and broadcasts every
  * event to every client, so views Emacs never attached form in the reducer
  * too; notifications go out only for refs Emacs attached through this
- * helper, a set kept here and re-keyed on `renamed`. `sessions/changed` is
- * unfiltered. The hand-rolled reader in `sse.ts` does not retry, so a drop
+ * helper and have not detached or closed since, a set kept here and
+ * re-keyed on `renamed`. `sessions/changed` is unfiltered. The hand-rolled reader in `sse.ts` does not retry, so a drop
  * is reopened after `reconnectDelayMs`, and every open after the first
  * emits `sessions/changed`: a listing change while the stream was down is
  * gone (D21).
@@ -192,7 +192,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// rename is said here, before the reply, with the snapshot the reducer
 				// holds for the new ref if one has arrived; one still on its way is
 				// forwarded when it does. A key already gone was re-keyed by a
-				// `renamed` that did arrive.
+				// `renamed` that did arrive, or dropped by a `sessions/detach` sent
+				// while this attach was in flight, which a reply that lands after it
+				// must not undo.
 				const next = sessionKey(summary.ref);
 				if (next !== key && attached.has(key)) {
 					attached.delete(key);
@@ -221,6 +223,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/close": async ({ session }) => {
 			await api.close(session);
+			attached.delete(sessionKey(session));
+			return null;
+		},
+		// Emacs no longer shows the session, and nothing more: unlike `close`,
+		// the session goes on running on the server.
+		"sessions/detach": async ({ session }) => {
 			attached.delete(sessionKey(session));
 			return null;
 		},

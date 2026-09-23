@@ -282,6 +282,36 @@ describe("notifications", () => {
 		expect(io.notifications()).toHaveLength(1);
 	});
 
+	it("says nothing more after sessions/detach, which calls no route, nor after an attach in flight across it", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const { io, source, calls } = start({
+			...attachRoutes(codex),
+			[`GET ${ROUTES.session(alias)}`]: async () => {
+				await held;
+				return json({ session: summary(pi) });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex } });
+		await io.until(1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: codex } });
+		await io.until(2);
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+		source.emit({ type: "snapshot", session: codex, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: alias } });
+		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/detach", params: { session: alias } });
+		await io.until(3);
+		release();
+		await io.until(4);
+		source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		source.emit({ type: "snapshot", session: alias, seq: 1, messages: [], isStreaming: false, compaction: null, model: null });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications()).toEqual([]);
+		expect(calls.map((call) => call.url)).toEqual([ROUTES.session(codex), ROUTES.session(alias)]);
+	});
+
 	it("re-keys on renamed and says so before the snapshot that follows", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
