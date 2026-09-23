@@ -60,9 +60,46 @@
   (with-current-buffer (agentpane-test--render)
     (let ((positions (mapcar #'agentpane-test--position
                              '("Fix the bug" "Looking." "Read app.ts"
-                               "Edit app.ts (+1 -1)" "— #1 · haiku · 12 tokens"))))
+                               "Edit app.ts (+1 -1)" "— haiku · 12 tok"))))
       (should (equal positions (sort (copy-sequence positions) #'<))))
     (kill-buffer)))
+
+(defun agentpane-test--meta-line (meta)
+  "The meta line drawn for an assistant node carrying META."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw (vector (list :index 1 :role "assistant" :parts [] :meta meta)))
+    (goto-char (point-min))
+    (re-search-forward "^— .*$")
+    (match-string-no-properties 0)))
+
+(ert-deftest agentpane-test-meta-compact-tokens-no-zero-cost ()
+  "The meta line shows tokens as the browser's footer does, and no index or zero cost."
+  (let ((line (agentpane-test--meta-line
+               '(:model "claude-opus-5" :usage (:totalTokens 136013 :cost 0)))))
+    (should (string-search "136K tok" line))
+    (should-not (string-search "#" line))
+    (should-not (string-search "$" line))))
+
+(ert-deftest agentpane-test-meta-nonzero-cost ()
+  "A non-zero cost follows the tokens at four decimals, and effort is bare."
+  (should (equal (agentpane-test--meta-line
+                  '(:model "haiku" :effort "high"
+                    :usage (:totalTokens 1234 :cost 0.00123)))
+                 "— haiku · high · 1.2K tok · $0.0012")))
+
+(ert-deftest agentpane-test-compact-number-matches-intl ()
+  "Token counts round as en-US `Intl.NumberFormat' compact notation does.
+The expected strings are what `bun 1.4.0' printed for each value."
+  (dolist (case '((1 . "1") (12 . "12") (999 . "999") (1000 . "1K")
+                  (1049 . "1K") (1050 . "1.1K") (1234 . "1.2K") (1949 . "1.9K")
+                  (1950 . "2K") (9949 . "9.9K") (9950 . "10K") (12345 . "12K")
+                  (99499 . "99K") (99500 . "100K") (136013 . "136K")
+                  (999499 . "999K") (999500 . "1M") (999999 . "1M")
+                  (1049999 . "1M") (1050000 . "1.1M") (1500000 . "1.5M")
+                  (9950000 . "10M") (999999999 . "1B") (1234567890 . "1.2B")
+                  (1500000000000 . "1.5T") (1000000000000000 . "1000T")))
+    (should (equal (agentpane--compact-number (car case)) (cdr case)))))
 
 (ert-deftest agentpane-test-no-role-label ()
   "Neither a user nor an assistant turn carries a role label."

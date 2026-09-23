@@ -63,10 +63,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
+;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 43 tests, 43 results as expected, 0 unexpected
+;;     Ran 46 tests, 46 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -657,21 +657,48 @@ either, and BODY is invisible unless KEY is expanded."
                            'face 'agentpane-warning)
                "\n")))))
 
-(defun agentpane--insert-meta (index meta)
-  "Insert the meta line for the assistant node at INDEX from META."
+(defun agentpane--compact-number (n)
+  "N, a non-negative integer, as en-US `Intl.NumberFormat' compact notation.
+That is the browser's `compact' in `Message.svelte': one decimal below ten of
+a unit, none from ten up, halves rounded up, and a result that rounds to 1000
+of a unit shown as 1 of the next, so 999500 is \"1M\", not \"1000K\"."
+  (let ((units '(("" . 1) ("K" . 1000) ("M" . 1000000)
+                 ("B" . 1000000000) ("T" . 1000000000000)))
+        result)
+    (while (not result)
+      (let* ((suffix (caar units))
+             (unit (cdar units))
+             (tenths (if (< n (* 10 unit))
+                         (/ (+ (* 10 n) (/ unit 2)) unit)
+                       (* 10 (/ (+ n (/ unit 2)) unit)))))
+        (when (or (< tenths 10000) (null (cdr units)))
+          (setq result (if (zerop (% tenths 10))
+                           (format "%d%s" (/ tenths 10) suffix)
+                         (format "%d.%d%s" (/ tenths 10) (% tenths 10) suffix))))
+        (setq units (cdr units))))
+    result))
+
+(defun agentpane--insert-meta (meta)
+  "Insert the meta line for an assistant node from META.
+Its fields are the browser's footer in `Message.svelte': the model and the
+effort when present, and the tokens, then any cost, only when there are
+tokens.  The stop reason and error message follow, which the browser shows
+as a banner beside the footer instead."
   (let* ((usage (plist-get meta :usage))
+         (model (plist-get meta :model))
+         (tokens (or (plist-get usage :totalTokens) 0))
+         (cost (or (plist-get usage :cost) 0))
          (stop (plist-get meta :stopReason))
          (error-message (plist-get meta :errorMessage))
          (effort (plist-get meta :effort))
          (face (if stop 'agentpane-warning 'agentpane-meta))
          (fields
           (delq nil
-                (list (format "#%s" index)
-                      (let ((model (plist-get meta :model)))
-                        (if (or (null model) (string-empty-p model)) "model ?" model))
-                      (and effort (format "effort %s" effort))
-                      (format "%s tokens" (or (plist-get usage :totalTokens) 0))
-                      (format "$%.4f" (or (plist-get usage :cost) 0))
+                (list (and model (not (string-empty-p model)) model)
+                      effort
+                      (and (> tokens 0)
+                           (format "%s tok" (agentpane--compact-number tokens)))
+                      (and (> tokens 0) (> cost 0) (format "$%.4f" cost))
                       stop
                       error-message))))
     (insert (propertize (concat "— " (mapconcat #'identity fields " · ")) 'face face)
@@ -730,7 +757,7 @@ prompt region below the nodes takes typing."
         (agentpane--insert-part index ordinal part)
         (setq ordinal (1+ ordinal)))
       (let ((meta (plist-get node :meta)))
-        (when meta (agentpane--insert-meta index meta)))
+        (when meta (agentpane--insert-meta meta)))
       (when userp
         ;; The bar runs down the box's left edge, and `wrap-prefix' carries it
         ;; onto the rows `visual-line-mode' wraps. Nothing here uses
