@@ -15,6 +15,8 @@ Pi's stored preview also drops `custom_message` entries and roles such as `bashE
 
 The browser never makes the comparison: a previewed session offers no Edit control (`src/client/App.svelte`, the `{#if previewing}` branch).
 OW-fojike's card allowed forking a previewed session on the premise that the result attaches; it did not consider the index spaces.
+Also from the adversarial read of OW-yoyiya: `agentpane-fork` sends `sessions/forkPoints` on a previewed buffer with no attach first, and that route attaches (`sessions.attach(ref)` in the fork-points case of `src/server/http/app.ts`), so it can cold-spawn the backend under jsonrpc.el's 10s default rather than `agentpane--spawn-timeout`, and `sessions/fork` after it likewise.
+Whichever way the decision below goes, the requests that may spawn take `agentpane--spawn-timeout`.
 The decision this card gates is whether `f` on a previewed buffer attaches and redraws first, refuses as the browser does, or trusts the indices; record it in `agentpane-fork`'s docstring.
 
 Done when an ert test on a previewed buffer whose stored and live indices differ shows `agentpane-fork` not forking at the wrong message, red before the change.

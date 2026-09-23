@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, emacs-native]
+closed: done
 ---
 
 # A second C-RET while agentpane-mode is still attaching sends the prompt twice, and a preview reply can land over the live transcript
@@ -32,3 +33,20 @@ Whether a spawn ever takes 10s is unmeasured; `docs/MANUAL_TESTING.md` has a 1.1
 An ert test in `emacs/agentpane-test.el`, in the style of `agentpane-test-set-model-only-before-the-first-prompt` (stubbing `agentpane--request` with `cl-letf`, no process), sends twice from a buffer whose attach has not answered and asserts one `sessions/prompt` goes out; it fails before the fix.
 A second one asserts a preview reply arriving after an attach was sent does not redraw the buffer.
 Choose the timeout deliberately and say why in the docstring; the two figures above are the only evidence there is.
+
+## Close note
+
+Landed on main as 514c461..99d5f48, all in `emacs/agentpane.el` and `emacs/agentpane-test.el`.
+
+- One send at a time per buffer: `agentpane--sending`, set by `agentpane--send-prompt` and cleared by the prompt's reply (the prompt route answers 202 once the turn is admitted), or by the attach's or prompt's failure or timeout.
+  A second `C-RET` says "A prompt to this session is already being sent" and sends nothing; this covers the attached-buffer double send too.
+- `agentpane--attaching`, set while a `sessions/attach` is out, makes `agentpane-refetch` (`g`, and picker `RET` through `agentpane-show-transcript`) send nothing, so no preview can supersede the attach and draw over its snapshot.
+- `agentpane--spawn-timeout`, 60s, for `sessions/attach` and `sessions/prompt` and `agentpane-new-session`'s synchronous attach; its docstring gives the why and names the requests still on the 10s default.
+- The adversarial read found a wedge: a synchronous signal from `agentpane--request` (the helper failing to start) left the flags set forever.
+  `agentpane--request` now runs FAILED on a non-local exit from the send or the reply's callback, via `agentpane--failing`.
+
+Verified by ert, 26/26 on Emacs 31.1: `agentpane-test-one-send-at-a-time` was red against the unfixed code with attach, attach, prompt, prompt; `agentpane-test-refetch-while-attaching-keeps-the-live-transcript`, releasing snapshot, preview reply, then attach reply, was red with the stored indices (0 1) drawn over the snapshot's (5); `agentpane-test-send-that-signals-frees-the-buffer` was red with the "already being sent" refusal.
+Not run live against a backend.
+
+Left for OW-yibimi: attaches are not coalesced (set-model or compact during an attach sends a second one, and one flag serves several attaches).
+The forkPoints and fork requests' 10s timeout was noted on OW-gekiki.
