@@ -50,5 +50,5 @@ New `ert` tests in `emacs/agentpane-test.el`, run as that file's Commentary says
 - a node with two tool parts and meta draws the meta's model on the second tool's header line and on no line of its own, and the first tool's header carries no meta;
 - a tool whose summary is far wider than the window draws a header that is one line, ending its summary in `…`, and unfolding it shows the whole summary;
 - a node ending in text still draws its meta on its own line after the text.
-The rest of that file stays green, fold toggling, diff faces and a signature-only thinking part drawing nothing among it, with any test the change breaks updated rather than deleted and the Commentary's pass count updated.
+The rest of that file stays green, fold toggling, diff faces and a signature-only thinking part drawing nothing among it, with any test the change breaks updated rather than deleted and the pass count in `emacs/agentpane.el`'s Commentary updated.
 Done when those pass and the owner has said the look is settled, with the rounds and the verdict in this card's close note.

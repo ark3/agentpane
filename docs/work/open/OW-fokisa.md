@@ -21,5 +21,5 @@ Its fifth item, the two-node `upsert` limit, is not a missing fact and moved to 
 ## Done when
 
 Each of the three facts is in the `protocol.ts` docblock and the projection in `src/emacs/nodes.ts`, with a structural test in `src/emacs/nodes.test.ts` red before the change.
-Each is drawn in `emacs/agentpane.el`, and the `showsMeta` rule applied, with `ert` tests in `emacs/agentpane-test.el` red before the change, that file green as its Commentary says and its pass count updated.
+Each is drawn in `emacs/agentpane.el`, and the `showsMeta` rule applied, with `ert` tests in `emacs/agentpane-test.el` red before the change, that file green as its Commentary says and the pass count in `emacs/agentpane.el`'s Commentary updated.
 `bun run check` passes.

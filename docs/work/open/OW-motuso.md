@@ -40,5 +40,5 @@ New `ert` tests in `emacs/agentpane-test.el`, run as that file's Commentary says
 - `agentpane-index-at-point` on an assistant node after an elided node returns that node's original index;
 - a fold expanded before the toggle is still expanded on the same part after toggling twice;
 - with reading on and the buffer streaming, the tail status names the last node's running tool.
-The whole file stays green, with the pass count in the Commentary updated.
+The whole file stays green, with the pass count in `emacs/agentpane.el`'s Commentary updated.
 The owner has used the toggle on a live Claude session on the work laptop.

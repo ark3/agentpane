@@ -23,4 +23,4 @@ Nor is `showsMeta`'s suppression of the whole line for a pending turn, also on O
 ## Done when
 
 In `emacs/agentpane-test.el`, run as that file's Commentary says: `agentpane-test-lines-in-order`, which today searches for `— #1 · haiku · 12 tokens`, expects the new content, and a new test draws meta with 136013 tokens and zero cost and asserts the line contains `136K tok` and neither `#` nor `$`, and one with non-zero cost shows it at four decimals.
-Both red before the change; the whole file green after, with the Commentary's pass count updated.
+Both red before the change; the whole file green after, with the pass count in `emacs/agentpane.el`'s Commentary updated (the count lives there, not in the test file's).
