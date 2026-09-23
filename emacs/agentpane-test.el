@@ -520,8 +520,11 @@ once; a send whose attach or prompt failed frees the buffer for another."
 
 (ert-deftest agentpane-test-refetch-while-attaching-keeps-the-live-transcript ()
   "A refetch while the first prompt's attach is in flight does not draw the
-stored transcript over the live one the attach's snapshot drew; once an
-attach has failed, a refetch reads the stored transcript again."
+stored transcript over the live one the attach's snapshot drew, when the
+replies land in the order that would: the snapshot, the preview's reply,
+then the attach's, before whose prompt the preview is still the latest
+request.  Once an attach has failed, a refetch reads the stored transcript
+again."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
@@ -534,7 +537,9 @@ attach has failed, a refetch reads the stored transcript again."
          nil 'session/snapshot
          (list :session ref :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))
                :isStreaming :json-false :compaction nil :model nil))
-        (while held (funcall (cdr (pop held)) t))
+        ;; Held in the order sent, attach then any preview: release in reverse.
+        (dolist (entry (reverse held)) (funcall (cdr entry) t))
+        (setq held nil)
         (should (equal (agentpane-test--indices) '(5)))
         (insert "again")
         (agentpane-send)
