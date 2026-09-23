@@ -158,9 +158,12 @@ export class PiAdapter implements BackendAdapter {
 	 * `low` as the default, and `get_state` read `off`; `--model` without a
 	 * suffix kept `off` too, but `--model ...:high` read `high`, so a resume
 	 * spawn that carries the suffix overrides the session's own level. So the
-	 * `get_state` at start is the truth here too, and no choice is resent. The
-	 * turns `get_messages` returns on a resume carry no level, and are not
-	 * named one: only turns this adapter watched arrive are.
+	 * `get_state` at start is the truth here too, and no choice is resent.
+	 *
+	 * Which turns carry a level: those streamed live since the last resume or
+	 * fork. Turns loaded by `get_messages` -- the whole transcript on a resume,
+	 * and again after a fork, which replaces every message, including turns
+	 * this adapter had named -- carry none, since Pi's messages hold no level.
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
