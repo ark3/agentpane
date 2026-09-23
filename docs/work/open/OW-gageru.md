@@ -44,11 +44,12 @@ Read it for what makes it look good -- header layout, status glyphs, how the bod
 
 ## How it closes
 
-The one-line rule closes on tests; the rest of the look is judged by eye over rounds, the owner's practice for a UI decision and the one OW-dekate followed: a first cut drawn from stored sessions with parallel tool calls, Edit diffs, shell commands and thinking, looked at by the owner in a live Emacs beside the browser and `agent-shell`, then revised.
+The one-line rule closes on tests; the rest of the look is a first cut borrowed from `agent-shell` and drawn against stored sessions with parallel tool calls, Edit diffs, shell commands and thinking.
+Amended 2026-09-23 under the rule in `AGENTS.md`, "Cards": the card closes once that is shown to work, and the owner's rounds on the look are later cards, not this one's close.
 
 New `ert` tests in `emacs/agentpane-test.el`, run as that file's Commentary says, each red before the change:
 - a node with two tool parts and meta draws the meta's model on the second tool's header line and on no line of its own, and the first tool's header carries no meta;
 - a tool whose summary is far wider than the window draws a header that is one line, ending its summary in `…`, and unfolding it shows the whole summary;
 - a node ending in text still draws its meta on its own line after the text.
 The rest of that file stays green, fold toggling, diff faces and a signature-only thinking part drawing nothing among it, with any test the change breaks updated rather than deleted and the pass count in `emacs/agentpane.el`'s Commentary updated.
-Done when those pass and the owner has said the look is settled, with the rounds and the verdict in this card's close note.
+Done when those pass and the first cut of the look is landed, with what it borrowed from `agent-shell` and the first cuts named above in this card's close note.

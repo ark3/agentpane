@@ -134,6 +134,10 @@ The session proposes a set of cards in an order, and the owner either pastes tha
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
 Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
 
+A card closes once its work is shown to work — tests red first and green after, output that changed — and never waits on the owner trying it or passing a verdict; details are iterated afterwards, in new cards.
+So a done-condition names no owner trial, and where an existing card's does, the executor treats that clause as met by the evidence and moves on.
+Set by the owner on 2026-09-23, after OW-motuso's "the owner has used the toggle" held a landed, tested change open and stopped the set.
+
 ### Committing a card you authored
 
 Commit it unless the user asks not to.
