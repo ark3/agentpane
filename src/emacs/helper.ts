@@ -60,11 +60,20 @@ interface JsonRpcRequest {
 
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 
-/** Runs until `input` ends; then closes the stream and resolves. */
+/**
+ * Runs until `input` ends; then closes the stream, aborts every request still
+ * waiting on the server, and resolves. Each request is answered detached from
+ * the read loop, so without the abort a server that never answers holds its
+ * socket, and Bun's event loop and the process with it, open past the end of
+ * `input` (OW-kofuda). No api method passes a signal of its own.
+ */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render, write } = options;
 	const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
-	const api = createAgentpaneApi({ fetch: options.fetch, openEvents: options.openEvents });
+	const inFlight = new AbortController();
+	const fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+		options.fetch(input, { ...init, signal: inFlight.signal })) as typeof globalThis.fetch;
+	const api = createAgentpaneApi({ fetch, openEvents: options.openEvents });
 
 	let state: ClientState = initialClientState();
 	const attached = new Set<string>();
@@ -272,6 +281,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	stopped = true;
 	if (reconnect !== undefined) clearTimeout(reconnect);
 	closeStream();
+	inFlight.abort();
 }
 
 function toRpcError(error: unknown): { code: number; message: string; data?: unknown } {

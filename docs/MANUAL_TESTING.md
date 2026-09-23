@@ -2316,10 +2316,23 @@ Driven from a Python 3.14 script that started `bun run src/emacs/main.ts` on a p
 With the helper pointed at a stand-in server that holds `GET /api/events` open and answers anything else 404, a `sessions/attach` opened the stream and failed its REST call, and closing stdin one second later aborted the stream and exited the helper with code 0 in 0.034s.
 The ert test `agentpane-test-shutdown-ends-the-helper` covers the no-stream case through `agentpane-shutdown`, against the real helper.
 
-**An HTTP request that never completes holds the helper alive.**
+**Until OW-kofuda, an HTTP request that never completed held the helper alive.**
 In the first run of that stand-in, every `GET` was held open, the attach's `GET /api/sessions/pi/nope` included; closing stdin aborted the event stream but the helper was still running 30s later.
-`runHelper` aborts its event stream when its input ends but not a request still in flight, so a server that never answers keeps the helper up past stdin close.
-`agentpane-shutdown` still ends it, by the kill `jsonrpc-shutdown` falls back to: run in `--batch` against the same stand-in with that attach in flight, it printed `Sentinel for agentpane helper still hasn't run, deleting it!` and returned after 0.332s with the process at status `signal`, code 9, and `process-attributes` finding no such pid.
+`runHelper` as of 7b35eab aborted its event stream when its input ended but not a request still in flight, so a server that never answered kept the helper up past stdin close.
+`agentpane-shutdown` still ended it, by the kill `jsonrpc-shutdown` falls back to: run in `--batch` against the same stand-in with that attach in flight, it printed `Sentinel for agentpane helper still hasn't run, deleting it!` and returned after 0.332s with the process at status `signal`, code 9, and `process-attributes` finding no such pid.
+
+**Since OW-kofuda, the helper aborts a request still in flight when stdin closes, and exits.**
+Rerun on the home server 2026-09-22, `bun 1.4.0`, Python 3.14.7, Emacs 31.1, comparing the helper at 1b9cb66 with the OW-kofuda fix on top of it.
+The stand-in was a Python `ThreadingHTTPServer` that answered `GET /api/events` with a 200 `text/event-stream` head and no body, and held every other `GET` open with no response at all, each on a thread that never returned.
+A Python driver started `bun run src/emacs/main.ts http://127.0.0.1:<port>` against it on pipes, slept 2.5s so the renderer had loaded, sent one `sessions/attach` for `{"backend": "pi", "id": "nope"}`, slept 1s, closed the helper's stdin and timed its exit; the server logged `GET /api/events` and `GET /api/sessions/pi/nope` both times.
+At 1b9cb66 the helper was still running 30s after the close, as in the first run, and the driver killed it by its pid.
+With the fix it exited with code 0, in 0.033s, 0.065s and 0.034s over three runs.
+The aborted request is still answered, since closing stdin leaves stdout open: the one frame on the helper's stdout was `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"The operation was aborted."}}`.
+Through `agentpane-shutdown`, with the same stand-in on port 4173 and the same attach sent by `jsonrpc-async-request` from `--batch` 2.5s after the helper started, `agentpane-shutdown` was called 1s later.
+At 1b9cb66 it printed the sentinel warning, the attach's error callback got `(:code -1 :message "Server died")`, and the process ended at status `signal`, code 9, after 0.607s.
+With the fix there was no warning, the error callback got `(:code -32603 :message "The operation was aborted.")`, and the process ended at status `exit`, code 0; `agentpane-shutdown` returned after 0.303s, which is `jsonrpc-shutdown`'s own 0.3s `accept-process-output` wait rather than the helper's exit.
+In both, `process-attributes` found no such pid afterwards.
+The vitest case `aborts a request still waiting on the server when the input ends` in `src/emacs/helper.test.ts` holds the abort; it failed against 1b9cb66, the fetch's signal reading `undefined`.
 
 ## The native Emacs mode drives a Codex session live (OW-gunuke)
 

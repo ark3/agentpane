@@ -403,4 +403,25 @@ describe("shutdown", () => {
 		expect(source.closed).toEqual([0]);
 		stop = null;
 	});
+
+	it("aborts a request still waiting on the server when the input ends, and answers it with the abort", async () => {
+		// A server that never answers: the call settles only if its signal fires.
+		const signals: (AbortSignal | null | undefined)[] = [];
+		const { io, calls, done } = start({
+			[`GET ${ROUTES.sessions}`]: (_url, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					signals.push(init?.signal);
+					init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+				}),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await vi.waitFor(() => expect(calls).toHaveLength(1));
+		io.end();
+		await done;
+		stop = null;
+		expect(signals).toHaveLength(1);
+		expect(signals[0]?.aborted).toBe(true);
+		await io.until(1);
+		expect(io.response(1)!["error"]).toMatchObject({ code: -32603 });
+	});
 });

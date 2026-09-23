@@ -264,10 +264,10 @@ connection named \"agentpane\", so the helper's own stderr lands there."
 Its stdin is closed first, since that is what the helper exits on
 \(`runHelper' in src/emacs/helper.ts); `jsonrpc-shutdown' does not close
 it, and after 0.3s without an exit it warns and kills the process.  Once
-the helper is reading its input, it exited within 0.1s of the close, event
-stream open or not (Emacs 31.1, bun 1.4.0, measured 2026-09-22) -- unless
-an HTTP request of its own was still unanswered, which held it alive, so
-that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
+the helper is reading its input, it exited within 0.1s of the close, even
+with its event stream open or an HTTP request of its own unanswered, which
+it aborts (Emacs 31.1, bun 1.4.0, measured 2026-09-22;
+docs/MANUAL_TESTING.md, OW-bonode and OW-kofuda)."
   (interactive)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
     (process-send-eof (jsonrpc--process agentpane--connection))
