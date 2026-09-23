@@ -39,15 +39,17 @@
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
-;; backend's models; the first prompt on a previewed transcript attaches it.  Once attached,
+;; backend's models, then one of that model's efforts when it offers any;
+;; the first prompt on a previewed transcript attaches it.  Once attached,
 ;; the helper's notifications drive the buffer: a snapshot redraws every
 ;; node, a node update redraws the node with its index or appends it, and
 ;; the mode line shows streaming, compaction and the model.  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
-;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' sets the
-;; model, but only before the first prompt.
+;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
+;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
+;; only before the first prompt.
 ;; `M-x agentpane-shutdown' stops the helper; the next command that needs
 ;; it starts a fresh one.
 ;;
@@ -71,7 +73,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 76 tests, 76 results as expected, 0 unexpected
+;;     Ran 83 tests, 83 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -552,6 +554,10 @@ Per buffer and not kept, where the browser's is one global boolean (owner,
 
 (defvar-local agentpane--status-fields nil
   "The mode-line fields of the last status this buffer heard, as strings.")
+
+(defvar-local agentpane--model nil
+  "The model the last status this buffer heard named, or nil; the one whose
+efforts `agentpane-set-effort' offers (OW-vozaku).")
 
 (defvar-local agentpane--tail-overlay nil
   "Overlay on the prompt separator whose `before-string' is the reading-view
@@ -1604,7 +1610,8 @@ another buffer holds the ref, since only here is a second holder meant."
 
 (defun agentpane--set-status (params)
   "Show the streaming, compaction and model fields of PARAMS in the mode line,
-and keep the streaming field in `agentpane--streaming'.
+and keep the streaming field in `agentpane--streaming' and the model in
+`agentpane--model'.
 When streaming ends, the last node is redrawn, since it was drawn as the
 pending turn, a tool call with no result on it as running, and the helper
 re-sends no node for the change; and reading view's tail status goes."
@@ -1621,6 +1628,7 @@ re-sends no node for the change; and reading view's tail status goes."
                     (let ((compaction (plist-get params :compaction)))
                       (and compaction (concat "compaction " compaction)))
                     (plist-get params :model))))
+  (setq agentpane--model (plist-get params :model))
   (agentpane--show-reading-tail)
   (agentpane--show-mode-line))
 
@@ -1826,15 +1834,30 @@ inside this one, and nothing the notifications run is synchronous."
                      (mapcar (lambda (model) (plist-get model :id)) models)
                      nil t)))
 
-(defun agentpane--check-model-gate ()
-  "Signal a user error unless this buffer's session has no nodes yet.
+(defun agentpane--read-effort (backend model)
+  "Read an effort id for BACKEND's MODEL, from the efforts its entry in
+`models/list' offers, with completion, or return nil, prompting for
+nothing, when MODEL is nil or offers none (OW-vozaku).  Synchronous for
+the reason `agentpane--read-model' is."
+  (let* ((models (and model (jsonrpc-request (agentpane--connection) 'models/list
+                                             (list :backend backend))))
+         (entry (seq-find (lambda (entry) (equal (plist-get entry :id) model)) models))
+         (efforts (mapcar (lambda (effort) (plist-get effort :id))
+                          (plist-get entry :efforts))))
+    (when efforts
+      (completing-read (format "Effort for %s: " model) efforts nil t))))
+
+(defun agentpane--check-gate (what)
+  "Signal a user error, saying WHAT is chosen before the first prompt,
+unless this buffer's session has no nodes yet.
 The model is chosen at conversation start, never switched later (owner,
-2026-09-13); the browser enforces the same in `loadModelsForSelected'
-\(src/client/controller.ts), and neither the server nor the helper does."
+2026-09-13), and the effort with it (OW-vozaku); the browser enforces the
+same in `loadModelsForSelected' and `setEffort' (src/client/controller.ts),
+and neither the server nor the helper does."
   (with-current-buffer (agentpane--transcript)
     (when (and agentpane--ewoc
                (ewoc-collect agentpane--ewoc (lambda (data) (plist-get data :index))))
-      (user-error "The model is chosen before the first prompt"))))
+      (user-error "The %s is chosen before the first prompt" what))))
 
 (defun agentpane-set-model (model)
   "Set this buffer's session's MODEL through `sessions/setModel'.
@@ -1856,19 +1879,49 @@ restart (OW-kisemu, read from `listModels' in src/server/http/app.ts at
 daf5f52, not run live)."
   (interactive
    (progn
-     (agentpane--check-model-gate)
+     (agentpane--check-gate "model")
      (with-current-buffer (agentpane--transcript)
        (unless (agentpane--attached-p)
          (agentpane--attach-now))
        (list (agentpane--read-model (plist-get (agentpane--ref agentpane--session)
                                                :backend))))))
   (unless (string-empty-p model)
-    (agentpane--check-model-gate)
+    (agentpane--check-gate "model")
     (with-current-buffer (agentpane--transcript)
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/setModel
                              (list :session (agentpane--ref agentpane--session) :model model)
+                             #'ignore t))))))
+
+(defun agentpane-set-effort (effort)
+  "Set this buffer's session's reasoning EFFORT through `sessions/setEffort'.
+Allowed only before the first prompt, as `agentpane-set-model' is, and an
+empty EFFORT sets nothing, for that command's reason (OW-vozaku).
+
+Interactively the session is attached first, as for `agentpane-set-model'
+and for its reason, and the efforts offered are those of the model its
+last status named, `agentpane--model'; when that model offers none, or no
+status has named one yet, it prompts for nothing and says so."
+  (interactive
+   (progn
+     (agentpane--check-gate "effort")
+     (with-current-buffer (agentpane--transcript)
+       (unless (agentpane--attached-p)
+         (agentpane--attach-now))
+       (unless agentpane--model
+         (user-error "No model is known yet for this session; try again once one is"))
+       (list (or (agentpane--read-effort (plist-get (agentpane--ref agentpane--session)
+                                                    :backend)
+                                         agentpane--model)
+                 (user-error "The model offers no effort to choose"))))))
+  (unless (string-empty-p effort)
+    (agentpane--check-gate "effort")
+    (with-current-buffer (agentpane--transcript)
+      (agentpane--attached-then
+       (lambda ()
+         (agentpane--request 'sessions/setEffort
+                             (list :session (agentpane--ref agentpane--session) :effort effort)
                              #'ignore t))))))
 
 (defvar-local agentpane--forking nil
@@ -1997,7 +2050,8 @@ fork fails.  See `agentpane-fork'."
 ;;;###autoload
 (defun agentpane-new-session (backend)
   "Create a session on BACKEND in the current buffer's project, open its
-buffer attached, and read its model from `models/list' with completion.
+buffer attached, and read its model from `models/list' with completion,
+then its effort, when that model offers any.
 The model is read after the attach, as the browser reads it: at 118a46a
 `sessions/create' records the session without spawning anything, and the
 server answers `models/list' for Codex or Pi only from a live adapter,
@@ -2008,7 +2062,15 @@ list is; see `agentpane--read-model'.
 The buffer is shown before the attach, so one that fails or is quit
 leaves the new session in view, unattached, where a send attaches it
 again and `M-x agentpane-set-model' still applies; shown only after, it
-stayed hidden, holding the session."
+stayed hidden, holding the session.
+
+The efforts offered are the model's just chosen, since the status naming
+it may not have arrived, or with an empty choice those of the model the
+session already has, if a status has named it (OW-vozaku).  The effort is
+sent after the model, and holds whichever the server takes first: it is
+one the new model lists, and the Codex adapter's `setModel' replaces only
+an effort the new model does not list (src/server/adapters/codex/adapter.ts
+at 9850a05, read, not run live)."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
   (let* ((cwd (agentpane--current-cwd))
          (ref (jsonrpc-request (agentpane--connection) 'sessions/create
@@ -2019,7 +2081,15 @@ stayed hidden, holding the session."
     (with-current-buffer buffer
       (agentpane--draw [] (agentpane--transcript-header summary))
       (agentpane--attach-now))
-    (agentpane-set-model (agentpane--read-model backend))))
+    (let ((model (agentpane--read-model backend)))
+      (agentpane-set-model model)
+      (let ((effort (agentpane--read-effort
+                     backend
+                     (if (string-empty-p model)
+                         (buffer-local-value 'agentpane--model buffer)
+                       model))))
+        (when effort
+          (agentpane-set-effort effort))))))
 
 ;;;; The composer
 

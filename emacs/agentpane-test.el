@@ -633,6 +633,97 @@ live adapter, and then sets the model without attaching again."
   (should (equal (agentpane-test--set-model-interactively "")
                  '(sessions/attach models/list))))
 
+(defconst agentpane-test--models
+  [(:id "gpt-5.6-luna" :efforts [(:id "low" :description "Fast") (:id "high" :description "Deep")]
+    :defaultEffort "low")
+   (:id "gpt-5.6-sol" :efforts [(:id "medium" :description "Even")] :defaultEffort "medium")
+   (:id "plain" :efforts [] :defaultEffort nil)]
+  "A `models/list' answer: two models offering different efforts, and one
+offering none.")
+
+(ert-deftest agentpane-test-set-effort-only-before-the-first-prompt ()
+  "`agentpane-set-effort' on a buffer with nodes, called or interactively,
+signals the gate's error, naming the effort, and sends nothing; on a buffer
+with none it attaches and sends `sessions/setEffort'."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (sent nil))
+    (cl-letf (((symbol-function 'agentpane--request)
+               (lambda (method _params callback &rest _)
+                 (push method sent)
+                 (funcall callback (list :ref ref))))
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (&rest _) (push 'jsonrpc-async-request sent)))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (&rest _) (push 'jsonrpc-request sent))))
+      (agentpane-test--with-session ref
+        (dolist (call (list (lambda () (agentpane-set-effort "high"))
+                            (lambda () (call-interactively #'agentpane-set-effort))))
+          (should (equal (cadr (should-error (funcall call) :type 'user-error))
+                         "The effort is chosen before the first prompt")))
+        (should-not sent)
+        (agentpane--draw [])
+        (agentpane-set-effort "high")
+        (should (equal (reverse sent) '(sessions/attach sessions/setEffort)))))))
+
+(defun agentpane-test--set-effort-interactively (model choice)
+  "Call `agentpane-set-effort' interactively on an empty, unattached buffer
+whose last status named MODEL, of `agentpane-test--models', and whose
+effort prompt answers CHOICE.  Return the methods sent, in order, then the
+collections offered, then the user error signalled, if any."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection)
+        (sent nil)
+        (offered nil)
+        (refused nil))
+    (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+              ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
+               (lambda (method _params callback &rest _)
+                 (push method sent)
+                 (funcall callback (list :ref ref))))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (_connection method &rest _)
+                 (push method sent)
+                 (pcase method
+                   ('sessions/attach (list :ref ref))
+                   ('models/list agentpane-test--models))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (push collection offered)
+                 choice)))
+      (agentpane-test--with-session ref
+        (agentpane--draw [])
+        (agentpane--set-status (list :session ref :isStreaming :json-false :model model))
+        (condition-case err
+            (call-interactively #'agentpane-set-effort)
+          (user-error (setq refused (cadr err))))
+        ;; Before the kill, whose detach would join them.
+        (list (reverse sent) (reverse offered) refused)))))
+
+(ert-deftest agentpane-test-set-effort-offers-the-models-efforts ()
+  "`M-x agentpane-set-effort' attaches, reads `models/list', offers the
+efforts of the model the session's last status named and no other's, and
+sets the one chosen."
+  (should (equal (agentpane-test--set-effort-interactively "gpt-5.6-luna" "high")
+                 '((sessions/attach models/list sessions/setEffort) (("low" "high")) nil))))
+
+(ert-deftest agentpane-test-set-effort-empty-choice-sets-nothing ()
+  "An empty `RET' at the effort prompt sends no `sessions/setEffort', for
+the reason an empty model choice sends no `sessions/setModel'."
+  (should (equal (agentpane-test--set-effort-interactively "gpt-5.6-luna" "")
+                 '((sessions/attach models/list) (("low" "high")) nil))))
+
+(ert-deftest agentpane-test-set-effort-without-options-prompts-for-nothing ()
+  "`M-x agentpane-set-effort' on a session whose model offers no effort, or
+whose model is not known, prompts for nothing, sends no
+`sessions/setEffort', and says why."
+  (should (equal (agentpane-test--set-effort-interactively "plain" "low")
+                 '((sessions/attach models/list) nil
+                   "The model offers no effort to choose")))
+  (should (equal (agentpane-test--set-effort-interactively nil "low")
+                 '((sessions/attach) nil
+                   "No model is known yet for this session; try again once one is"))))
+
 (ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
   "Undo in the prompt region undoes the draft, never a node redraw that
 arrived while it was being typed."
@@ -1661,6 +1752,80 @@ window, where a send attaches it again, rather than in a buffer never shown."
               (should (eq (window-buffer (selected-window)) (agentpane--buffer-for ref))))
           (dolist (buffer (buffer-list))
             (unless (memq buffer buffers) (kill-buffer buffer))))))))
+
+;;;; A new session's model and effort, against a stub jsonrpc
+
+(defun agentpane-test--new-session (choices &optional current)
+  "Run `agentpane-new-session' on Codex against a stub jsonrpc whose
+`models/list' answers `agentpane-test--models' and whose prompts answer
+CHOICES in turn, the attach delivering a status naming CURRENT when it is
+non-nil.  Return the requests sent, in order, each as its method or, for
+`sessions/setModel' and `sessions/setEffort', as the method and the value
+set, then the collections offered."
+  (let ((ref '(:backend "codex" :id "virtual-1"))
+        (agentpane--connection 'connection)
+        (buffers (buffer-list))
+        (sent nil)
+        (offered nil))
+    (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+              ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
+               (lambda (method params &rest _)
+                 (push (pcase method
+                         ('sessions/setModel (list method (plist-get params :model)))
+                         ('sessions/setEffort (list method (plist-get params :effort)))
+                         (_ method))
+                       sent)))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (_connection method &rest _)
+                 (push method sent)
+                 (pcase method
+                   ('sessions/create ref)
+                   ('sessions/attach
+                    (when current
+                      (agentpane--set-status
+                       (list :session ref :isStreaming :json-false :model current)))
+                    (list :ref ref))
+                   ('models/list agentpane-test--models))))
+              ((symbol-function 'completing-read)
+               (lambda (prompt collection &rest _)
+                 (unless (equal prompt "Backend: ")
+                   (push collection offered))
+                 (pop choices))))
+      (unwind-protect
+          (save-window-excursion
+            (agentpane-new-session "codex")
+            (list (reverse sent) (reverse offered)))
+        (dolist (buffer (buffer-list))
+          (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(ert-deftest agentpane-test-new-session-reads-an-effort-after-the-model ()
+  "`agentpane-new-session' reads an effort after the model, offering the
+efforts of the model just chosen, and sets it after the model."
+  (should (equal (agentpane-test--new-session '("gpt-5.6-sol" "medium") "gpt-5.6-luna")
+                 '((sessions/create sessions/attach models/list
+                    (sessions/setModel "gpt-5.6-sol") models/list
+                    (sessions/setEffort "medium"))
+                   (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("medium"))))))
+
+(ert-deftest agentpane-test-new-session-reads-no-effort-without-options ()
+  "`agentpane-new-session' prompts for no effort when the model chosen
+offers none."
+  (should (equal (agentpane-test--new-session '("plain" "low"))
+                 '((sessions/create sessions/attach models/list
+                    (sessions/setModel "plain") models/list)
+                   (("gpt-5.6-luna" "gpt-5.6-sol" "plain"))))))
+
+(ert-deftest agentpane-test-new-session-empty-model-reads-the-current-ones-effort ()
+  "With an empty model choice, `agentpane-new-session' offers the efforts of
+the model the session already has, and none when that is not known."
+  (should (equal (agentpane-test--new-session '("" "high") "gpt-5.6-luna")
+                 '((sessions/create sessions/attach models/list models/list
+                    (sessions/setEffort "high"))
+                   (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("low" "high")))))
+  (should (equal (agentpane-test--new-session '("" "high"))
+                 '((sessions/create sessions/attach models/list)
+                   (("gpt-5.6-luna" "gpt-5.6-sol" "plain"))))))
 
 ;;;; A send that signals, against a stub jsonrpc
 
