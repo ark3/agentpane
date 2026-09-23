@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, emacs-native]
+closed: done
 ---
 
 # A transcript buffer re-keyed onto a ref another buffer already holds leaves two buffers for one session, and killing either now detaches both
@@ -17,3 +18,17 @@ Decide what a rekey onto a held ref does — merge into the existing buffer and 
 ## Done when
 
 An ert test in `emacs/agentpane-test.el` makes two transcript buffers, re-keys one onto the other's ref through `agentpane--on-notification` with a `session/renamed`, and asserts exactly one buffer then holds that ref, red before the fix.
+
+## Close note
+
+Landed on main as the one OW-jafini commit after e57a5b5 ("fix: merge a transcript buffer rekeyed onto a held ref"), in `emacs/agentpane.el` and `emacs/agentpane-test.el`.
+
+Decision, in `agentpane--rekey`'s docstring: a buffer re-keyed onto a ref another buffer holds survives, and the other is merged into it by `agentpane--absorb` and killed.
+The rekeyed buffer survives because it is always the attached one (a forwarded `session/renamed` reaches only attached sessions, and the attach reply and `agentpane--attach-now` rekey on attaching) and because its own attach reply goes on to run its waiters, a queued prompt among them, in it.
+The other's prompt-region draft is appended to the survivor's, its composer (with any text) sends to the survivor from then on, windows showing it show the survivor, and its kill has the `agentpane--detach` hook disarmed so the shared session is not silenced.
+The other's own in-flight requests are dropped with it, as any killed buffer's are.
+
+Verified by ert, 43/43 on Emacs 31.1: `agentpane-test-renamed-onto-a-held-ref-leaves-one-buffer` was red with two buffers holding the ref, and went red again with the disarm removed (a `sessions/detach` sent) and with the window move removed; `agentpane-test-renamed-onto-a-held-ref-keeps-drafts` was red with the other's draft lost.
+The attach-reply path was checked only by an uncommitted script; the committed tests drive `session/renamed`.
+Not run live.
+The swap happens with no echo-area message, and a composer taken over beside the survivor's own keeps its old name; both left as they are.
