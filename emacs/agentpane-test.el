@@ -574,6 +574,31 @@ nothing."
           (kill-buffer buffer)
           (should (equal sent `((sessions/detach :session ,ref)))))))))
 
+;;;; A new session whose attach fails, against a stub jsonrpc
+
+(ert-deftest agentpane-test-new-session-shown-when-its-attach-fails ()
+  "A new session whose attach signals, or is quit, is left in the selected
+window, where a send attaches it again, rather than in a buffer never shown."
+  (let ((ref '(:backend "codex" :id "virtual-1"))
+        (buffers (buffer-list)))
+    (dolist (failure '((error "attach failed") (quit)))
+      (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+                ((symbol-function 'jsonrpc-request)
+                 (lambda (_connection method &rest _)
+                   (pcase method
+                     ('sessions/create ref)
+                     ('sessions/attach (signal (car failure) (cdr failure)))))))
+        (unwind-protect
+            (save-window-excursion
+              ;; `should-error' catches only `error' and its children.
+              (should (eq (condition-case err (progn (agentpane-new-session "codex") nil)
+                            ((error quit) (car err)))
+                          (car failure)))
+              (should (agentpane--buffer-for ref))
+              (should (eq (window-buffer (selected-window)) (agentpane--buffer-for ref))))
+          (dolist (buffer (buffer-list))
+            (unless (memq buffer buffers) (kill-buffer buffer))))))))
+
 ;;;; A send that signals, against a stub jsonrpc
 
 (ert-deftest agentpane-test-send-that-signals-frees-the-buffer ()

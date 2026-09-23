@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 27 tests, 27 results as expected, 0 unexpected
+;;     Ran 28 tests, 28 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1336,13 +1336,19 @@ The model is read after the attach, as the browser reads it: at 118a46a
 server answers `models/list' for Codex or Pi only from a live adapter,
 failing with \"codex adapter not started\" before one exists (measured
 2026-09-22).  The attach is synchronous for the same reason the model
-list is; see `agentpane--read-model'."
+list is; see `agentpane--read-model'.
+
+The buffer is shown before the attach, so one that fails or is quit
+leaves the new session in view, unattached, where a send attaches it
+again and `M-x agentpane-set-model' still applies; shown only after, it
+stayed hidden, holding the session."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
   (let* ((cwd (agentpane--current-cwd))
          (ref (jsonrpc-request (agentpane--connection) 'sessions/create
                                (list :cwd cwd :backend backend)))
          (summary (list :ref ref :cwd cwd))
          (buffer (agentpane--transcript-buffer summary)))
+    (pop-to-buffer buffer '(display-buffer-same-window))
     (with-current-buffer buffer
       (agentpane--draw [] (agentpane--transcript-header summary))
       (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
@@ -1352,7 +1358,6 @@ list is; see `agentpane--read-model'."
         ;; The route's ref is authoritative: attaching is where a new session
         ;; takes its backend's own id.
         (agentpane--rekey (agentpane--ref attached))))
-    (pop-to-buffer buffer '(display-buffer-same-window))
     (agentpane-set-model (agentpane--read-model backend))))
 
 ;;;; The composer
