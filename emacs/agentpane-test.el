@@ -1437,6 +1437,66 @@ does not stop the transcript buffer from being killed."
         (kill-buffer buffer)
         (should-not (buffer-live-p buffer))))))
 
+;;;; Each buffer's default-directory, against a stub connection
+
+(defmacro agentpane-test--with-directories (names &rest body)
+  "Run BODY with each of NAMES bound to a fresh temporary directory, without
+the trailing slash, as the server stores a session's cwd, and delete them
+afterwards."
+  (declare (indent 1))
+  `(let ,(mapcar (lambda (name) `(,name (make-temp-file "agentpane-test-" t))) names)
+     (unwind-protect (progn ,@body)
+       ,@(mapcar (lambda (name) `(delete-directory ,name t)) names))))
+
+(ert-deftest agentpane-test-transcript-takes-its-sessions-cwd ()
+  "A transcript opened from a buffer in one directory takes its session's
+cwd as its `default-directory', not the directory of the buffer it was
+opened from."
+  (agentpane-test--with-directories (cwd elsewhere)
+    (agentpane-test--forking nil nil
+      (let* ((default-directory (file-name-as-directory elsewhere))
+             (buffer (agentpane--transcript-buffer
+                      (list :ref '(:backend "codex" :id "t1") :cwd cwd))))
+        (should (equal (buffer-local-value 'default-directory buffer)
+                       (file-name-as-directory cwd)))))))
+
+(ert-deftest agentpane-test-transcripts-keep-their-own-cwd ()
+  "Two transcripts for sessions in two directories each take their own, the
+second though opened from the first."
+  (agentpane-test--with-directories (one two)
+    (agentpane-test--forking nil nil
+      (let* ((first (agentpane--transcript-buffer
+                     (list :ref '(:backend "codex" :id "t1") :cwd one)))
+             (second (with-current-buffer first
+                       (agentpane--transcript-buffer
+                        (list :ref '(:backend "pi" :id "s2") :cwd two)))))
+        (should (equal (buffer-local-value 'default-directory first)
+                       (file-name-as-directory one)))
+        (should (equal (buffer-local-value 'default-directory second)
+                       (file-name-as-directory two)))))))
+
+(ert-deftest agentpane-test-picker-takes-the-projects-root ()
+  "`agentpane-sessions' run from a buffer below a project's root sets the
+picker's `default-directory' to that root, though the picker was first
+opened, listing every session, from a buffer elsewhere."
+  (agentpane-test--with-directories (root elsewhere)
+    (let ((project-vc-extra-root-markers '(".agentpane-test-root"))
+          (below (expand-file-name "src/" root)))
+      (make-directory below)
+      (write-region "" nil (expand-file-name ".agentpane-test-root" root))
+      (agentpane-test--forking nil nil
+        (save-window-excursion
+          (with-temp-buffer
+            (setq default-directory (file-name-as-directory elsewhere))
+            (agentpane-sessions t))
+          (with-temp-buffer
+            (setq default-directory below)
+            (agentpane-sessions))
+          (should (equal (assq 'sessions/list sent) `(sessions/list :cwd ,root)))
+          (should (equal (buffer-local-value 'default-directory
+                                             (get-buffer "*agentpane sessions*"))
+                         (file-name-as-directory root))))))))
+
 ;;;; A new session whose attach fails, against a stub jsonrpc
 
 (ert-deftest agentpane-test-new-session-shown-when-its-attach-fails ()

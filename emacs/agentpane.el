@@ -71,7 +71,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 65 tests, 65 results as expected, 0 unexpected
+;;     Ran 70 tests, 70 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1508,11 +1508,16 @@ the session id where there is no preview yet."
 
 (defun agentpane--transcript-buffer (summary)
   "The transcript buffer for SUMMARY's session, created if there is none.
-One buffer per session ref, named after the backend and the summary's preview."
+One buffer per session ref, named after the backend and the summary's preview.
+A new buffer's `default-directory' is the session's cwd, where the summary
+gives one, rather than that of whichever buffer was current (OW-ruhotu)."
   (or (agentpane--buffer-for (agentpane--ref summary))
-      (let ((buffer (generate-new-buffer (agentpane--buffer-name summary))))
+      (let ((buffer (generate-new-buffer (agentpane--buffer-name summary)))
+            (cwd (plist-get summary :cwd)))
         (with-current-buffer buffer
           (agentpane-transcript-mode)
+          (unless (or (null cwd) (string-empty-p cwd))
+            (setq default-directory (file-name-as-directory cwd)))
           (setq agentpane--session summary))
         buffer)))
 
@@ -2126,8 +2131,10 @@ Without the trailing slash, as the server stores a session's cwd."
 
 ;;;###autoload
 (defun agentpane-sessions (&optional all)
-  "List agentpane sessions in the current buffer's project.
-With a prefix argument ALL, list every session instead."
+  "List agentpane sessions in the current buffer's project, and make that
+project the picker's `default-directory'.
+With a prefix argument ALL, list every session instead, and leave the
+picker's directory as it was."
   (interactive "P")
   (let ((cwd (and (not all) (agentpane--current-cwd)))
         (buffer (get-buffer-create "*agentpane sessions*")))
@@ -2135,6 +2142,8 @@ With a prefix argument ALL, list every session instead."
       (unless (eq major-mode 'agentpane-sessions-mode)
         (agentpane-sessions-mode))
       (setq agentpane--cwd cwd)
+      (when cwd
+        (setq default-directory (file-name-as-directory cwd)))
       (setq mode-line-process (and cwd (format " [%s]" (file-name-nondirectory cwd))))
       (revert-buffer))
     (pop-to-buffer buffer '(display-buffer-same-window))))
