@@ -27,6 +27,14 @@
  *   order; each element is one of the parts below, told apart by `type`.
  * - `meta` (object, only on `role: "assistant"`). The turn's footer facts,
  *   present on every assistant node including a streaming one; see below.
+ * - `timestamp` (number, only on `role: "user"` and `role: "assistant"`, and
+ *   only when the message carries a usable one). When the message happened,
+ *   as epoch milliseconds, exactly as the message holds it; the drawer
+ *   formats it in its own zone, as the browser's `formatTimestamp` does in
+ *   the browser's. Absent for a stored turn whose record had no time.
+ * - `tokensBefore` (integer, only on `role: "compactionSummary"`, always
+ *   there). The context size the backend folded, `0` when it reported none;
+ *   the browser's marker names it only when it is above `0`.
  *
  * Parts, by `type`:
  *
@@ -43,15 +51,20 @@
  *   withheld it. `text` may also be empty with `redacted` false: Pi emits
  *   thinking blocks carrying only a signature, and the browser draws nothing
  *   for such a part unless the turn is still streaming.
- * - `{ type: "tool", name, summary, args, result, state, diff? }` -- one tool
- *   call with its answer folded in. `name` (string) is the backend's own tool
- *   name, casing preserved. `summary` (string) is the one-line description the
- *   browser's tool card shows in its header: the command for a shell, the
- *   basename and line counts for a file tool, the arguments otherwise; may be
- *   empty. `args` (string) is the call's arguments pretty-printed as JSON,
- *   empty when there were none. `result` (string) is the text of the result,
- *   empty when none has arrived; a result's image parts are not carried.
- *   `state` (string) is `"running"` while the session is streaming, the
+ * - `{ type: "tool", name, summary, args, result, state, timestamp?,
+ *   images?, diff? }` -- one tool call with its answer folded in. `name`
+ *   (string) is the backend's own tool name, casing preserved. `summary`
+ *   (string) is the one-line description the browser's tool card shows in
+ *   its header: the command for a shell, the basename and line counts for a
+ *   file tool, the arguments otherwise; may be empty. `args` (string) is the
+ *   call's arguments pretty-printed as JSON, empty when there were none.
+ *   `result` (string) is the text of the result, empty when none has
+ *   arrived. `timestamp` (number) is the result's own, epoch milliseconds
+ *   like a node's, present only once a result carrying a usable one has
+ *   arrived; the browser shows it in the card's body. `images` (array) is
+ *   the result's image parts in order, each an `image` part as below,
+ *   present only when the result has any: Pi's `read` answers an image path
+ *   with one. `state` (string) is `"running"` while the session is streaming, the
  *   call's node is the last one, and no result has arrived -- the browser's
  *   own rule; `"error"` when the result reported failure; `"ok"` otherwise,
  *   including a call whose result never arrived in a finished turn. `diff`
@@ -64,7 +77,8 @@
  *   plain content, never a diff, and the lines are here so one drawer serves
  *   both. An orphan `tool-result` node carries one of these parts too, with
  *   `args` empty and no `diff`.
- * - `{ type: "image", mimeType, data }` -- an image the user attached.
+ * - `{ type: "image", mimeType, data }` -- an image the user attached, or
+ *   one in a tool result's `images`.
  *   `mimeType` (string) such as `"image/png"`; `data` (string) is base64.
  *
  * Meta -- the object under an assistant node's `meta`:
@@ -192,6 +206,8 @@ export interface TranscriptNode {
 	role: string;
 	parts: NodePart[];
 	meta?: TurnMeta;
+	timestamp?: number;
+	tokensBefore?: number;
 }
 
 export type NodePart = TextPart | ThinkingPart | ToolPart | ImagePart;
@@ -215,6 +231,8 @@ export interface ToolPart {
 	args: string;
 	result: string;
 	state: "running" | "ok" | "error";
+	timestamp?: number;
+	images?: ImagePart[];
 	diff?: NodeDiffLine[];
 }
 

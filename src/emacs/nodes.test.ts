@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { PaneMessage } from "$shared/protocol.ts";
 import { ClaudeReducer } from "$server/adapters/claude/reducer.ts";
 import {
@@ -157,6 +157,57 @@ describe("tool parts", () => {
 		expect(nodes[0]).toMatchObject({ index: 0, role: "tool-result" });
 		expect(nodes[0]!.parts).toHaveLength(1);
 		expect(nodes[0]!.parts[0]).toMatchObject({ type: "tool", state: "ok", args: "" });
+		expect(nodes[0]!.parts[0]).toMatchObject({ timestamp: result.timestamp });
+		expect("timestamp" in nodes[0]!).toBe(false);
+	});
+
+	it("carries each folded result's timestamp on its call's part, and none before a result arrives", () => {
+		const messages = replayClaude("tool-use");
+		const results = new Map<string, ToolResultMessage>();
+		for (const message of messages) if (message.role === "toolResult") results.set(message.toolCallId, message);
+		const nodes = projectTranscript(messages, false, render);
+		let checked = 0;
+		for (const node of nodes) {
+			const message = messages[node.index]!;
+			if (message.role !== "assistant") continue;
+			message.content.forEach((block, i) => {
+				if (block.type !== "toolCall") return;
+				const part = node.parts[i] as ToolPart;
+				expect(part.timestamp).toBe(results.get(block.id)?.timestamp);
+				checked += 1;
+			});
+		}
+		expect(checked).toBeGreaterThan(0);
+
+		const callIndex = messages.findIndex(
+			(message) => message.role === "assistant" && message.content.some((block) => block.type === "toolCall"),
+		);
+		for (const part of toolParts(projectTranscript(messages.slice(0, callIndex + 1), true, render))) {
+			expect("timestamp" in part).toBe(false);
+		}
+	});
+
+	it("carries a result's image parts on its call's part, and on an orphan's", () => {
+		const messages = replayClaude("tool-use");
+		const resultIndex = messages.findIndex((message) => message.role === "toolResult");
+		const result = messages[resultIndex] as ToolResultMessage;
+		const withImage: ToolResultMessage = {
+			...result,
+			content: [...result.content, { type: "image", mimeType: "image/png", data: "AAAA" }],
+		};
+		const edited = messages.slice();
+		edited[resultIndex] = withImage;
+		const image = { type: "image", mimeType: "image/png", data: "AAAA" };
+
+		const parts = toolParts(projectTranscript(edited, false, render));
+		const carrying = parts.filter((part) => part.images !== undefined);
+		expect(carrying).toHaveLength(1);
+		expect(carrying[0]!.images).toEqual([image]);
+
+		const [orphan] = projectTranscript([withImage], false, render);
+		expect((orphan!.parts[0] as ToolPart).images).toEqual([image]);
+		// A result with no image parts carries no `images` at all.
+		expect("images" in (projectTranscript([result], false, render)[0]!.parts[0] as ToolPart)).toBe(false);
 	});
 
 	it("marks a call running only while the session streams and its turn is the last visible entry", () => {
@@ -249,6 +300,27 @@ describe("assistant turns", () => {
 	});
 });
 
+describe("timestamps", () => {
+	it("carries the message's own timestamp on every user and assistant node, and on no other", () => {
+		for (const messages of [replayClaude("compact"), replayCodex("text"), replayCodex("tool-read")]) {
+			const nodes = projectTranscript(messages, false, render);
+			const timed = nodes.filter((node) => node.role === "user" || node.role === "assistant");
+			expect(timed.length).toBeGreaterThan(0);
+			for (const node of nodes) {
+				if (timed.includes(node)) expect(node.timestamp).toBe(messages[node.index]!.timestamp);
+				else expect("timestamp" in node).toBe(false);
+			}
+		}
+	});
+
+	it("omits a timestamp a preview could not read, rather than sending null", () => {
+		const messages = replayCodex("text").map((message) => ({ ...message, timestamp: Number.NaN }) as PaneMessage);
+		const nodes = projectTranscript(messages, false, render);
+		expect(nodes.length).toBeGreaterThan(0);
+		for (const node of nodes) expect("timestamp" in node).toBe(false);
+	});
+});
+
 describe("text parts", () => {
 	function textParts(nodes: TranscriptNode[]): TextPart[] {
 		return nodes.flatMap((node) => node.parts.filter((part): part is TextPart => part.type === "text"));
@@ -282,13 +354,17 @@ describe("text parts", () => {
 });
 
 describe("other roles", () => {
-	it("yields a compactionSummary node with its summary as text", () => {
+	it("yields a compactionSummary node with its summary as text and its tokensBefore", () => {
 		const messages = replayClaude("compact");
 		const nodes = projectTranscript(messages, false, render);
 		const marker = nodes.find((node) => node.role === "compactionSummary");
 		expect(marker).toBeDefined();
 		expect(marker!.meta).toBeUndefined();
 		expect(marker!.parts.every((part) => part.type === "text")).toBe(true);
+		const message = messages[marker!.index]!;
+		if (message.role !== "compactionSummary") throw new Error("marker is not a compactionSummary");
+		expect(message.tokensBefore).toBeGreaterThan(0);
+		expect(marker!.tokensBefore).toBe(message.tokensBefore);
 	});
 
 	it("yields a user node with text and image parts in order", () => {

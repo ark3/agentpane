@@ -31,8 +31,16 @@ import { buildTranscript, type TranscriptEntry, type TranscriptView } from "$cli
 import { argString, editHunks, prettyArgs } from "$client/render/tools/args.ts";
 import { buildDiff } from "$client/render/tools/diff.ts";
 import { toolSummary } from "$client/render/tools/summary.ts";
-import { oneLine, resultText, toolState, userBlocks } from "$client/render/types.ts";
-import type { NodeDiffLine, NodePart, TextPart, ToolPart, TranscriptNode, TurnMeta } from "./protocol.ts";
+import { oneLine, resultImages, resultText, toolState, userBlocks } from "$client/render/types.ts";
+import type {
+	ImagePart,
+	NodeDiffLine,
+	NodePart,
+	TextPart,
+	ToolPart,
+	TranscriptNode,
+	TurnMeta,
+} from "./protocol.ts";
 
 /** Markdown source to the sanitized HTML a text part carries; `loadRenderer` in `render.ts` supplies the browser's. */
 export type Render = (markdown: string) => string;
@@ -86,10 +94,9 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 			return {
 				index,
 				role: "user",
+				...timestampOf(message.timestamp),
 				parts: userBlocks(message.content).map((block) =>
-					block.type === "image"
-						? { type: "image", mimeType: block.mimeType, data: block.data }
-						: text(block.type === "text" ? block.text : ""),
+					block.type === "image" ? imagePart(block) : text(block.type === "text" ? block.text : ""),
 				),
 			};
 		case "assistant": {
@@ -102,7 +109,7 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 				}
 				return toolPart(block, view.results.get(block.id), streaming);
 			});
-			return { index, role: "assistant", parts, meta: metaFor(turn) };
+			return { index, role: "assistant", ...timestampOf(turn.timestamp), parts, meta: metaFor(turn) };
 		}
 		case "toolResult":
 			return { index, role: "tool-result", parts: [orphanPart(message)] };
@@ -110,6 +117,7 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 			return {
 				index,
 				role: "compactionSummary",
+				tokensBefore: message.tokensBefore,
 				parts: message.summary ? [text(message.summary)] : [],
 			};
 		default:
@@ -132,7 +140,7 @@ function toolPart(call: ToolCall, result: ToolResultMessage | undefined, streami
 	};
 	const diff = diffFor(call);
 	if (diff) part.diff = diff;
-	return part;
+	return withResult(part, result);
 }
 
 /**
@@ -154,14 +162,40 @@ function diffFor(call: ToolCall): NodeDiffLine[] | undefined {
 /** What `Message.svelte` draws for a result whose call is not in the slice. */
 function orphanPart(result: ToolResultMessage): ToolPart {
 	const text = resultText(result);
+	return withResult(
+		{
+			type: "tool",
+			name: result.toolName,
+			summary: oneLine(text) || "result",
+			args: "",
+			result: text,
+			state: result.isError ? "error" : "ok",
+		},
+		result,
+	);
+}
+
+/** The result's time and image parts, which `ResultBody.svelte` and `ToolCard.svelte` draw beside its text. */
+function withResult(part: ToolPart, result: ToolResultMessage | undefined): ToolPart {
+	const images = resultImages(result);
 	return {
-		type: "tool",
-		name: result.toolName,
-		summary: oneLine(text) || "result",
-		args: "",
-		result: text,
-		state: result.isError ? "error" : "ok",
+		...part,
+		...timestampOf(result?.timestamp),
+		...(images.length > 0 ? { images: images.map(imagePart) } : {}),
 	};
+}
+
+function imagePart(image: { mimeType: string; data: string }): ImagePart {
+	return { type: "image", mimeType: image.mimeType, data: image.data };
+}
+
+/**
+ * A usable epoch-ms timestamp as a field to spread, or nothing. A preview
+ * turn whose record had no time arrives as `NaN` (`previewMessages` in
+ * `$client/preview.ts`), which JSON would send as `null`.
+ */
+function timestampOf(value: number | undefined): { timestamp?: number } {
+	return value !== undefined && Number.isFinite(value) ? { timestamp: value } : {};
 }
 
 function metaFor(turn: AssistantTurn): TurnMeta {
