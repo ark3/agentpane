@@ -718,7 +718,7 @@ It shows that a surviving parent is available on Claude Code, not that nothing c
 The store samples begin at 40 deltas, so the first seconds of a turn are unsampled; what they cover is everything from there to past the end.
 
 It also did not fork *into* the streaming turn, and the reason is not the one Codex has.
-On Codex `lastTurnId` is **exclusive** of the named turn and the schema forbids naming one in progress, so `codex/adapter.ts` `fork()` computes the turn before the fork point.
+On Codex `lastTurnId` is **inclusive** of the named turn and the schema forbids naming one in progress, so `codex/adapter.ts` `fork()` computes the turn before the fork point; on `codex-cli 0.156.0` a fork named that way kept history through that turn's `task_complete` (OW-buligi, below).
 On Claude `--resume-session-at` is **inclusive** of the named entry (OW-mayuza), and the exclusion here is just where the probe put its fork point: the last entry of the quiesced priming turn.
 Production would name the entry immediately before the long prompt's `user` line, which `listForkPoints` supplies as `previousUuid` — and the census above shows a `queue-operation` line can sit between those two.
 The two backends land on the same range for opposite reasons, and the probe's range is production's approximately rather than exactly.
