@@ -283,7 +283,7 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
          (held nil)
          (buffers (buffer-list)))
      (cl-letf (((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed)
+                (lambda (method params callback &optional _always failed &rest _)
                   (push (cons method params) sent)
                   (let* ((from (current-buffer))
                          (reply (pcase method

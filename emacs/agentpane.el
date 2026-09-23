@@ -277,13 +277,26 @@ that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
 (defvar-local agentpane--session nil
   "The summary plist of the session this transcript buffer shows.")
 
-(defun agentpane--request (method params callback &optional always failed)
+(defconst agentpane--spawn-timeout 60
+  "Seconds to wait for a request that may spawn the session's backend:
+`sessions/attach', and `sessions/prompt', whose route attaches first.
+Past it the reply is discarded even if it comes, so a spawn that ran long
+but succeeded reads as a failure and leaves the buffer unattached though
+its session is live.  jsonrpc.el's default is 10s, and the one attach
+measured took 1.138s (a Pi re-attach, docs/MANUAL_TESTING.md); no cold
+spawn has been timed.  60s is what `agentpane-new-session''s synchronous
+attach already allowed, where waiting blocks Emacs; here it blocks nothing,
+and a hung helper costs only a minute before a refused second send is
+accepted again.")
+
+(defun agentpane--request (method params callback &optional always failed timeout)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
 is the one it wants.  An error or a timeout is reported in the echo area.
 With no PARAMS the request carries no `params' at all: a null one would
 reach the helper as a JSON null, which is not the absence it tests for.
+TIMEOUT is in seconds, `jsonrpc-default-request-timeout' when nil.
 
 FAILED, when given, runs with no arguments in this buffer, if it is still
 live, after an error or a timeout has been reported, whatever ALWAYS says.
@@ -304,6 +317,8 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
         id)
     (setq id (car (jsonrpc-async-request
                    (agentpane--connection) method (or params :jsonrpc-omit)
+                   ;; An explicit nil would mean no timeout at all.
+                   :timeout (or timeout jsonrpc-default-request-timeout)
                    :success-fn
                    (lambda (result)
                      (when (buffer-live-p buffer)
@@ -1051,7 +1066,8 @@ From here on the helper sends this session's notifications, starting with a
                       t
                       (lambda ()
                         (setq agentpane--attaching nil)
-                        (when failed (funcall failed)))))
+                        (when failed (funcall failed)))
+                      agentpane--spawn-timeout))
 
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
@@ -1105,7 +1121,7 @@ adapter makes a steer of the turn the first began (D16)."
                              (lambda (_)
                                (setq agentpane--sending nil)
                                (funcall sent))
-                             t failed))
+                             t failed agentpane--spawn-timeout))
        failed))))
 
 (defun agentpane--clear-sent (buffer beg text)
@@ -1289,7 +1305,8 @@ list is; see `agentpane--read-model'."
     (with-current-buffer buffer
       (agentpane--draw [] (agentpane--transcript-header summary))
       (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
-                                       (list :session ref) :timeout 60)))
+                                       (list :session ref)
+                                       :timeout agentpane--spawn-timeout)))
         (setq agentpane--attached agentpane--connection)
         ;; The route's ref is authoritative: attaching is where a new session
         ;; takes its backend's own id.
