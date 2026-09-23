@@ -11,6 +11,7 @@ OW-yoyiya added two buffer-local flags in `emacs/agentpane.el`: `agentpane--send
 Neither makes `agentpane--attached-then` coalesce attaches, and that is what is left:
 
 - **A second attach.** `agentpane-set-model` and `agentpane-compact` go through `agentpane--attached-then`, which checks only `agentpane--attached-p`, so either one run while a first-prompt attach is in flight sends another `sessions/attach`.
+- **A synchronous attach beside an asynchronous one.** Since OW-kisemu, `agentpane-set-model`'s `interactive` spec attaches through `agentpane--attach-now` (synchronous, as `agentpane-new-session` does) when `agentpane--attached-p` is nil, without consulting `agentpane--attaching`, so it too sends a second attach while a first prompt's is in flight.
 - **One flag, several attaches.** `agentpane--attaching` is a single boolean that each attach's reply or FAILED hook clears.
   If two attaches are out and the first fails, the flag clears while the second is still pending, and a `g` in that window sends `sessions/preview`, which can draw the stored transcript over the live one — the hazard OW-yoyiya closed.
 - **The Pi fork's parent redraw.** The Pi branch of `agentpane--fork-at` clears `agentpane--attached` and calls `agentpane-refetch` to redraw the parent from the store (see `agentpane-fork`'s docstring, and OW-zovaye for why it exists).

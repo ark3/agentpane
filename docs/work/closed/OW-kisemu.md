@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, emacs-native]
+closed: done
 ---
 
 # agentpane-set-model reads models/list before attaching, which Codex and Pi refuse with no live adapter, and an empty completion sends "" as the model
@@ -18,3 +19,17 @@ At the model prompt that `""` reaches `sessions/setModel`: at 2026-09-22 the ser
 
 An ert test in `emacs/agentpane-test.el`, stubbing `agentpane--request` and `jsonrpc-request` with `cl-letf` as `agentpane-test-set-model-only-before-the-first-prompt` does, calls `agentpane-set-model` interactively (`call-interactively`) on an empty, unattached buffer and asserts `sessions/attach` is sent before `models/list`; it fails before the fix.
 An empty model choice sends no `sessions/setModel`; an ert test asserts that too.
+
+## Close note
+
+Landed on main as e1bb87e and 62cdc7f, in `emacs/agentpane.el` and `emacs/agentpane-test.el`.
+
+- `agentpane-set-model`'s `interactive` spec now attaches an unattached buffer synchronously before `agentpane--read-model`, through `agentpane--attach-now`, the synchronous attach factored out of `agentpane-new-session` unchanged (up to `agentpane--spawn-timeout`, rekey from the reply).
+  Synchronous rather than prompting from inside a jsonrpc callback, for the reason `agentpane-new-session` already gave.
+- An empty model choice (an empty `RET` at a REQUIRE-MATCH `completing-read`) sends no `sessions/setModel` and the session keeps its model; a silent no-op rather than a user-error, since `agentpane-new-session` reaches it after the session exists and an empty `RET` there means "keep the default".
+  Read from the adapters at daf5f52: Codex stores `""` and runs on its default while reporting `""`, Pi's `splitModelRef` throws on it, and Claude passes it to the CLI as is — the card's "Claude Code errors" was not confirmed from our code.
+
+Verified by ert, 31/31 on Emacs 31.1: `agentpane-test-set-model-attaches-before-listing-models` was red on the old code with (models/list sessions/attach sessions/setModel), and `agentpane-test-set-model-empty-choice-sets-nothing` was red with a `sessions/setModel` sent.
+Not run live against a server restart.
+
+The synchronous attach does not consult `agentpane--attaching`, so it can send a second attach beside a first prompt's; recorded on OW-yibimi.
