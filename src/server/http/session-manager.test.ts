@@ -505,6 +505,106 @@ describe("fork (the third #adoptRef point)", () => {
 		expect(sessions.summaryOf(REF)).toBeNull();
 	});
 
+	describe("what the adapter emits from inside a ref-changing fork (OW-zovaye)", () => {
+		// `PiAdapter.fork` moves its ref onto the fork, then re-reads the fork's
+		// rewound transcript and emits it -- all before `fork()` returns, so
+		// before the manager's `finally` re-keys the container. Keyed by the
+		// container, that went out as a snapshot under the PARENT's ref, and every
+		// client showing the parent redrew it shortened.
+		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
+
+		function collectEvents(): ServerEvent[] {
+			const events: ServerEvent[] = [];
+			broadcaster.addClient((chunk) => {
+				for (const line of chunk.split("\n")) {
+					if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+				}
+			});
+			return events;
+		}
+
+		const under = (ref: SessionRef, events: ServerEvent[]) =>
+			events.filter((event) => "session" in event && sessionKey(event.session) === sessionKey(ref));
+
+		/** Attach the parent, and make its fork do what `PiAdapter.fork` does, in its order. */
+		async function attachRewindingOnFork(options: { before?: () => Promise<void>; fail?: Error } = {}): Promise<FakeAdapter> {
+			await sessions.attach(REF);
+			const adapter = pi.forRef(REF);
+			if (!adapter) throw new Error("no adapter");
+			adapter.messages = [userMessage("one"), userMessage("two")];
+			const fork = adapter.fork.bind(adapter);
+			adapter.fork = async (entryId) => {
+				await options.before?.();
+				// The fake's default "pi" mode moves the ref.
+				const forked = await fork(entryId);
+				adapter.messages = adapter.messages.slice(0, 1);
+				adapter.emitUnlocalisedChange();
+				if (options.fail) throw options.fail;
+				return forked;
+			};
+			return adapter;
+		}
+
+		it("sends nothing under the parent's ref, and the fork's attach snapshots the rewound transcript", async () => {
+			await attachRewindingOnFork();
+			const events = collectEvents();
+
+			expect(await sessions.fork(REF, "e1")).toEqual(moved);
+			expect(under(REF, events)).toEqual([]);
+
+			await sessions.attach(moved);
+			expect(under(moved, events).findLast((event) => event.type === "snapshot")).toMatchObject({
+				messages: [userMessage("one")],
+			});
+		});
+
+		it("sends nothing under the parent's ref when the fork fails after emitting", async () => {
+			await attachRewindingOnFork({ fail: new Error("get_messages failed") });
+			const events = collectEvents();
+
+			await expect(sessions.fork(REF, "e1")).rejects.toThrow("get_messages failed");
+			expect(under(REF, events)).toEqual([]);
+			// The `finally` still re-keys: the live adapter is on the fork.
+			expect(sessions.liveRefs()).toEqual([moved]);
+		});
+
+		it("sends nothing under the first fork's ref while a second fork of it is in flight", async () => {
+			// Two clients can fork one session at once: both look the container up
+			// before either `fork()` settles. The first to finish re-keys it onto
+			// its fork, and the second then moves the adapter again.
+			const firstGate = deferred();
+			const secondGate = deferred();
+			const gates = [firstGate.promise, secondGate.promise];
+			await attachRewindingOnFork({ before: () => gates.shift() as Promise<void> });
+			const events = collectEvents();
+
+			const first = sessions.fork(REF, "e1");
+			const second = sessions.fork(REF, "e2");
+			firstGate.resolve();
+			expect(await first).toEqual(moved);
+			secondGate.resolve();
+			await second;
+
+			expect(under(moved, events)).toEqual([]);
+		});
+
+		it("still broadcasts under the container's ref when the adapter's ref runs ahead with no fork in flight", async () => {
+			// A rename, not a fork: `ClaudeAdapter` adopts the id a `system init`
+			// reports whenever it arrives, mid-turn included, and the container
+			// follows only at the next `#adoptRef`. Every client holds the old ref
+			// until then, so that is where the turn has to go.
+			await sessions.attach(REF);
+			const adapter = pi.forRef(REF);
+			if (!adapter) throw new Error("no adapter");
+			const events = collectEvents();
+
+			adapter.materialiseAs("/home/u/.pi/agent/sessions/renamed.jsonl");
+			adapter.append(userMessage("hello"));
+
+			expect(under(REF, events)).toMatchObject([{ type: "upsert", index: 0 }]);
+		});
+	});
+
 	it("does not hand the fork the parent's stored preview", async () => {
 		// `#adoptRef` re-keys the parent's own container onto the fork, so
 		// `session.stored` -- the index's answer about the PARENT -- would ride

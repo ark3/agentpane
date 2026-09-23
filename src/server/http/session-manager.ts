@@ -80,6 +80,12 @@ interface ManagedSession {
 	 * which does the same job one stage earlier.
 	 */
 	torndown?: boolean;
+	/**
+	 * `fork()` calls in flight on this container. A count, not a flag: two
+	 * clients can fork one session at once, and the first to finish must not
+	 * reopen the window for the other -- see `#onUpdate`.
+	 */
+	forking: number;
 }
 
 /**
@@ -249,6 +255,7 @@ export class SessionManager {
 			lastStreaming: false,
 			lastCompaction: null,
 			lastModel: null,
+			forking: 0,
 			createdAt: this.#now(),
 		});
 		this.broadcaster.sessionsChanged();
@@ -327,7 +334,8 @@ export class SessionManager {
 	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
 	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table.
 	 *    It emits no `renamed` -- see `#adoptRef`. The value the adapter returns
-	 *    IS its new ref.
+	 *    IS its new ref. What the adapter emits between moving and returning is
+	 *    the fork's, not the parent's, and `#onUpdate` drops it (OW-zovaye).
 	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
 	 *    driving; its own `ref` is unchanged, so `#adoptRef` no-ops. The returned
 	 *    ref points at the freshly-flushed forked thread, which differs from
@@ -352,6 +360,7 @@ export class SessionManager {
 	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
 		const session = this.#lookup(ref);
 		if (!session?.adapter) throw new UnknownSessionError(ref);
+		session.forking += 1;
 		try {
 			const forked = await session.adapter.fork(entryId);
 			if (forked.start) {
@@ -362,6 +371,7 @@ export class SessionManager {
 			}
 			return forked.ref;
 		} finally {
+			session.forking -= 1;
 			this.#adoptRef(session, "fork");
 		}
 	}
@@ -483,6 +493,7 @@ export class SessionManager {
 				lastStreaming: false,
 				lastCompaction: null,
 				lastModel: null,
+				forking: 0,
 				createdAt: this.#now(),
 			};
 		}
@@ -546,6 +557,7 @@ export class SessionManager {
 				lastStreaming: false,
 				lastCompaction: null,
 				lastModel: null,
+				forking: 0,
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};
@@ -661,6 +673,18 @@ export class SessionManager {
 		session.lastStreaming = state.isStreaming;
 		session.lastCompaction = state.compaction;
 		session.lastModel = state.model;
+
+		// An update from inside a fork, after the adapter moved onto it but before
+		// `fork()`'s `finally` re-keys this container, describes the FORK while
+		// `session.ref` still names the parent. `PiAdapter.fork` emits the fork's
+		// rewound transcript exactly there, and broadcast under the parent's ref it
+		// redrew every client showing the parent shortened (OW-zovaye). Nobody
+		// holds a view of the fork yet: the client that forked attaches it once
+		// `fork()` answers, and that attach is what snapshots it -- so the update
+		// is dropped, not deferred. `forking` is what keeps this off the renames,
+		// where the adapter's ref also runs ahead of the container's and the old
+		// ref is the right one to broadcast under (`#adoptRef`).
+		if (session.forking > 0 && session.adapter && sessionKey(session.adapter.ref) !== sessionKey(session.ref)) return;
 
 		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
 		if (modelChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
