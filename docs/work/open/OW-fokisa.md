@@ -14,9 +14,10 @@ Its fifth item, the two-node `upsert` limit, is not a missing fact and moved to 
   The browser formats it with `formatTimestamp` in `src/client/time.ts`, local `YYYY-MM-DD HH:MM:SS`, and the Emacs drawing uses that shape.
   OW-janimi reshapes the meta line's other fields and left the time to this card; where the tool's time goes depends on the one-line tool header OW-gageru settles, so carry it here and draw it there.
 - `compactionSummary.tokensBefore`: the browser's marker says "from N tok"; the node carries only the summary text.
-- Tool-result image parts: `resultImages` in `src/client/render/types.ts`, drawn by `ResultBody.svelte`; the contract says explicitly they are not carried.
+- Tool-result image parts: `resultImages` in `src/client/render/types.ts`, drawn by `src/client/render/tools/ResultBody.svelte`; the contract says explicitly they are not carried.
   Drawn at least as the user's own `image` parts are today, the `[image <mime>]` line in `agentpane--insert-part`.
 - The browser's `showsMeta` suppression in `Message.svelte` hides meta for a pending turn or one with no model and zero tokens; the contract deliberately sends meta on every assistant node and leaves the choice to the drawer, so this one is the drawer applying `showsMeta`'s rule in `agentpane--insert-meta`, not a contract change.
+  Amended 2026-09-23: a node does not say it is pending — the `protocol.ts` docblock's Meta list says a streaming turn "is recognised by the projection still re-sending the node, not by anything in it" — so the drawer derives pending from the buffer's streaming state and the node being the last, and the line must appear once streaming ends.
 
 ## Done when
 
