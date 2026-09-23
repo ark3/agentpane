@@ -71,7 +71,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 60 tests, 60 results as expected, 0 unexpected
+;;     Ran 65 tests, 65 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -105,8 +105,15 @@
   "Face for the role line of a node whose role is neither user nor assistant.")
 
 (defface agentpane-tool
-  '((t :inherit font-lock-builtin-face))
-  "Face for a tool part's summary line.")
+  '((t :inherit font-lock-doc-markup-face))
+  "Face for a tool call's name and thinking's label on a fold header, after
+agent-shell's `agent-shell-section-heading', which its tool calls and
+thinking share.")
+
+(defface agentpane-tool-ok
+  '((t :inherit success))
+  "Face for the mark of a tool call that finished: agent-shell's
+`agent-shell-success'.")
 
 (defface agentpane-thinking
   '((t :inherit shadow :slant italic))
@@ -565,26 +572,113 @@ A key absent from the table is folded; that is every fold's initial state.")
   "Non-nil when the fold KEY is expanded."
   (gethash key agentpane--folds))
 
-(defun agentpane--insert-fold (key summary body)
-  "Insert SUMMARY as one line, then BODY folded beneath it under fold KEY.
-SUMMARY is a propertized line without its newline; BODY is a string, possibly
-multi-line, without a trailing newline, or nil when there is nothing to fold.
+(defun agentpane--insert-fold (key header body)
+  "Insert HEADER as one line, then BODY folded beneath it under fold KEY.
+HEADER is a propertized line without its newline, fitted to one screen
+line by `agentpane--fit-header'; BODY is a string, possibly multi-line,
+without a trailing newline, or nil when there is nothing to fold.
 Both carry the `agentpane-fold' property so `TAB' finds the fold from
-either, and BODY is invisible unless KEY is expanded."
+either, and BODY is invisible unless KEY is expanded.
+Expanded, BODY is framed after agent-shell's fragment body: a blank line
+after the header, and indented two spaces by `line-prefix' and
+`wrap-prefix', so the indent is display only and a copy carries none.
+agent-shell's blank line after the body is left out: shr, opening a text
+part that follows, reads the blank line it already sees there, hidden or
+not, as its paragraph break and adds none, so the text would sit flush
+under a folded header.
+Folded, nothing follows the header on its line: the marker says there is
+a body, and an ellipsis would take room the one-line header needs."
   (let* ((expanded (agentpane--expanded-p key))
          (marker (if body (if expanded "▾ " "▸ ") "  ")))
     (insert (propertize marker 'face 'agentpane-dim 'agentpane-fold key)
-            (propertize summary 'agentpane-fold key)
+            (propertize header 'agentpane-fold key)
             (propertize "\n" 'agentpane-fold key))
     (when body
       (let ((start (point)))
-        (insert body "\n")
-        (add-text-properties start (point) (list 'agentpane-fold key))
+        (insert "\n" body "\n")
+        (add-text-properties start (point) (list 'agentpane-fold key
+                                                 'line-prefix "  "
+                                                 'wrap-prefix "  "))
         (unless expanded
-          ;; Hide from the summary's newline through the body's last
-          ;; character, so the ellipsis lands at the end of the summary
-          ;; line and the line after the body starts fresh.
+          ;; Hide from the header's newline through the body's last
+          ;; character, so the line after the fold starts fresh.
           (put-text-property (1- start) (1- (point)) 'invisible 'agentpane))))))
+
+(defvar-local agentpane--fitted-width nil
+  "The width in pixels this buffer's nodes were last drawn, and their fold
+headers fitted, at; see `agentpane--refit-on-resize'.")
+
+(defvar-local agentpane--refit-timer nil
+  "The idle timer that refits this buffer's fold headers, while one is pending.")
+
+(defun agentpane--window-width ()
+  "The body width in pixels fold headers are fitted to: the narrowest of the
+windows showing this buffer, so that none of them wraps a header, or the
+selected window's while none shows it."
+  (seq-min (mapcar (lambda (window) (window-body-width window t))
+                   (or (get-buffer-window-list nil nil t) (list (selected-window))))))
+
+(defun agentpane--fit-header (head summary tail)
+  "HEAD, SUMMARY and TAIL, in that order, fitted to one screen line.
+Return (LINE CUT TAILP): LINE without the fold marker; CUT non-nil when
+SUMMARY was cut short with `…' to fit, since the summary is what gives
+way; and TAILP non-nil when TAIL is on LINE.  TAIL, a step's meta, may be
+nil, and is left off when it would not fit even beside an ellipsis alone,
+for the caller to draw on a line of its own.
+The measure is `string-pixel-width' under this buffer's face remapping,
+since the buffer's prose is proportional and a character count is not a
+width, against `agentpane--window-width' less one character, the column a
+terminal keeps for its continuation glyph.  The fold marker is counted as
+`▸ ' whichever is drawn.  In batch Emacs both measures degrade to
+character cells, which is what the tests fit against.
+Nothing refits a header when the window changes width except a redraw;
+see `agentpane--refit-on-resize'."
+  (let* ((width (- (agentpane--window-width) (frame-char-width)))
+         (marker (propertize "▸ " 'face 'agentpane-dim))
+         (fits (lambda (text)
+                 (<= (string-pixel-width (concat marker head text) (current-buffer))
+                     width))))
+    (cond
+     ((funcall fits (concat summary tail))
+      (list (concat head summary tail) nil (and tail t)))
+     ((string-empty-p summary)
+      (list head nil nil))
+     (t
+      (let* ((ellipsis (propertize "…" 'face (get-text-property 0 'face summary)))
+             (tail (and tail (funcall fits (concat ellipsis tail)) tail)))
+        (if (and (not tail) (funcall fits summary))
+            (list (concat head summary) nil nil)
+          ;; The longest start of the summary that fits beside the ellipsis.
+          (let ((lo 0)
+                (hi (1- (length summary))))
+            (while (< lo hi)
+              (let ((mid (/ (+ lo hi 1) 2)))
+                (if (funcall fits (concat (substring summary 0 mid) ellipsis tail))
+                    (setq lo mid)
+                  (setq hi (1- mid)))))
+            (list (concat head (string-trim-right (substring summary 0 lo)) ellipsis tail)
+                  t (and tail t)))))))))
+
+(defun agentpane--refit-on-resize (_window)
+  "Refit this buffer's fold headers once its windows settle at a new width.
+On `window-size-change-functions', buffer-locally, which runs when a
+window showing the buffer is added or changes size.  Only a change in
+the width `agentpane--window-width' answers redraws, and only once no
+input has come for 0.2s, since a drag resizes many times over and a
+redraw draws every node again, text through shr included."
+  (unless (or (null agentpane--ewoc) agentpane--refit-timer
+              (eql agentpane--fitted-width (agentpane--window-width)))
+    (setq agentpane--refit-timer
+          (run-with-idle-timer 0.2 nil #'agentpane--refit (current-buffer)))))
+
+(defun agentpane--refit (buffer)
+  "Redraw every node of BUFFER, if still live, should its width have changed."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq agentpane--refit-timer nil)
+      (unless (eql agentpane--fitted-width (agentpane--window-width))
+        (agentpane--keeping-points
+         (lambda () (agentpane--above-prompt (lambda () (ewoc-refresh agentpane--ewoc)))))))))
 
 (defun agentpane--diff-text (lines)
   "Render LINES, a vector of diff-line plists, as a propertized string."
@@ -605,15 +699,23 @@ either, and BODY is invisible unless KEY is expanded."
 its pixels."
   (propertize (format "[image %s]" (plist-get part :mimeType)) 'face 'agentpane-dim))
 
-(defun agentpane--tool-body (part)
-  "The folded body of a tool PART: its diff, args and result, or nil.
-The result's image parts follow its text, as `ResultBody.svelte' draws them."
+(defun agentpane--tool-body (part &optional summary)
+  "The folded body of a tool PART: SUMMARY, when given, then its diff, args
+and result, then the time its result arrived, each apart by a blank line
+as agent-shell sets a body's sections apart.
+SUMMARY is the whole of the summary its header cut short.  The result's
+image parts follow its text, as `ResultBody.svelte' draws them, and the
+time goes last, where the browser's tool card draws it: in the body,
+since the header is the line a reader scans."
   (let* ((diff (plist-get part :diff))
          (args (plist-get part :args))
          (result (plist-get part :result))
+         (time (agentpane--format-timestamp (plist-get part :timestamp)))
          (lines (append (and result (not (string-empty-p result)) (list result))
                         (mapcar #'agentpane--image-line (plist-get part :images))))
          (chunks nil))
+    (when summary
+      (push summary chunks))
     ;; A `write' of empty content arrives as an empty vector, which is not nil.
     (when (and diff (> (length diff) 0))
       (push (agentpane--diff-text diff) chunks))
@@ -624,54 +726,83 @@ The result's image parts follow its text, as `ResultBody.svelte' draws them."
                       (mapconcat #'identity lines "\n")
                     (propertize "(none)" 'face 'agentpane-dim)))
           chunks)
-    (let ((body (mapconcat #'identity (nreverse chunks) "\n")))
+    (when time
+      (push (propertize time 'face 'agentpane-meta) chunks))
+    (let ((body (mapconcat #'identity (nreverse chunks) "\n\n")))
       ;; Arguments, results and diffs are column-aligned text: keep them
       ;; monospace under the buffer's proportional default. Appended, so the
       ;; diff faces already on the text keep every attribute but the family.
       (add-face-text-property 0 (length body) 'fixed-pitch t body)
       body)))
 
-(defun agentpane--insert-tool (key part)
-  "Insert a tool PART under fold KEY."
-  (let* ((name (plist-get part :name))
-         (summary (plist-get part :summary))
-         (state (plist-get part :state))
-         (marker (pcase state
-                   ("ok" "")
-                   ("error" (propertize " ✗ error" 'face 'agentpane-warning))
-                   ("running" (propertize " … running" 'face 'agentpane-dim))
-                   (_ (propertize (format " ?%s" state) 'face 'agentpane-warning)))))
+(defconst agentpane--tool-marks
+  '(("ok" "✓" agentpane-tool-ok)
+    ("error" "✗" agentpane-warning)
+    ("running" "◔" agentpane-dim))
+  "Each tool state's mark at the head of its header, with the face it is
+drawn in: agent-shell's status icons.")
+
+(defun agentpane--tool-summary (part)
+  "The summary of a tool PART as its header draws it: the line counts a file
+edit's summary ends with in the diff faces, as agent-shell colours them."
+  (let ((summary (copy-sequence (or (plist-get part :summary) ""))))
+    (when (string-match " · \\(\\+[0-9]+\\) \\(−[0-9]+\\)\\'" summary)
+      (add-face-text-property (match-beginning 1) (match-end 1) 'diff-added nil summary)
+      (add-face-text-property (match-beginning 2) (match-end 2) 'diff-removed nil summary))
+    summary))
+
+(defun agentpane--insert-tool (key part &optional tail)
+  "Insert a tool PART under fold KEY, with TAIL after its summary on the header.
+The header is agent-shell's: the state's mark, the name as a heading, then
+the summary, on one screen line, the summary cut short to fit; see
+`agentpane--fit-header'.  Return non-nil when TAIL is on the header."
+  (let* ((state (plist-get part :state))
+         (mark (assoc state agentpane--tool-marks))
+         (head (concat (if mark
+                           (propertize (nth 1 mark) 'face (nth 2 mark))
+                         (propertize (format "?%s" state) 'face 'agentpane-warning))
+                       " " (propertize (plist-get part :name) 'face 'agentpane-tool) " "))
+         (fit (agentpane--fit-header head (agentpane--tool-summary part) tail)))
     (agentpane--insert-fold
-     key
-     (concat (propertize name 'face 'agentpane-tool)
-             (if (string-empty-p summary) "" (concat " " summary))
-             marker)
-     (agentpane--tool-body part))))
+     key (nth 0 fit)
+     (agentpane--tool-body part (and (nth 1 fit) (plist-get part :summary))))
+    (nth 2 fit)))
 
 (defun agentpane--insert-thinking (key part)
-  "Insert a thinking PART under fold KEY: its first line shown, the rest folded."
+  "Insert a thinking PART under fold KEY: agent-shell's `✶ Thinking' label, then
+the first line of the thinking, cut short to keep the header one screen
+line.  What the header does not show is folded beneath it: the rest, or
+all of it when the first line was cut."
   (let ((text (or (plist-get part :text) ""))
-        (redacted (eq (plist-get part :redacted) t)))
+        (head (concat (propertize "✶ " 'face 'agentpane-thinking)
+                      (propertize "Thinking" 'face 'agentpane-tool))))
     (cond
-     (redacted
+     ((eq (plist-get part :redacted) t)
       (agentpane--insert-fold
-       key (propertize "thinking (redacted)" 'face 'agentpane-thinking) nil))
+       key (concat head (propertize " (redacted)" 'face 'agentpane-thinking)) nil))
      ;; A signature-only block, which is every thinking part a Claude Code
      ;; store carried on 2026-09-21: the browser's `Thinking.svelte' renders
      ;; nothing for it, so neither does this.
      ((string-empty-p text) nil)
      (t
-      (let* ((split (string-search "\n" text))
-             (head (if split (substring text 0 split) text))
-             (rest (and split (string-trim-right (substring text (1+ split))))))
+      (let* ((text (string-trim text))
+             (split (string-search "\n" text))
+             (fit (agentpane--fit-header
+                   (concat head " ")
+                   (propertize (if split (substring text 0 split) text)
+                               'face 'agentpane-thinking)
+                   nil))
+             (body (cond ((nth 1 fit) text)
+                         (split (string-trim (substring text (1+ split)))))))
         (agentpane--insert-fold
-         key
-         (propertize (concat "thinking: " head) 'face 'agentpane-thinking)
-         (and rest (not (string-empty-p rest))
-              (propertize rest 'face 'agentpane-thinking))))))))
+         key (nth 0 fit)
+         (and body (not (string-empty-p body))
+              (propertize body 'face 'agentpane-thinking))))))))
 
-(defun agentpane--insert-part (index ordinal part)
-  "Insert PART, part number ORDINAL of the node at INDEX."
+(defun agentpane--insert-part (index ordinal part &optional tail)
+  "Insert PART, part number ORDINAL of the node at INDEX.
+TAIL, given only for a tool PART, is the step's meta for its header; the
+return value is then non-nil when the header carries it."
   (let ((key (cons index ordinal))
         (type (plist-get part :type)))
     (pcase type
@@ -680,12 +811,35 @@ The result's image parts follow its text, as `ResultBody.svelte' draws them."
          (unless (or (null html) (string-empty-p html))
            (agentpane--insert-html html))))
       ("thinking" (agentpane--insert-thinking key part))
-      ("tool" (agentpane--insert-tool key part))
+      ("tool" (agentpane--insert-tool key part tail))
       ("image" (insert (agentpane--image-line part) "\n"))
       (_
        (insert (propertize (format "[unknown part type %S]" type)
                            'face 'agentpane-warning)
                "\n")))))
+
+(defun agentpane--draws-p (part)
+  "Non-nil when PART draws anything: when reading view does not elide it and
+it is neither a text part with no HTML nor a thinking part with no text
+that was not redacted either."
+  (and (not (and agentpane--reading (agentpane--chrome-part-p part)))
+       (pcase (plist-get part :type)
+         ("text" (let ((html (plist-get part :html)))
+                   (and html (not (string-empty-p html)))))
+         ("thinking" (or (eq (plist-get part :redacted) t)
+                         (not (string-empty-p (or (plist-get part :text) "")))))
+         (_ t))))
+
+(defun agentpane--meta-ordinal (parts)
+  "The ordinal among PARTS of the last one drawn, when it is a tool call,
+whose header then carries the step's meta; otherwise nil."
+  (let ((ordinal 0)
+        last)
+    (seq-doseq (part parts)
+      (when (agentpane--draws-p part)
+        (setq last (and (equal (plist-get part :type) "tool") ordinal)))
+      (setq ordinal (1+ ordinal)))
+    last))
 
 (defun agentpane--compact-number (n)
   "N, a non-negative integer, as en-US `Intl.NumberFormat' compact notation.
@@ -714,8 +868,11 @@ The shape of `formatTimestamp' in src/client/time.ts, in Emacs's zone as
 that is in the browser's; a part second is dropped, as there."
   (and ms (format-time-string "%Y-%m-%d %H:%M:%S" (floor ms 1000))))
 
-(defun agentpane--insert-meta (meta timestamp pending)
-  "Insert the meta line for an assistant node from META and TIMESTAMP.
+(defun agentpane--meta-text (meta timestamp pending)
+  "The meta of an assistant node from META and TIMESTAMP, its fields joined by
+` · ' in the meta's face, or nil when it has none.
+Drawn as a line of its own by `agentpane--insert-meta', or on the header of
+a tool call that ends the node, after `agentpane--meta-tail'.
 Its fields are the browser's footer in `Message.svelte': the time, the
 model and the effort when present, and the tokens, then any cost, only
 when there are tokens.  The stop reason and error message follow, which
@@ -745,9 +902,15 @@ fact nothing is."
                                  (format "%s tok" (agentpane--compact-number tokens)))
                             (and (> tokens 0) (> cost 0) (format "$%.4f" cost))))
                  (list stop error-message)))))
-    (when fields
-      (insert (propertize (concat "— " (mapconcat #'identity fields " · ")) 'face face)
-              "\n"))))
+    (and fields (propertize (mapconcat #'identity fields " · ") 'face face))))
+
+(defun agentpane--insert-meta (text)
+  "Insert TEXT, from `agentpane--meta-text', as a meta line of its own."
+  (insert (propertize "— " 'face (get-text-property 0 'face text)) text "\n"))
+
+(defun agentpane--meta-tail (text)
+  "TEXT, from `agentpane--meta-text', as it follows a tool header's summary."
+  (concat (propertize " · " 'face (get-text-property 0 'face text)) text))
 
 (defun agentpane--bar-wrap-prefixes (beg end bar)
   "Give every line between BEG and END a `wrap-prefix' that starts with BAR.
@@ -782,6 +945,7 @@ NODE may instead be `(:error MESSAGE)', a `session/error' drawn as a
 warning line where it arrived.  A node reading view elides draws nothing;
 see `agentpane--elided-p'.  Everything drawn is read-only, so only the
 prompt region below the nodes takes typing."
+  (setq agentpane--fitted-width (agentpane--window-width))
   (let ((start (point)))
     (cond
      ((plist-member node :error)
@@ -811,23 +975,35 @@ the context size it folded, as the browser's marker names it when above 0."
       (insert (propertize (concat role (agentpane--role-suffix node))
                           'face 'agentpane-role-other)
               "\n"))
-    (let ((body-start (point))
-          (time (agentpane--format-timestamp (plist-get node :timestamp))))
+    (let* ((body-start (point))
+           (time (agentpane--format-timestamp (plist-get node :timestamp)))
+           (parts (plist-get node :parts))
+           (meta (plist-get node :meta))
+           (meta-text (and meta (agentpane--meta-text
+                                 meta (plist-get node :timestamp)
+                                 (and agentpane--streaming
+                                      (eql index agentpane--tail-index)))))
+           ;; The one-line rule (OW-gageru): a step that ends in a tool call
+           ;; carries its meta on that call's header, one screen line, unless
+           ;; there is an error message, too long for it to share.
+           (meta-ordinal (and meta-text (not (plist-get meta :errorMessage))
+                              (agentpane--meta-ordinal parts)))
+           (placed nil))
       ;; An elided part keeps its ordinal, so a fold keeps its key across
       ;; a toggle of reading view.
-      (seq-doseq (part (plist-get node :parts))
+      (seq-doseq (part parts)
         (unless (and agentpane--reading (agentpane--chrome-part-p part))
-          (agentpane--insert-part index ordinal part))
+          (if (eql ordinal meta-ordinal)
+              (setq placed (agentpane--insert-part index ordinal part
+                                                   (agentpane--meta-tail meta-text)))
+            (agentpane--insert-part index ordinal part)))
         (setq ordinal (1+ ordinal)))
       ;; The browser puts a user turn's time on its first block's action row,
       ;; below the text inside the box; this is the box's last line.
       (when (and userp time)
         (insert (propertize time 'face 'agentpane-meta) "\n"))
-      (let ((meta (plist-get node :meta)))
-        (when meta
-          (agentpane--insert-meta meta (plist-get node :timestamp)
-                                  (and agentpane--streaming
-                                       (eql index agentpane--tail-index)))))
+      (when (and meta-text (not placed))
+        (agentpane--insert-meta meta-text))
       (when userp
         ;; The bar runs down the box's left edge, and `wrap-prefix' carries it
         ;; onto the rows `visual-line-mode' wraps. Nothing here uses
@@ -1143,7 +1319,10 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   (agentpane--insert-prompt-region)
   (setq-local agentpane--folds (make-hash-table :test #'equal))
   (add-hook 'kill-buffer-hook #'agentpane--detach nil t)
-  (add-to-invisibility-spec '(agentpane . t))
+  ;; No ellipsis: a folded header's marker already says there is more, and
+  ;; the one-line header needs the room (OW-gageru).
+  (add-to-invisibility-spec 'agentpane)
+  (add-hook 'window-size-change-functions #'agentpane--refit-on-resize nil t)
   ;; Proportional prose and word wrap at the window edge; code, tables and
   ;; tool bodies inherit `fixed-pitch', so they stay monospace under the
   ;; remapped default.

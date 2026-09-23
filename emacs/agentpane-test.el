@@ -56,11 +56,12 @@
     (match-beginning 0)))
 
 (ert-deftest agentpane-test-lines-in-order ()
-  "The user text, assistant text, tool summaries and meta line appear in order."
+  "The user text, assistant text, tool summaries and meta appear in order, the
+meta on the header of the tool call that ends the step."
   (with-current-buffer (agentpane-test--render)
     (let ((positions (mapcar #'agentpane-test--position
                              '("Fix the bug" "Looking." "Read app.ts"
-                               "Edit app.ts (+1 -1)" "— haiku · 12 tok"))))
+                               "Edit app.ts (+1 -1)" "· haiku · 12 tok"))))
       (should (equal positions (sort (copy-sequence positions) #'<))))
     (kill-buffer)))
 
@@ -209,6 +210,101 @@ The expected strings are what `bun 1.4.0' printed for each value."
     (should-not (memq 'diff-added (agentpane-test--faces-at "-old line")))
     (kill-buffer)))
 
+;;;; Fold headers: one screen line each, the meta on the last tool's
+
+(defun agentpane-test--line-at (text)
+  "The buffer line holding the first TEXT, with its properties, less its newline."
+  (save-excursion
+    (goto-char (agentpane-test--position text))
+    (buffer-substring (line-beginning-position) (line-end-position))))
+
+(defun agentpane-test--tool (summary result)
+  "A finished `Bash' tool part running SUMMARY and answering RESULT."
+  (list :type "tool" :name "Bash" :summary summary :args "" :result result :state "ok"))
+
+(defconst agentpane-test--step-meta
+  '(:model "claude-opus-5" :usage (:totalTokens 49000 :cost 0))
+  "The meta of one model step, whose model is drawn nowhere else.")
+
+(ert-deftest agentpane-test-meta-rides-the-last-tool-header ()
+  "A step whose last part is a tool call draws its meta on that call's header
+line and on no line of its own, and an earlier call's header carries none;
+while the step is the streaming tail, the header carries no meta at all."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (let ((node (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                      :parts (vector (agentpane-test--tool "rg -n one" "a")
+                                     (agentpane-test--tool "rg -n two" "b")))))
+      (agentpane--draw (vector node))
+      (should (string-search "claude-opus-5" (agentpane-test--line-at "rg -n two")))
+      (should-not (string-search "claude-opus-5" (agentpane-test--line-at "rg -n one")))
+      (should (= 1 (count-matches "claude-opus-5" (point-min) (point-max))))
+      (goto-char (point-min))
+      (should-not (re-search-forward "^— " nil t))
+      (setq agentpane--streaming t)
+      (agentpane--draw (vector node))
+      (should-not (string-search "claude-opus-5" (buffer-string)))
+      (goto-char (point-min))
+      (should-not (re-search-forward "^— " nil t)))))
+
+(ert-deftest agentpane-test-long-summary-cut-to-one-line ()
+  "A tool whose summary is far wider than the window draws a header that fits
+one line of it, its summary ending in `…', and unfolding it shows the whole
+summary."
+  (let ((summary (mapconcat #'number-to-string (number-sequence 1 60) " ")))
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (cl-letf (((symbol-function 'agentpane--window-width) (lambda () 40)))
+        (agentpane--draw
+         (vector (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                       :parts (vector (agentpane-test--tool summary "done")))))
+        (let ((header (agentpane-test--line-at "Bash")))
+          ;; The drawn text is read-only, which `string-pixel-width' trips
+          ;; on when it empties its work buffer.
+          (should (<= (let ((inhibit-read-only t))
+                        (string-pixel-width header (current-buffer)))
+                      40))
+          (should (string-search "…" header))
+          (should-not (string-search summary header)))
+        (goto-char (agentpane-test--position "Bash"))
+        (agentpane-toggle)
+        (should-not (invisible-p (agentpane-test--position summary)))))))
+
+(ert-deftest agentpane-test-headers-refit-at-a-new-width ()
+  "A window narrowing under a drawn header schedules a redraw, which fits the
+header to the new width."
+  (let ((summary (mapconcat #'number-to-string (number-sequence 1 20) " "))
+        (width 80))
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (cl-letf (((symbol-function 'agentpane--window-width) (lambda () width)))
+        (agentpane--draw
+         (vector (list :index 1 :role "assistant"
+                       :parts (vector (agentpane-test--tool summary "done")))))
+        (should (string-search summary (agentpane-test--line-at "Bash")))
+        (setq width 30)
+        (agentpane--refit-on-resize nil)
+        (should (timerp agentpane--refit-timer))
+        (cancel-timer agentpane--refit-timer)
+        (agentpane--refit (current-buffer))
+        (should-not (string-search summary (agentpane-test--line-at "Bash")))
+        (should (string-search "…" (agentpane-test--line-at "Bash")))))))
+
+(ert-deftest agentpane-test-meta-after-closing-text-keeps-its-line ()
+  "A step that ends in text draws its meta on a line of its own after that
+text, and the tool call before the text carries none on its header."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     (vector (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                   :parts (vector (agentpane-test--tool "rg -n one" "a")
+                                  '(:type "text" :text "Found it." :html "<p>Found it.</p>\n")))))
+    (should-not (string-search "claude-opus-5" (agentpane-test--line-at "rg -n one")))
+    (let ((meta (agentpane-test--line-at "claude-opus-5")))
+      (should (string-prefix-p "— " meta)))
+    (should (< (agentpane-test--position "Found it.")
+               (agentpane-test--position "claude-opus-5")))))
+
 ;;;; Notifications driving an attached buffer, with no process
 
 (defmacro agentpane-test--with-session (ref &rest body)
@@ -294,7 +390,7 @@ and the node it follows, no longer the last, is redrawn with its own."
       (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
-      (should (string-search "— haiku" (buffer-string)))
+      (should (string-search "· haiku" (buffer-string)))
       (should-not (string-search "— luna" (buffer-string)))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
@@ -650,7 +746,7 @@ turn with no parts; a turn of text; and a last turn that is only thinking.")
   (call-interactively (lookup-key agentpane-transcript-mode-map "r")))
 
 (defconst agentpane-test--chrome-lines
-  '("Read app.ts" "thinking: Weighing it" "Grep orphan" "Bash ls -la" "thinking: Tail thought")
+  '("Read app.ts" "Thinking Weighing it" "Grep orphan" "Bash ls -la" "Thinking Tail thought")
   "The summary lines of every tool call, tool result and thinking part in the
 chrome nodes.")
 
@@ -729,6 +825,22 @@ expanded, on the same part, and its neighbour still folded."
     (agentpane-test--press-r)
     (should-not (invisible-p (agentpane-test--position "const x = 1;")))
     (should (invisible-p (agentpane-test--position "and more besides")))))
+
+(ert-deftest agentpane-test-reading-view-meta-after-surviving-text ()
+  "With reading view on, a step whose last part is a tool call draws its
+surviving text, then its meta on a line of its own after that text, since
+the tool header that would carry it is not drawn."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     (vector (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                   :parts (vector '(:type "text" :text "Checking." :html "<p>Checking.</p>\n")
+                                  (agentpane-test--tool "rg -n one" "a")))))
+    (agentpane-test--press-r)
+    (should-not (string-search "rg -n one" (buffer-string)))
+    (should (string-prefix-p "— " (agentpane-test--line-at "claude-opus-5")))
+    (should (< (agentpane-test--position "Checking.")
+               (agentpane-test--position "claude-opus-5")))))
 
 (defun agentpane-test--tail-status ()
   "The reading-view tail status line shown in the current buffer, or nil."
