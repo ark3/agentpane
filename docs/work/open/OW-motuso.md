@@ -42,3 +42,9 @@ New `ert` tests in `emacs/agentpane-test.el`, run as that file's Commentary says
 - with reading on and the buffer streaming, the tail status names the last node's running tool.
 The whole file stays green, with the pass count in `emacs/agentpane.el`'s Commentary updated.
 The owner has used the toggle on a live Claude session on the work laptop.
+
+## Status, 2026-09-23
+
+The code landed on main as 95024fa: `r` runs `agentpane-toggle-reading`, and the six tests above were each shown red first, then green, with ert at 60 of 60.
+What remains is the last condition, the owner using the toggle on a live Claude session.
+Choices made while implementing: the tail status is an overlay line directly above the prompt separator, e.g. `Bash bun test … running`; the mode line leads with `reading`; `n`, `p` and `agentpane-index-at-point` go through `agentpane--locate`, which skips elided nodes.
