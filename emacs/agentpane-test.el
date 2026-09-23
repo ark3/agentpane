@@ -224,6 +224,12 @@ live adapter, and then sets the model without attaching again."
   (should (equal (agentpane-test--set-model-interactively "gpt-5.6-luna")
                  '(sessions/attach models/list sessions/setModel))))
 
+(ert-deftest agentpane-test-set-model-empty-choice-sets-nothing ()
+  "An empty `RET' at the model prompt, which `completing-read' returns as
+\"\" even when it requires a match, sends no `sessions/setModel'."
+  (should (equal (agentpane-test--set-model-interactively "")
+                 '(sessions/attach models/list))))
+
 (ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
   "Undo in the prompt region undoes the draft, never a node redraw that
 arrived while it was being typed."

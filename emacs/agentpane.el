@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 30 tests, 30 results as expected, 0 unexpected
+;;     Ran 31 tests, 31 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1248,6 +1248,12 @@ The model is chosen at conversation start, never switched later (owner,
 (defun agentpane-set-model (model)
   "Set this buffer's session's MODEL through `sessions/setModel'.
 Allowed only before the first prompt, while the buffer has no nodes.
+An empty MODEL, which `completing-read' returns for an empty `RET' even
+when it requires a match, sets nothing, and the session keeps the model
+it has.  Sent, \"\" was stored by the Codex adapter and reported as the
+model while its turns ran on the default, refused by the Pi adapter, and
+handed to Claude Code as it was (OW-kisemu, read from the adapters in
+src/server/adapters/ at daf5f52, not run live).
 
 Interactively a session not yet attached is attached before the models
 are read, and synchronously, as `agentpane-new-session' does and for its
@@ -1265,13 +1271,14 @@ daf5f52, not run live)."
          (agentpane--attach-now))
        (list (agentpane--read-model (plist-get (agentpane--ref agentpane--session)
                                                :backend))))))
-  (agentpane--check-model-gate)
-  (with-current-buffer (agentpane--transcript)
-    (agentpane--attached-then
-     (lambda ()
-       (agentpane--request 'sessions/setModel
-                           (list :session (agentpane--ref agentpane--session) :model model)
-                           #'ignore t)))))
+  (unless (string-empty-p model)
+    (agentpane--check-model-gate)
+    (with-current-buffer (agentpane--transcript)
+      (agentpane--attached-then
+       (lambda ()
+         (agentpane--request 'sessions/setModel
+                             (list :session (agentpane--ref agentpane--session) :model model)
+                             #'ignore t))))))
 
 (defvar-local agentpane--forking nil
   "Non-nil while a fork this buffer began is in flight.")
