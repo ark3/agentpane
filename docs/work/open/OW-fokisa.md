@@ -1,5 +1,5 @@
 ---
-labels: [deferral, emacs-native]
+labels: [deferral, emacs-native, now]
 ---
 
 # Facts the browser transcript shows that an OW-mutufa node does not carry: timestamps, compaction tokensBefore, tool-result images
