@@ -518,6 +518,31 @@ once; a send whose attach or prompt failed frees the buffer for another."
             (funcall release)
             (should (equal (funcall methods) '(sessions/prompt sessions/prompt)))))))))
 
+(ert-deftest agentpane-test-refetch-while-attaching-keeps-the-live-transcript ()
+  "A refetch while the first prompt's attach is in flight does not draw the
+stored transcript over the live one the attach's snapshot drew; once an
+attach has failed, a refetch reads the stored transcript again."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking nil nil
+      (agentpane-test--with-session ref
+        (setq hold '(sessions/attach sessions/preview))
+        (goto-char (point-max))
+        (insert "hello")
+        (agentpane-send)
+        (agentpane-refetch)
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))
+               :isStreaming :json-false :compaction nil :model nil))
+        (while held (funcall (cdr (pop held)) t))
+        (should (equal (agentpane-test--indices) '(5)))
+        (insert "again")
+        (agentpane-send)
+        (funcall (cdr (pop held)) nil)
+        (setq sent nil)
+        (agentpane-refetch)
+        (should (equal (mapcar #'car sent) '(sessions/preview)))))))
+
 ;;;; The helper connection, against a fake helper
 
 (defconst agentpane-test--root

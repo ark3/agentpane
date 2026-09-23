@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 24 tests, 24 results as expected, 0 unexpected
+;;     Ran 25 tests, 25 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -805,6 +805,9 @@ whole of follow mode, deliberately less than the browser's."
 Attached only while that is still the running connection: a fresh helper
 has attached nothing.")
 
+(defvar-local agentpane--attaching nil
+  "Non-nil while a `sessions/attach' this buffer sent has not answered.")
+
 (defvar agentpane-prompt-region-map
   (let ((map (make-keymap)))
     (set-char-table-range (nth 1 map) (cons ?\s ?~) #'self-insert-command)
@@ -950,16 +953,21 @@ buffer resolve to the first and last."
   "Refetch this buffer's transcript and redraw it.
 A stored transcript is read through `sessions/preview'; an attached one is
 attached again, which answers with a fresh `session/snapshot', since a
-preview would draw the stored transcript over the live one."
+preview would draw the stored transcript over the live one.  One still
+attaching sends nothing: its attach's snapshot is the refetch, and a
+preview sent now would supersede the attach and draw over that snapshot."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
-  (if (agentpane--attached-p)
-      (agentpane--attach)
+  (cond
+   (agentpane--attaching)
+   ((agentpane--attached-p)
+    (agentpane--attach))
+   (t
     (agentpane--request 'sessions/preview
                         (list :session (agentpane--ref agentpane--session))
                         (lambda (nodes)
-                          (agentpane--draw nodes (agentpane--transcript-header agentpane--session))))))
+                          (agentpane--draw nodes (agentpane--transcript-header agentpane--session)))))))
 
 (defun agentpane--same-ref-p (a b)
   "Non-nil when session refs A and B name the same session."
@@ -1031,14 +1039,19 @@ and keep the streaming field in `agentpane--streaming'."
 or FAILED if the attach fails.
 From here on the helper sends this session's notifications, starting with a
 `session/snapshot' that redraws the buffer."
+  (setq agentpane--attaching t)
   (agentpane--request 'sessions/attach
                       (list :session (agentpane--ref agentpane--session))
                       (lambda (summary)
+                        (setq agentpane--attaching nil)
                         (setq agentpane--attached agentpane--connection)
                         ;; The route's ref is authoritative and may differ.
                         (agentpane--rekey (agentpane--ref summary))
                         (when then (funcall then)))
-                      t failed))
+                      t
+                      (lambda ()
+                        (setq agentpane--attaching nil)
+                        (when failed (funcall failed)))))
 
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
