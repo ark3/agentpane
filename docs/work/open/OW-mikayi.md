@@ -22,7 +22,8 @@ Decided with the owner on 2026-09-23:
   Picking a particular session is the picker's job (`agentpane-sessions`), and the transcript's header line, `agentpane--transcript-header`, already shows backend, session id and cwd.
 - A rekey leaves the name alone: the name no longer carries the ref or the preview, and a rename could reshuffle the `<N>` suffixes mid-session.
   Drop the rename from `agentpane--rekey`, for the composer too, and update the tests that assert it rather than deleting them, so they now assert the names are unchanged across a rekey.
-- The composer's name derives from its transcript's without nesting it, e.g. `*agentpane/claude: sandbox prompt*`; how it carries the transcript's `<N>`, so that the composer of `…*<2>` is recognisably that transcript's, is the implementer's first cut, stated in the close note.
+- The composer's name is its transcript's with any trailing `<N>` moved inside the stars and ` prompt` added before the closing star: `*agentpane/claude: sandbox*` has `*agentpane/claude: sandbox prompt*`, and `*agentpane/claude: sandbox*<2>` has `*agentpane/claude: sandbox<2> prompt*`.
+  Transcript names are unique, so these are too, and a composer never takes a `<N>` of its own that could disagree with its transcript's; with no rename on rekey, the name holds for the composer's life.
 - Two projects with the same directory name share a base name and are told apart by the suffix, as Magit's are.
 - Where `:cwd` is absent or empty, `<project>` falls back to the session id, as the preview did; OW-ruhotu leaves the buffer's directory alone in that same case.
 
@@ -34,5 +35,5 @@ This card and OW-ruhotu both read the session's `:cwd` and do not depend on each
 - a transcript for a summary with `:cwd` `/tmp/x/sandbox` and backend `claude` is named `*agentpane/claude: sandbox*`;
 - a second session in the same project gets the same name with Emacs's `<2>`;
 - a rekey leaves the transcript's and its composer's names as they were (the existing test near `(format "*agentpane composer: %s*" (buffer-name))` is the one to rework);
-- the composer's name does not contain its transcript's name inside it.
+- the composer of a transcript named `*agentpane/claude: sandbox*<2>` is named `*agentpane/claude: sandbox<2> prompt*`.
 The whole file green, with the pass count in `emacs/agentpane.el`'s Commentary updated.
