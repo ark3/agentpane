@@ -687,6 +687,32 @@ the buffer to attach again."
           (agentpane-fork)
           (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach))))))))
 
+(ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
+  "A refetch while a Pi fork is in flight says so and sends nothing, so no
+re-attach of the parent can answer after the fork's reply has counted the
+parent detached; that reply then redraws the parent from the store."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (setq hold '(sessions/fork sessions/attach))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (agentpane-refetch)
+          (funcall (cdr (assq 'sessions/fork held)) t)
+          (dolist (entry held)
+            (when (eq (car entry) 'sessions/attach) (funcall (cdr entry) t)))
+          (with-current-buffer buffer
+            (should-not (agentpane--attached-p)))
+          (should (seq-some (lambda (text) (string-search "fork of this session" text)) said))
+          (should (equal (mapcar #'car (reverse sent))
+                         '(sessions/forkPoints sessions/fork sessions/detach
+                           sessions/preview sessions/attach))))))))
+
 ;;;; Sending, against a stub connection
 
 (ert-deftest agentpane-test-one-send-at-a-time ()
@@ -762,6 +788,88 @@ again."
         (setq sent nil)
         (agentpane-refetch)
         (should (equal (mapcar #'car sent) '(sessions/preview)))))))
+
+(ert-deftest agentpane-test-one-attach-at-a-time ()
+  "`agentpane-set-model' and `agentpane-compact' while a send's attach is
+held wait on that attach, and run once it answers, so exactly one
+`sessions/attach' goes out.  `M-x agentpane-set-model', whose attach is
+synchronous, refuses meanwhile and sends nothing."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (cl-letf (((symbol-function 'jsonrpc-request)
+                     (lambda (_connection method &rest _)
+                       (push (list method) sent)
+                       (pcase method
+                         ('sessions/attach (list :ref ref))
+                         ('models/list [(:id "gpt-5.6-luna")]))))
+                    ((symbol-function 'completing-read) (lambda (&rest _) "gpt-5.6-luna")))
+            (agentpane--draw [])
+            (setq hold '(sessions/attach))
+            (goto-char (point-max))
+            (insert "hello")
+            (agentpane-send)
+            (agentpane-set-model "gpt-5.6-luna")
+            (agentpane-compact)
+            (let ((refused (condition-case nil
+                               (progn (call-interactively #'agentpane-set-model) nil)
+                             (user-error t))))
+              (should (equal (mapcar #'car sent) '(sessions/attach)))
+              (should refused))
+            (funcall (cdr (pop held)) t)
+            (should-not held)
+            (should (equal (mapcar #'car (reverse sent))
+                           '(sessions/attach sessions/prompt sessions/setModel
+                             sessions/compact)))))))))
+
+(ert-deftest agentpane-test-failed-attach-fails-every-waiter ()
+  "A send that waits on an attach `agentpane-compact' began is freed when
+that attach fails, as it is when its own does; a refetch while the attach
+is held says so and sends nothing, and once the failure has left nothing
+in flight, a refetch reads the stored transcript."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking nil nil
+      (agentpane-test--with-session ref
+        (setq hold '(sessions/attach))
+        (agentpane-compact)
+        (goto-char (point-max))
+        (insert "hello")
+        (agentpane-send)
+        (agentpane-refetch)
+        (let ((explained (seq-some (lambda (text) (string-search "still attaching" text))
+                                   said)))
+          (funcall (cdr (pop held)) nil)
+          (should-not agentpane--sending)
+          (setq sent nil)
+          (agentpane-refetch)
+          ;; A preview goes out only once no attach is held whose snapshot it
+          ;; could draw over.
+          (should (equal (list (mapcar #'car held) (mapcar #'car sent))
+                         '(nil (sessions/preview))))
+          (should explained))))))
+
+(ert-deftest agentpane-test-waiter-that-signals-frees-the-rest ()
+  "When a caller waiting on an attach signals as the attach answers, as
+`agentpane-compact' does when its request cannot go out, a send waiting
+behind it is freed rather than left refusing every later send."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking nil nil
+      (agentpane-test--with-session ref
+        (let ((request (symbol-function 'agentpane--request)))
+          (cl-letf (((symbol-function 'agentpane--request)
+                     (lambda (method &rest args)
+                       (when (eq method 'sessions/compact)
+                         (error "Process agentpane helper not running"))
+                       (apply request method args))))
+            (setq hold '(sessions/attach))
+            (agentpane-compact)
+            (goto-char (point-max))
+            (insert "hello")
+            (agentpane-send)
+            (should-error (funcall (cdr (pop held)) t))
+            (should-not agentpane--sending)))))))
 
 ;;;; Killing a transcript buffer, against a stub connection
 

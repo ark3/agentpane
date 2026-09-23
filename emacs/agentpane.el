@@ -66,7 +66,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 37 tests, 37 results as expected, 0 unexpected
+;;     Ran 41 tests, 41 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -859,7 +859,9 @@ Attached only while that is still the running connection: a fresh helper
 has attached nothing.")
 
 (defvar-local agentpane--attaching nil
-  "Non-nil while a `sessions/attach' this buffer sent has not answered.")
+  "While a `sessions/attach' this buffer sent has not answered, the callers
+waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
+`agentpane--attach' was given; nil otherwise.")
 
 (defvar agentpane-prompt-region-map
   (let ((map (make-keymap)))
@@ -1003,18 +1005,26 @@ buffer resolve to the first and last."
             (plist-get ref :backend) (plist-get ref :id)
             (or (plist-get summary :cwd) ""))))
 
+(defvar agentpane--forking)
+
 (defun agentpane-refetch ()
   "Refetch this buffer's transcript and redraw it.
 A stored transcript is read through `sessions/preview'; an attached one is
 attached again, which answers with a fresh `session/snapshot', since a
 preview would draw the stored transcript over the live one.  One still
 attaching sends nothing: its attach's snapshot is the refetch, and a
-preview sent now would supersede the attach and draw over that snapshot."
+preview sent now would supersede the attach and draw over that snapshot.
+Nor does one with a fork in flight; see `agentpane-fork'.  Either says
+why in the echo area rather than signalling, since opening a session from
+the picker refetches its buffer, and an error would leave it unshown."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
   (cond
-   (agentpane--attaching)
+   (agentpane--attaching
+    (message "agentpane: still attaching; the attach's snapshot redraws the transcript"))
+   (agentpane--forking
+    (message "agentpane: a fork of this session is in flight; refetch once it lands"))
    ((agentpane--attached-p)
     (agentpane--attach))
    (t
@@ -1099,28 +1109,57 @@ and keep the streaming field in `agentpane--streaming'."
   "Attach this buffer's session through `sessions/attach', then call THEN,
 or FAILED if the attach fails.
 From here on the helper sends this session's notifications, starting with a
-`session/snapshot' that redraws the buffer."
-  (setq agentpane--attaching t)
-  (agentpane--request 'sessions/attach
-                      (list :session (agentpane--ref agentpane--session))
-                      (lambda (summary)
-                        (setq agentpane--attaching nil)
-                        (setq agentpane--attached agentpane--connection)
-                        ;; The route's ref is authoritative and may differ.
-                        (agentpane--rekey (agentpane--ref summary))
-                        (when then (funcall then)))
-                      t
-                      (lambda ()
-                        (setq agentpane--attaching nil)
-                        (when failed (funcall failed)))
-                      agentpane--spawn-timeout))
+`session/snapshot' that redraws the buffer.
+
+One attach at a time per buffer: while one is in flight nothing is sent,
+and THEN or FAILED waits on that one's answer instead.  Two in flight
+answered separately, and the first to fail ended the wait while the other
+was still out, so a refetch then sent a preview that could draw the
+stored transcript over the live one the other's snapshot drew (OW-yibimi)."
+  (if agentpane--attaching
+      (setq agentpane--attaching
+            (append agentpane--attaching (list (cons then failed))))
+    (setq agentpane--attaching (list (cons then failed)))
+    (agentpane--request 'sessions/attach
+                        (list :session (agentpane--ref agentpane--session))
+                        (lambda (summary)
+                          (setq agentpane--attached agentpane--connection)
+                          ;; The route's ref is authoritative and may differ.
+                          (agentpane--rekey (agentpane--ref summary))
+                          (agentpane--attach-answered t))
+                        t
+                        (lambda () (agentpane--attach-answered nil))
+                        agentpane--spawn-timeout)))
+
+(defun agentpane--attach-answered (ok)
+  "End the wait on this buffer's attach, calling each waiter's THEN if OK,
+else its FAILED.  Should one exit non-locally, every waiter not yet called
+has its FAILED called on the way out, so a flag a FAILED clears, such as
+`agentpane--sending', never outlives the attach."
+  (let ((waiters agentpane--attaching))
+    (setq agentpane--attaching nil)
+    (unwind-protect
+        (while waiters
+          (let ((fn (funcall (if ok #'car #'cdr) (pop waiters))))
+            (when fn (funcall fn))))
+      (dolist (waiter waiters)
+        (when (cdr waiter) (funcall (cdr waiter)))))))
 
 (defun agentpane--attach-now ()
   "Attach this buffer's session through `sessions/attach', and return only
 once the attach has answered, for a command that must then read from the
 session's live adapter; see `agentpane-new-session'.  It blocks Emacs for
 up to `agentpane--spawn-timeout', and a timeout, an error or a quit
-signals, leaving the buffer unattached."
+signals, leaving the buffer unattached.
+
+While an asynchronous attach is in flight it refuses, and sends nothing:
+a second attach beside that one is what `agentpane--attach' exists to
+prevent, and waiting for it here would block Emacs on a reply that may
+take the whole timeout.  `agentpane-set-model' reaches this with a first
+prompt's attach out; asked again once that has answered, it finds the
+session attached and needs no attach at all."
+  (when agentpane--attaching
+    (user-error "This session is still attaching; try again once it has"))
   (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
                                    (list :session (agentpane--ref agentpane--session))
                                    :timeout agentpane--spawn-timeout)))
@@ -1340,7 +1379,11 @@ draws a detached session.  That is there because of the server's ordering:
 fork and re-reads the fork's shortened transcript before
 `SessionManager.fork' re-keys the session, so that transcript goes out as a
 snapshot under the parent's ref and the parent buffer draws it.  Once the
-server keys that snapshot to the fork, the redraw is redundant.
+server keys that snapshot to the fork, the redraw is redundant.  While the
+fork is in flight `agentpane-refetch' sends nothing: on the attached parent
+it would attach again, and a reply to that landing after the fork's would
+count the parent attached, the server having detached it, and leave it
+showing whatever the fork had drawn there.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
