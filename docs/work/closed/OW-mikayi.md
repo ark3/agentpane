@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs-native]
+closed: done
 ---
 
 # agentpane-mode names a transcript buffer after its first prompt, up to 80 characters; name it for its project and backend, as Magit does
@@ -37,3 +38,12 @@ This card and OW-ruhotu both read the session's `:cwd` and do not depend on each
 - a rekey leaves the transcript's and its composer's names as they were (the existing test near `(format "*agentpane composer: %s*" (buffer-name))` is the one to rework);
 - the composer of a transcript named `*agentpane/claude: sandbox*<2>` is named `*agentpane/claude: sandbox<2> prompt*`.
 The whole file green, with the pass count in `emacs/agentpane.el`'s Commentary updated.
+
+## Close note
+
+Landed in bf36dde (implementer's two commits squashed).
+A transcript buffer is now `*agentpane/<backend>: <project>*`, `<project>` being the last component of the session's `:cwd` (trailing slash tolerated) or the session id where there is none; sessions in one project take Emacs's own `<N>` after the closing star.
+The composer is the transcript's name with that `<N>` moved inside the stars and ` prompt` added: `*agentpane/claude: sandbox<2> prompt*`.
+`agentpane--rekey` no longer renames either buffer; review found that this left a composer `agentpane--absorb` adopts as the survivor's own carrying the killed buffer's name, so absorb now renames that one composer after the survivor.
+Verified by `ert` in `emacs/agentpane-test.el`: three new naming tests, the two rekey tests reworked to assert names unchanged, and a merge test for the adopted composer, each shown red against the old code first; the whole file 74/74 on Emacs 31.1.
+The one edge left, a composer outliving its killed transcript so a later composer takes a `<N>` of its own, is OW-futuve.
