@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-kokalo]
+closed: done
 ---
 
 # The browser's conversation header offers an effort select beside the model select, before the first prompt
@@ -29,3 +30,14 @@ Its label, placement and default option are a first cut, to be iterated from use
 
 - A client test in `src/client/` shows the effort select offering the selected model's list, following a model change, gone after the first prompt, and absent for a backend with no options, each assertion shown red first.
 - `bun run check` passes.
+
+## Close note
+
+Landed in b0269e8 (`feat: offer an effort select beside the model select before the first prompt`).
+An empty conversation's action row in `src/client/App.svelte` gains a select labelled "Conversation effort", listing the efforts of the `ModelInfo` whose id is the session's model, valued at the session's `effort` or else the model's `defaultEffort`, and following a model change.
+It is absent when the model offers no efforts, when the list does not name the model, or when no model is known, and gone after the first turn with no label in its place, since each turn's footer already names its effort.
+`controller.setEffort` mirrors `setModel`: its own `pendingEffortSets` and `effortSetting` flag, rename tracking, and an early return once the session has messages.
+The e2e harness's models now offer efforts, so `e2e/model-select.spec.ts` checks the effort select fits the action row too.
+Verified by App and controller tests, each shown red first (the dispatching session re-broke the `efforts.length > 0` gate and watched the three absence cases fail), `bun run check` (1202 tests) and `bun run test:browser` (22 tests) on main.
+Label, placement and default option are a first cut.
+Untested `setModel` gate noticed in review filed as OW-tebuze.
