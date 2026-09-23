@@ -129,11 +129,10 @@ Five cross-cutting labels may follow that kind.
 D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 2026-09-22, and the ACP-shim stream filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` under it; OW-vibipo is the question card that chose.
 `emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
 
-`now` marks the cards to execute next, and `card list --open --label now` is that queue.
-It is the deck's only priority signal: card has no priority axis, and `--ready` cannot serve as one here because nearly every open card is unblocked, so a listing that selects everything selects nothing.
-Roughly five cards carry `now` at a time, restocked when it empties; the cost of the label falls on those five rather than on every card written, which is the whole reason it is a label and not a field on all of them.
-It rides on top of the kind and overrides it: a `deferral` carrying `now` is deliberate, and says this particular deferral has become worth doing ahead of the queue.
-Cards without it are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
+What runs next, and in what order, is settled in conversation, not stored in the deck.
+The session proposes a set of cards in an order, and the owner either pastes that order into `card run` or asks for them to be executed in a fresh session.
+`now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
+Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
 
 ### Committing a card you authored
 
