@@ -354,9 +354,11 @@ and says the message is not forkable."
         (should (seq-some (lambda (text) (string-search "not forkable" text)) said))))))
 
 (ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
-  "After a Pi fork, which leaves its parent detached on the server, the
-parent buffer attaches again before compacting, since the compact route
-answers only for an attached session."
+  "A Pi fork, which leaves its parent detached on the server, detaches the
+parent from the helper before redrawing it from the store, so the helper
+stops feeding a buffer that counts itself detached; and the parent buffer
+attaches again before compacting, since the compact route answers only for
+an attached session."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl"))
         (agentpane--connection 'connection))
@@ -368,6 +370,10 @@ answers only for an attached session."
           (setq agentpane--attached agentpane--connection)
           (agentpane-test--goto-index 0)
           (agentpane-fork)
+          (should (equal (mapcar #'car (reverse sent))
+                         '(sessions/forkPoints sessions/fork sessions/detach
+                           sessions/preview sessions/attach)))
+          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref)))
           (setq sent nil)
           (with-current-buffer buffer (agentpane-compact))
           (should (equal (reverse sent)

@@ -1098,7 +1098,8 @@ if it is only a preview; call FAILED instead if that attach fails."
 
 (defun agentpane--detach ()
   "Stop the helper sending this buffer's session's notifications.
-The buffer-local `kill-buffer-hook' of a transcript.
+The buffer-local `kill-buffer-hook' of a transcript, and what a Pi fork
+does for its parent, which the server leaves detached.
 Without it the helper went on sending them after a kill, since only
 `sessions/close' removed a session from its attached set, and a buffer
 reopened from the picker drew them over its preview: a node that arrived
@@ -1272,8 +1273,8 @@ and Claude Code keep a parent turn running through a fork, and are not
 aborted.  A Pi fork also moves the parent's live process onto the fork and
 leaves the parent detached, with no `session/renamed' (`SessionManager.fork'
 in src/server/http/session-manager.ts), so this buffer then counts itself
-detached too, and its next command that needs the session attaches it
-again.  Codex and Claude Code leave the parent attached.
+detached too, detaches the parent from the helper, and its next command
+that needs the session attaches it again.  Codex and Claude Code leave the parent attached.
 
 The parent buffer is then redrawn from the store, as `agentpane-refetch'
 draws a detached session.  That is there because of the server's ordering:
@@ -1323,6 +1324,7 @@ fork fails.  See `agentpane-fork'."
    (lambda (forked)
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
+       (agentpane--detach)
        (setq agentpane--attached nil)
        (agentpane-refetch))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
