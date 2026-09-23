@@ -278,16 +278,19 @@ that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
   "The summary plist of the session this transcript buffer shows.")
 
 (defconst agentpane--spawn-timeout 60
-  "Seconds to wait for a request that may spawn the session's backend:
-`sessions/attach', and `sessions/prompt', whose route attaches first.
-Past it the reply is discarded even if it comes, so a spawn that ran long
+  "Seconds to wait for `sessions/attach' and `sessions/prompt', either of
+which may spawn the session's backend: the prompt route attaches first.
+Other requests whose server route attaches too -- `sessions/forkPoints',
+`sessions/fork' and `sessions/setModel' (src/server/http/app.ts) -- still
+take jsonrpc.el's default.
+Past this the reply is discarded even if it comes, so a spawn that ran long
 but succeeded reads as a failure and leaves the buffer unattached though
 its session is live.  jsonrpc.el's default is 10s, and the one attach
-measured took 1.138s (a Pi re-attach, docs/MANUAL_TESTING.md); no cold
-spawn has been timed.  60s is what `agentpane-new-session''s synchronous
-attach already allowed, where waiting blocks Emacs; here it blocks nothing,
-and a hung helper costs only a minute before a refused second send is
-accepted again.")
+measured took 1.138s, a re-attach on `pi 0.85.1' on 2026-09-16, driven at
+the HTTP route (docs/MANUAL_TESTING.md, OW-jamoyi); no cold spawn has been
+timed.  60s is what `agentpane-new-session''s synchronous attach already
+allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
+helper costs only a minute before a refused second send is accepted again.")
 
 (defun agentpane--request (method params callback &optional always failed timeout)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
@@ -1116,7 +1119,7 @@ then call SENT.  A prompt the server refuses, such as one sent mid-turn
 \(DESIGN D16), shows the server's text in the echo area and SENT is not
 called, so the draft stays where it was.
 
-One send at a time per session, as the browser allows (OW-kelede): until
+One send at a time per session, as the browser allows (OW-nasofa): until
 the prompt has answered, which it does once the turn is accepted, a second
 send says so and sends nothing.  The draft stays visible until that answer,
 so pressing again while a backend spawns is the natural move, and without
