@@ -102,7 +102,8 @@
 
 (defface agentpane-role-other
   '((t :inherit font-lock-type-face :weight bold))
-  "Face for the role line of a node whose role is neither user nor assistant.")
+  "Face for the role line of a node whose role is not user, assistant or
+compactionSummary, which draw none.")
 
 (defface agentpane-tool
   '((t :inherit font-lock-doc-markup-face))
@@ -963,14 +964,14 @@ prompt region below the nodes takes typing."
      (t (agentpane--pp-node node)))
     (add-text-properties start (point) '(read-only t front-sticky (read-only)))))
 
-(defun agentpane--role-suffix (node)
-  "What the role line of NODE says after the role: for a compaction marker,
-the context size it folded, as the browser's marker names it when above 0."
+(defun agentpane--compaction-marker (node)
+  "The line compaction marker NODE draws: the browser's divider in text, its
+label between two rules, naming the context size it folded when above 0."
   (let ((tokens (plist-get node :tokensBefore)))
-    (if (and (equal (plist-get node :role) "compactionSummary")
-             tokens (> tokens 0))
-        (format " · from %s tok" (agentpane--compact-number tokens))
-      "")))
+    (concat "── Context compacted"
+            (and tokens (> tokens 0)
+                 (format " · from %s tok" (agentpane--compact-number tokens)))
+            " ──")))
 
 (defun agentpane--pp-node (node)
   "Pretty-print NODE, one transcript node plist, at point; see `agentpane--pp'."
@@ -979,10 +980,12 @@ the context size it folded, as the browser's marker names it when above 0."
          (userp (equal role "user"))
          (ordinal 0))
     (when userp (insert "\n"))
-    (unless (or userp (equal role "assistant"))
-      (insert (propertize (concat role (agentpane--role-suffix node))
-                          'face 'agentpane-role-other)
+    (cond
+     ((equal role "compactionSummary")
+      (insert (propertize (agentpane--compaction-marker node) 'face 'agentpane-dim)
               "\n"))
+     ((not (or userp (equal role "assistant")))
+      (insert (propertize role 'face 'agentpane-role-other) "\n")))
     (let* ((body-start (point))
            (time (agentpane--format-timestamp (plist-get node :timestamp)))
            (parts (plist-get node :parts))

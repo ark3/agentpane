@@ -120,15 +120,18 @@ browser's `showsMeta' draws none, but one that ended badly still says so."
         (should (< (agentpane-test--position "Fix the bug") time))
         (should (memq 'agentpane-user-box (agentpane-test--faces-at "2026-09-23 00:30:30")))))))
 
-(ert-deftest agentpane-test-compaction-marker-names-tokens-before ()
-  "A compaction marker names the context size it folded, in compact tokens,
+(ert-deftest agentpane-test-compaction-marker-reads-as-the-browser ()
+  "A compaction marker carries the browser's words, not its raw role: it
+reads Context compacted, names the context size it folded in compact tokens,
 and a marker whose size is 0 names none."
   (with-temp-buffer
     (agentpane-transcript-mode)
-    (agentpane--draw [(:index 0 :role "compactionSummary" :tokensBefore 27614 :parts [])
+    (agentpane--draw [(:index 0 :role "compactionSummary" :tokensBefore 28000 :parts [])
                       (:index 1 :role "compactionSummary" :tokensBefore 0 :parts [])])
-    (should (string-search "compactionSummary · from 28K tok" (buffer-string)))
-    (should (= 1 (count-matches "tok" (point-min) (point-max))))))
+    (should (= 2 (count-matches "Context compacted" (point-min) (point-max))))
+    (should (string-search "from 28K tok" (buffer-string)))
+    (should (= 1 (count-matches "tok" (point-min) (point-max))))
+    (should-not (string-search "compactionSummary" (buffer-string)))))
 
 (ert-deftest agentpane-test-tool-result-images-in-the-fold ()
   "A tool result's image parts are drawn in its folded body, where its text
