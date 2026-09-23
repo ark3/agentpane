@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs-native, now]
+closed: done
 ---
 
 # agentpane-mode has no reading view, the browser's toggle that elides tool calls, tool results and thinking
@@ -48,3 +49,15 @@ The owner has used the toggle on a live Claude session on the work laptop.
 The code landed on main as 95024fa: `r` runs `agentpane-toggle-reading`, and the six tests above were each shown red first, then green, with ert at 60 of 60.
 What remains is the last condition, the owner using the toggle on a live Claude session.
 Choices made while implementing: the tail status is an overlay line directly above the prompt separator, e.g. `Bash bun test … running`; the mode line leads with `reading`; `n`, `p` and `agentpane-index-at-point` go through `agentpane--locate`, which skips elided nodes.
+
+## Close note
+
+Landed as 95024fa on main.
+`r` runs `agentpane-toggle-reading` in `emacs/agentpane.el`: per buffer and not kept, the mode line leading with `reading` while it is on.
+The rule is `condense` over nodes (`agentpane--elided-p`, `agentpane--chrome-part-p`): `tool-result` nodes and `tool`/`thinking` parts are not drawn, and an assistant node left with no parts draws nothing, meta included, unless its `stopReason` is `error` or `aborted`.
+The ewoc keeps every node, so a toggle is an `ewoc-refresh`; elided parts keep their ordinals, so fold keys survive.
+`agentpane--locate` answers the nearest drawn node, and `n`, `p` and `agentpane-index-at-point` (hence `f`) go through it.
+While streaming, an overlay string on the prompt separator names the running tool or thinking by `readingTailStatus`'s rules, e.g. `Bash bun test … running`.
+Verified by six ert tests, each red first on the unbound key and then against a targeted breakage of the finished code; ert 60 of 60, byte-compile clean.
+The owner's live trial was dropped as a close condition on 2026-09-23: shown to work closes a card, and details are iterated afterwards.
+Follow-up filed: OW-wofovo (no placeholder when reading view hides everything).
