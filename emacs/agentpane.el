@@ -1274,7 +1274,8 @@ aborted.  A Pi fork also moves the parent's live process onto the fork and
 leaves the parent detached, with no `session/renamed' (`SessionManager.fork'
 in src/server/http/session-manager.ts), so this buffer then counts itself
 detached too, detaches the parent from the helper, and its next command
-that needs the session attaches it again.  Codex and Claude Code leave the parent attached.
+that needs the session attaches it again.  Codex and Claude Code leave
+the parent attached.
 
 The parent buffer is then redrawn from the store, as `agentpane-refetch'
 draws a detached session.  That is there because of the server's ordering:
