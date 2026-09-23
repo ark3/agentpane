@@ -755,8 +755,16 @@ edit's summary ends with in the diff faces, as agent-shell colours them."
   "Insert a tool PART under fold KEY, with TAIL after its summary on the header.
 The header is agent-shell's: the state's mark, the name as a heading, then
 the summary, on one screen line, the summary cut short to fit; see
-`agentpane--fit-header'.  Return non-nil when TAIL is on the header."
-  (let* ((state (plist-get part :state))
+`agentpane--fit-header'.  Return non-nil when TAIL is on the header.
+A `running' state is drawn as `ok' unless the node is still the streaming
+tail, the contract's own rule: the helper sends no fresh node when the
+streaming ends or a later node is appended, so the one held may be stale."
+  (let* ((state (let ((state (plist-get part :state)))
+                  (if (and (equal state "running")
+                           (not (and agentpane--streaming
+                                     (eql (car key) agentpane--tail-index))))
+                      "ok"
+                    state)))
          (mark (assoc state agentpane--tool-marks))
          (head (concat (if mark
                            (propertize (nth 1 mark) 'face (nth 2 mark))
@@ -1572,8 +1580,8 @@ another buffer holds the ref, since only here is a second holder meant."
   "Show the streaming, compaction and model fields of PARAMS in the mode line,
 and keep the streaming field in `agentpane--streaming'.
 When streaming ends, the last node is redrawn, since it was drawn as the
-pending turn and the helper re-sends no node for the change, and reading
-view's tail status goes."
+pending turn, a tool call with no result on it as running, and the helper
+re-sends no node for the change; and reading view's tail status goes."
   (let ((was agentpane--streaming))
     (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
     (when (and was (not agentpane--streaming) agentpane--ewoc)

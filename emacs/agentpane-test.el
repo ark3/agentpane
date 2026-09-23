@@ -399,6 +399,42 @@ and the node it follows, no longer the last, is redrawn with its own."
                  (agentpane-test--position "— luna")
                  (agentpane-test--position "Five."))))))
 
+(defun agentpane-test--running-tool (index summary)
+  "An assistant node at INDEX whose one part is a `Bash' call running SUMMARY
+with no result yet, as the helper projects it for the streaming tail."
+  (list :index index :role "assistant"
+        :parts (vector (list :type "tool" :name "Bash" :summary summary
+                             :args "" :result "" :state "running"))
+        :meta '(:model "luna" :usage (:totalTokens 1 :cost 0))))
+
+(ert-deftest agentpane-test-running-tool-settles-when-streaming-ends ()
+  "The streaming tail's tool call with no result is drawn running, and once a
+status says the streaming ended it is drawn `ok', though no node is re-sent."
+  (let ((ref '(:backend "pi" :id "s1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming t
+             :nodes (vector (agentpane-test--running-tool 1 "sleep 60"))))
+      (should (string-search "◔ Bash" (agentpane-test--line-at "sleep 60")))
+      (agentpane--on-notification
+       nil 'session/status (list :session ref :isStreaming :json-false))
+      (should-not (string-search "◔" (agentpane-test--line-at "sleep 60")))
+      (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60"))))))
+
+(ert-deftest agentpane-test-appended-node-settles-the-previous-running-tool ()
+  "A node appended while the session streams draws the tool call with no
+result on the node it follows as `ok', since that is no longer the last."
+  (let ((ref '(:backend "pi" :id "s1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--running-tool 3 "sleep 60")))
+      (should (string-search "◔ Bash" (agentpane-test--line-at "sleep 60")))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+      (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60"))))))
+
 (ert-deftest agentpane-test-pending-turn-keeps-its-warning ()
   "The last node of a streaming session still says it ended badly, while
 the facts `showsMeta' governs stay hidden."

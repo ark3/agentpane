@@ -67,7 +67,10 @@
  *   with one. `state` (string) is `"running"` while the session is streaming, the
  *   call's node is the last one, and no result has arrived -- the browser's
  *   own rule; `"error"` when the result reported failure; `"ok"` otherwise,
- *   including a call whose result never arrived in a finished turn. `diff`
+ *   including a call whose result never arrived in a finished turn. The
+ *   state is as of the node's sending: no node is re-sent when streaming
+ *   ends or a later node is appended, so the drawer applies the rule again
+ *   and draws a held `"running"` as `"ok"` once either has happened. `diff`
  *   (array) is present only for a call named `edit` or `write`
  *   (case-insensitive), as `{ type, text }` lines where `type` is `"add"`,
  *   `"del"`, `"ctx"` (unchanged, kept as context), or `"gap"` (a marker
