@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs-native, now]
+closed: done
 ---
 
 # Facts the browser transcript shows that an OW-mutufa node does not carry: timestamps, compaction tokensBefore, tool-result images
@@ -24,3 +25,15 @@ Its fifth item, the two-node `upsert` limit, is not a missing fact and moved to 
 Each of the three facts is in the `protocol.ts` docblock and the projection in `src/emacs/nodes.ts`, with a structural test in `src/emacs/nodes.test.ts` red before the change.
 Each is drawn in `emacs/agentpane.el`, and the `showsMeta` rule applied, with `ert` tests in `emacs/agentpane-test.el` red before the change, that file green as its Commentary says and the pass count in `emacs/agentpane.el`'s Commentary updated.
 `bun run check` passes.
+
+## Close note
+
+Landed as 9050cbe (contract and projection) and a000b72 (drawing) on main.
+Contract, in the `src/emacs/protocol.ts` docblock and types: `timestamp` (epoch ms as the message holds it) on user and assistant nodes and on a `tool` part once its result arrived, omitted when not finite because a preview turn with no recorded time arrives as `NaN` (`previewMessages` in `src/client/preview.ts`); `tokensBefore` on every `compactionSummary` node, 0 when unreported; `images` on a `tool` part as ordinary `image` parts, present only when the result has any.
+Drawing in `emacs/agentpane.el`: the assistant meta line leads with the time in `formatTimestamp`'s shape in Emacs's zone; the user turn's time is the last line inside its box, in the meta face (first cut; the browser puts it on the first block's action row); the compaction header gains `· from 28K tok`; result images are `[image <mime>]` lines after the result text inside the fold.
+The tool part's timestamp is carried and not drawn: OW-gageru draws it.
+`showsMeta` is applied drawer-side, with no contract flag: the meta facts are hidden while the node is the streaming tail (`agentpane--tail-index` with `agentpane--streaming`) or when there is neither model nor tokens, while `stopReason`/`errorMessage` still draw.
+The streaming-off status redraws the last node, and appending a node while streaming redraws the one before.
+That differs from the browser for Claude Code only: the browser keys on `stopReason === "pending"`, which Pi and Codex set, so a live Claude turn shows its meta there and not in Emacs.
+Verified: new structural tests in `src/emacs/nodes.test.ts` and eight new ert tests, each shown red before; ert 54 of 54 with the Commentary count updated, time tests pinned to Asia/Kolkata with `set-time-zone-rule` and also green under UTC and Pacific/Auckland; `bun run check` green (1184 tests).
+Filed from what surfaced: OW-nawela (a tool left `running` after the turn ends) and OW-yaboke (the compaction marker's raw role name).
