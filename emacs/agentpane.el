@@ -279,11 +279,11 @@ that it went only by that kill (docs/MANUAL_TESTING.md, OW-bonode)."
   "The summary plist of the session this transcript buffer shows.")
 
 (defconst agentpane--spawn-timeout 60
-  "Seconds to wait for `sessions/attach' and `sessions/prompt', either of
-which may spawn the session's backend: the prompt route attaches first.
-Other requests whose server route attaches too -- `sessions/forkPoints',
-`sessions/fork' and `sessions/setModel' (src/server/http/app.ts) -- still
-take jsonrpc.el's default.
+  "Seconds to wait for a request that may spawn the session's backend:
+`sessions/attach', and `sessions/prompt', `sessions/forkPoints' and
+`sessions/fork', whose server routes attach first (src/server/http/app.ts).
+`sessions/setModel', whose route attaches too, still takes jsonrpc.el's
+default.
 Past this the reply is discarded even if it comes, so a spawn that ran long
 but succeeded reads as a failure and leaves the buffer unattached though
 its session is live.  jsonrpc.el's default is 10s, and the one attach
@@ -1370,7 +1370,7 @@ lands."
                                (lambda (_) (agentpane--fork-at parent point window failed))
                                t failed))
           (t (agentpane--fork-at parent point window failed)))))
-     t failed)))
+     t failed agentpane--spawn-timeout)))
 
 (defun agentpane--fork-at (parent point window failed)
   "Fork the session PARENT at the fork POINT, and open the fork attached in a
@@ -1392,7 +1392,7 @@ fork fails.  See `agentpane-fork'."
        (if (window-live-p window)
            (set-window-buffer window buffer)
          (pop-to-buffer buffer '(display-buffer-same-window)))))
-   t failed))
+   t failed agentpane--spawn-timeout))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)
