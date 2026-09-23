@@ -25,10 +25,11 @@
  * event to every client, so views Emacs never attached form in the reducer
  * too; notifications go out only for refs Emacs attached through this
  * helper and have not detached or closed since, a set kept here and
- * re-keyed on `renamed`. `sessions/changed` is unfiltered. The hand-rolled reader in `sse.ts` does not retry, so a drop
- * is reopened after `reconnectDelayMs`, and every open after the first
- * emits `sessions/changed`: a listing change while the stream was down is
- * gone (D21).
+ * re-keyed on `renamed`. `sessions/changed` is unfiltered. The hand-rolled
+ * reader in `sse.ts` does not retry, so a drop is reopened after
+ * `reconnectDelayMs`, and every open after the first emits
+ * `sessions/changed`: a listing change while the stream was down is gone
+ * (D21).
  */
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";

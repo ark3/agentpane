@@ -102,7 +102,8 @@
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, whose `ref` is authoritative and may differ from the one
  *   asked for; when it does, a `session/renamed` from the one asked for has
- *   gone out before the reply, from the stream or else from the helper.
+ *   gone out before the reply, from the stream or else from the helper,
+ *   unless a `sessions/detach` for it landed while the attach was in flight.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
