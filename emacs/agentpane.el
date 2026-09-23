@@ -28,7 +28,8 @@
 ;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
 ;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
 ;; refetches, `f' forks at the user message at point into a buffer of its
-;; own, and `q' buries.
+;; own, and `q' buries.  Killing a transcript buffer stops its session's
+;; notifications and leaves the session running on the server.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
@@ -64,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 26 tests, 26 results as expected, 0 unexpected
+;;     Ran 27 tests, 27 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -896,6 +897,7 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   (setq buffer-read-only nil)
   (agentpane--insert-prompt-region)
   (setq-local agentpane--folds (make-hash-table :test #'equal))
+  (add-hook 'kill-buffer-hook #'agentpane--detach nil t)
   (add-to-invisibility-spec '(agentpane . t))
   ;; Proportional prose and word wrap at the window edge; code, tables and
   ;; tool bodies inherit `fixed-pitch', so they stay monospace under the
@@ -1093,6 +1095,27 @@ if it is only a preview; call FAILED instead if that attach fails."
   (if (agentpane--attached-p)
       (funcall fn)
     (agentpane--attach fn failed)))
+
+(defun agentpane--detach ()
+  "Stop the helper sending this buffer's session's notifications, as the
+buffer is killed; the buffer-local `kill-buffer-hook' of a transcript.
+Without this the helper went on sending them after the kill, since only
+`sessions/close' removed a session from its attached set, and a buffer
+reopened from the picker drew them over its preview: a node that arrived
+before the preview's reply signalled on the missing ewoc, and the reopened
+buffer, not attached, took `g' to preview a live session.
+`sessions/detach' rather than `sessions/close', which closes the session
+on the server and lets go of its agent (`SessionManager.close' in
+src/server/http/session-manager.ts): killing a buffer leaves the session
+running, as closing a browser tab does.  An attach still in flight is
+detached too, and the helper keeps its reply from attaching it again.
+Neither holds without a running helper, so a kill never starts one: a
+helper that dies runs every pending request's error handler (jsonrpc.el's
+process sentinel), which clears `agentpane--attaching'."
+  (when (or (agentpane--attached-p) agentpane--attaching)
+    (agentpane--request 'sessions/detach
+                        (list :session (agentpane--ref agentpane--session))
+                        #'ignore t)))
 
 (defvar-local agentpane--composer nil
   "This transcript's composer buffer, once `agentpane-prompt' has made one.")

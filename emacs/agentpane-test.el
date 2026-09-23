@@ -548,6 +548,32 @@ again."
         (agentpane-refetch)
         (should (equal (mapcar #'car sent) '(sessions/preview)))))))
 
+;;;; Killing a transcript buffer, against a stub connection
+
+(ert-deftest agentpane-test-kill-detaches-the-session ()
+  "Killing a transcript buffer whose session is attached, or attaching,
+sends `sessions/detach' for it and nothing else, so the helper stops its
+notifications and the session keeps running; killing a previewed one sends
+nothing."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (kill-buffer buffer)
+          (should-not sent))
+        (agentpane-test--with-session ref
+          (agentpane--attach)
+          (setq sent nil)
+          (kill-buffer buffer)
+          (should (equal sent `((sessions/detach :session ,ref)))))
+        (agentpane-test--with-session ref
+          (setq hold '(sessions/attach))
+          (agentpane--attach)
+          (setq sent nil)
+          (kill-buffer buffer)
+          (should (equal sent `((sessions/detach :session ,ref)))))))))
+
 ;;;; A send that signals, against a stub jsonrpc
 
 (ert-deftest agentpane-test-send-that-signals-frees-the-buffer ()
