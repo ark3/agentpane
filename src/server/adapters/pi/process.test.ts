@@ -721,6 +721,10 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await set;
 
 		const changed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash");
+		const levelsSent = () => h.child.sent().filter((command) => command.type === "set_thinking_level");
+		await flush();
+		// Not before Pi answers: a resend that raced `set_model` would be undone by it.
+		expect(levelsSent()).toHaveLength(1);
 		// Measured on 0.87.1: with `modelThinkingLevels` naming `high` for this
 		// model, `set_model` put the level back to `high`.
 		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
@@ -776,6 +780,21 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(streamed.effort).toBe("low");
 		expect((assistant as AssistantTurn).effort).toBe("low");
 		expect(user).not.toHaveProperty("effort");
+	});
+
+	it("adopts the level get_state reports after a fork", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: PLAIN, thinkingLevel: "off" });
+
+		const forked = h.adapter.fork("e1");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await flush();
+		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "max", isStreaming: false });
+		await flush();
+		h.child.respondTo("get_messages", { messages: [] });
+		await forked;
+
+		expect(h.adapter.getState().effort).toBe("max");
 	});
 
 	it("keeps the level a turn started at when the level changes before it ends", async () => {
