@@ -1675,6 +1675,7 @@ The owner set `defaultProvider: "openrouter"` and `defaultModel: "deepseek/deeps
 The turn above, run after that edit with the file copied in, reported `deepseek/deepseek-v4.1-flash` on the `message_end` and `thinkingLevel: "high"` on `get_state` — so the thinking-level entry does apply to the selected model.
 The catalogue entry for it gives a 1048576-token context window, `maxTokens` 384000, and $0.15/$0.60 per Mtok in/out against Kimi K2.6's $0.95/$4.00.
 Its `thinkingLevelMap` is sparse: only `off`, `high` and `xhigh` map to real values, while `minimal`, `low`, `medium` and `max` are `null`, so `high` is the bottom of this model's usable reasoning range and `medium` does not exist on it.
+That was the catalogue as it stood that day; read again on 2026-09-23 under `pi 0.87.1`, the same entry maps `off`, `low`, `high` and `max`, so `low` is the bottom of the range there and `xhigh` is gone (OW-ruzuhu's section, below).
 
 An earlier turn the same evening, at 22:40 — three minutes before that settings edit — reported `moonshotai/kimi-k2.6` and was billed at Kimi's rates.
 Both readings are correct for their moment, which is the only reason this paragraph is here: a model read off `get_state` is a reading of a mutable file, and it goes stale as soon as the owner edits it.
@@ -2214,6 +2215,7 @@ The first spawn's argv ended `pi --mode rpc --model openrouter/deepseek/deepseek
 This is structural rather than a fluke of the run: `close()` drops the session from the manager's table, so the re-attach takes `#start`'s `!session` branch, which rebuilds the record from the index with `fromStore: true` and no `model` key, and the spawn's `...(bound.model ? { model: bound.model } : {})` then contributes nothing.
 It could not do otherwise as things stand -- `SessionSummary` carries no `model` field, so the store path has no model to restore even if it asked.
 What the resumed process actually ran on is **not** established by this run, and could not have been: `~/.pi/agent/settings.json` held the same model *and* the same `thinkingLevel: high` the flag had asked for, so neither axis could have shown a difference.
+The thinking-level axis was settled later, on `pi 0.87.1`: a resume with `--session` alone keeps the level the session file last recorded over both settings defaults (OW-ruzuhu's section, below); the model axis is still open.
 Pi writes a `model_change` entry into its session file, and whether a resume replays it was not tested; settling this needs a resume whose logged model differs deliberately from the settings default, read back through `get_state`.
 Filed as OW-pubulu.
 Also found on the way, on this version: `POST /api/sessions/:backend/:id/model` accepted `provider/modelId` but rejected the `:thinkingLevel` suffix that `--model` takes, answering 500 with `Model not found: openrouter/deepseek/deepseek-v4.1-flash:high` -- a 400 case surfacing as a 500.
@@ -2509,3 +2511,48 @@ The adapter holds the chosen effort for its own lifetime and resends it on every
 **Not established.**
 A resume on the app-server that still holds the thread, which is what a fork's borrower and a re-attach through the connection registry do, was not tried.
 Nor was a model change mid-conversation without a chosen effort, where the thread's reported effort may not be one the new model lists.
+
+## A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)
+
+Run on the home server 2026-09-23, **`pi 0.87.1`**, from the `card/OW-ruzuhu` worktree cut at `d3f6fe5` with this card's adapter change in its working tree.
+Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 was the same before and after every run, and the throwaway directories were removed.
+Both drivers were throwaway Python scripts, not kept: one spoke LF-framed JSON to `pi --mode rpc` directly, the other drove agentpane's own server.
+
+**Through agentpane, the chosen level reaches Pi before the prompt, and the turn names it.**
+The driver started `bun run start` on port 44291 with a `pi` shim first on `PATH` that `tee`d Pi's stdin and stdout to files, the shape `agentpane_pi_steer_probe.py` uses for stdout alone.
+The process chain under the server was `bun`, `bwrap`, `bwrap`, then the shim's `pi`, `tee` and the real `pi`, so the spawn went through `sbox` as production does.
+It created a Pi session with `model: "openrouter/deepseek/deepseek-v4.1-flash:high"`, the pin, and attached it.
+`GET /api/models?backend=pi` listed 386 models, 302 of them with efforts; the pinned one listed `off`, `low`, `high` and `max` with empty descriptions and `defaultEffort: null`.
+Before any choice the session's effort read `high`, which is what the adapter's startup `get_state` answered.
+`POST .../effort` with `off` answered 204, and the status that followed carried `effort: "off"`.
+The prompt `Do not use any tools. Reply with exactly: ok` answered `ok` with `stopReason: "stop"`, 6189 tokens in and 2 out, $0.00093, and no thinking block.
+The stdin tap reads, in order, `get_state`, `get_available_models`, `set_thinking_level` with `level: "off"`, then `prompt`; the stdout tap carries one `thinking_level_changed` with `level: "off"`.
+The assistant message on the SSE wire carried `model: "deepseek/deepseek-v4.1-flash"`, `provider: "openrouter"` and `effort: "off"`, and the settled status carried `effort: "off"`.
+The session file reads `session`, `model_change`, `thinking_level_change` `high`, `thinking_level_change` `off`, then a `system` message, the user message and the assistant message, so Pi recorded the choice ahead of the turn.
+
+**A resume keeps the level the session file recorded, not the settings default.**
+After `DELETE` stopped agentpane's process, the throwaway `settings.json` was rewritten so that each source named a different level: `modelThinkingLevels` naming `max` for the pinned model and `defaultThinkingLevel: "low"`, against the session's recorded `off`.
+`pi --mode rpc --session <file>`, which is the shape agentpane's resume spawn takes today (OW-pubulu), answered `get_state` with the pinned model at `thinkingLevel: "off"`, and `get_messages` returned all three messages.
+Adding `--model openrouter/deepseek/deepseek-v4.1-flash` without a suffix still read `off`.
+Adding `--model openrouter/deepseek/deepseek-v4.1-flash:high` read `high`: the suffix overrides the level the session recorded, so a resume spawn that carries the pin as written would silently undo a chosen level.
+A fresh session with no flags read `max`, the per-model setting, which shows the rewritten settings file was read at all.
+This agrees with the source: `createAgentSession` in `dist/core/sdk.js` prefers an explicit `thinkingLevel`, then a resumed session's `thinking_level_change`, then `modelThinkingLevels`, then `defaultThinkingLevel`.
+
+**`set_model` puts the level back to the settings default when one exists.**
+This part used the direct driver and drove no turn.
+With the owner's settings copied as they were — `modelThinkingLevels` naming `high` for the pinned model, no `defaultThinkingLevel` — `set_thinking_level` `off` read back `off`, and a `set_model` to the same model then read `high`.
+With `modelThinkingLevels` removed from the copy, the same sequence kept `off` across the `set_model`.
+A `set_model` to `openrouter/anthropic/claude-fable-5`, whose map has no `off`, read `low` in both conditions, and switching back read `high` with the per-model setting and `low` without it.
+Each change arrived as a `thinking_level_changed` event before the command's own response.
+That is `_getThinkingLevelForModelSwitch` in `dist/core/agent-session.js`: the per-model setting, else `defaultThinkingLevel`, else the level in force, then clamped to the new model.
+So the adapter re-sends a chosen level after a model change when the new model lists it (`chosenEffort` in `src/server/adapters/pi/process.ts`).
+
+**What Pi offers per model agrees with what the adapter derives.**
+`get_available_thinking_levels` answered `["off", "low", "high", "max"]` for the pinned model and `["low", "medium", "high", "xhigh", "max"]` for `claude-fable-5`, each equal to what `thinkingLevels` in `src/server/adapters/pi/protocol.ts` derives from the catalogue entry's `reasoning` and `thinkingLevelMap`.
+The pinned model's map is `off: "none"`, `low: "low"`, `high: "high"`, `max: "max"`, with `minimal`, `medium` and `xhigh` null, which differs from the map "Pi arrives on the home server" read on 2026-09-13.
+`set_thinking_level` with `medium`, which that model lacks, answered success and read back `high`: Pi clamps rather than refusing.
+Of the 386 catalogue entries, 84 do not reason; one of those, `openrouter/openai/gpt-5.2-chat`, carries a `thinkingLevelMap` anyway, which Pi ignores for a model that does not reason and so does the adapter.
+
+**Not established.**
+Two commands in flight at once — a `set_thinking_level` written while a `set_model` awaits its auth check — was read at the source and not run.
+Neither run went through the browser or Emacs; both clients read the same listing and status the driver read.
