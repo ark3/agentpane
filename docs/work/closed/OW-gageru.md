@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs-native]
+closed: done
 ---
 
 # A folded tool call in agentpane-mode takes a wrapped header plus a meta line; it should take one screen line carrying its message's meta, with agent-shell's look borrowed for the rest
@@ -54,3 +55,18 @@ New `ert` tests in `emacs/agentpane-test.el`, run as that file's Commentary says
 - a node ending in text still draws its meta on its own line after the text.
 The rest of that file stays green, fold toggling, diff faces and a signature-only thinking part drawing nothing among it, with any test the change breaks updated rather than deleted and the pass count in `emacs/agentpane.el`'s Commentary updated.
 Done when those pass and the first cut of the look is landed, with what it borrowed from `agent-shell` and the first cuts named above in this card's close note.
+
+## Close note
+
+Landed as 397d667 on main; `emacs/agentpane.el` and `emacs/agentpane-test.el` only.
+The one-line rule: a step whose last drawn part is a tool call puts its meta on that header (` · <time> · <model> · <tokens>`), and each tool and thinking header is fitted to one screen line by `agentpane--fit-header`, the summary cut with `…`; unfolding a cut tool shows the whole summary at the head of its body.
+"Last drawn" skips empty text, signature-only thinking and what reading view elides, so with reading on the meta goes on its own line after the surviving text.
+`agentpane--insert-meta` was split into `agentpane--meta-text`, `agentpane--insert-meta` and `agentpane--meta-tail`, keeping OW-fokisa's `showsMeta` rule and OW-janimi's fields.
+First cuts: the measure is `string-pixel-width` under the buffer's face remapping against the narrowest window showing the buffer, less one character; a width change redraws every node after 0.2s idle (`agentpane--refit-on-resize` on buffer-local `window-size-change-functions`); a meta carrying `errorMessage` keeps its own line, as does one that will not fit beside a lone `…`; the tool's result time is the last line of its folded body, where the browser's card draws it.
+Borrowed from `agent-shell` 7377ba8: a status mark before the name (`✓` in a new `agentpane-tool-ok` face, `✗`, `◔` running), the name in `font-lock-doc-markup-face`, `+N −M` in the diff faces, a two-space display-only body indent with blank lines between sections, and `✶ Thinking` as the thinking label.
+Declined: its fold triangles, its boxed file label on diffs, and its blank line after a body, which made shr drop the paragraph break before following text.
+The invisibility ellipsis after a folded header is gone.
+Verified: the card's three tests, a reading-view test and a refit-at-new-width test, each shown red; three existing tests updated for the new header text; ert 65 of 65, byte-compile clean.
+Drawn in batch from stored Claude and Codex sessions: a two-call step now reads `▸ ✓ Bash card workflow; echo… · 2026-09-23 12:04:52 · claude-opus-5-5 · 30K tok` where it took three lines.
+Noted, not filed: at 80 columns a Claude meta takes about 45 characters of the header, and fitting tripled a 49-node batch draw from 21ms to 63ms; both are for the owner's rounds on the look.
+The owner's verdict on the look was dropped as a close condition on 2026-09-23 under the rule in `AGENTS.md`, "Cards".
