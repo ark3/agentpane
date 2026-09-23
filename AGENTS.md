@@ -138,6 +138,12 @@ A card closes once its work is shown to work — tests red first and green after
 So a done-condition names no owner trial, and where an existing card's does, the executor treats that clause as met by the evidence and moves on.
 Set by the owner on 2026-09-23, after OW-motuso's "the owner has used the toggle" held a landed, tested change open and stopped the set.
 
+### Both clients
+
+The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
+A card that adds or changes a user-facing capability lands it in both clients or in neither.
+One that lands it in neither carries the capability onto both wires -- the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts` -- and each client gets its own card blocked by it, the Emacs one labelled `emacs`.
+
 ### Committing a card you authored
 
 Commit it unless the user asks not to.
