@@ -117,6 +117,7 @@ class PublishingController implements AgentpaneController {
 
 	async detach() {}
 	async setModel(_model: string) {}
+	async setEffort(_effort: string) {}
 	async refreshSessions() {}
 	async refreshPreview() {}
 	clearError() {}
@@ -164,6 +165,7 @@ async function mounted(): Promise<PublishingController> {
 		error: null,
 		models: [],
 		modelSetting: false,
+		effortSetting: false,
 		preview: null,
 		forkIndices: null,
 	});

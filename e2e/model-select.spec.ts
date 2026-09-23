@@ -1,7 +1,7 @@
-/** The model picker must fit the composer's busiest empty-conversation action row. */
+/** The model and effort pickers must fit the composer's busiest empty-conversation action row. */
 import { expect, test } from "@playwright/test";
 
-test("the reported model selector stays on the action row without page overflow", async ({ page }) => {
+test("the reported model and effort selectors stay on the action row without page overflow", async ({ page }) => {
 	await page.goto("/e2e/harness.html");
 	await page.getByRole("button", { name: "Attach", exact: true }).click();
 
@@ -10,9 +10,14 @@ test("the reported model selector stays on the action row without page overflow"
 	await expect(model).toHaveValue("harness/default");
 	await model.selectOption("harness/model");
 	await expect(model).toHaveValue("harness/model");
+	const effort = page.getByLabel("Conversation effort");
+	await expect(effort).toHaveValue("medium");
+	await effort.selectOption("high");
+	await expect(effort).toHaveValue("high");
 
 	const controls = [
 		model,
+		effort,
 		page.getByRole("button", { name: "Tools" }),
 		page.getByRole("button", { name: "External Editor" }),
 		page.getByRole("button", { name: "Send" }),

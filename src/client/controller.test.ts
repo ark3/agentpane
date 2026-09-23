@@ -283,6 +283,40 @@ describe("client controller", () => {
 		await selecting;
 	});
 
+	it("sets an exact effort under its own pending flag, not the model's", async () => {
+		const api = new FakeApi();
+		const setting = deferred<void>();
+		api.setEffort.mockReturnValue(setting.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium" });
+		await controller.preview(ref);
+
+		const choosing = controller.setEffort("high");
+		expect(api.setEffort).toHaveBeenCalledWith(ref, "high");
+		expect(controller.getView()).toMatchObject({ effortSetting: true, modelSetting: false });
+		await controller.setEffort("low");
+		expect(api.setEffort).toHaveBeenCalledOnce();
+		setting.resolve();
+		await choosing;
+
+		expect(controller.getView().effortSetting).toBe(false);
+		expect(controller.getView().state.sessions[sessionKey(ref)]?.effort).toBe("medium");
+	});
+
+	it("never sets an effort once the conversation has a message", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium" });
+		await controller.preview(ref);
+
+		await controller.setEffort("high");
+
+		expect(api.setEffort).not.toHaveBeenCalled();
+		expect(controller.getView().effortSetting).toBe(false);
+	});
+
 	it("connects SSE and loads summaries when started", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

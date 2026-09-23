@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	sessionKey,
 	type BackendId,
+	type ModelInfo,
 	type ServerEvent,
 	type SessionPreviewTurn,
 	type SessionRef,
@@ -63,6 +64,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		error: null,
 		models: [],
 		modelSetting: false,
+		effortSetting: false,
 		preview: null,
 		forkIndices: null,
 		...overrides,
@@ -108,6 +110,7 @@ class FakeController implements AgentpaneController {
 	compacted = 0;
 	detached = 0;
 	modelSets: string[] = [];
+	effortSets: string[] = [];
 	externalEdits: string[] = [];
 	externalEditResult = "edited externally";
 	clearErrorCalls = 0;
@@ -225,6 +228,13 @@ class FakeController implements AgentpaneController {
 		this.publish({ ...this.current, modelSetting: true });
 		await Promise.resolve();
 		this.publish({ ...this.current, modelSetting: false });
+	}
+
+	async setEffort(effort: string) {
+		this.effortSets.push(effort);
+		this.publish({ ...this.current, effortSetting: true });
+		await Promise.resolve();
+		this.publish({ ...this.current, effortSetting: false });
 	}
 
 	async editDraft() {
@@ -449,6 +459,113 @@ describe("App", () => {
 
 		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
 		expect(screen.getByText("backend/reported")).toHaveClass("model-label");
+	});
+
+	const effortModels: ModelInfo[] = [
+		{
+			id: "opaque/current",
+			label: "Current Model",
+			efforts: [{ id: "low", description: "Fast" }, { id: "medium", description: "Balanced" }, { id: "high", description: "Deep" }],
+			defaultEffort: "medium",
+		},
+		{ id: "opaque/next", label: "Next Model", efforts: [{ id: "minimal", description: "Least" }, { id: "xhigh", description: "Most" }], defaultEffort: "xhigh" },
+		{ id: "opaque/flat", label: "Flat Model", efforts: [], defaultEffort: null },
+	];
+
+	function effortOptions(): string[] {
+		return within(screen.getByLabelText("Conversation effort")).getAllByRole("option").map((option) => (option as HTMLOptionElement).value);
+	}
+
+	it("offers the selected model's efforts in an empty conversation, on the one in force", () => {
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		})) } });
+
+		expect(effortOptions()).toEqual(["low", "medium", "high"]);
+		expect(screen.getByLabelText("Conversation effort")).toHaveValue("high");
+	});
+
+	it("shows the model's default effort when the session reports none", () => {
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		})) } });
+
+		expect(screen.getByLabelText("Conversation effort")).toHaveValue("medium");
+	});
+
+	it("follows a model change to the new model's efforts", async () => {
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		}));
+		render(App, { props: { controller } });
+
+		controller.publish(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: { ...session, model: "opaque/next", effort: "xhigh", seq: 2 } } }),
+		}));
+		await tick();
+
+		expect(effortOptions()).toEqual(["minimal", "xhigh"]);
+		expect(screen.getByLabelText("Conversation effort")).toHaveValue("xhigh");
+	});
+
+	it("requests an exact effort and waits for server status before changing the select", async () => {
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		const controller = new FakeController(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		}));
+		render(App, { props: { controller } });
+
+		await fireEvent.change(screen.getByLabelText("Conversation effort"), { target: { value: "high" } });
+
+		expect(controller.effortSets).toEqual(["high"]);
+		expect(controller.modelSets).toEqual([]);
+		expect(screen.getByLabelText("Conversation effort")).toHaveValue("medium");
+	});
+
+	it("disables only the effort select while its request is in flight", () => {
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			effortSetting: true,
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		})) } });
+
+		expect(screen.getByLabelText("Conversation effort")).toBeDisabled();
+		expect(screen.getByLabelText("Conversation model")).toBeEnabled();
+	});
+
+	it("drops the effort select once the conversation has a turn, with no label in its place", () => {
+		const session = { ref: codexSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			models: effortModels,
+			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
+		})) } });
+
+		expect(screen.queryByLabelText("Conversation effort")).not.toBeInTheDocument();
+		expect(document.querySelector(".prompt-actions")).not.toHaveTextContent("high");
+	});
+
+	it.each([
+		["a model with no efforts", "opaque/flat"],
+		["a model the list does not name", "opaque/unlisted"],
+		["no reported model", null],
+	])("shows no effort select for %s", (_name, model) => {
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model, seq: 1, error: null, requests: [] };
+		render(App, { props: { controller: new FakeController(view({
+			models: effortModels,
+			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
+		})) } });
+
+		expect(screen.getByLabelText("Conversation model")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Conversation effort")).not.toBeInTheDocument();
 	});
 
 	it("offers system, light, and dark themes and writes the resolved theme on the document", async () => {

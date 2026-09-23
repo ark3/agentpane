@@ -45,6 +45,7 @@
 		error: null,
 		models: [],
 		modelSetting: false,
+		effortSetting: false,
 		preview: null,
 		forkIndices: null,
 	});
@@ -80,6 +81,13 @@
 		// The request changes no client model state. Put the DOM back on the
 		// server-reported value until the adapter's status event accepts it.
 		select.value = selectedSession?.model ?? "";
+	}
+
+	function chooseEffort(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		void controller.setEffort(select.value);
+		// As for the model: the status event, not this change, moves the value.
+		select.value = selectedEffort ?? "";
 	}
 	/**
 	 * Reading view (OW-51): elide the tool chrome so the prose can be read back
@@ -195,6 +203,10 @@
 			? "Backend default"
 			: (view.models.find((option) => option.id === selectedSession.model)?.label ?? selectedSession.model),
 	);
+	/** Efforts are per model (OW-kokalo): a model the list does not name offers none, and none offered shows no select. */
+	const selectedModelInfo = $derived(view.models.find((option) => option.id === selectedSession?.model));
+	const selectedEfforts = $derived(selectedModelInfo?.efforts ?? []);
+	const selectedEffort = $derived(selectedSession?.effort ?? selectedModelInfo?.defaultEffort ?? null);
 	/**
 	 * Most-recently-updated first -- the ordering cue the list otherwise has none of.
 	 *
@@ -1398,6 +1410,20 @@
 						{/each}
 					</select>
 					{/key}
+					{#if selectedEfforts.length > 0}
+					{#key `${selectedSession.model} ${selectedEffort}`}
+					<select aria-label="Conversation effort" value={selectedEffort ?? ""} onchange={chooseEffort} disabled={view.effortSetting}>
+						{#if selectedEffort === null}
+							<option value="">Backend default</option>
+						{:else if !selectedEfforts.some((option) => option.id === selectedEffort)}
+							<option value={selectedEffort}>{selectedEffort}</option>
+						{/if}
+						{#each selectedEfforts as effort (effort.id)}
+							<option value={effort.id} title={effort.description}>{effort.id}</option>
+						{/each}
+					</select>
+					{/key}
+					{/if}
 				{:else if selectedSession}
 					<span class="model-label">{selectedModelLabel}</span>
 				{/if}

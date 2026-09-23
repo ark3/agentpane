@@ -80,6 +80,12 @@ function paragraphs(seed: number, count: number): string {
 let seq = 0;
 let messages: AgentMessage[] = [];
 let model = "harness/default";
+let effort: string | null = null;
+const HARNESS_EFFORTS = [
+	{ id: "low", description: "Low" },
+	{ id: "medium", description: "Medium" },
+	{ id: "high", description: "High" },
+];
 let handlers: EventHandlers | undefined;
 /** Resolves when the in-flight turn emits its `status:false`. */
 let turnSettled: Promise<void> = Promise.resolve();
@@ -93,7 +99,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort: null });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -105,7 +111,7 @@ function upsert(index: number, message: AgentMessage): void {
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort: null });
+	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort });
 }
 
 function summary(): SessionSummary {
@@ -215,21 +221,24 @@ const api: AgentpaneApi = {
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {
 			seq += 1;
-			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort: null });
+			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort });
 		});
 	},
 	async close() {},
 	async listModels() {
 		return [
-			{ id: "harness/default", label: "Harness Default", efforts: [], defaultEffort: null },
-			{ id: "harness/model", label: "Harness Model", efforts: [], defaultEffort: null },
+			{ id: "harness/default", label: "Harness Default", efforts: HARNESS_EFFORTS, defaultEffort: "medium" },
+			{ id: "harness/model", label: "Harness Model", efforts: HARNESS_EFFORTS, defaultEffort: "medium" },
 		];
 	},
 	async setModel(_ref, next) {
 		model = next;
 		queueMicrotask(() => status(false));
 	},
-	async setEffort() {},
+	async setEffort(_ref, next) {
+		effort = next;
+		queueMicrotask(() => status(false));
+	},
 	/**
 	 * One point per user message, each naming that message's transcript index
 	 * (OW-roveze) -- the Pi shape, and the one a backend answers with when every

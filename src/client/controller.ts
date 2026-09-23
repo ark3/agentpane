@@ -43,6 +43,8 @@ export interface ControllerView {
 	models: ModelInfo[];
 	/** Only the picker is disabled while this request is in flight. */
 	modelSetting: boolean;
+	/** The effort select's own flag, as `modelSetting` is the model picker's. */
+	effortSetting: boolean;
 	/**
 	 * Read-only transcript of the selected session (OW-39), when it is being
 	 * *previewed* rather than attached. Null once the session is attached (a
@@ -155,6 +157,7 @@ export interface AgentpaneController {
 	 */
 	detach(): Promise<void>;
 	setModel(model: string): Promise<void>;
+	setEffort(effort: string): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
 	refreshSessions(): Promise<void>;
 	/**
@@ -204,6 +207,7 @@ export function createController(
 		error: null,
 		models: [],
 		modelSetting: false,
+		effortSetting: false,
 		preview: null,
 		forkIndices: null,
 	};
@@ -215,6 +219,7 @@ export function createController(
 	let selectionIntent = 0;
 	let modelLoadStartedForSelection: number | null = null;
 	const pendingModelSets = new Set<string>();
+	const pendingEffortSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
 	/** Whether the event stream has ever been up: every open after the first is a reconnect. */
 	let opened = false;
@@ -339,6 +344,10 @@ export function createController(
 
 	function modelSettingForSession(ref: SessionRef | null): boolean {
 		return ref !== null && pendingModelSets.has(sessionKey(ref));
+	}
+
+	function effortSettingForSession(ref: SessionRef | null): boolean {
+		return ref !== null && pendingEffortSets.has(sessionKey(ref));
 	}
 
 	async function loadModelsForSelected(intent: number): Promise<void> {
@@ -564,12 +573,12 @@ export function createController(
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
-		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref) });
+		publish({ busy: "attaching", error: null, models: [], forkIndices: null, modelSetting: modelSettingForSession(ref), effortSetting: effortSettingForSession(ref) });
 		try {
 			const attached = await api.attach(ref);
 			if (!disposed && intent === selectionIntent) {
 				applyAttached(attached, true, ref);
-				publish({ modelSetting: modelSettingForSession(view.state.selected) });
+				publish({ modelSetting: modelSettingForSession(view.state.selected), effortSetting: effortSettingForSession(view.state.selected) });
 				await loadModelsForSelected(intent);
 			} else if (!disposed) {
 				// An older attach is still useful list state, but it no longer owns
@@ -728,6 +737,7 @@ export function createController(
 					error: null,
 					models: [],
 					modelSetting: modelSettingForSession(ref),
+					effortSetting: effortSettingForSession(ref),
 				});
 				await loadModelsForSelected(intent);
 				return;
@@ -790,6 +800,30 @@ export function createController(
 				renameListeners.delete(onRename);
 				pendingModelSets.delete(key);
 				if (!disposed) publish({ modelSetting: modelSettingForSession(view.state.selected) });
+			}
+		},
+		async setEffort(effort) {
+			const selected = view.state.selected;
+			if (!selected || effortSettingForSession(selected) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
+			let key = sessionKey(selected);
+			const onRename = (from: SessionRef, to: SessionRef) => {
+				if (sessionKey(from) !== key) return;
+				pendingEffortSets.delete(key);
+				key = sessionKey(to);
+				pendingEffortSets.add(key);
+			};
+			renameListeners.add(onRename);
+			pendingEffortSets.add(key);
+			publish({ effortSetting: true, error: null });
+			try {
+				await api.setEffort(selected, effort);
+			} catch (error: unknown) {
+				const current = view.state.selected;
+				if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+			} finally {
+				renameListeners.delete(onRename);
+				pendingEffortSets.delete(key);
+				if (!disposed) publish({ effortSetting: effortSettingForSession(view.state.selected) });
 			}
 		},
 		async submit() {
