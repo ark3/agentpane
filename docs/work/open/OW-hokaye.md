@@ -5,7 +5,8 @@ blocked-by: [OW-kokalo]
 
 # Claude Code conversations get the effort picker, once a live run shows how claude 2.1.280 takes an effort level
 
-OW-kokalo lands the effort contract, the client control and Codex; this card fills in Claude Code against that contract.
+OW-kokalo lands the effort contract on both wires, the HTTP API and the Emacs helper's JSON-RPC, with Codex behind it and no client UI; OW-kivahe and OW-vozaku are the browser and Emacs controls.
+This card fills in Claude Code's adapter, so both clients offer Claude Code effort without either changing.
 
 ## Leads, unmeasured
 
@@ -35,7 +36,7 @@ Record the run in `docs/MANUAL_TESTING.md` with the CLI version.
 
 - The process is already running when the picker is shown -- `listModels` needs it -- so a control request is the natural path.
   If the measurement shows none works, `--effort` at spawn is the fallback, and the card then says how the running process is replaced before the first prompt.
-- The footer shows the chosen effort on Claude Code's assistant turns, as it does for Codex.
+- The chosen effort is stamped on Claude Code's assistant turns, so the browser's footer and the Emacs meta line both show it, as they do for Codex's.
 - What a `--resume` spawn runs at is stated in the adapter's docblock, whatever the answer; OW-pubulu is the model's twin of that question.
 
 ## Done when

@@ -5,7 +5,8 @@ blocked-by: [OW-kokalo]
 
 # Pi conversations get the effort picker, set through set_thinking_level before the first prompt
 
-OW-kokalo lands the effort contract, the client control and Codex; this card fills in Pi against that contract.
+OW-kokalo lands the effort contract on both wires, the HTTP API and the Emacs helper's JSON-RPC, with Codex behind it and no client UI; OW-kivahe and OW-vozaku are the browser and Emacs controls.
+This card fills in Pi's adapter, so both clients offer Pi effort without either changing.
 
 ## What Pi offers
 
@@ -28,7 +29,7 @@ These come from Pi's docs, not a live run.
   The implementer picks, and the close note says which and why.
 - Whether `set_model` resets the thinking level is unmeasured; the answer decides whether the adapter re-asserts the effort after a model change, so measure it.
 - Pi's assistant turns carry no effort today: OW-61 made the footer's effort Codex-only on the claim "Pi's RPC protocol exposes no corresponding field", which the docs above refute.
-  Stamp the chosen level onto Pi's assistant turns so the footer shows it, as Codex's does.
+  Stamp the chosen level onto Pi's assistant turns so the browser's footer and the Emacs meta line both show it, as they do for Codex's.
 - What a resumed Pi session runs at: the session file carries `thinking_level_change`, but OW-pubulu found the resume spawn passes no `--model`, and `~/.pi/agent/settings.json` carries its own `thinkingLevel`.
   OW-pubulu's method settles it -- set a deliberately different default, resume, read `get_state` back.
   Whatever the answer, record it in OW-pubulu as well as in the adapter's docblock.

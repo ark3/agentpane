@@ -2,25 +2,23 @@
 labels: [change]
 ---
 
-# A conversation's reasoning effort can be chosen beside its model before the first prompt, Codex first
+# A conversation's reasoning effort can be set before the first prompt over both wires, Codex first
 
-The conversation header's model picker has no effort companion, so a conversation runs at whatever effort the backend defaults to, and the footer merely reports it (OW-61).
+A conversation runs at whatever effort the backend defaults to, and the footer merely reports it (OW-61).
 The owner wants to choose effort the way they choose the model today: before the first prompt only, fixed after it.
 Every backend can switch effort mid-conversation, but that is out of scope; a later card lifts the gate if use asks for it.
 
-This card lands the shared contract, the client control, and Codex.
-Pi and Claude Code follow in their own cards, built against the contract this one lands.
+This card lands the capability with no client UI: the shared contract, both wires, and Codex.
+Per `AGENTS.md`, "Both clients", each client gets its own card blocked by this one, and Pi and Claude Code fill in their adapters in their own cards.
 
-## Where the model picker already lives
+## Where the model's equivalent already lives
 
-- `src/client/App.svelte`: the `select` labelled "Conversation model", and `chooseModel`.
-- `src/client/controller.ts`: `setModel`, whose gate returns early once the selected session has any messages; `pendingModelSets`; `loadModelsForSelected`.
-- `src/server/http/app.ts`: `sessionAction`'s `case "model"`, and `listModels`.
 - `src/shared/protocol.ts`: `SetModelRequest`, `ModelInfo`, `ModelsResponse`, and the `status` event, which carries `model`.
+- `src/server/http/app.ts`: `sessionAction`'s `case "model"`, and `listModels`.
 - `src/server/adapters/types.ts`: `setModel`, `listModels`, and the state's `model`.
+- `src/emacs/protocol.ts`: `models/list`, `sessions/setModel`, and `session/status`; their handlers in `src/emacs/helper.ts`, and the round trip pinned in `src/emacs/helper.test.ts`.
 
-Follow that picker's shape rather than inventing a second one: an effort select beside it, gated the same way, with its own pending state.
-`emacs/agentpane.el`'s `agentpane-set-model` mirrors the same gate for the Emacs client, which is out of scope here.
+Follow the model's shape rather than inventing a second one.
 
 ## Codex
 
@@ -34,22 +32,23 @@ These are types, not a live measurement; the live run below confirms them.
 
 ## Load-bearing
 
-- Effort options are per model: the list the control offers follows the selected model, and choosing a model whose list lacks the current effort falls back to that model's default rather than sending an unsupported value.
-- A backend or model with no effort options shows no effort control at all -- the state Pi and Claude Code stay in until their cards land.
-- The footer's effort (`turn.effort` in `src/client/render/Message.svelte`) must name the effort the turn actually ran at.
-  Today the Codex reducer's `identity.effort` is set only from the `thread/start` and `thread/resume` responses (`setIdentity` in `src/server/adapters/codex/reducer.ts`), so an effort overridden on `turn/start` would leave the footer naming the old one -- the effort twin of OW-9.
+- Effort options are per model, so each model's list and default reach both wires, and a client can follow a model change without guessing.
+- A model whose effort is set and then changed to one whose list lacks that effort falls back to the new model's default rather than sending an unsupported value.
+- A backend or model with no effort options says so on the wire, so a client can show no control at all -- the state Pi and Claude Code stay in until their cards land.
+- The turn's `effort` (`AssistantTurn` in `src/shared/protocol.ts`, which the browser's footer and the Emacs meta line both print) must name the effort the turn actually ran at.
+  Today the Codex reducer's `identity.effort` is set only from the `thread/start` and `thread/resume` responses (`setIdentity` in `src/server/adapters/codex/reducer.ts`), so an effort overridden on `turn/start` would leave both clients naming the old one -- the effort twin of OW-9.
 - What a resumed Codex thread runs at is unmeasured: OW-pubulu found a resumed Pi spawn drops its model, and whether an effort overridden on `turn/start` survives `thread/resume` has never been read.
   Whatever the answer, state it in the adapter's docblock beside the effort field.
 
 ## Incidental
 
-The protocol's shape -- a route beside `/model`, a widened `SetModelRequest`, new `ModelInfo` fields -- and the select's label and default option.
+The contract's shape -- a route beside `/model`, a widened `SetModelRequest`, new `ModelInfo` fields -- and the JSON-RPC method's name.
 It is a first cut, to be iterated from use.
 
 ## Done when
 
 - A Codex adapter test asserts `turn/start` carries the chosen `effort`, shown red first.
-- A test asserts the footer's effort names the chosen effort after the first turn, shown red first.
-- A client test shows the effort select offering the selected model's list, following a model change, disabled after the first prompt, and absent for a backend with no options.
+- A test asserts the turn's `effort` names the chosen effort after the first turn, shown red first.
+- A server test sets effort over HTTP and reads the model list with its effort options back; `src/emacs/helper.test.ts` pins the same round trip over JSON-RPC.
 - One live Codex turn on the home server, driven through agentpane with the model pinned to `gpt-5.6-luna` per `AGENTS.md`, at a non-default effort, is recorded in `docs/MANUAL_TESTING.md` with the `codex-cli` version and where the effort was read back from.
 - `bun run check` passes.
