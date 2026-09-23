@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, emacs-native]
+closed: done
 ---
 
 # agentpane-fork from a previewed buffer matches a stored-transcript index against the live adapter's fork points, which can name a different message
@@ -20,3 +21,18 @@ Whichever way the decision below goes, the requests that may spawn take `agentpa
 The decision this card gates is whether `f` on a previewed buffer attaches and redraws first, refuses as the browser does, or trusts the indices; record it in `agentpane-fork`'s docstring.
 
 Done when an ert test on a previewed buffer whose stored and live indices differ shows `agentpane-fork` not forking at the wrong message, red before the change.
+
+## Close note
+
+Landed on main as the two OW-gekiki commits after 4d6ff8c, in `emacs/agentpane.el` and `emacs/agentpane-test.el`.
+
+Decision, recorded in `agentpane-fork`'s docstring: `f` on a buffer that is not attached attaches it and forks nothing; the attach's snapshot redraws it from the live transcript, and the echo area then says "the transcript now shows the live session; press f again at the message to fork".
+Trusting the indices was rejected because the stored and live projections can differ (Pi's preview drops entries `get_messages` keeps; Codex's disagreement was OW-buligi's, fixed the same day); refusing as the browser does was rejected because Emacs has no attach-only command, so a previewed session could not be forked short of prompting it.
+This also covers a Pi fork's parent, which is left detached and drawn from the store.
+While that attach is in flight `f` is a user-error that sends nothing; on an attached buffer `f` forks as before (now `agentpane--fork-points`).
+`sessions/forkPoints` and `sessions/fork` now take `agentpane--spawn-timeout`.
+Known gap, in the docstring: the attach reply and its snapshot are unordered (D2), so a press in the instant between them would still read stored indices.
+
+Verified by ert, 37/37 on Emacs 31.1; `agentpane-test-fork-on-a-preview-attaches-first` (a Pi preview whose stored index 0 is live `entry-custom`) was red with the old code forking at `entry-custom`, and `agentpane-test-fork-while-attaching-sends-nothing` was red with no refusal.
+Six existing fork tests were set up on buffers that did not count as attached (no running connection bound); their setup is now attached through `agentpane-test--with-helper`, with no assertion weakened.
+Not run live.
