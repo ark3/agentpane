@@ -66,7 +66,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 41 tests, 41 results as expected, 0 unexpected
+;;     Ran 43 tests, 43 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1073,14 +1073,60 @@ One buffer per session ref, named after the backend and the summary's preview."
 (defun agentpane--rekey (ref)
   "Make this buffer hold the session REF, renaming it, and its composer if
 it has one, to match.
-For a `session/renamed', and for an attach whose reply names another ref."
+For a `session/renamed', and for an attach whose reply names another ref.
+
+Should another buffer already hold REF, as one the picker opened on the
+canonical ref while this one previewed a virtual ref does, the two merge
+into this one, and the other is killed: two buffers for one session left
+notifications reaching only whichever came first in `buffer-list'
+\(OW-jafini).  This one survives because it is the one attached, and its
+own callbacks are running: the attach reply that rekeys it goes on to call
+its waiters, a prompt among them, in this buffer.  The other's
+prompt-region draft follows this one's own, and its composer, if any,
+sends here from then on, and is this buffer's composer if it has none.
+Should this buffer have a prompt in flight, its answer then leaves the
+sent text in place rather than clearing it, as it does whenever the
+region changed after the send.  Requests of the other's still in flight
+are dropped with it, as any killed buffer's are; a prompt of its own that
+went out leaves its text in this buffer's draft.  A window that showed
+the other shows this one, and the other's kill sends no
+`sessions/detach', which would silence the session this one now holds."
   (unless (agentpane--same-ref-p ref (agentpane--ref agentpane--session))
-    (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
+    (let ((other (agentpane--buffer-for ref)))
+      (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
+      (when other (agentpane--absorb other)))
     (rename-buffer (agentpane--buffer-name agentpane--session) t)
     (when (buffer-live-p agentpane--composer)
       (let ((name (agentpane--composer-name)))
         (with-current-buffer agentpane--composer
           (rename-buffer name t))))))
+
+(defvar agentpane--composer-transcript)
+
+(defun agentpane--absorb (other)
+  "Take the transcript buffer OTHER's draft, composer and windows into this
+buffer, then kill OTHER without detaching.  See `agentpane--rekey'.
+The detach is disarmed for this kill alone, rather than skipped whenever
+another buffer holds the ref, since only here is a second holder meant."
+  (let ((buffer (current-buffer))
+        (draft (with-current-buffer other
+                 (buffer-substring-no-properties agentpane--prompt-start (point-max))))
+        (composer (buffer-local-value 'agentpane--composer other)))
+    (unless (string-empty-p draft)
+      (save-excursion
+        (goto-char (point-max))
+        (unless (= (point) agentpane--prompt-start) (insert "\n"))
+        (insert draft)))
+    (when (buffer-live-p composer)
+      (with-current-buffer composer
+        (setq agentpane--composer-transcript buffer))
+      (unless (buffer-live-p agentpane--composer)
+        (setq agentpane--composer composer)))
+    (dolist (window (get-buffer-window-list other nil t))
+      (set-window-buffer window buffer))
+    (with-current-buffer other
+      (remove-hook 'kill-buffer-hook #'agentpane--detach t))
+    (kill-buffer other)))
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")

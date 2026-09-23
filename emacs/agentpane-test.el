@@ -184,6 +184,59 @@ the last, above the prompt region."
                              (format "*agentpane composer: %s*" (buffer-name)))))
           (kill-buffer composer))))))
 
+(defun agentpane-test--holders (ref)
+  "The live buffers holding the session REF."
+  (seq-filter (lambda (buffer)
+                (let ((held (buffer-local-value 'agentpane--session buffer)))
+                  (and held (agentpane--same-ref-p (agentpane--ref held) ref))))
+              (buffer-list)))
+
+(ert-deftest agentpane-test-renamed-onto-a-held-ref-leaves-one-buffer ()
+  "A `session/renamed' onto the ref another transcript buffer already holds
+leaves exactly one buffer holding it: the renamed one, which hears the
+session.  The other is killed without detaching the session, and a window
+that showed it shows the survivor."
+  (let ((from '(:backend "claude" :id "pending-1"))
+        (to '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (let ((renamed (agentpane--transcript-buffer (list :ref from)))
+              (other (agentpane--transcript-buffer (list :ref to))))
+          (delete-other-windows)
+          (switch-to-buffer other)
+          (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+          (should (equal (agentpane-test--holders to) (list renamed)))
+          (should-not sent)
+          (should (eq (window-buffer (selected-window)) renamed)))))))
+
+(ert-deftest agentpane-test-renamed-onto-a-held-ref-keeps-drafts ()
+  "When a `session/renamed' merges the buffer already holding the new ref
+into the renamed one, the other's prompt-region draft follows the renamed
+one's own, and the other's composer, text and all, sends to the survivor."
+  (let ((from '(:backend "claude" :id "pending-1"))
+        (to '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (let ((renamed (agentpane--transcript-buffer (list :ref from)))
+            (other (agentpane--transcript-buffer (list :ref to)))
+            composer)
+        (with-current-buffer renamed
+          (goto-char (point-max))
+          (insert "mine"))
+        (with-current-buffer other
+          (goto-char (point-max))
+          (insert "theirs")
+          (save-current-buffer (agentpane-prompt))
+          (setq composer agentpane--composer))
+        (with-current-buffer composer (insert "composed"))
+        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+        (with-current-buffer renamed
+          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                         "mine\ntheirs"))
+          (should (eq agentpane--composer composer)))
+        (with-current-buffer composer
+          (should (eq (agentpane--transcript) renamed))
+          (should (equal (buffer-string) "composed")))))))
+
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
 same distance from the end, and that of any other window where it was."
