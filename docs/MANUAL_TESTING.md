@@ -2556,3 +2556,54 @@ Of the 386 catalogue entries, 84 do not reason; one of those, `openrouter/openai
 **Not established.**
 Two commands in flight at once — a `set_thinking_level` written while a `set_model` awaits its auth check — was read at the source and not run.
 Neither run went through the browser or Emacs; both clients read the same listing and status the driver read.
+
+## A Claude Code turn at a chosen effort, what `set_model` does to it, and what a resume keeps (OW-hokaye)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-hokaye` worktree cut at `3b62559`.
+Every child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p ...` with the worktree as `cwd`, and with every `CLAUDE*` variable and `AI_AGENT` removed from its environment, because the session driving the probes exported `CLAUDE_EFFORT=high` and a child's Bash tool could otherwise have echoed that back.
+All drivers were throwaway scripts, not kept: a Python one speaking stream-json control requests to the CLI directly, and a Bun one driving `ClaudeAdapter` itself.
+The `initialize` response carries the operator's account details; nothing below records them, and no response was saved.
+The owner's `~/.claude/settings.json` names no `effortLevel`, and its `modelSettings` names `medium` for `claude-opus-5` and `high` for `claude-opus-5-5`; its sha256 was the same after the control-request runs as before.
+
+**What `initialize` offers.**
+Spawned with `--model sonnet` and sent `initialize` with no turn, the model entries `default` and `opus[1m]` (both resolving to `claude-opus-5-5[1m]`), `claude-fable-5-1[1m]` and `sonnet` (resolving to `claude-sonnet-5`) each carried `supportsEffort: true` and `supportedEffortLevels` of `low`, `medium`, `high`, `xhigh` and `max`.
+`haiku`, resolving to `claude-haiku-4-5-20251001`, carried neither field.
+No entry names a default level, so the adapter lists `defaultEffort: null`; the same measurement was made earlier that day spawned with `--model haiku`, with the same entries.
+
+**Control requests, no turn.**
+`get_settings` answered with `effective`, `sources` and `applied`, and `applied.effort` read `high` on `sonnet` before anything was chosen, which is the CLI's own pick, since no settings source names one for that model.
+`apply_flag_settings` with `settings: { effortLevel: "low" }` answered success with no payload, and `applied.effort` then read `low`, with `effortLevel: "low"` appearing in `effective` and in a flag-settings entry of `sources`.
+`set_model` to `haiku` then read `applied.effort: null` with the flag entry still holding `low`, and `set_model` back to `sonnet` read `low` again.
+`apply_flag_settings` with `max` read `max`, and `max` did not appear in `effective` or `sources`, consistent with the SDK's typing of `max` as session-scoped (`@anthropic-ai/claude-agent-sdk` 0.3.246).
+`apply_flag_settings` with `effortLevel: "bogus"` answered success and changed nothing: `applied.effort` still read `max`.
+`apply_flag_settings` with `effortLevel: null` cleared the choice and `applied.effort` read `high` again.
+Spawned instead with `--effort low`, `applied.effort` read `low` at once.
+Spawned with `--model haiku`, `applied.effort` read `null`; `apply_flag_settings` with `low` answered success and still read `null`, and a `set_model` to `sonnet` then read `low`.
+So the control channel works on the process the picker already needs, and the adapter uses it: `setEffort` sends `apply_flag_settings`, and the effort in force is always what `get_settings` reads back, never the request echoed (`src/server/adapters/claude/adapter.ts`, module doc).
+
+**What a resume and a fork run at, no turn.**
+The owner's own session `00a72d03-...`, whose 172 assistant store lines all record `effort: "max"` on `claude-opus-5-5`, was copied into the worktree's project directory and resumed from the worktree, so the original was never opened for writing.
+`--resume` with `--model claude-opus-5-5` read `applied.effort: high`, as did `--resume` without `--model`, `--resume` with `--model sonnet`, a `--resume ... --fork-session --session-id <new>` spawn, and a fresh spawn on `claude-opus-5-5` for comparison.
+`get_context_usage` on the resumed process reported 246379 tokens in context, so the resume had loaded the conversation.
+Even with no turn, a plain `--resume` appended a `mode` line and a `cost-state` line to the store file on exit, which is why the copy, not the original, was resumed; the copy was deleted afterwards.
+
+**Through agentpane, one turn on Sonnet at `low`.**
+This is the one Sonnet turn the owner granted for this card; every other spawn above drove no turn.
+The Bun driver constructed `ClaudeAdapter` with a spawner that wrapped the production `spawnClaude` and kept a copy of every stdout line, and started it with `model: "sonnet"`.
+After `start()`, `getState().effort` read `high`, from the adapter's own `get_settings`.
+`listModels()` listed `sonnet` with the five levels, empty descriptions and `defaultEffort: null`.
+`setEffort("low")` sent `apply_flag_settings`, and the adapter's read-back `get_settings` answered `applied.effort: "low"`, which `getState().effort` then reported.
+The prompt asked the model to run `echo "CLAUDE_EFFORT=$CLAUDE_EFFORT"` with the Bash tool and reply with the line it printed.
+The turn made one Bash call, whose tool result read `CLAUDE_EFFORT=low`, and replied `CLAUDE_EFFORT=low`; the `result` was `success` at $0.11, with `claude-sonnet-5` the only model in its `modelUsage`.
+Both assistant messages in the adapter's state carried `model: "claude-sonnet-5"` and `effort: "low"`, the second with `stopReason: "stop"`.
+The store file's two assistant lines each recorded `version: "2.1.280"`, `model: "claude-sonnet-5"`, `effort: "low"` and `perTurnEffort: null`.
+So `low` was read back from three places the adapter does not write: `get_settings`'s `applied.effort`, the `CLAUDE_EFFORT` the CLI exported to its own Bash tool, and the store's `effort` field.
+Neither the `system` `init` event nor the `assistant` events on the stream carried any effort field, which is why the adapter names a live turn with the effort in force at submit rather than reading it off the wire.
+
+**A resume of that session runs at the default.**
+After the adapter was disposed, a second `ClaudeAdapter` started on the same session with `resumeId` and `model: "sonnet"`, no turn.
+Its `get_settings` read `applied.effort: "high"`, so the chosen `low` did not survive the process, while the two hydrated assistant messages carried `effort: "low"` from their store lines.
+
+**Not established.**
+Whether `perTurnEffort` ever differs from `effort` on a store line: the owner's sessions carry both equal, and this run's carried `null` beside `low`.
+Neither run went through the browser or Emacs; both clients read the same listing and status the driver read.
