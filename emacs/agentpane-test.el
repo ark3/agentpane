@@ -64,14 +64,86 @@
       (should (equal positions (sort (copy-sequence positions) #'<))))
     (kill-buffer)))
 
-(defun agentpane-test--meta-line (meta)
-  "The meta line drawn for an assistant node carrying META."
+(defun agentpane-test--meta-line (meta &optional timestamp)
+  "The meta line drawn for an assistant node carrying META and TIMESTAMP, or
+nil when none is drawn."
   (with-temp-buffer
     (agentpane-transcript-mode)
-    (agentpane--draw (vector (list :index 1 :role "assistant" :parts [] :meta meta)))
+    (agentpane--draw (vector (list :index 1 :role "assistant" :parts [] :meta meta
+                                   :timestamp timestamp)))
     (goto-char (point-min))
-    (re-search-forward "^— .*$")
-    (match-string-no-properties 0)))
+    (and (re-search-forward "^— .*$" nil t)
+         (match-string-no-properties 0))))
+
+(defmacro agentpane-test--in-kolkata (&rest body)
+  "Run BODY with Emacs's local zone pinned to Asia/Kolkata, as the vitest
+run's is: a half-hour offset makes both the clock and the offset arithmetic
+visible in a time assertion, whatever zone the run itself is in."
+  (declare (indent 0))
+  `(let ((zone (getenv "TZ")))
+     (unwind-protect
+         (progn (set-time-zone-rule "Asia/Kolkata") ,@body)
+       (set-time-zone-rule zone))))
+
+(defconst agentpane-test--ms 1790103630500
+  "2026-09-22T19:00:30.500Z as epoch milliseconds: in Asia/Kolkata, the
+next day's 00:30:30, the half second dropped as the browser drops it.")
+
+(ert-deftest agentpane-test-meta-leads-with-the-timestamp ()
+  "An assistant turn's timestamp is its meta line's first field, in the local
+zone and to the second, as the browser's footer shows it."
+  (agentpane-test--in-kolkata
+    (should (equal (agentpane-test--meta-line
+                    '(:model "claude-opus-5" :usage (:totalTokens 136013 :cost 0))
+                    agentpane-test--ms)
+                   "— 2026-09-23 00:30:30 · claude-opus-5 · 136K tok"))))
+
+(ert-deftest agentpane-test-meta-needs-a-model-or-tokens ()
+  "A turn with neither a model nor tokens draws no meta line, as the
+browser's `showsMeta' draws none, but one that ended badly still says so."
+  (should-not (agentpane-test--meta-line '(:model "" :usage (:totalTokens 0 :cost 0))
+                                         agentpane-test--ms))
+  (should (equal (agentpane-test--meta-line
+                  '(:model "" :usage (:totalTokens 0 :cost 0) :stopReason "aborted")
+                  agentpane-test--ms)
+                 "— aborted")))
+
+(ert-deftest agentpane-test-user-turn-shows-its-timestamp ()
+  "A user turn's timestamp is drawn inside its box, below its text."
+  (agentpane-test--in-kolkata
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (agentpane--draw (vector (list :index 0 :role "user" :timestamp agentpane-test--ms
+                                     :parts (plist-get (aref agentpane-test--nodes 0) :parts))))
+      (let ((time (agentpane-test--position "2026-09-23 00:30:30")))
+        (should (< (agentpane-test--position "Fix the bug") time))
+        (should (memq 'agentpane-user-box (agentpane-test--faces-at "2026-09-23 00:30:30")))))))
+
+(ert-deftest agentpane-test-compaction-marker-names-tokens-before ()
+  "A compaction marker names the context size it folded, in compact tokens,
+and a marker whose size is 0 names none."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw [(:index 0 :role "compactionSummary" :tokensBefore 27614 :parts [])
+                      (:index 1 :role "compactionSummary" :tokensBefore 0 :parts [])])
+    (should (string-search "compactionSummary · from 28K tok" (buffer-string)))
+    (should (= 1 (count-matches "tok" (point-min) (point-max))))))
+
+(ert-deftest agentpane-test-tool-result-images-in-the-fold ()
+  "A tool result's image parts are drawn in its folded body, where its text
+is, and a result that is only images is not drawn as none."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     [(:index 1 :role "assistant"
+       :parts [(:type "tool" :name "read" :summary "shot.png" :args "" :result ""
+                :state "ok" :images [(:type "image" :mimeType "image/png" :data "AAAA")])]
+       :meta (:model "haiku" :usage (:totalTokens 1 :cost 0)))])
+    (should (invisible-p (agentpane-test--position "[image image/png]")))
+    (should-not (string-search "(none)" (buffer-string)))
+    (goto-char (agentpane-test--position "read shot.png"))
+    (agentpane-toggle)
+    (should-not (invisible-p (agentpane-test--position "[image image/png]")))))
 
 (ert-deftest agentpane-test-meta-compact-tokens-no-zero-cost ()
   "The meta line shows tokens as the browser's footer does, and no index or zero cost."
@@ -196,6 +268,52 @@ the last, above the prompt region."
       (should (< (agentpane-test--position "Looking.")
                  (agentpane-test--position "Appended.")
                  (agentpane-test--position "── prompt"))))))
+
+(ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
+  "While the session streams, the last node draws no meta line and an
+earlier one does, and the last one's appears once a status says the
+streaming ended, though no node is re-sent."
+  (let ((ref '(:backend "pi" :id "s1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming t
+             :nodes (vector (agentpane-test--assistant 1 "<p>One.</p>")
+                            (agentpane-test--assistant 2 "<p>Two.</p>"))))
+      (should (= 1 (count-matches "^— luna" (point-min) (point-max))))
+      (should (< (agentpane-test--position "— luna") (agentpane-test--position "Two.")))
+      (agentpane--on-notification
+       nil 'session/status (list :session ref :isStreaming :json-false))
+      (should (= 2 (count-matches "^— luna" (point-min) (point-max)))))))
+
+(ert-deftest agentpane-test-appended-node-releases-the-previous-tail ()
+  "A node appended while the session streams is drawn without its meta line,
+and the node it follows, no longer the last, is redrawn with its own."
+  (let ((ref '(:backend "pi" :id "s1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
+      (should (string-search "— haiku" (buffer-string)))
+      (should-not (string-search "— luna" (buffer-string)))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+      (should (= 1 (count-matches "^— luna" (point-min) (point-max))))
+      (should (< (agentpane-test--position "Three.")
+                 (agentpane-test--position "— luna")
+                 (agentpane-test--position "Five."))))))
+
+(ert-deftest agentpane-test-pending-turn-keeps-its-warning ()
+  "The last node of a streaming session still says it ended badly, while
+the facts `showsMeta' governs stay hidden."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (setq agentpane--streaming t)
+    (agentpane--draw (vector (list :index 1 :role "assistant" :parts [] :timestamp agentpane-test--ms
+                                   :meta '(:model "haiku" :usage (:totalTokens 5 :cost 0)
+                                           :stopReason "error" :errorMessage "boom"))))
+    (should (string-search "— error · boom" (buffer-string)))
+    (should-not (string-search "haiku" (buffer-string)))))
 
 (ert-deftest agentpane-test-renamed-rekeys-the-buffer ()
   "A `session/renamed' moves the buffer to the new ref and renames it."

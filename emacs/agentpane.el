@@ -66,7 +66,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 46 tests, 46 results as expected, 0 unexpected
+;;     Ran 54 tests, 54 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -524,6 +524,14 @@ list rows their hanging indent."
 (defvar-local agentpane--ewoc nil
   "The ewoc drawing this buffer's nodes.")
 
+(defvar-local agentpane--tail-index nil
+  "The index of the last node drawn, the one a streaming turn is filling.
+Kept apart from the ewoc because a snapshot draws its nodes one at a time,
+and each would otherwise be the last while it is drawn.")
+
+(defvar-local agentpane--streaming nil
+  "Non-nil while the last status this buffer heard said a turn is streaming.")
+
 (defvar-local agentpane--prompt-separator nil
   "Marker at the start of the line between the nodes and the prompt region.
 It advances past text inserted at it, so nodes drawn there stay above it.")
@@ -575,20 +583,28 @@ either, and BODY is invisible unless KEY is expanded."
          (_ (propertize (format "?%s %s" type text) 'face 'agentpane-warning)))))
    lines "\n"))
 
+(defun agentpane--image-line (part)
+  "The line an image PART is drawn as, without its newline: its type, not
+its pixels."
+  (propertize (format "[image %s]" (plist-get part :mimeType)) 'face 'agentpane-dim))
+
 (defun agentpane--tool-body (part)
-  "The folded body of a tool PART: its diff, args and result, or nil."
-  (let ((diff (plist-get part :diff))
-        (args (plist-get part :args))
-        (result (plist-get part :result))
-        (chunks nil))
+  "The folded body of a tool PART: its diff, args and result, or nil.
+The result's image parts follow its text, as `ResultBody.svelte' draws them."
+  (let* ((diff (plist-get part :diff))
+         (args (plist-get part :args))
+         (result (plist-get part :result))
+         (lines (append (and result (not (string-empty-p result)) (list result))
+                        (mapcar #'agentpane--image-line (plist-get part :images))))
+         (chunks nil))
     ;; A `write' of empty content arrives as an empty vector, which is not nil.
     (when (and diff (> (length diff) 0))
       (push (agentpane--diff-text diff) chunks))
     (when (and args (not (string-empty-p args)))
       (push (concat (propertize "args:" 'face 'agentpane-dim) "\n" args) chunks))
     (push (concat (propertize "result:" 'face 'agentpane-dim) "\n"
-                  (if (and result (not (string-empty-p result)))
-                      result
+                  (if lines
+                      (mapconcat #'identity lines "\n")
                     (propertize "(none)" 'face 'agentpane-dim)))
           chunks)
     (let ((body (mapconcat #'identity (nreverse chunks) "\n")))
@@ -648,10 +664,7 @@ either, and BODY is invisible unless KEY is expanded."
            (agentpane--insert-html html))))
       ("thinking" (agentpane--insert-thinking key part))
       ("tool" (agentpane--insert-tool key part))
-      ("image"
-       (insert (propertize (format "[image %s]" (plist-get part :mimeType))
-                           'face 'agentpane-dim)
-               "\n"))
+      ("image" (insert (agentpane--image-line part) "\n"))
       (_
        (insert (propertize (format "[unknown part type %S]" type)
                            'face 'agentpane-warning)
@@ -678,31 +691,46 @@ of a unit shown as 1 of the next, so 999500 is \"1M\", not \"1000K\"."
         (setq units (cdr units))))
     result))
 
-(defun agentpane--insert-meta (meta)
-  "Insert the meta line for an assistant node from META.
-Its fields are the browser's footer in `Message.svelte': the model and the
-effort when present, and the tokens, then any cost, only when there are
-tokens.  The stop reason and error message follow, which the browser shows
-as a banner beside the footer instead."
+(defun agentpane--format-timestamp (ms)
+  "MS, epoch milliseconds or nil, as a local date and time to the second, or nil.
+The shape of `formatTimestamp' in src/client/time.ts, in Emacs's zone as
+that is in the browser's; a part second is dropped, as there."
+  (and ms (format-time-string "%Y-%m-%d %H:%M:%S" (floor ms 1000))))
+
+(defun agentpane--insert-meta (meta timestamp pending)
+  "Insert the meta line for an assistant node from META and TIMESTAMP.
+Its fields are the browser's footer in `Message.svelte': the time, the
+model and the effort when present, and the tokens, then any cost, only
+when there are tokens.  The stop reason and error message follow, which
+the browser shows as a banner beside the footer instead.
+The footer's facts are drawn under the browser's `showsMeta': not while
+the turn is PENDING, and not unless there is a model or tokens.  The stop
+reason and error message are drawn regardless, and with neither nor any
+fact nothing is."
   (let* ((usage (plist-get meta :usage))
-         (model (plist-get meta :model))
+         (model (let ((model (plist-get meta :model)))
+                  (and model (not (string-empty-p model)) model)))
          (tokens (or (plist-get usage :totalTokens) 0))
          (cost (or (plist-get usage :cost) 0))
          (stop (plist-get meta :stopReason))
          (error-message (plist-get meta :errorMessage))
          (effort (plist-get meta :effort))
          (face (if stop 'agentpane-warning 'agentpane-meta))
+         (shown (and (not pending) (or model (> tokens 0))))
          (fields
           (delq nil
-                (list (and model (not (string-empty-p model)) model)
-                      effort
-                      (and (> tokens 0)
-                           (format "%s tok" (agentpane--compact-number tokens)))
-                      (and (> tokens 0) (> cost 0) (format "$%.4f" cost))
-                      stop
-                      error-message))))
-    (insert (propertize (concat "— " (mapconcat #'identity fields " · ")) 'face face)
-            "\n")))
+                (append
+                 (and shown
+                      (list (agentpane--format-timestamp timestamp)
+                            model
+                            effort
+                            (and (> tokens 0)
+                                 (format "%s tok" (agentpane--compact-number tokens)))
+                            (and (> tokens 0) (> cost 0) (format "$%.4f" cost))))
+                 (list stop error-message)))))
+    (when fields
+      (insert (propertize (concat "— " (mapconcat #'identity fields " · ")) 'face face)
+              "\n"))))
 
 (defun agentpane--bar-wrap-prefixes (beg end bar)
   "Give every line between BEG and END a `wrap-prefix' that starts with BAR.
@@ -743,6 +771,15 @@ prompt region below the nodes takes typing."
       (agentpane--pp-node node))
     (add-text-properties start (point) '(read-only t front-sticky (read-only)))))
 
+(defun agentpane--role-suffix (node)
+  "What the role line of NODE says after the role: for a compaction marker,
+the context size it folded, as the browser's marker names it when above 0."
+  (let ((tokens (plist-get node :tokensBefore)))
+    (if (and (equal (plist-get node :role) "compactionSummary")
+             tokens (> tokens 0))
+        (format " · from %s tok" (agentpane--compact-number tokens))
+      "")))
+
 (defun agentpane--pp-node (node)
   "Pretty-print NODE, one transcript node plist, at point; see `agentpane--pp'."
   (let* ((index (plist-get node :index))
@@ -751,13 +788,23 @@ prompt region below the nodes takes typing."
          (ordinal 0))
     (when userp (insert "\n"))
     (unless (or userp (equal role "assistant"))
-      (insert (propertize role 'face 'agentpane-role-other) "\n"))
-    (let ((body-start (point)))
+      (insert (propertize (concat role (agentpane--role-suffix node))
+                          'face 'agentpane-role-other)
+              "\n"))
+    (let ((body-start (point))
+          (time (agentpane--format-timestamp (plist-get node :timestamp))))
       (seq-doseq (part (plist-get node :parts))
         (agentpane--insert-part index ordinal part)
         (setq ordinal (1+ ordinal)))
+      ;; The browser puts a user turn's time on its first block's action row,
+      ;; below the text inside the box; this is the box's last line.
+      (when (and userp time)
+        (insert (propertize time 'face 'agentpane-meta) "\n"))
       (let ((meta (plist-get node :meta)))
-        (when meta (agentpane--insert-meta meta)))
+        (when meta
+          (agentpane--insert-meta meta (plist-get node :timestamp)
+                                  (and agentpane--streaming
+                                       (eql index agentpane--tail-index)))))
       (when userp
         ;; The bar runs down the box's left edge, and `wrap-prefix' carries it
         ;; onto the rows `visual-line-mode' wraps. Nothing here uses
@@ -787,11 +834,21 @@ node."
                                                 'front-sticky '(read-only)))
                         nil
                         t))
+     (setq agentpane--tail-index
+           (and (> (length nodes) 0) (plist-get (elt nodes (1- (length nodes))) :index)))
      (seq-doseq (node nodes)
        (ewoc-enter-last agentpane--ewoc node))
      (goto-char (point-min))
      (when (ewoc-nth agentpane--ewoc 0)
        (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0))))))
+
+(defun agentpane--drawn (index)
+  "The ewoc node drawing the node at INDEX, or nil."
+  (and index
+       (let ((at (ewoc-nth agentpane--ewoc -1)))
+         (while (and at (not (eql index (plist-get (ewoc-data at) :index))))
+           (setq at (ewoc-prev agentpane--ewoc at)))
+         at)))
 
 (defun agentpane--upsert (node)
   "Redraw the drawn node whose index is NODE's in place, or append NODE.
@@ -799,20 +856,25 @@ A node's `index' is its place in the session's flat message array, so the
 match is by that and never by position; an `(:error MESSAGE)' has no index
 and always appends.  Text after the redrawn node, the prompt region
 included, moves with it, and so does a point there: at the end of the
-buffer before, at the end after."
+buffer before, at the end after.
+A node appended with an index becomes the last, and while the session
+streams the one it follows is redrawn, since it was drawn as the pending
+turn and no longer is."
   (let* ((index (plist-get node :index))
-         (drawn (and index
-                     (let ((at (ewoc-nth agentpane--ewoc -1)))
-                       (while (and at (not (eql index (plist-get (ewoc-data at) :index))))
-                         (setq at (ewoc-prev agentpane--ewoc at)))
-                       at))))
+         (drawn (agentpane--drawn index))
+         (previous (and index (not drawn) agentpane--streaming
+                        (agentpane--drawn agentpane--tail-index))))
+    (when (and index (not drawn))
+      (setq agentpane--tail-index index))
     (agentpane--above-prompt
      (lambda ()
        (if drawn
            (progn
              (ewoc-set-data drawn node)
              (ewoc-invalidate agentpane--ewoc drawn))
-         (ewoc-enter-last agentpane--ewoc node))))))
+         (ewoc-enter-last agentpane--ewoc node))
+       (when previous
+         (ewoc-invalidate agentpane--ewoc previous))))))
 
 (defun agentpane--above-prompt (redraw)
   "Call REDRAW, which changes only the read-only text above the prompt region.
@@ -1155,13 +1217,18 @@ another buffer holds the ref, since only here is a second holder meant."
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
     (kill-buffer other)))
 
-(defvar-local agentpane--streaming nil
-  "Non-nil while the last status this buffer heard said a turn is streaming.")
-
 (defun agentpane--set-status (params)
   "Show the streaming, compaction and model fields of PARAMS in the mode line,
-and keep the streaming field in `agentpane--streaming'."
-  (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
+and keep the streaming field in `agentpane--streaming'.
+When streaming ends, the last node is redrawn, since it was drawn as the
+pending turn and the helper re-sends no node for the change."
+  (let ((was agentpane--streaming))
+    (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
+    (when (and was (not agentpane--streaming) agentpane--ewoc)
+      (let ((tail (agentpane--drawn agentpane--tail-index)))
+        (when tail
+          (agentpane--above-prompt
+           (lambda () (ewoc-invalidate agentpane--ewoc tail)))))))
   (let ((fields (delq nil
                       (list (and (eq (plist-get params :isStreaming) t) "streaming")
                             (let ((compaction (plist-get params :compaction)))
