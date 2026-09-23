@@ -71,7 +71,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 70 tests, 70 results as expected, 0 unexpected
+;;     Ran 74 tests, 74 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1494,21 +1494,22 @@ the picker refetches its buffer, and an error would leave it unshown."
             (buffer-list)))
 
 (defun agentpane--buffer-name (summary)
-  "The transcript buffer name for SUMMARY: the backend and the preview, or
-the session id where there is no preview yet."
-  (let ((ref (agentpane--ref summary))
-        (preview (plist-get summary :preview)))
-    (format "*agentpane %s: %s*"
+  "The transcript buffer name for SUMMARY: the backend and the project, as
+Magit names a repository -- the last component of the session's cwd, or the
+session id where there is no cwd.  Sessions in one project are told apart
+only by the `<2>', `<3>' that `generate-new-buffer' adds."
+  (let* ((ref (agentpane--ref summary))
+         (cwd (plist-get summary :cwd))
+         (project (and cwd (file-name-nondirectory (directory-file-name cwd)))))
+    (format "*agentpane/%s: %s*"
             (plist-get ref :backend)
-            (truncate-string-to-width
-             (if (or (null preview) (string-empty-p preview))
-                 (plist-get ref :id)
-               preview)
-             60 nil nil "…"))))
+            (if (or (null project) (string-empty-p project))
+                (plist-get ref :id)
+              project))))
 
 (defun agentpane--transcript-buffer (summary)
   "The transcript buffer for SUMMARY's session, created if there is none.
-One buffer per session ref, named after the backend and the summary's preview.
+One buffer per session ref, named by `agentpane--buffer-name'.
 A new buffer's `default-directory' is the session's cwd, where the summary
 gives one, rather than that of whichever buffer was current (OW-ruhotu)."
   (or (agentpane--buffer-for (agentpane--ref summary))
@@ -1524,8 +1525,9 @@ gives one, rather than that of whichever buffer was current (OW-ruhotu)."
 (defvar agentpane--composer)
 
 (defun agentpane--rekey (ref)
-  "Make this buffer hold the session REF, renaming it, and its composer if
-it has one, to match.
+  "Make this buffer hold the session REF, leaving its name, and its
+composer's, as they were: the backend and project they name do not change
+with the ref, and a name that fell back to the session id keeps the old one.
 For a `session/renamed', and for an attach whose reply names another ref.
 
 Should another buffer already hold REF, as one the picker opened on the
@@ -1547,18 +1549,15 @@ the other shows this one, and the other's kill sends no
   (unless (agentpane--same-ref-p ref (agentpane--ref agentpane--session))
     (let ((other (agentpane--buffer-for ref)))
       (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
-      (when other (agentpane--absorb other)))
-    (rename-buffer (agentpane--buffer-name agentpane--session) t)
-    (when (buffer-live-p agentpane--composer)
-      (let ((name (agentpane--composer-name)))
-        (with-current-buffer agentpane--composer
-          (rename-buffer name t))))))
+      (when other (agentpane--absorb other)))))
 
 (defvar agentpane--composer-transcript)
 
 (defun agentpane--absorb (other)
   "Take the transcript buffer OTHER's draft, composer and windows into this
 buffer, then kill OTHER without detaching.  See `agentpane--rekey'.
+A composer taken as this buffer's own is renamed after this buffer; one
+that stays secondary to this buffer's own composer keeps its name.
 The detach is disarmed for this kill alone, rather than skipped whenever
 another buffer holds the ref, since only here is a second holder meant."
   (let ((buffer (current-buffer))
@@ -1574,7 +1573,10 @@ another buffer holds the ref, since only here is a second holder meant."
       (with-current-buffer composer
         (setq agentpane--composer-transcript buffer))
       (unless (buffer-live-p agentpane--composer)
-        (setq agentpane--composer composer)))
+        (setq agentpane--composer composer)
+        (let ((name (agentpane--composer-name)))
+          (with-current-buffer composer
+            (rename-buffer name t)))))
     (dolist (window (get-buffer-window-list other nil t))
       (set-window-buffer window buffer))
     (with-current-buffer other
@@ -2018,8 +2020,15 @@ the running turn.
 \\{agentpane-composer-mode-map}")
 
 (defun agentpane--composer-name ()
-  "The name of this transcript's composer, which follows the transcript's own."
-  (format "*agentpane composer: %s*" (buffer-name)))
+  "The name of this transcript's composer: the transcript's own, with any
+`<N>' Emacs gave it moved inside the stars and \" prompt\" before the
+closing one, so `*agentpane/claude: sandbox*<2>' has the composer
+`*agentpane/claude: sandbox<2> prompt*'.  Unique as the transcript's is."
+  (let* ((name (buffer-name))
+         (suffix (if (string-match "<[0-9]+>\\'" name) (match-string 0 name) "")))
+    (format "%s%s prompt*"
+            (string-remove-suffix "*" (string-remove-suffix suffix name))
+            suffix)))
 
 (defun agentpane-prompt ()
   "Open this transcript's composer in a small window below it."

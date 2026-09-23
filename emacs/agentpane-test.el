@@ -448,27 +448,29 @@ the facts `showsMeta' governs stay hidden."
     (should-not (string-search "haiku" (buffer-string)))))
 
 (ert-deftest agentpane-test-renamed-rekeys-the-buffer ()
-  "A `session/renamed' moves the buffer to the new ref and renames it."
+  "A `session/renamed' moves the buffer to the new ref and leaves its name."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
     (agentpane-test--with-session from
-      (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-      (should (eq (agentpane--buffer-for to) (current-buffer)))
-      (should-not (agentpane--buffer-for from))
-      (should (string-search "real-2" (buffer-name))))))
+      (let ((name (buffer-name)))
+        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+        (should (eq (agentpane--buffer-for to) (current-buffer)))
+        (should-not (agentpane--buffer-for from))
+        (should (equal (buffer-name) name))))))
 
-(ert-deftest agentpane-test-renamed-renames-the-composer ()
-  "A `session/renamed' renames the transcript's composer after it."
+(ert-deftest agentpane-test-renamed-keeps-the-composers-name ()
+  "A `session/renamed' leaves the names of the transcript and its composer."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
     (agentpane-test--with-session from
       (save-current-buffer (save-window-excursion (agentpane-prompt)))
-      (let ((composer agentpane--composer))
+      (let ((composer agentpane--composer)
+            (name (buffer-name)))
         (unwind-protect
-            (progn
+            (let ((composer-name (buffer-name composer)))
               (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-              (should (equal (buffer-name composer)
-                             (format "*agentpane composer: %s*" (buffer-name)))))
+              (should (equal (buffer-name) name))
+              (should (equal (buffer-name composer) composer-name)))
           (kill-buffer composer))))))
 
 (defun agentpane-test--holders (ref)
@@ -523,6 +525,25 @@ one's own, and the other's composer, text and all, sends to the survivor."
         (with-current-buffer composer
           (should (eq (agentpane--transcript) renamed))
           (should (equal (buffer-string) "composed")))))))
+
+(ert-deftest agentpane-test-renamed-onto-a-held-ref-names-the-adopted-composer ()
+  "When a `session/renamed' merge hands the renamed buffer, which has no
+composer, the other's, that composer is named after the survivor."
+  (let ((from '(:backend "claude" :id "pending-1"))
+        (to '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (let ((renamed (agentpane--transcript-buffer
+                      (list :ref from :cwd "/tmp/x/sandbox")))
+            (other (agentpane--transcript-buffer
+                    (list :ref to :cwd "/tmp/x/sandbox")))
+            composer)
+        (with-current-buffer other
+          (save-current-buffer (agentpane-prompt))
+          (setq composer agentpane--composer))
+        (should (equal (buffer-name composer) "*agentpane/claude: sandbox<2> prompt*"))
+        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+        (should (eq (buffer-local-value 'agentpane--composer renamed) composer))
+        (should (equal (buffer-name composer) "*agentpane/claude: sandbox prompt*"))))))
 
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
@@ -1474,6 +1495,48 @@ second though opened from the first."
                        (file-name-as-directory one)))
         (should (equal (buffer-local-value 'default-directory second)
                        (file-name-as-directory two)))))))
+
+;;;; Buffer names
+
+(ert-deftest agentpane-test-transcript-named-for-backend-and-project ()
+  "A transcript is named for its backend and the last component of its
+session's cwd, or its session id where there is no cwd."
+  (agentpane-test--forking nil nil
+    (should (equal (buffer-name (agentpane--transcript-buffer
+                                 (list :ref '(:backend "claude" :id "c1")
+                                       :cwd "/tmp/x/sandbox")))
+                   "*agentpane/claude: sandbox*"))
+    (should (equal (buffer-name (agentpane--transcript-buffer
+                                 (list :ref '(:backend "codex" :id "t1"))))
+                   "*agentpane/codex: t1*"))))
+
+(ert-deftest agentpane-test-second-session-in-a-project-takes-a-suffix ()
+  "A second session in the same project takes its name with the `<2>' Emacs
+adds, a trailing slash on its cwd notwithstanding."
+  (agentpane-test--forking nil nil
+    (agentpane--transcript-buffer
+     (list :ref '(:backend "claude" :id "c1") :cwd "/tmp/x/sandbox"))
+    (should (equal (buffer-name (agentpane--transcript-buffer
+                                 (list :ref '(:backend "claude" :id "c2")
+                                       :cwd "/tmp/x/sandbox/")))
+                   "*agentpane/claude: sandbox*<2>"))))
+
+(ert-deftest agentpane-test-composer-named-for-its-transcript ()
+  "A composer takes its transcript's name, with the transcript's `<N>'
+moved inside the stars and ` prompt' before the closing one."
+  (agentpane-test--forking nil nil
+    (let ((first (agentpane--transcript-buffer
+                  (list :ref '(:backend "claude" :id "c1") :cwd "/tmp/x/sandbox")))
+          (second (agentpane--transcript-buffer
+                   (list :ref '(:backend "claude" :id "c2") :cwd "/tmp/x/sandbox"))))
+      (should (equal (buffer-name second) "*agentpane/claude: sandbox*<2>"))
+      (dolist (transcript (list first second))
+        (with-current-buffer transcript
+          (save-current-buffer (save-window-excursion (agentpane-prompt)))))
+      (should (equal (buffer-name (buffer-local-value 'agentpane--composer first))
+                     "*agentpane/claude: sandbox prompt*"))
+      (should (equal (buffer-name (buffer-local-value 'agentpane--composer second))
+                     "*agentpane/claude: sandbox<2> prompt*")))))
 
 (ert-deftest agentpane-test-picker-takes-the-projects-root ()
   "`agentpane-sessions' run from a buffer below a project's root sets the
