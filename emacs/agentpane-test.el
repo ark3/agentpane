@@ -443,6 +443,15 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
          (dolist (buffer (buffer-list))
            (unless (memq buffer buffers) (kill-buffer buffer)))))))
 
+(defmacro agentpane-test--with-helper (&rest body)
+  "Run BODY with a helper connection that counts as running, so a buffer
+whose `agentpane--attached' is `agentpane--connection' is attached, and
+`agentpane-fork' forks there rather than attaching first."
+  (declare (indent 0))
+  `(let ((agentpane--connection 'connection))
+     (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+       ,@body)))
+
 (defun agentpane-test--goto-index (index)
   "Move point to the drawn node whose index is INDEX."
   (ewoc-goto-node agentpane--ewoc
@@ -459,36 +468,39 @@ with that point's id, and opens the fork in a buffer of its own, attached,
 leaving this one holding its session, and on Codex still attached."
   (let ((ref '(:backend "codex" :id "t1"))
         (forked '(:backend "codex" :id "t2")))
-    (agentpane-test--forking
-        [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
-        forked
-      (agentpane-test--with-session ref
-        (setq agentpane--attached 'connection)
-        (agentpane-test--goto-index 0)
-        (agentpane-fork)
-        (should (equal (assq 'sessions/fork sent)
-                       `(sessions/fork :session ,ref :entryId "turn-0")))
-        (should (equal (assq 'sessions/attach sent)
-                       `(sessions/attach :session ,forked)))
-        (let ((fork-buffer (agentpane--buffer-for forked)))
-          (should fork-buffer)
-          (should-not (eq fork-buffer buffer))
-          (should (agentpane--same-ref-p
-                   (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref))
-          (should (eq (buffer-local-value 'agentpane--attached buffer) 'connection)))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0) (:id "turn-2" :text "More" :index 2)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached 'connection)
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (should (equal (assq 'sessions/fork sent)
+                         `(sessions/fork :session ,ref :entryId "turn-0")))
+          (should (equal (assq 'sessions/attach sent)
+                         `(sessions/attach :session ,forked)))
+          (let ((fork-buffer (agentpane--buffer-for forked)))
+            (should fork-buffer)
+            (should-not (eq fork-buffer buffer))
+            (should (agentpane--same-ref-p
+                     (agentpane--ref (buffer-local-value 'agentpane--session buffer)) ref))
+            (should (eq (buffer-local-value 'agentpane--attached buffer) 'connection))))))))
 
 (ert-deftest agentpane-test-fork-at-no-fork-point ()
   "`agentpane-fork' on a node no fork point names sends no `sessions/fork'
 and says the message is not forkable."
   (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--forking
-        [(:id "turn-0" :text "Fix the bug" :index 0)]
-        '(:backend "codex" :id "t2")
-      (agentpane-test--with-session ref
-        (agentpane-test--goto-index 1)
-        (agentpane-fork)
-        (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
-        (should (seq-some (lambda (text) (string-search "not forkable" text)) said))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (agentpane-test--goto-index 1)
+          (agentpane-fork)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+          (should (seq-some (lambda (text) (string-search "not forkable" text)) said)))))))
 
 (ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
   "A Pi fork, which leaves its parent detached on the server, detaches the
@@ -523,87 +535,95 @@ during a Pi fork is replaced, once the fork's reply lands, by the parent's
 stored transcript."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
-    (agentpane-test--forking
-        [(:id "entry-0" :text "Fix the bug" :index 0)]
-        forked
-      (agentpane-test--with-session ref
-        (setq hold '(sessions/fork))
-        (agentpane-test--goto-index 0)
-        (agentpane-fork)
-        (agentpane--on-notification
-         nil 'session/snapshot
-         (list :session ref :nodes [] :isStreaming :json-false :compaction nil :model nil))
-        (with-current-buffer buffer
-          (should (equal (agentpane-test--indices) nil)))
-        (funcall (cdr (assq 'sessions/fork held)) t)
-        (should (equal (assq 'sessions/preview sent) `(sessions/preview :session ,ref)))
-        (with-current-buffer buffer
-          (should (equal (agentpane-test--indices) '(0 1))))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (setq hold '(sessions/fork))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (agentpane--on-notification
+           nil 'session/snapshot
+           (list :session ref :nodes [] :isStreaming :json-false :compaction nil :model nil))
+          (with-current-buffer buffer
+            (should (equal (agentpane-test--indices) nil)))
+          (funcall (cdr (assq 'sessions/fork held)) t)
+          (should (equal (assq 'sessions/preview sent) `(sessions/preview :session ,ref)))
+          (with-current-buffer buffer
+            (should (equal (agentpane-test--indices) '(0 1)))))))))
 
 (ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
   "A second `agentpane-fork' while one is in flight says so and sends
 nothing; a fork that failed, or finished, frees the buffer for another."
   (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--forking
-        [(:id "turn-0" :text "Fix the bug" :index 0)]
-        '(:backend "codex" :id "t2")
-      (agentpane-test--with-session ref
-        (setq hold '(sessions/forkPoints))
-        (agentpane-test--goto-index 0)
-        (agentpane-fork)
-        (should-error (agentpane-fork) :type 'user-error)
-        (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
-        (funcall (cdr (pop held)) nil)
-        (agentpane-fork)
-        (should (equal (mapcar #'car sent) '(sessions/forkPoints sessions/forkPoints)))
-        (setq hold nil)
-        (funcall (cdr (pop held)) t)
-        (with-current-buffer buffer
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (setq hold '(sessions/forkPoints))
           (agentpane-test--goto-index 0)
-          (agentpane-fork))
-        (should (equal (car (car sent)) 'sessions/attach))
-        (should (= 3 (seq-count (lambda (s) (eq (car s) 'sessions/forkPoints)) sent)))))))
+          (agentpane-fork)
+          (should-error (agentpane-fork) :type 'user-error)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+          (funcall (cdr (pop held)) nil)
+          (agentpane-fork)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints sessions/forkPoints)))
+          (setq hold nil)
+          (funcall (cdr (pop held)) t)
+          (with-current-buffer buffer
+            (agentpane-test--goto-index 0)
+            (agentpane-fork))
+          (should (equal (car (car sent)) 'sessions/attach))
+          (should (= 3 (seq-count (lambda (s) (eq (car s) 'sessions/forkPoints)) sent))))))))
 
 (ert-deftest agentpane-test-fork-shows-in-the-parents-window ()
   "The fork is shown in the window that showed the parent when the fork
 began, not in whichever window is selected when its reply lands."
   (let ((ref '(:backend "codex" :id "t1"))
         (forked '(:backend "codex" :id "t2")))
-    (agentpane-test--forking
-        [(:id "turn-0" :text "Fix the bug" :index 0)]
-        forked
-      (agentpane-test--with-session ref
-        (delete-other-windows)
-        (switch-to-buffer buffer)
-        (let ((parent-window (selected-window))
-              (notes (get-buffer-create " *agentpane-test notes*")))
-          (setq hold '(sessions/fork))
-          (agentpane-test--goto-index 0)
-          (agentpane-fork)
-          (select-window (split-window))
-          (switch-to-buffer notes)
-          (funcall (cdr (assq 'sessions/fork held)) t)
-          (should (eq (window-buffer parent-window) (agentpane--buffer-for forked)))
-          (should (eq (window-buffer (selected-window)) notes)))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (delete-other-windows)
+          (switch-to-buffer buffer)
+          (let ((parent-window (selected-window))
+                (notes (get-buffer-create " *agentpane-test notes*")))
+            (setq hold '(sessions/fork))
+            (agentpane-test--goto-index 0)
+            (agentpane-fork)
+            (select-window (split-window))
+            (switch-to-buffer notes)
+            (funcall (cdr (assq 'sessions/fork held)) t)
+            (should (eq (window-buffer parent-window) (agentpane--buffer-for forked)))
+            (should (eq (window-buffer (selected-window)) notes))))))))
 
 (defun agentpane-test--fork-streaming (backend)
   "Fork a BACKEND session at index 0 while a `session/status' says it is
 streaming, holding any abort's reply.  Return the methods sent before that
 reply is released, and those sent after, in order."
   (let ((ref (list :backend backend :id "parent")))
-    (agentpane-test--forking
-        [(:id "entry-0" :text "Fix the bug" :index 0)]
-        (list :backend backend :id "fork")
-      (agentpane-test--with-session ref
-        (setq hold '(sessions/abort))
-        (agentpane--on-notification
-         nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
-        (agentpane-test--goto-index 0)
-        (agentpane-fork)
-        (let ((before (mapcar #'car (reverse sent))))
-          (setq sent nil)
-          (dolist (entry held) (funcall (cdr entry) t))
-          (list before (mapcar #'car (reverse sent))))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          (list :backend backend :id "fork")
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection)
+          (setq hold '(sessions/abort))
+          (agentpane--on-notification
+           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (let ((before (mapcar #'car (reverse sent))))
+            (setq sent nil)
+            (dolist (entry held) (funcall (cdr entry) t))
+            (list before (mapcar #'car (reverse sent)))))))))
 
 (ert-deftest agentpane-test-fork-aborts-a-streaming-pi-turn ()
   "A fork of a streaming Pi session aborts the turn and forks only once the
@@ -611,9 +631,61 @@ abort has answered, as the browser does (D15); a streaming Codex session is
 forked with no abort."
   (should (equal (agentpane-test--fork-streaming "pi")
                  '((sessions/forkPoints sessions/abort)
-                   (sessions/fork sessions/preview sessions/attach))))
+                   (sessions/fork sessions/detach sessions/preview sessions/attach))))
   (should (equal (agentpane-test--fork-streaming "codex")
                  '((sessions/forkPoints sessions/fork sessions/attach) nil))))
+
+(ert-deftest agentpane-test-fork-on-a-preview-attaches-first ()
+  "`agentpane-fork' on a previewed buffer, whose stored index names another
+message among the live fork points, as a Pi preview that drops a
+`custom_message' does, forks nothing: it attaches, and says to press again.
+Pressed again once the live snapshot has redrawn the buffer, it forks at
+the message it is on."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-custom" :text "A custom message" :index 0)
+           (:id "entry-fix" :text "Fix the bug" :index 1)]
+          '(:backend "pi" :id "/s/fork.jsonl")
+        (agentpane-test--with-session ref
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (should (equal (mapcar #'car sent) '(sessions/attach)))
+          (should (seq-some (lambda (text) (string-search "press f again" text)) said))
+          (agentpane--on-notification
+           nil 'session/snapshot
+           (list :session ref
+                 :nodes (vector '(:index 0 :role "custom"
+                                  :parts [(:type "text" :text "A custom message"
+                                           :html "<p>A custom message</p>\n")])
+                                (plist-put (copy-sequence (aref agentpane-test--nodes 0))
+                                           :index 1))
+                 :isStreaming :json-false :compaction nil :model nil))
+          (agentpane-test--goto-index 1)
+          (setq sent nil)
+          (agentpane-fork)
+          (should (equal (assq 'sessions/fork sent)
+                         `(sessions/fork :session ,ref :entryId "entry-fix"))))))))
+
+(ert-deftest agentpane-test-fork-while-attaching-sends-nothing ()
+  "A second `agentpane-fork' on a previewed buffer while the first one's
+attach is in flight says so and sends nothing; an attach that failed frees
+the buffer to attach again."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (setq hold '(sessions/attach))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (should-error (agentpane-fork) :type 'user-error)
+          (should (equal (mapcar #'car sent) '(sessions/attach)))
+          (funcall (cdr (pop held)) nil)
+          (should-not (seq-some (lambda (text) (string-search "press f again" text)) said))
+          (agentpane-fork)
+          (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach))))))))
 
 ;;;; Sending, against a stub connection
 

@@ -28,8 +28,9 @@
 ;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
 ;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
 ;; refetches, `f' forks at the user message at point into a buffer of its
-;; own, and `q' buries.  Killing a transcript buffer stops its session's
-;; notifications and leaves the session running on the server.
+;; own -- on a previewed transcript it attaches first, and forks at the
+;; next press -- and `q' buries.  Killing a transcript buffer stops its
+;; session's notifications and leaves the session running on the server.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
@@ -65,7 +66,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 35 tests, 35 results as expected, 0 unexpected
+;;     Ran 37 tests, 37 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1345,17 +1346,49 @@ One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
 is shown in the window that showed this buffer when the fork began, if it
 is still live, rather than in whichever window is selected when the reply
-lands."
+lands.
+
+A buffer not attached, only previewed, is attached and forks nothing: once
+the attach answers, the echo area says the transcript now shows the live
+session and to press `f' again at the message to fork.  Its indices are the
+stored projection's, and the fork points are the live adapter's, since the
+route attaches first, and the two can name different messages: a Pi
+preview drops the `custom_message' entries and roles such as
+`bashExecution' that `get_messages' keeps (read from `pi 0.87.1''s
+source), and nothing makes the Claude Code store and live projections
+agree (OW-gekiki).  So trusting the index could fork at another message.
+Refusing, as the browser does by offering no Edit on a preview, would
+leave no way to fork a session only previewed short of sending it a
+prompt, since there is no command that only attaches.  Attaching redraws
+the buffer from the live transcript through the attach's snapshot, so the
+index at point becomes a live one, and the second press lets the user
+confirm the message after that redraw, which may have moved it.  The
+attach's reply and its snapshot are unordered (D2), so the message can
+precede the redraw by that snapshot's transit.  This covers the parent of
+a Pi fork too, which is left detached and drawn from the store.  While
+that attach is in flight a second press says so and sends nothing."
   (interactive)
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
+  (unless (agentpane-index-at-point)
+    (user-error "No message at point"))
+  (cond
+   ((agentpane--attached-p) (agentpane--fork-points))
+   (agentpane--attaching
+    (user-error "This session is still attaching; press f once it has"))
+   (t (agentpane--attach
+       (lambda ()
+         (message "agentpane: the transcript now shows the live session; \
+press f again at the message to fork"))))))
+
+(defun agentpane--fork-points ()
+  "Fetch this attached buffer's fork points, and fork at the one naming the
+index at point.  See `agentpane-fork'."
   (let* ((index (agentpane-index-at-point))
          (parent (agentpane--ref agentpane--session))
          (pi-backend (equal (plist-get parent :backend) "pi"))
          (window (get-buffer-window))
          (failed (lambda () (setq agentpane--forking nil))))
-    (unless index
-      (user-error "No message at point"))
     (setq agentpane--forking t)
     (agentpane--request
      'sessions/forkPoints (list :session parent)
