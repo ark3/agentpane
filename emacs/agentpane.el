@@ -29,8 +29,13 @@
 ;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
 ;; refetches, `f' forks at the user message at point into a buffer of its
 ;; own -- on a previewed transcript it attaches first, and forks at the
-;; next press -- and `q' buries.  Killing a transcript buffer stops its
-;; session's notifications and leaves the session running on the server.
+;; next press -- `r' toggles reading view, and `q' buries.  Reading view is
+;; the browser's (`condense' in src/client/render/transcript.ts): tool
+;; calls, tool results and thinking are elided, and while a turn streams
+;; the line above the prompt names the tool or thinking it is running.  It
+;; is per buffer and not kept, and the mode line says when it is on.
+;; Killing a transcript buffer stops its session's notifications and
+;; leaves the session running on the server.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
@@ -66,7 +71,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 54 tests, 54 results as expected, 0 unexpected
+;;     Ran 60 tests, 60 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -532,6 +537,18 @@ and each would otherwise be the last while it is drawn.")
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
 
+(defvar-local agentpane--reading nil
+  "Non-nil while this buffer shows reading view; see `agentpane-toggle-reading'.
+Per buffer and not kept, where the browser's is one global boolean (owner,
+2026-09-23).")
+
+(defvar-local agentpane--status-fields nil
+  "The mode-line fields of the last status this buffer heard, as strings.")
+
+(defvar-local agentpane--tail-overlay nil
+  "Overlay on the prompt separator whose `before-string' is the reading-view
+tail status, when there is one; see `agentpane--show-reading-tail'.")
+
 (defvar-local agentpane--prompt-separator nil
   "Marker at the start of the line between the nodes and the prompt region.
 It advances past text inserted at it, so nodes drawn there stay above it.")
@@ -762,13 +779,16 @@ consecutive assistant turns run together the way they do there; a user turn
 is the one raised surface, a tinted box with an accent bar down its left
 edge, with a blank line on either side.  Neither carries a role label.
 NODE may instead be `(:error MESSAGE)', a `session/error' drawn as a
-warning line where it arrived.  Everything drawn is read-only, so only the
+warning line where it arrived.  A node reading view elides draws nothing;
+see `agentpane--elided-p'.  Everything drawn is read-only, so only the
 prompt region below the nodes takes typing."
   (let ((start (point)))
-    (if (plist-member node :error)
-        (insert (propertize (concat "⚠ " (plist-get node :error)) 'face 'agentpane-warning)
-                "\n")
-      (agentpane--pp-node node))
+    (cond
+     ((plist-member node :error)
+      (insert (propertize (concat "⚠ " (plist-get node :error)) 'face 'agentpane-warning)
+              "\n"))
+     ((agentpane--elided-p node))
+     (t (agentpane--pp-node node)))
     (add-text-properties start (point) '(read-only t front-sticky (read-only)))))
 
 (defun agentpane--role-suffix (node)
@@ -793,8 +813,11 @@ the context size it folded, as the browser's marker names it when above 0."
               "\n"))
     (let ((body-start (point))
           (time (agentpane--format-timestamp (plist-get node :timestamp))))
+      ;; An elided part keeps its ordinal, so a fold keeps its key across
+      ;; a toggle of reading view.
       (seq-doseq (part (plist-get node :parts))
-        (agentpane--insert-part index ordinal part)
+        (unless (and agentpane--reading (agentpane--chrome-part-p part))
+          (agentpane--insert-part index ordinal part))
         (setq ordinal (1+ ordinal)))
       ;; The browser puts a user turn's time on its first block's action row,
       ;; below the text inside the box; this is the box's last line.
@@ -840,7 +863,8 @@ node."
        (ewoc-enter-last agentpane--ewoc node))
      (goto-char (point-min))
      (when (ewoc-nth agentpane--ewoc 0)
-       (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0))))))
+       (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))
+  (agentpane--show-reading-tail))
 
 (defun agentpane--drawn (index)
   "The ewoc node drawing the node at INDEX, or nil."
@@ -874,7 +898,8 @@ turn and no longer is."
              (ewoc-invalidate agentpane--ewoc drawn))
          (ewoc-enter-last agentpane--ewoc node))
        (when previous
-         (ewoc-invalidate agentpane--ewoc previous))))))
+         (ewoc-invalidate agentpane--ewoc previous))))
+    (agentpane--show-reading-tail)))
 
 (defun agentpane--above-prompt (redraw)
   "Call REDRAW, which changes only the read-only text above the prompt region.
@@ -940,6 +965,112 @@ the whole of follow mode, deliberately less than the browser's."
           ;; Clamped to the buffer, as every marker is.
           (set-window-start window (if from-end (- (point-max) (- size start)) start) t))))))
 
+;;;; Reading view
+
+(defun agentpane--chrome-part-p (part)
+  "Non-nil when PART is tool chrome that reading view elides: a tool call, its
+result folded in, or thinking."
+  (member (plist-get part :type) '("tool" "thinking")))
+
+(defun agentpane--elided-p (node)
+  "Non-nil when reading view is on and elides NODE entirely.
+The browser's `condense' over nodes rather than messages: a `tool-result'
+node goes, orphan as it is, and so does an assistant node left with no
+parts once its tool calls and thinking are gone, unless it ended in an
+error or an abort, whose warning is not tool chrome.  Every other node is
+drawn, less its chrome parts; see `agentpane--pp-node'."
+  (and agentpane--reading
+       (pcase (plist-get node :role)
+         ("tool-result" t)
+         ("assistant"
+          (and (seq-every-p #'agentpane--chrome-part-p (plist-get node :parts))
+               (not (member (plist-get (plist-get node :meta) :stopReason)
+                            '("error" "aborted"))))))))
+
+(defun agentpane--shown (ewoc node step)
+  "NODE, an ewoc node of EWOC, if reading view draws it, else the nearest one
+it does draw in the direction STEP, `ewoc-next' or `ewoc-prev'; or nil."
+  (while (and node (agentpane--elided-p (ewoc-data node)))
+    (setq node (funcall step ewoc node)))
+  node)
+
+(defun agentpane--locate ()
+  "The drawn node at point in this buffer's ewoc, or nil when there is none.
+An elided node draws nothing and shares its position with the next drawn
+node, or with the end of the nodes when none follows, and `ewoc-locate'
+answers it for a point before the first node or after the last: this
+answers the drawn node nearest it instead, the one before if any."
+  (let* ((ewoc (agentpane--ewoc))
+         (node (ewoc-locate ewoc)))
+    (or (agentpane--shown ewoc node #'ewoc-prev)
+        (agentpane--shown ewoc node #'ewoc-next))))
+
+(defun agentpane--one-line (text max)
+  "TEXT with its whitespace collapsed and trimmed, cut to MAX characters with
+an ellipsis: the browser's `oneLine'."
+  (let ((line (string-trim (replace-regexp-in-string "[[:space:]]+" " " text))))
+    (if (> (length line) max)
+        (concat (substring line 0 (1- max)) "…")
+      line)))
+
+(defun agentpane--tail-line (name face summary)
+  "The reading-view tail status line naming NAME, in FACE, and SUMMARY."
+  (concat (propertize name 'face face)
+          (if (string-empty-p summary) "" (concat " " summary))
+          (propertize " … running" 'face 'agentpane-dim)
+          "\n"))
+
+(defun agentpane--reading-tail ()
+  "The line naming the tool or thinking a streaming turn is running, which
+reading view elides, or nil; the browser's `readingTailStatus'.
+Only with reading view on while the buffer streams.  Walking back from the
+last node, a user node ends the walk with nothing, and within an assistant
+node's parts, from the last, non-blank text does too; the first tool or
+thinking part met is named.  Other nodes and parts are walked past."
+  (and agentpane--reading agentpane--streaming agentpane--ewoc
+       (catch 'found
+         (let ((at (ewoc-nth agentpane--ewoc -1)))
+           (while at
+             (let ((node (ewoc-data at)))
+               (pcase (plist-get node :role)
+                 ("user" (throw 'found nil))
+                 ("assistant"
+                  (seq-doseq (part (seq-reverse (plist-get node :parts)))
+                    (pcase (plist-get part :type)
+                      ("text"
+                       (unless (string-blank-p (or (plist-get part :text) ""))
+                         (throw 'found nil)))
+                      ("tool"
+                       (throw 'found (agentpane--tail-line (plist-get part :name)
+                                                           'agentpane-tool
+                                                           (or (plist-get part :summary) ""))))
+                      ("thinking"
+                       (throw 'found (agentpane--tail-line
+                                      "Thinking" 'agentpane-thinking
+                                      (if (eq (plist-get part :redacted) t)
+                                          "redacted by the provider"
+                                        (agentpane--one-line (or (plist-get part :text) "")
+                                                             80)))))))))
+               (setq at (ewoc-prev agentpane--ewoc at))))
+           nil))))
+
+(defun agentpane--show-reading-tail ()
+  "Show `agentpane--reading-tail' as the line above the prompt separator, or
+no line when it is nil.  An overlay string rather than buffer text, so it
+moves no node and no draft, and is in no one's undo."
+  (when agentpane--tail-overlay
+    (overlay-put agentpane--tail-overlay 'before-string (agentpane--reading-tail))))
+
+(defun agentpane--show-mode-line ()
+  "Show the status fields, after `reading' when reading view is on, in the
+mode line."
+  (let ((fields (if agentpane--reading
+                    (cons "reading" agentpane--status-fields)
+                  agentpane--status-fields)))
+    (setq mode-line-process
+          (and fields (concat " [" (mapconcat #'identity fields " · ") "]")))
+    (force-mode-line-update)))
+
 ;;;; The transcript buffer
 
 (defvar-local agentpane--attached nil
@@ -975,6 +1106,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
     (define-key map (kbd "f") #'agentpane-fork)
+    (define-key map (kbd "r") #'agentpane-toggle-reading)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "C-<return>") #'agentpane-send)
     (define-key map (kbd "C-c C-a") #'agentpane-abort)
@@ -995,6 +1127,9 @@ kept out of undo, which would otherwise delete it past the last draft edit."
                         'rear-nonsticky t))
     (setq agentpane--prompt-separator (copy-marker (point-min) t))
     (setq agentpane--prompt-start (point-marker))
+    ;; Over the separator, and front-advancing, so the nodes inserted at its
+    ;; start stay outside it and its string stays right above the separator.
+    (setq agentpane--tail-overlay (make-overlay (point-min) (point) nil t nil))
     (overlay-put (make-overlay (point) (point) nil nil t)
                  'keymap agentpane-prompt-region-map)))
 
@@ -1040,21 +1175,39 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
       (user-error "Not an agentpane transcript buffer")))
 
 (defun agentpane-next (&optional n)
-  "Move point to the start of the next node, or the N-th next."
+  "Move point to the start of the next node, or the N-th next.
+As `ewoc-goto-next', but over the nodes drawn: reading view's elided ones
+are stepped over, since point on one is on its drawn neighbour."
   (interactive "p")
-  (ewoc-goto-next (agentpane--ewoc) (or n 1)))
+  (let ((ewoc (agentpane--ewoc))
+        (node (agentpane--locate)))
+    (dotimes (_ (or n 1))
+      (setq node (and node (agentpane--shown ewoc (ewoc-next ewoc node) #'ewoc-next))))
+    (unless node
+      (user-error "No next node"))
+    (ewoc-goto-node ewoc node)))
 
 (defun agentpane-prev (&optional n)
-  "Move point to the start of the previous node, or the N-th previous."
+  "Move point to the start of the previous node, or the N-th previous.
+As `ewoc-goto-prev', but over the nodes drawn, as `agentpane-next' is:
+from below the last node the first step is onto it, and none goes above
+the first."
   (interactive "p")
-  (ewoc-goto-prev (agentpane--ewoc) (or n 1)))
+  (let ((ewoc (agentpane--ewoc))
+        (node (agentpane--locate))
+        (n (or n 1)))
+    (when node
+      (when (>= (point) agentpane--prompt-separator)
+        (setq n (1- n)))
+      (dotimes (_ n)
+        (setq node (or (agentpane--shown ewoc (ewoc-prev ewoc node) #'ewoc-prev) node)))
+      (ewoc-goto-node ewoc node))))
 
 (defun agentpane-index-at-point ()
   "The transcript index of the node at point, or nil when the buffer has no nodes.
-`ewoc-locate' answers the nearest node, so the header and the end of the
-buffer resolve to the first and last."
-  (let* ((ewoc (agentpane--ewoc))
-         (node (ewoc-locate ewoc)))
+`agentpane--locate' answers the nearest drawn node, so the header and the
+end of the buffer resolve to the first and last drawn."
+  (let ((node (agentpane--locate)))
     (and node (plist-get (ewoc-data node) :index))))
 
 (defun agentpane--goto-fold (key)
@@ -1082,6 +1235,25 @@ buffer resolve to the first and last."
       (puthash key t agentpane--folds))
     (agentpane--above-prompt (lambda () (ewoc-invalidate ewoc node)))
     (agentpane--goto-fold key)))
+
+(defun agentpane-toggle-reading ()
+  "Toggle reading view in this buffer: the transcript with its tool calls,
+tool results and thinking elided, as the browser's reading view shows it.
+See `agentpane--elided-p'.  The ewoc keeps every node either way, so this
+redraws and fetches nothing, and expanded folds stay expanded.  Point on a
+node stays on it, or goes to the next drawn one when it is elided."
+  (interactive)
+  (let ((node (and agentpane--ewoc (< (point) agentpane--prompt-separator)
+                   (agentpane--locate))))
+    (setq agentpane--reading (not agentpane--reading))
+    (when agentpane--ewoc
+      (agentpane--keeping-points
+       (lambda () (agentpane--above-prompt (lambda () (ewoc-refresh agentpane--ewoc)))))
+      (let ((drawn (and node (or (agentpane--shown agentpane--ewoc node #'ewoc-next)
+                                 (agentpane--shown agentpane--ewoc node #'ewoc-prev)))))
+        (when drawn (ewoc-goto-node agentpane--ewoc drawn)))))
+  (agentpane--show-reading-tail)
+  (agentpane--show-mode-line))
 
 (defun agentpane--ref (summary)
   "The session ref plist of SUMMARY."
@@ -1221,7 +1393,8 @@ another buffer holds the ref, since only here is a second holder meant."
   "Show the streaming, compaction and model fields of PARAMS in the mode line,
 and keep the streaming field in `agentpane--streaming'.
 When streaming ends, the last node is redrawn, since it was drawn as the
-pending turn and the helper re-sends no node for the change."
+pending turn and the helper re-sends no node for the change, and reading
+view's tail status goes."
   (let ((was agentpane--streaming))
     (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
     (when (and was (not agentpane--streaming) agentpane--ewoc)
@@ -1229,14 +1402,14 @@ pending turn and the helper re-sends no node for the change."
         (when tail
           (agentpane--above-prompt
            (lambda () (ewoc-invalidate agentpane--ewoc tail)))))))
-  (let ((fields (delq nil
-                      (list (and (eq (plist-get params :isStreaming) t) "streaming")
-                            (let ((compaction (plist-get params :compaction)))
-                              (and compaction (concat "compaction " compaction)))
-                            (plist-get params :model)))))
-    (setq mode-line-process
-          (and fields (concat " [" (mapconcat #'identity fields " · ") "]")))
-    (force-mode-line-update)))
+  (setq agentpane--status-fields
+        (delq nil
+              (list (and (eq (plist-get params :isStreaming) t) "streaming")
+                    (let ((compaction (plist-get params :compaction)))
+                      (and compaction (concat "compaction " compaction)))
+                    (plist-get params :model))))
+  (agentpane--show-reading-tail)
+  (agentpane--show-mode-line))
 
 ;;;; Driving the session
 

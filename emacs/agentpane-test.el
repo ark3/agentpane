@@ -609,6 +609,169 @@ still takes typing."
     (let ((last-command-event ?h)) (self-insert-command 1))
     (should-not (get-text-property (1- (point-max)) 'face))))
 
+;;;; Reading view
+
+(defconst agentpane-test--chrome-nodes
+  [(:index 0 :role "user"
+    :parts [(:type "text" :text "Fix the bug" :html "<p>Fix the bug</p>\n")])
+   (:index 1 :role "assistant"
+    :parts [(:type "text" :text "Looking." :html "<p>Looking.</p>\n")
+            (:type "thinking" :text "Weighing it\nand more besides" :redacted :json-false)
+            (:type "tool" :name "Read" :summary "app.ts" :args "" :result "const x = 1;"
+             :state "ok")]
+    :meta (:model "haiku" :usage (:totalTokens 12 :cost 0)))
+   (:index 2 :role "tool-result"
+    :parts [(:type "tool" :name "Grep" :summary "orphan" :args "" :result "hit" :state "ok")])
+   (:index 3 :role "assistant"
+    :parts [(:type "tool" :name "Bash" :summary "ls -la" :args "" :result "." :state "ok")]
+    :meta (:model "luna" :usage (:totalTokens 3 :cost 0)))
+   (:index 4 :role "assistant" :parts []
+    :meta (:model "" :usage (:totalTokens 0 :cost 0) :stopReason "aborted"))
+   (:index 5 :role "assistant"
+    :parts [(:type "text" :text "All done." :html "<p>All done.</p>\n")]
+    :meta (:model "haiku" :usage (:totalTokens 7 :cost 0)))
+   (:index 6 :role "assistant"
+    :parts [(:type "thinking" :text "Tail thought" :redacted :json-false)]
+    :meta (:model "luna" :usage (:totalTokens 2 :cost 0)))]
+  "A transcript with tool chrome to elide: a turn mixing text, thinking and
+a tool; an orphan tool result; a turn that is only a tool call; an aborted
+turn with no parts; a turn of text; and a last turn that is only thinking.")
+
+(defmacro agentpane-test--with-chrome (&rest body)
+  "Run BODY in a fresh transcript buffer drawn with the chrome nodes."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (agentpane-transcript-mode)
+     (agentpane--draw agentpane-test--chrome-nodes)
+     ,@body))
+
+(defun agentpane-test--press-r ()
+  "Run whatever `r' is bound to in the transcript keymap, as a command."
+  (call-interactively (lookup-key agentpane-transcript-mode-map "r")))
+
+(defconst agentpane-test--chrome-lines
+  '("Read app.ts" "thinking: Weighing it" "Grep orphan" "Bash ls -la" "thinking: Tail thought")
+  "The summary lines of every tool call, tool result and thinking part in the
+chrome nodes.")
+
+(ert-deftest agentpane-test-reading-view-is-per-buffer ()
+  "`r' turns reading view on in its own transcript buffer and in no other,
+and the mode line says so there."
+  (let ((one (generate-new-buffer " *agentpane-test one*"))
+        (two (generate-new-buffer " *agentpane-test two*")))
+    (unwind-protect
+        (progn
+          (dolist (buffer (list one two))
+            (with-current-buffer buffer
+              (agentpane-transcript-mode)
+              (agentpane--draw agentpane-test--chrome-nodes)))
+          (with-current-buffer one (agentpane-test--press-r))
+          (with-current-buffer one
+            (should agentpane--reading)
+            (should (string-search "reading" (or mode-line-process ""))))
+          (with-current-buffer two
+            (should-not agentpane--reading)
+            (should-not (string-search "reading" (or mode-line-process "")))
+            (should (string-search "Read app.ts" (buffer-string)))))
+      (kill-buffer one)
+      (kill-buffer two))))
+
+(ert-deftest agentpane-test-reading-view-elides-tool-chrome ()
+  "With reading view on, no tool call, tool result or thinking part is drawn
+while the user and assistant text remain; toggled off, they are back."
+  (agentpane-test--with-chrome
+    (agentpane-test--press-r)
+    (dolist (line agentpane-test--chrome-lines)
+      (should-not (string-search line (buffer-string))))
+    (dolist (text '("Fix the bug" "Looking." "All done." "— haiku · 12 tok"))
+      (should (string-search text (buffer-string))))
+    (agentpane-test--press-r)
+    (dolist (line agentpane-test--chrome-lines)
+      (should (string-search line (buffer-string))))))
+
+(ert-deftest agentpane-test-reading-view-drops-empty-turns-but-not-banners ()
+  "With reading view on, a turn that was only a tool call or only thinking
+draws nothing, its meta line included, while an aborted turn with no parts
+keeps its warning."
+  (agentpane-test--with-chrome
+    (agentpane-test--press-r)
+    (should-not (string-search "luna" (buffer-string)))
+    (should (string-search "— aborted" (buffer-string)))))
+
+(ert-deftest agentpane-test-reading-view-keeps-indices-and-navigation ()
+  "With reading view on, the node at point after an elided one answers its
+own index, `n' and `p' step over elided nodes both ways, and a point below
+an elided last node answers the last one drawn."
+  (agentpane-test--with-chrome
+    (agentpane-test--press-r)
+    (goto-char (agentpane-test--position "— aborted"))
+    (should (eql (agentpane-index-at-point) 4))
+    (agentpane-test--goto-index 1)
+    (agentpane-next)
+    (should (eql (agentpane-index-at-point) 4))
+    (agentpane-prev)
+    (should (eql (agentpane-index-at-point) 1))
+    (goto-char (point-max))
+    (should (eql (agentpane-index-at-point) 5))
+    (agentpane-prev)
+    (should (eql (agentpane-index-at-point) 5))
+    (agentpane-prev)
+    (should (eql (agentpane-index-at-point) 4))))
+
+(ert-deftest agentpane-test-reading-view-keeps-folds ()
+  "A fold expanded before reading view is toggled on and off again is still
+expanded, on the same part, and its neighbour still folded."
+  (agentpane-test--with-chrome
+    (goto-char (agentpane-test--position "Read app.ts"))
+    (agentpane-toggle)
+    (should-not (invisible-p (agentpane-test--position "const x = 1;")))
+    (agentpane-test--press-r)
+    (agentpane-test--press-r)
+    (should-not (invisible-p (agentpane-test--position "const x = 1;")))
+    (should (invisible-p (agentpane-test--position "and more besides")))))
+
+(defun agentpane-test--tail-status ()
+  "The reading-view tail status line shown in the current buffer, or nil."
+  (let ((shown (seq-some (lambda (overlay) (overlay-get overlay 'before-string))
+                         (overlays-in (point-min) (point-max)))))
+    (and shown (substring-no-properties shown))))
+
+(ert-deftest agentpane-test-reading-view-names-the-running-tool ()
+  "With reading view on and the session streaming, a line above the prompt
+names the last turn's running tool; it follows the node updates, and goes
+once the turn's text arrives or the streaming ends."
+  (let ((ref '(:backend "claude" :id "c1"))
+        (running (lambda (name summary)
+                   (list :index 1 :role "assistant"
+                         :parts (vector '(:type "text" :text "Checking." :html "<p>Checking.</p>")
+                                        (list :type "tool" :name name :summary summary
+                                              :args "" :result "" :state "running"))
+                         :meta '(:model "haiku" :usage (:totalTokens 0 :cost 0))))))
+    (agentpane-test--with-session ref
+      (agentpane-test--press-r)
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming t
+             :nodes (vector (aref agentpane-test--nodes 0) (funcall running "Bash" "bun test"))))
+      (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (funcall running "Read" "app.ts")))
+      (should (equal (agentpane-test--tail-status) "Read app.ts … running\n"))
+      (agentpane--on-notification
+       nil 'session/status (list :session ref :isStreaming :json-false))
+      (should-not (agentpane-test--tail-status))
+      (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
+      (should (agentpane-test--tail-status))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 2 "<p>Done.</p>")))
+      (should-not (agentpane-test--tail-status))
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (plist-put (funcall running "Bash" "again")
+                                                             :index 3)))
+      (should (equal (agentpane-test--tail-status) "Bash again … running\n"))
+      (agentpane-test--press-r)
+      (should-not (agentpane-test--tail-status)))))
+
 ;;;; Forking, against a stub connection
 
 (defmacro agentpane-test--forking (points forked &rest body)
