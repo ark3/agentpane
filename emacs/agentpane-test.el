@@ -557,10 +557,9 @@ and says the message is not forkable."
 
 (ert-deftest agentpane-test-pi-fork-detaches-the-parent ()
   "A Pi fork, which leaves its parent detached on the server, detaches the
-parent from the helper before redrawing it from the store, so the helper
-stops feeding a buffer that counts itself detached; and the parent buffer
-attaches again before compacting, since the compact route answers only for
-an attached session."
+parent from the helper, so the helper stops feeding a buffer that counts
+itself detached; and the parent buffer attaches again before compacting,
+since the compact route answers only for an attached session."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl"))
         (agentpane--connection 'connection))
@@ -574,7 +573,7 @@ an attached session."
           (agentpane-fork)
           (should (equal (mapcar #'car (reverse sent))
                          '(sessions/forkPoints sessions/fork sessions/detach
-                           sessions/preview sessions/attach)))
+                           sessions/attach)))
           (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref)))
           (setq sent nil)
           (with-current-buffer buffer (agentpane-compact))
@@ -582,10 +581,10 @@ an attached session."
                          `((sessions/attach :session ,ref)
                            (sessions/compact :session ,ref)))))))))
 
-(ert-deftest agentpane-test-pi-fork-redraws-the-parent-from-the-store ()
-  "A snapshot of the fork's shortened transcript that reaches the parent
-during a Pi fork is replaced, once the fork's reply lands, by the parent's
-stored transcript."
+(ert-deftest agentpane-test-pi-fork-leaves-the-parent-as-it-was ()
+  "A Pi fork leaves the parent buffer showing the transcript it showed, and
+fetches nothing to redraw it: the server sends the fork's shortened
+transcript under the fork's ref, never the parent's (OW-zovaye)."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -594,17 +593,12 @@ stored transcript."
           forked
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection)
-          (setq hold '(sessions/fork))
           (agentpane-test--goto-index 0)
           (agentpane-fork)
-          (agentpane--on-notification
-           nil 'session/snapshot
-           (list :session ref :nodes [] :isStreaming :json-false :compaction nil :model nil))
+          (should (agentpane--buffer-for forked))
+          (should-not (assq 'sessions/preview sent))
           (with-current-buffer buffer
-            (should (equal (agentpane-test--indices) nil)))
-          (funcall (cdr (assq 'sessions/fork held)) t)
-          (should (equal (assq 'sessions/preview sent) `(sessions/preview :session ,ref)))
-          (with-current-buffer buffer
+            (should-not (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(0 1)))))))))
 
 (ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
@@ -684,7 +678,7 @@ abort has answered, as the browser does (D15); a streaming Codex session is
 forked with no abort."
   (should (equal (agentpane-test--fork-streaming "pi")
                  '((sessions/forkPoints sessions/abort)
-                   (sessions/fork sessions/detach sessions/preview sessions/attach))))
+                   (sessions/fork sessions/detach sessions/attach))))
   (should (equal (agentpane-test--fork-streaming "codex")
                  '((sessions/forkPoints sessions/fork sessions/attach) nil))))
 
@@ -743,7 +737,7 @@ the buffer to attach again."
 (ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
   "A refetch while a Pi fork is in flight says so and sends nothing, so no
 re-attach of the parent can answer after the fork's reply has counted the
-parent detached; that reply then redraws the parent from the store."
+parent detached."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -764,7 +758,7 @@ parent detached; that reply then redraws the parent from the store."
           (should (seq-some (lambda (text) (string-search "fork of this session" text)) said))
           (should (equal (mapcar #'car (reverse sent))
                          '(sessions/forkPoints sessions/fork sessions/detach
-                           sessions/preview sessions/attach))))))))
+                           sessions/attach))))))))
 
 ;;;; Sending, against a stub connection
 

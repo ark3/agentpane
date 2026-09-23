@@ -1419,17 +1419,16 @@ detached too, detaches the parent from the helper, and its next command
 that needs the session attaches it again.  Codex and Claude Code leave
 the parent attached.
 
-The parent buffer is then redrawn from the store, as `agentpane-refetch'
-draws a detached session.  That is there because of the server's ordering:
-`PiAdapter.fork' (src/server/adapters/pi/process.ts) moves its ref to the
-fork and re-reads the fork's shortened transcript before
-`SessionManager.fork' re-keys the session, so that transcript goes out as a
-snapshot under the parent's ref and the parent buffer draws it.  Once the
-server keys that snapshot to the fork, the redraw is redundant.  While the
-fork is in flight `agentpane-refetch' sends nothing: on the attached parent
-it would attach again, and a reply to that landing after the fork's would
-count the parent attached, the server having detached it, and leave it
-showing whatever the fork had drawn there.
+The parent buffer keeps the live transcript it was showing, unredrawn: the
+server drops what `PiAdapter.fork' emits of the fork's shortened
+transcript before `SessionManager.fork' re-keys the session, rather than
+send it under the parent's ref (OW-zovaye).  A detached buffer usually
+shows the store's projection instead, which for Pi can omit messages the
+live one keeps, but nothing here trusts an index from it: a fork attaches
+first, and a send attaches and redraws.  While the fork is in flight
+`agentpane-refetch' sends nothing: on the attached parent it would attach
+again, and a reply to that landing after the fork's would count the
+parent attached, the server having detached it.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
@@ -1454,8 +1453,8 @@ index at point becomes a live one, and the second press lets the user
 confirm the message after that redraw, which may have moved it.  The
 attach's reply and its snapshot are unordered (D2), so the message can
 precede the redraw by that snapshot's transit.  This covers the parent of
-a Pi fork too, which is left detached and drawn from the store.  While
-that attach is in flight a second press says so and sends nothing."
+a Pi fork too, which is left detached.  While that attach is in flight a
+second press says so and sends nothing."
   (interactive)
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
@@ -1504,8 +1503,7 @@ fork fails.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil)
-       (agentpane-refetch))
+       (setq agentpane--attached nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
