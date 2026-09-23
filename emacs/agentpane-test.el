@@ -320,6 +320,66 @@ a node redraw that changed the buffer's size between the presses."
       (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                      "hello ")))))
 
+(ert-deftest agentpane-test-undo-in-region-survives-a-redraw ()
+  "A run of undo in region in the prompt region keeps undoing the draft, and
+leaves the nodes alone, across a node redraw that grew between the presses.
+Undo inhibits read-only, so a stale position edits a node's text."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (transient-mark-mode t))
+    (agentpane-test--with-session ref
+      (save-window-excursion
+        (set-window-buffer (selected-window) (current-buffer))
+        (buffer-enable-undo)
+        (setq last-command nil)
+        (goto-char (point-max))
+        (let ((draft (point)))
+          (insert "aa ")
+          (undo-boundary)
+          (insert "bb ")
+          (undo-boundary)
+          (insert "cc")
+          (push-mark draft t t))
+        (agentpane-test--command 'undo)
+        (agentpane--on-notification
+         nil 'session/node
+         (list :session ref
+               :node (agentpane-test--assistant
+                      1 (concat "<p>" (string-join (make-list 40 "streaming") " ") "</p>"))))
+        (let ((nodes (buffer-substring-no-properties (point-min) agentpane--prompt-start)))
+          (agentpane-test--command 'undo)
+          (should (equal (buffer-substring-no-properties (point-min) agentpane--prompt-start)
+                         nodes))
+          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                         "aa ")))))))
+
+(ert-deftest agentpane-test-redraw-leaves-another-buffers-undo-alone ()
+  "A node redraw that changes size leaves alone a run of undo in region in
+another buffer, since `pending-undo-list' is global."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (transient-mark-mode t)
+        (notes (generate-new-buffer " *agentpane-test notes*")))
+    (unwind-protect
+        (agentpane-test--with-session ref
+          (save-window-excursion
+            (set-window-buffer (selected-window) notes)
+            (with-current-buffer notes
+              (buffer-enable-undo)
+              (setq last-command nil)
+              (insert "aa ")
+              (undo-boundary)
+              (insert "bb ")
+              (undo-boundary)
+              (insert "cc")
+              (push-mark (point-min) t t)
+              (agentpane-test--command 'undo))
+            (agentpane--on-notification
+             nil 'session/node
+             (list :session ref :node (agentpane-test--assistant 1 "<p>Redrawn.</p>")))
+            (with-current-buffer notes
+              (agentpane-test--command 'undo)
+              (should (equal (buffer-string) "aa ")))))
+      (kill-buffer notes))))
+
 (ert-deftest agentpane-test-undo-past-the-draft-keeps-the-prompt ()
   "Undo past everything typed leaves the separator, and the prompt region
 still takes typing."
