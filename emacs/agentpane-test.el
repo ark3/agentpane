@@ -170,6 +170,31 @@ the last, above the prompt region."
       (should-not (agentpane--buffer-for from))
       (should (string-search "real-2" (buffer-name))))))
 
+(ert-deftest agentpane-test-snapshot-keeps-window-start ()
+  "A `session/snapshot' leaves the start of a window following the tail the
+same distance from the end, and that of any other window where it was."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (save-window-excursion
+        (let ((window (selected-window))
+              (snapshot (lambda (nodes)
+                          (agentpane--on-notification
+                           nil 'session/snapshot (list :session ref :nodes nodes)))))
+          (set-window-buffer window (current-buffer))
+          (set-window-point window (point-max))
+          (set-window-start window (agentpane-test--position "Edit app.ts") t)
+          (let ((from-end (- (point-max) (window-start window))))
+            ;; One node more, so its start keeping its position would differ.
+            (funcall snapshot (vconcat agentpane-test--nodes
+                                       (list (agentpane-test--assistant 2 "<p>More.</p>"))))
+            (should (= (window-point window) (point-max)))
+            (should (= (window-start window) (- (point-max) from-end))))
+          (let ((start (agentpane-test--position "Looking.")))
+            (set-window-point window (agentpane-test--position "Read app.ts"))
+            (set-window-start window start t)
+            (funcall snapshot agentpane-test--nodes)
+            (should (= (window-start window) start))))))))
+
 (ert-deftest agentpane-test-set-model-only-before-the-first-prompt ()
   "`agentpane-set-model' on a buffer with nodes signals the gate's error and
 sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."

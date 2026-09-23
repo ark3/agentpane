@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 31 tests, 31 results as expected, 0 unexpected
+;;     Ran 32 tests, 32 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -816,21 +816,32 @@ and `undo-redo' across a redraw."
             (setq cell (cdr cell))))))))
 
 (defun agentpane--keeping-points (redraw)
-  "Call REDRAW, which replaces every node, keeping point and each window's point.
-A point in the prompt region, the end of the buffer included, stays the same
-distance from the end, and any other stays at its position.  That is the
-whole of follow mode, deliberately less than the browser's."
+  "Call REDRAW, which replaces every node, keeping point and each window's
+point and start.  A point in the prompt region, the end of the buffer
+included, stays the same distance from the end, and any other stays at its
+position; a window's start goes the way of its point, so a window following
+the tail keeps its view of the bottom.  Without that the redraw's deletion
+leaves every start at the top, and redisplay, scrolling back to point,
+recentres.  The start is kept as a hint: should point fall outside the view
+it gives, redisplay picks another start rather than moving point.  That is
+the whole of follow mode, deliberately less than the browser's."
   (let* ((separator (marker-position agentpane--prompt-separator))
+         (size (point-max))
          (saved (mapcar (lambda (window)
                           (let ((pos (if window (window-point window) (point))))
-                            (list window pos (and (>= pos separator) (- (point-max) pos)))))
+                            (list window pos (and window (window-start window))
+                                  (and (>= pos separator) (- (point-max) pos)))))
                         (cons nil (get-buffer-window-list nil nil t)))))
     (funcall redraw)
-    (pcase-dolist (`(,window ,pos ,from-end) saved)
+    (pcase-dolist (`(,window ,pos ,start ,from-end) saved)
       (let ((target (if from-end
                         (- (point-max) from-end)
                       (min pos agentpane--prompt-separator))))
-        (if window (set-window-point window target) (goto-char target))))))
+        (if (not window)
+            (goto-char target)
+          (set-window-point window target)
+          ;; Clamped to the buffer, as every marker is.
+          (set-window-start window (if from-end (- (point-max) (- size start)) start) t))))))
 
 ;;;; The transcript buffer
 
