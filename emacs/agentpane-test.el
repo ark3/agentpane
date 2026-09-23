@@ -548,6 +548,40 @@ again."
         (agentpane-refetch)
         (should (equal (mapcar #'car sent) '(sessions/preview)))))))
 
+;;;; A send that signals, against a stub jsonrpc
+
+(ert-deftest agentpane-test-send-that-signals-frees-the-buffer ()
+  "A send whose request signals before it goes out, as when the helper
+cannot start, leaves the buffer free to refetch and send again; so does one
+whose attach reply signals while it is handled."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (sent nil)
+        (success nil)
+        (starts 0))
+    (cl-letf (((symbol-function 'agentpane--connection)
+               (lambda ()
+                 (when (= (cl-incf starts) 1)
+                   (error "Searching for program: No such file or directory, bun"))
+                 'connection))
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (_connection method _params &rest args)
+                 (push method sent)
+                 (setq success (plist-get args :success-fn))
+                 (list (length sent)))))
+      (agentpane-test--with-session ref
+        (goto-char (point-max))
+        (insert "hello")
+        (should-error (agentpane-send))
+        (agentpane-refetch)
+        (agentpane-send)
+        (should (equal (reverse sent) '(sessions/preview sessions/attach)))
+        (setq sent nil)
+        (cl-letf (((symbol-function 'agentpane--rekey)
+                   (lambda (_) (error "Rekey failed"))))
+          (should-error (funcall success (list :ref ref))))
+        (agentpane-send)
+        (should (equal sent '(sessions/attach)))))))
+
 ;;;; The helper connection, against a fake helper
 
 (defconst agentpane-test--root

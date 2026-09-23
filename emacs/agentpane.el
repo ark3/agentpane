@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 25 tests, 25 results as expected, 0 unexpected
+;;     Ran 26 tests, 26 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -300,6 +300,10 @@ TIMEOUT is in seconds, `jsonrpc-default-request-timeout' when nil.
 
 FAILED, when given, runs with no arguments in this buffer, if it is still
 live, after an error or a timeout has been reported, whatever ALWAYS says.
+It runs too, and the signal goes on, when sending the request or running
+CALLBACK exits non-locally -- the helper failing to start, or a reply's
+handling failing partway -- so a flag that FAILED clears never outlives the
+request that set it.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -315,25 +319,36 @@ returned only at its own timeout's deadline, 10s later (OW-bonode; the
 ert tests `agentpane-test-nested-refetch-*' provoke it)."
   (let ((buffer (current-buffer))
         id)
-    (setq id (car (jsonrpc-async-request
-                   (agentpane--connection) method (or params :jsonrpc-omit)
-                   ;; An explicit nil would mean no timeout at all.
-                   :timeout (or timeout jsonrpc-default-request-timeout)
-                   :success-fn
-                   (lambda (result)
-                     (when (buffer-live-p buffer)
-                       (with-current-buffer buffer
-                         (when (or always (eql id agentpane--latest-request))
-                           (funcall callback result)))))
-                   :error-fn
-                   (lambda (error)
-                     (message "agentpane: %s failed: %s" method (plist-get error :message))
-                     (agentpane--failed buffer failed))
-                   :timeout-fn
+    (setq id (car (agentpane--failing
+                   failed
                    (lambda ()
-                     (message "agentpane: %s timed out" method)
-                     (agentpane--failed buffer failed)))))
+                     (jsonrpc-async-request
+                      (agentpane--connection) method (or params :jsonrpc-omit)
+                      ;; An explicit nil would mean no timeout at all.
+                      :timeout (or timeout jsonrpc-default-request-timeout)
+                      :success-fn
+                      (lambda (result)
+                        (when (buffer-live-p buffer)
+                          (with-current-buffer buffer
+                            (when (or always (eql id agentpane--latest-request))
+                              (agentpane--failing failed (lambda () (funcall callback result)))))))
+                      :error-fn
+                      (lambda (error)
+                        (message "agentpane: %s failed: %s" method (plist-get error :message))
+                        (agentpane--failed buffer failed))
+                      :timeout-fn
+                      (lambda ()
+                        (message "agentpane: %s timed out" method)
+                        (agentpane--failed buffer failed)))))))
     (setq agentpane--latest-request id)))
+
+(defun agentpane--failing (failed fn)
+  "Call FN and return its value; should it exit non-locally, call FAILED, if
+non-nil, on the way out."
+  (let ((done nil))
+    (unwind-protect (prog1 (funcall fn) (setq done t))
+      (when (and failed (not done))
+        (funcall failed)))))
 
 (defun agentpane--failed (buffer failed)
   "Call FAILED, if non-nil, in BUFFER, if it is still live."
