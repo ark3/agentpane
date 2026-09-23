@@ -176,7 +176,7 @@ sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
   (let ((ref '(:backend "codex" :id "t1"))
         (sent nil))
     (cl-letf (((symbol-function 'agentpane--request)
-               (lambda (method _params callback &optional _always)
+               (lambda (method _params callback &rest _)
                  (push method sent)
                  (funcall callback (list :ref ref))))
               ((symbol-function 'jsonrpc-async-request)
@@ -471,6 +471,52 @@ forked with no abort."
                    (sessions/fork sessions/preview sessions/attach))))
   (should (equal (agentpane-test--fork-streaming "codex")
                  '((sessions/forkPoints sessions/fork sessions/attach) nil))))
+
+;;;; Sending, against a stub connection
+
+(ert-deftest agentpane-test-one-send-at-a-time ()
+  "A second `agentpane-send' while the first is in flight -- its attach or
+its prompt unanswered -- says so and sends nothing, so the prompt goes out
+once; a send whose attach or prompt failed frees the buffer for another."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (let ((send (lambda ()
+                        (condition-case err (progn (agentpane-send) nil)
+                          (user-error err))))
+                (release (lambda () (while held (funcall (cdr (pop held)) t))))
+                (methods (lambda () (prog1 (mapcar #'car (reverse sent)) (setq sent nil)))))
+            (setq hold '(sessions/attach sessions/prompt))
+            (goto-char (point-max))
+            ;; A previewed buffer: the first send's attach has not answered.
+            (insert "hello")
+            (should-not (funcall send))
+            (let ((second (funcall send)))
+              (funcall release)
+              (should (equal (funcall methods) '(sessions/attach sessions/prompt)))
+              (should second))
+            ;; Attached: the first send's prompt has not answered.
+            (insert "more")
+            (funcall send)
+            (should (funcall send))
+            (funcall release)
+            (should (equal (funcall methods) '(sessions/prompt)))
+            ;; A failed attach, then a failed prompt, each free the buffer.
+            (setq agentpane--attached nil)
+            (insert "again")
+            (funcall send)
+            (funcall (cdr (pop held)) nil)
+            (should-not (funcall send))
+            (funcall release)
+            (should (equal (funcall methods) '(sessions/attach sessions/attach sessions/prompt)))
+            (insert "last")
+            (funcall send)
+            (funcall (cdr (pop held)) nil)
+            (should-not (funcall send))
+            (funcall release)
+            (should (equal (funcall methods) '(sessions/prompt sessions/prompt)))))))))
 
 ;;;; The helper connection, against a fake helper
 

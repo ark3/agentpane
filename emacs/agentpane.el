@@ -64,7 +64,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 23 tests, 23 results as expected, 0 unexpected
+;;     Ran 24 tests, 24 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1026,8 +1026,9 @@ and keep the streaming field in `agentpane--streaming'."
   (and agentpane--attached (eq agentpane--attached agentpane--connection)
        (jsonrpc-running-p agentpane--attached)))
 
-(defun agentpane--attach (&optional then)
-  "Attach this buffer's session through `sessions/attach', then call THEN.
+(defun agentpane--attach (&optional then failed)
+  "Attach this buffer's session through `sessions/attach', then call THEN,
+or FAILED if the attach fails.
 From here on the helper sends this session's notifications, starting with a
 `session/snapshot' that redraws the buffer."
   (agentpane--request 'sessions/attach
@@ -1037,14 +1038,14 @@ From here on the helper sends this session's notifications, starting with a
                         ;; The route's ref is authoritative and may differ.
                         (agentpane--rekey (agentpane--ref summary))
                         (when then (funcall then)))
-                      t))
+                      t failed))
 
-(defun agentpane--attached-then (fn)
+(defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
-if it is only a preview."
+if it is only a preview; call FAILED instead if that attach fails."
   (if (agentpane--attached-p)
       (funcall fn)
-    (agentpane--attach fn)))
+    (agentpane--attach fn failed)))
 
 (defvar-local agentpane--composer nil
   "This transcript's composer buffer, once `agentpane-prompt' has made one.")
@@ -1061,20 +1062,38 @@ if it is only a preview."
          agentpane--composer-transcript)
         (t (user-error "Not an agentpane transcript or composer buffer"))))
 
+(defvar-local agentpane--sending nil
+  "Non-nil while a prompt this transcript buffer sent, or the attach before
+it, has not answered.")
+
 (defun agentpane--send-prompt (text sent)
   "Send TEXT as a prompt to the session of the current buffer's transcript,
 then call SENT.  A prompt the server refuses, such as one sent mid-turn
 \(DESIGN D16), shows the server's text in the echo area and SENT is not
-called, so the draft stays where it was."
+called, so the draft stays where it was.
+
+One send at a time per session, as the browser allows (OW-kelede): until
+the prompt has answered, which it does once the turn is accepted, a second
+send says so and sends nothing.  The draft stays visible until that answer,
+so pressing again while a backend spawns is the natural move, and without
+this each press attached and prompted with the same text, which the Codex
+adapter makes a steer of the turn the first began (D16)."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
-    (agentpane--attached-then
-     (lambda ()
-       (agentpane--request 'sessions/prompt
-                           (list :session (agentpane--ref agentpane--session) :text text)
-                           (lambda (_) (funcall sent))
-                           t)))))
+    (when agentpane--sending
+      (user-error "A prompt to this session is already being sent"))
+    (setq agentpane--sending t)
+    (let ((failed (lambda () (setq agentpane--sending nil))))
+      (agentpane--attached-then
+       (lambda ()
+         (agentpane--request 'sessions/prompt
+                             (list :session (agentpane--ref agentpane--session) :text text)
+                             (lambda (_)
+                               (setq agentpane--sending nil)
+                               (funcall sent))
+                             t failed))
+       failed))))
 
 (defun agentpane--clear-sent (buffer beg text)
   "Delete TEXT from BEG to the end of BUFFER, if it is still exactly there."
