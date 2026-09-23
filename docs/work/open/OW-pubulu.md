@@ -11,7 +11,7 @@ A session created with an explicit model spawned as `pi --mode rpc --model openr
 After a `DELETE` and a re-attach, the second spawn was `pi --mode rpc --session <path>` with no model flag at all.
 
 The store path could not do otherwise as things stand: `SessionSummary` in `src/shared/protocol.ts` carries no `model` field, so there is nothing for the `!session` branch to restore even if it asked.
-That is the useful half for whoever fixes this -- the repair needs either a new summary field or the manager retaining the closed record's model, not a read off the index.
+D23 in `docs/DESIGN.md` settles where the repair reads from: the model the session file last recorded, not a new summary field or a copy the manager keeps.
 
 This is structural, not a fluke of that run.
 `close()` drops the session from the manager's table, so the re-attach takes `#start`'s `!session` branch, which rebuilds the record from the index with `fromStore: true`, `lastModel: null` and no `model` field; the spread that would pass the model then contributes nothing.
@@ -25,12 +25,13 @@ Without that, whoever picks this up repeats the 2026-09-16 run and learns the sa
 If the log wins, this is a narrower defect than it looks and the repair is to say so in a docblock; if settings win, agentpane is handing the user's model choice to a file it does not control.
 
 Load-bearing: that the model is dropped on the resume spawn, which is proven.
-Incidental: whether the repair threads the model through the store path, re-asserts it after attach via `setModel`, or records the backend's replay as sufficient.
+Incidental: whether the repair passes the recorded model at spawn or re-asserts it after attach via `setModel`, or, if Pi restores it itself, records that in a docblock.
+Either way the resume spawn never carries the pin's `:<thinking>` suffix: OW-ruzuhu measured a suffixed `--model` on `pi 0.87.1` overriding the level the session file recorded (`docs/MANUAL_TESTING.md`, OW-ruzuhu's section).
 
 Found alongside: `POST /api/sessions/:backend/:id/model` accepts `provider/modelId` but rejects the `:thinkingLevel` suffix that Pi's `--model` accepts, answering 500 with `Model not found: openrouter/deepseek/deepseek-v4.1-flash:high`.
 That asymmetry between the two paths is a second thing, and whether it belongs to this card or its own is for whoever picks this up.
 
-Done when a re-attached session provably runs on the model it was created with, pinned by a server test that asserts the resume spawn's argv carries `--model` -- red first.
+Done when a re-attached session provably runs on the model its session file last recorded, pinned by a server test, red first, that asserts what the repair relies on: the resume spawn carrying that model, or, where Pi restores it, carrying no suffixed `--model`.
 
 Found in the same run: OW-bohodu (D9's first-prompt materialisation claim) and OW-pizaki (the `:thinkingLevel` suffix answering 500).
 

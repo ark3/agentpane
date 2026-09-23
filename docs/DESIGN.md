@@ -779,6 +779,38 @@ The helper of OW-refibu sends that HTML beside each text part's markdown source,
 The spike's pretty-printer is the seed of OW-wavone's drawing and the spike file is deleted there.
 D14 gained its sentence scoping the pointer rule to the browser client in the same change.
 
+### D23. A conversation's model and effort are read back from its store's last turn, never kept by agentpane
+
+The owner took this on 2026-09-23, after OW-kokalo, OW-ruzuhu and OW-hokaye landed a chosen effort for all three backends and each measured what a resume keeps of it.
+
+A conversation's model and effort are chosen before its first prompt and fixed after it, by a gate in each client (`setModel` in `src/client/controller.ts`, `agentpane--check-model-gate` in `emacs/agentpane.el`).
+Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses them, and OW-pubulu found that for the model first.
+
+Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries.
+What each restores on a resume differs, measured for effort on 2026-09-23 (`docs/MANUAL_TESTING.md`, the three sections named for those cards):
+
+| | Effort after a resume |
+|---|---|
+| Pi (`pi 0.87.1`) | the level the session file last recorded |
+| Codex (`codex-cli 0.156.0`) | the default, not the chosen level |
+| Claude Code (`claude 2.1.280`) | the default, not the chosen level |
+
+What each restores of the model has not been measured for any of the three.
+
+**The decision.**
+On a resume and on a fork, a conversation runs at the model and effort its store's last turn recorded, and agentpane re-asserts them wherever the backend does not restore them itself.
+The start-only gate is what makes the last turn enough: every stored turn names the same pair, so the last one's is the one chosen.
+Where the backend restores a value itself, agentpane's part is not to override it; on Pi, a resume spawn whose `--model` carries a `:<thinking>` suffix overrides the recorded level (OW-ruzuhu's run).
+
+**Why not a copy of agentpane's own.**
+D13's paragraph on names already weighed this and chose the backend: no second copy to keep coherent, and agentpane stays one more UI over the agent rather than a store beside it.
+The D13 file holds marks, not this.
+A value read from the store also covers a session started outside agentpane, which no copy of agentpane's could.
+
+A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
+The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
+Applied per backend by OW-sayaju for Codex, OW-nabano for Claude Code, and OW-pubulu for Pi's model.
+
 ## The backend adapter contract
 
 The core abstraction, and it lives **server-side**.

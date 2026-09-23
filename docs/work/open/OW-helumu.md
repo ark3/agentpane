@@ -19,7 +19,7 @@ That is the current effort, not the one each turn ran at, so copying Codex would
 
 The per-turn truth exists on disk.
 As of `pi 0.87.1` the session file carries a `thinking_level_change` entry at every change, ahead of the turns it governs (`docs/MANUAL_TESTING.md`, "A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)", which lists a session file's entries in order), and `get_entries` is already spoken by the adapter.
-Load-bearing: a turn's label is the level in force when it ran, read from those entries, not the level in force when it was loaded.
+Load-bearing: a turn's label is the level in force when it ran, read from those entries, not the level in force when it was loaded -- D23 in `docs/DESIGN.md`, read per turn.
 Incidental: whether the walk reads `get_entries` or the session file, and whether one pass serves both the resume and fork paths.
 
 ## Done when

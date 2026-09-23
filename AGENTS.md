@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D22 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
+Decisions D1–D23 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
 Work items are cards, in the deck at `docs/work/`, read and written through the `card` CLI — see "Cards" below, and run `card status`.
 
 ## Commands

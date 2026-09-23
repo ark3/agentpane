@@ -25,10 +25,12 @@ The model half of this is the same gap, and OW-pubulu is its Pi twin for a resum
 ## Load-bearing
 
 A conversation whose effort was chosen keeps running at that effort, and its turns name it, across a reopen and into a fork -- or, where Codex cannot be made to, the clients stop pretending the choice is fixed.
-Where the effort is persisted, or whether it is re-derived from the rollout's last `turn_context` record, is incidental.
+D23 in `docs/DESIGN.md` settles the source: the model and effort the rollout's last `turn_context` recorded, re-asserted by the adapter, never a copy agentpane keeps.
+The model half is unmeasured -- whether a `thread/resume` with no `model` restores the thread's own -- so measure it with the effort and apply D23 to whichever Codex does not restore.
+How the adapter reads the rollout is incidental.
 Two related unknowns from the same run belong to whoever works this: a resume on the app-server that still holds the thread, and a model change with no chosen effort, where the thread's reported effort may not be one the new model lists.
 
 ## Done when
 
-- A test reopens a Codex conversation whose effort was chosen and asserts the next `turn/start` carries that effort, shown red first.
+- A test reopens a Codex conversation whose rollout's last `turn_context` records a model and effort and asserts the next `turn/start` carries that effort, and that model unless Codex was measured restoring it, shown red first.
 - A test forks such a conversation and asserts the fork's first `turn/start` carries the parent's effort and model, shown red first -- or a live run records in `docs/MANUAL_TESTING.md` that `thread/fork` already carries the override, with the `codex-cli` version, and the test asserts what the adapter relies on instead.
