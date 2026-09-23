@@ -33,3 +33,12 @@ That asymmetry between the two paths is a second thing, and whether it belongs t
 Done when a re-attached session provably runs on the model it was created with, pinned by a server test that asserts the resume spawn's argv carries `--model` -- red first.
 
 Found in the same run: OW-bohodu (D9's first-prompt materialisation claim) and OW-pizaki (the `:thinkingLevel` suffix answering 500).
+
+## The thinking-level half, settled by OW-ruzuhu
+
+Measured on the home server 2026-09-23, `pi 0.87.1` (`docs/MANUAL_TESTING.md`, "A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)").
+A session that chose `off` was resumed while the throwaway `settings.json` named `max` for its model and `low` as the default.
+With `--session` alone, which is today's resume spawn, `get_state` read `off`: a resume keeps the level the session file last recorded, over both settings defaults.
+`--model` without a suffix also kept `off`, but `--model openrouter/deepseek/deepseek-v4.1-flash:high` read `high`, so the suffix overrides the session's own level.
+That constrains the fix here: a resume spawn that restores the model must pass it **without** the `:<level>` suffix, or it silently undoes the effort the user chose through OW-ruzuhu's `set_thinking_level`.
+The model axis is still unmeasured.

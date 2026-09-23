@@ -22,3 +22,9 @@ Worth deciding deliberately rather than by whichever is easier, because a silent
 Unmeasured, and worth checking before choosing: whether Codex and Claude Code have the same asymmetry, and what each answers to a model it does not know.
 
 Done when a model string the backend rejects answers 400 with a message a user can act on, pinned by a server test -- red first -- and the accepted form is stated in one place both paths cite.
+
+## What OW-ruzuhu decided about the suffix
+
+Nothing changed in `setModel`: effort is its own field since OW-ruzuhu (`POST .../effort`, `set_thinking_level` in `src/server/adapters/pi/process.ts`), so `setModel` does not need to accept the suffix to set a level.
+Stripping a trailing `:<level>` is not safe as a repair either: as of `pi 0.87.1` real catalogue ids contain colons, such as `openrouter/anthropic/claude-fable-5:batch`, so any parse has to match the suffix against the seven level names, not split on the last colon.
+The measured precedence in OW-pubulu also bears on this card: on a resume spawn the suffix overrides the level the session file recorded.
