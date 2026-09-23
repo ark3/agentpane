@@ -170,6 +170,20 @@ the last, above the prompt region."
       (should-not (agentpane--buffer-for from))
       (should (string-search "real-2" (buffer-name))))))
 
+(ert-deftest agentpane-test-renamed-renames-the-composer ()
+  "A `session/renamed' renames the transcript's composer after it."
+  (let ((from '(:backend "claude" :id "pending-1"))
+        (to '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-session from
+      (save-current-buffer (save-window-excursion (agentpane-prompt)))
+      (let ((composer agentpane--composer))
+        (unwind-protect
+            (progn
+              (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+              (should (equal (buffer-name composer)
+                             (format "*agentpane composer: %s*" (buffer-name)))))
+          (kill-buffer composer))))))
+
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
 same distance from the end, and that of any other window where it was."

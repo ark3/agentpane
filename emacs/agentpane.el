@@ -65,7 +65,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-22) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 32 tests, 32 results as expected, 0 unexpected
+;;     Ran 33 tests, 33 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1050,12 +1050,19 @@ One buffer per session ref, named after the backend and the summary's preview."
           (setq agentpane--session summary))
         buffer)))
 
+(defvar agentpane--composer)
+
 (defun agentpane--rekey (ref)
-  "Make this buffer hold the session REF, renaming it to match.
+  "Make this buffer hold the session REF, renaming it, and its composer if
+it has one, to match.
 For a `session/renamed', and for an attach whose reply names another ref."
   (unless (agentpane--same-ref-p ref (agentpane--ref agentpane--session))
     (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
-    (rename-buffer (agentpane--buffer-name agentpane--session) t)))
+    (rename-buffer (agentpane--buffer-name agentpane--session) t)
+    (when (buffer-live-p agentpane--composer)
+      (let ((name (agentpane--composer-name)))
+        (with-current-buffer agentpane--composer
+          (rename-buffer name t))))))
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
@@ -1424,6 +1431,10 @@ message: `C-c C-c' or `C-RET' sends, `C-c C-k' discards, `C-c C-a' aborts
 the running turn.
 \\{agentpane-composer-mode-map}")
 
+(defun agentpane--composer-name ()
+  "The name of this transcript's composer, which follows the transcript's own."
+  (format "*agentpane composer: %s*" (buffer-name)))
+
 (defun agentpane-prompt ()
   "Open this transcript's composer in a small window below it."
   (interactive)
@@ -1431,8 +1442,7 @@ the running turn.
          (composer
           (with-current-buffer transcript
             (unless (buffer-live-p agentpane--composer)
-              (setq agentpane--composer
-                    (generate-new-buffer (format "*agentpane composer: %s*" (buffer-name))))
+              (setq agentpane--composer (generate-new-buffer (agentpane--composer-name)))
               (with-current-buffer agentpane--composer
                 (agentpane-composer-mode)
                 (setq agentpane--composer-transcript transcript)))
