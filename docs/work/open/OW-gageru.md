@@ -28,6 +28,7 @@ What fitting means is a first cut too, stated in the close note.
 The buffer's `default` is remapped to `variable-pitch` (`agentpane-prose`), so a character count is not a width; `string-pixel-width` against `window-body-width` in pixels is the likely measure.
 The width is the window's at draw time, and a buffer can be shown in several windows or resized; whether the headers are redrawn on a width change (`window-size-change-functions`) or simply fit the width they were drawn at is the implementer's call.
 Thinking's header already shows only the first line of the thinking and may wrap the same way; fitting it to one line likewise is in scope.
+OW-fokisa left one fact for this card to draw: a `tool` part's `timestamp`, the result's time, carried since then and drawn nowhere; the browser shows it in the tool card's body, and where it goes here is the implementer's call within the one-line rule.
 
 ## Where things stand
 
