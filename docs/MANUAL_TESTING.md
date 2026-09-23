@@ -2417,6 +2417,8 @@ The server's listing then read both sessions `status: "attached"`, `isStreaming:
 `bun run src/emacs/dump-nodes.ts codex/<fork id>`, the stored transcript as a preview projects it, answered two nodes, the fork's own prompt and reply, where the live buffer had drawn four; the parent's answered all six.
 The fork's rollout, as `codex-cli 0.156.0` wrote it, opens with a `session_meta` whose `forked_from_id` names the parent and holds only the turn sent after the fork, and the listing's preview for the fork was that turn's prompt rather than the first prompt it inherited.
 So a Codex fork reopened from the picker, which previews without attaching, would draw only its own turns; this run did not open one that way.
+OW-buligi has since made the preview follow the fork's `history_base` to the parent's rollout, and this fork now previews with the four turns the live buffer drew; see "A Codex fork's rollout names where its inherited history ends (OW-buligi)" below.
+The listing's preview for a fork is unchanged by it.
 
 **Smaller things.**
 The helper's stderr buffer was empty.
@@ -2453,6 +2455,10 @@ The 43 subagent rollouts on the store that carry `forked_from_id`, written by 0.
 The 0.147.0 fork in `resources/fixtures/codex/fork.jsonl` is built the same way.
 Such a file already projects its inherited history, and following its `forked_from_id` would draw that history twice, so the stored preview follows `history_base` only.
 No 0.156.0 subagent rollout exists on the store yet.
+
+**The stored preview now draws what the fork inherited.**
+`src/server/sessions/codex.ts` reads a fork's `history_base` and projects the named rollout's records below the ordinal, that rollout's own base first, ahead of the fork's own; a fork whose base's rollout is not in the store draws only its own turns, as before.
+Run against the store through `readSessionPreview` in a one-off `bun` script, the OW-fojike fork drew the parent's first exchange and then its own, four turns where it had drawn two, and the parent drew its six unchanged.
 
 **Not established.**
 No agentpane fork on the store was written by a version between 0.147.0 and 0.154.0, so when forks stopped copying their history is unknown.

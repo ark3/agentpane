@@ -8,7 +8,8 @@ import { readSessionPreview } from "./preview.ts";
 /**
  * OW-38: the read-only, non-attaching preview path. These prove it reads
  * exactly one session file by ref -- Pi by its path (D9), Codex by the uuid
- * embedded in the filename -- and never the whole corpus.
+ * embedded in the filename -- and never the whole corpus. A Codex fork also
+ * reads the rollouts its inherited history lives in (OW-buligi).
  *
  * Fixtures below are synthesized store-format JSONL, matching the sibling
  * parser tests (pi.test.ts / codex.test.ts): the recorded `resources/fixtures`
@@ -109,6 +110,74 @@ function codexAssistant(text: string) {
 		timestamp: "2026-08-13T02:10:54.809Z",
 		payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
 	};
+}
+
+/**
+ * One turn as `codex-cli` 0.156.0 writes it to a rollout, each record trimmed
+ * to its type (OW-buligi). Only the two messages project, but every record
+ * counts toward the ordinal a fork's `history_base` cuts at, so none is left
+ * out. `opening` is what the first turn carries between `task_started` and
+ * `turn_context`: injected instructions and a `world_state`.
+ */
+function codexTurn(prompt: string, reply: string, opening: unknown[] = []): unknown[] {
+	return [
+		{ type: "event_msg", payload: { type: "task_started" } },
+		...opening,
+		{ type: "turn_context", payload: {} },
+		codexUser(prompt),
+		{ type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage" } } },
+		{ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage" } } },
+		codexAssistant(reply),
+		{ type: "token_usage_record", payload: {} },
+		codexTokenCount(31271, 15639),
+		{ type: "event_msg", payload: { type: "task_complete" } },
+	];
+}
+
+const CODEX_FIRST_TURN_OPENING = [
+	{
+		type: "response_item",
+		payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<skills_instructions>" }] },
+	},
+	codexUser("<recommended_plugins>\n</recommended_plugins>"),
+	{ type: "world_state", payload: {} },
+];
+
+const CODEX_SETTINGS_APPLIED = { type: "event_msg", payload: { type: "thread_settings_applied" } };
+
+/**
+ * A fork's header as 0.156.0 writes it: the file holds none of the inherited
+ * records, and `history_base` says where they end in `base`'s rollout -- as an
+ * ordinal over `base`'s whole history, which is its own lines plus whatever
+ * `base` in turn inherited, and as a byte offset into `base`'s own file.
+ */
+function codexForkHeader(
+	id: string,
+	forkedFrom: string,
+	base: { id: string; lines: unknown[]; inherited: number },
+	ownLines: number,
+) {
+	const endOrdinal = base.inherited + ownLines;
+	const endByteOffset = Buffer.byteLength(
+		base.lines.slice(0, ownLines).map((line) => `${JSON.stringify(line)}\n`).join(""),
+	);
+	return {
+		type: "session_meta",
+		payload: {
+			id,
+			forked_from_id: forkedFrom,
+			forked_from_ordinal_exclusive: endOrdinal,
+			timestamp: "2026-09-22T23:44:00.679Z",
+			cwd: "/ws/project",
+			cli_version: "0.156.0",
+			history_mode: "paginated",
+			history_base: { thread_id: base.id, end_ordinal_exclusive: endOrdinal, end_byte_offset: endByteOffset },
+		},
+	};
+}
+
+function codexRollout(root: string, id: string): string {
+	return join(root, "2026", "09", "22", `rollout-2026-09-22T19-43-49-${id}.jsonl`);
 }
 
 function previewText(turn: SessionPreviewTurn | undefined): string {
@@ -581,6 +650,119 @@ describe("readSessionPreview", () => {
 			expect(turns.length).toBe(messageCount);
 			const late = turns[250];
 			expect(previewText(late)).toContain("turn-250");
+		});
+
+		describe("a fork whose rollout holds none of its inherited history (OW-buligi)", () => {
+			const PARENT = "01a0cb81-1557-7a01-b5a1-7b22be24fbdd";
+			const FORK = "01a0cb81-4088-7e73-b4ea-d20ab523535a";
+			const FORK_OF_FORK = "01a0cbd3-9b9c-7852-904e-c4f3d521516c";
+
+			// Two exchanges; a fork at the second user message keeps the first,
+			// which ends with the parent's 13th line.
+			const parentLines = [
+				codexHeader(PARENT),
+				...codexTurn("first prompt", "first reply", CODEX_FIRST_TURN_OPENING),
+				CODEX_SETTINGS_APPLIED,
+				...codexTurn("parent's second prompt", "parent's second reply"),
+			];
+			const fromParent = { id: PARENT, lines: parentLines, inherited: 0 };
+			const forkLines = [
+				codexForkHeader(FORK, PARENT, fromParent, 13),
+				CODEX_SETTINGS_APPLIED,
+				CODEX_SETTINGS_APPLIED,
+				...codexTurn("fork's own prompt", "fork's own reply"),
+				CODEX_SETTINGS_APPLIED,
+				...codexTurn("fork's later prompt", "fork's later reply"),
+			];
+
+			it("draws the parent's turns through the fork point ahead of the fork's own", async () => {
+				await writeJsonl(codexRollout(root, PARENT), parentLines);
+				await writeJsonl(codexRollout(root, FORK), forkLines);
+
+				const turns = await readSessionPreview({ backend: "codex", id: FORK }, { codexRoot: root });
+
+				expect(turns.map((turn) => previewText(turn))).toEqual([
+					"first prompt",
+					"first reply",
+					"fork's own prompt",
+					"fork's own reply",
+					"fork's later prompt",
+					"fork's later reply",
+				]);
+			});
+
+			it("draws only the fork's own turns when the parent's rollout is not in the store", async () => {
+				await writeJsonl(codexRollout(root, FORK), forkLines);
+
+				const turns = await readSessionPreview({ backend: "codex", id: FORK }, { codexRoot: root });
+
+				expect(turns.map((turn) => previewText(turn))).toEqual([
+					"fork's own prompt",
+					"fork's own reply",
+					"fork's later prompt",
+					"fork's later reply",
+				]);
+			});
+
+			it("draws a fork of a fork through its parent's own turn and its grandparent's", async () => {
+				// Measured by `resources/probes/codex_fork_history_probe.py` on
+				// 0.156.0: the base names the fork, the ordinal counts the 13
+				// records the fork inherited plus the 13 of its own file kept here.
+				await writeJsonl(codexRollout(root, PARENT), parentLines);
+				await writeJsonl(codexRollout(root, FORK), forkLines);
+				await writeJsonl(codexRollout(root, FORK_OF_FORK), [
+					codexForkHeader(FORK_OF_FORK, FORK, { id: FORK, lines: forkLines, inherited: 13 }, 13),
+					CODEX_SETTINGS_APPLIED,
+				]);
+
+				const turns = await readSessionPreview({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
+
+				expect(turns.map((turn) => previewText(turn))).toEqual([
+					"first prompt",
+					"first reply",
+					"fork's own prompt",
+					"fork's own reply",
+				]);
+			});
+
+			it("follows the base the header names, not the thread it was forked from", async () => {
+				// A fork of a fork cut inside what that fork inherited: 0.154.0 wrote
+				// its base as the grandparent (home-server rollouts, 2026-09-15).
+				await writeJsonl(codexRollout(root, PARENT), parentLines);
+				await writeJsonl(codexRollout(root, FORK), forkLines);
+				await writeJsonl(codexRollout(root, FORK_OF_FORK), [
+					codexForkHeader(FORK_OF_FORK, FORK, fromParent, 13),
+					CODEX_SETTINGS_APPLIED,
+				]);
+
+				const turns = await readSessionPreview({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
+
+				expect(turns.map((turn) => previewText(turn))).toEqual(["first prompt", "first reply"]);
+			});
+
+			it("leaves a subagent's rollout, which copies its parent's history inline, drawn once", async () => {
+				// Through 0.154.0 a subagent carries `forked_from_id` but no
+				// `history_base`, and its file repeats the parent's records after a
+				// second `session_meta`.
+				const SUBAGENT = "01a08be7-6b91-79b2-a508-ab46ec970c52";
+				await writeJsonl(codexRollout(root, PARENT), parentLines);
+				await writeJsonl(codexRollout(root, SUBAGENT), [
+					{
+						type: "session_meta",
+						payload: { id: SUBAGENT, forked_from_id: PARENT, thread_source: "subagent", cwd: "/ws/project" },
+					},
+					...parentLines.slice(0, 13),
+					codexAssistant("subagent's reply"),
+				]);
+
+				const turns = await readSessionPreview({ backend: "codex", id: SUBAGENT }, { codexRoot: root });
+
+				expect(turns.map((turn) => previewText(turn))).toEqual([
+					"first prompt",
+					"first reply",
+					"subagent's reply",
+				]);
+			});
 		});
 	});
 

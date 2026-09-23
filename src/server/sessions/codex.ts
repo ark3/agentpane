@@ -190,26 +190,104 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 	};
 }
 
+/** The rollout file of a Codex thread, or undefined when the store has none. */
+export type CodexRolloutLocator = (threadId: string) => string | undefined;
+
 /**
  * The full transcript of a stored Codex session for the read-only preview
  * (OW-38). Codex stores Responses API `response_item` payloads, not the live
  * `ThreadItem` shape, so this module maps those store variants directly. The
  * synthetic user filtering remains shared with enumeration.
+ *
+ * A fork's rollout may hold none of the history it inherited, which then lives
+ * in another rollout its header names; `locate` finds that file, and the
+ * inherited turns are drawn ahead of the fork's own. See `historyBase`.
  */
-export async function extractCodexPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
+export async function extractCodexPreviewTurns(
+	filePath: string,
+	locate: CodexRolloutLocator,
+): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
 	const context: PreviewContext = { toolNames: new Map(), tokensBefore: 0 };
+	await projectRollout(filePath, Infinity, locate, context, turns);
+	return turns;
+}
+
+/**
+ * Where a fork's inherited history ends, from its `session_meta` (OW-buligi).
+ *
+ * As of `codex-cli` 0.154.0 a fork made by `thread/fork` writes a rollout that
+ * holds only its own records; the header's `history_base` names the thread
+ * whose rollout holds the rest, as `{thread_id, end_ordinal_exclusive,
+ * end_byte_offset}`. The one earlier fork captured, `resources/fixtures/codex/
+ * fork.jsonl` on 0.147.0, copies its parent's records into its own file
+ * instead, after a second `session_meta`, and so draws whole with no base to
+ * follow; no version between the two has been looked at.
+ *
+ * The ordinal counts records over the named thread's whole history, not its
+ * file: a thread's own line n (header first, from 0) is ordinal n plus
+ * whatever that thread itself inherited. Measured on 0.156.0 with
+ * `resources/probes/codex_fork_history_probe.py`: a fork of a fork taken after
+ * the first fork's own turn named that fork at ordinal 27, which is the 13
+ * records it inherited plus the 14 lines of its own file through that turn's
+ * `task_complete`, and whose byte offset ended at exactly that 14th line. The
+ * byte offset is file-local and would do as well; the ordinal is used because
+ * the line reader counts lines, not bytes. A fork of a fork cut inside the
+ * first fork's inherited history names the grandparent instead (0.154.0,
+ * 2026-09-15 on the home server), which is why the base, not
+ * `forked_from_id`, is followed. Every cut measured fell between turns, at a
+ * `task_complete` or at a `thread_settings_applied` just after one, since
+ * `lastTurnId` forks whole turns. See `docs/MANUAL_TESTING.md`, "A Codex
+ * fork's rollout names where its inherited history ends (OW-buligi)".
+ *
+ * A subagent's rollout carries `forked_from_id` but, across the 43 on the home
+ * server written by 0.150.1 through 0.154.0, never `history_base`: its file
+ * repeats its parent's records inline, like the 0.147.0 fork. Following
+ * `forked_from_id` would draw that history twice.
+ */
+function historyBase(header: string): { threadId: string; endOrdinal: number } | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(header);
+	} catch {
+		return null;
+	}
+	const payload = (parsed as { payload?: { history_base?: unknown } } | null)?.payload;
+	const base = payload?.history_base as Record<string, unknown> | null | undefined;
+	if (typeof base?.thread_id !== "string" || typeof base.end_ordinal_exclusive !== "number") return null;
+	return { threadId: base.thread_id, endOrdinal: base.end_ordinal_exclusive };
+}
+
+/**
+ * Projects `filePath`'s records below `endOrdinal` onto `turns`, the history it
+ * inherited first. When the base's rollout is not in the store the inherited
+ * turns are simply missing, and the fork draws only its own.
+ */
+async function projectRollout(
+	filePath: string,
+	endOrdinal: number,
+	locate: CodexRolloutLocator,
+	context: PreviewContext,
+	turns: SessionPreviewTurn[],
+): Promise<void> {
 	let lineNo = 0;
+	let ownLines = Infinity;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
 	// stopping early at the enumeration caps would be a visible regression).
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
-		if (lineNo === 1) continue;
+		if (lineNo === 1) {
+			const base = historyBase(line);
+			const baseFile = base ? locate(base.threadId) : undefined;
+			if (base && baseFile) await projectRollout(baseFile, base.endOrdinal, locate, context, turns);
+			ownLines = endOrdinal - (base?.endOrdinal ?? 0);
+			continue;
+		}
+		if (lineNo > ownLines) break;
 		const turn = extractStoreTurn(line, context);
 		if (turn) turns.push(turn);
 	}
-	return turns;
 }
 
 /**

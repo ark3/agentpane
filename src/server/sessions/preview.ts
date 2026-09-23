@@ -4,8 +4,11 @@
  * This is the non-attaching counterpart to `SessionManager.attach`: selecting a
  * session to *look at* must be as cheap as listing one (D9), so this spawns no
  * subprocess and -- crucially -- reads exactly one session file, never the
- * whole corpus. It never calls `listSessions()`, `index.list()`, or
- * `index.get()`, all of which parse every file in both stores.
+ * whole corpus. The one exception is a Codex fork whose rollout holds none of
+ * its inherited history: it also reads the rollouts that history lives in,
+ * one per fork in its ancestry, located by name like its own (OW-buligi). It
+ * never calls `listSessions()`, `index.list()`, or `index.get()`, all of
+ * which parse every file in both stores.
  *
  * The backends locate their one file differently:
  *
@@ -14,8 +17,9 @@
  *  - **Codex**: the ref is a UUIDv7 thread id embedded in the filename. A
  *    readdir-only walk (`findJsonlFiles`, no file reads) turns up the candidate
  *    names; the one whose filename carries the matching uuid is read, and only
- *    that one. If none matches, the preview is empty rather than an error --
- *    the same "tolerate a missing file" spirit enumeration takes.
+ *    that one, save a fork's base as above. If none matches, the preview is
+ *    empty rather than an error -- the same "tolerate a missing file" spirit
+ *    enumeration takes.
  *  - **Claude Code**: the ref is the session uuid the file is named after;
  *    same match-by-filename as Codex, over the readdir-only
  *    `findClaudeSessionFiles` walk.
@@ -26,7 +30,7 @@
 
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { extractClaudePreviewTurns, findClaudeSessionFiles } from "./claude.ts";
-import { extractCodexPreviewTurns } from "./codex.ts";
+import { type CodexRolloutLocator, extractCodexPreviewTurns } from "./codex.ts";
 import { resolvePiSessionPath, SESSION_ROOTS } from "./index.ts";
 import { extractPiPreviewTurns } from "./pi.ts";
 import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
@@ -47,7 +51,7 @@ export interface ReadPreviewOptions {
 	/** Pi transcript extractor seam. Defaults to the real one. */
 	readPiTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
 	/** Codex transcript extractor seam. Defaults to the real one. */
-	readCodexTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
+	readCodexTurns?: (filePath: string, locate: CodexRolloutLocator) => Promise<SessionPreviewTurn[]>;
 	/** Claude Code transcript extractor seam. Defaults to the real one. */
 	readClaudeTurns?: (filePath: string) => Promise<SessionPreviewTurn[]>;
 }
@@ -82,5 +86,5 @@ export async function readSessionPreview(
 	const files = await findFiles(root);
 	const match = files.find((file) => fileMatchesThreadId(file, ref.id));
 	if (!match) return [];
-	return readCodexTurns(match);
+	return readCodexTurns(match, (threadId) => files.find((file) => fileMatchesThreadId(file, threadId)));
 }
