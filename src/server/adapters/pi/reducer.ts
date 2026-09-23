@@ -25,13 +25,20 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { AgentRequest } from "../../../shared/protocol.ts";
+import type { AgentRequest, AssistantTurn } from "../../../shared/protocol.ts";
 import { PI_DIALOG_METHODS, type PiCommand, type PiDialogMethod, type PiNotification } from "./protocol.ts";
 
 export interface PiReducerState {
 	readonly messages: AgentMessage[];
 	readonly isStreaming: boolean;
 	readonly compaction: "requesting" | "running" | null;
+	/**
+	 * The thinking level named on each assistant message as it arrives, the
+	 * `AssistantTurn.effort` the footer shows. Pi's messages carry none, so
+	 * `process.ts` keeps this current from what Pi reports (OW-ruzuhu); null
+	 * names nothing, as for a model that does not reason.
+	 */
+	readonly effort: string | null;
 	/** requestId -> dialog method, so `reply()` knows how to shape the response. */
 	readonly pendingUiRequests: Readonly<Record<string, PiDialogMethod>>;
 }
@@ -55,7 +62,7 @@ export interface PiReduceResult {
 }
 
 export function createInitialPiState(): PiReducerState {
-	return { messages: [], isStreaming: false, compaction: null, pendingUiRequests: {} };
+	return { messages: [], isStreaming: false, compaction: null, effort: null, pendingUiRequests: {} };
 }
 
 export function reducePiNotification(state: PiReducerState, event: PiNotification): PiReduceResult {
@@ -67,7 +74,7 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			return { state: { ...state, isStreaming: false } };
 
 		case "message_start": {
-			const messages = [...state.messages, event.message];
+			const messages = [...state.messages, withEffort(event.message, state.effort)];
 			return { state: { ...state, messages }, changedIndex: messages.length - 1 };
 		}
 
@@ -78,11 +85,11 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			// D9's "never throw on something you don't recognise" spirit applies).
 			const index = state.messages.length - 1;
 			if (index < 0) {
-				const messages = [event.message];
+				const messages = [withEffort(event.message, state.effort)];
 				return { state: { ...state, messages }, changedIndex: 0 };
 			}
 			const messages = state.messages.slice();
-			messages[index] = event.message;
+			messages[index] = withEffort(event.message, state.effort);
 			return { state: { ...state, messages }, changedIndex: index };
 		}
 
@@ -155,6 +162,17 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 		default:
 			return { state };
 	}
+}
+
+/**
+ * Name the level on an assistant message, as Codex's reducer names its effort.
+ * Deltas keep it by spreading the message they extend, so only the two events
+ * that bring a whole message need this.
+ */
+function withEffort(message: AgentMessage, effort: string | null): AgentMessage {
+	if (effort === null || message.role !== "assistant") return message;
+	const turn: AssistantTurn = { ...message, effort };
+	return turn;
 }
 
 function reduceAssistantDelta(

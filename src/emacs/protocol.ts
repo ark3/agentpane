@@ -88,7 +88,7 @@
  *
  * - `model` (string, always; may be empty when the backend reported none).
  * - `effort` (string, only when the backend reported a reasoning effort;
- *   Codex does, others do not).
+ *   Codex does, Pi does on a model that reasons, Claude Code does not).
  * - `usage` (object, always): `totalTokens` (integer) and `cost` (number, in
  *   dollars); both are `0` when the backend reports no accounting.
  * - `stopReason` (string, only when the turn ended badly): `"error"` or
@@ -137,8 +137,9 @@
  *   notifications and does nothing else: no HTTP call, and the session goes
  *   on running on the server. Sent when Emacs stops showing a session.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
- *   new model does not list falls back to that model's `defaultEffort`, which
- *   the `session/status` that follows reports.
+ *   new model does not list falls back to that model's `defaultEffort`, or
+ *   where that is `null` to whatever the backend then picks, which the
+ *   `session/status` that follows reports.
  * - `sessions/setEffort` -- `{ session, effort }` -> `null`. `effort` is one of
  *   the session's model's `efforts` ids, taking effect from the next turn; a
  *   backend that lists none refuses it.

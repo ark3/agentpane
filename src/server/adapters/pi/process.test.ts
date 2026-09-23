@@ -15,7 +15,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { SessionRef } from "../../../shared/protocol.ts";
+import type { AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
 import { type PiChild, PiAdapter } from "./process.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/s.jsonl" };
@@ -626,6 +626,166 @@ describe("PiAdapter.fork", () => {
 		await expect(forked).rejects.toThrow(/cancelled by an extension/);
 		// The veto must not leave us claiming a rewind happened.
 		expect(h.child.sent().some((c) => c.type === "get_messages")).toBe(false);
+	});
+});
+
+describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
+	// The shape `get_available_models` answered for the pinned model on
+	// `pi 0.87.1` (docs/MANUAL_TESTING.md, OW-ruzuhu): `null` marks a level the
+	// model lacks, and `xhigh`/`max` exist only where the map names them.
+	const FLASH = {
+		provider: "openrouter",
+		id: "deepseek/deepseek-v4.1-flash",
+		name: "DeepSeek V4.1 Flash",
+		reasoning: true,
+		thinkingLevelMap: { off: "none", minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
+	};
+	/** A reasoning model with no `off`, like `openrouter/anthropic/claude-fable-5` on 0.87.1. */
+	const NO_OFF = {
+		provider: "openrouter",
+		id: "anthropic/claude-fable-5",
+		name: "Fable 5",
+		reasoning: true,
+		thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+	};
+	const PLAIN = { provider: "openrouter", id: "openai/plain", name: "Plain", reasoning: false };
+
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+	const ids = (efforts: { id: string }[]) => efforts.map((effort) => effort.id);
+
+	it("offers each model the levels Pi would, from its reasoning flag and thinkingLevelMap", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const models = h.adapter.listModels();
+		h.child.respondTo("get_available_models", { models: [FLASH, NO_OFF, PLAIN] });
+		const [flash, noOff, plain] = await models;
+
+		expect(ids(flash?.efforts ?? [])).toEqual(["off", "low", "high", "max"]);
+		expect(ids(noOff?.efforts ?? [])).toEqual(["low", "medium", "high", "xhigh", "max"]);
+		// Pi answers `["off"]` for a model that does not reason: nothing to choose.
+		expect(plain?.efforts).toEqual([]);
+		// What Pi picks for a model comes from settings.json, which the catalogue does not carry.
+		expect([flash, noOff, plain].map((model) => model?.defaultEffort)).toEqual([null, null, null]);
+	});
+
+	it("reports the level get_state names, and none for a model that does not reason", async () => {
+		const reasoning = makeHarness();
+		await startAdapter(reasoning, { model: FLASH, thinkingLevel: "high" });
+		expect(reasoning.adapter.getState().effort).toBe("high");
+
+		const plain = makeHarness();
+		await startAdapter(plain, { model: PLAIN, thinkingLevel: "off" });
+		expect(plain.adapter.getState().effort).toBeNull();
+	});
+
+	it("sends the chosen level to Pi as set_thinking_level before the first prompt", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high", sessionFile: REF.id });
+
+		const set = h.adapter.setEffort("low");
+		expect(h.child.lastSent("set_thinking_level")).toMatchObject({ level: "low" });
+		// Pi announces the change before it answers the command.
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const submitted = h.adapter.submit("hello");
+		h.child.respondTo("prompt");
+		await submitted;
+
+		const order = h.child.sent().map((command) => command.type);
+		expect(order.indexOf("set_thinking_level")).toBeGreaterThanOrEqual(0);
+		expect(order.indexOf("set_thinking_level")).toBeLessThan(order.indexOf("prompt"));
+		expect(h.adapter.getState().effort).toBe("low");
+	});
+
+	it("follows the level Pi reports, whatever changed it", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const seen: (string | null)[] = [];
+		h.adapter.onUpdate((state) => seen.push(state.effort));
+
+		h.child.emitLine({ type: "thinking_level_changed", level: "max" });
+
+		expect(seen).toEqual(["max"]);
+		expect(h.adapter.getState().effort).toBe("max");
+	});
+
+	it("re-asserts the chosen level after set_model, which Pi resets from its settings", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const set = h.adapter.setEffort("off");
+		h.child.emitLine({ type: "thinking_level_changed", level: "off" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const changed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash");
+		// Measured on 0.87.1: with `modelThinkingLevels` naming `high` for this
+		// model, `set_model` put the level back to `high`.
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.respondTo("set_model", FLASH);
+		await flush();
+		expect(h.child.sent().filter((command) => command.type === "set_thinking_level").map((command) => command.level)).toEqual(["off", "off"]);
+		h.child.emitLine({ type: "thinking_level_changed", level: "off" });
+		h.child.respondTo("set_thinking_level");
+		await changed;
+
+		expect(h.adapter.getState().effort).toBe("off");
+	});
+
+	it("keeps Pi's own level after set_model to a model that does not list the chosen one", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const set = h.adapter.setEffort("off");
+		h.child.emitLine({ type: "thinking_level_changed", level: "off" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const changed = h.adapter.setModel("openrouter/anthropic/claude-fable-5");
+		// Pi clamps `off` to the new model's lowest level.
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_model", NO_OFF);
+		await changed;
+
+		expect(h.child.sent().filter((command) => command.type === "set_thinking_level")).toHaveLength(1);
+		expect(h.adapter.getState().effort).toBe("low");
+	});
+
+	it("names the level in force on each assistant turn, which the footer shows", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const set = h.adapter.setEffort("low");
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "message_start", message: userMessage("hello") });
+		h.child.emitLine({ type: "message_end", message: userMessage("hello") });
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		h.child.emitLine({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" },
+		});
+		const streamed = h.adapter.getState().messages[1] as AssistantTurn;
+		h.child.emitLine({ type: "message_end", message: assistantMessage("hi") });
+		h.child.emitLine({ type: "agent_settled" });
+
+		const [user, assistant] = h.adapter.getState().messages as PaneMessage[];
+		expect(streamed.effort).toBe("low");
+		expect((assistant as AssistantTurn).effort).toBe("low");
+		expect(user).not.toHaveProperty("effort");
+	});
+
+	it("names no level on the turns of a model that does not reason", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: PLAIN, thinkingLevel: "off" });
+
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		h.child.emitLine({ type: "message_end", message: assistantMessage("hi") });
+
+		expect(h.adapter.getState().messages[0]).not.toHaveProperty("effort");
 	});
 });
 

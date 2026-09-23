@@ -35,6 +35,7 @@ import {
 	type PiOutputLine,
 	type PiResponseFor,
 	splitModelRef,
+	thinkingLevels,
 } from "./protocol.ts";
 
 type UpdateListener = (state: AdapterState, changedIndex?: number) => void;
@@ -123,6 +124,47 @@ export class PiAdapter implements BackendAdapter {
 	private readonly splitter = new LfLineSplitter();
 	private state: PiReducerState = createInitialPiState();
 	private model: string | null = null;
+	/**
+	 * Pi's thinking level is the effort (OW-ruzuhu). It is read, not assumed:
+	 * `get_state` names it at start and after a fork, and Pi announces every
+	 * change with `thinking_level_changed`, including the ones it makes itself.
+	 * The reducer's `effort` is this level while the model reasons, and null
+	 * while it does not, since Pi pins such a model at `off` and there is
+	 * nothing to show or choose.
+	 *
+	 * Offered per model from the catalogue entry, not from
+	 * `get_available_thinking_levels`, which answers for the current model only
+	 * (`thinkingLevels` in `protocol.ts`). `defaultEffort` is null: what Pi picks
+	 * for a model is `settings.json`'s `modelThinkingLevels` entry, else its
+	 * `defaultThinkingLevel`, else the level already in force, clamped to the
+	 * model -- none of which the catalogue carries.
+	 *
+	 * `chosenEffort` is re-sent after a model change, because `set_model` puts
+	 * the level back to that settings default when one exists. Measured on the
+	 * home server, 2026-09-23, `pi 0.87.1` (docs/MANUAL_TESTING.md, OW-ruzuhu):
+	 * with `modelThinkingLevels` naming `high`, `off` became `high` again across
+	 * a `set_model` to the same model; with neither setting, `off` survived it.
+	 * And a `set_thinking_level` sent while `set_model` is still in flight can
+	 * land first and then be undone: as read at the source on 0.87.1, not run,
+	 * `rpc-mode.js` does not wait for one command before starting the next, and
+	 * `set_model` awaits an auth check before it resets the level. A client
+	 * sending both at once, as the Emacs one does, would hit that.
+	 * A choice the new model does not list is dropped, and Pi's own clamp
+	 * stands, as Codex falls back to the new model's default.
+	 *
+	 * A resumed session runs at the level its file last recorded, not at the
+	 * settings default. Same run: a session that chose `off` was resumed with
+	 * `--session` alone while `settings.json` named `max` for the model and
+	 * `low` as the default, and `get_state` read `off`; `--model` without a
+	 * suffix kept `off` too, but `--model ...:high` read `high`, so a resume
+	 * spawn that carries the suffix overrides the session's own level. So the
+	 * `get_state` at start is the truth here too, and no choice is resent. The
+	 * turns `get_messages` returns on a resume carry no level, and are not
+	 * named one: only turns this adapter watched arrive are.
+	 */
+	private thinkingLevel: string | null = null;
+	private reasoning = false;
+	private chosenEffort: string | null = null;
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
@@ -198,6 +240,9 @@ export class PiAdapter implements BackendAdapter {
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		this.adoptSessionFile(state.data.sessionFile);
 		this.model = state.data.model ? modelToInfo(state.data.model).id : null;
+		this.reasoning = state.data.model?.reasoning === true;
+		this.thinkingLevel = state.data.thinkingLevel ?? null;
+		this.syncEffort();
 
 		// Cold start (D3): the transcript of a session that predates this
 		// adapter has to be re-queried, because nothing replays the events that
@@ -404,6 +449,9 @@ export class PiAdapter implements BackendAdapter {
 		// unconditionally.
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
+		if (state.data.model) this.reasoning = state.data.model.reasoning === true;
+		this.thinkingLevel = state.data.thinkingLevel ?? this.thinkingLevel;
+		this.syncEffort();
 		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
 			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
 		}
@@ -419,7 +467,7 @@ export class PiAdapter implements BackendAdapter {
 	// -- state ----------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model, effort: null };
+		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model, effort: this.state.effort };
 	}
 
 	onUpdate(cb: UpdateListener): Unsubscribe {
@@ -453,17 +501,37 @@ export class PiAdapter implements BackendAdapter {
 		const { provider, modelId } = splitModelRef(model);
 		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId });
 		this.model = modelToInfo(response.data).id;
+		this.reasoning = response.data.reasoning === true;
+		if (this.chosenEffort !== null && thinkingLevels(response.data).includes(this.chosenEffort)) {
+			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: this.chosenEffort });
+		} else {
+			this.chosenEffort = null;
+		}
+		this.syncEffort();
 		this.emitUpdate();
 	}
 
-	/** Not yet: `listModels` offers no efforts, so there is nothing to choose. */
-	async setEffort(_effort: string): Promise<void> {
-		throw new Error("pi adapter offers no reasoning effort to set");
+	/** Sent now, not held for the next prompt: Pi has a standalone command, and records it in the session file. */
+	async setEffort(effort: string): Promise<void> {
+		this.chosenEffort = effort;
+		await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: effort });
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
 		const resp = await this.sendCommand<PiResponseFor<"get_available_models">>({ type: "get_available_models" });
-		return resp.data.models.map((m: Model<any>) => ({ ...modelToInfo(m), efforts: [], defaultEffort: null }));
+		return resp.data.models.map((m: Model<any>) => ({
+			...modelToInfo(m),
+			efforts: thinkingLevels(m).map((id) => ({ id, description: "" })),
+			defaultEffort: null,
+		}));
+	}
+
+	/** Bring the reducer's effort in line with the level and model last reported. Emits nothing. */
+	private syncEffort(): boolean {
+		const effort = this.reasoning ? this.thinkingLevel : null;
+		if (effort === this.state.effort) return false;
+		this.state = { ...this.state, effort };
+		return true;
 	}
 
 	// -- stdio plumbing ---------------------------------------------------------
@@ -488,6 +556,11 @@ export class PiAdapter implements BackendAdapter {
 
 		if (parsed.type === "response") {
 			this.handleResponse(parsed);
+			return;
+		}
+		if (parsed.type === "thinking_level_changed") {
+			this.thinkingLevel = parsed.level;
+			if (this.syncEffort()) this.emitUpdate();
 			return;
 		}
 
@@ -569,7 +642,7 @@ export class PiAdapter implements BackendAdapter {
 			isStreaming: this.state.isStreaming,
 			compaction: this.state.compaction,
 			model: this.model,
-			effort: null,
+			effort: this.state.effort,
 		};
 		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
 	}

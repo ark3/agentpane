@@ -311,16 +311,23 @@ export interface ModelInfo {
 	 * The reasoning efforts this model accepts, in the backend's order. Per
 	 * model, not per backend, so a client can follow a model change without
 	 * guessing: setting a model whose list lacks the effort in force falls back
-	 * to that model's `defaultEffort`. Empty when the model or its backend
-	 * offers no effort control, and then a client shows none.
+	 * to that model's `defaultEffort`, or where that is null to whatever the
+	 * backend then picks, which the status that follows reports. Empty when
+	 * the model or its backend offers no effort control, and then a client
+	 * shows none.
 	 */
 	efforts: EffortInfo[];
-	/** The effort the backend picks for this model when none is chosen; null when it names none. */
+	/**
+	 * The effort the backend picks for this model when none is chosen; null when
+	 * it names none. Pi's is always null: it picks from its own settings file,
+	 * which its model catalogue does not carry (OW-ruzuhu).
+	 */
 	defaultEffort: string | null;
 }
 export interface EffortInfo {
 	/** What `SetEffortRequest.effort` takes, and what a turn's `effort` names. */
 	id: string;
+	/** Empty where the backend describes none, as Pi does not. */
 	description: string;
 }
 export interface ModelsResponse {

@@ -9,10 +9,12 @@
  * against the installed CLI's `dist/modes/rpc/rpc-types.d.ts`.
  *
  * Only the commands/events/responses this adapter actually speaks are
- * included -- not the full RPC surface (thinking level, bash-as-a-command,
- * session naming, etc. are all real commands we simply never send). The
+ * included -- not the full RPC surface (bash-as-a-command, session naming,
+ * cycling, etc. are all real commands we simply never send). The
  * manual-compaction `compact` command IS spoken (OW-72), transcribed from
- * rpc.md's "Compaction" section.
+ * rpc.md's "Compaction" section, and so is `set_thinking_level` with the
+ * `thinking_level_changed` event (OW-ruzuhu), from `rpc-commands.md`'s
+ * "Thinking" and `json.md` as of `pi 0.87.1`.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -34,6 +36,11 @@ export type PiCommand =
 	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
+	// `level` is one of `off|minimal|low|medium|high|xhigh|max`. As of 0.87.1 Pi
+	// answers success for a level the model lacks and clamps it -- to the next
+	// level up the model has, else down -- so `medium` on a model without it
+	// ran at `high` (docs/MANUAL_TESTING.md, OW-ruzuhu).
+	| { id?: string; type: "set_thinking_level"; level: string }
 	| { id?: string; type: "get_available_models" }
 	| { id?: string; type: "fork"; entryId: string }
 	| { id?: string; type: "get_fork_messages" }
@@ -66,9 +73,10 @@ export type PiResponse =
 			type: "response";
 			command: "get_state";
 			success: true;
-			data: { model: Model<any> | null; isStreaming: boolean; sessionFile?: string };
+			data: { model: Model<any> | null; thinkingLevel?: string; isStreaming: boolean; sessionFile?: string };
 	  }
 	| { id?: string; type: "response"; command: "set_model"; success: true; data: Model<any> }
+	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }
 	| {
 			id?: string;
 			type: "response";
@@ -185,6 +193,10 @@ export type PiNotification =
 	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: unknown; partialResult: unknown }
 	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: unknown; isError: boolean }
 	| { type: "queue_update"; steering: string[]; followUp: string[] }
+	// Emitted whenever the level actually changes -- by `set_thinking_level`,
+	// and by `set_model` re-applying the settings default (OW-ruzuhu) -- before
+	// the command's own response, as of 0.87.1.
+	| { type: "thinking_level_changed"; level: string }
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| {
 			type: "compaction_end";
@@ -218,6 +230,32 @@ export type PiOutputLine = PiResponse | PiNotification;
 
 export function modelToInfo(model: Model<any>): { id: string; label: string } {
 	return { id: `${model.provider}/${model.id}`, label: model.name };
+}
+
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * The thinking levels a client may choose among for `model`, in Pi's order:
+ * `pi-ai`'s `getSupportedThinkingLevels`, transcribed because D10 keeps that
+ * package types-only (read at the source in `pi-ai` as installed with
+ * `pi 0.87.1`). A `null` in `thinkingLevelMap` removes a level, and `xhigh`
+ * and `max` exist only where the map names them.
+ *
+ * Derived from the catalogue entry, not asked of Pi, because
+ * `get_available_thinking_levels` answers for the current model only and
+ * `ModelInfo.efforts` is per model; the live run found the two agree for the
+ * models it read (docs/MANUAL_TESTING.md, OW-ruzuhu). One departure: Pi
+ * answers `["off"]` for a model that does not reason, and this answers
+ * nothing, since there is no choice to offer.
+ */
+export function thinkingLevels(model: Model<any>): string[] {
+	if (!model.reasoning) return [];
+	return THINKING_LEVELS.filter((level) => {
+		const mapped = model.thinkingLevelMap?.[level];
+		if (mapped === null) return false;
+		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		return true;
+	});
 }
 
 export function splitModelRef(modelRef: string): { provider: string; modelId: string } {

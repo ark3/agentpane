@@ -137,8 +137,8 @@ describe("Message", () => {
 	});
 
 	it("names only the model when no effort was reported", () => {
-		// Pi reports no effort at all, so the absent case is the common one: no
-		// placeholder, no "unknown", nothing extra in the meta line. The row's
+		// Claude Code reports no effort, and Pi none on a model that does not
+		// reason: no placeholder, no "unknown", nothing extra in the meta line. The row's
 		// timestamp (OW-67) is a <time>, not a <span>, so it is not in this list.
 		const { container } = render(Message, {
 			props: { message: assistant([{ type: "text", text: "done" }]) },
