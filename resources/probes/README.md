@@ -311,6 +311,22 @@ Costs tokens: one real model turn, two on Claude.
 Verified with: `pi 0.85.1`, `claude 2.1.270` and `codex-cli 0.154.0` on the home server, 2026-09-15, each on its AGENTS.md pin.
 What it showed is `docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire".
 
+## `codex_fork_history_probe.py`
+
+Proves: **a Codex fork's `history_base` names where its inherited history ends, as an ordinal over the named thread's whole history and a byte offset into its own file** (OW-buligi).
+One `codex app-server`, a parent with two turns, a fork of it keeping the first and then taking two turns of its own, and a fork of that fork keeping the fork's first own turn -- the one shape in which the ordinal could have counted either a file's lines or the whole ancestry.
+
+```bash
+python3 codex_fork_history_probe.py [--json <path>]
+```
+
+For each fork it reports the header's `forked_from_id`, `forked_from_ordinal_exclusive` and `history_base`, what the byte offset lands on in the named rollout, the records either side of the cut, and the turns `thread/read` answers for the fork of a fork.
+Shaped after `codex_fork_same_process_probe.py`, whose `AppServer` it imports, down to the temporary `CODEX_HOME`, which it removes on exit.
+Costs tokens: four real model turns, each on the AGENTS.md pin.
+
+Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-22.
+What it showed is `docs/MANUAL_TESTING.md`, "A Codex fork's rollout names where its inherited history ends (OW-buligi)".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's

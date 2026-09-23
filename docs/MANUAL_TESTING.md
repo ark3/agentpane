@@ -2421,3 +2421,39 @@ So a Codex fork reopened from the picker, which previews without attaching, woul
 **Smaller things.**
 The helper's stderr buffer was empty.
 The fork buffer is named after its id: its summary carries no preview, the fork having none the mode knows of.
+
+## A Codex fork's rollout names where its inherited history ends (OW-buligi)
+
+Read on the home server 2026-09-22, `codex-cli 0.156.0`, from the rollouts under `~/.codex/sessions/`, and settled for a fork of a fork by one live run.
+The question was OW-fojike's: a fork's rollout holds none of the history it inherited, so the stored preview needs to know where in the parent that history ends, and whether any rollout says.
+
+**The fork's header names the fork point, twice.**
+The OW-fojike fork's `session_meta` carries, beside `forked_from_id`, `forked_from_ordinal_exclusive: 13` and `history_base: {thread_id: <parent>, end_ordinal_exclusive: 13, end_byte_offset: 70014}`, and `history_mode: "paginated"`.
+The parent's first 13 lines are its header and its first turn through that turn's `event_msg`/`task_complete`, and the 13th ends at byte 70014 exactly.
+The parent kept going after the fork, to 33 lines and a third exchange, and the base is unmoved by it: the cut is a line count and a byte offset, not "whatever the parent held when the fork was read".
+So no timestamp heuristic is needed; the adapter's `thread/fork` passes `lastTurnId`, the turn before the fork point (`codex/adapter.ts` `fork`), and the base records where that turn ended.
+
+**Every `history_base` in the store agrees.**
+A census of the store's headers found 19 rollouts carrying one, 18 written by 0.154.0 (one on 2026-09-11, the rest on 2026-09-15) and the OW-fojike fork on 0.156.0.
+In all 19 the byte offset falls exactly at a line end in the named thread's rollout, at the line the ordinal counts, and the record there is a `task_complete` or, in the 2026-09-11 one, the `thread_settings_applied` that follows one.
+Four of the 0.154.0 rollouts are forks of forks whose base names not the fork they were taken from but its parent: each was cut inside what that fork had inherited, so its whole history lies in the grandparent.
+
+**For a fork of a fork cut past its own turn, the ordinal counts the whole ancestry and the byte offset the named file.**
+No rollout on the store had that shape, and it is the one where the two fields could part, so `resources/probes/codex_fork_history_probe.py` built it in a temporary `CODEX_HOME`: a parent with two turns, a fork keeping the first and taking two of its own, and a fork of that fork keeping the fork's first own turn, every turn on `gpt-5.6-luna`.
+It was run twice; the second run added the records either side of each cut to the report, and both runs measured the same numbers.
+The first fork's base named the parent at ordinal 13, the parent's first turn, as above.
+The fork of a fork's base named the first fork, at `end_ordinal_exclusive: 27` with an `end_byte_offset` that ended the first fork's 14th line, that fork's own turn's `task_complete`.
+27 is the 13 records the first fork inherited plus those 14 lines, so the ordinal is a position in the named thread's whole history, its inherited records first, while the byte offset is local to the named file.
+`thread/read` on the fork of a fork answered two turns, the parent's first prompt and the first fork's first, which is what reading the chain that way yields.
+The `session_meta` also carried `forked_from_ordinal_exclusive` equal to the base's ordinal in every case measured.
+
+**A subagent's rollout inherits inline, not by base.**
+The 43 subagent rollouts on the store that carry `forked_from_id`, written by 0.150.1 through 0.154.0, carry no `history_base`; each holds its parent's records inline, the parent's first real prompt among them.
+42 open that copy with the parent's `session_meta` on their second line; the other, on 0.154.0, opens it with the parent's first prompt.
+The 0.147.0 fork in `resources/fixtures/codex/fork.jsonl` is built the same way.
+Such a file already projects its inherited history, and following its `forked_from_id` would draw that history twice, so the stored preview follows `history_base` only.
+No 0.156.0 subagent rollout exists on the store yet.
+
+**Not established.**
+No agentpane fork on the store was written by a version between 0.147.0 and 0.154.0, so when forks stopped copying their history is unknown.
+Whether the attached view of a fork survives a server restart, which reads through `thread/resume` rather than the rollout, was not tried.
