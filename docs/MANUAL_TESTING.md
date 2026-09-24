@@ -2669,11 +2669,12 @@ After `--effort low`, `set_model` to `haiku` read `null` and `set_model` back to
 After `--effort low`, `apply_flag_settings` with `high` read `high`, so a later choice still overrides the spawn flag.
 
 **What the adapter makes of it.**
-`ClaudeAdapter` spawns a resume, and a fork at a real entry, with `--effort` at the level the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, and never a `<synthetic>` notice the CLI wrote itself -- and still passes a model id as `--model` (`src/server/adapters/claude/adapter.ts`, module doc).
+`ClaudeAdapter` spawns a resume, and a fork at a real entry, with `--effort` at the level the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, and never a `<synthetic>` notice the CLI wrote itself -- and, since OW-tebibo, passes no `--model` on either, since the CLI restores the stored model itself (`src/server/adapters/claude/adapter.ts`, module doc).
 The start read of `get_settings` stays the report of what is in force.
 
 **Not established.**
 Whether the model the CLI restores on its own is the store line's id or something it records elsewhere: on the owner's copy the settings' model and the stored one differ only by `[1m]`, so that resume could not tell them apart.
+OW-tebibo's run settled it below: the last model-run assistant line's `message.model`, widened to the settings' `[1m]` variant of the same model.
 No turn ran at a restored effort, so nothing here reads `CLAUDE_EFFORT` or a new store line after a resume; OW-hokaye's run is what ties `applied.effort` to the effort a turn runs at.
 
 ## What a Claude Code `set_model` writes to stdout and to the store (OW-hiligu)
@@ -2795,3 +2796,68 @@ The resume spawn carries no `--model`, which is D23 being met rather than a mode
 **Not established.**
 A resume whose recorded model has left the catalogue or lost its auth was read at the source only: Pi then falls back to the settings default, and agentpane would name whatever `get_state` reports.
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs; the adapter reads the model in force from the same `get_state` the driver read.
+
+## Which stored model a Claude Code resume and fork restore with no `--model` (OW-tebibo)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-tebibo` worktree cut at `06f4204`.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages ...`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+The driver was a throwaway Python script, not kept, that printed only `get_settings`'s `applied.model`, `applied.effort` and `effective.model`.
+The owner's `~/.claude/settings.json` named `model: "opus[1m]"`, and its sha256 was the same after the runs as before.
+
+One store was made for the run: a spawn with `--model haiku` and `--session-id` ran two turns, each asking for the single word `ok`, under the worktree's own project directory.
+Its four assistant lines, two per turn, recorded `message.model: "claude-haiku-4-5-20251001"`, as did the file's `model` attachment line and its `cost-state` line's `modelUsage`.
+No other turn ran, and every later spawn was driven by `get_settings` alone.
+Six copies of that file were then written under fresh session ids, with every `sessionId` rewritten, and **four of them hand-edited**, only in the `message.model` of assistant lines:
+
+- B: the second turn's two assistant lines set to `claude-sonnet-5`, the first turn's left haiku.
+- C: the first turn's two set to `claude-sonnet-5`, the second turn's left haiku.
+- D: the second turn's two set to `claude-opus-5-5`, the id the owner's opus store lines record.
+- E: the second turn's two set to `<synthetic>`, the marker of a notice the CLI writes itself.
+- F: the second turn's thinking line set to `claude-sonnet-5` and its last line to `<synthetic>`.
+
+Nothing else in the copies was changed, so in every one the attachment and `cost-state` lines still named haiku.
+The forks cut at the first turn's last assistant line, the fork point `listForkPoints` gives the second prompt.
+All store files, the original included, were deleted afterwards, and no store file appeared for any of the four fork session ids.
+
+**What each spawn read, with no `--model` unless named.**
+
+| Spawn | `applied.model` | `applied.effort` |
+|---|---|---|
+| fresh, no store | `claude-opus-5-5[1m]` | `high` |
+| `--resume` of the unedited store | `claude-haiku-4-5-20251001` | `null` |
+| `--resume` of an unedited copy | `claude-haiku-4-5-20251001` | `null` |
+| `--resume` of B | `claude-sonnet-5` | `high` |
+| B, `--fork-session` cut at the first turn | `claude-haiku-4-5-20251001` | `null` |
+| B, `--fork-session` cut at its last assistant line | `claude-sonnet-5` | `high` |
+| `--resume` of C | `claude-haiku-4-5-20251001` | `null` |
+| C, `--fork-session` cut at the first turn | `claude-sonnet-5` | `high` |
+| `--resume` of D | `claude-opus-5-5[1m]` | `high` |
+| `--resume` of D with `--settings '{"model":"sonnet"}'` | `claude-opus-5-5` | `high` |
+| `--settings '{"model":"sonnet"}'`, no store | `claude-sonnet-5` | `high` |
+| `--resume` of E | `claude-haiku-4-5-20251001` | `null` |
+| `--resume` of F | `claude-sonnet-5` | `high` |
+| B, cut at the first turn, with `--model claude-sonnet-5` | `claude-sonnet-5` | `high` |
+
+`effective.model` read the settings' `opus[1m]` on every spawn but the two passed `--settings`, where it read `sonnet`.
+
+**The model a resume restores is the last model-run assistant line's.**
+B and C separate the line from everything else in the file: a resume followed the hand-edited `message.model` of the last assistant line against the attachment and `cost-state` lines, and against the settings' family.
+E and F show a `<synthetic>` line skipped for the line before it, the same rule `lastHydratedAssistant` in `src/server/adapters/claude/adapter.ts` applies.
+
+**A fork restores its kept prefix's, not the file's.**
+Cut at the first turn, B's fork ran the haiku the prefix ended on though the file's last line named sonnet, and C's ran the prefix's sonnet though the file ended on haiku.
+The last row is what agentpane spawned until this card, the parent's latest model passed as `--model`, and it put sonnet in force over the prefix's haiku.
+
+**The `[1m]` variant comes from the settings, not the store.**
+D's stored `claude-opus-5-5` came back as `claude-opus-5-5[1m]` under the owner's `opus[1m]`, and as `claude-opus-5-5` under a settings model of `sonnet`.
+So the owner's opus copy in OW-nabano, which read `claude-opus-5-5[1m]` resumed with no `--model` and `claude-opus-5-5` with `--model claude-opus-5-5`, was the CLI restoring the store line's id and widening it to the settings' variant of the same model, which the flag then overrode.
+
+**What the adapter makes of it.**
+`ClaudeAdapter` now spawns a resume, and a fork at a real entry, with no `--model`, and names the model the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, over the parent's -- in `getState().model` (`src/server/adapters/claude/adapter.ts`, module doc).
+The parent's model, which `fork()` still hands over, rides a fork's spawn only when the kept prefix names none, and a fork before the first message is a fresh spawn that carries it as before.
+`src/server/adapters/claude/adapter.test.ts` pins the resume and the fork spawns, and failed against the old code on both.
+
+**Not established.**
+What the CLI restores for a fork whose kept prefix holds no assistant line a model ran was not tried; the adapter passes the parent's model there, as it did for every fork before.
+The `[1m]` widening was seen for `opus[1m]` only; whether another model with a `[1m]` variant widens the same way was not tried.
+No turn ran on a resumed or forked process, so the evidence is `applied.model`, not a new store line, and nothing here went through agentpane's server, the browser or Emacs.

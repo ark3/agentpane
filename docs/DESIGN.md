@@ -798,7 +798,7 @@ What each restores on a resume differs, measured for effort on 2026-09-23 (`docs
 What each restores of the model has been measured for all three, and only narrowly.
 As of `pi 0.87.1`, a `--session` resume with no `--model` ran the model the session file last recorded over a settings default naming another, and an unsuffixed `--model` replaced that model while keeping the recorded level (`docs/MANUAL_TESTING.md`, OW-pubulu).
 As of `codex-cli 0.156.0`, a `thread/resume` naming no model answered the model the thread's last turn ran over `config.toml`'s, in a fresh app-server and in the one holding the thread, while `thread/fork` answered `config.toml`'s (`docs/MANUAL_TESTING.md`, OW-sayaju).
-As of `claude 2.1.280`, a `--resume` of one sonnet session, and a `--fork-session` spawn of it cut at its last assistant line, each with no `--model`, put the model the store recorded in force over the settings' `opus[1m]`; the owner's opus session, resumed the same way, could not tell the store's model from the settings' (`docs/MANUAL_TESTING.md`, OW-nabano).
+As of `claude 2.1.280`, a `--resume` with no `--model` put in force the model the last assistant line a model ran records, over the settings' `opus[1m]` and over the same file's other lines naming another, and a `--fork-session` spawn put in force its kept prefix's rather than the file's last; a stored `claude-opus-5-5` came back as the settings' `claude-opus-5-5[1m]` variant, which passing the stored id as `--model` would drop (`docs/MANUAL_TESTING.md`, OW-nabano and OW-tebibo).
 
 **The decision.**
 On a resume and on a fork, a conversation runs at the model and effort its store's last turn recorded, and agentpane re-asserts them wherever the backend does not restore them itself.
@@ -812,7 +812,7 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
-Applied per backend by OW-sayaju for Codex and OW-nabano for Claude Code; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
+Applied per backend by OW-sayaju for Codex, and for Claude Code by OW-nabano, which re-asserts the effort, and OW-tebibo, which dropped the `--model` a resume and a fork at an entry had carried; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
 
 ## The backend adapter contract
 
