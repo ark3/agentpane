@@ -101,6 +101,13 @@ export class CodexReducer {
 	threadId: string | null = null;
 	turnId: string | null = null;
 	/**
+	 * The turn an `error` notification already reported. As of `codex-cli
+	 * 0.156.0` a turn the upstream API refused sent that notification and then
+	 * a failed `turn/completed` carrying the same error (docs/MANUAL_TESTING.md,
+	 * OW-wawuzu), and a second report would show the user the line twice.
+	 */
+	private reportedErrorTurnId: string | null = null;
+	/**
 	 * Item types Codex sent that this build has no mapping for. Diagnostics only
 	 * -- an unknown item must never be an error, because Codex adds `ThreadItem`
 	 * variants between releases and the session would die on a routine upgrade.
@@ -235,8 +242,8 @@ export class CodexReducer {
 				// NOTE: `turn.items` here is a *summary* view (`itemsView:
 				// "summary"` in every fixture) -- only the final agent message.
 				// Rebuilding the transcript from it would delete the turn.
-				if (turn.status === "failed" && turn.error?.message) {
-					effects.push({ type: "error", message: turn.error.message });
+				if (turn.status === "failed" && turn.error?.message && turn.id !== this.reportedErrorTurnId) {
+					effects.push({ type: "error", message: upstreamMessage(turn.error.message) });
 				}
 				effects.push(...this.setStreaming(false));
 				return effects;
@@ -314,7 +321,18 @@ export class CodexReducer {
 				return [{ type: "request-resolved", requestId: message.params.requestId }];
 
 			case "error":
-				return [...this.setCompaction(null), { type: "error", message: message.params.error.message }];
+				// Read from `resources/codex-protocol/v2/ErrorNotification.ts`, not
+				// measured: `willRetry` means Codex is still running the turn, and a
+				// non-retrying error or a failed `turn/completed` follows if retries
+				// run out. Reporting it would leave a stale banner over a retry that
+				// then succeeds, and clearing compaction would reopen the steer path
+				// into a compact turn that is still live.
+				if (message.params.willRetry) return [];
+				this.reportedErrorTurnId = message.params.turnId;
+				return [
+					...this.setCompaction(null),
+					{ type: "error", message: upstreamMessage(message.params.error.message) },
+				];
 
 			default:
 				// Everything else app-server emits -- account/rateLimits/updated,
@@ -463,6 +481,27 @@ export class CodexReducer {
 function appendAt(parts: string[], index: number, delta: string): void {
 	while (parts.length <= index) parts.push("");
 	parts[index] = (parts[index] ?? "") + delta;
+}
+
+/**
+ * The sentence inside an upstream API error, or the message unchanged.
+ *
+ * As of `codex-cli 0.156.0` a refusal from the upstream API arrived as that
+ * API's response serialized into `error.message` --
+ * `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"..."}}`
+ * (docs/MANUAL_TESTING.md, OW-wawuzu) -- while Codex's own errors are plain
+ * text, such as a stream reset.
+ */
+function upstreamMessage(message: string): string {
+	try {
+		const parsed: unknown = JSON.parse(message);
+		if (isRecord(parsed) && isRecord(parsed.error) && typeof parsed.error.message === "string") {
+			return parsed.error.message;
+		}
+	} catch {
+		// Not JSON: a plain-text message.
+	}
+	return message;
 }
 
 /**

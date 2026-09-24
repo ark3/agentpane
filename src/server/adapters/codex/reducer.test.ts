@@ -908,6 +908,78 @@ describe("defensive handling", () => {
 			}),
 		).toEqual([{ type: "error", message: "stream reset" }]);
 	});
+
+	// The shape `codex-cli 0.156.0` delivered for a turn the upstream API refused
+	// (docs/MANUAL_TESTING.md, OW-wawuzu): an `error` notification, then a failed
+	// `turn/completed`, both carrying the upstream response serialized as a string.
+	const upstream = (message: string) =>
+		JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message } });
+
+	function errorNotification(turnId: string, message: string, willRetry = false): CodexServerMessage {
+		return {
+			method: "error",
+			params: {
+				error: { message, codexErrorInfo: "other", additionalDetails: null },
+				willRetry,
+				threadId: "t",
+				turnId,
+			},
+		};
+	}
+
+	function failedTurn(turnId: string, message: string): CodexServerMessage {
+		return {
+			method: "turn/completed",
+			params: {
+				threadId: "t",
+				turn: {
+					id: turnId,
+					items: [],
+					itemsView: "summary",
+					status: "failed",
+					error: { message, codexErrorInfo: "other", additionalDetails: null },
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1_618,
+				},
+			},
+		};
+	}
+
+	const errorsOf = (effects: CodexEffect[]) => effects.filter((effect) => effect.type === "error");
+
+	it("reports an upstream refusal once, as the inner message", () => {
+		const r = reducer();
+		const raw = upstream("the model is not supported");
+		const effects = [...r.handle(errorNotification("u", raw)), ...r.handle(failedTurn("u", raw))];
+		expect(errorsOf(effects)).toEqual([{ type: "error", message: "the model is not supported" }]);
+	});
+
+	it("unwraps an upstream refusal that only a failed turn reports", () => {
+		const r = reducer();
+		expect(errorsOf(r.handle(failedTurn("u", upstream("refused"))))).toEqual([
+			{ type: "error", message: "refused" },
+		]);
+	});
+
+	it("does not report an error Codex is still retrying", () => {
+		const r = reducer();
+		r.requestCompaction();
+		// Nothing at all: the turn is still live, so a pending compaction stays too.
+		expect(r.handle(errorNotification("u", "stream reset", true))).toEqual([]);
+		expect(r.getState().compaction).toBe("requesting");
+		// Retries ran out: the failed turn is the only report, so it must not be suppressed.
+		expect(errorsOf(r.handle(failedTurn("u", "stream reset")))).toEqual([
+			{ type: "error", message: "stream reset" },
+		]);
+	});
+
+	it("still reports a later turn's failure after deduplicating an earlier one", () => {
+		const r = reducer();
+		r.handle(errorNotification("u1", "first"));
+		r.handle(failedTurn("u1", "first"));
+		expect(errorsOf(r.handle(failedTurn("u2", "second")))).toEqual([{ type: "error", message: "second" }]);
+	});
 });
 
 describe("item types with no fixture yet", () => {
