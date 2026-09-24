@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getSession, listSessions } from "./index.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { codexSessionsRoot, getSession, listSessions } from "./index.ts";
 
 function codexHeader(id: string, cwd: string) {
 	return {
@@ -62,6 +62,33 @@ describe("listSessions", () => {
 	it("returns an empty list when no store exists on disk (smoke: no sessions yet)", async () => {
 		const result = await listSessions({ codexRoot, piRoot, claudeRoot });
 		expect(result).toEqual([]);
+	});
+
+	describe("with CODEX_HOME set (OW-siboja)", () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		it("reads Codex rollouts from $CODEX_HOME/sessions when no codexRoot is given", async () => {
+			const codexHome = join(root, "codex-home");
+			vi.stubEnv("CODEX_HOME", codexHome);
+			const thread = "019f1aae-2a5e-7173-a90a-aad3e2b17d0b";
+			await writeJsonl(join(codexHome, "sessions", "2026", "09", "23", `rollout-2026-09-23T10-00-00-${thread}.jsonl`), [
+				codexHeader(thread, "/ws/a"),
+				codexUserItem("q"),
+			]);
+
+			const result = await listSessions({ piRoot, claudeRoot });
+			expect(result.map((s) => s.ref)).toEqual([{ backend: "codex", id: thread }]);
+
+			const found = await getSession({ backend: "codex", id: thread });
+			expect(found?.ref).toEqual({ backend: "codex", id: thread });
+		});
+
+		it("falls back to ~/.codex/sessions when CODEX_HOME is empty", () => {
+			vi.stubEnv("CODEX_HOME", "");
+			expect(codexSessionsRoot()).toBe(join(homedir(), ".codex", "sessions"));
+		});
 	});
 
 	it("merges all three backends and sorts by recency (most recent first)", async () => {

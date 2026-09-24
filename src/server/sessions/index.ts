@@ -37,14 +37,24 @@ export interface ListSessionsOptions {
 	concurrency?: number;
 }
 
-const DEFAULT_CODEX_ROOT = join(homedir(), ".codex", "sessions");
 const DEFAULT_PI_ROOT = join(homedir(), ".pi", "agent", "sessions");
 const DEFAULT_CLAUDE_ROOT = join(homedir(), ".claude", "projects");
 const DEFAULT_CONCURRENCY = 64;
 
+/**
+ * The Codex sessions root: `$CODEX_HOME/sessions` when that variable is set and
+ * non-empty, as Codex itself writes rollouts there, else `~/.codex/sessions`.
+ * Read at call time from the server's environment, which the app-server child
+ * inherits through sbox (OW-siboja). Shared with the preview path and the
+ * Codex adapter so they locate files the same way.
+ */
+export function codexSessionsRoot(): string {
+	const codexHome = process.env.CODEX_HOME;
+	return codexHome ? join(codexHome, "sessions") : join(homedir(), ".codex", "sessions");
+}
+
 /** Store roots, shared with the preview path so it locates files the same way. */
 export const SESSION_ROOTS = {
-	codex: DEFAULT_CODEX_ROOT,
 	pi: DEFAULT_PI_ROOT,
 	claude: DEFAULT_CLAUDE_ROOT,
 } as const;
@@ -91,7 +101,7 @@ function isPresent<T>(value: T | null): value is T {
 }
 
 export async function listSessions(opts: ListSessionsOptions = {}): Promise<SessionSummary[]> {
-	const codexRoot = opts.codexRoot ?? DEFAULT_CODEX_ROOT;
+	const codexRoot = opts.codexRoot ?? codexSessionsRoot();
 	const piRoot = opts.piRoot ?? DEFAULT_PI_ROOT;
 	const claudeRoot = opts.claudeRoot ?? DEFAULT_CLAUDE_ROOT;
 	const concurrency = opts.concurrency ?? DEFAULT_CONCURRENCY;
@@ -190,7 +200,7 @@ export async function getSession(
 		return loadOne(match, parseClaudeSession);
 	}
 
-	const root = opts.codexRoot ?? DEFAULT_CODEX_ROOT;
+	const root = opts.codexRoot ?? codexSessionsRoot();
 	const files = await findJsonlFiles(root);
 	const match = files.find((file) => fileMatchesThreadId(file, ref.id));
 	if (!match) return null;

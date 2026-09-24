@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
-import { SESSION_ROOTS } from "../../sessions/index.ts";
+import { codexSessionsRoot } from "../../sessions/index.ts";
 import type {
 	AdapterState,
 	AdapterFactory,
@@ -48,8 +48,9 @@ export interface CodexAdapterOptions {
 	clientInfo?: ClientInfo;
 	/**
 	 * Start threads with `ephemeral: true`, which keeps them out of the on-disk
-	 * rollout store under `~/.codex/sessions` (HANDOFF finding 25). Tests set
-	 * this so nothing they do reaches the real store.
+	 * rollout store under `$CODEX_HOME/sessions`, default `~/.codex/sessions`
+	 * (HANDOFF finding 25). Tests set this so nothing they do reaches the real
+	 * store.
 	 *
 	 * NOTE: the frozen `StartOptions` has no field for this, so it is an
 	 * adapter-construction option rather than a per-start one.
@@ -1005,7 +1006,7 @@ export class CodexAdapter implements BackendAdapter {
 	}
 
 	private readStoredTurn(threadId: string): Promise<CodexTurnSettings | null> {
-		return readCodexLastTurnSettings(this.options.codexRoot ?? SESSION_ROOTS.codex, threadId);
+		return readCodexLastTurnSettings(this.options.codexRoot ?? codexSessionsRoot(), threadId);
 	}
 
 	private rememberTurns(thread: Pick<Thread, "turns">): void {

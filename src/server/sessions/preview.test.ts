@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { readSessionPreview } from "./preview.ts";
 
@@ -383,6 +383,20 @@ describe("readSessionPreview", () => {
 				"Fix the failing test.",
 				"Done, it passes now.",
 			]);
+		});
+
+		it("reads from $CODEX_HOME/sessions when CODEX_HOME is set and no codexRoot is given (OW-siboja)", async () => {
+			vi.stubEnv("CODEX_HOME", root);
+			try {
+				const file = join(root, "sessions", "2026", "09", "23", `rollout-2026-09-23T10-00-00-${THREAD}.jsonl`);
+				await writeJsonl(file, [codexHeader(THREAD), codexUser("Fix the failing test."), codexAssistant("Done.")]);
+
+				const turns = await readSessionPreview({ backend: "codex", id: THREAD });
+
+				expect(turns.map((turn) => turn.role)).toEqual(["user", "assistant"]);
+			} finally {
+				vi.unstubAllEnvs();
+			}
 		});
 
 		it("carries no timestamp for a record without a string timestamp (OW-71)", async () => {

@@ -31,7 +31,7 @@
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { extractClaudePreviewTurns, findClaudeSessionFiles } from "./claude.ts";
 import { type CodexRolloutLocator, extractCodexPreviewTurns } from "./codex.ts";
-import { resolvePiSessionPath, SESSION_ROOTS } from "./index.ts";
+import { codexSessionsRoot, resolvePiSessionPath, SESSION_ROOTS } from "./index.ts";
 import { extractPiPreviewTurns } from "./pi.ts";
 import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
@@ -82,7 +82,7 @@ export async function readSessionPreview(
 
 	// Codex: find the one filename carrying this thread id, then read only it.
 	const findFiles = opts.findFiles ?? findJsonlFiles;
-	const root = opts.codexRoot ?? SESSION_ROOTS.codex;
+	const root = opts.codexRoot ?? codexSessionsRoot();
 	const files = await findFiles(root);
 	const match = files.find((file) => fileMatchesThreadId(file, ref.id));
 	if (!match) return [];
