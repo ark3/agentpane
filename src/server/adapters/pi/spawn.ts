@@ -29,7 +29,7 @@ export interface PiSpawnOptions {
 	/** Resume an existing session; Pi's id is its JSONL path (D9), which is exactly what `--session` accepts. */
 	resumeId?: string;
 	/**
-	 * `provider/modelId`, matching Pi's own `--model` CLI pattern (see `protocol.ts`'s `modelToInfo`/`splitModelRef`).
+	 * Passed to Pi's `--model` unchanged, which takes more than `set_model` does, a thinking-level suffix included; "Model refs" in `protocol.ts` states both.
 	 * A resume passes none: Pi restores the model and level its session file
 	 * recorded (the note at `#start`'s spawn in `session-manager.ts`).
 	 */

@@ -528,6 +528,7 @@ export class PiAdapter implements BackendAdapter {
 
 	// -- session controls -----------------------------------------------------
 
+	/** Takes `provider/modelId` only, and sends it unchanged; see "Model refs" in `protocol.ts`. */
 	async setModel(model: string): Promise<void> {
 		const { provider, modelId } = splitModelRef(model);
 		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId }).catch(

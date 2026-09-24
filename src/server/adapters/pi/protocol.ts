@@ -255,6 +255,23 @@ export type PiOutputLine = PiResponse | PiNotification;
 // separate provider field, but Pi's `set_model` command needs `provider` and
 // `modelId` split. We bridge this the same way Pi's own `--model` CLI flag
 // documents ("supports `provider/id`"): `ModelInfo.id` is `provider/modelId`.
+//
+// This is the one statement of which model strings each path takes; the spawn
+// flag's docblock in `spawn.ts` and `PiAdapter.setModel` cite it.
+//
+//  - `set_model` takes `provider/modelId` and nothing else: split at the first
+//    slash below, then matched against the catalogue verbatim (rpc-mode.js,
+//    read at the source in `pi 0.87.1`).
+//  - The spawn flag `--model` takes more: "Model pattern or ID (supports
+//    "provider/id" and optional ":<thinking>")", Pi's own help text as of
+//    `pi 0.87.1`. So `provider/modelId:thinkingLevel`, the form AGENTS.md's
+//    model pin is written in, starts a session and sets its level too.
+//
+// That suffix is the gap: sent to `set_model` it answered "Model not found"
+// (`pi 0.85.1`, 2026-09-16, OW-pizaki). Nothing strips it, because the level
+// is the effort's to set and a colon is no delimiter -- as of `pi 0.87.1` the
+// catalogue lists `openrouter/anthropic/claude-fable-5:batch`. So the string
+// goes to Pi whole, and only Pi's refusal of one ending in a level says why.
 // ---------------------------------------------------------------------------
 
 export function modelToInfo(model: Model<any>): { id: string; label: string } {
