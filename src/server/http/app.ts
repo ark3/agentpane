@@ -335,6 +335,10 @@ export function createApp(deps: AppDeps): App {
 				//     adapter borrows the parent's connection and `fork()` hands that
 				//     adapter over for `SessionManager` to start (OW-lajehi). The
 				//     parent adapter's own ref is unchanged, so `#adoptRef` no-ops.
+				//     A fork at the first user message is the exception: no
+				//     `thread/fork` keeps nothing, so it mints nothing and takes
+				//     Claude Code's path below, a `virtual:` ref renamed at attach to
+				//     the thread its own `thread/start` names (OW-hojefo).
 				//   * Claude Code's fork mints the forked session's id and the
 				//     arguments that spawn it (`--resume --resume-session-at
 				//     --fork-session --session-id`, truncation inclusive of the named

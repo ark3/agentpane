@@ -71,7 +71,9 @@ export interface StartOptions {
  * to disk immediately, but the minting app-server keeps its writer lock and a
  * second one is refused (`codex-cli` 0.154.0, OW-lajehi), so the fork's adapter
  * borrows the parent's connection and only `CodexAdapter.fork` can hand it
- * over -- `AdapterFactory.create` takes a ref and could not.
+ * over -- `AdapterFactory.create` takes a ref and could not. A Codex fork at
+ * the first user message mints no thread and so hands back `start` alone, as
+ * Claude Code's forks do (OW-hojefo).
  *
  * A union rather than two optional fields, because an `adapter` without a
  * `start` is a shape nothing can act on: `SessionManager.fork` parks an entry
