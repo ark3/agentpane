@@ -2674,7 +2674,7 @@ The start read of `get_settings` stays the report of what is in force.
 
 **Not established.**
 Whether the model the CLI restores on its own is the store line's id or something it records elsewhere: on the owner's copy the settings' model and the stored one differ only by `[1m]`, so that resume could not tell them apart.
-OW-tebibo's run settled it below: the last model-run assistant line's `message.model`, widened to the settings' `[1m]` variant of the same model.
+OW-tebibo's run settled it below: the last model-run assistant line's `message.model`, widened to the settings' `[1m]` variant of the same model, and OW-lizupu's found the store's own `model` attachment line widens it too.
 No turn ran at a restored effort, so nothing here reads `CLAUDE_EFFORT` or a new store line after a resume; OW-hokaye's run is what ties `applied.effort` to the effort a turn runs at.
 
 ## What a Claude Code `set_model` writes to stdout and to the store (OW-hiligu)
@@ -2848,9 +2848,10 @@ E and F show a `<synthetic>` line skipped for the line before it, the same rule 
 Cut at the first turn, B's fork ran the haiku the prefix ended on though the file's last line named sonnet, and C's ran the prefix's sonnet though the file ended on haiku.
 The last row is what agentpane spawned until this card, the parent's latest model passed as `--model`, and it put sonnet in force over the prefix's haiku.
 
-**The `[1m]` variant comes from the settings, not the store.**
+**The `[1m]` variant here came from the settings, not the store.**
 D's stored `claude-opus-5-5` came back as `claude-opus-5-5[1m]` under the owner's `opus[1m]`, and as `claude-opus-5-5` under a settings model of `sonnet`.
 So the owner's opus copy in OW-nabano, which read `claude-opus-5-5[1m]` resumed with no `--model` and `claude-opus-5-5` with `--model claude-opus-5-5`, was the CLI restoring the store line's id and widening it to the settings' variant of the same model, which the flag then overrode.
+Every copy here kept the original's `model` attachment line, which named haiku, so none could show a store widening its own model; OW-lizupu, below, found one that does, a `model` attachment naming the `[1m]` id.
 
 **What the adapter makes of it.**
 `ClaudeAdapter` now spawns a resume, and a fork at a real entry, with no `--model`, and names the model the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, over the parent's -- in `getState().model` (`src/server/adapters/claude/adapter.ts`, module doc).
@@ -2860,7 +2861,7 @@ Since OW-faledu, below, that stored id is only the first name: the start read of
 
 **Not established.**
 What the CLI restores for a fork whose kept prefix holds no assistant line a model ran was not tried; the adapter passes the parent's model there, as it did for every fork before.
-The `[1m]` widening was seen for `opus[1m]` only; whether another model with a `[1m]` variant widens the same way was not tried.
+The settings' `[1m]` widening was seen for `opus[1m]` only; whether another model with a `[1m]` variant widens the same way was not tried.
 No turn ran on a resumed or forked process, so the evidence is `applied.model`, not a new store line, and nothing here went through agentpane's server, the browser or Emacs.
 
 ## What `--model` puts a resumed Claude Code session's `[1m]` variant back in force (OW-faledu)
@@ -2913,6 +2914,51 @@ So D resumed is named `opus[1m]`, S `sonnet`, and D under `sonnet`'s settings `c
 `src/server/adapters/claude/adapter.test.ts` pins that and failed against the old code, which named `claude-opus-5-5` and spawned the fork with it.
 
 **Not established.**
-The `init` event that a turn brings still replaces the adapter's model with the id it reports, and what it reports for an `opus[1m]` session was not measured, since that needs a turn on opus; if it lacks the variant, a session-start fork after a turn on the resumed process drops it again.
 Whether a listed id's `resolvedModel` follows a change to the account's recommended model on a process already running was not measured, as in OW-kakide.
+Nothing here went through agentpane's server, the browser or Emacs.
+
+## What model a Claude Code turn's `init` names on a `[1m]` session (OW-lizupu)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-lizupu` worktree cut at `c98ec6f`.
+Two turns ran, each asking for the single word `ok`, both on `claude-sonnet-5[1m]`: `AGENTS.md` pins agent-driven turns to Haiku, and these two ran on sonnet under the owner's explicit leave for this card, given 2026-09-23, because a Haiku turn has no `[1m]` variant to keep.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages ...`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+The driver was a throwaway Python script, not kept, that printed `get_settings`'s `applied.model`, `applied.effort` and `effective.model`, each `initialize` entry's `value` and `resolvedModel`, the `init` event's keys other than its tool, MCP, command, agent, skill and plugin lists, the `message.model` of `message_start` and of the `assistant` event, and the `result`'s `modelUsage` keys.
+The owner's `~/.claude/settings.json` named `model: "opus[1m]"`, and its sha256 was the same after the runs as before.
+The turns' store was written under the worktree's own project directory, and it, the copies below and the directory were deleted afterwards.
+
+**The turns.**
+
+| Spawn | `applied.model` before | `init` `model` | `message.model` | `modelUsage` key | `applied.model` after |
+|---|---|---|---|---|---|
+| fresh, `--model claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` | `claude-sonnet-5` | `claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` |
+| `--resume` of that store, no `--model` | `claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` | `claude-sonnet-5` | `claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` |
+
+`applied.effort` read `high` and `effective.model` the settings' `opus[1m]` throughout, and `initialize` listed the same five entries OW-faledu records, none resolving to `claude-sonnet-5[1m]`.
+`message_start` and the `assistant` event named the same `message.model`.
+No other key of `init` names a model: beside `model` it carried `session_id`, `cwd`, `permissionMode: "bypassPermissions"`, `apiKeySource: "none"`, `claude_code_version: "2.1.280"`, `output_style`, `capabilities`, `memory_paths`, `fast_mode_state: "off"` and `fast_mode_disabled_reason`.
+In the store, the first turn's assistant line recorded `message.model: "claude-sonnet-5"` at `effort: "high"`, while the `model` attachment line named `modelId: "claude-sonnet-5[1m]"` and the `cost-state` line's `modelUsage` was keyed `claude-sonnet-5[1m]`.
+
+So `init` names the model in force, `[1m]` included, the same id `get_settings` reports as `applied.model`, while the stream's and the store line's `message.model` drop the variant.
+
+**Where the resume's `[1m]` came from.**
+Before the second turn, three resumes of the store, driven by `get_settings` alone, all read `applied.model: "claude-sonnet-5[1m]"`: with no `--settings`, where the settings named `opus[1m]`, and with `--settings '{"model":"sonnet[1m]"}'` and `--settings '{"model":"claude-sonnet-5[1m]"}'`, where `effective.model` read what was passed.
+The settings' `opus[1m]` names another model, so it could not have widened sonnet, and four copies of the store, written under fresh session ids with every session id rewritten and resumed with no turn, found what did:
+
+| Copy | Edit | `applied.model` |
+|---|---|---|
+| A | none | `claude-sonnet-5[1m]` |
+| B | `cost-state` `modelUsage` keys set to `claude-sonnet-5` | `claude-sonnet-5[1m]` |
+| C | the `model` attachment's `modelId` and text set to `claude-sonnet-5` | `claude-sonnet-5` |
+| D | both | `claude-sonnet-5` |
+
+So a resume widens the restored model by the store's `model` attachment line as well as by the settings, a source OW-tebibo's copies, all carrying a haiku attachment, could not see.
+
+**What the adapter makes of it.**
+Nothing changed in the code.
+`handleLine` in `src/server/adapters/claude/adapter.ts` still lets a turn's `init` replace the model's name with the id it reports, and since that id carries the variant, `fork()` hands a fork before the first message a name that puts it back in force: `claude-sonnet-5[1m]` and `claude-opus-5-5[1m]` each put themselves back in a fresh spawn (OW-faledu).
+On the sonnet session the replacement is a no-op: the model given at start, and on the resume the start read, had already named `claude-sonnet-5[1m]`, which no listed id resolves to.
+`src/server/adapters/claude/adapter.test.ts` pins the fork after a turn on the owner's `opus[1m]`, where `init` does replace a listed name, and it failed with the variant stripped from `init`'s id.
+
+**Not established.**
+No turn ran on opus, so that `init` names `claude-opus-5-5[1m]` on an `opus[1m]` session is the sonnet relation applied to it, not a measurement.
 Nothing here went through agentpane's server, the browser or Emacs.
