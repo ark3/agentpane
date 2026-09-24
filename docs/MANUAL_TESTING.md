@@ -3032,3 +3032,54 @@ On all three backends as measured, attach replaces the `virtual:` id and nothing
 **Not established.**
 Nothing here went through agentpane's server, the browser or Emacs.
 Pi was not run through `sbox`, and whether a Pi turn stopped before its reply ends leaves a file was not measured.
+
+## What a Codex turn on a model that does not exist does, and whether `model/list` bounds what Codex accepts (OW-wawuzu)
+
+Run on the home server 2026-09-24, **`codex-cli 0.156.0`**, logged in with a ChatGPT account, from the main checkout at `89e6f1a`.
+The question was OW-pizaki's leftover: whether `CodexAdapter.setModel` could refuse an unknown model up front as `BackendRefusedError` (400), as Pi and Claude Code do, which is safe only if Codex refuses every id `model/list` does not name.
+The owner licensed, for this card alone, turns naming the made-up id `agentpane-no-such-model`; two such turns were sent, one per harness, and the only other turn named `gpt-5.6-luna`.
+Both harnesses were throwaway Python scripts, not kept, on a temporary `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, removed afterwards with their `git init` work directories.
+
+**`model/list` answers from a catalogue cached per account, and `includeHidden` adds two ids.**
+Without `includeHidden` it answered `gpt-6-luna` (`isDefault: true`), `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-5.5`; with `includeHidden: true` it answered those four, field for field identical, plus `gpt-reserve` and `codex-auto-review`, both `hidden: true`.
+Each answer was one page, `nextCursor: null`.
+The app-server wrote `models_cache.json` into the temporary home at startup, carrying an `etag`, an account `identity` hash and a `visibility` of `list` or `hide` per model, which appears to be where `hidden` comes from.
+
+**Codex did not refuse a made-up id itself; the upstream API refused it.**
+On a bare `codex app-server`, `thread/start` naming `agentpane-no-such-model` answered a result echoing that `model`, with no error and no warning.
+On a second thread started on `gpt-5.6-luna`, a `turn/start` naming the made-up id drew, 8 ms later, a `warning` notification -- ``Model metadata for `agentpane-no-such-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.`` -- and then a **result, not an error**: a turn at `status: "inProgress"`.
+`turn/started` and the user message's items followed.
+1.6 s after the request `thread/status/changed` went to `systemError`, and after it an `error` notification arrived with `willRetry: false`, `codexErrorInfo: "other"` and this `message`:
+
+```
+{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'agentpane-no-such-model' model is not supported when using Codex with a ChatGPT account."}}
+```
+
+`turn/completed` followed with `status: "failed"`, the same error and `durationMs: 1618`.
+The rollout recorded `task_started`, a `<model_switch>` developer message, a `turn_context` naming the made-up id, the user message and a `task_complete` carrying the error.
+There was one attempt and no retry notice.
+
+**No tokens or cost were reported for either made-up-model turn.**
+Neither harness saw a `thread/tokenUsage/updated` notification for them, and the rollout held no `token_count` event; the `gpt-5.6-luna` control turn below reported usage and wrote a `token_count`.
+
+**Through agentpane, the failure arrives after a 202, twice on the SSE stream, as raw JSON.**
+The second harness ran `bun run start` on port 44191 with that `CODEX_HOME`, which spawned the app-server through `direnv exec <cwd> sbox -- codex app-server`, and created and attached a Codex session on a temporary work directory.
+`POST .../model` with the made-up id answered 204 and `POST .../prompt` answered 202.
+The SSE stream carried a snapshot at `isStreaming: true`, the user message, a snapshot at `isStreaming: false` and then two identical `error` events whose `message` was the raw JSON string above.
+Read from the code: the `isStreaming: false` snapshot is the `systemError` status change, since the reducer ends streaming on any status other than `active`, and the two errors are the `error` notification and the failed `turn/completed`, both cases in `src/server/adapters/codex/reducer.ts`.
+The `warning` notification did not reach the SSE stream; that reducer has no case for it and its `default` branch drops it.
+The server logged nothing for the turn.
+The session stayed usable over the HTTP API: `POST .../model` with `gpt-5.6-luna` answered 204 and the next prompt streamed `ok`.
+The failed turn's user message stays in the transcript with no reply, so the clients' D23 gate (`setModel` in `src/client/controller.ts`) would refuse that switch.
+
+**Why `setModel` still does not validate.**
+Codex did not refuse the made-up id locally: its warning says it ran the id on fallback metadata, and the refusal came from the upstream API, worded for a ChatGPT-account login.
+Whether that upstream refuses every real id this account's `model/list` omits, and whether an API-key login or another `model_provider` (selectable in `config.toml`; `resources/codex-protocol/v2/Config.ts`, read, not run) would, cannot be read from a made-up id, and the pin forbids naming a real one.
+So a refusal against `listModels()` could reject a model Codex would run, and the reason sits in the docblock of `CodexAdapter.setModel` in `src/server/adapters/codex/adapter.ts`.
+As `listModels()` stands it sends no `includeHidden`, so such a refusal would also reject the two hidden ids `model/list` does name.
+Both clients offer only listed ids -- the browser's model control is a `<select>` and Emacs's `agentpane--read-model` requires a match -- so an unlisted id reaches `setModel` only from a direct HTTP or JSON-RPC caller.
+
+**Not established.**
+Whether a real model that `model/list` omits, or one of the two hidden ones, would run, and how an API-key login answers a made-up id.
+Nothing here went through a browser or Emacs.
+Read from the code, the browser's banner (`view.error` in `src/client/session-state.ts`) shows the raw JSON once, the second event overwriting the first, while Emacs appends an `(:error MESSAGE)` node per event and shows it twice.

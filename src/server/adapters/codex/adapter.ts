@@ -824,6 +824,14 @@ export class CodexAdapter implements BackendAdapter {
 	 * Takes effect on the next `turn/start`; Codex has no standalone set-model
 	 * call. A chosen effort the new model does not list falls back to that
 	 * model's default rather than going out on a turn it would not suit.
+	 *
+	 * Unlike Pi and Claude Code, an unknown model is not refused here: as of
+	 * `codex-cli 0.156.0` Codex did not refuse a made-up id itself but ran it
+	 * on fallback metadata, and the upstream API refused it for a
+	 * ChatGPT-account login, as a failed turn after `turn/start` had answered.
+	 * Whether that upstream refuses every real id `model/list` omits could
+	 * not be measured, so checking against `listModels` could reject a model
+	 * Codex would run (`docs/MANUAL_TESTING.md`, OW-wawuzu).
 	 */
 	async setModel(model: string): Promise<void> {
 		if (this.effort) {
