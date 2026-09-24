@@ -491,6 +491,7 @@ A log line on a headless server is indistinguishable from swallowing it, which t
 Reporting it needs a session-less `notice` arm on the `ServerEvent` union, since every error today carries a `session` ref and a per-session `seq` and this condition belongs to no session.
 It lands with this feature rather than ahead of it, following the pattern the compaction work used for `compact()`, and it is small because `sessions-changed` is already a session-less, seq-less arm.
 It will not stay single-use: a D12 reaper eviction and a spawn that fails before any session exists are both server-global and both currently unreportable.
+The tag `notice` is no longer free for it: since OW-tujiya a per-session `notice` arm carries a backend's non-fatal warnings, so the session-less arm needs a tag of its own or a reason to share that one.
 
 **Codex has slots of its own for both marks, and the decision stands anyway.**
 As of `codex-cli 0.154.0` (home server, 2026-09-15), the `threads` table in `~/.codex/state_5.sqlite` carries `is_pinned` and `archived` columns, the protocol has `thread/archive` and `thread/unarchive` with matching notifications, and `thread/list` filters on archived state.
