@@ -27,6 +27,8 @@ A Claude Code conversation whose effort was chosen keeps running at that effort,
 D23 in `docs/DESIGN.md` settles the source: the model and effort the store's last assistant line recorded, never a copy agentpane keeps.
 Whether it travels by spawn flag or control request is incidental.
 The model half is unmeasured: a resume spawns with no `--model` once the manager has lost it (OW-pubulu), while `adoptModel` in `src/server/adapters/claude/adapter.ts` labels the session with the stored model, so measure what model the resumed CLI actually runs on; if it is the settings default, the label is wrong too, and D23 applies to the model as well.
+Measure it with no turn: as of `claude 2.1.280`, `get_settings` answers `applied.model` with the resolved model in force (`claude-haiku-4-5-20251001` for a process spawned with `--model haiku`, probed on the home server 2026-09-23 with no turn).
+That same probe read `effective.model` as `opus[1m]`, so a resume that loses its model falls back to Opus on the home server; a turn on a resume spawned without `--model` would run outside the `AGENTS.md` pin, and none is licensed here.
 `max` is session-scoped per the SDK typing (`@anthropic-ai/claude-agent-sdk` 0.3.246) and did not appear in `get_settings`'s `effective` or `sources` in that run, so check it survives whatever path is chosen.
 
 ## Done when

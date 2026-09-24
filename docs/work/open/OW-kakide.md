@@ -23,6 +23,10 @@ A Claude Code conversation that has not yet had a prompt offers the effort its c
 Whether the fix is the adapter naming the model it is on at start or the clients falling back to the default entry is the implementer's call; per `AGENTS.md`, "Both clients", a fix on the wire serves both, and a client-side one lands in both or neither.
 Codex and Pi report a model at start, so Claude Code is the backend where this shows.
 
+A lead for the adapter-side fix, probed on the home server 2026-09-23 with no turn: as of `claude 2.1.280`, `get_settings` -- which `ClaudeAdapter` already sends at start to read the effort -- answers `applied.model` with the model in force, but as a resolved id (`claude-haiku-4-5-20251001`), not a listed one (`haiku`).
+`initialize`'s model entries each carry `resolvedModel` beside `value` (`ClaudeModelDescriptor` in `src/server/adapters/claude/protocol.ts`), so a resolved id maps back to a listed one; several listed ids can share one resolved id (`default` and `opus[1m]` both resolved to `claude-opus-5-5[1m]` that day), so say which the mapping picks.
+The same mapping serves the fork case above.
+
 ## Done when
 
 - A test creates a Claude Code session with no model and asserts the effort control, or the status the clients key it on, offers the default model's efforts, shown red first.
