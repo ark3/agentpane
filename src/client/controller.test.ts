@@ -266,6 +266,19 @@ describe("client controller", () => {
 		expect(api.listModels).not.toHaveBeenCalled();
 	});
 
+	it("never sets a model once the conversation has a message", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: null });
+		await controller.preview(ref);
+
+		await controller.setModel("opaque/next");
+
+		expect(api.setModel).not.toHaveBeenCalled();
+		expect(controller.getView().modelSetting).toBe(false);
+	});
+
 	it("disables only model selection while setting and does not block the first prompt", async () => {
 		const api = new FakeApi();
 		const setting = deferred<void>();
