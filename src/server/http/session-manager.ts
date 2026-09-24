@@ -643,7 +643,10 @@ export class SessionManager {
 					// the file last recorded over settings defaults naming others,
 					// while a `--model <m>:<level>` would override that level
 					// (docs/MANUAL_TESTING.md, OW-ruzuhu and OW-pubulu). So no
-					// copy of the chosen model is kept here across a close.
+					// copy of the chosen model is kept here across a close. Where
+					// the recorded model had left the catalogue or lost its auth,
+					// the same Pi fell back to another and said nothing of it over
+					// RPC (OW-zujofa).
 					...(bound.model ? { model: bound.model } : {}),
 				},
 			);

@@ -2794,7 +2794,7 @@ The resume spawn carries no `--model`, which is D23 being met rather than a mode
 `src/server/http/session-manager.test.ts` pins that a Pi session created on a suffixed model, prompted, closed and re-attached resumes with `resumeId` and no model, and the note at `#start`'s spawn in `src/server/http/session-manager.ts` says why.
 
 **Not established.**
-A resume whose recorded model has left the catalogue or lost its auth was read at the source only: Pi then falls back to the settings default, and agentpane would name whatever `get_state` reports.
+A resume whose recorded model has left the catalogue or lost its auth was read at the source only here; OW-zujofa's section, below, ran both on 2026-09-24 and found the fallback said nothing over RPC.
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs; the adapter reads the model in force from the same `get_state` the driver read.
 
 ## Which stored model a Claude Code resume and fork restore with no `--model` (OW-tebibo)
@@ -3121,6 +3121,53 @@ A turn whose model has left the catalogue keeps the level recorded.
 The override is not recoverable: the level lives only in the command line of a process that is gone, and agentpane's resume spawn carries no `--model` (OW-pubulu), so the exposure is a turn driven from the `pi` CLI under an override, which reloads in agentpane labelled with the level recorded before it.
 
 **Not established.**
-Only a hand-edited level was clamped; a clamp that arose because the recorded model left the catalogue or lost its auth and the resume fell back to another was read at the source, where the same line 138 applies.
+Only a hand-edited level was clamped here; a clamp that arose because the recorded model left the catalogue and the resume fell back to another was run in OW-zujofa's section, below, and appended nothing either.
 Whether the turns after the resumes ran at `low` and `off` rests on `get_state`; their missing thinking blocks agree but do not prove it.
 A resume that clamps followed by a `set_model` that leaves the level unchanged would record nothing either, so a turn on the new model is labelled by clamping the unclamped recorded level to that model, which can differ from the level in force; this was read at the source, in `_getThinkingLevelForModelSwitch`, and not run.
+
+## A Pi resume that cannot restore its recorded model falls back without a word over RPC (OW-zujofa)
+
+Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-zujofa` worktree cut at `86b7696`.
+Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, and in a throwaway workspace beside it, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and both directories were removed.
+The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` and logged every stdout line and every stderr line, with its time, from spawn to exit.
+Every spawn but one was direct; the last went through `direnv exec <workspace> sbox --`, the chain `buildPiSpawnCommand` in `src/server/adapters/pi/spawn.ts` builds.
+One turn ran in all.
+The question was whether Pi says anything over RPC, on stdout or stderr, when a `--session` resume cannot restore the model the file recorded, since D23 promises a conversation runs at its recorded model or says why not.
+
+**The session.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, `get_state` read that model at `thinkingLevel: "high"`, and `Do not use any tools. Reply with exactly: ok` answered `ok` for $0.00022.
+The file read `session`, `model_change`, `thinking_level_change` `high`, then the system, user and assistant messages: six lines, as in OW-pubulu's run.
+The throwaway `settings.json` was then rewritten to `defaultModel` `google/gemini-2.5-flash-lite` under the same `defaultProvider` `openrouter`, with `modelThinkingLevels` emptied, and a fresh `pi --mode rpc` read that model at `medium`.
+A bare resume of an unedited copy of the file read `openrouter/deepseek/deepseek-v4.1-flash` at `high`, OW-pubulu's result again.
+
+**Left the catalogue: the settings default, at the recorded level, and nothing said.**
+The model was taken out of the catalogue by rewriting a copy of the session file, the `model_change` entry's `modelId` and the assistant message's `model` both set to `deepseek/deepseek-v0-nonexistent`.
+Editing the catalogue did not work: with the entry deleted from the throwaway `models-store.json`, a resume of the unedited copy still read `deepseek/deepseek-v4.1-flash` at `high`, and `get_available_models` still listed it among 395 models, because the `dist/bundle/` build that `pi` runs carries a built-in catalogue naming it.
+`pi --mode rpc --session <copy>`, the shape agentpane's resume spawn takes, read `openrouter/google/gemini-2.5-flash-lite` at `high`: the settings default, at the level the file recorded.
+`get_messages` still named the made-up model on the assistant message, `get_entries` still named it in the `model_change`, and the file still held six lines, so the fallback recorded nothing.
+A further copy whose `thinking_level_change` also named `max`, which that model lacks, read the same model at `high`, with the entries and the six lines unchanged: the clamp OW-lehita's section left to the source happens on a fallback too, and appends nothing either.
+
+**Lost its auth: the first keyed provider's default, or no model at all.**
+With the throwaway `auth.json` reduced to `{}`, which removed the only provider the file held credentials for, a bare resume of an unedited copy answered `get_state` with a model whose `provider` and `id` both read `"unknown"`, at `thinkingLevel: "off"`; `get_available_models` returned an empty list and `get_available_thinking_levels` only `off`.
+With `DEEPSEEK_API_KEY` set to a dummy string and `PI_OFFLINE=1`, so that the background catalogue refresh never sent it anywhere, the same resume read `deepseek/deepseek-v4-pro` at `high`: the `deepseek` entry in `defaultModelPerProvider`, since the settings default's provider had no auth, and `get_available_models` listed two `deepseek` models and nothing else.
+
+**What Pi emitted: nothing about it.**
+In every resume stdout held only the responses to the commands sent, with no event and no `extension_ui_request` before the first response or after the last, and stderr held nothing at all.
+The commands tried were `get_state`, `get_session_stats`, `get_messages`, `get_entries`, `get_available_models`, `get_commands` and `get_available_thinking_levels`; `get_state`'s keys were `model`, `thinkingLevel`, `isStreaming`, `isCompacting`, `steeringMode`, `followUpMode`, `sessionFile`, `sessionId`, `autoCompactionEnabled`, `messageCount` and `pendingMessageCount`, and no answer carried the fallback.
+Through `sbox`, the workspace needing a `.sandbox-workspace` marker because it was no git repository, the made-up-model copy read the same `gemini-2.5-flash-lite` at `high`, and stderr held only sbox's own lines: six `Warning: Common mount path not found, skipping: ...` and `sbox [pi]: <workspace>`.
+
+**The source agrees.**
+`pi` runs `dist/bundle/cli.js`, whose `createAgentSession` matches `dist/core/sdk.js`: it builds `Could not restore model <provider>/<id>. Using <provider>/<id>`, or Pi's no-models message when nothing resolves, and returns it as `modelFallbackMessage`.
+`dist/main.js` hands that only to `InteractiveMode`, which shows it with `showWarning`; `runRpcMode` never reads it, `get_state` builds its answer from fields that exclude it, and `switch_session` answers only `{ cancelled }`.
+`restoreModelFromSession` in `dist/core/model-resolver.js`, the path that writes `Warning: Could not restore model ...` to stderr, is called nowhere in the package and is absent from the bundle.
+
+**What agentpane makes of it.**
+Pi emits nothing the adapter could relay, so no code changed.
+The adapter names the model `get_state` reports, so a session whose recorded model was lost is labelled with the fallback as if it had been chosen, and one that resolved nothing is labelled `unknown/unknown` (`modelToInfo` in `src/server/adapters/pi/protocol.ts`, read at the source).
+The mismatch stays readable from what `hydrateMessages` in `src/server/adapters/pi/process.ts` already fetches on a resume: `get_messages` and `get_entries` name the recorded model while `get_state` names another.
+Noticing it would be agentpane's own inference, not a message from Pi, and nothing here built it.
+
+**Not established.**
+No turn ran on a fallback; by `getSessionContextSettings`, read at the source in OW-pubulu's section, that turn's assistant message would name the fallback model, and every later resume would restore it as the recorded one.
+The lost-auth fallback to another provider rested on a dummy key and was read from `get_state` alone.
+Nothing here went through agentpane's server, the browser or Emacs.
