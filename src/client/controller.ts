@@ -1128,33 +1128,36 @@ export function createController(
 				delete sessions[key];
 				publish({ state: { ...view.state, sessions } });
 			}
-			// A virtual session has nothing to preview and no row to go back to:
-			// `readSessionPreview` answers its ref with an empty-but-*non-null*
-			// transcript rather than an error, which is enough to put `App.svelte`
-			// on its preview branch, whose one control is an Attach that can only
-			// 404 on a ref the session manager no longer holds (OW-vasubu). Land on
-			// the startup view instead -- selection cleared, no preview -- which is
-			// where every user starts anyway. Bumping the intent here is safe and
-			// makes this the last word on the selection, as `preview` below would
-			// have been: the intent is unchanged, so nothing the user started
-			// during the close is in flight.
+			// A session with nothing on disk has nothing to preview and no row to go
+			// back to: `readSessionPreview` answers its ref with an
+			// empty-but-*non-null* transcript rather than an error, which is enough
+			// to put `App.svelte` on its preview branch, whose one control is an
+			// Attach that can only 404 on a ref the session manager no longer holds
+			// (OW-vasubu). Land on the startup view instead -- selection cleared, no
+			// preview -- which is where every user starts anyway. Bumping the intent
+			// here is safe and makes this the last word on the selection, as
+			// `preview` below would have been: the intent is unchanged, so nothing
+			// the user started during the close is in flight.
 			//
-			// Read off the ref, not `summaries[].status`: a virtual session this
-			// client has attached lists as `attached` -- the status is about the
-			// process, not the store (`session-manager.ts`, `#liveOverlay`) -- so
-			// the status would miss the commonest case of all, a session created
-			// here and detached before its first prompt. The ref misses it too:
-			// every backend replaces the `virtual:` id `createVirtual` mints at
-			// attach, while nothing reaches disk until the first turn (D9), so
-			// such a session skips this exit and is previewed below with no file
-			// behind it (OW-wedupe).
-			if (selected.id.startsWith("virtual:")) {
-				// This exit asks for the listing itself, and the non-virtual one below
-				// does not (D21). The difference is what the stale row means. A
-				// detached stored session lists with the wrong `status` -- the stripe
-				// says attached when it is not -- which is merely untrue and can wait
-				// for the reconnect re-list. A detached *virtual* session is gone
-				// everywhere: nothing on disk, and dropped from the manager's table.
+			// Read off the summary's `onDisk`, which is the session index's answer,
+			// and not off anything that merely correlates with it. Not `status`: a
+			// session this client has attached lists as `attached` whatever the
+			// store holds -- the status is about the process (`session-manager.ts`,
+			// `#liveOverlay`). Not the `virtual:` prefix: every backend replaces
+			// that id at attach, while nothing reaches disk until the first turn
+			// (D9), and a fork is born with no file and no such prefix at all
+			// (OW-wedupe). Read after the close, so a re-list that landed during it
+			// is the answer; a row it dropped is a session nothing lists, which is
+			// this exit too. A listing that has not yet caught up with a first turn
+			// errs the same way, and the re-list below brings its row back.
+			const listed = view.state.summaries.find((item) => sessionKey(item.ref) === key);
+			if (!listed?.onDisk) {
+				// This exit asks for the listing itself, and the one below does not
+				// (D21). The difference is what the stale row means. A detached stored
+				// session lists with the wrong `status` -- the stripe says attached
+				// when it is not -- which is merely untrue and can wait for the
+				// reconnect re-list. A detached session with nothing on disk is gone
+				// everywhere: no file, and dropped from the manager's table.
 				// Its row nonetheless lives on in `summaries`, which is what the
 				// sidebar renders, and a click on it strands the user on the
 				// empty-but-non-null preview OW-vasubu exists to keep them off. So

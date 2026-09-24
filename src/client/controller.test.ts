@@ -978,20 +978,31 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A detached virtual session is gone everywhere -- nothing on disk, dropped
-	// from the manager's table -- but its row lives on in `summaries`, which is
-	// what the sidebar renders, and clicking it lands on exactly the screen
-	// OW-vasubu exists to prevent. So this exit asks for the listing itself
-	// rather than waiting for the reconnect the stripe waits for (D21). The
-	// stream is down here and no event is emitted.
-	it("drops a detached virtual session's phantom row with no broadcast to ride on", async () => {
-		const virtualRef: SessionRef = { backend: "pi", id: "virtual:b" };
+	// Every backend replaces the `virtual:` id at attach and none writes before
+	// the first turn (D9), so a session created here and detached before its
+	// first prompt holds an ordinary-looking id with nothing behind it. Its
+	// summary says so, and the id does not (OW-wedupe).
+	const createdRef: SessionRef = { backend: "pi", id: "/sessions/created.jsonl" };
+
+	function createRenamedAtAttach(api: FakeApi, onDisk: boolean): void {
+		api.createSession.mockResolvedValue({ backend: "pi", id: "virtual:a" });
+		api.attach.mockResolvedValue({ ...summary(createdRef), onDisk });
+	}
+
+	// A detached session with nothing on disk is gone everywhere -- no file, and
+	// dropped from the manager's table -- but its row lives on in `summaries`,
+	// which is what the sidebar renders, and clicking it lands on exactly the
+	// screen OW-vasubu exists to prevent. So this exit asks for the listing
+	// itself rather than waiting for the reconnect the stripe waits for (D21).
+	// The stream is down here and no event is emitted.
+	it("drops the phantom row of a detached session with nothing on disk, with no broadcast to ride on", async () => {
 		const api = new FakeApi();
-		api.listSessions.mockResolvedValue([summary(virtualRef)]);
+		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
-		await controller.select(virtualRef);
-		api.emit({ type: "snapshot", session: virtualRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		await controller.create("/work", "pi");
+		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
 		api.listSessions.mockResolvedValue([]);
 
 		api.drop();
@@ -1002,32 +1013,81 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A virtual session has nothing on disk, so `preview` would answer with an
-	// empty-but-non-null transcript and strand the user on a screen whose only
-	// control is an Attach the session manager can no longer honour (OW-vasubu).
-	// Attached here first, which is how a session created in this client reaches
-	// Detach: it lists as `attached` while its id is still virtual.
-	it("clears the selection onto the startup view when the detached session was virtual", async () => {
-		const virtualRef: SessionRef = { backend: "pi", id: "virtual:a" };
+	// Nothing on disk means `preview` would answer with an empty-but-non-null
+	// transcript and strand the user on a screen whose only control is an
+	// Attach the session manager can no longer honour (OW-vasubu).
+	it("clears the selection onto the startup view when the session detached before its first turn was renamed at attach", async () => {
 		const api = new FakeApi();
-		api.listSessions.mockResolvedValue([summary(virtualRef)]);
+		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
-		await controller.select(virtualRef);
-		api.emit({ type: "snapshot", session: virtualRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		await controller.create("/work", "pi");
+		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		expect(controller.getView().state.selected).toEqual(createdRef);
 
 		await controller.detach();
 		await settle();
 
 		const detachedView = controller.getView();
-		expect(api.close).toHaveBeenCalledWith(virtualRef);
+		expect(api.close).toHaveBeenCalledWith(createdRef);
 		expect(api.preview).not.toHaveBeenCalled();
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
-		expect(detachedView.state.sessions[sessionKey(virtualRef)]).toBeUndefined();
+		expect(detachedView.state.sessions[sessionKey(createdRef)]).toBeUndefined();
 		// The re-list is on this exit, and only this one: the row it removes is
 		// not merely stale, it points at a session that exists nowhere (D21).
 		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		controller.dispose();
+	});
+
+	// A fork is born with no file on every backend, and gets one only when its
+	// first turn ends (OW-japuzo, OW-hojefo). Detaching it mid-turn kills that
+	// turn, so nothing is ever written.
+	it("clears the selection onto the startup view when the detached fork has run no turn", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		api.attach.mockImplementation(async (session: SessionRef) =>
+			sessionKey(session) === sessionKey(forkedRef) ? { ...summary(session), onDisk: false } : summary(session),
+		);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		controller.setDraft("reworded");
+		expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
+		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null });
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+
+		await controller.detach();
+		await settle();
+
+		const detachedView = controller.getView();
+		expect(api.close).toHaveBeenCalledWith(forkedRef);
+		expect(api.preview).not.toHaveBeenCalled();
+		expect(detachedView.state.selected).toBeNull();
+		expect(detachedView.preview).toBeNull();
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		controller.dispose();
+	});
+
+	// The other side of the same signal: once a turn has written the store, the
+	// listing that turn's end asks for says so, and the session detaches onto its
+	// preview like any stored one (OW-tewave).
+	it("previews a session created here once a listing has found its first turn on disk", async () => {
+		const api = new FakeApi();
+		createRenamedAtAttach(api, false);
+		const controller = createController(api);
+		await controller.start();
+		await controller.create("/work", "pi");
+		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		api.listSessions.mockResolvedValue([{ ...summary(createdRef), onDisk: true }]);
+		api.emit({ type: "sessions-changed" });
+		await settle();
+
+		await controller.detach();
+		await settle();
+
+		expect(api.preview).toHaveBeenCalledWith(createdRef);
+		expect(controller.getView().state.selected).toEqual(createdRef);
 		controller.dispose();
 	});
 
