@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The session index and the preview read ~/.codex/sessions directly and ignore CODEX_HOME
@@ -15,3 +16,11 @@ Observed during OW-kokalo's live run on the home server, 2026-09-23, `codex-cli 
 ## Done when
 
 - A test with `CODEX_HOME` set asserts the index lists a rollout written under `$CODEX_HOME/sessions`, and the preview reads it, shown red first -- or the decision to support only `~/.codex` is recorded in `docs/DESIGN.md` beside the session index.
+
+## Close note
+
+Honoured the variable rather than recording a default-only decision: sbox does not clear the environment, so the sandboxed `codex app-server` inherits the server's `CODEX_HOME`.
+`src/server/sessions/index.ts` now exports `codexSessionsRoot()`, read at call time: `$CODEX_HOME/sessions` when `CODEX_HOME` is set and non-empty, else `~/.codex/sessions`.
+The listing, `getSession`, the preview and the Codex adapter's stored-turn read all default through it; an explicit `codexRoot` still wins, and `SESSION_ROOTS` lost its `codex` entry.
+Verified by three new tests in `src/server/sessions/index.test.ts` and `preview.test.ts` (listing and lookup under a stubbed `CODEX_HOME`, preview under it, empty-value fallback), red on the old source and green after; `bun run check` passed.
+Not handled, because it is sbox's configuration rather than agentpane's: sbox's `codex` profile mounts only `~/.codex`, so a `CODEX_HOME` outside `/tmp` or the project tree is read-only inside the jail, and Codex, which needs it writable, would fail there.
