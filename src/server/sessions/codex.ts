@@ -28,6 +28,7 @@ import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.t
 import { readLinesLfOnly } from "./line-reader.ts";
 import { storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
+import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
 /**
  * Codex (and whatever harness/plugin set is active) injects wrapper content
@@ -211,6 +212,76 @@ export async function extractCodexPreviewTurns(
 	const context: PreviewContext = { toolNames: new Map(), tokensBefore: 0 };
 	await projectRollout(filePath, Infinity, locate, context, turns);
 	return turns;
+}
+
+/** The model and effort one stored `turn_context` record names; either may be absent from it. */
+export interface CodexTurnSettings {
+	model: string | null;
+	effort: string | null;
+}
+
+/**
+ * The model and effort the last turn in a stored thread's history ran at, or
+ * null when the store holds no rollout for the thread or no turn in it (D23).
+ *
+ * Every turn writes a `turn_context` record carrying both, as the turn ran
+ * them: a `turn/start` override lands there and nowhere a notification
+ * reports (`docs/MANUAL_TESTING.md`, OW-kokalo, `codex-cli` 0.156.0). A fork
+ * whose rollout holds none of its inherited history is read through its
+ * `history_base`, exactly as the preview reads it, so a fork with no turn of
+ * its own yet answers with the last turn it kept of its parent's.
+ */
+export async function readCodexLastTurnSettings(
+	root: string,
+	threadId: string,
+): Promise<CodexTurnSettings | null> {
+	const files = await findJsonlFiles(root);
+	const locate: CodexRolloutLocator = (id) => files.find((file) => fileMatchesThreadId(file, id));
+	const file = locate(threadId);
+	// A rollout that vanishes or will not read mid-walk names nothing, as in enumeration.
+	return file ? lastTurnSettings(file, Infinity, locate).catch(() => null) : null;
+}
+
+/** `projectRollout`'s walk, keeping only the last `turn_context` below `endOrdinal`. */
+async function lastTurnSettings(
+	filePath: string,
+	endOrdinal: number,
+	locate: CodexRolloutLocator,
+): Promise<CodexTurnSettings | null> {
+	let last: CodexTurnSettings | null = null;
+	let lineNo = 0;
+	let ownLines = Infinity;
+	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
+		lineNo++;
+		if (lineNo === 1) {
+			const base = historyBase(line);
+			const baseFile = base ? locate(base.threadId) : undefined;
+			if (base && baseFile) last = await lastTurnSettings(baseFile, base.endOrdinal, locate);
+			ownLines = endOrdinal - (base?.endOrdinal ?? 0);
+			continue;
+		}
+		if (lineNo > ownLines) break;
+		// Most lines are large items; only a line naming the type is parsed.
+		if (!line.includes('"turn_context"')) continue;
+		last = turnSettings(line) ?? last;
+	}
+	return last;
+}
+
+function turnSettings(line: string): CodexTurnSettings | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		return null;
+	}
+	const rec = parsed as { type?: unknown; payload?: { model?: unknown; effort?: unknown } } | null;
+	if (rec?.type !== "turn_context" || typeof rec.payload !== "object" || rec.payload === null) return null;
+	const { model, effort } = rec.payload;
+	return {
+		model: typeof model === "string" ? model : null,
+		effort: typeof effort === "string" ? effort : null,
+	};
 }
 
 /**

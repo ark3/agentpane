@@ -9,6 +9,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
+import { SESSION_ROOTS } from "../../sessions/index.ts";
 import type {
 	AdapterState,
 	AdapterFactory,
@@ -78,6 +80,12 @@ export interface CodexAdapterOptions {
 	 * tests that drive a single adapter want.
 	 */
 	connections?: CodexConnectionRegistry;
+	/**
+	 * The rollout store a resumed thread's last turn is read from (D23; see
+	 * `effort`). Defaults to the root the session index walks; tests point it
+	 * at a directory of their own so nothing they do reads the real store.
+	 */
+	codexRoot?: string;
 }
 
 const DEFAULT_CLIENT_INFO: ClientInfo = { name: "agentpane", title: "agentpane", version: "0.0.0" };
@@ -154,25 +162,30 @@ export class CodexAdapter implements BackendAdapter {
 	private pendingTurnCompletionOverflow = false;
 	private model: string | null = null;
 	/**
-	 * The effort `setEffort` chose, sent on every `turn/start` like `model` --
+	 * The effort sent on every `turn/start` like `model` --
 	 * `TurnStartParams.effort` is the only way to set one, overriding it "for
-	 * this turn and subsequent turns". Null until chosen, and then nothing is
-	 * sent and the thread runs at what `thread/start` or `thread/resume`
-	 * reported, which is what `getState` names instead.
+	 * this turn and subsequent turns". `setEffort` sets it, and so do a resume
+	 * and a fork, from the effort the store's last turn ran at (D23): the
+	 * rollout's last `turn_context`, for a fork the last one it kept of its
+	 * parent's. The model that turn ran goes into `model` the same way. Null
+	 * when neither has named one, and then nothing is sent and the thread runs
+	 * at what `thread/start` or `thread/resume` reported, which is what
+	 * `getState` names instead.
 	 *
-	 * Held here and nowhere else, and that is enough only because it is resent
-	 * each turn. Measured on the home server, 2026-09-23, `codex-cli 0.156.0`
-	 * with `gpt-5.6-luna` (`docs/MANUAL_TESTING.md`, OW-kokalo): `low` sent on
-	 * one `turn/start` carried to the next turn sent without an effort on the
-	 * same app-server, but a `thread/resume` of that thread in a fresh
-	 * app-server answered `reasoningEffort: "medium"`, not the override, and a
-	 * turn sent after it without an effort ran at `medium`. So a conversation
-	 * reopened after its app-server exits runs at the default again, and
-	 * `getState` says so. That default was both the model's
-	 * `defaultReasoningEffort` and `config.toml`'s `model_reasoning_effort`, so
-	 * the run cannot say which one a resume restores. A resume on the
-	 * app-server that still holds the thread -- a fork's borrower, or a
-	 * re-attach through the registry -- was not measured.
+	 * Re-asserted from the store rather than left to Codex, because what Codex
+	 * keeps depends on the path. Measured on the home server, 2026-09-23,
+	 * `codex-cli 0.156.0`, every turn on `gpt-5.6-luna`, in a `CODEX_HOME` whose
+	 * `config.toml` named `gpt-5.6-terra` at `high` (`docs/MANUAL_TESTING.md`,
+	 * OW-sayaju): after a turn at `low`, a `thread/resume` naming no model
+	 * answered `gpt-5.6-luna` at `low`, on the app-server that ran the turn and
+	 * in a fresh one alike. But a fresh resume that named the model, as
+	 * OW-kokalo's did, answered the config's `high`, wrote it to the rollout as
+	 * `thread_settings_applied`, and a later resume naming none restored that
+	 * `high` though no turn had run at it. And `thread/fork` carried neither:
+	 * the fork, and its borrower's resume, answered the config's
+	 * `gpt-5.6-terra` at `high`, and a turn sent on it naming only the model ran
+	 * at `high`. Which is also why the store's model is applied after the
+	 * resume and rides `turn/start`, never `thread/resume`.
 	 */
 	private effort: string | null = null;
 	private cwd: string | null = null;
@@ -220,7 +233,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.startCalled = true;
 		this.cwd = opts.cwd;
 		if (opts.model) this.model = opts.model;
-		if (this.borrowed) return this.startBorrowed();
+		if (this.borrowed) return this.startBorrowed(opts.model);
 
 		// Re-attaching a thread a live app-server still holds. That happens when
 		// one side of a fork pair is closed while the other keeps the child alive:
@@ -233,7 +246,7 @@ export class CodexAdapter implements BackendAdapter {
 		const shared = opts.resumeId ? this.options.connections?.find(opts.resumeId) : undefined;
 		if (shared && opts.resumeId) {
 			this.adoptConnection(shared, opts.resumeId, opts.cwd);
-			return this.startBorrowed();
+			return this.startBorrowed(opts.model);
 		}
 
 		const spawner = this.options.spawn ?? spawnCodex;
@@ -280,11 +293,17 @@ export class CodexAdapter implements BackendAdapter {
 						...(this.options.ephemeral ? { ephemeral: true } : {}),
 					});
 			assertOwned();
+			const stored = opts.resumeId ? await this.readStoredTurn(started.thread.id) : null;
+			assertOwned();
 
-			this.model = started.model ?? this.model;
+			// The store's last turn, not the resume's answer, names what runs next
+			// (D23; see `effort`), save a model chosen at start.
+			if (stored?.effort) this.effort = stored.effort;
+			const model = (opts.model ? undefined : stored?.model) ?? started.model;
+			this.model = model ?? this.model;
 			this.reducer.setIdentity({
 				threadId: started.thread.id,
-				model: started.model,
+				model,
 				modelProvider: started.modelProvider,
 				reasoningEffort: started.reasoningEffort,
 			});
@@ -327,7 +346,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * made it. A second one on the same connection has never been measured, and
 	 * sending an unprobed request blind is not how this adapter learns things.
 	 * What remains is real work -- resume the thread, hydrate the transcript the
-	 * fork inherited, and learn the model the fork actually runs.
+	 * fork inherited, and read from the store the model and effort its kept
+	 * prefix last ran, which `thread/fork` does not carry (see `effort`).
 	 *
 	 * Identity is NOT seeded here. `adoptConnection` did that synchronously at
 	 * fork time, because the shared line stream reaches this adapter from that
@@ -338,7 +358,7 @@ export class CodexAdapter implements BackendAdapter {
 	 * `#start` reaps a failed start through `#terminate` -- and that is what
 	 * releases it.
 	 */
-	private async startBorrowed(): Promise<void> {
+	private async startBorrowed(chosenModel: string | undefined): Promise<void> {
 		const holder = this.holder;
 		const ownership = this.ownership;
 		const threadId = this.threadId;
@@ -359,11 +379,17 @@ export class CodexAdapter implements BackendAdapter {
 			...(this.model ? { model: this.model } : {}),
 		});
 		assertOwned();
+		const stored = await this.readStoredTurn(resumed.thread.id);
+		assertOwned();
 
-		this.model = resumed.model ?? this.model;
+		// As in `start`: a fork's resume answers with the config's defaults, not
+		// the parent's (see `effort`), so here the store is what carries them.
+		if (stored?.effort) this.effort = stored.effort;
+		const model = (chosenModel ? undefined : stored?.model) ?? resumed.model;
+		this.model = model ?? this.model;
 		this.reducer.setIdentity({
 			threadId: resumed.thread.id,
-			model: resumed.model,
+			model,
 			modelProvider: resumed.modelProvider,
 			reasoningEffort: resumed.reasoningEffort,
 		});
@@ -949,6 +975,10 @@ export class CodexAdapter implements BackendAdapter {
 	private clearPendingRequests(): void {
 		this.pendingRequests.clear();
 		this.externalRequestIds.clear();
+	}
+
+	private readStoredTurn(threadId: string): Promise<CodexTurnSettings | null> {
+		return readCodexLastTurnSettings(this.options.codexRoot ?? SESSION_ROOTS.codex, threadId);
 	}
 
 	private rememberTurns(thread: Pick<Thread, "turns">): void {

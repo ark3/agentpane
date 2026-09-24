@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRequest, SessionRef } from "../../../shared/protocol.ts";
 import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
@@ -7,7 +10,34 @@ import { FakeCodexProcess } from "./test-support.ts";
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
 const STORED_REF: SessionRef = { backend: "codex", id: "thread-stored" };
 
+/**
+ * A rollout store with nothing in it, so a resume's read of its last turn
+ * (D23) never reaches the real `~/.codex/sessions`.
+ */
+const NO_STORE = join(tmpdir(), "agentpane-codex-no-store");
+
 type WireMessage = Record<string, unknown>;
+
+/** A throwaway rollout store holding one file per thread, each line written as given. */
+async function rolloutStore(threads: Record<string, unknown[]>): Promise<string> {
+	const root = await mkdtemp(join(tmpdir(), "agentpane-codex-store-"));
+	const day = join(root, "2026", "09", "23");
+	await mkdir(day, { recursive: true });
+	for (const [threadId, lines] of Object.entries(threads)) {
+		const body = lines.map((line) => JSON.stringify(line)).join("\n");
+		await writeFile(join(day, `rollout-2026-09-23T00-00-00-${threadId}.jsonl`), `${body}\n`);
+	}
+	return root;
+}
+
+/** The fields of a stored `turn_context` record the adapter reads, as `codex-cli` 0.156.0 writes them. */
+function turnContext(turnId: string, model: string, effort: string): unknown {
+	return { timestamp: "2026-09-23T00:00:01.000Z", type: "turn_context", payload: { turn_id: turnId, model, effort } };
+}
+
+function eventMsg(type: string, turnId: string): unknown {
+	return { timestamp: "2026-09-23T00:00:02.000Z", type: "event_msg", payload: { type, turn_id: turnId } };
+}
 
 function deferred<T>() {
 	let resolve: (value: T | PromiseLike<T>) => void;
@@ -165,7 +195,7 @@ async function startedAdapter(
 ): Promise<{ adapter: CodexAdapter; proc: AdapterProcess }> {
 	const proc = new AdapterProcess();
 	configureHappyServer(proc, options);
-	const adapter = new CodexAdapter(ref, { ...options, spawn: () => proc });
+	const adapter = new CodexAdapter(ref, { codexRoot: NO_STORE, ...options, spawn: () => proc });
 	await adapter.start({ cwd: "/workspace", ...(ref === STORED_REF ? { resumeId: ref.id } : {}) });
 	return { adapter, proc };
 }
@@ -236,7 +266,7 @@ describe("CodexAdapter lifecycle", () => {
 				},
 			],
 		});
-		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
 		const updates = vi.fn();
 		adapter.onUpdate(updates);
 
@@ -493,7 +523,7 @@ describe("CodexAdapter lifecycle", () => {
 				},
 			],
 		});
-		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
 		let disposal: Promise<void> | undefined;
 		adapter.onUpdate(() => {
 			disposal = adapter.dispose();
@@ -1464,6 +1494,35 @@ describe("CodexAdapter turns", () => {
 		expect(answer).toMatchObject({ role: "assistant", effort: "low" });
 	});
 
+	it("resumes at the effort the rollout's last turn ran at, not the one the resume reports (D23)", async () => {
+		// As of `codex-cli` 0.156.0 a resume naming no model restores the model
+		// itself, but answers whatever effort the thread's settings last held,
+		// which a resume naming a model resets to the config's without a turn
+		// (docs/MANUAL_TESTING.md, OW-sayaju). So the effort is re-asserted.
+		const codexRoot = await rolloutStore({
+			[STORED_REF.id]: [
+				{ type: "session_meta", payload: { id: STORED_REF.id } },
+				turnContext("turn-1", "gpt-stored", "high"),
+				eventMsg("task_complete", "turn-1"),
+				turnContext("turn-2", "gpt-stored", "low"),
+				eventMsg("task_complete", "turn-2"),
+			],
+		});
+		try {
+			const { adapter, proc } = await startedAdapter(
+				{ threadId: STORED_REF.id, model: "gpt-stored", reasoningEffort: "high", codexRoot },
+				STORED_REF,
+			);
+
+			expect(adapter.getState().effort).toBe("low");
+			await adapter.submit("go");
+
+			expect(request(proc, "turn/start")["params"]).toMatchObject({ effort: "low" });
+		} finally {
+			await rm(codexRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("falls back to the new model's default when it does not list the chosen effort", async () => {
 		const { adapter, proc } = await startedAdapter({
 			models: [
@@ -1569,7 +1628,7 @@ describe("CodexAdapter fork points", () => {
 				},
 			],
 		});
-		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
 		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
 
 		// Six items, six messages: the steered prompt is a transcript message of
@@ -1637,7 +1696,7 @@ describe("CodexAdapter fork points", () => {
 				},
 			],
 		});
-		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc });
+		const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
 		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
 
 		expect(adapter.getState().messages).toHaveLength(4);
@@ -1974,10 +2033,15 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 	// is about two adapters sharing one id space and one line stream.
 
 	/** A server that echoes back whatever thread id a resume asked for. */
-	function shareableServer(
-		proc: AdapterProcess,
-		options: { holdResume?: { promise: Promise<void> }; refuseResume?: string } = {},
-	): void {
+	interface ShareableOptions {
+		holdResume?: { promise: Promise<void> };
+		refuseResume?: string;
+		/** What a fork and a resume of it answer with, as `thread/fork` left it: the config's defaults. */
+		forkSettings?: { model: string; reasoningEffort: string };
+		codexRoot?: string;
+	}
+
+	function shareableServer(proc: AdapterProcess, options: ShareableOptions = {}): void {
 		let forks = 0;
 		proc.onWrite((message) => {
 			const id = message["id"];
@@ -1997,7 +2061,9 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 							proc.emit({ id, error: { code: -32600, message: options.refuseResume } });
 							return;
 						}
-						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
+						const settings =
+							threadId !== "thread-parent" && options.forkSettings ? options.forkSettings : { model: "m" };
+						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, ...settings } });
 					};
 					if (options.holdResume) void options.holdResume.promise.then(answer);
 					else answer();
@@ -2013,7 +2079,10 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 					forks += 1;
 					proc.emit({
 						id,
-						result: { thread: { id: forks === 1 ? "thread-forked" : `thread-forked-${forks}`, turns: [] } },
+						result: {
+							thread: { id: forks === 1 ? "thread-forked" : `thread-forked-${forks}`, turns: [] },
+							...options.forkSettings,
+						},
 					});
 					break;
 				case "turn/start":
@@ -2023,12 +2092,10 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		});
 	}
 
-	async function forkedPair(
-		options: { holdResume?: { promise: Promise<void> }; refuseResume?: string } = {},
-	) {
+	async function forkedPair(options: ShareableOptions = {}) {
 		const proc = new AdapterProcess();
 		shareableServer(proc, options);
-		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
+		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc, codexRoot: options.codexRoot ?? NO_STORE });
 		await parent.start({ cwd: "/workspace" });
 		// `fork()` needs a turn to cut at; `thread/read` above answers one.
 		await parent.listForkPoints();
@@ -2056,6 +2123,56 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			sandbox: "danger-full-access",
 			approvalPolicy: "never",
 		});
+	});
+
+	it("starts a fork at the model and effort the kept prefix's last turn ran at (D23)", async () => {
+		// As of `codex-cli` 0.156.0 `thread/fork` carries neither: the fork, and a
+		// resume of it on the app-server that minted it, answered the config's
+		// defaults, and a turn sent on it naming no effort ran at the config's
+		// (docs/MANUAL_TESTING.md, OW-sayaju). The fork's rollout holds only its
+		// own records and names its parent's as its history (OW-buligi), so the
+		// parent's second turn, past the cut, is not the fork's.
+		const parentLines = [
+			{ type: "session_meta", payload: { id: "thread-parent" } },
+			eventMsg("task_started", "turn-1"),
+			turnContext("turn-1", "gpt-parent", "low"),
+			eventMsg("task_complete", "turn-1"),
+			eventMsg("task_started", "turn-2"),
+			turnContext("turn-2", "gpt-later", "max"),
+			eventMsg("task_complete", "turn-2"),
+		];
+		const codexRoot = await rolloutStore({
+			"thread-parent": parentLines,
+			"thread-forked": [
+				{
+					type: "session_meta",
+					payload: {
+						id: "thread-forked",
+						forked_from_id: "thread-parent",
+						history_base: { thread_id: "thread-parent", end_ordinal_exclusive: 4, end_byte_offset: 0 },
+					},
+				},
+				{ type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "thread-forked" } },
+			],
+		});
+		try {
+			const { proc, forked, borrower } = await forkedPair({
+				codexRoot,
+				forkSettings: { model: "gpt-config", reasoningEffort: "high" },
+			});
+			await borrower.start(forked.start as { cwd: string; resumeId: string });
+
+			expect(borrower.getState()).toMatchObject({ model: "gpt-parent", effort: "low" });
+			await borrower.submit("go");
+
+			expect(request(proc, "turn/start")["params"]).toMatchObject({
+				threadId: "thread-forked",
+				model: "gpt-parent",
+				effort: "low",
+			});
+		} finally {
+			await rm(codexRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("ignores the parent's live turn while its own resume is still in flight", async () => {

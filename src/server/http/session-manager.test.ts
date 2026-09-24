@@ -4,6 +4,8 @@
  * session.
  */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type ServerEvent, type SessionRef, sessionKey } from "../../shared/protocol.ts";
 import { ClaudeAdapterFactory } from "../adapters/claude/adapter.ts";
@@ -1507,7 +1509,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 			storedSession(forkRef, WORKSPACE),
 		]);
 		sessions = new SessionManager(
-			{ index, adapters: { codex: new CodexAdapterFactory({ spawn: cluster.spawn }) } },
+			{ index, adapters: { codex: new CodexAdapterFactory({ spawn: cluster.spawn, codexRoot: join(tmpdir(), "agentpane-codex-no-store") }) } },
 			broadcaster,
 		);
 	});
