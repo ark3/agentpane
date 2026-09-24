@@ -3000,3 +3000,35 @@ The model rides `thread/start` and every `turn/start`, and the effort, which `th
 **Not established.**
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs, and no no-turn fork was driven end to end through agentpane.
 Whether a fresh thread closed before its first turn leaves anything behind was not read: it has no rollout to leave.
+
+## When a new Claude Code or Pi session first reaches disk (OW-bohodu)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`** and **`pi 0.87.1`**, from the `card/OW-bohodu` worktree cut at `cce059b`.
+The question was D9's: whether a new session's store file exists once it is attached, or only once it is prompted.
+Codex was not re-run; OW-hojefo's section above measured it on `codex-cli 0.156.0`, where `thread/start` named a thread that had no rollout until its first turn.
+Each child was driven by a throwaway Python script that was not kept, from a scratch workspace at `/tmp/bohodu-probe/ws` made a git repository so `sbox` would accept it, and removed afterwards with everything the runs wrote.
+
+**Claude Code writes nothing before the first user message.**
+The child was spawned the way `ClaudeAdapter.start()` spawns a fresh session, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --model haiku --session-id <fresh uuid>`, with every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+It was sent the `get_settings` control request the adapter sends at start, answered in 1.25 s, and then nothing for 15 s.
+A walk of all of `~/.claude` for any path naming the session id found none at 1, 3, 6, 10 and 15 s.
+The user message `Reply with the single word OK.` was written at 15.06 s; `init` arrived at 15.16 s, and `~/.claude/projects/-tmp-bohodu-probe-ws/<id>.jsonl` existed at 15.34 s, 85388 bytes, opening with two `queue-operation` lines and the user line, before either assistant event.
+The `result` arrived at 16.49 s.
+A second child, spawned the same way and sent only `get_settings`, had its stdin closed at 10 s and exited 0; neither the session id nor the workspace's `-tmp-bohodu-probe-ws` project directory existed anywhere under `~/.claude` before or after the exit.
+So an attach names a Claude Code session, since agentpane mints its `--session-id`, but writes nothing, and a session closed unprompted leaves nothing behind.
+
+**Pi names its file at start and writes it when the first turn's reply ends.**
+Pi was run as `pi --mode rpc --model openrouter/deepseek/deepseek-v4.1-flash:high`, not through `sbox`: this session's sandbox mounts `~/.pi/agent` read-only, so `PI_CODING_AGENT_DIR` pointed at a throwaway directory holding copies of `auth.json`, `models-store.json` and `settings.json`, the workaround the "Pi arrives on the home server" section above records.
+`get_state` at 0.81 s answered `deepseek/deepseek-v4.1-flash` at `high` and a `sessionFile` under that directory's `sessions/--tmp-bohodu-probe-ws--/`.
+That file did not exist at 0.8, 2, 5 or 10 s, and the `sessions` directory held nothing at all.
+The prompt `Reply with the single word OK.` was sent at 10.04 s; with the path polled every 50 ms, the file was absent through the user and assistant `message_end`s and first seen at 10.97 s, just after `agent_end` and `agent_settled` at 10.95 s, 7099 bytes holding `session`, `model_change`, `thinking_level_change` and the system, user and assistant messages.
+A second process, asked only `get_state` and closed after 3 s, exited 0 having written nothing: the named file never existed and the `sessions` directory stayed empty.
+`docs/HANDOFF.md` finding 41 says the file already existed when `start()`'s probe answered on `pi 0.84.1`, but the evidence it names is a live `renamed` event, which shows the name and not the write; on 0.87.1 the name came at start and the write only with the first turn.
+
+**What this means for D9.**
+On all three backends as measured, attach replaces the `virtual:` id and nothing reaches disk until the first turn, so an id that no longer starts with `virtual:` does not mean the session has a store file.
+`ManagedSession.virtual`, which `markPrompted` clears, is set only while nothing is on disk, but it clears at the prompt, before the write: about 0.3 s before it on Claude Code, and on Pi not until the reply ends.
+
+**Not established.**
+Nothing here went through agentpane's server, the browser or Emacs.
+Pi was not run through `sbox`, and whether a Pi turn stopped before its reply ends leaves a file was not measured.
