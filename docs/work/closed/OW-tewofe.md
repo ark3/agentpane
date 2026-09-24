@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # An effort the model does not list is sent to every backend unchecked, and each answers POST .../effort with 204
@@ -21,3 +22,16 @@ Deferred because neither client can reach it: both offer only the efforts `GET /
 ## Done when
 
 - An HTTP test posts an effort the session's model does not list and asserts a 400, shown red first.
+
+## Close note
+
+Built: `POST /api/sessions/:backend/:id/effort` (`case "effort"` in `src/server/http/app.ts`) now matches `getState().model` to `listModels()` by exact id, the rule both clients use to offer efforts (`selectedModelInfo` in `src/client/App.svelte`, `agentpane--read-effort` in `emacs/agentpane.el`), and answers 400 `bad_request` for an effort that entry does not list.
+A model that lists no efforts, a null model, and a model the listing does not name all offer none and are refused the same way, before the adapter is called; one check covers Codex, Claude Code, Pi and the Emacs helper, which goes through the same route.
+Adapters are unchanged and take what they are given; the `setEffort` contract in `src/server/adapters/types.ts`, `SetEffortRequest` in `src/shared/protocol.ts`, `sessions/setEffort` in `src/emacs/protocol.ts` and the `agentpane-new-session` docstring were reworded to say so.
+It is a plain 400, not `BackendRefusedError`, since the backend is never asked.
+
+Verified: the new test in `src/server/http/app.test.ts`, "refuses an effort the session's model does not list, before the adapter sees it (OW-tewofe)", covers no model, an unlisted effort and a model with no efforts; it failed against the unfixed route (expected 204 to be 400) and passes after; `bun run check` passed on main, 1261 tests.
+The existing OW-kokalo effort test now sets a model first.
+
+Cost: every effort POST makes one `listModels()` round trip to the backend.
+Filed OW-zayefe for the window this opens in `agentpane-new-session`, which sends the effort without awaiting the model change.
