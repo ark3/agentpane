@@ -270,9 +270,10 @@ describe("attach", () => {
 
 describe("an adapter that renames itself (the Pi contract)", () => {
 	// `PiAdapter.ref` is not stable at construction: Pi's session id IS its JSONL
-	// path (D9) and a `virtual` session has no path until its first prompt writes
-	// one. The adapter documents that its caller must re-read `adapter.ref` after
-	// start() and after the first submit(); these are that contract.
+	// path (D9), which Pi names from start()'s get_state, and a backend that has
+	// named nothing by the end of attach names it at the first prompt instead. The
+	// adapter documents that its caller must re-read `adapter.ref` after start()
+	// and after the first submit(); these are that contract.
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 
 	it("adopts the id the adapter took during start()", async () => {
@@ -292,7 +293,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(listed.filter((s) => s.status === "attached")).toHaveLength(1);
 	});
 
-	it("adopts the id a virtual session materialises on its first prompt (D9)", async () => {
+	it("adopts the id a virtual session takes on its first prompt when attach named none (D9)", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
 		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");

@@ -221,11 +221,12 @@ describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
 		expect(adapter.ref.backend).toBe("pi");
 	});
 
-	it("resolves the id after the first prompt when the session had not materialised at start", async () => {
+	it("resolves the id after the first prompt when start's get_state named no file", async () => {
 		const h = makeHarness();
 		const adapter = new PiAdapter({ backend: "pi", id: "__new__" }, { spawn: () => h.child as unknown as PiChild });
 
-		// A virtual session has no file yet, so Pi reports none (D9).
+		// Pi names the path at start as of `pi 0.84.1` (D9); a start that names
+		// none is the case the post-submit probe stays for.
 		const started = adapter.start({ cwd: WORKSPACE });
 		h.child.respondTo("get_state", { model: null, isStreaming: false });
 		await started;

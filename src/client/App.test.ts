@@ -807,10 +807,10 @@ describe("App", () => {
 	});
 
 	it("labels a just-prompted session by its own first user message while the server preview is still null", async () => {
-		// The real SSE order for a first prompt on a virtual Pi session
-		// (broadcaster.ts): sessions-changed, renamed, then the snapshot for the
-		// new ref. Replayed through the real reducer rather than hand-assembled,
-		// so the end state is the one the client would actually hold.
+		// The real SSE order for a first prompt on a virtual Pi session that attach
+		// left unnamed (broadcaster.ts, D9): sessions-changed, renamed, then the
+		// snapshot for the new ref. Replayed through the real reducer rather than
+		// hand-assembled, so the end state is the one the client would actually hold.
 		const virtualRef: SessionRef = { backend: "pi", id: "virtual:abc" };
 		const realRef: SessionRef = { backend: "pi", id: "/home/u/.pi/sessions/abc.jsonl" };
 
@@ -1514,7 +1514,7 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
-	it("keeps following across a virtual session's rename on its first submit (D9: every new session gets one)", async () => {
+	it("keeps following across a virtual session's rename on its first submit (D9: when attach named none)", async () => {
 		const virtualSession: SessionRef = { backend: "pi", id: "virtual:1" };
 		const realSession: SessionRef = { backend: "pi", id: "pi-77" };
 		const sessions = {

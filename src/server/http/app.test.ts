@@ -568,7 +568,7 @@ describe("prompting", () => {
 		await client.close();
 	});
 
-	it("materialises a virtual session on the first prompt and spawns with no resumeId", async () => {
+	it("spawns a virtual session on its first prompt with no resumeId", async () => {
 		const { ref } = (await (
 			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi", model: "pi-1" })
 		).json()) as CreateSessionResponse;
@@ -584,10 +584,11 @@ describe("prompting", () => {
 	});
 
 	it("follows a session that adopts its backend id on the first prompt (D9)", async () => {
-		// The whole life of a new Pi session in one test: create it virtual, prompt
-		// it, and watch it become a real JSONL path under the browser. The browser
-		// has to be able to follow that without losing the transcript, because the
-		// id it created the session with is not the id the session keeps.
+		// A virtual Pi session whose backend named nothing by the end of attach --
+		// the case D9 keeps the first-prompt rename for -- in one test: create it,
+		// prompt it, and watch it become a real JSONL path under the browser. The
+		// browser has to be able to follow that without losing the transcript,
+		// because the id it created the session with is not the id the session keeps.
 		const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 		const renaming = new FakeAdapterFactory({
 			materialiseOnSubmit: REAL,
