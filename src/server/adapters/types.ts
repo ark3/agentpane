@@ -27,12 +27,12 @@ export interface AdapterState {
 	 */
 	effort: string | null;
 	/**
-	 * The model the conversation's store last recorded, when the backend
-	 * could not restore it and `model` is a fallback in its place (D23,
-	 * OW-jitoni); null or absent otherwise. Only Pi reports one, and only by
-	 * inference: as of `pi 0.87.1` it fell back without a word over RPC
-	 * (docs/MANUAL_TESTING.md, OW-zujofa). When it is set and cleared is
-	 * `PiAdapter`'s docblock on the field.
+	 * The model the conversation's store last recorded, when the backend did
+	 * not restore it and `model` is another in its place (D23, OW-jitoni);
+	 * null or absent otherwise. Only Pi reports one, and only by inference:
+	 * as of `pi 0.87.1` it fell back without a word over RPC
+	 * (docs/MANUAL_TESTING.md, OW-zujofa). What causes it, and when it is set
+	 * and cleared, is `PiAdapter`'s docblock on the field.
 	 */
 	unrestoredModel?: string | null;
 }

@@ -1509,6 +1509,23 @@ describe("turn boundaries", () => {
 			expect.objectContaining({ type: "status", model: "openrouter/fallback", unrestoredModel: null }),
 		]);
 	});
+
+	it("carries a recorded model the resume could not restore on the attach snapshot, before any turn (OW-jitoni)", async () => {
+		const resumed = new FakeAdapterFactory({
+			onStart: (adapter) => {
+				adapter.model = "openrouter/fallback";
+				adapter.unrestoredModel = "openrouter/recorded";
+			},
+		});
+		const manager = new SessionManager({ index, adapters: { pi: resumed } }, broadcaster);
+		const events = collectEvents();
+
+		await manager.attach(REF);
+
+		expect(events.filter((event) => event.type === "snapshot")).toEqual([
+			expect.objectContaining({ type: "snapshot", session: REF, model: "openrouter/fallback", unrestoredModel: "openrouter/recorded" }),
+		]);
+	});
 });
 
 describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {

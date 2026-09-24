@@ -1183,7 +1183,7 @@ describe("PiAdapter recorded model a resume could not restore (OW-jitoni)", () =
 		await started;
 	}
 
-	it("names the recorded model when the model in force is another, in the snapshot the resume emits", async () => {
+	it("names the recorded model when the model in force is another, by the time start() returns", async () => {
 		const h = makeHarness();
 		const updates: { model: string | null; unrestoredModel?: string | null }[] = [];
 		h.adapter.onUpdate((state) => updates.push(state));
@@ -1191,8 +1191,10 @@ describe("PiAdapter recorded model a resume could not restore (OW-jitoni)", () =
 		await resume(h, FALLBACK, [u1, a1], ranOnRecorded, "a1");
 
 		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/google/gemini-2.5-flash-lite", unrestoredModel: "openrouter/deepseek/deepseek-v0-nonexistent" });
-		// The hydration snapshot is the first thing the manager broadcasts: it
-		// has to carry the loss, since no turn has run yet.
+		// Set before `start()` returns, which is what puts it on the snapshot the
+		// manager broadcasts at attach: the first thing a client holding no view
+		// of the session takes, before any turn. The hydration update itself
+		// reaches the manager as a `status`, which such a client drops.
 		expect(updates).toHaveLength(1);
 		expect(updates[0]).toMatchObject({ model: "openrouter/google/gemini-2.5-flash-lite", unrestoredModel: "openrouter/deepseek/deepseek-v0-nonexistent" });
 	});
@@ -1225,6 +1227,20 @@ describe("PiAdapter recorded model a resume could not restore (OW-jitoni)", () =
 		await resume(h, FALLBACK, [u1, reply(2, FALLBACK)], entries, "a1");
 
 		expect(h.adapter.getState().unrestoredModel).toBeNull();
+	});
+
+	it("reads a model change recorded after the last turn over that turn's model", async () => {
+		const h = makeHarness();
+		// A model chosen after the last turn, and the process closed before the
+		// next: Pi's own reading takes the later entry, whatever its kind.
+		const entries = [...ranOnRecorded, modelChange("m2", "a1", FALLBACK)];
+
+		await resume(h, RECORDED, [u1, a1], entries, "m2");
+
+		expect(h.adapter.getState()).toMatchObject({
+			model: "openrouter/deepseek/deepseek-v0-nonexistent",
+			unrestoredModel: "openrouter/google/gemini-2.5-flash-lite",
+		});
 	});
 
 	it("names nothing for a session with no messages, which Pi does not restore a model for", async () => {

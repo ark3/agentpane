@@ -153,10 +153,10 @@ export type ServerEvent =
 			effort: string | null;
 			/**
 			 * The model the conversation's store last recorded, when the backend
-			 * could not restore it on a resume or fork and `model` is a fallback in
-			 * its place (D23, OW-jitoni); null otherwise. Only Pi reports one. It
-			 * outlives the first turn on the fallback, which records the fallback
-			 * as though chosen, and clears once a model is set.
+			 * did not restore it on a resume or fork and `model` is another in its
+			 * place (D23, OW-jitoni); null otherwise. Only Pi reports one. It
+			 * outlives the first turn on `model`, which records `model` as though
+			 * chosen, and clears once a model is set.
 			 */
 			unrestoredModel: string | null;
 	  }

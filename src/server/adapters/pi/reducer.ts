@@ -276,7 +276,7 @@ export function withLoadedEfforts(
 export function recordedModel(entries: PiSessionEntry[], leafId: string | null): string | null {
 	let model: string | null = null;
 	for (const entry of activeBranch(entries, leafId)) {
-		if (entry.type === "model_change" && entry.provider && entry.modelId) {
+		if (entry.type === "model_change") {
 			model = `${entry.provider}/${entry.modelId}`;
 		} else if (entry.type === "message" && entry.message?.role === "assistant") {
 			model = `${entry.message.provider}/${entry.message.model}`;

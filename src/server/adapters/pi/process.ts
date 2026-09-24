@@ -148,6 +148,10 @@ export class PiAdapter implements BackendAdapter {
 	 * Read wherever the transcript is read back -- a resume's start, and a
 	 * fork, which D23 holds to the same promise -- and cleared by a
 	 * `setModel` that succeeds, after which the model in force is one chosen.
+	 * A fork has a cause of its own: as read at the source of `pi 0.87.1`, not
+	 * run, a process spawned with `--model` puts that model back at a fork
+	 * over one `set_model` chose (OW-sinoha), and then this names the chosen
+	 * model though it is neither out of the catalogue nor without auth.
 	 * A turn does not clear it: the first turn on the fallback records the
 	 * fallback, so every later resume restores that without a mismatch to see,
 	 * and from then on this is the only thing still saying the recorded model
