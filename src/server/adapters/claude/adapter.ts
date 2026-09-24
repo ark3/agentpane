@@ -86,6 +86,13 @@
  *   `claude-opus-5-5[1m]`, which `opus[1m]` resolves to, and under `sonnet`'s
  *   settings read `claude-opus-5-5`, which no listed id resolves to and which
  *   a fresh `--model claude-opus-5-5` puts back.
+ *   Each turn's `init` event then replaces that name with the id it reports,
+ *   which is the model in force with its `[1m]` variant, so what `fork()`
+ *   hands over after a turn still puts the variant back, though it may no
+ *   longer be a listed id. Measured on the home server, 2026-09-23, `claude
+ *   2.1.280` (docs/MANUAL_TESTING.md, OW-lizupu): on a sonnet `[1m]` session,
+ *   fresh and resumed, `init` named `claude-sonnet-5[1m]`, as `applied.model`
+ *   did, while the assistant event and store line named `claude-sonnet-5`.
  *   Each assistant turn is named with the effort in force when it started,
  *   and a resumed one with the `effort` its store line records.
  * - A session nobody chose a model on still names one before its first turn,

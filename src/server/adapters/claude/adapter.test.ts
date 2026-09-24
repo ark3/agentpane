@@ -1004,9 +1004,10 @@ describe("ClaudeAdapter fork", () => {
 
 	/**
 	 * As of `claude 2.1.280`, a resume restores the stored model widened to the
-	 * settings' `[1m]` variant, and a fresh spawn with `--model claude-opus-5-5`
-	 * drops it, while `--model opus[1m]` keeps it (docs/MANUAL_TESTING.md,
-	 * OW-tebibo and OW-faledu).
+	 * `[1m]` variant the settings or the store's `model` attachment name, and
+	 * a fresh spawn with `--model claude-opus-5-5` drops it, while `--model
+	 * opus[1m]` keeps it (docs/MANUAL_TESTING.md, OW-tebibo, OW-faledu and
+	 * OW-lizupu).
 	 */
 	describe("naming the model a store restores after the CLI's own answer (OW-faledu)", () => {
 		function entriesOn(model: string): ClaudeStoreMessageEntry[] {
@@ -1049,6 +1050,44 @@ describe("ClaudeAdapter fork", () => {
 
 			expect(h.adapter.getState().model).toBe("sonnet");
 			expect((await h.adapter.fork(CLAUDE_FORK_SESSION_START)).start?.model).toBe("sonnet");
+		});
+
+		/**
+		 * As of `claude 2.1.280`, a turn's `init` names the model in force as
+		 * `get_settings`'s `applied.model` does, `[1m]` included, while its
+		 * assistant event and store line name the id without the variant: on
+		 * a sonnet `[1m]` session, fresh and resumed, `init` read
+		 * `claude-sonnet-5[1m]` and the assistant `claude-sonnet-5`
+		 * (docs/MANUAL_TESTING.md, OW-lizupu). No opus turn ran; this applies
+		 * that relation to the owner's `opus[1m]`, where `init` replaces a
+		 * listed id and so the branch that handles it is exercised.
+		 */
+		it("forks at its start after a turn on a model that keeps [1m] (OW-lizupu)", async () => {
+			const h = harness({
+				entries: entriesOn("claude-opus-5-5"),
+				ids: ["forked-1"],
+				appliedModel: "claude-opus-5-5[1m]",
+				models: MODELS,
+			});
+			await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+			expect(h.adapter.getState().model).toBe("opus[1m]");
+			await h.adapter.submit("Reply with the single word ok");
+
+			h.proc().emit({ type: "system", subtype: "init", session_id: "parent", model: "claude-opus-5-5[1m]" });
+			h.proc().emit({
+				type: "assistant",
+				message: {
+					id: "msg_c",
+					role: "assistant",
+					model: "claude-opus-5-5",
+					content: [{ type: "text", text: "ok" }],
+				},
+			});
+			h.proc().emit({ type: "result", subtype: "success", is_error: false });
+
+			// Either name puts `claude-opus-5-5[1m]` in force in a fresh spawn (OW-faledu).
+			const spawned = (await h.adapter.fork(CLAUDE_FORK_SESSION_START)).start?.model;
+			expect(["opus[1m]", "claude-opus-5-5[1m]"]).toContain(spawned);
 		});
 
 		it("names the model in force itself when no listed id resolves to it", async () => {
