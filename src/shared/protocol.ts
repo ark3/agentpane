@@ -121,6 +121,25 @@ export interface AgentRequest {
 	issuerThreadId?: string | null;
 }
 
+/**
+ * Something the backend wants the human to know that is not a failure and not
+ * transcript state (OW-tujiya): as of `codex-cli 0.156.0`, Codex's `warning`,
+ * `guardianWarning`, `deprecationNotice` and `configWarning` notifications,
+ * which Codex keeps out of its rollouts, so nothing reveals one after the fact.
+ *
+ * `kind` is the backend's own method name, not normalised, as for
+ * `AgentRequest`. `message` is the one line to show; `details` is the
+ * backend's further guidance, and `path` the file the notice is about, with
+ * `:LINE:COLUMN` appended where the backend named a place in it -- each null
+ * when the backend sent none.
+ */
+export interface AgentNotice {
+	kind: string;
+	message: string;
+	details: string | null;
+	path: string | null;
+}
+
 export interface AgentRequestReply {
 	requestId: string;
 	/** Backend-shaped response body, or null to decline/cancel. */
@@ -180,6 +199,22 @@ export type ServerEvent =
 			session: SessionRef;
 			seq: number;
 			message: string;
+	  }
+	| {
+			/**
+			 * A non-fatal notice from the backend (OW-tujiya). Not an `error`: it
+			 * says nothing about whether a turn failed, and a client neither
+			 * clears nor sets its error from it. Like `error`, no snapshot carries
+			 * it, so a reconnect does not replay it.
+			 *
+			 * Per session, not D13's session-less `notice` arm: a Codex notice
+			 * comes from the app-server that session runs on, and one shown beside
+			 * a Pi session would be about a process that session does not have.
+			 */
+			type: "notice";
+			session: SessionRef;
+			seq: number;
+			notice: AgentNotice;
 	  }
 	| {
 			/**

@@ -21,6 +21,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AgentNotice } from "../../../shared/protocol.ts";
 import { mapItem, usageFromBreakdown, type MapContext } from "./mapping.ts";
 import {
 	isCodexNotification,
@@ -49,7 +50,9 @@ export type CodexEffect =
 	| { type: "request"; requestId: RequestId; kind: string; payload: unknown; issuerThreadId?: string | null }
 	/** Codex resolved a pending request itself (auto-approval, another client). */
 	| { type: "request-resolved"; requestId: RequestId }
-	| { type: "error"; message: string };
+	| { type: "error"; message: string }
+	/** A warning Codex sent that is neither a failure nor transcript state (OW-tujiya). */
+	| { type: "notice"; notice: AgentNotice };
 
 export interface CodexReducerOptions {
 	/** Stamped onto assistant messages. Overridden by the `thread/start` response. */
@@ -334,10 +337,35 @@ export class CodexReducer {
 					{ type: "error", message: upstreamMessage(message.params.error.message) },
 				];
 
+			// Not errors (OW-tujiya): as of `codex-cli 0.156.0` a `turn/start` on a
+			// model with no metadata drew a `warning` and then ran the turn
+			// (docs/MANUAL_TESTING.md, OW-wawuzu), so none of these may reach the
+			// `error` effect, whose contract is a turn that failed. A thread-scoped
+			// one for another thread never gets here: the guard above drops it.
+			case "warning":
+			case "guardianWarning":
+				return [{ type: "notice", notice: { kind: message.method, message: message.params.message, details: null, path: null } }];
+
+			case "deprecationNotice":
+				return [
+					{
+						type: "notice",
+						notice: { kind: message.method, message: message.params.summary, details: message.params.details, path: null },
+					},
+				];
+
+			case "configWarning": {
+				const { summary, details, path, range } = message.params;
+				const at = path && range ? `${path}:${range.start.line}:${range.start.column}` : (path ?? null);
+				return [{ type: "notice", notice: { kind: message.method, message: summary, details, path: at } }];
+			}
+
 			default:
 				// Everything else app-server emits -- account/rateLimits/updated,
 				// mcpServer/startupStatus/updated, remoteControl/status/changed,
-				// thread/compacted, fs/changed, ... -- is not transcript state.
+				// thread/compacted, fs/changed, windows/worldWritableWarning, ... --
+				// is not transcript state, and not surfaced; the four warnings
+				// above are.
 				return [];
 		}
 	}

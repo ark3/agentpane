@@ -16,6 +16,7 @@ import { CODEX_TOOL_NAMES, mapItem } from "./mapping.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import {
 	isRecord,
+	type CodexNotification,
 	type CodexServerMessage,
 	type ThreadItem,
 	type UserInput,
@@ -1328,5 +1329,72 @@ describe("ServerRequest issuer thread identification (OW-futewo)", () => {
 		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
 		expect(requestEffect.type).toBe("request");
 		expect(requestEffect.issuerThreadId).toBeNull();
+	});
+});
+
+describe("warning notifications (OW-tujiya)", () => {
+	// The one shape observed live is a `warning` naming the thread whose
+	// `turn/start` drew it (`codex-cli 0.156.0`, docs/MANUAL_TESTING.md,
+	// OW-wawuzu); the other three are read from `resources/codex-protocol/v2/`.
+	const reducer = () => {
+		const r = new CodexReducer({ now: () => 1 });
+		r.setIdentity({ threadId: "t" });
+		return r;
+	};
+	const cases: { message: CodexNotification; notice: Extract<CodexEffect, { type: "notice" }>["notice"] }[] = [
+		{
+			message: { method: "warning", params: { threadId: "t", message: "fallback metadata" } },
+			notice: { kind: "warning", message: "fallback metadata", details: null, path: null },
+		},
+		{
+			message: { method: "guardianWarning", params: { threadId: "t", message: "guarded" } },
+			notice: { kind: "guardianWarning", message: "guarded", details: null, path: null },
+		},
+		{
+			message: { method: "deprecationNotice", params: { summary: "old flag", details: "use the new one" } },
+			notice: { kind: "deprecationNotice", message: "old flag", details: "use the new one", path: null },
+		},
+		{
+			message: {
+				method: "configWarning",
+				params: {
+					summary: "unknown key",
+					details: null,
+					path: "/home/u/.codex/config.toml",
+					range: { start: { line: 3, column: 5 }, end: { line: 3, column: 9 } },
+				},
+			},
+			notice: { kind: "configWarning", message: "unknown key", details: null, path: "/home/u/.codex/config.toml:3:5" },
+		},
+	];
+
+	for (const { message, notice } of cases) {
+		it(`surfaces ${message.method} as a notice, not an error`, () => {
+			const effects = reducer().handle(message);
+			expect(effects).toEqual([{ type: "notice", notice }]);
+			expect(effects.some((effect) => effect.type === "error")).toBe(false);
+		});
+	}
+
+	it("keeps a config warning's path when it names no range", () => {
+		const effects = reducer().handle({
+			method: "configWarning",
+			params: { summary: "unknown key", details: "see the docs", path: "/c.toml" },
+		});
+		expect(effects).toEqual([
+			{ type: "notice", notice: { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml" } },
+		]);
+	});
+
+	it("surfaces a warning that names no thread", () => {
+		expect(reducer().handle({ method: "warning", params: { threadId: null, message: "global" } })).toEqual([
+			{ type: "notice", notice: { kind: "warning", message: "global", details: null, path: null } },
+		]);
+	});
+
+	it("drops a warning naming another thread, which is that thread's session's", () => {
+		const r = reducer();
+		expect(r.handle({ method: "warning", params: { threadId: "other", message: "not ours" } })).toEqual([]);
+		expect(r.handle({ method: "guardianWarning", params: { threadId: "other", message: "not ours" } })).toEqual([]);
 	});
 });
