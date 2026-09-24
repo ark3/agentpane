@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi resume that fell back from its recorded model is labelled with the fallback as if chosen, and the next turn makes the loss permanent
@@ -21,3 +22,17 @@ Session state, the same update that carries the model in force, is the implement
 Per AGENTS.md "Both clients", this is a user-facing capability: this card carries it onto both wires, the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts`, and the browser and Emacs clients each get a card of their own blocked by this one, the Emacs one labelled `emacs`.
 
 Done when a server test in `src/server/**`, fed a resume whose `get_entries` names a model other than the one `get_state` reports, shows the adapter surfacing the fallback on both wires, red first and green after, and a resume whose models agree surfaces nothing.
+
+## Close note
+
+Built: the Pi adapter infers a resume's model fallback itself, since as of `pi 0.87.1` Pi says nothing over RPC (OW-zujofa).
+`hydrateMessages` in `src/server/adapters/pi/process.ts` compares the active branch's recorded model (`recordedModel` in `src/server/adapters/pi/reducer.ts`: the last `model_change` or assistant message, as Pi's `getSessionContextSettings` reads it) with `get_state`'s, only when the branch holds messages, since Pi restores a model only then.
+A mismatch, `unknown/unknown` included, sets `unrestoredModel`, carried on the HTTP `snapshot` and `status` events (`src/shared/protocol.ts`) and on the Emacs helper's `session/snapshot` and `session/status` (`src/emacs/protocol.ts`); `onError` is untouched.
+It is set before `start()` returns, so it rides the snapshot broadcast at attach, before any turn; it survives turns, since the first turn on the fallback records it, and clears only on a successful `setModel`.
+It is also read at a fork, where a process spawned with `--model` putting that model back over one `set_model` chose (OW-sinoha, read at the source only) surfaces as the same field; OW-sinoha now says so.
+
+Verified: new tests in `src/server/adapters/pi/process.test.ts` and `src/server/http/session-manager.test.ts` shown red first (feature removed, `model_change` ignored, broadcaster dropping the field) and green after; agreeing models surface null; the Emacs helper tests carry it through `toEqual`.
+`bun run check` 1285 green on `main`, and `bun run test:browser` 22 green, since the e2e harnesses gained the field.
+An adversarial reader checked the comparison against the installed `pi 0.87.1` source: the `provider/id` strings match `modelToInfo` exactly and every assistant message carries both, so a healthy resume cannot mismatch.
+
+Rendering is filed per client: OW-pubeju (browser) and OW-firaja (Emacs).
