@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Codex reattach to a thread with a running turn can lose live notifications that land before its hydrate
@@ -19,3 +20,17 @@ Whether `thread/turns/list` returns an in-progress turn's partial items at all, 
 
 Done when an adapter test in `src/server/adapters/codex/adapter.test.ts` shows a notification emitted between the resume's answer and the last `thread/turns/list` page surviving into `getState()`, red against today's adapter first.
 Or, if a live measurement shows the window cannot lose anything, close this with that measurement recorded in `docs/MANUAL_TESTING.md` with the CLI version.
+
+## Close note
+
+Fixed in `CodexReducer.hydrate` (`src/server/adapters/codex/reducer.ts`): it no longer starts with `reset()`, and lays the paged-in turns under the slots the live stream already built.
+An item the stream opened or completed keeps its live slot, in the listed copy's position, so its text shows once whether or not `thread/turns/list` already held it; an item the listing lacks follows the history; streaming and compaction state are kept.
+Nothing is replayed, so no delta is applied twice.
+`reset()` had no other caller and was removed; only the two start paths call Codex `hydrate`, so no later re-hydrate can inherit stale slots.
+The `adoptConnection` docblock now says `hydrate` keeps what the thread said in the meantime; the adapter's seeding order is unchanged.
+
+Verified by two tests in `src/server/adapters/codex/adapter.test.ts`, block "re-attaching a thread whose turn is running (OW-vijuyi)": a fork is closed and re-attached over the parent's app-server, and `turn/started`, `item/started` and a delta are emitted on the first of two `thread/turns/list` pages.
+One listing omits the running turn, the other already holds its text.
+Both went red against the old reducer (the assistant message missing; `isStreaming` false) and green after; `bun run check` green.
+
+Not reached: deltas for an item that started before the attach still drop until its slot exists; filed as OW-zudase, along with the unmeasured question of whether `thread/turns/list` returns in-progress items.
