@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # Codex's four warning notifications reach both clients as a non-fatal notice, where the reducer drops them today
@@ -50,3 +51,32 @@ It is a first cut, to be tuned once the owner has seen one.
 - A client test in `src/client/` shows the notice drawn and `view.error` untouched, shown red first.
 - An ERT test in `emacs/agentpane-test.el` shows the notice drawn as its own node, not as `(:error ...)`, shown red first, with the Commentary's test count in `emacs/agentpane.el` updated.
 - `bun run check` and the whole ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, both pass.
+
+## Close note
+
+Built: Codex's `warning`, `guardianWarning`, `deprecationNotice` and `configWarning` notifications now reach both clients as a non-fatal notice, separate from the error banner.
+`CodexReducer` emits a `notice` effect carrying an `AgentNotice` (`kind`, `message`, `details`, `path`, defined in `src/shared/protocol.ts`).
+For `configWarning`, the start of `range` is appended to `path` as `:LINE:COLUMN`.
+`BackendAdapter` gains an optional `onNotice`, which only the Codex adapter implements.
+`SessionManager` broadcasts it as a new per-session, sequenced `notice` arm on `ServerEvent`.
+The browser keeps `view.notices` in a `role="status"` list beside the error banner.
+The Emacs helper sends `session/notice` and repeats the session's notices on every `session/snapshot`.
+`agentpane-mode` draws each notice as its own `(:notice ...)` node, marked ℹ, in a new `agentpane-notice` face.
+Nothing about a notice sets or clears `view.error`, and the next prompt does not clear it.
+
+Routing: a notice that names a thread reaches that thread's session only, through the reducer's existing cross-thread guard.
+A notice with no thread reaches every session on the app-server that sent it, a fork's borrower included, because it is about that process; the reason is at `CodexAdapter.onNotice`.
+D13's planned session-less `notice` arm was not reused, because these notices belong to specific sessions.
+D13 now records that the `notice` tag is taken.
+
+Review found that `agentpane-mode` wiped notices at the next snapshot, and a Codex turn boundary always sends one.
+Carrying `notices` on the helper's `session/snapshot` fixed that.
+
+Verified: every new test was shown red first, across the reducer, the adapter (including the borrower split), HTTP SSE, the helper wire, browser state, `App`, and two ERT tests.
+The dispatching session re-broke the reducer and the render and saw 7 fail.
+Final runs: `bun run check` reported 1299 tests passing and 0 svelte-check errors; ERT ran 88 tests, 88 as expected; `bun run test:browser` passed 22 of 22.
+
+Left open: notices share OW-bipume's gap, since no server snapshot carries them, so a reconnect, a late attach, or a notice sent while `adapter.start` is awaited loses them.
+OW-bipume was amended to say so.
+A warning naming a D19 subagent thread reaches no session; that is filed as OW-weyefe.
+The browser has no way to dismiss a notice and does not de-duplicate repeats: a first cut.
