@@ -25,7 +25,7 @@ export interface SessionView {
 	 * from `error` on purpose: nothing that clears an error clears these, and
 	 * like `error` and `requests` no snapshot carries them.
 	 */
-	notices?: AgentNotice[];
+	notices: AgentNotice[];
 }
 
 export interface ClientState {
@@ -83,6 +83,7 @@ function emptySession(ref: SessionRef): SessionView {
 		seq: null,
 		error: null,
 		requests: [],
+		notices: [],
 	};
 }
 
@@ -264,7 +265,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			view.requests = [...view.requests, event.request];
 			break;
 		case "notice":
-			view.notices = [...(view.notices ?? []), event.notice];
+			view.notices = [...view.notices, event.notice];
 			break;
 	}
 

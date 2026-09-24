@@ -1313,7 +1313,7 @@
 		</p>
 	{/if}
 
-	{#if selectedSession?.notices?.length}
+	{#if selectedSession?.notices.length}
 		<!-- The backend's non-fatal notices (OW-tujiya): not the error banner above,
 		     and nothing dismisses them yet; a first cut. -->
 		<ul class="notices" role="status" aria-label="Backend notices">

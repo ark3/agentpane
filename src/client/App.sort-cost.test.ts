@@ -147,6 +147,7 @@ function state(): ClientState {
 		seq: 1,
 		error: null,
 		requests: [],
+		notices: [],
 	});
 	return {
 		...initialClientState(),

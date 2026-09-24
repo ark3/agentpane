@@ -40,7 +40,11 @@ function summary(
 	};
 }
 
-type TestSessionView = Omit<SessionView, "model" | "effort"> & { model?: string | null; effort?: string | null };
+type TestSessionView = Omit<SessionView, "model" | "effort" | "notices"> & {
+	model?: string | null;
+	effort?: string | null;
+	notices?: SessionView["notices"];
+};
 
 function state(
 	overrides: Omit<Partial<ClientState>, "sessions"> & { sessions?: Record<string, TestSessionView> } = {},
@@ -49,7 +53,12 @@ function state(
 	const sessions: Record<string, SessionView> = Object.fromEntries(
 		Object.entries(suppliedSessions ?? {}).map(([key, session]) => [
 			key,
-			{ ...session, model: session.model ?? null, effort: session.effort ?? null } satisfies SessionView,
+			{
+				...session,
+				model: session.model ?? null,
+				effort: session.effort ?? null,
+				notices: session.notices ?? [],
+			} satisfies SessionView,
 		]),
 	);
 	return { ...initialClientState(), ...rest, ...(suppliedSessions ? { sessions } : {}) };
@@ -178,7 +187,7 @@ class FakeController implements AgentpaneController {
 				selected: ref,
 				sessions: {
 					...this.current.state.sessions,
-					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, requests: [] },
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, requests: [], notices: [] },
 				},
 			},
 		});
