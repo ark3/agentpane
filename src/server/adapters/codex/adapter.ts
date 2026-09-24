@@ -437,7 +437,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * with the parent's live deltas, which is exactly the D15/OW-gojado case of
 	 * forking a streaming parent. Seeding after `thread/resume` instead of
 	 * joining late is deliberate too: joining late drops whatever the fork's own
-	 * thread said in the meantime.
+	 * thread said in the meantime, which `CodexReducer.hydrate` keeps under the
+	 * paged-in history (OW-vijuyi).
 	 */
 	private adoptConnection(connection: CodexConnection, threadId: string, cwd: string): void {
 		this.connection = connection;

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRequest, SessionRef } from "../../../shared/protocol.ts";
+import { CodexConnectionRegistry } from "./connection.ts";
 import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
 import type { CodexProcess } from "./process.ts";
 import type { Thread } from "./protocol.ts";
@@ -2509,6 +2510,79 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		gate.resolve();
 		await starting;
 		expect(borrower.getState().messages).toEqual([]);
+	});
+
+	describe("re-attaching a thread whose turn is running (OW-vijuyi)", () => {
+		// The re-attach of OW-voyezi: the fork's session is closed while the
+		// parent keeps the app-server, and the thread it held may still be running
+		// a turn. The reattached adapter hears that turn from `adoptConnection` on,
+		// well before its history is paged in.
+
+		/** A fork closed and re-attached over the parent's app-server, with `gap` emitted after the first of the history's two pages. */
+		async function reattachWithGap(forkTurns: unknown[], gap: unknown[]) {
+			const connections = new CodexConnectionRegistry();
+			const proc = new AdapterProcess();
+			shareableServer(proc, { forkTurns });
+			const spawn = vi.fn(() => proc);
+			const options = { spawn, codexRoot: NO_STORE, connections };
+			const parent = new CodexAdapter(VIRTUAL_REF, options);
+			await parent.start({ cwd: "/workspace" });
+			await parent.listForkPoints();
+			const forked = await parent.fork("turn-2");
+			await forked.adapter?.dispose();
+			proc.onWrite((message) => {
+				const params = (message["params"] ?? {}) as Record<string, unknown>;
+				if (message["method"] !== "thread/turns/list" || params["threadId"] !== "thread-forked" || params["cursor"]) return;
+				for (const line of gap) proc.emit(line);
+			});
+			const reattached = new CodexAdapter(forked.ref, options);
+			await reattached.start({ cwd: "/workspace", resumeId: "thread-forked" });
+			expect(spawn).toHaveBeenCalledTimes(1);
+			return { proc, reattached };
+		}
+
+		const liveTurn = (text: string) => ({
+			id: "turn-live",
+			items: [{ type: "agentMessage", id: "item-live", text, phase: null, memoryCitation: null }],
+			itemsView: "full",
+			status: "inProgress",
+			error: null,
+			startedAt: 1_700_000_010,
+			completedAt: null,
+			durationMs: null,
+		});
+		const gap = [
+			{ method: "turn/started", params: { threadId: "thread-forked", turn: { id: "turn-live" } } },
+			{
+				method: "item/started",
+				params: { threadId: "thread-forked", startedAtMs: 1, item: { id: "item-live", type: "agentMessage", text: "" } },
+			},
+			{ method: "item/agentMessage/delta", params: { threadId: "thread-forked", itemId: "item-live", delta: "said early" } },
+		];
+		const later = { method: "item/agentMessage/delta", params: { threadId: "thread-forked", itemId: "item-live", delta: ", then more" } };
+
+		it("keeps what the turn streamed before the history was paged in, when the history does not list it", async () => {
+			const { proc, reattached } = await reattachWithGap(twoStoredTurns(), gap);
+
+			expect(reattached.getState().messages).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "first prompt" }] },
+				{ role: "user", content: [{ type: "text", text: "second prompt" }] },
+				{ role: "assistant", content: [{ type: "text", text: "said early" }] },
+			]);
+			expect(reattached.getState().isStreaming).toBe(true);
+			proc.emit(later);
+			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "said early, then more" }] });
+		});
+
+		it("shows the turn's text once when the history already lists what it streamed", async () => {
+			const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), liveTurn("said early")], gap);
+
+			expect(reattached.getState().isStreaming).toBe(true);
+			expect(reattached.getState().messages).toHaveLength(3);
+			proc.emit(later);
+			expect(reattached.getState().messages).toHaveLength(3);
+			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "said early, then more" }] });
+		});
 	});
 
 	it("publishes a blocking request once across both adapters, and answers it once", async () => {

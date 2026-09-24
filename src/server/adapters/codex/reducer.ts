@@ -171,28 +171,35 @@ export class CodexReducer {
 		if (id.reasoningEffort) this.identity.effort = id.reasoningEffort;
 	}
 
-	reset(): void {
-		this.messages = [];
-		this.slots.clear();
-		this.streaming = false;
-		this.compaction = null;
-		this.turnDiff = null;
-		this.compactionTokensBefore.clear();
-	}
-
 	/**
 	 * Cold start (D3): replay a thread's turns, paged in with
 	 * `thread/turns/list` at `itemsView: "full"`, into a transcript. Items
 	 * arrive already completed, so this is the same path with no deltas.
+	 *
+	 * Laid under what the live stream already built, never over it
+	 * (OW-vijuyi). A re-attach over an app-server that still holds the thread
+	 * hears it from `CodexAdapter.adoptConnection` on, so a turn still running
+	 * there streams while the history is paged in. An item that stream opened
+	 * or completed keeps its live slot, which has every delta since, in place
+	 * of the listed copy -- so its text shows once whether or not the listing
+	 * already held it -- and one the listing lacks follows the history. The
+	 * streaming and compaction state the stream set are kept with it.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
-		this.reset();
+		const live = this.slots;
+		this.slots = new Map();
 		this.threadId = thread.id;
 		for (const turn of thread.turns) {
 			this.turnId = turn.id;
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
-			for (const item of turn.items) this.applyItem(item, timestamp, true);
+			for (const item of turn.items) {
+				const slot = live.get(item.id);
+				if (slot) this.slots.set(item.id, slot);
+				else this.applyItem(item, timestamp, true);
+			}
 		}
+		for (const [id, slot] of live) if (!this.slots.has(id)) this.slots.set(id, slot);
+		this.messages = this.flattenMessages();
 		return [{ type: "reset" }];
 	}
 
