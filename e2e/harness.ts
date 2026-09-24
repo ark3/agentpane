@@ -15,7 +15,8 @@
  * placeholder, only then `status:true`) is the ordering a live Pi turn was
  * observed to produce -- see OW-27's close note.
  *
- * Deliberately narrow: one session, one turn shape, no rename, no error paths.
+ * Deliberately narrow: one session, one turn shape, no rename, and no error
+ * path beyond the banners `showBanners` snapshots in place.
  * This is the harness under the browser UI suite -- follow mode, the nav rail,
  * the composer's action row, the assistant footer row, the edit-and-fork
  * chrome, and the turn-done favicon badge -- but it has no server: no backend,
@@ -97,9 +98,17 @@ function emit(event: ServerEvent): void {
 	handlers?.onEvent(event);
 }
 
-function snapshot(isStreaming: boolean): void {
+/** Every shell-level banner at once, for the specs that place them (OW-watajo). */
+const BANNERS = {
+	unrestoredModel: "harness/retired",
+	error: "The turn ended in an error.",
+	requests: [{ requestId: "harness-request", session: REF, kind: "harness/unknownRequest", payload: {} }],
+	notices: [{ kind: "warning", message: "A backend notice.", details: "Its details.", path: "/tmp/agentpane-harness/config.toml" }],
+};
+
+function snapshot(isStreaming: boolean, banners = false): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [] });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -287,6 +296,8 @@ export interface FollowHarness {
 	pace(chunks: number, ms: number): void;
 	/** Replace the transcript with `turns` completed user/assistant pairs and snapshot it. */
 	seed(turns: number, withElidedChrome?: boolean, interleavedChrome?: boolean): void;
+	/** Re-snapshot the current transcript carrying the error, a notice, an unrestored model, and a pending request. */
+	showBanners(): void;
 	/** Show one running default tool whose summary is either present or absent. */
 	seedAlignmentTool(withSummary: boolean): void;
 	/** Resolves when the turn currently streaming has emitted its `status:false`. */
@@ -344,6 +355,9 @@ const harness: FollowHarness = {
 		}
 		seq = 0;
 		snapshot(false);
+	},
+	showBanners() {
+		snapshot(false, true);
 	},
 	seedAlignmentTool(withSummary) {
 		messages = [

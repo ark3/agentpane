@@ -1306,42 +1306,47 @@
 		{/each}
 	</nav>
 
-	{#if error}
-		<p class="error" role="alert">
-			<span>{error}</span>
-			<button type="button" aria-label="Dismiss error" onclick={() => controller.clearError()}>Dismiss</button>
-		</p>
-	{/if}
+	<!-- One grid area for every shell-level banner (OW-watajo), so each is read
+	     above the conversation; `app.css` gives the area a row only while it
+	     holds one. -->
+	<div class="banners">
+		{#if error}
+			<p class="error" role="alert">
+				<span>{error}</span>
+				<button type="button" aria-label="Dismiss error" onclick={() => controller.clearError()}>Dismiss</button>
+			</p>
+		{/if}
 
-	{#if selectedSession?.notices.length}
-		<!-- The backend's non-fatal notices (OW-tujiya): not the error banner above,
-		     and nothing dismisses them yet; a first cut. -->
-		<ul class="notices" role="status" aria-label="Backend notices">
-			{#each selectedSession.notices as notice, i (i)}
-				<li>
-					<span>{notice.message}</span>
-					{#if notice.details}<span class="notice-details">{notice.details}</span>{/if}
-					{#if notice.path}<code class="notice-path">{notice.path}</code>{/if}
-				</li>
-			{/each}
-		</ul>
-	{/if}
+		{#if selectedSession?.notices.length}
+			<!-- The backend's non-fatal notices (OW-tujiya): not the error banner above,
+			     and nothing dismisses them yet; a first cut. -->
+			<ul class="notices" role="status" aria-label="Backend notices">
+				{#each selectedSession.notices as notice, i (i)}
+					<li>
+						<span>{notice.message}</span>
+						{#if notice.details}<span class="notice-details">{notice.details}</span>{/if}
+						{#if notice.path}<code class="notice-path">{notice.path}</code>{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 
-	{#if selectedSession?.unrestoredModel}
-		<!-- D23's "says why not" (OW-pubeju). It follows the field, which the
-		     server clears only on a successful model change; a first cut. -->
-		<p class="warning" role="status" aria-label="Unrestored model">
-			This conversation last ran on {selectedSession.unrestoredModel}, which could not be restored; it is running on {selectedModelLabel} instead.
-		</p>
-	{/if}
+		{#if selectedSession?.unrestoredModel}
+			<!-- D23's "says why not" (OW-pubeju). It follows the field, which the
+			     server clears only on a successful model change; a first cut. -->
+			<p class="warning" role="status" aria-label="Unrestored model">
+				This conversation last ran on {selectedSession.unrestoredModel}, which could not be restored; it is running on {selectedModelLabel} instead.
+			</p>
+		{/if}
 
-	{#if selectedSession && selectedSession.requests.length > 0}
-		<p class="warning">
-			The agent is blocked on a request agentpane cannot answer: {selectedSession.requests
-				.map((request) => request.kind)
-				.join(", ")}. There is nothing to act on here; end the session to clear it.
-		</p>
-	{/if}
+		{#if selectedSession && selectedSession.requests.length > 0}
+			<p class="warning">
+				The agent is blocked on a request agentpane cannot answer: {selectedSession.requests
+					.map((request) => request.kind)
+					.join(", ")}. There is nothing to act on here; end the session to clear it.
+			</p>
+		{/if}
+	</div>
 
 	<section
 		class="conversation"

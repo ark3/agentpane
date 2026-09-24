@@ -202,6 +202,19 @@ button, input, select, textarea { font: inherit; }
 	margin: 0 auto;
 	padding: var(--ap-space-4);
 }
+/* The banners' row exists only while a banner does (OW-watajo): an empty track
+   would still cost a `gap` above the conversation. The controls span it, so
+   only the conversation column moves down. */
+.shell:has(> .banners > *) {
+	grid-template-rows: auto auto auto auto 1fr auto;
+	grid-template-areas:
+		"masthead masthead masthead"
+		"controls banners ."
+		"controls conversation rail"
+		"sessions-header conversation rail"
+		"sessions conversation rail"
+		"sessions prompt prompt";
+}
 
 .masthead { grid-area: masthead; display: flex; align-items: baseline; gap: var(--ap-space-3); }
 .masthead h1 { margin: 0; font-size: var(--ap-text-xl); }
@@ -338,8 +351,11 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .edit-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--ap-space-3); margin: 0; padding: var(--ap-space-2) var(--ap-space-3); border: 1px solid var(--ap-accent); border-radius: var(--ap-radius-sm); background: var(--ap-surface-raised); color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
 .edit-banner button { flex: 0 0 auto; }
 
+.banners { grid-area: banners; display: grid; gap: var(--ap-space-2); min-width: 0; }
+.banners:not(:has(> *)) { display: none; }
 /* Preview and attached turns both render through Transcript (OW-50). */
 .error {
+	margin: 0;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -357,6 +373,11 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 	.shell {
 		grid-template-columns: 1fr;
 		grid-template-areas: "masthead" "controls" "sessions-header" "sessions" "conversation" "rail" "prompt";
+	}
+	/* Back to the base rows, which the wide banners rule replaced. */
+	.shell:has(> .banners > *) {
+		grid-template-rows: auto auto auto 1fr auto;
+		grid-template-areas: "masthead" "controls" "sessions-header" "sessions" "banners" "conversation" "rail" "prompt";
 	}
 	/* One column means the rail is a full-width row rather than a right margin,
 	   so it lies down: the segments keep their order left-to-right. */
