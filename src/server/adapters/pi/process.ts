@@ -27,6 +27,7 @@ import {
 	createInitialPiState,
 	type PiReducerState,
 	reducePiNotification,
+	withLoadedEfforts,
 } from "./reducer.ts";
 import { buildPiSpawnCommand } from "./spawn.ts";
 import {
@@ -160,10 +161,15 @@ export class PiAdapter implements BackendAdapter {
 	 * spawn that carries the suffix overrides the session's own level. So the
 	 * `get_state` at start is the truth here too, and no choice is resent.
 	 *
-	 * Which turns carry a level: those streamed live since the last resume or
-	 * fork. Turns loaded by `get_messages` -- the whole transcript on a resume,
-	 * and again after a fork, which replaces every message, including turns
-	 * this adapter had named -- carry none, since Pi's messages hold no level.
+	 * Which turns carry a level: every assistant turn, live or loaded. A live
+	 * one is named at `message_start`. One loaded by `get_messages` -- the whole
+	 * transcript on a resume, and again after a fork, which replaces every
+	 * message, including turns this adapter had named -- is named from the
+	 * `thinking_level_change` entries on the session file's active branch
+	 * (OW-helumu), since Pi's messages hold no level: the level in force when
+	 * the turn ran, not when it was loaded. A loaded turn that cannot be matched
+	 * to its entry, or ran at `off` on a model other than the current one, which
+	 * may not reason, stays unlabelled (`withLoadedEfforts` in `reducer.ts`).
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
@@ -253,11 +259,12 @@ export class PiAdapter implements BackendAdapter {
 		// user takes another turn -- and then shows a conversation missing
 		// everything before it.
 		//
-		// `get_messages`, not `get_entries`: we want the active branch as
-		// `AgentMessage[]`, which is the contract. `get_entries` additionally
-		// carries pre-compaction history and abandoned branches (rpc.md), none
-		// of which belongs in a transcript view. Skipped for a fresh session,
-		// which by definition has nothing to fetch.
+		// The transcript is `get_messages`, not `get_entries`: we want the active
+		// branch as `AgentMessage[]`, which is the contract. `get_entries`
+		// additionally carries pre-compaction history and abandoned branches
+		// (rpc.md), none of which belongs in a transcript view; it is read only
+		// for the level each turn ran at (`hydrateMessages`). Skipped for a fresh
+		// session, which by definition has nothing to fetch.
 		if (opts.resumeId) await this.hydrateMessages();
 	}
 
@@ -273,10 +280,21 @@ export class PiAdapter implements BackendAdapter {
 		}
 	}
 
-	/** Replace the held transcript with Pi's own. Emits a snapshot, not an upsert. */
+	/**
+	 * Replace the held transcript with Pi's own. Emits a snapshot, not an upsert.
+	 * Its messages carry no level, so each assistant turn is named from the
+	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu).
+	 * Both callers read `get_state` first, because whether the current model
+	 * reasons decides what an `off` turn on it is named.
+	 */
 	private async hydrateMessages(): Promise<void> {
-		const resp = await this.sendCommand<PiResponseFor<"get_messages">>({ type: "get_messages" });
-		this.state = { ...this.state, messages: resp.data.messages };
+		const [messages, entries] = await Promise.all([
+			this.sendCommand<PiResponseFor<"get_messages">>({ type: "get_messages" }),
+			this.sendCommand<PiResponseFor<"get_entries">>({ type: "get_entries" }),
+		]);
+		const current = { model: this.model, reasoning: this.reasoning };
+		const labelled = withLoadedEfforts(messages.data.messages, entries.data.entries, entries.data.leafId, current);
+		this.state = { ...this.state, messages: labelled };
 		this.emitUpdate(undefined);
 	}
 

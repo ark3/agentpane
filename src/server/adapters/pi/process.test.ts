@@ -304,6 +304,7 @@ describe("PiAdapter cold start (D3)", () => {
 		h.child.respondTo("get_messages", {
 			messages: [assistantMessage("from a previous session"), assistantMessage("and another")],
 		});
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
 		await started;
 
 		// Nothing replays the events that built this transcript, so without the
@@ -606,6 +607,7 @@ describe("PiAdapter.fork", () => {
 		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: MOVED });
 		await Promise.resolve();
 		h.child.respondTo("get_messages", { messages: [assistantMessage("rewound")] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
 
 		// No `start`: the fork IS the file this live process is already writing.
 		expect(await forked).toEqual({ ref: { backend: "pi", id: MOVED } }); // moved file, NOT REF
@@ -792,6 +794,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "max", isStreaming: false });
 		await flush();
 		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
 		await forked;
 
 		expect(h.adapter.getState().effort).toBe("max");
@@ -818,6 +821,142 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		h.child.emitLine({ type: "message_end", message: assistantMessage("hi") });
 
 		expect(h.adapter.getState().messages[0]).not.toHaveProperty("effort");
+	});
+
+	/**
+	 * A turn loaded by `get_messages` carries no level, so its label is read
+	 * from the session file's `thinking_level_change` entries (OW-helumu): the
+	 * level in force when the turn ran, not the one in force now.
+	 */
+	describe("on loaded turns (OW-helumu)", () => {
+		const T0 = Date.parse("2026-09-23T10:00:00.000Z");
+		const at = (seconds: number) => T0 + seconds * 1000;
+		type Model = { provider: string; id: string };
+		const reply = (text: string, timestamp: number, model: Model = FLASH): AgentMessage =>
+			({ role: "assistant", content: [{ type: "text", text }], provider: model.provider, model: model.id, timestamp }) as AgentMessage;
+		const prompt = (text: string, timestamp: number): AgentMessage =>
+			({ role: "user", content: [{ type: "text", text }], timestamp }) as AgentMessage;
+		const entry = (id: string, parentId: string | null, seconds: number, fields: Record<string, unknown>) => ({
+			id,
+			parentId,
+			timestamp: new Date(at(seconds)).toISOString(),
+			...fields,
+		});
+		const level = (id: string, parentId: string | null, seconds: number, thinkingLevel: string) =>
+			entry(id, parentId, seconds, { type: "thinking_level_change", thinkingLevel });
+		const message = (id: string, parentId: string | null, m: AgentMessage) =>
+			entry(id, parentId, (m.timestamp - T0) / 1000, { type: "message", message: m });
+		const efforts = (h: Harness) =>
+			(h.adapter.getState().messages as PaneMessage[]).map((m) => (m.role === "assistant" ? m.effort : m.role));
+
+		async function resume(h: Harness, state: Record<string, unknown>, messages: AgentMessage[], entries: unknown[], leafId: string) {
+			const started = h.adapter.start({ cwd: WORKSPACE, resumeId: REF.id });
+			h.child.respondTo("get_state", { isStreaming: false, sessionFile: REF.id, ...state });
+			await flush();
+			h.child.respondTo("get_messages", { messages });
+			h.child.respondTo("get_entries", { entries, leafId });
+			await started;
+		}
+
+		it("names each resumed turn the level recorded ahead of it, not the level in force now", async () => {
+			const h = makeHarness();
+			const u1 = prompt("first", at(2));
+			const a1 = reply("one", at(3));
+			const u2 = prompt("second", at(5));
+			const a2 = reply("two", at(6));
+			const entries = [
+				entry("m", null, 0, { type: "model_change", provider: FLASH.provider, modelId: FLASH.id }),
+				level("l1", "m", 0, "high"),
+				message("u1", "l1", u1),
+				message("a1", "u1", a1),
+				level("l2", "a1", 4, "low"),
+				message("u2", "l2", u2),
+				// An abandoned branch sits between the active branch's entries in file
+				// order; read in that order, it would name `a2` wrongly.
+				level("x", "u2", 5.5, "max"),
+				message("a2", "u2", a2),
+			];
+
+			await resume(h, { model: FLASH, thinkingLevel: "off" }, [u1, a1, u2, a2], entries, "a2");
+
+			expect(efforts(h)).toEqual(["user", "high", "user", "low"]);
+			expect(h.adapter.getState().effort).toBe("off");
+		});
+
+		it("keeps the level of turns that streamed live across a fork, which reloads them", async () => {
+			const h = makeHarness();
+			await startAdapter(h, { model: FLASH, thinkingLevel: "high", sessionFile: REF.id });
+			const u1 = prompt("first", at(2));
+			const a1 = reply("one", at(3));
+			const u2 = prompt("second", at(5));
+			const a2 = reply("two", at(6));
+			const stream = (user: AgentMessage, assistant: AgentMessage) => {
+				h.child.emitLine({ type: "agent_start" });
+				for (const m of [user, assistant]) {
+					h.child.emitLine({ type: "message_start", message: m });
+					h.child.emitLine({ type: "message_end", message: m });
+				}
+				h.child.emitLine({ type: "agent_settled" });
+			};
+			stream(u1, a1);
+			const set = h.adapter.setEffort("low");
+			h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+			h.child.respondTo("set_thinking_level");
+			await set;
+			stream(u2, a2);
+			h.child.emitLine({ type: "message_start", message: prompt("third", at(8)) });
+			expect(efforts(h)).toEqual(["user", "high", "user", "low", "user"]);
+
+			const forked = h.adapter.fork("u3");
+			h.child.respondTo("fork", { text: "third", cancelled: false });
+			await flush();
+			h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+			await flush();
+			h.child.respondTo("get_messages", { messages: [u1, a1, u2, a2] });
+			h.child.respondTo("get_entries", {
+				entries: [
+					level("l1", null, 0, "high"),
+					message("u1", "l1", u1),
+					message("a1", "u1", a1),
+					level("l2", "a1", 4, "low"),
+					message("u2", "l2", u2),
+					message("a2", "u2", a2),
+				],
+				leafId: "a2",
+			});
+			await forked;
+
+			expect(efforts(h)).toEqual(["user", "high", "user", "low"]);
+		});
+
+		it("does not name a turn by a change recorded while it streamed, as live streaming does not", async () => {
+			const h = makeHarness();
+			const u1 = prompt("first", at(2));
+			const a1 = reply("one", at(3));
+			// Pi appends the change when it is made and the turn's entry when it
+			// ends, so the change sits ahead of the turn it did not govern.
+			const entries = [level("l1", null, 0, "low"), message("u1", "l1", u1), level("l2", "u1", 4, "high"), message("a1", "l2", a1)];
+
+			await resume(h, { model: FLASH, thinkingLevel: "high" }, [u1, a1], entries, "a1");
+
+			expect(efforts(h)).toEqual(["user", "low"]);
+		});
+
+		it("names `off` only where the turn's model is known to reason, and leaves an unmatched turn unlabelled", async () => {
+			const h = makeHarness();
+			// Pi pins a model that does not reason at `off`, so `off` alone cannot
+			// tell the two apart; `get_state` says whether the current model reasons.
+			const a1 = reply("plain", at(3), PLAIN);
+			const a2 = reply("flash at off", at(6), FLASH);
+			// A compaction summary and a reply the branch does not hold: nothing to read a level from.
+			const summary = { role: "compactionSummary", summary: "folded", tokensBefore: 1, timestamp: at(1) } as AgentMessage;
+			const stray = reply("not on the branch", at(9), FLASH);
+			const entries = [level("l1", null, 0, "off"), message("a1", "l1", a1), message("a2", "a1", a2)];
+
+			await resume(h, { model: FLASH, thinkingLevel: "off" }, [summary, a1, a2, stray], entries, "a2");
+
+			expect(efforts(h)).toEqual(["compactionSummary", undefined, "off", undefined]);
+		});
 	});
 });
 

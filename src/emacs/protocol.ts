@@ -89,9 +89,10 @@
  * - `model` (string, always; may be empty when the backend reported none).
  * - `effort` (string, only when the backend reported a reasoning effort;
  *   Codex does, Claude Code does on a model with effort, and Pi does on a
- *   model that reasons for turns streamed live since the session's last
- *   resume or fork, but not for turns loaded from its store on a resume or
- *   after a fork).
+ *   model that reasons, for turns streamed live and for turns loaded from its
+ *   store on a resume or after a fork alike: a loaded turn names the level
+ *   its store recorded when it ran, and none where the store cannot say, as
+ *   for a turn at `off` on a model other than the current one).
  * - `usage` (object, always): `totalTokens` (integer) and `cost` (number, in
  *   dollars); both are `0` when the backend reports no accounting.
  * - `stopReason` (string, only when the turn ended badly): `"error"` or

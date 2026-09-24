@@ -26,7 +26,13 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentRequest, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
-import { PI_DIALOG_METHODS, type PiCommand, type PiDialogMethod, type PiNotification } from "./protocol.ts";
+import {
+	PI_DIALOG_METHODS,
+	type PiCommand,
+	type PiDialogMethod,
+	type PiNotification,
+	type PiSessionEntry,
+} from "./protocol.ts";
 
 export interface PiReducerState {
 	readonly messages: AgentMessage[];
@@ -178,6 +184,69 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
 	if (effort === null || message.role !== "assistant") return message;
 	const turn: AssistantTurn = { ...message, effort };
 	return turn;
+}
+
+/**
+ * Name on each loaded assistant message the level it ran at, read from the
+ * session file's entries (OW-helumu): `get_messages` carries none, and the level
+ * in force now is not the one an earlier turn ran at (D23, read per turn).
+ *
+ * The levels come from the active branch, walked from `leafId` by `parentId`,
+ * since `get_entries` also returns abandoned branches. Each assistant message
+ * gets the last `thinking_level_change` on that branch appended before the
+ * message's own `timestamp`, which Pi's provider stamps as the reply begins. So
+ * a change made while a turn streamed, which Pi appends ahead of that turn's
+ * entry, is not read as the turn's: the same level `message_start` would have
+ * named live. A tie to the millisecond names nothing.
+ *
+ * Messages are matched to entries by that `timestamp`, not by position:
+ * `get_messages` is Pi's context, where a compaction replaces the folded
+ * history with a summary and a context edit can drop a message, so positions
+ * need not line up with the branch. A timestamp the branch holds twice, or not
+ * at all, leaves the message unlabelled rather than guessing.
+ *
+ * Live stamping names nothing for a model that does not reason, and Pi clamps
+ * such a model to `off` (`clampThinkingLevel` in `pi-ai`, read at the source in
+ * 0.87.1), so a recorded level other than `off` means the model reasoned. At
+ * `off` that is only known for the model `get_state` names now (`current`), so
+ * an `off` turn on any other model is left unlabelled.
+ */
+export function withLoadedEfforts(
+	messages: AgentMessage[],
+	entries: PiSessionEntry[],
+	leafId: string | null,
+	current: { model: string | null; reasoning: boolean },
+): AgentMessage[] {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	const branch: PiSessionEntry[] = [];
+	for (let entry = leafId ? byId.get(leafId) : undefined; entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
+		branch.push(entry);
+	}
+	branch.reverse();
+
+	const changes: { at: number; level: string }[] = [];
+	const levels = new Map<number, string | null>();
+	for (const entry of branch) {
+		if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
+			changes.push({ at: Date.parse(entry.timestamp), level: entry.thinkingLevel });
+		}
+		const message = entry.type === "message" ? entry.message : undefined;
+		if (message?.role !== "assistant" || typeof message.timestamp !== "number") continue;
+		const started = message.timestamp;
+		const before = changes.findLast((change) => change.at <= started);
+		let level = before && before.at < started ? before.level : null;
+		if (`${message.provider}/${message.model}` === current.model) {
+			if (!current.reasoning) level = null;
+		} else if (level === "off") {
+			level = null;
+		}
+		levels.set(started, levels.has(started) ? null : level);
+	}
+
+	return messages.map((message) => {
+		if (message.role !== "assistant") return message;
+		return withEffort(message, levels.get(message.timestamp) ?? null);
+	});
 }
 
 function reduceAssistantDelta(

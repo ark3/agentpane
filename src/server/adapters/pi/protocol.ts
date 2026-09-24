@@ -105,7 +105,35 @@ export type PiResponse =
 			success: true;
 			data: { messages: AgentMessage[] };
 	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_entries";
+			success: true;
+			// Every entry in the session file, abandoned branches included, and the
+			// active branch's tip, as `rpc-mode.js` answers it in 0.87.1.
+			data: { entries: PiSessionEntry[]; leafId: string | null };
+	  }
 	| { id?: string; type: "response"; command: string; success: false; error: string };
+
+/**
+ * One entry of a Pi session file, as `get_entries` returns it: `SessionEntryBase`
+ * from `core/session-manager.d.ts` in 0.87.1, plus the fields of the two kinds
+ * this adapter reads. The other kinds (`model_change`, `compaction`,
+ * `branch_summary`, `custom`, ...) carry only the base fields as far as it is
+ * concerned.
+ */
+export interface PiSessionEntry {
+	type: string;
+	id: string;
+	parentId: string | null;
+	/** ISO 8601, stamped when the entry was appended. */
+	timestamp: string;
+	/** On `type: "message"`. */
+	message?: AgentMessage;
+	/** On `type: "thinking_level_change"`: the level in force from here on. */
+	thinkingLevel?: string;
+}
 
 /** Narrow `PiResponse` to the one matching a given command's `type`. */
 export type PiResponseFor<C extends PiCommandType> = Extract<PiResponse, { command: C }>;
