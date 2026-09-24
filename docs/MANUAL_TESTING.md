@@ -3171,3 +3171,54 @@ Noticing it would be agentpane's own inference, not a message from Pi, and nothi
 No turn ran on a fallback; by `getSessionContextSettings`, read at the source in OW-pubulu's section, that turn's assistant message would name the fallback model, and every later resume would restore it as the recorded one.
 The lost-auth fallback to another provider rested on a dummy key and was read from `get_state` alone.
 Nothing here went through agentpane's server, the browser or Emacs.
+
+## A Pi fork in a process spawned with a suffixed `--model` puts the suffix's level back, unrecorded (OW-dojebo)
+
+Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-dojebo` worktree cut at `d49aa65`.
+Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json` and `models-store.json` and a rewritten `settings.json`, and in a throwaway workspace beside it, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and the directories were removed.
+The rewritten `settings.json` named `max` in `modelThinkingLevels` for `openrouter/deepseek/deepseek-v4.1-flash`, so that the suffix, the chosen level and the settings default were three different levels.
+The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` directly, not through `sbox` or agentpane's server.
+The question was whether a fork, which Pi carries out inside the process that holds the parent, keeps a level chosen by `set_thinking_level` when that process was spawned with a `--model` whose suffix names another, since agentpane spawns a fresh Pi session with its model string whole ("Model refs" in `src/server/adapters/pi/protocol.ts`).
+
+**How a turn's level was read.**
+Every spawn also passed `--extension` naming a throwaway extension, also not kept, whose `before_provider_request` handler appended the request payload's `model` and `reasoning` fields to a file and returned nothing, leaving the request unchanged.
+On this model `reasoning.effort` read `none` for `off`, and `low` or `high` for those levels.
+The payload is the evidence; the thinking blocks are not, since a turn at `low` carried one and a turn at `high` did not.
+
+**The sequence.**
+Each run spawned `pi --mode rpc --model <model>`, sent `set_thinking_level`, prompted `Do not use any tools. Reply with exactly: ok` twice, forked with `fork` at one of the two entries `get_fork_messages` named, read `get_state` and `get_entries`, prompted once more, and exited; a bare `pi --mode rpc --session <forked file>` then read `get_state` once.
+Every turn answered `ok`, for $0.00025 or less each.
+
+**Suffixed, set to `off`, forked at the second prompt.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, `get_state` read `high`, and after `set_thinking_level` `off`, with one `thinking_level_changed` naming `off`, it read `off`.
+Both turns asked for `reasoning.effort` `none`.
+The `fork` response came with no events at all, and `get_state` then read the same model at `thinkingLevel: "high"`, on the moved-to session file.
+`get_entries` read `model_change`, `thinking_level_change` `high`, `thinking_level_change` `off`, then the system message and the first turn's user and assistant messages: the branch still named `off` as its last level.
+The turn after the fork asked for `reasoning.effort` `high`, carried a thinking block and 8 reasoning tokens, and after it `get_state` still read `high` while the forked file had grown by that turn's user and assistant messages alone.
+The bare resume of the forked file read `off`: the turn that ran at `high` reloads labelled `off`.
+
+**The same, set to `low`.**
+With `low` chosen instead, the turns before the fork asked for `low`, `get_state` after the fork read `high`, the turn after it asked for `high`, the forked file's last level entry still named `low`, and the bare resume read `low`.
+
+**Suffixed, forked at the first prompt.**
+Forking at the first user message kept the `model_change`, both `thinking_level_change` entries and the system message, and nothing else; it behaved as the fork at the second did: `get_state` read `high`, the next turn asked for `high`, and the file's last level stayed `off`.
+
+**Unsuffixed, the control.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash`, `get_state` read `max`, the rewritten per-model setting, which shows that file was read.
+After `set_thinking_level` `off`, a fork at either prompt left `get_state` at `off`, the next turn asked for `none`, and a bare resume read `off`.
+So it is the suffix that comes back, not the settings default.
+
+**The source agrees.**
+`fork` in `dist/core/agent-session-runtime.js` replaces the session through `createRuntime` (line 225 for a persisted session), and `createRuntime` in `dist/main.js` hands `createAgentSessionFromServices` the options `buildSessionOptions` parsed from the process's command line (lines 662 and 663), which take a `--model` suffix as `thinkingLevel` (line 377).
+`createAgentSession` in `dist/core/sdk.js` takes an explicit `thinkingLevel` over the branch's recorded one (line 116) and, for a session with messages, appends a `thinking_level_change` only when the branch has none (line 263).
+`createRuntime` then calls `setThinkingLevel` with the level already in force (line 672), which appends nothing, as in OW-lehita's section above.
+The same `createRuntime` takes `options.model` over the branch's model (`sdk.js` line 85), so by that reading a fork also puts the spawn's `--model` back over a model `set_model` chose; that was not run.
+
+**What agentpane makes of it.**
+The adapter re-sends the chosen level after a fork whenever `get_state` answers another (`fork` in `src/server/adapters/pi/process.ts`), as it already did after `set_model`, and `src/server/adapters/pi/process.test.ts` pins it: a session spawned with the suffix and set to `off` sends `set_thinking_level` `off` again when the fork's `get_state` reads `high`.
+Pi records that re-sent level, since it changes the level in force, so the file names what the next turn runs at.
+A session whose level was never chosen runs at the suffix's level, which is also the level its file recorded first, so it has nothing to re-send.
+
+**Not established.**
+The adapter's re-send was not run live; it rests on the unit test and on `set_thinking_level` having been measured to take effect and be recorded (OW-ruzuhu's section).
+Nothing here went through `sbox`, agentpane's server, the browser or Emacs.

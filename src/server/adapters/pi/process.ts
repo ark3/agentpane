@@ -169,6 +169,15 @@ export class PiAdapter implements BackendAdapter {
 	 * spawn that carries the suffix overrides the session's own level. So the
 	 * `get_state` at start is the truth here too, and no choice is resent.
 	 *
+	 * A fork is that same override inside the live process, so `chosenEffort`
+	 * is re-sent after one. Measured on the home server, 2026-09-24, `pi 0.87.1`
+	 * (docs/MANUAL_TESTING.md, OW-dojebo): spawned with `--model ...:high` and
+	 * set to `off`, a fork answered `get_state` at `high` with no
+	 * `thinking_level_changed`, the next turn's request asked for `high`, and
+	 * the forked file still named `off` as its last level. Pi rebuilds a forked
+	 * session from the options its command line parsed, the suffix included.
+	 * An unsuffixed spawn kept `off` across the same fork.
+	 *
 	 * Which turns carry a level: every assistant turn, live or loaded. A live
 	 * one is named at `message_start`. One loaded by `get_messages` -- the whole
 	 * transcript on a resume, and again after a fork, which replaces every
@@ -502,6 +511,12 @@ export class PiAdapter implements BackendAdapter {
 		this.syncEffort();
 		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
 			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
+		}
+		// A fork rebuilds the session from this process's command line, so a
+		// `--model` suffix is in force again over the chosen level, silently and
+		// unrecorded (OW-dojebo, in the docblock on `thinkingLevel`).
+		if (this.chosenEffort !== null && this.thinkingLevel !== this.chosenEffort) {
+			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: this.chosenEffort });
 		}
 		// `fork` emits no message events of its own, so our held transcript is now
 		// stale; re-fetch the rewound branch wholesale -- the same cold-start path

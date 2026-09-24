@@ -265,7 +265,9 @@ export type PiOutputLine = PiResponse | PiNotification;
 //  - The spawn flag `--model` takes more: "Model pattern or ID (supports
 //    "provider/id" and optional ":<thinking>")", Pi's own help text as of
 //    `pi 0.87.1`. So `provider/modelId:thinkingLevel`, the form AGENTS.md's
-//    model pin is written in, starts a session and sets its level too.
+//    model pin is written in, starts a session and sets its level too, and
+//    sets it again at every fork in that process (OW-dojebo), which is why
+//    `PiAdapter.fork` re-sends a chosen level.
 //
 // That suffix is the gap: sent to `set_model` it answered "Model not found"
 // (`pi 0.85.1`, 2026-09-16, OW-pizaki). Nothing strips it, because the level

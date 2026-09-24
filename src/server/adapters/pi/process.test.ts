@@ -934,6 +934,36 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(h.adapter.getState().effort).toBe("max");
 	});
 
+	it("re-asserts the chosen level after a fork, which puts a suffixed --model's level back (OW-dojebo)", async () => {
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE, model: "openrouter/deepseek/deepseek-v4.1-flash:high" });
+		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "high", isStreaming: false, sessionFile: REF.id });
+		await started;
+		const set = h.adapter.setEffort("off");
+		h.child.emitLine({ type: "thinking_level_changed", level: "off" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const forked = h.adapter.fork("e1");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await flush();
+		// Measured on 0.87.1: the fork rebuilds the session from the spawn's
+		// command line, so the suffix's `high` is in force again, announced by no
+		// event and recorded nowhere.
+		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "high", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await flush();
+		expect(h.child.sent().filter((command) => command.type === "set_thinking_level").map((command) => command.level)).toEqual(["off", "off"]);
+		h.child.emitLine({ type: "thinking_level_changed", level: "off" });
+		h.child.respondTo("set_thinking_level");
+		await flush();
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+		await forked;
+
+		expect(h.adapter.getState().effort).toBe("off");
+	});
+
 	it("keeps the level a turn started at when the level changes before it ends", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: FLASH, thinkingLevel: "low" });
