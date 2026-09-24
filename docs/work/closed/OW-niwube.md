@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # A loaded Pi turn recorded at a level its model has since dropped is labelled with the level that clamps to
@@ -25,3 +26,12 @@ Load-bearing: that a turn's label is the level it ran at; incidental: how that i
 ## Done when
 
 - A test in `src/server/adapters/pi/process.test.ts` reloads a turn recorded at a level its model's current catalogue entry lacks, where that level was in force when it ran, and asserts it keeps the recorded level, shown red first against the code OW-lehita landed; and the OW-lehita test, where the clamp is right, still passes.
+
+## Close note
+
+Declined by the owner on 2026-09-24, under D23 in `docs/DESIGN.md` ("A conversation's model and effort are read back from its store's last turn, never kept by agentpane").
+The card itself found that the clamp OW-lehita landed cannot tell a resume that clamped without recording from a turn that ran under an older catalogue, so its done condition could be met only by the remedy it named: agentpane keeping its own record of the level `get_state` reported at each resume.
+That is the copy of agentpane's own which D23 rules out, for the reasons its "Why not a copy of agentpane's own" paragraph gives.
+The cost accepted is the limit the card describes: a loaded Pi turn recorded at a level its model's catalogue entry has since dropped is labelled with the level that clamps to.
+As of 2026-09-24 no session under the home server's `~/.pi/agent/sessions` was affected, and the limit is stated in the `withLoadedEfforts` docblock in `src/server/adapters/pi/reducer.ts` and in the OW-lehita section of `docs/MANUAL_TESTING.md`.
+Reopen only alongside a change to D23.
