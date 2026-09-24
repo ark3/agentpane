@@ -841,7 +841,7 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// Of the seven `SessionSummary` fields, `status` and `updatedAt` move only
+	// Of the eight `SessionSummary` fields, `status` and `updatedAt` move only
 	// when a listing moves them, and every `sessions-changed` that fanned out
 	// while the stream was down is gone: there is no `Last-Event-ID` cursor and
 	// no replay buffer, and the opening snapshots carry neither field

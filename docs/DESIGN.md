@@ -316,7 +316,8 @@ Finding 41 read Pi 0.84.1's file as already on disk at start, but its evidence w
 
 So an id without the `virtual:` prefix does not mean anything is on disk.
 The server tracks the `virtual` state apart from the id (`ManagedSession.virtual`, cleared by `markPrompted`), and while it is set nothing is on disk, but its clearing does not mean a file exists either.
-It clears as the first prompt is sent, before any backend above has written, and a fork's container starts with it clear and no file behind it (OW-japuzo, OW-hojefo); OW-wedupe is the code that reads it the other way.
+It clears as the first prompt is sent, before any backend above has written, and a fork's container starts with it clear and no file behind it (OW-japuzo, OW-hojefo).
+What says a file exists is the session index: `SessionSummary.onDisk` is true once the index has listed the session, and the manager remembers that for the attach response, which does not walk the index (OW-wedupe).
 The first prompt can still move the id on Pi: `PiAdapter` probes `get_state` again after its first `submit()`.
 That probe has not fired on the Pi versions above, since `start()` already resolved the id, and it stays, because a backend that has named nothing by the end of attach is exactly what `virtual` describes.
 `ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- but `init` arrives after `submit()` has settled, so the manager hears of such a move only at the next point it re-reads `ref`.
@@ -741,7 +742,7 @@ The owner took this on 2026-09-16 (OW-vukoku).
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
 `Last-Event-ID` appears nowhere in `src/`, so there is no cursor and no replay buffer either: a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
-Of the seven `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
+Of the eight `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
 `status` lights the sidebar's attached stripe and is the first conjunct of the composer Tools menu's `detachable`, which reads `"attached"` or `"virtual"`.
 `updatedAt` drives the whole sidebar ordering; it is the session file's mtime for a stored session, and `session.createdAt` for one the manager minted itself, which `#ownSummary` reports as both stamps.
 `isStreaming` is the one field reconnection effectively heals, and only because the UI reads it live-first.
@@ -750,10 +751,10 @@ What it replaces is OW-lejahi, landed one commit earlier and narrower: `detach()
 That was one visible instance of a general loss.
 The reconnect re-list subsumes it for a stored session -- a detach with the stream up rides the `sessions-changed` the close broadcasts, and a detach with it down heals at the next open -- so that call came out of the ordinary path with this decision.
 
-It stays on `detach()`'s virtual exit, because the row a virtual detach leaves behind is a different kind of wrong.
+It stays on the exit `detach()` takes for a session with nothing on disk, because the row such a detach leaves behind is a different kind of wrong.
 A detached stored session lists with an untrue `status` and is otherwise real: the transcript is on disk and a click reaches it.
-A detached virtual session is gone everywhere -- nothing on disk, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and `readSessionPreview` answers a `virtual:` ref with an empty-but-non-null transcript, so a click strands the user on precisely the screen OW-vasubu exists to keep them off.
-As of D9's correction (OW-bohodu) that exit does not run for a session created here: attach replaces the `virtual:` id before any prompt, so a session detached before its first turn falls through to the preview and reaches that phantom after all, which OW-wedupe carries.
+A detached session with nothing on disk is gone everywhere -- no file, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and `readSessionPreview` answers its ref with an empty-but-non-null transcript, so a click strands the user on precisely the screen OW-vasubu exists to keep them off.
+The exit is chosen by the summary's `onDisk`, not by the id: attach replaces the `virtual:` id before any prompt (D9, as corrected by OW-bohodu) and a fork never has one, so a session created here and detached before its first turn, and a fork detached before its first turn ended, take this exit too (OW-wedupe).
 A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 
 Not on the first open, which is the whole of the mechanism's subtlety.

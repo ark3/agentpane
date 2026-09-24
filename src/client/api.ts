@@ -71,8 +71,9 @@ export interface AgentpaneApi {
 	/**
 	 * Kill this session's subprocess and drop it from the server's table
 	 * (OW-tewave). The on-disk transcript survives, so the session comes back as
-	 * `detached` in the next listing -- unless it was `virtual`, which has
-	 * nothing on disk and so leaves the listing altogether.
+	 * `detached` in the next listing -- unless nothing had reached disk, as for
+	 * a session created or forked here before its first turn, which leaves the
+	 * listing altogether (`SessionSummary.onDisk`).
 	 */
 	close(ref: SessionRef): Promise<void>;
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
