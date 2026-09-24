@@ -43,7 +43,8 @@
 ;; the first prompt on a previewed transcript attaches it.  Once attached,
 ;; the helper's notifications drive the buffer: a snapshot redraws every
 ;; node, a node update redraws the node with its index or appends it, and
-;; the mode line shows streaming, compaction and the model.  A prompt is
+;; the mode line shows streaming, compaction, the model and its effort,
+;; the model's default one when the session reports none.  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
@@ -73,7 +74,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 84 tests, 84 results as expected, 0 unexpected
+;;     Ran 85 tests, 85 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -558,6 +559,16 @@ Per buffer and not kept, where the browser's is one global boolean (owner,
 (defvar-local agentpane--model nil
   "The model the last status this buffer heard named, or nil; the one whose
 efforts `agentpane-set-effort' offers (OW-vozaku).")
+
+(defvar-local agentpane--status nil
+  "The params of the last status this buffer heard, or nil.")
+
+(defvar-local agentpane--listed-model nil
+  "The model whose `models/list' entry this buffer last asked for, or nil.")
+
+(defvar-local agentpane--default-effort nil
+  "The `defaultEffort' of `agentpane--listed-model', once the listing has
+answered, or nil.")
 
 (defvar-local agentpane--tail-overlay nil
   "Overlay on the prompt separator whose `before-string' is the reading-view
@@ -1613,11 +1624,17 @@ another buffer holds the ref, since only here is a second holder meant."
 mode line, and keep the streaming field in `agentpane--streaming' and the
 model in `agentpane--model'.
 The effort is the one the status reports, named right after the model as a
-turn's meta line names it, and absent when the status's is null: no model's
-default stands in for it, which would take a `models/list' (OW-zobiro).
+turn's meta line names it (OW-zobiro).  When the status's is null, the
+model's `defaultEffort' from `models/list' stands in for it, as the same
+field and unmarked, as the browser's effort select shows it (OW-gogaki);
+until that listing has answered, or when it names none, no effort is
+named.  See `agentpane--list-default-effort' for when it is asked for.
 When streaming ends, the last node is redrawn, since it was drawn as the
 pending turn, a tool call with no result on it as running, and the helper
 re-sends no node for the change; and reading view's tail status goes."
+  (setq agentpane--status params)
+  (unless (equal (plist-get params :model) agentpane--listed-model)
+    (agentpane--list-default-effort (plist-get params :model)))
   (let ((was agentpane--streaming))
     (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
     (when (and was (not agentpane--streaming) agentpane--ewoc)
@@ -1631,10 +1648,46 @@ re-sends no node for the change; and reading view's tail status goes."
                     (let ((compaction (plist-get params :compaction)))
                       (and compaction (concat "compaction " compaction)))
                     (plist-get params :model)
-                    (plist-get params :effort))))
+                    (or (plist-get params :effort) agentpane--default-effort))))
   (setq agentpane--model (plist-get params :model))
   (agentpane--show-reading-tail)
   (agentpane--show-mode-line))
+
+(defun agentpane--list-default-effort (model)
+  "Forget the default effort and, when MODEL is non-nil, ask `models/list'
+for its `defaultEffort', then show the last status again once it answers.
+Asked once per model a status names, the first status and each change of
+model, and never once per status: the default belongs to the model, and
+statuses arrive at every turn's start and end.
+Asynchronous because this runs in a notification handler, where a
+synchronous request is the nesting that `agentpane--request' describes
+stalling; and not through `agentpane--request', which would make it this
+buffer's latest request and so drop the reply of a view refetch still in
+flight.  Sent only through a helper already running, as
+`agentpane--detach' is, since a status never needs one started.  Should
+the listing fail, no effort is named until the model changes."
+  (setq agentpane--listed-model model
+        agentpane--default-effort nil)
+  (when (and model agentpane--connection (jsonrpc-running-p agentpane--connection))
+    (let ((buffer (current-buffer)))
+      (jsonrpc-async-request
+       agentpane--connection 'models/list
+       (list :backend (plist-get (agentpane--ref agentpane--session) :backend))
+       :success-fn
+       (lambda (models)
+         (when (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (when (equal model agentpane--listed-model)
+               (setq agentpane--default-effort
+                     (plist-get (seq-find (lambda (entry) (equal (plist-get entry :id) model))
+                                          models)
+                                :defaultEffort))
+               (agentpane--set-status agentpane--status)))))
+       :error-fn
+       (lambda (error)
+         (message "agentpane: models/list failed: %s" (plist-get error :message)))
+       :timeout-fn
+       (lambda () (message "agentpane: models/list timed out"))))))
 
 ;;;; Driving the session
 
