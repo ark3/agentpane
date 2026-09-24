@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi fork at the first message of a resumed session may run at the settings default model and level
@@ -27,3 +28,14 @@ If `get_state` after the fork names that other model, the turn after the fork is
 
 - A live run on the home server, recorded with the version in `docs/MANUAL_TESTING.md`, shows what `get_state` names after that fork.
 - If it names the settings default, a test in `src/server/adapters/pi/process.test.ts` forks a resumed session at its first user message and asserts the model and level in force after the fork are the parent's, shown red first, and the D23 Pi bullet is brought in line; if it names the recorded model and level, the run's record is the whole of the work.
+
+## Close note
+
+Done. The suspicion held for older session files.
+Measured live on the home server, `pi 0.87.1`, recorded in `docs/MANUAL_TESTING.md` under "A Pi fork at the first message of a resumed session runs at the settings default when it keeps no message (OW-riyeku)".
+A file written by `pi 0.86.0` or later keeps its system message at a fork at the first user message; Pi counts it (`messageCount` 1) and restores the recorded model and level itself.
+A file with no system message, which every file written before 0.86.0 is (all nine of the owner's Pi sessions on the home server, by date), keeps nothing: `get_state` answered `messageCount` 0 at the settings default model and level, and Pi appended a `model_change` and `thinking_level_change` naming them.
+Fix: `fork` in `src/server/adapters/pi/process.ts` notes the model and level in force before the fork, and when the fork's `get_state` answers `messageCount` 0 re-sends them through `setModel` and `set_thinking_level`; otherwise it re-sends only the chosen ones as before.
+A test in `src/server/adapters/pi/process.test.ts` ("re-asserts the parent's model, then its level, after a resumed session's fork that keeps no message") was shown red first, and `bun run check` passed; the D23 Pi bullet and paragraph in `docs/DESIGN.md` and the `chosenModel`/`unrestoredModel` docblocks were brought in line.
+The adapter's re-send was not run live; the same commands sent by hand in the run put the pinned model at `high` back.
+Not covered: a 0.86.0+ file whose model or level changed mid-conversation, where the fork restores the opening values instead of the parent's current ones — filed as OW-bupuko.
