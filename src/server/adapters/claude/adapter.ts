@@ -60,7 +60,7 @@
  *   is what makes `getState().effort` true for every path.
  *   The model, unlike the effort, the CLI restores itself, so a resume and a
  *   fork at a real entry are spawned with no `--model`, and the stored model
- *   is only what `getState().model` names. Measured on the home server,
+ *   is only what `getState().model` names first. Measured on the home server,
  *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md,
  *   OW-tebibo): with the settings naming `opus[1m]`, a `--resume` with no
  *   `--model` put in force the `message.model` of the last assistant line
@@ -72,6 +72,20 @@
  *   the fork's; the parent's model, which `fork()` hands over, rides the
  *   spawn only when the prefix names none, as does a model given at start
  *   to a resume.
+ *   So the start read of `get_settings` renames a stored model by the one in
+ *   force: the listed id whose `resolvedModel` it is, never `default`, or the
+ *   resolved id itself where no listed id resolves to it. That name is what
+ *   `fork()` hands a fork before the first message, a fresh spawn that
+ *   carries it as `--model`, so the fork runs what the parent runs, `[1m]`
+ *   included. Measured on the home server, 2026-09-23, `claude 2.1.280`, no
+ *   turn (docs/MANUAL_TESTING.md, OW-faledu): under settings naming
+ *   `opus[1m]`, a fresh `--model claude-opus-5-5` put `claude-opus-5-5` in
+ *   force, while `--model opus[1m]` and `--model claude-opus-5-5[1m]` each
+ *   put `claude-opus-5-5[1m]` in force under those settings and under
+ *   `sonnet`'s; a resumed copy of a store naming `claude-opus-5-5` read
+ *   `claude-opus-5-5[1m]`, which `opus[1m]` resolves to, and under `sonnet`'s
+ *   settings read `claude-opus-5-5`, which no listed id resolves to and which
+ *   a fresh `--model claude-opus-5-5` puts back.
  *   Each assistant turn is named with the effort in force when it started,
  *   and a resumed one with the `effort` its store line records.
  * - A session nobody chose a model on still names one before its first turn,
@@ -88,8 +102,9 @@
  *   resolves to the model actually in force, and `--model default` or
  *   `set_model` to it then put that same model in force -- which is what
  *   makes it safe for `fork()` to hand the named model to the fork's spawn.
- *   Only a session with no model yet adopts one this way: a model chosen at
- *   start or since is never overwritten.
+ *   Only a session with no model yet, or only its store's (above), adopts one
+ *   this way, and only the former prefers `default`: a model chosen at start
+ *   or since is never overwritten.
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
@@ -186,6 +201,11 @@ export class ClaudeAdapter implements BackendAdapter {
 	private ownership: Ownership | null = null;
 	private cwd: string | null = null;
 	private model: string | null = null;
+	/**
+	 * `model` is the store's id, not yet named from what the CLI put in force,
+	 * which may carry a `[1m]` variant the store's id lacks (module doc).
+	 */
+	private modelFromStore = false;
 	/** `get_settings`'s `applied.effort` as last read: null for a model without effort (see module doc). */
 	private effort: string | null = null;
 	private started = false;
@@ -246,6 +266,7 @@ export class ClaudeAdapter implements BackendAdapter {
 				const stored = this.lastHydratedAssistant();
 				if (stored) {
 					this.model = stored.model;
+					this.modelFromStore = true;
 					this.emitUpdate();
 				}
 				await this.attachProcess({
@@ -472,6 +493,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		// Only on success (a bogus id rejects above): remembered so `fork()` can
 		// hand it to the fork's own adapter.
 		this.model = model;
+		this.modelFromStore = false;
 		// A chosen effort outlives the switch, applied only while the model has
 		// effort at all (module doc), so what is in force is read, not kept.
 		await this.readSettings();
@@ -517,15 +539,27 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	/**
 	 * Adopt the effort the CLI will send on its next request, and, while no
-	 * model is known, name the listed one in force (module doc).
+	 * model is known or the known one is only the store's id, name the listed
+	 * one in force (module doc).
 	 */
 	private async readSettings(): Promise<void> {
 		const response = await this.sendControl({ subtype: "get_settings" });
 		const applied = isRecord(response) && isRecord(response.applied) ? response.applied : null;
 		if (!applied) return;
 		this.effort = typeof applied.effort === "string" ? applied.effort : null;
-		if (this.model !== null || typeof applied.model !== "string") return;
-		const listed = listedModelFor(applied.model, await this.sendControl({ subtype: "initialize" }));
+		const inForce = applied.model;
+		if (typeof inForce !== "string") return;
+		if (this.modelFromStore) {
+			const listed = listedModelFor(inForce, await this.sendControl({ subtype: "initialize" }), false);
+			// A `setModel` that landed meanwhile chose a model, which outranks this.
+			if (!this.modelFromStore) return;
+			this.modelFromStore = false;
+			this.model = listed ?? inForce;
+			this.emitUpdate();
+			return;
+		}
+		if (this.model !== null) return;
+		const listed = listedModelFor(inForce, await this.sendControl({ subtype: "initialize" }), true);
 		if (listed === null || this.model !== null) return;
 		this.model = listed;
 		this.emitUpdate();
@@ -560,6 +594,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		const last = this.lastHydratedAssistant();
 		if (!last) return;
 		this.model = last.model;
+		this.modelFromStore = true;
 		this.emitUpdate();
 	}
 
@@ -740,15 +775,18 @@ async function defaultReadStoreEntries(
  * The listed id, among `initialize`'s model entries, whose `resolvedModel` is
  * `resolved`, or null when none is. Several can share one: as of `claude
  * 2.1.280`, `default` and `opus[1m]` both resolved to `claude-opus-5-5[1m]`.
- * Then `default` wins when it is among them, since this only names a model
- * for a session nobody chose one on, and otherwise the first in list order.
+ * Then `default` wins when it is among them and `preferDefault` is set, as it
+ * is for a session nobody chose a model on, and otherwise the first other id
+ * in list order. A model a store restored never takes `default`, which names
+ * the account's recommended model and so need not stay the conversation's.
  */
-function listedModelFor(resolved: string, response: unknown): string | null {
+function listedModelFor(resolved: string, response: unknown, preferDefault: boolean): string | null {
 	const models = isRecord(response) && Array.isArray(response.models) ? response.models : [];
 	const matches = (models as ClaudeModelDescriptor[])
 		.filter((model) => model?.resolvedModel === resolved && typeof model.value === "string")
 		.map((model) => model.value as string);
-	return matches.includes("default") ? "default" : (matches[0] ?? null);
+	if (preferDefault && matches.includes("default")) return "default";
+	return matches.find((value) => value !== "default") ?? null;
 }
 
 /** The fork point's label: the text of the user message the reducer built. */

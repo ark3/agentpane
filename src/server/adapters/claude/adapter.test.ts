@@ -49,6 +49,16 @@ function storedEntries(): ClaudeStoreMessageEntry[] {
 	];
 }
 
+// As `claude 2.1.280` answered on the home server, 2026-09-23: `default` and
+// `opus[1m]` share a resolved id, and haiku lists no effort.
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const MODELS: ClaudeModelDescriptor[] = [
+	{ value: "default", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
+	{ value: "opus[1m]", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
+	{ value: "sonnet", resolvedModel: "claude-sonnet-5", supportedEffortLevels: EFFORTS },
+	{ value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
+];
+
 interface Harness {
 	adapter: ClaudeAdapter;
 	procs: FakeClaudeProcess[];
@@ -500,16 +510,6 @@ describe("ClaudeAdapter session controls", () => {
 	});
 
 	describe("naming the model in force when none was chosen", () => {
-		// As `claude 2.1.280` answered on the home server, 2026-09-23: `default`
-		// and `opus[1m]` share a resolved id, and haiku lists no effort.
-		const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-		const MODELS: ClaudeModelDescriptor[] = [
-			{ value: "default", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
-			{ value: "opus[1m]", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
-			{ value: "sonnet", resolvedModel: "claude-sonnet-5", supportedEffortLevels: EFFORTS },
-			{ value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
-		];
-
 		it("names the listed default, whose efforts the clients then offer, before any turn", async () => {
 			const h = harness({ appliedEffort: "high", appliedModel: "claude-opus-5-5[1m]", models: MODELS });
 			const updates = vi.fn();
@@ -1000,6 +1000,95 @@ describe("ClaudeAdapter fork", () => {
 			{ cwd: "/workspace", sessionId: "forked-1", model: "last-model" },
 		]);
 		expect(h.adapter.getState().messages).toEqual([]);
+	});
+
+	/**
+	 * As of `claude 2.1.280`, a resume restores the stored model widened to the
+	 * settings' `[1m]` variant, and a fresh spawn with `--model claude-opus-5-5`
+	 * drops it, while `--model opus[1m]` keeps it (docs/MANUAL_TESTING.md,
+	 * OW-tebibo and OW-faledu).
+	 */
+	describe("naming the model a store restores after the CLI's own answer (OW-faledu)", () => {
+		function entriesOn(model: string): ClaudeStoreMessageEntry[] {
+			return storedEntries().map((entry) =>
+				entry.uuid === "a3"
+					? { ...entry, record: { ...entry.record, message: { ...(entry.record.message as object), model } } }
+					: entry,
+			);
+		}
+
+		it("forks a resumed session at its start on the model the parent runs, [1m] included", async () => {
+			const parent = harness({
+				entries: entriesOn("claude-opus-5-5"),
+				ids: ["forked-1"],
+				appliedModel: "claude-opus-5-5[1m]",
+				models: MODELS,
+			});
+			await parent.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+
+			expect(parent.adapter.getState().model).toBe("opus[1m]");
+			expect(parent.spawns).toEqual([{ cwd: "/workspace", resumeId: "parent" }]);
+
+			const forked = await parent.adapter.fork(CLAUDE_FORK_SESSION_START);
+			const fork = harness({ entries: entriesOn("claude-opus-5-5"), ref: forked.ref });
+			await fork.adapter.start(forked.start ?? { cwd: "/workspace" });
+
+			const spawned = fork.spawns[0]?.model;
+			expect(fork.spawns).toEqual([{ cwd: "/workspace", sessionId: "forked-1", model: "opus[1m]" }]);
+			expect(MODELS.find((model) => model.value === spawned)?.resolvedModel).toBe("claude-opus-5-5[1m]");
+		});
+
+		it("names a stored model the settings do not select by its listed id", async () => {
+			const h = harness({
+				entries: entriesOn("claude-sonnet-5"),
+				ids: ["forked-1"],
+				appliedModel: "claude-sonnet-5",
+				models: MODELS,
+			});
+			await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+
+			expect(h.adapter.getState().model).toBe("sonnet");
+			expect((await h.adapter.fork(CLAUDE_FORK_SESSION_START)).start?.model).toBe("sonnet");
+		});
+
+		it("names the model in force itself when no listed id resolves to it", async () => {
+			// A stored opus under a settings model of sonnet runs without the variant.
+			const h = harness({
+				entries: entriesOn("claude-opus-5-5"),
+				ids: ["forked-1"],
+				appliedModel: "claude-opus-5-5",
+				models: MODELS,
+			});
+			await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+
+			expect(h.adapter.getState().model).toBe("claude-opus-5-5");
+			expect((await h.adapter.fork(CLAUDE_FORK_SESSION_START)).start?.model).toBe("claude-opus-5-5");
+		});
+
+		it("names a fork at an entry by the model its own process runs", async () => {
+			const h = harness({
+				entries: entriesOn("claude-opus-5-5"),
+				ref: { backend: "claude", id: "forked-1" },
+				appliedModel: "claude-opus-5-5[1m]",
+				models: [
+					{ value: "default", resolvedModel: "claude-opus-5-5[1m]" },
+					{ value: "opus[1m]", resolvedModel: "claude-opus-5-5[1m]" },
+				],
+			});
+			// The kept prefix names `m`, which the fake's process widens like the CLI would.
+			await h.adapter.start({ cwd: "/workspace", forkOf: { parentId: "parent", entryId: "a2" } });
+
+			expect(h.spawns[0]?.model).toBeUndefined();
+			expect(h.adapter.getState().model).toBe("opus[1m]");
+		});
+
+		it("keeps a model chosen at resume and asks no initialize for it", async () => {
+			const h = harness({ entries: storedEntries(), appliedModel: "claude-opus-5-5[1m]", models: MODELS });
+			await h.adapter.start({ cwd: "/workspace", resumeId: "parent", model: "sonnet" });
+
+			expect(h.adapter.getState().model).toBe("sonnet");
+			expect(h.proc().lastControlRequest("initialize")).toBeUndefined();
+		});
 	});
 
 	it("rejects an unknown fork point without touching the child", async () => {
