@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork inside a Pi process may put the spawn --model back over a model set_model chose
@@ -34,3 +35,14 @@ If it names the pinned model, a turn after the fork runs on the pinned model and
 
 - A live run on the home server, with the throwaway `PI_CODING_AGENT_DIR` method and the `before_provider_request` extension recorded in OW-dojebo's section of `docs/MANUAL_TESTING.md`, arranged as the section above says, records with the version what `get_state` and the forked file show after a fork, and the next turn's request only where that turn was sent.
 - If the model snaps back, a test in `src/server/adapters/pi/process.test.ts` forks a session after `setModel` and asserts the model and level in force after the fork are the chosen ones, shown red first; if it does not, the run's record is the whole of the work, and the D23 sentence quoted above is corrected in the same change.
+
+## Close note
+
+Confirmed live on the home server, 2026-09-24, `pi 0.87.1`: a Pi process spawned with `--model openrouter/google/gemini-2.5-flash-lite` and moved by `set_model` to the pinned `openrouter/deepseek/deepseek-v4.1-flash` answered `get_state` after a `fork` with the spawn's model, announced by no event, while the forked file's last `model_change` still named the chosen one and a bare resume of that file read the chosen model.
+The chosen level (`low`) survived; only a `--model` suffix brings the level back (OW-dojebo).
+The turn after the snapped-back fork was not sent, to keep every turn on the pin; a second run sent `set_model` then `set_thinking_level` by hand and the next turn's provider request asked for the pinned model at the chosen level.
+Recorded in `docs/MANUAL_TESTING.md`, "A Pi fork puts the spawn's `--model` back over a model `set_model` chose, unrecorded (OW-sinoha)"; the D23 Pi bullet in `docs/DESIGN.md` now states it as measured.
+
+Fix: `PiAdapter` remembers `chosenModel` in `setModel`, and `fork` re-sends it through `setModel` (model first, then the level, since `set_model` resets it) when `get_state` names another model; a refused re-send falls through so a fork Pi already made does not fail, and `unrestoredModel` then names the chosen model.
+Two tests in `src/server/adapters/pi/process.test.ts`, each shown red first: the re-assert, and the refusal case the adversarial read found as a regression in the first cut.
+Filed from that read: OW-riyeku, a fork at the first message of a resumed session, which has nothing chosen to re-assert.
