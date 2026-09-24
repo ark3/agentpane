@@ -1714,3 +1714,169 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		expect(cluster.procs).toHaveLength(2);
 	});
 });
+
+/**
+ * The server holds each session's error, pending requests and notices, and
+ * every snapshot carries them (OW-bipume): the snapshot is the only thing that
+ * introduces a session to a client, so a client that was not holding a view
+ * when one of the three was fanned out learns of it nowhere else.
+ */
+describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
+	const notice = { kind: "configWarning", message: "unknown key", details: null, path: "/c.toml:3:5" };
+
+	/** A client connecting now: its opening snapshots, then whatever is fanned out. */
+	function connect(): ServerEvent[] {
+		const events: ServerEvent[] = [];
+		const client = broadcaster.addClient((chunk) => {
+			for (const line of chunk.split("\n")) {
+				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+			}
+		});
+		broadcaster.sendOpeningSnapshots(client, sessions.liveRefs());
+		return events;
+	}
+
+	const snapshots = (events: ServerEvent[]) =>
+		events.filter((event): event is Extract<ServerEvent, { type: "snapshot" }> => event.type === "snapshot");
+
+	it("carries a pending request, the turn error and the notices raised before the client connected", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const request = adapter.emitRequest("approval");
+		adapter.emitError("turn failed");
+		adapter.emitNotice(notice);
+
+		expect(snapshots(connect())).toEqual([
+			expect.objectContaining({ session: REF, error: "turn failed", requests: [request], notices: [notice] }),
+		]);
+	});
+
+	it("carries what the adapter raised inside start(), before the session was published", async () => {
+		const raising = new FakeAdapterFactory({
+			onStart: (adapter) => {
+				adapter.emitRequest("approval");
+				adapter.emitError("resume failed halfway");
+				adapter.emitNotice(notice);
+			},
+		});
+		sessions = new SessionManager({ index, adapters: { pi: raising } }, broadcaster);
+		const early = connect();
+
+		await sessions.attach(REF);
+
+		// The client connected before the attach and held no view while the three
+		// were fanned out; the attach's snapshot is the first it hears of them.
+		expect(snapshots(early)).toEqual([
+			expect.objectContaining({
+				session: REF,
+				error: "resume failed halfway",
+				requests: [expect.objectContaining({ kind: "approval" })],
+				notices: [notice],
+			}),
+		]);
+		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: "resume failed halfway", notices: [notice] })]);
+	});
+
+	it("drops a request once it is answered", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const answered = adapter.emitRequest("approval");
+		const pending = adapter.emitRequest("elicitation");
+
+		sessions.clearRequest(answered.requestId);
+
+		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
+	});
+
+	it("clears the error when the next prompt is admitted, as the client does (OW-31)", async () => {
+		await sessions.attach(REF);
+		pi.forRef(REF)!.emitError("turn failed");
+
+		await sessions.submit(REF, "again");
+
+		expect(snapshots(connect())[0]?.error).toBeNull();
+	});
+
+	it("keeps an error raised while that prompt was being admitted", async () => {
+		const raising = new FakeAdapterFactory({ onSubmit: (adapter) => adapter.emitError("refused at admission") });
+		sessions = new SessionManager({ index, adapters: { pi: raising } }, broadcaster);
+		await sessions.attach(REF);
+		raising.forRef(REF)!.emitError("turn failed");
+
+		await sessions.submit(REF, "again");
+
+		expect(snapshots(connect())[0]?.error).toBe("refused at admission");
+	});
+
+	it("keeps the error when the prompt is refused", async () => {
+		const refusing = new FakeAdapterFactory({
+			onSubmit: () => {
+				throw new Error("busy");
+			},
+		});
+		sessions = new SessionManager({ index, adapters: { pi: refusing } }, broadcaster);
+		await sessions.attach(REF);
+		refusing.forRef(REF)!.emitError("turn failed");
+
+		await expect(sessions.submit(REF, "again")).rejects.toThrow("busy");
+		expect(snapshots(connect())[0]?.error).toBe("turn failed");
+	});
+
+	it("clears the error a client dismissed", async () => {
+		await sessions.attach(REF);
+		pi.forRef(REF)!.emitError("turn failed");
+
+		sessions.clearError(REF);
+
+		expect(snapshots(connect())[0]?.error).toBeNull();
+	});
+
+	it("carries all three across a rename", async () => {
+		const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
+		const renaming = new FakeAdapterFactory({
+			materialiseOnSubmit: REAL,
+			onSubmit: (adapter) => adapter.emitError("turn failed"),
+		});
+		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
+		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+		await sessions.attach(virtualRef);
+		const adapter = renaming.forRef(virtualRef)!;
+		const request = adapter.emitRequest("approval");
+		adapter.emitNotice(notice);
+		const events = connect();
+
+		await sessions.submit(virtualRef, "first");
+
+		// The snapshot `renamed` is followed by, under the new ref.
+		expect(snapshots(events).at(-1)).toEqual(
+			expect.objectContaining({ session: { backend: "pi", id: REAL }, error: "turn failed", requests: [request], notices: [notice] }),
+		);
+	});
+
+	it("leaves the parent's turn error behind on a fork that moves the container, and keeps what the process holds", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const request = adapter.emitRequest("approval");
+		adapter.emitError("parent turn failed");
+		adapter.emitNotice(notice);
+
+		const forked = await sessions.fork(REF, "e1");
+
+		expect(snapshots(connect())).toEqual([
+			expect.objectContaining({ session: forked, error: null, requests: [request], notices: [notice] }),
+		]);
+	});
+
+	it("holds nothing for a session re-attached after a close", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		adapter.emitRequest("approval");
+		adapter.emitError("turn failed");
+		adapter.emitNotice(notice);
+
+		await sessions.close(REF);
+		await sessions.attach(REF);
+
+		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: null, requests: [], notices: [] })]);
+	});
+});

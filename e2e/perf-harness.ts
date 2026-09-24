@@ -162,6 +162,9 @@ const api: AgentpaneApi = {
 				model: null,
 				effort: null,
 				unrestoredModel: null,
+				error: null,
+				requests: [],
+				notices: [],
 			});
 		});
 		return summaries.find((s) => s.ref.id === ref.id) ?? summaryFor(id, 0);
@@ -201,6 +204,7 @@ const api: AgentpaneApi = {
 		return ref;
 	},
 	async reply() {},
+	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());
@@ -319,6 +323,9 @@ const harness: PerfHarness = {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		});
 		await controller!.select(refFor("a"));
 		// The attach snapshot arrives in a microtask; let it, and let layout settle.

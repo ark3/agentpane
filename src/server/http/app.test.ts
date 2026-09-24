@@ -768,6 +768,50 @@ describe("backend notices (OW-tujiya)", () => {
 	});
 });
 
+describe("what a client that connects late is told (OW-bipume)", () => {
+	it("opens on a snapshot carrying the pending request, the turn error and the notices", async () => {
+		await get(ROUTES.session(CODEX_SESSION));
+		const adapter = codex.forRef(CODEX_SESSION);
+		const request = adapter?.emitRequest("item/fileChange/requestApproval");
+		adapter?.emitError("turn failed");
+		const notice = { kind: "configWarning", message: "unknown key", details: null, path: null };
+		adapter?.emitNotice(notice);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+
+		expect(client.typed("snapshot")).toEqual([
+			expect.objectContaining({ session: CODEX_SESSION, error: "turn failed", requests: [request], notices: [notice] }),
+		]);
+		await client.close();
+	});
+
+	it("drops an answered request from the next snapshot", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const request = pi.forRef(PI_SESSION)?.emitRequest("elicitation");
+		expect((await post(ROUTES.reply(request?.requestId ?? ""), { response: null })).status).toBe(204);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+
+		expect(client.typed("snapshot")[0]?.requests).toEqual([]);
+		await client.close();
+	});
+
+	it("forgets a dismissed error, so no later snapshot shows it again", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		pi.forRef(PI_SESSION)?.emitError("turn failed");
+
+		const response = await app.fetch(new Request(`http://127.0.0.1${ROUTES.error(PI_SESSION)}`, { method: "DELETE" }));
+		expect(response.status).toBe(204);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]?.error).toBeNull();
+		await client.close();
+	});
+});
+
 describe("fork, model, and enumeration routes", () => {
 	it("lists fork points from the attached agent", async () => {
 		const withPoints = new FakeAdapterFactory({

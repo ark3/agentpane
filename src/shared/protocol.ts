@@ -180,6 +180,20 @@ export type ServerEvent =
 			 * chosen, and clears once a model is set.
 			 */
 			unrestoredModel: string | null;
+			/**
+			 * What the `error`, `request` and `notice` events below have told the
+			 * session's clients so far, as the server still holds it (OW-bipume):
+			 * the last turn error, null once the next prompt is admitted or a
+			 * client dismisses it (`ROUTES.error`); every request not yet
+			 * answered, oldest first; and every notice, oldest first. Here because
+			 * a snapshot is the only thing that introduces a session to a client,
+			 * so one that connects, reconnects or first attaches after the event
+			 * went out learns of it nowhere else. A client takes all three from
+			 * here, replacing what it held.
+			 */
+			error: string | null;
+			requests: AgentRequest[];
+			notices: AgentNotice[];
 	  }
 	| {
 			/**
@@ -206,8 +220,8 @@ export type ServerEvent =
 			/**
 			 * A non-fatal notice from the backend (OW-tujiya). Not an `error`: it
 			 * says nothing about whether a turn failed, and a client neither
-			 * clears nor sets its error from it. Like `error`, no snapshot carries
-			 * it, so a reconnect does not replay it.
+			 * clears nor sets its error from it. Like `error`, every later snapshot
+			 * carries it again, in `notices`.
 			 *
 			 * Per session, not D13's session-less `notice` arm: a Codex notice
 			 * comes from the app-server that session runs on, and one shown beside
@@ -422,6 +436,11 @@ export const ROUTES = {
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,
 	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
 	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
+	/**
+	 * DELETE -- dismiss the session's turn error, so no later snapshot carries
+	 * it (OW-bipume). 204 whether or not there was one.
+	 */
+	error: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/error`,
 	reply: (requestId: string) => `/api/requests/${encodeURIComponent(requestId)}`,
 } as const;
 

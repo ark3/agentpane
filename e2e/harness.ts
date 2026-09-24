@@ -99,7 +99,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [] });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -265,6 +265,7 @@ const api: AgentpaneApi = {
 		return REF;
 	},
 	async reply() {},
+	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
 		queueMicrotask(() => next.onOpen());

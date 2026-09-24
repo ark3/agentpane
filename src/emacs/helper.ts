@@ -101,6 +101,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			params: {
 				...statusOf(view),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
+				error: view.error,
+				requests: view.requests,
 				notices: view.notices,
 			},
 		});
@@ -146,13 +148,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				notify({ method: "session/notice", params: { session: view.ref, notice: event.notice } });
 				return;
 			case "request":
-				notify({
-					method: "session/error",
-					params: {
-						session: view.ref,
-						message: `the agent sent a ${event.request.kind} request (${event.request.requestId}) that nothing in Emacs answers yet`,
-					},
-				});
+				notify({ method: "session/request", params: { session: view.ref, request: event.request } });
 				return;
 		}
 	};

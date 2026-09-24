@@ -407,6 +407,55 @@ turn's end sends does, redraws them as notice nodes after its nodes."
                  (agentpane-test--position "ℹ Fallback metadata")
                  (agentpane-test--position "── prompt"))))))
 
+(ert-deftest agentpane-test-snapshot-restores-error-requests-and-notices ()
+  "A `session/snapshot' carrying the session's turn error, pending requests
+and notices, as the one an attach made after they were raised does, draws
+all three after its nodes, the error and each request as a warning line
+naming what it is (OW-bipume)."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (request '(:requestId "r1" :session (:backend "codex" :id "t1")
+                   :kind "item/fileChange/requestApproval" :payload nil))
+        (notice '(:kind "configWarning" :message "Unknown key" :details nil :path nil)))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+             :error "Turn failed upstream" :requests (vector request)
+             :notices (vector notice)))
+      (should (equal (agentpane-test--indices) '(0 1 nil nil nil)))
+      (let ((error-at (agentpane-test--position "⚠ Turn failed upstream"))
+            (request-at (agentpane-test--position "item/fileChange/requestApproval")))
+        (should (eq (get-text-property error-at 'face) 'agentpane-warning))
+        (should (eq (get-text-property request-at 'face) 'agentpane-warning))
+        (should (< (agentpane-test--position "Looking.")
+                   error-at
+                   (agentpane-test--position "ℹ Unknown key")
+                   request-at
+                   (agentpane-test--position "── prompt"))))
+      ;; A snapshot holding none of them, as after the next prompt is admitted,
+      ;; draws none.
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+             :error nil :requests [] :notices []))
+      (should (equal (agentpane-test--indices) '(0 1)))
+      (should-not (string-search "⚠" (buffer-string))))))
+
+(ert-deftest agentpane-test-request-is-drawn-where-it-arrives ()
+  "A `session/request' appends the same warning line a snapshot draws for it."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/request
+       (list :session ref
+             :request '(:requestId "r1" :session (:backend "codex" :id "t1")
+                        :kind "item/fileChange/requestApproval" :payload nil)))
+      (should (plist-member (ewoc-data (ewoc-nth agentpane--ewoc -1)) :request))
+      (let ((at (agentpane-test--position "item/fileChange/requestApproval")))
+        (should (eq (get-text-property at 'face) 'agentpane-warning))
+        (should (< (agentpane-test--position "Looking.") at
+                   (agentpane-test--position "── prompt")))))))
+
 (ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
   "While the session streams, the last node draws no meta line and an
 earlier one does, and the last one's appears once a status says the

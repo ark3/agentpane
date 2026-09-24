@@ -168,27 +168,38 @@
  * `sessions/changed`:
  *
  * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model,
- *   effort, unrestoredModel, notices }`.
+ *   effort, unrestoredModel, error, requests, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
- *   after `sessions/attach`, and how a missed event is healed. `notices`
- *   (array, always, possibly empty) is every `session/notice` the helper has
- *   passed on for the session, oldest first, each the `notice` it carried;
- *   the buffer redraws them after `nodes`, since a snapshot arrives at every
- *   Codex turn's start and end and would otherwise wipe them (OW-tujiya).
+ *   after `sessions/attach`, and how a missed event is healed. The last three
+ *   are what the server holds for the session, and what `session/error`,
+ *   `session/request` and `session/notice` below have said, whether or not
+ *   Emacs was attached to hear them (OW-bipume): `error` (string or `null`)
+ *   the last turn error, `null` again once a later prompt is admitted or a
+ *   client dismisses it; `requests` (array, always, possibly empty) every
+ *   request not yet answered, oldest first, each the `request` a
+ *   `session/request` carried; and `notices` (array, always, possibly empty)
+ *   every notice, oldest first, each the `notice` a `session/notice` carried.
+ *   The buffer draws all three after `nodes`, since a snapshot arrives at
+ *   every Codex turn's start and end and would otherwise wipe them.
  * - `session/node` -- `{ session, node }`. One node to replace by `index`.
  * - `session/status` -- `{ session, isStreaming, compaction, model, effort,
  *   unrestoredModel }`.
- * - `session/error` -- `{ session, message }`. A turn error, or an agent
- *   request nothing in Emacs answers yet, as text saying what kind arrived.
- *   Not carried by a snapshot, so a re-snapshot does not replay it.
+ * - `session/error` -- `{ session, message }`. A turn error. Every later
+ *   `session/snapshot` carries it again, in `error`, until it is cleared.
+ * - `session/request` -- `{ session, request }`. The agent is blocked on a
+ *   request nothing in Emacs answers yet: `request` is the HTTP API's
+ *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
+ *   backend's own method name) and `payload` -- and `issuerThreadId` where a
+ *   Codex subagent issued it. Every later `session/snapshot` carries it
+ *   again, in `requests`, until it is answered.
  * - `session/notice` -- `{ session, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
  *   it), `message` (string, the line to show), `details` (string or `null`,
  *   further guidance) and `path` (string or `null`, the file it is about,
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
- *   Codex adapter produces any. Unlike `session/error`, every later
- *   `session/snapshot` carries it again, in `notices`.
+ *   Codex adapter produces any. Every later `session/snapshot` carries it
+ *   again, in `notices`.
  * - `session/renamed` -- `{ from, to }`. Re-key the buffer; a
  *   `session/snapshot` for `to` follows.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
@@ -198,6 +209,7 @@
 
 import type {
 	AgentNotice,
+	AgentRequest,
 	AgentRequestReply,
 	BackendId,
 	CreateSessionRequest,
@@ -237,10 +249,14 @@ export interface SessionStatusParams {
 }
 
 export type HelperNotification =
-	| { method: "session/snapshot"; params: SessionStatusParams & { nodes: TranscriptNode[]; notices: AgentNotice[] } }
+	| {
+			method: "session/snapshot";
+			params: SessionStatusParams & { nodes: TranscriptNode[]; error: string | null; requests: AgentRequest[]; notices: AgentNotice[] };
+	  }
 	| { method: "session/node"; params: { session: SessionRef; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; message: string } }
+	| { method: "session/request"; params: { session: SessionRef; request: AgentRequest } }
 	| { method: "session/notice"; params: { session: SessionRef; notice: AgentNotice } }
 	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef } }
 	| { method: "sessions/changed"; params?: undefined };

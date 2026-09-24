@@ -54,6 +54,9 @@ function stateAtSequence(session: SessionRef, seq: number): ClientState {
 		model: null,
 		effort: null,
 		unrestoredModel: null,
+		error: null,
+		requests: [],
+		notices: [],
 	}).state;
 }
 
@@ -69,6 +72,9 @@ describe("client session state", () => {
 			model: "opaque/current",
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		const result = reduceServerEvent(withModel, {
@@ -81,6 +87,9 @@ describe("client session state", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]?.model).toBeNull();
@@ -101,6 +110,9 @@ describe("client session state", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		});
 
 		expect(result.state.sessions[sessionKey(ref)]).toMatchObject({
@@ -162,6 +174,9 @@ describe("client session state", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -188,6 +203,9 @@ describe("client session state", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		const result = reduceServerEvent(state, {
@@ -260,6 +278,9 @@ describe("client session state", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 		const result = reduceServerEvent(withOther, {
 			type: "error",
@@ -326,6 +347,50 @@ describe("client session state", () => {
 
 		expect(cleared.sessions[sessionKey(ref)]?.error).toBeNull();
 		expect(clearSessionError(withError, { backend: "codex", id: "no-such-session" })).toBe(withError);
+	});
+
+	it("takes a session's error, requests and notices from a snapshot, replacing what it held (OW-bipume)", () => {
+		const request: AgentRequest = { requestId: "request-1", session: ref, kind: "approval", payload: {} };
+		const held = { kind: "warning", message: "fallback metadata", details: null, path: null };
+		let state = stateAtSequence(ref, 1);
+		state = reduceServerEvent(state, { type: "error", session: ref, seq: 2, message: "turn failed" }).state;
+		state = reduceServerEvent(state, { type: "request", session: ref, seq: 3, request }).state;
+		state = reduceServerEvent(state, { type: "notice", session: ref, seq: 4, notice: held }).state;
+
+		const later = { kind: "configWarning", message: "unknown key", details: null, path: null };
+		const snapshot = reduceServerEvent(state, {
+			type: "snapshot",
+			session: ref,
+			seq: 0,
+			messages: [],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+			effort: null,
+			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [held, later],
+		}).state;
+
+		expect(snapshot.sessions[sessionKey(ref)]).toMatchObject({ error: null, requests: [], notices: [held, later] });
+
+		// And a view the snapshot creates starts from what the server holds.
+		const fresh = reduceServerEvent(stateWithSelected(ref), {
+			type: "snapshot",
+			session: ref,
+			seq: 3,
+			messages: [],
+			isStreaming: true,
+			compaction: null,
+			model: null,
+			effort: null,
+			unrestoredModel: null,
+			error: "turn failed",
+			requests: [request],
+			notices: [held],
+		}).state;
+		expect(fresh.sessions[sessionKey(ref)]).toMatchObject({ error: "turn failed", requests: [request], notices: [held] });
 	});
 
 	it("requests a session summary refresh when sessions change", () => {

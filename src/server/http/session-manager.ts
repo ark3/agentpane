@@ -13,6 +13,8 @@
  */
 
 import type {
+	AgentNotice,
+	AgentRequest,
 	BackendId,
 	ListSessionsQuery,
 	SessionRef,
@@ -80,6 +82,21 @@ interface ManagedSession {
 	lastModel: string | null;
 	lastEffort: string | null;
 	lastUnrestoredModel: string | null;
+	/**
+	 * What the adapter's `onError`, `onRequest` and `onNotice` have said, held
+	 * for every snapshot to carry (OW-bipume): a client that was not holding a
+	 * view when the event went out -- one that connects or reconnects later, or
+	 * one the startup window or a fork's re-key left without one -- has no other
+	 * way to learn of it. Each follows the lifecycle the client applies to its
+	 * own copy, or a snapshot would resurrect what the client had cleared:
+	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`),
+	 * a request leaves when it is answered (`clearRequest`), and notices only
+	 * accumulate. They live on the container, so a rename carries them and a
+	 * close drops them; a fork's re-key keeps all but `error` (`#adoptRef`).
+	 */
+	error: string | null;
+	requests: AgentRequest[];
+	notices: AgentNotice[];
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
@@ -214,8 +231,11 @@ export class SessionManager {
 		this.#newId = deps.newId ?? (() => crypto.randomUUID());
 		this.#now = deps.now ?? (() => new Date().toISOString());
 		broadcaster.setSnapshotSource((ref) => {
-			const adapter = this.#lookup(ref)?.adapter;
-			return adapter ? adapter.getState() : null;
+			const session = this.#lookup(ref);
+			if (!session?.adapter) return null;
+			// Every write below replaces these arrays rather than mutating them, so
+			// they are handed over as they are.
+			return { ...session.adapter.getState(), error: session.error, requests: session.requests, notices: session.notices };
 		});
 	}
 
@@ -270,6 +290,9 @@ export class SessionManager {
 			lastModel: null,
 			lastEffort: null,
 			lastUnrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 			forking: 0,
 			createdAt: this.#now(),
 		});
@@ -332,8 +355,13 @@ export class SessionManager {
 		const session = this.#lookup(ref);
 		if (!session?.adapter) throw new UnknownSessionError(ref);
 		this.markPrompted(session.ref);
+		// The client clears a session's error once the next prompt is admitted,
+		// unless a newer one landed meanwhile (OW-31, `submit` in
+		// `controller.ts`); this is the same rule, so the next snapshot agrees.
+		const priorError = session.error;
 		try {
 			await session.adapter.submit(text, images);
+			if (session.error === priorError) session.error = null;
 		} finally {
 			this.#adoptRef(session, "rename");
 		}
@@ -472,6 +500,11 @@ export class SessionManager {
 			// into being now, and a stamp days older would sort a brand-new fork
 			// below the conversations it was forked out of.
 			session.createdAt = this.#now();
+			// The error was the parent's last turn, and the fork has had none. The
+			// requests and notices stay: a pending request blocks the process this
+			// container now drives, as `#pendingRequests` below agrees, and a
+			// notice is about that process too.
+			session.error = null;
 		}
 
 		if (cause === "rename") {
@@ -519,6 +552,9 @@ export class SessionManager {
 				lastModel: null,
 				lastEffort: null,
 				lastUnrestoredModel: null,
+				error: null,
+				requests: [],
+				notices: [],
 				forking: 0,
 				createdAt: this.#now(),
 			};
@@ -586,6 +622,9 @@ export class SessionManager {
 				lastModel: null,
 				lastEffort: null,
 				lastUnrestoredModel: null,
+				error: null,
+				requests: [],
+				notices: [],
 				forking: 0,
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
@@ -628,13 +667,24 @@ export class SessionManager {
 			// startup and we would otherwise miss it.
 			bound.subscriptions.push(
 				adapter.onUpdate((state, changedIndex) => this.#onUpdate(bound, state, changedIndex)),
+				// Held on `bound` as well as fanned out, and from before `start()`
+				// resolves: an event raised in that window goes out under a key no
+				// client holds a view of yet, and the attach's snapshot that follows
+				// is what delivers it (OW-bipume).
 				adapter.onRequest((request) => {
 					this.#pendingRequests.set(request.requestId, sessionKey(bound.ref));
+					bound.requests = [...bound.requests, request];
 					this.broadcaster.request(bound.ref, request);
 				}),
-				adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
+				adapter.onError((message) => {
+					bound.error = message;
+					this.broadcaster.error(bound.ref, message);
+				}),
 			);
-			const offNotice = adapter.onNotice?.((notice) => this.broadcaster.notice(bound.ref, notice));
+			const offNotice = adapter.onNotice?.((notice) => {
+				bound.notices = [...bound.notices, notice];
+				this.broadcaster.notice(bound.ref, notice);
+			});
 			if (offNotice) bound.subscriptions.push(offNotice);
 			await adapter.start(
 				forkStart?.start ?? {
@@ -783,7 +833,19 @@ export class SessionManager {
 	}
 
 	clearRequest(requestId: string): void {
+		const owner = this.#pendingRequests.get(requestId);
 		this.#pendingRequests.delete(requestId);
+		const session = owner === undefined ? undefined : this.#sessions.get(owner);
+		if (session) session.requests = session.requests.filter((request) => request.requestId !== requestId);
+	}
+
+	/**
+	 * A client dismissed the session's error. Only the next snapshot says so:
+	 * the other clients showing it keep it until then (OW-bipume).
+	 */
+	clearError(ref: SessionRef): void {
+		const session = this.#lookup(ref);
+		if (session) session.error = null;
 	}
 
 	/**

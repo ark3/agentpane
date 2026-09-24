@@ -464,6 +464,9 @@ describe("App", () => {
 			model: "backend/reported",
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		render(App, { props: { controller: new FakeController(view({ state: attached })) } });
@@ -483,6 +486,9 @@ describe("App", () => {
 			model: "backend/fallback",
 			effort: null,
 			unrestoredModel,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		const fellBack = render(App, { props: { controller: new FakeController(view({ state: snapshot("backend/recorded") })) } });
@@ -862,6 +868,9 @@ describe("App", () => {
 			model: null,
 			effort: null,
 			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
 		}).state;
 
 		const controller = new FakeController(view({ state: current }));
@@ -2055,6 +2064,7 @@ describe("App", () => {
 			forkPoints: async () => [],
 			fork: async () => piSession,
 			reply: async () => {},
+			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
 				return { close: () => {} };
@@ -2064,7 +2074,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		// The composer only replaces the Attach button once the session is live,
 		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -2603,6 +2613,7 @@ describe("App", () => {
 				});
 			},
 			reply: async () => {},
+			dismissError: async () => {},
 			connect: (handlers: EventHandlers) => {
 				emit = handlers.onEvent;
 				return { close: () => {} };
@@ -2614,7 +2625,7 @@ describe("App", () => {
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			await controller.select(piSession);
 			await tick();
 
@@ -2630,7 +2641,7 @@ describe("App", () => {
 
 			// The fork's own turn, start to finish, with the tab in the background.
 			const turn = (isStreaming: boolean) =>
-				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null });
+				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			turn(true);
 			await tick();
 			turn(false);
@@ -2934,5 +2945,76 @@ describe("App", () => {
 		document.dispatchEvent(new Event("visibilitychange"));
 		window.dispatchEvent(new Event("focus"));
 		expect(controller.previewRefreshes).toBe(2);
+	});
+});
+
+/**
+ * What a client that arrives late is told (OW-bipume). Each opens on the
+ * snapshot the server sends a fresh connection for a live session
+ * (`sendOpeningSnapshots`), and nothing else: no `request`, `error` or
+ * `notice` event ever reached it, so the snapshot is the only thing that can.
+ */
+describe("a client that connects after the fact (OW-bipume)", () => {
+	function connectLate(): { controller: AgentpaneController; emit: (event: ServerEvent) => void } {
+		let emit: (event: ServerEvent) => void = () => {};
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession)],
+			createSession: async () => piSession,
+			attach: async (ref) => summary(ref),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [],
+			fork: async () => piSession,
+			reply: async () => {},
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		return { controller, emit: (event) => emit(event) };
+	}
+
+	function opening(held: Pick<Extract<ServerEvent, { type: "snapshot" }>, "error" | "requests" | "notices">): ServerEvent {
+		return { type: "snapshot", session: piSession, seq: 4, messages: [user("hi")], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, ...held };
+	}
+
+	it("shows the blocked banner for a request raised before it connected, with no gesture", async () => {
+		const { controller, emit } = connectLate();
+		emit(opening({ error: null, requests: [{ requestId: "r-1", session: piSession, kind: "approval", payload: {} }], notices: [] }));
+		await controller.select(piSession);
+		await tick();
+
+		expect(screen.getByText(/blocked on a request agentpane cannot answer: approval/)).toBeInTheDocument();
+	});
+
+	it("shows a notice raised before it connected", async () => {
+		const { controller, emit } = connectLate();
+		const notice = { kind: "configWarning", message: "Unknown key", details: null, path: "/c.toml:3:5" };
+		emit(opening({ error: null, requests: [], notices: [notice] }));
+		await controller.select(piSession);
+		await tick();
+
+		const notices = screen.getByRole("status", { name: "Backend notices" });
+		expect(within(notices).getAllByRole("listitem")).toHaveLength(1);
+		expect(notices).toHaveTextContent("Unknown key");
+	});
+
+	it("shows a turn error recorded before it connected", async () => {
+		const { controller, emit } = connectLate();
+		emit(opening({ error: "turn failed upstream", requests: [], notices: [] }));
+		await controller.select(piSession);
+		await tick();
+
+		expect(screen.getByRole("alert")).toHaveTextContent("turn failed upstream");
 	});
 });

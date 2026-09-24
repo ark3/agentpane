@@ -41,9 +41,23 @@ export function formatSseFrame(event: ServerEvent): string {
 	return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-/** State the broadcaster needs to build a snapshot, supplied by the session manager. */
+/**
+ * State the broadcaster needs to build a snapshot, supplied by the session
+ * manager: the adapter's own, plus the error, requests and notices the manager
+ * holds for the session (OW-bipume).
+ */
 export interface SnapshotSource {
-	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel?: string | null } | null;
+	(ref: SessionRef): {
+		messages: AgentMessage[];
+		isStreaming: boolean;
+		compaction: "requesting" | "running" | null;
+		model: string | null;
+		effort: string | null;
+		unrestoredModel?: string | null;
+		error: string | null;
+		requests: AgentRequest[];
+		notices: AgentNotice[];
+	} | null;
 }
 
 export class Broadcaster {
@@ -96,6 +110,9 @@ export class Broadcaster {
 			model: state.model,
 			effort: state.effort,
 			unrestoredModel: state.unrestoredModel ?? null,
+			error: state.error,
+			requests: state.requests,
+			notices: state.notices,
 		});
 	}
 
@@ -115,6 +132,9 @@ export class Broadcaster {
 			model: state.model,
 			effort: state.effort,
 			unrestoredModel: state.unrestoredModel ?? null,
+			error: state.error,
+			requests: state.requests,
+			notices: state.notices,
 		});
 	}
 

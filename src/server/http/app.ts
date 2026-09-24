@@ -305,6 +305,13 @@ export function createApp(deps: AppDeps): App {
 				await adapter.compact();
 				return noContent();
 			}
+			case "error": {
+				// The server holds the error for every later snapshot (OW-bipume), so a
+				// dismissal the server never heard of would come back on the next one.
+				if (request.method !== "DELETE") return methodNotAllowed(request.method, "DELETE");
+				sessions.clearError(ref);
+				return noContent();
+			}
 			case "fork": {
 				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
 				const body = await readJson<ForkRequest>(request);

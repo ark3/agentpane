@@ -100,6 +100,8 @@ export interface AgentpaneApi {
 	 * (OW-refibu).
 	 */
 	reply(requestId: string, body: AgentRequestReply): Promise<void>;
+	/** Dismiss the session's turn error on the server, so no later snapshot brings it back (OW-bipume). */
+	dismissError(ref: SessionRef): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -178,6 +180,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		reply(requestId, body) {
 			return requestNoContent(ROUTES.reply(requestId), jsonRequest(body));
+		},
+		dismissError(ref) {
+			return requestNoContent(ROUTES.error(ref), { method: "DELETE" });
 		},
 		connect(handlers) {
 			return openEvents(ROUTES.events, handlers);
