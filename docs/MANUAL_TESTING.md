@@ -2607,3 +2607,34 @@ Its `get_settings` read `applied.effort: "high"`, so the chosen `low` did not su
 **Not established.**
 Whether `perTurnEffort` ever differs from `effort` on a store line: the owner's sessions carry both equal, and this run's carried `null` beside `low`.
 Neither run went through the browser or Emacs; both clients read the same listing and status the driver read.
+
+## What model a Claude Code session is on before its first turn, and what `--model default` runs (OW-kakide)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-kakide` worktree cut at `6adc0c0`.
+No user message was written to any child: every spawn was driven by control requests alone and exited when its stdin closed.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages ... --session-id <fresh uuid>`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+The driver was a throwaway Python script that printed only the model fields of each response, never `initialize`'s account block; nothing was saved.
+The owner's `~/.claude/settings.json` named `model: "opus[1m]"` and its sha256 was the same after the runs as before, and no store file appeared under `~/.claude` for any of the six session ids.
+
+**Spawned with no `--model`.**
+`get_settings` read `applied.model: "claude-opus-5-5[1m]"`, `applied.effort: "high"` and `effective.model: "opus[1m]"`.
+`initialize` listed `default` and `opus[1m]` both resolving to `claude-opus-5-5[1m]`, `claude-fable-5-1[1m]` resolving to `claude-fable-5-1`, and `sonnet` resolving to `claude-sonnet-5`, each with the five levels `low` to `max`, and `haiku` resolving to `claude-haiku-4-5-20251001` with no levels.
+A second `initialize` on the same process answered the same list, and a `get_settings` after it read the same, so the start-time `initialize` the adapter now sends does not spoil the one `listModels` sends later.
+
+**Spawned with `--model default`.**
+`get_settings` read `applied.model: "claude-opus-5-5[1m]"` and `applied.effort: "high"`, the same as no `--model` at all.
+Spawned with `--model haiku`, `applied.model` read `claude-haiku-4-5-20251001`; `set_model` to `default` then read `claude-opus-5-5[1m]` at `high`, and `set_model` back to `haiku` read `claude-haiku-4-5-20251001` with effort `null`.
+
+**With a settings `model` that is not the default.**
+Each of these spawns also passed `--settings '{"model":"sonnet"}'`, which leaves the settings file untouched.
+With no `--model`, `get_settings` read `applied.model: "claude-sonnet-5"` and `effective.model: "sonnet"`, while `initialize` still listed `default` resolving to `claude-opus-5-5[1m]`.
+With `--model default`, `applied.model` read `claude-opus-5-5[1m]`, and a `set_model` to `default` from `haiku` read the same.
+So `default` names the account's recommended model, not whatever the settings select, and a session left on no model runs the settings' model when there is one.
+
+**What the adapter makes of it.**
+`ClaudeAdapter` maps `applied.model` back to a listed id through `initialize`'s `resolvedModel`, preferring `default` when it shares the resolved id, so a session nobody chose a model on is named `default` here and `sonnet` under the override (`src/server/adapters/claude/adapter.ts`, module doc).
+Because `default` is only named when it resolves to the model in force, a fork spawned with `--model default` runs the model its parent ran.
+
+**Not established.**
+Nothing here went through the browser or Emacs; both read the session's `model` from the same status the adapter's state feeds.
+Whether `default`'s resolved id follows a change to the account's recommended model on a process already running was not measured.
