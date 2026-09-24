@@ -192,3 +192,17 @@ export interface BackendAdapter {
 export interface AdapterFactory {
 	create(ref: SessionRef): BackendAdapter;
 }
+
+/**
+ * The backend refused the value it was asked to take -- a model it does not
+ * know, say -- or the adapter did, for a value the backend's protocol cannot
+ * even carry. The server answers 400 with this message, because the
+ * request is what was wrong; a backend that died or never answered is not
+ * this, and stays a 500. Thrown by `setModel` only (OW-pizaki).
+ */
+export class BackendRefusedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "BackendRefusedError";
+	}
+}

@@ -23,6 +23,7 @@ import {
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
+import { BackendRefusedError } from "../adapters/types.ts";
 import { type App, createApp } from "./app.ts";
 import {
 	assistantMessage,
@@ -770,6 +771,28 @@ describe("fork, model, and enumeration routes", () => {
 	it("sets the model", async () => {
 		expect((await post(ROUTES.model(PI_SESSION), { model: "pi-2" })).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.model).toBe("pi-2");
+	});
+
+	it("answers 400 with the backend's reason when it refuses the model, and 500 when it fails (OW-pizaki)", async () => {
+		const refusing = new FakeAdapterFactory({
+			onSetModel(model) {
+				if (model === "dead") throw new Error("Pi process is not running");
+				throw new BackendRefusedError(`Model not found: ${model}`);
+			},
+		});
+		app = createApp({ index, adapters: { pi: refusing } });
+
+		const refused = await post(ROUTES.model(PI_SESSION), { model: "nobody/nothing" });
+		expect(refused.status).toBe(400);
+		expect((await refused.json()) as ApiError).toEqual({
+			error: "backend_refused",
+			detail: "Model not found: nobody/nothing",
+		});
+		expect(refusing.forRef(PI_SESSION)?.model).not.toBe("nobody/nothing");
+
+		const failed = await post(ROUTES.model(PI_SESSION), { model: "dead" });
+		expect(failed.status).toBe(500);
+		expect((await failed.json()) as ApiError).toMatchObject({ error: "internal_error" });
 	});
 
 	it("sets the effort, and lists each model's effort options (OW-kokalo)", async () => {

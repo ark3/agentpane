@@ -141,14 +141,15 @@ import {
 	readClaudeMessageEntries,
 	type ClaudeStoreMessageEntry,
 } from "../../sessions/claude.ts";
-import type {
-	AdapterState,
-	AdapterFactory,
-	BackendAdapter,
-	ForkResult,
-	ImageInput,
-	StartOptions,
-	Unsubscribe,
+import {
+	type AdapterState,
+	type AdapterFactory,
+	type BackendAdapter,
+	BackendRefusedError,
+	type ForkResult,
+	type ImageInput,
+	type StartOptions,
+	type Unsubscribe,
 } from "../types.ts";
 import { spawnClaude, type ClaudeProcess, type ClaudeSpawner } from "./process.ts";
 import {
@@ -175,6 +176,9 @@ const DEFAULT_CLAUDE_ROOT = join(homedir(), ".claude", "projects");
 /** The `message.model` of an assistant store line the CLI wrote itself (`lastHydratedAssistant`). */
 const SYNTHETIC_MODEL = "<synthetic>";
 const TURN_ACTIVE_ERROR = "claude adapter cannot submit while a turn is active";
+
+/** A control request the CLI answered with `subtype: "error"`: it is alive and said no, unlike an exit or a failed write. */
+class ClaudeControlError extends Error {}
 
 export interface ClaudeAdapterOptions {
 	/** Injected in tests; the default spawns `direnv exec <cwd> sbox -- claude -p ...`. */
@@ -511,7 +515,9 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- session controls ---------------------------------------------------
 
 	async setModel(model: string): Promise<void> {
-		await this.sendControl({ subtype: "set_model", model });
+		await this.sendControl({ subtype: "set_model", model }).catch((error: unknown) => {
+			throw error instanceof ClaudeControlError ? new BackendRefusedError(error.message) : error;
+		});
 		// Only on success (a bogus id rejects above): remembered so `fork()` can
 		// hand it to the fork's own adapter.
 		this.model = model;
@@ -725,7 +731,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		if (!pending) return;
 		this.pendingControls.delete(requestId);
 		if (response?.subtype === "error") {
-			pending.reject(new Error(response.error ?? "claude control request failed"));
+			pending.reject(new ClaudeControlError(response.error ?? "claude control request failed"));
 		} else {
 			pending.resolve(response?.response);
 		}

@@ -12,13 +12,14 @@
 
 import { spawn as nodeSpawn } from "node:child_process";
 import type { Model } from "@earendil-works/pi-ai";
-import type {
-	AdapterState,
-	BackendAdapter,
-	ForkResult,
-	ImageInput,
-	StartOptions,
-	Unsubscribe,
+import {
+	type AdapterState,
+	type BackendAdapter,
+	BackendRefusedError,
+	type ForkResult,
+	type ImageInput,
+	type StartOptions,
+	type Unsubscribe,
 } from "../types.ts";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import { LfLineSplitter } from "./framing.ts";
@@ -31,6 +32,7 @@ import {
 } from "./reducer.ts";
 import { buildPiSpawnCommand } from "./spawn.ts";
 import {
+	modelRefusal,
 	modelToInfo,
 	type PiCommand,
 	type PiOutputLine,
@@ -47,6 +49,9 @@ interface PendingCommand {
 	resolve: (response: unknown) => void;
 	reject: (error: Error) => void;
 }
+
+/** Pi answered `success: false`: it is alive and said no, unlike a pipe or process failure. */
+class PiCommandError extends Error {}
 
 // ---------------------------------------------------------------------------
 // The spawn seam
@@ -525,7 +530,11 @@ export class PiAdapter implements BackendAdapter {
 
 	async setModel(model: string): Promise<void> {
 		const { provider, modelId } = splitModelRef(model);
-		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId });
+		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId }).catch(
+			(error: unknown) => {
+				throw error instanceof PiCommandError ? new BackendRefusedError(modelRefusal(model, error.message)) : error;
+			},
+		);
 		this.model = modelToInfo(response.data).id;
 		this.reasoning = response.data.reasoning === true;
 		if (this.chosenEffort !== null && thinkingLevels(response.data).includes(this.chosenEffort)) {
@@ -606,7 +615,7 @@ export class PiAdapter implements BackendAdapter {
 		if (pending) {
 			this.pendingCommands.delete(id as string);
 			if (resp.success) pending.resolve(resp);
-			else pending.reject(new Error(resp.error));
+			else pending.reject(new PiCommandError(resp.error));
 			return;
 		}
 		if (!resp.success) {

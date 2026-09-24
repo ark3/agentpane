@@ -16,6 +16,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
+import { BackendRefusedError } from "../types.ts";
 import { type PiChild, PiAdapter } from "./process.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/s.jsonl" };
@@ -376,6 +377,55 @@ describe("PiAdapter command correlation", () => {
 		h.child.respondTo("set_model", { provider: "anthropic", id: "claude-opus-5", name: "Opus 5" });
 		await done;
 		expect(h.adapter.getState().model).toBe("anthropic/claude-opus-5");
+	});
+
+	/**
+	 * Pi's `--model` flag takes `provider/modelId:thinkingLevel` and its
+	 * `set_model` does not, so the pin's own form answered 500 "Model not
+	 * found" (`pi 0.85.1`, 2026-09-16). The string still goes to Pi unchanged;
+	 * only the refusal's message learns why.
+	 */
+	it("refuses a model Pi refuses, and names the level suffix when that is why (OW-pizaki)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const suffixed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash:high");
+		expect(h.child.lastSent("set_model")).toMatchObject({
+			provider: "openrouter",
+			modelId: "deepseek/deepseek-v4.1-flash:high",
+		});
+		h.child.failCommand("set_model", "Model not found: openrouter/deepseek/deepseek-v4.1-flash:high");
+		const refusal = await suffixed.catch((error: unknown) => error);
+		expect(refusal).toBeInstanceOf(BackendRefusedError);
+		expect((refusal as Error).message).toContain("Model not found: openrouter/deepseek/deepseek-v4.1-flash:high");
+		expect((refusal as Error).message).toContain('"provider/modelId"');
+		expect((refusal as Error).message).toContain("effort");
+
+		// A colon that is not a level is part of the id as far as anyone here
+		// knows (`pi 0.87.1` lists `openrouter/anthropic/claude-fable-5:batch`),
+		// so Pi's own words go through alone.
+		for (const model of ["openrouter/anthropic/claude-fable-5:batch", "nobody/nothing"]) {
+			const refused = h.adapter.setModel(model);
+			h.child.failCommand("set_model", `Model not found: ${model}`);
+			const error = await refused.catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(BackendRefusedError);
+			expect((error as Error).message).toBe(`Model not found: ${model}`);
+		}
+
+		const bare = h.adapter.setModel("deepseek-v4.1-flash");
+		await expect(bare).rejects.toBeInstanceOf(BackendRefusedError);
+		expect(h.child.sent().filter((c) => c.type === "set_model")).toHaveLength(3);
+	});
+
+	it("does not call a Pi that died before answering set_model a refusal (OW-pizaki)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const done = h.adapter.setModel("anthropic/claude-opus-5");
+		h.child.emit("close", 1, null);
+		const error = await done.catch((e: unknown) => e);
+		expect((error as Error).message).toMatch(/before responding/);
+		expect(error).not.toBeInstanceOf(BackendRefusedError);
 	});
 
 	it("sends a bare compact command and resolves on its response (OW-72)", async () => {

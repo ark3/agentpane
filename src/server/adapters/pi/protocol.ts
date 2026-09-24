@@ -19,6 +19,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model, ToolCall } from "@earendil-works/pi-ai";
+import { BackendRefusedError } from "../types.ts";
 
 // ---------------------------------------------------------------------------
 // Commands (stdin)
@@ -289,7 +290,17 @@ export function thinkingLevels(model: Model<any>): string[] {
 export function splitModelRef(modelRef: string): { provider: string; modelId: string } {
 	const slash = modelRef.indexOf("/");
 	if (slash === -1) {
-		throw new Error(`Pi model ref must be "provider/modelId", got: ${JSON.stringify(modelRef)}`);
+		throw new BackendRefusedError(`Pi model ref must be "provider/modelId", got: ${JSON.stringify(modelRef)}`);
 	}
 	return { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
+}
+
+/** Pi's refusal of `modelRef` for `set_model`, saying so when a thinking-level suffix is the likely reason. */
+export function modelRefusal(modelRef: string, piError: string): string {
+	const level = THINKING_LEVELS.find((candidate) => modelRef.endsWith(`:${candidate}`));
+	if (!level) return piError;
+	return (
+		`${piError}. A model here is "provider/modelId"; the ":${level}" suffix is only for Pi's --model flag. ` +
+		`Choose the model without it and set "${level}" as the effort.`
+	);
 }

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRef } from "../../../shared/protocol.ts";
+import { BackendRefusedError } from "../types.ts";
 import type { ClaudeStoreMessageEntry } from "../../sessions/claude.ts";
 import { ClaudeAdapter, ClaudeAdapterFactory, CLAUDE_FORK_SESSION_START } from "./adapter.ts";
 import type { ClaudeProcess, ClaudeSpawnOptions } from "./process.ts";
@@ -642,6 +643,18 @@ describe("ClaudeAdapter session controls", () => {
 		});
 
 		await expect(setting).rejects.toThrow("not a recognized model id");
+		await expect(setting).rejects.toBeInstanceOf(BackendRefusedError);
+	});
+
+	it("does not call a CLI that exited before answering set_model a refusal (OW-pizaki)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+
+		const setting = h.adapter.setModel("haiku");
+		h.proc().exit(1, null);
+		const error = await setting.catch((e: unknown) => e);
+		expect((error as Error).message).toMatch(/claude exited/);
+		expect(error).not.toBeInstanceOf(BackendRefusedError);
 	});
 
 	/**

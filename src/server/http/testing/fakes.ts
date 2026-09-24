@@ -69,6 +69,8 @@ export function assistantMessage(text: string, timestamp = 0): AssistantMessage 
 export interface FakeAdapterOptions {
 	/** Runs on submit(). Leave unset for a fake that records prompts and nothing else. */
 	onSubmit?: (adapter: FakeAdapter, text: string, images?: ImageInput[]) => void | Promise<void>;
+	/** Runs on setModel(), before the model is taken; throw to refuse it. */
+	onSetModel?: (model: string) => void | Promise<void>;
 	models?: ModelInfo[];
 	forkPoints?: ForkPoint[];
 	/** Make start() fail, to exercise the attach error path. */
@@ -295,6 +297,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async setModel(model: string): Promise<void> {
+		await this.options.onSetModel?.(model);
 		this.model = model;
 		this.#emit(undefined);
 	}

@@ -39,7 +39,7 @@ import {
 	type SetModelRequest,
 	sessionKey,
 } from "../../shared/protocol.ts";
-import type { BackendAdapter } from "../adapters/types.ts";
+import { type BackendAdapter, BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import {
@@ -471,6 +471,7 @@ export function createApp(deps: AppDeps): App {
 				if (err instanceof ServerShuttingDownError) {
 					return error(503, "server_shutting_down", err.message);
 				}
+				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message);
 				const ref = sessionRefFromRequest(request);
 				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
 				return error(500, "internal_error", describe(err));
