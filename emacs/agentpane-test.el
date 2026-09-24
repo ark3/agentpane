@@ -1802,27 +1802,38 @@ window, where a send attaches it again, rather than in a buffer never shown."
 
 ;;;; A new session's model and effort, against a stub jsonrpc
 
-(defun agentpane-test--new-session (choices &optional current)
+(defun agentpane-test--new-session (choices &optional current held)
   "Run `agentpane-new-session' on Codex against a stub jsonrpc whose
 `models/list' answers `agentpane-test--models' and whose prompts answer
 CHOICES in turn, the attach delivering a status naming CURRENT when it is
 non-nil.  Return the requests sent, in order, each as its method or, for
 `sessions/setModel' and `sessions/setEffort', as the method and the value
-set, then the collections offered."
+set, then the collections offered.
+`sessions/setModel' is answered as it is sent, unless HELD is non-nil: then
+its answer waits until `agentpane-new-session' has returned, and the symbol
+`answered' marks, among the requests, the moment it arrives."
   (let ((ref '(:backend "codex" :id "virtual-1"))
         (agentpane--connection 'connection)
         (buffers (buffer-list))
         (sent nil)
-        (offered nil))
+        (offered nil)
+        (answer nil))
     (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
               ((symbol-function 'jsonrpc-running-p) (lambda (_) t))
               ((symbol-function 'agentpane--request)
-               (lambda (method params &rest _)
+               (lambda (method params callback &rest _)
                  (push (pcase method
                          ('sessions/setModel (list method (plist-get params :model)))
                          ('sessions/setEffort (list method (plist-get params :effort)))
                          (_ method))
-                       sent)))
+                       sent)
+                 (when (eq method 'sessions/setModel)
+                   (let ((buffer (current-buffer)))
+                     (setq answer (lambda ()
+                                    (with-current-buffer buffer
+                                      (funcall callback nil)))))
+                   (unless held
+                     (funcall answer)))))
               ((symbol-function 'jsonrpc-request)
                (lambda (_connection method &rest _)
                  (push method sent)
@@ -1844,9 +1855,22 @@ set, then the collections offered."
       (unwind-protect
           (save-window-excursion
             (agentpane-new-session "codex")
+            (when held
+              (push 'answered sent)
+              (funcall answer))
             (list (reverse sent) (reverse offered)))
         (dolist (buffer (buffer-list))
           (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(ert-deftest agentpane-test-new-session-sends-the-effort-once-the-model-answers ()
+  "`agentpane-new-session' sends the effort only once `sessions/setModel' has
+answered, so the server checks it against the model just chosen, not the
+one the session had (OW-zayefe)."
+  (should (equal (agentpane-test--new-session '("gpt-5.6-sol" "medium") "gpt-5.6-luna" t)
+                 '((sessions/create sessions/attach models/list
+                    (sessions/setModel "gpt-5.6-sol") models/list
+                    answered (sessions/setEffort "medium"))
+                   (("gpt-5.6-luna" "gpt-5.6-sol" "plain") ("medium"))))))
 
 (ert-deftest agentpane-test-new-session-reads-an-effort-after-the-model ()
   "`agentpane-new-session' reads an effort after the model, offering the

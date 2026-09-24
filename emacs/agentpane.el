@@ -1916,7 +1916,7 @@ and neither the server nor the helper does."
                (ewoc-collect agentpane--ewoc (lambda (data) (plist-get data :index))))
       (user-error "The %s is chosen before the first prompt" what))))
 
-(defun agentpane-set-model (model)
+(defun agentpane-set-model (model &optional then)
   "Set this buffer's session's MODEL through `sessions/setModel'.
 Allowed only before the first prompt, while the buffer has no nodes.
 An empty MODEL, which `completing-read' returns for an empty `RET' even
@@ -1925,6 +1925,11 @@ it has.  Sent, \"\" was stored by the Codex adapter and reported as the
 model while its turns ran on the default, refused by the Pi adapter, and
 handed to Claude Code as it was (OW-kisemu, read from the adapters in
 src/server/adapters/ at daf5f52, not run live).
+
+THEN, when given, runs with no arguments once the server has taken MODEL,
+in the buffer the request went from, or at once for an empty MODEL; never
+when the request fails, which is reported in the echo area.  It is how
+`agentpane-new-session' holds the effort back until the model is taken.
 
 Interactively a session not yet attached is attached before the models
 are read, and synchronously, as `agentpane-new-session' does and for its
@@ -1942,14 +1947,16 @@ daf5f52, not run live)."
          (agentpane--attach-now))
        (list (agentpane--read-model (plist-get (agentpane--ref agentpane--session)
                                                :backend))))))
-  (unless (string-empty-p model)
+  (if (string-empty-p model)
+      (when then (funcall then))
     (agentpane--check-gate "model")
     (with-current-buffer (agentpane--transcript)
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/setModel
                              (list :session (agentpane--ref agentpane--session) :model model)
-                             #'ignore t))))))
+                             (lambda (_) (when then (funcall then)))
+                             t))))))
 
 (defun agentpane-set-effort (effort)
   "Set this buffer's session's reasoning EFFORT through `sessions/setEffort'.
@@ -2123,13 +2130,14 @@ stayed hidden, holding the session.
 
 The efforts offered are the model's just chosen, since the status naming
 it may not have arrived, or with an empty choice those of the model the
-session already has, if a status has named it (OW-vozaku).  The effort is
-sent after the model without awaiting its reply, and the server checks it
-against the model the session holds when it arrives, refusing one that
-model does not list (OW-tewofe).  The effort's minibuffer read in between
-all but ensures the model is taken first; an effort that overtook it would
-be checked against the old model, and refused in the echo area if that
-one does not list it."
+session already has, if a status has named it (OW-vozaku).  The model is
+sent as soon as it is read, and the effort only once the model's reply has
+come, whichever of that reply and the effort's read is last: the server
+checks an effort against the model the session holds when it arrives,
+refusing one that model does not list (OW-tewofe), and the helper answers
+requests concurrently, so one sent before could overtake the model and be
+checked against the old one (OW-zayefe).  A model that fails is reported
+in the echo area, and the effort read for it is never sent."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
   (let* ((cwd (agentpane--current-cwd))
          (ref (jsonrpc-request (agentpane--connection) 'sessions/create
@@ -2140,15 +2148,19 @@ one does not list it."
     (with-current-buffer buffer
       (agentpane--draw [] (agentpane--transcript-header summary))
       (agentpane--attach-now))
-    (let ((model (agentpane--read-model backend)))
-      (agentpane-set-model model)
-      (let ((effort (agentpane--read-effort
-                     backend
-                     (if (string-empty-p model)
-                         (buffer-local-value 'agentpane--model buffer)
-                       model))))
-        (when effort
-          (agentpane-set-effort effort))))))
+    (let ((model (agentpane--read-model backend))
+          (taken nil)
+          (effort nil))
+      (agentpane-set-model model (lambda ()
+                                   (setq taken t)
+                                   (when effort (agentpane-set-effort effort))))
+      (setq effort (agentpane--read-effort
+                    backend
+                    (if (string-empty-p model)
+                        (buffer-local-value 'agentpane--model buffer)
+                      model)))
+      (when (and effort taken)
+        (agentpane-set-effort effort)))))
 
 ;;;; The composer
 
