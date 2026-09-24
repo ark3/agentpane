@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A chosen Claude Code effort is lost on a resume and a fork, though every store line records it
@@ -35,3 +36,15 @@ That same probe read `effective.model` as `opus[1m]`, so a resume that loses its
 
 - A test resumes a Claude Code conversation whose store's last assistant line records a model and effort and asserts the CLI is told that effort before the first turn, and that model unless the CLI was measured restoring it, shown red first.
 - A test forks such a conversation and asserts the fork's process is told the parent's effort, shown red first.
+
+## Close note
+
+A Claude Code resume, and a fork at a real entry, now spawn with `--effort <level>` at the effort the last hydrated assistant message a model ran records -- for a fork, the kept prefix's -- per D23; a `<synthetic>` assistant line the CLI writes itself (a session-limit notice, `isApiErrorMessage: true`, no `effort`) is skipped for both the effort and the stored model, since a resume after a session limit is exactly when such a line is last.
+`effort` is a new `ClaudeSpawnOptions` field in `src/server/adapters/claude/process.ts`; `StartOptions` is unchanged.
+The spawn flag was chosen over `apply_flag_settings` after attach because it is in force from the process's first instant; both were measured to hold the level.
+
+Measured on the home server 2026-09-23, `claude 2.1.280`, no turn (`docs/MANUAL_TESTING.md`, "What model and effort a Claude Code resume and fork run at, and how the effort is put back (OW-nabano)"): every resume or fork without an effort read `applied.effort: "high"`; `--effort low` and `--effort max` read back `low` and `max` on a resume and a fork, `max` included though no settings source names it; `--effort bogus` was ignored; a later `apply_flag_settings` still overrides the flag.
+The model half needed no code: a `--resume` and a `--fork-session` spawn of a sonnet session with no `--model` put the store's `claude-sonnet-5` in force over the settings' `opus[1m]`, and the existing tests already pin the stored model on the resume spawn (dropping it turned 8 red).
+That the adapter still passes `--model` anyway, overriding the CLI's own restore (observably, it drops `[1m]` on an opus session), is OW-tebibo; a `user` event seen on each `set_model` in the same run is OW-hiligu.
+
+Tests in `src/server/adapters/claude/adapter.test.ts` (resume at the stored model and effort; resume past a synthetic line; fork at the kept prefix's effort, not the parent's last) and `process.test.ts` (`--effort` placement), each shown red before the fix; `bun run check` green on main, 1227 tests.
