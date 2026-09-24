@@ -615,6 +615,14 @@ export class SessionManager {
 					// Only a session the backend itself stored can be resumed; a
 					// `virtual:` id means nothing to Pi or Codex.
 					...(bound.fromStore ? { resumeId: bound.ref.id } : {}),
+					// A resume carries no model, by D23 and not by omission: the
+					// store's last turn names it, and the backend or its adapter
+					// restores it. Pi does so itself -- as of `pi 0.87.1`, a
+					// `--session` spawn with no `--model` ran the model and level
+					// the file last recorded over settings defaults naming others,
+					// while a `--model <m>:<level>` would override that level
+					// (docs/MANUAL_TESTING.md, OW-ruzuhu and OW-pubulu). So no
+					// copy of the chosen model is kept here across a close.
 					...(bound.model ? { model: bound.model } : {}),
 				},
 			);

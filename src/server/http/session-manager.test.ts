@@ -948,6 +948,29 @@ describe("lifecycle", () => {
 		expect(after.find((s) => sessionKey(s.ref) === sessionKey(ref))?.status).toBe("attached");
 	});
 
+	it("resumes a closed Pi session with no model, leaving Pi to restore the one its file recorded (OW-pubulu, D23)", async () => {
+		// As of `pi 0.87.1` a `--session` resume runs the model and level the file
+		// last recorded, and a `--model <m>:<level>` would override the level
+		// (docs/MANUAL_TESTING.md, OW-ruzuhu and OW-pubulu).
+		const real: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/materialised.jsonl" };
+		index = new FakeSessionIndex([storedSession(real, WORKSPACE)]);
+		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: real.id });
+		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
+		const virtualRef = sessions.createVirtual(WORKSPACE, "pi", "openrouter/deepseek/deepseek-v4.1-flash:high");
+		await sessions.attach(virtualRef);
+		await sessions.submit(virtualRef, "first");
+		await sessions.close(real);
+
+		await sessions.attach(real);
+
+		expect(renaming.created).toHaveLength(2);
+		expect(renaming.created[0]?.startOptions).toEqual({
+			cwd: WORKSPACE,
+			model: "openrouter/deepseek/deepseek-v4.1-flash:high",
+		});
+		expect(renaming.created[1]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: real.id });
+	});
+
 	it("forgets a session's pending requests when it closes", async () => {
 		const adapter = await sessions.attach(REF);
 		const request = pi.forRef(REF)?.emitRequest("approval");
