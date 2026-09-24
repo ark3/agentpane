@@ -1019,7 +1019,12 @@
 		void controller.compact();
 	}
 
-	/** End the selected conversation's subprocess and stay on its transcript, now read-only (OW-tewave). */
+	/**
+	 * End the selected conversation's subprocess. A session with a transcript on
+	 * disk stays on it, now a read-only preview (OW-tewave); one with nothing on
+	 * disk lands on the startup view (OW-vasubu). `detach()` in `controller.ts`
+	 * says why.
+	 */
 	function detachSession(): void {
 		void controller.detach();
 	}
