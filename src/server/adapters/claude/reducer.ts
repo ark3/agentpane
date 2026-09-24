@@ -426,7 +426,8 @@ export class ClaudeReducer {
 			}
 			return effects;
 		}
-		// Replayed echoes (`<local-command-stdout>...` after /compact) and
+		// Replayed echoes (`<local-command-stdout>...` after /compact, and after
+		// a `set_model` as of `claude 2.1.280`, MANUAL_TESTING OW-hiligu) and
 		// harness-injected wrapper lines are not human turns.
 		if (event.isReplay === true) return effects;
 		const kept = texts.filter((text) => text.trim().length > 0 && !isSyntheticClaudeUserText(text));

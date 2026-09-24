@@ -20,7 +20,8 @@ export type FixtureName =
 	| "fork-at-message"
 	| "session-id"
 	| "control-discovery"
-	| "permission-request";
+	| "permission-request"
+	| "set-model";
 
 const FIXTURE_DIR = fileURLToPath(
 	new URL("../../../../resources/fixtures/claude/", import.meta.url),

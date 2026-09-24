@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `sonnet (claude-sonnet-5)`</local-command-stdout>"},"session_id":"bfe6341d-5ffb-4dc7-a07e-5b61c65c88f1","parent_tool_use_id":null,"uuid":"8301111d-75a8-4850-b034-35fe30f56027","timestamp":"2026-09-24T01:18:54.263Z","isReplay":true}
+{"type":"control_response","response":{"subtype":"success","request_id":"set-model-1"}}
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `haiku (claude-haiku-4-5-20251001)`</local-command-stdout>"},"session_id":"bfe6341d-5ffb-4dc7-a07e-5b61c65c88f1","parent_tool_use_id":null,"uuid":"08355a21-4913-4800-a42e-30d2bf70e85f","timestamp":"2026-09-24T01:18:54.281Z","isReplay":true}
+{"type":"control_response","response":{"subtype":"success","request_id":"set-model-2"}}
