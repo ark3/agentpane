@@ -780,6 +780,23 @@ answered."
        (list :session ref :isStreaming :json-false :model "gpt-5.6-luna" :effort nil))
       (should (equal mode-line-process " [gpt-5.6-luna]")))))
 
+(ert-deftest agentpane-test-mode-line-names-the-unrestored-model ()
+  "A status whose `unrestoredModel' names a model says beside the model in
+force that the recorded one was not restored, before any turn; one whose
+`unrestoredModel' is null shows nothing new (OW-firaja)."
+  (let ((ref '(:backend "pi" :id "s1")))
+    (agentpane-test--with-session ref
+      (agentpane--draw [])
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "deepseek-v4.1-flash"
+             :effort "high" :unrestoredModel "claude-sonnet"))
+      (should (equal mode-line-process
+                     " [deepseek-v4.1-flash (claude-sonnet not restored) · high]"))
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "deepseek-v4.1-flash"
+             :effort "high" :unrestoredModel nil))
+      (should (equal mode-line-process " [deepseek-v4.1-flash · high]")))))
+
 (ert-deftest agentpane-test-mode-line-falls-back-to-the-default-effort ()
   "A status whose effort is null names the model's `defaultEffort' from
 `models/list' in the mode line once the listing answers, as the browser's

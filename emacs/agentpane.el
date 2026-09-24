@@ -1653,6 +1653,10 @@ model's `defaultEffort' from `models/list' stands in for it, as the same
 field and unmarked, as the browser's effort select shows it (OW-gogaki);
 until that listing has answered, or when it names none, no effort is
 named.  See `agentpane--list-default-effort' for when it is asked for.
+When the status's `unrestoredModel' names a model, the model field says it
+was not restored, so a resume that fell back does not read as chosen (D23,
+OW-firaja); it follows the field, which the server clears, and has no
+dismissal of its own.
 When streaming ends, the last node is redrawn, since it was drawn as the
 pending turn, a tool call with no result on it as running, and the helper
 re-sends no node for the change; and reading view's tail status goes."
@@ -1671,7 +1675,12 @@ re-sends no node for the change; and reading view's tail status goes."
               (list (and (eq (plist-get params :isStreaming) t) "streaming")
                     (let ((compaction (plist-get params :compaction)))
                       (and compaction (concat "compaction " compaction)))
-                    (plist-get params :model)
+                    (let ((unrestored (plist-get params :unrestoredModel)))
+                      (if unrestored
+                          (concat (plist-get params :model) " "
+                                  (propertize (format "(%s not restored)" unrestored)
+                                              'face 'agentpane-warning))
+                        (plist-get params :model)))
                     (or (plist-get params :effort) agentpane--default-effort))))
   (setq agentpane--model (plist-get params :model))
   (agentpane--show-reading-tail)
