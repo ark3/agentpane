@@ -307,6 +307,7 @@ describe("PiAdapter cold start (D3)", () => {
 			messages: [assistantMessage("from a previous session"), assistantMessage("and another")],
 		});
 		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
 		await started;
 
 		// Nothing replays the events that built this transcript, so without the
@@ -659,6 +660,7 @@ describe("PiAdapter.fork", () => {
 		await Promise.resolve();
 		h.child.respondTo("get_messages", { messages: [assistantMessage("rewound")] });
 		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
 
 		// No `start`: the fork IS the file this live process is already writing.
 		expect(await forked).toEqual({ ref: { backend: "pi", id: MOVED } }); // moved file, NOT REF
@@ -926,6 +928,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await flush();
 		h.child.respondTo("get_messages", { messages: [] });
 		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
 		await forked;
 
 		expect(h.adapter.getState().effort).toBe("max");
@@ -986,6 +989,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 			await flush();
 			h.child.respondTo("get_messages", { messages });
 			h.child.respondTo("get_entries", { entries, leafId });
+			h.child.respondTo("get_available_models", { models: [FLASH, NO_OFF, PLAIN] });
 			await started;
 		}
 
@@ -1055,6 +1059,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 				],
 				leafId: "a2",
 			});
+			h.child.respondTo("get_available_models", { models: [FLASH, NO_OFF, PLAIN] });
 			await forked;
 
 			expect(efforts(h)).toEqual(["user", "high", "user", "low"]);
@@ -1087,6 +1092,31 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 			await resume(h, { model: FLASH, thinkingLevel: "off" }, [summary, a1, a2, stray], entries, "a2");
 
 			expect(efforts(h)).toEqual(["compactionSummary", undefined, "off", undefined]);
+		});
+
+		it("names a turn after a resume that clamped the recorded level the clamped level, which Pi records nowhere (OW-lehita)", async () => {
+			const h = makeHarness();
+			// The recorded model has left the catalogue, so the resume fell back to
+			// FLASH and clamped the recorded `medium`, which FLASH lacks, up to `high`
+			// without appending an entry (docs/MANUAL_TESTING.md, OW-lehita).
+			const GONE = { provider: "openrouter", id: "retired/model" };
+			const u1 = prompt("first", at(2));
+			const a1 = reply("on the retired model", at(3), GONE);
+			const u2 = prompt("after the resume", at(10));
+			const a2 = reply("on flash", at(11), FLASH);
+			const entries = [
+				entry("m", null, 0, { type: "model_change", provider: GONE.provider, modelId: GONE.id }),
+				level("l1", "m", 0, "medium"),
+				message("u1", "l1", u1),
+				message("a1", "u1", a1),
+				message("u2", "a1", u2),
+				message("a2", "u2", a2),
+			];
+
+			await resume(h, { model: FLASH, thinkingLevel: "high" }, [u1, a1, u2, a2], entries, "a2");
+
+			// The retired model's own levels are unknown, so its turn keeps the level recorded.
+			expect(efforts(h)).toEqual(["user", "medium", "user", "high"]);
 		});
 	});
 });

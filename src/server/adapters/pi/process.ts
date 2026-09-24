@@ -300,17 +300,25 @@ export class PiAdapter implements BackendAdapter {
 	/**
 	 * Replace the held transcript with Pi's own. Emits a snapshot, not an upsert.
 	 * Its messages carry no level, so each assistant turn is named from the
-	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu).
+	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu),
+	 * each clamped to its turn's model in the catalogue (OW-lehita).
 	 * Both callers read `get_state` first, because whether the current model
 	 * reasons decides what an `off` turn on it is named.
 	 */
 	private async hydrateMessages(): Promise<void> {
-		const [messages, entries] = await Promise.all([
+		const [messages, entries, catalogue] = await Promise.all([
 			this.sendCommand<PiResponseFor<"get_messages">>({ type: "get_messages" }),
 			this.sendCommand<PiResponseFor<"get_entries">>({ type: "get_entries" }),
+			this.sendCommand<PiResponseFor<"get_available_models">>({ type: "get_available_models" }),
 		]);
 		const current = { model: this.model, reasoning: this.reasoning };
-		const labelled = withLoadedEfforts(messages.data.messages, entries.data.entries, entries.data.leafId, current);
+		const labelled = withLoadedEfforts(
+			messages.data.messages,
+			entries.data.entries,
+			entries.data.leafId,
+			current,
+			catalogue.data.models,
+		);
 		this.state = { ...this.state, messages: labelled };
 		this.emitUpdate(undefined);
 	}

@@ -3083,3 +3083,43 @@ Both clients offer only listed ids -- the browser's model control is a `<select>
 Whether a real model that `model/list` omits, or one of the two hidden ones, would run, and how an API-key login answers a made-up id.
 Nothing here went through a browser or Emacs.
 Read from the code, the browser's banner (`view.error` in `src/client/session-state.ts`) shows the raw JSON once, the second event overwriting the first, while Emacs appends an `(:error MESSAGE)` node per event and shows it twice.
+
+## A Pi resume that clamps the recorded level, or overrides it, records no level (OW-lehita)
+
+Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-lehita` worktree cut at `f09f7fd`.
+Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, and in a throwaway workspace beside it, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and both directories were removed.
+The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` directly, not through `sbox` or agentpane's server.
+Four turns ran in all, each `Do not use any tools. Reply with exactly: ok` on `openrouter/deepseek/deepseek-v4.1-flash`, each answering `ok` for $0.0003 or less.
+The question was whether either way a resume can put a level in force without choosing it appends a `thinking_level_change`, since the labels on loaded turns are read from those entries (`withLoadedEfforts` in `src/server/adapters/pi/reducer.ts`, OW-helumu).
+
+**The session.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, it ran one turn, which carried a thinking block and 10 reasoning tokens.
+The file read `session`, `model_change`, `thinking_level_change` `high`, then the system, user and assistant messages: six lines.
+It was copied three times, one copy per resume below, so each started from the same six lines.
+
+**A resume that clamps the recorded level appends nothing.**
+In one copy the `thinking_level_change` entry's `thinkingLevel` was hand-edited from `high` to `minimal`, which that model lacks, and nothing else in the file was touched.
+`pi --mode rpc --session <copy>`, the shape agentpane's resume spawn takes, answered `get_state` with the same model at `low`: `clampThinkingLevel` in `pi-ai` moves a missing level up to the nearest the model has, and this model has `off`, `low`, `high` and `max`.
+`get_entries` still held the one entry naming `minimal`, and the file still held six lines.
+A turn then ran, with no thinking block and 0 reasoning tokens, and after it `get_entries` held the six entries plus the new user and assistant messages and nothing else.
+A second bare resume read `low` again, and its `get_entries` named `minimal` as the only level: the turn that ran at `low` would load labelled `minimal`.
+
+**A resume given a level on the command line appends nothing either, and the next resume forgets it.**
+Resuming a second copy with `--model openrouter/deepseek/deepseek-v4.1-flash:low` answered `get_state` at `low`, with the one `high` entry still the only level on the branch; the turn that followed carried no thinking block, and the file grew by its user and assistant messages alone.
+Resuming the third copy with `--thinking off` did the same at `off`.
+A bare resume of each read `high`, the level recorded before the override, so the override governed only the process it was given to and is on no record once that process ends.
+
+**The source agrees.**
+`createAgentSession` in `dist/core/sdk.js` restores the branch's last recorded level (line 119), clamps it to the model it resolved (line 138), and appends a `thinking_level_change` only when the branch has none (line 262); given `options.thinkingLevel`, which `dist/main.js` sets from a `--model` suffix (line 378) or from `--thinking` (line 405), it takes that level instead and appends nothing either.
+`dist/main.js` then calls `setThinkingLevel` with the level already in force (lines 670 to 672), and `setThinkingLevel` in `dist/core/agent-session.js` appends only when the level changes (line 1761), which it does not.
+
+**What agentpane makes of it.**
+A clamp is recoverable, because Pi clamps a recorded level to a model the same way on every resume, and a level Pi does record is already clamped to the model then in force.
+So `withLoadedEfforts` now clamps each recorded level to its turn's model, found in the `get_available_models` catalogue that `hydrateMessages` in `src/server/adapters/pi/process.ts` fetches alongside `get_messages` and `get_entries`, with `clampThinkingLevel` in `src/server/adapters/pi/protocol.ts` transcribing `pi-ai`'s.
+A turn whose model has left the catalogue keeps the level recorded.
+The override is not recoverable: the level lives only in the command line of a process that is gone, and agentpane's resume spawn carries no `--model` (OW-pubulu), so the exposure is a turn driven from the `pi` CLI under an override, which reloads in agentpane labelled with the level recorded before it.
+
+**Not established.**
+Only a hand-edited level was clamped; a clamp that arose because the recorded model left the catalogue or lost its auth and the resume fell back to another was read at the source, where the same line 138 applies.
+Whether the turns after the resumes ran at `low` and `off` rests on `get_state`; their missing thinking blocks agree but do not prove it.
+A resume that clamps followed by a `set_model` that leaves the level unchanged would record nothing either, so a turn on the new model is labelled by clamping the unclamped recorded level to that model, which can differ from the level in force; this was read at the source, in `_getThinkingLevelForModelSwitch`, and not run.

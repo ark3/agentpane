@@ -24,9 +24,10 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { AgentRequest, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
 import {
+	clampThinkingLevel,
 	PI_DIALOG_METHODS,
 	type PiCommand,
 	type PiDialogMethod,
@@ -205,9 +206,23 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * need not line up with the branch. A timestamp the branch holds twice, or not
  * at all, leaves the message unlabelled rather than guessing.
  *
+ * The recorded level is clamped to the turn's model, found in `catalogue`,
+ * because a resume puts a level in force without recording it: Pi restores the
+ * last recorded level and clamps it to the model it resolved, and appends an
+ * entry only for a session that has none. As of `pi 0.87.1` a resume whose
+ * clamp changed the level, and one given `--model <ref>:<level>` or
+ * `--thinking`, each appended nothing (docs/MANUAL_TESTING.md, OW-lehita).
+ * The clamp recovers the first, since Pi clamps the same way each time; a
+ * level Pi records is already clamped, so for it the clamp changes nothing. A
+ * turn whose model has left the catalogue keeps the level recorded. The
+ * override is recoverable nowhere: the level named on the command line is on
+ * no record, so a turn driven under one, from the `pi` CLI (agentpane's
+ * resume spawn carries no `--model`, OW-pubulu), reloads with the level
+ * recorded before it.
+ *
  * Live stamping names nothing for a model that does not reason, and Pi clamps
  * such a model to `off` (`clampThinkingLevel` in `pi-ai`, read at the source in
- * 0.87.1), so a recorded level other than `off` means the model reasoned. At
+ * 0.87.1), so a clamped level other than `off` means the model reasoned. At
  * `off` that is only known for the model `get_state` names now (`current`), so
  * an `off` turn on any other model is left unlabelled.
  */
@@ -216,7 +231,9 @@ export function withLoadedEfforts(
 	entries: PiSessionEntry[],
 	leafId: string | null,
 	current: { model: string | null; reasoning: boolean },
+	catalogue: Model<any>[],
 ): AgentMessage[] {
+	const models = new Map(catalogue.map((model) => [`${model.provider}/${model.id}`, model]));
 	const byId = new Map(entries.map((entry) => [entry.id, entry]));
 	const branch: PiSessionEntry[] = [];
 	for (let entry = leafId ? byId.get(leafId) : undefined; entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
@@ -234,8 +251,11 @@ export function withLoadedEfforts(
 		if (message?.role !== "assistant" || typeof message.timestamp !== "number") continue;
 		const started = message.timestamp;
 		const before = changes.findLast((change) => change.at <= started);
+		const ref = `${message.provider}/${message.model}`;
+		const model = models.get(ref);
 		let level = before && before.at < started ? before.level : null;
-		if (`${message.provider}/${message.model}` === current.model) {
+		if (level !== null && model) level = clampThinkingLevel(model, level);
+		if (ref === current.model) {
 			if (!current.reasoning) level = null;
 		} else if (level === "off") {
 			level = null;

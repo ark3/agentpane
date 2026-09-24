@@ -835,6 +835,7 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first turn (D9), and its choice lives in memory until that turn is written.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
+On Pi that is the recorded level clamped to the turn's model, since as of `pi 0.87.1` a resume that clamps the recorded level records nothing, and a level given on a resume's command line is recorded nowhere, so a turn run under one reloads with the level before it (`docs/MANUAL_TESTING.md`, OW-lehita).
 What each backend needs from agentpane under this decision:
 
 - **Codex** (OW-sayaju, OW-hojefo): a resume and a fork at an entry re-assert the model and effort the rollout's last `turn_context` recorded.

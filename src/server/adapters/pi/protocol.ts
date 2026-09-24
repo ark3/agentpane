@@ -304,6 +304,22 @@ export function thinkingLevels(model: Model<any>): string[] {
 	});
 }
 
+/**
+ * The level Pi runs `model` at when asked for `level`: `pi-ai`'s
+ * `clampThinkingLevel`, transcribed for the same reason as `thinkingLevels`
+ * and read at the same source. A level the model lacks moves up to the
+ * nearest one it has, else down; a model that does not reason runs at `off`.
+ */
+export function clampThinkingLevel(model: Model<any>, level: string): string {
+	const available: string[] = model.reasoning ? thinkingLevels(model) : ["off"];
+	if (available.includes(level)) return level;
+	const requested = (THINKING_LEVELS as readonly string[]).indexOf(level);
+	if (requested === -1) return available[0] ?? "off";
+	const up = THINKING_LEVELS.slice(requested).find((candidate) => available.includes(candidate));
+	const down = THINKING_LEVELS.slice(0, requested).findLast((candidate) => available.includes(candidate));
+	return up ?? down ?? available[0] ?? "off";
+}
+
 export function splitModelRef(modelRef: string): { provider: string; modelId: string } {
 	const slash = modelRef.indexOf("/");
 	if (slash === -1) {
