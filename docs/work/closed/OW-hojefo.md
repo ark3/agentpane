@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # A Codex fork at the first user message sends no lastTurnId, which by the protocol keeps the whole thread rather than none of it
@@ -22,3 +23,13 @@ The existing test "starts a fork at the model and effort the kept prefix's last 
 
 The behaviour at index 0 is measured and recorded in `docs/MANUAL_TESTING.md` with the version.
 If it keeps history the fork should not have, an adapter test in `src/server/adapters/codex/adapter.test.ts` pins whatever the fix sends at index 0 (a fresh thread, or a refusal), red before it; if it keeps none, the comment above `lastTurnId` in `fork()` says so and cites the measurement.
+
+## Close note
+
+Measured on the home server 2026-09-23, `codex-cli 0.156.0`, turns on `gpt-5.6-luna` only, in a temporary `CODEX_HOME`: `thread/fork` with no `lastTurnId` on a two-turn parent kept the whole parent (`history_base.end_ordinal_exclusive` at the file's end, both turns in `thread/read`), and `lastTurnId: ""` or an unknown turn id was refused with `-32600 turn not found`, so no `thread/fork` keeps nothing; a `thread/start` thread writes no rollout until its first turn and cannot be resumed before it.
+`CodexAdapter.fork()` in `src/server/adapters/codex/adapter.ts` now, at the first fork point, sends nothing to Codex and returns a `virtual:` ref with `start: { cwd, model, forkOf: { parentId, entryId, effort } }`, Claude Code's session-start shape; the fork's own adapter spawns its own app-server and `thread/start`s at the parent's model, carries `forkOf.effort` on every `turn/start` (D23, "A fork that keeps no turn"), and the session manager renames the ref at attach as it does for a virtual session.
+Three tests failed first against the old code (a `thread/fork` sent at index 0, the config's `high` effort instead of the parent's `low`, and the fork's ref not `virtual:`); tests that forked at the first turn now fork at the second; `bun run check` passes on main.
+An adversarial reader traced fork, attach, rename and both clients (browser `forkAndSubmit`, Emacs `agentpane--fork-at`) and found no failure; the two stale comments it named, in the `fork` route of `src/server/http/app.ts` and the `ForkResult` docblock, were fixed.
+Evidence: `docs/MANUAL_TESTING.md` OW-hojefo section; D23's Codex sentence updated.
+Filed from it: OW-wedupe (detaching a Codex session before its first turn previews a rollout-less thread) and OW-riluye (vendored Codex bindings behind 0.156.0).
+Unmeasured edge the reader raised at low confidence: a parent started outside agentpane under a non-default `model_provider` would fork onto `config.toml`'s provider, since `thread/start` names only the model.
