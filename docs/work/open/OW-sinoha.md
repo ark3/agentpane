@@ -19,11 +19,18 @@ Since OW-jitoni, `PiAdapter.fork` also compares the kept branch's recorded model
 A remedy that re-asserts B after the fork has to leave `unrestoredModel` null once B is back in force; `setModel` clears it, but a bare `set_model` command sent past it would not.
 
 In service of D23 in `docs/DESIGN.md`.
-Load-bearing: whether `pi 0.87.1` or later, spawned with `--model A` and given `set_model` B, reports A or B from `get_state` after `fork`, which model the next turn's provider request names, and what the forked file records.
+Load-bearing: whether `pi 0.87.1` or later, spawned with `--model A` and given `set_model` B, reports A or B from `get_state` after `fork`, and what the forked file records.
 Incidental: the remedy, for instance the adapter remembering a chosen model and re-sending `set_model` after a fork as it re-sends the chosen level, in that order, since `set_model` resets the level (the `thinkingLevel` docblock in `process.ts`).
 The D23 Pi bullet already says "Read at the source and not run, that fork also takes the spawn's `--model` over a model `set_model` chose"; this card retires or confirms that sentence.
 
+## The live run keeps every turn on the pinned model
+
+Set by the owner on 2026-09-24.
+The `AGENTS.md` pin binds every turn here, so the run reverses the roles above: spawn with `--model` naming some other model the home server's Pi can resolve, and never run a turn on it; `set_model` to the pinned `openrouter/deepseek/deepseek-v4.1-flash`, run the turns before the fork there, fork, then read `get_state` and the forked file.
+If `get_state` names the spawn model after the fork, the snap-back is shown, and the turn after the fork is not sent, since it would run off the pin.
+If it names the pinned model, a turn after the fork runs on the pinned model and may be sent, with its provider request read through the `before_provider_request` extension as OW-dojebo's run did.
+
 ## Done when
 
-- A live run on the home server, with the throwaway `PI_CODING_AGENT_DIR` method and the `before_provider_request` extension recorded in OW-dojebo's section of `docs/MANUAL_TESTING.md`, spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high` and switched by `set_model` to another model the home server's Pi can reach, records with the version what `get_state`, the next turn's request, and the forked file show after a fork.
+- A live run on the home server, with the throwaway `PI_CODING_AGENT_DIR` method and the `before_provider_request` extension recorded in OW-dojebo's section of `docs/MANUAL_TESTING.md`, arranged as the section above says, records with the version what `get_state` and the forked file show after a fork, and the next turn's request only where that turn was sent.
 - If the model snaps back, a test in `src/server/adapters/pi/process.test.ts` forks a session after `setModel` and asserts the model and level in force after the fork are the chosen ones, shown red first; if it does not, the run's record is the whole of the work, and the D23 sentence quoted above is corrected in the same change.

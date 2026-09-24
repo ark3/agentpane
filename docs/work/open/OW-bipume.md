@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [defect]
 ---
 
 # A session error or pending request reaches no client that was not already holding a view
@@ -28,10 +28,16 @@ That window may be where Codex's `configWarning` normally arrives, if app-server
 A fork's borrower joins its parent's connection after `initialize`, so it would never hear such a notice even with the window closed.
 The Emacs helper holds the notices it has seen and replays them on each `session/snapshot`, but that only survives a redraw, not a reconnect or a late attach.
 
-Deferred rather than fixed because the repair is on the server and the card that surfaced it is a client one.
-Load-bearing: that the snapshot is the only restoring path a client has, and it carries neither field.
-Incidental: which repair.
+## Decided
+
+The owner decided on 2026-09-24 that `error`, `requests` and `notices` are not ephemeral: a client that arrives late sees them, for the reason OW-fomebu surfaced warnings at all -- something shown only to whoever happened to be watching is, for everyone else, dropped.
+So the repair is the first shape below: the server holds each session's current error, pending requests and notices, and every introduction a client receives -- the opening snapshots, an attach, and the snapshot after the startup window -- carries them.
+Publishing `bound.adapter` earlier alone is not enough, since it leaves the reconnect gap standing; it may still be part of the repair.
+Load-bearing: that the snapshot is the only restoring path a client has, so it must carry all three.
+Incidental: the field names, and how the Emacs helper's own replay of notices on `session/snapshot` is retired or kept.
+A fork's borrower that joins its parent's connection after `initialize` still never hears a notice sent before it joined; cover it or say so in the close note.
 The shapes, none costed -- add `error` and `requests` to `SnapshotSource` and the `snapshot` event, so every introduction carries them; or publish `bound.adapter` before `await adapter.start(...)` so an in-window `broadcastSnapshot` stops no-opping, which closes the startup window only and leaves the reconnect gap standing.
 
-Done when a client that connects to a server holding a session with a pending request shows the blocked banner for it without a gesture, pinned by a test that goes red first, and one that connects after a notice was raised shows that notice, pinned the same way.
-If the decision instead is that these fields are deliberately ephemeral, that closes this card too, recorded beside `SnapshotSource` in `src/server/http/broadcaster.ts` and in the OW-pezazo docblock in `src/client/session-state.ts` that currently points here.
+Done when a client that connects to a server holding a session with a pending request shows the blocked banner for it without a gesture, pinned by a test that goes red first, and one that connects after a notice was raised, or after a turn error was recorded, shows that notice or that error, each pinned the same way.
+The OW-pezazo docblock in `src/client/session-state.ts` that points here says what the snapshot now carries.
+Per `AGENTS.md`, "Both clients", the Emacs client restores the same three fields from the same snapshot, pinned by an ERT test red first, and the whole ERT suite passes as the Commentary of `emacs/agentpane.el` gives it, alongside `bun run check`.
