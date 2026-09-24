@@ -29,8 +29,11 @@ No client is told a request stopped being pending: not the one that answered it,
 ## Shape
 
 Publish the request as now, answer it at arrival, and broadcast the retraction, so the warning appears and clears rather than standing.
-Whether the retraction is its own `ServerEvent` variant or a field on an existing one is the implementer's call; what matters is that a client which missed the middle of the exchange converges, since `snapshot` preserves `requests` by OW-1's decision and would otherwise restore a stale one.
-Check that interaction deliberately -- OW-1 may still be unbuilt when this lands, and its reasoning is that the server holds ownership without payload and cannot reconstruct an `AgentRequest` into a snapshot.
+Whether the retraction is its own `ServerEvent` variant or a field on an existing one is the implementer's call; what matters is that a client which missed the middle of the exchange converges.
+Amended 2026-09-24 after OW-bipume landed: the server now holds each session's pending requests (`ManagedSession.requests` in `src/server/http/session-manager.ts`), every `snapshot` carries them, and a client replaces its `requests` from the snapshot rather than preserving its own, so OW-1's preserve rule no longer describes the code.
+A request answered through the reply route already leaves the server's copy (`clearRequest`) and so the next snapshot, but no event retracts it live.
+A request Codex resolves itself still reaches nobody: `applyEffects` consumes `request-resolved` and tells the manager nothing, so the server keeps holding it, every later snapshot re-sends it, and since OW-bipume not even a page reload clears the warning or re-enables Tools -> Detach.
+So the retraction has to reach the manager's held `requests` as well as the wire, and a snapshot is then a sufficient convergence path for a client that missed the event.
 
 The decline shape comes from `DECLINE_RESPONSES` where the kind has one, and a JSON-RPC error where it does not, which is what OW-nujawi already does for unknown kinds; this card makes the known kinds behave the same way with a proper "no" instead of an error.
 

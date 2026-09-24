@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: moot
 ---
 
 # A snapshot preserves the session's `error` and its pending `requests`; the wire contract has to say so, and a test has to hold it.
@@ -75,3 +76,10 @@ delivers.
 OW-66's fifth test depends on this being settled: it asserts a session
 snapshot does not clear a session-less `notice`, which is this rule one arm
 over.
+
+## Close note
+
+Superseded by OW-bipume on 2026-09-24.
+This card would have written into the contract that a snapshot *preserves* the client's own `error` and `requests`, because the server could not reconstruct them; its own "gap this does not close" said that retaining them server-side and carrying them in the snapshot would supersede that.
+The owner decided exactly that on OW-bipume, and it landed: every `snapshot` now carries the server's held `error`, `requests` and `notices`, and the client replaces its copy from them, with the error's OW-31 lifecycle mirrored on the server.
+Pinning a preserve rule now would contradict the code.

@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A session error or pending request reaches no client that was not already holding a view
@@ -41,3 +42,25 @@ The shapes, none costed -- add `error` and `requests` to `SnapshotSource` and th
 Done when a client that connects to a server holding a session with a pending request shows the blocked banner for it without a gesture, pinned by a test that goes red first, and one that connects after a notice was raised, or after a turn error was recorded, shows that notice or that error, each pinned the same way.
 The OW-pezazo docblock in `src/client/session-state.ts` that points here says what the snapshot now carries.
 Per `AGENTS.md`, "Both clients", the Emacs client restores the same three fields from the same snapshot, pinned by an ERT test red first, and the whole ERT suite passes as the Commentary of `emacs/agentpane.el` gives it, alongside `bun run check`.
+
+## Close note
+
+Built: the server holds each session's turn `error`, pending `requests` and `notices` on its `ManagedSession` (`src/server/http/session-manager.ts`), written by the adapter subscriptions in `#start` from before `adapter.start()` resolves, and every `snapshot` carries all three (`src/shared/protocol.ts`, `src/server/http/broadcaster.ts`).
+So the opening snapshots on connect or reconnect, an attach, the snapshot after the startup window, and the one after a rename all restore them, and the browser's snapshot arm (`src/client/session-state.ts`) takes them wholesale, replacing what it held.
+
+Lifecycle, mirroring the client so a snapshot never resurrects what it cleared: the error clears when a later prompt is admitted unless a newer one arrived meanwhile (OW-31's rule, with the prior error read before the prompt route's own attach, so an error raised by a start that prompt triggered survives it); a request leaves when answered through the reply route (`clearRequest`); notices only accumulate; a Pi fork's re-key (`#adoptRef`) drops the parent's error and keeps requests and notices; close drops everything.
+The browser's Dismiss was client-only and would have been undone by the next snapshot, so it now sends `DELETE ROUTES.error(ref)` with a `DismissErrorRequest` naming the message dismissed, and the server clears only a matching error so a newer one survives.
+
+Emacs: the helper puts `error` and `requests` on `session/snapshot` beside `notices` (the server's copy now, which retires the helper's own notice replay in effect), a live request arrives as a new `session/request` notification carrying the `AgentRequest` instead of `session/error` text, and `agentpane--draw` redraws the error, notices and requests after the nodes.
+`src/emacs/protocol.ts` documents both.
+Emacs cannot dismiss an error; that parity gap predates this card and is OW-desufa.
+
+Verified: the new tests were run against main's source and failed there (13 vitest across `App.test.ts` and `session-manager.test.ts`, including the three "a client that connects after the fact" tests showing the blocked banner, a notice and a turn error with no gesture, plus 2 ERT tests), then passed; `bun run check` 1327 tests green, ERT `Ran 91 tests, 91 results as expected`, and `bun run test:browser` 22 passed after the e2e harness edit.
+The OW-pezazo docblock in `session-state.ts`, the `SessionView.notices` comment, the protocol docblocks and `docs/DESIGN.md` D2a now say what the snapshot carries.
+
+Not covered: a Codex fork's borrower that joins its parent's app-server connection after `initialize`, and a session re-attached onto a still-live connection (OW-voyezi), start with no notices, so a connection-wide notice sent before they joined never reaches them.
+Copying the parent's notices would be wrong because `AgentNotice` does not say which are about the app-server and which about the parent's own thread; the fix would be `CodexConnection` recording thread-less notices and replaying them to a borrower at start.
+Whether `configWarning` even arrives in that pre-join window is unmeasured.
+
+Found in review and left: a request Codex resolves itself (`request-resolved`, dropped by the adapter) stays held by the server and so on every snapshot, and since this change a reload no longer clears it; OW-gusifo owns that and was amended to say so.
+`docs/DESIGN.md` D21's historical snapshot field list was already missing `effort` and `unrestoredModel` and was left as history.
