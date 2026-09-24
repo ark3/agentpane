@@ -119,9 +119,12 @@ This is provisional and OW-bijera is what revisits it: once a human can answer, 
 It is therefore sequenced *before* bijera rather than after, because declining honestly needs the retraction this contract has always lacked -- see the paragraph below.
 
 **A resolved request has no wire event, and that is a gap, not a decision.**
-`ServerEvent` carries `request` and nothing that retracts it, so the browser is never told a request stopped being pending -- not when this client answers it, not when another does, and not when Codex resolves it itself through auto-approval.
-The client's `requests` array is append-only for that reason (`src/client/session-state.ts`, the `request` arm of `reduceServerEvent`), which is why a declined request would otherwise leave a warning standing over a turn that had already moved on.
-The Codex reducer already produces a `request-resolved` effect that the adapter consumes and drops, so the missing piece is the wire event and the client arm, not the detection (OW-gusifo).
+`ServerEvent` carries `request` and nothing that retracts it, so no event tells a client a request stopped being pending.
+Since OW-bipume the server holds each session's pending requests and every `snapshot` carries them, and the client's snapshot arm replaces its `requests` with them (`src/client/session-state.ts`); between snapshots the `request` arm only appends.
+So a request answered through agentpane's reply route leaves the client's view at the next snapshot, with no event of its own.
+A request Codex resolves itself, through auto-approval or another client of the app-server, does not leave at all: the Codex reducer produces a `request-resolved` effect that the adapter consumes and drops, so the server never learns of it and goes on holding the request.
+Since OW-bipume that request therefore stays on every snapshot, and a reload no longer clears it either.
+The missing piece is carrying that effect out of the adapter to the server's held requests and a wire event, not the detection (OW-gusifo).
 
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.

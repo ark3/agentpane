@@ -84,7 +84,7 @@ class FakeApi implements AgentpaneApi {
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly reply = vi.fn(async (_requestId: string, _body: AgentRequestReply) => {});
-	readonly dismissError = vi.fn(async (_session: SessionRef) => {});
+	readonly dismissError = vi.fn(async (_session: SessionRef, _message: string) => {});
 	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
@@ -1281,7 +1281,9 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
 		// The server holds the error too, and would put it back on the next
 		// snapshot if it were not told (OW-bipume).
-		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(ref);
+		// It names the error it dismisses, so a newer one the server holds by
+		// then is left standing.
+		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(ref, "The turn ended in an error.");
 	});
 
 	it("tells the server nothing when the selected session holds no error to dismiss (OW-bipume)", async () => {

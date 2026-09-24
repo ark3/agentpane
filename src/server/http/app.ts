@@ -24,6 +24,7 @@ import {
 	type BackendId,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
+	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
 	type ForkRequest,
@@ -277,6 +278,10 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.text !== "string") {
 					return error(400, "bad_request", "text is required");
 				}
+				// Read before the attach, which may start the session: an error its
+				// start raises is not one the sender saw, so admitting this prompt
+				// must not clear it (OW-31, OW-bipume).
+				const priorError = sessions.errorOf(ref);
 				await sessions.attach(ref);
 				// Through the manager, not straight at the adapter: `submit()` is
 				// one of the two points at which a session's id changes under us
@@ -286,7 +291,7 @@ export function createApp(deps: AppDeps): App {
 				// admitted the turn, not when the turn completes. Await that boundary
 				// before acknowledging the POST so a rejected admission remains a
 				// normal HTTP failure and the browser can preserve its draft.
-				await sessions.submit(ref, body.value.text, body.value.images);
+				await sessions.submit(ref, body.value.text, body.value.images, priorError);
 				return accepted();
 			}
 			case "abort": {
@@ -309,7 +314,12 @@ export function createApp(deps: AppDeps): App {
 				// The server holds the error for every later snapshot (OW-bipume), so a
 				// dismissal the server never heard of would come back on the next one.
 				if (request.method !== "DELETE") return methodNotAllowed(request.method, "DELETE");
-				sessions.clearError(ref);
+				const body = await readJson<DismissErrorRequest>(request);
+				if (!body.ok) return body.response;
+				if (typeof body.value.message !== "string") {
+					return error(400, "bad_request", "message is required");
+				}
+				sessions.clearError(ref, body.value.message);
 				return noContent();
 			}
 			case "fork": {

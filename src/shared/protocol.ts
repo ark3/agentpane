@@ -373,6 +373,16 @@ export interface SetEffortRequest {
 	effort: string;
 }
 
+/**
+ * DELETE /api/sessions/:backend/:id/error -- `message` is the error being
+ * dismissed, as the client showed it. It is named because another client's
+ * turn can fail while the dismissal is on its way, and that newer error must
+ * survive it (OW-bipume). A body without one answers 400 `bad_request`.
+ */
+export interface DismissErrorRequest {
+	message: string;
+}
+
 /** GET /api/models?backend=pi|codex */
 export interface ModelInfo {
 	id: string;
@@ -437,8 +447,9 @@ export const ROUTES = {
 	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
 	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
 	/**
-	 * DELETE -- dismiss the session's turn error, so no later snapshot carries
-	 * it (OW-bipume). 204 whether or not there was one.
+	 * DELETE with a `DismissErrorRequest` -- dismiss the session's turn error,
+	 * so no later snapshot carries it (OW-bipume). Only the error the body names
+	 * is cleared; a newer one stays. 204 whether or not anything was cleared.
 	 */
 	error: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/error`,
 	reply: (requestId: string) => `/api/requests/${encodeURIComponent(requestId)}`,

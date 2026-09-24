@@ -1826,9 +1826,20 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		await sessions.attach(REF);
 		pi.forRef(REF)!.emitError("turn failed");
 
-		sessions.clearError(REF);
+		sessions.clearError(REF, "turn failed");
 
 		expect(snapshots(connect())[0]?.error).toBeNull();
+	});
+
+	it("keeps an error newer than the one a client dismissed", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		adapter.emitError("first turn failed");
+		adapter.emitError("second turn failed");
+
+		sessions.clearError(REF, "first turn failed");
+
+		expect(snapshots(connect())[0]?.error).toBe("second turn failed");
 	});
 
 	it("carries all three across a rename", async () => {

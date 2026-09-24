@@ -5,6 +5,7 @@ import {
 	type AttachSessionResponse,
 	type CreateSessionRequest,
 	type CreateSessionResponse,
+	type DismissErrorRequest,
 	type EditDraftRequest,
 	type EditDraftResponse,
 	type ForkPoint,
@@ -100,8 +101,12 @@ export interface AgentpaneApi {
 	 * (OW-refibu).
 	 */
 	reply(requestId: string, body: AgentRequestReply): Promise<void>;
-	/** Dismiss the session's turn error on the server, so no later snapshot brings it back (OW-bipume). */
-	dismissError(ref: SessionRef): Promise<void>;
+	/**
+	 * Dismiss the session's turn error on the server, so no later snapshot
+	 * brings it back (OW-bipume). `message` is the error dismissed; the server
+	 * keeps a newer one.
+	 */
+	dismissError(ref: SessionRef, message: string): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -181,8 +186,9 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		reply(requestId, body) {
 			return requestNoContent(ROUTES.reply(requestId), jsonRequest(body));
 		},
-		dismissError(ref) {
-			return requestNoContent(ROUTES.error(ref), { method: "DELETE" });
+		dismissError(ref, message) {
+			const body: DismissErrorRequest = { message };
+			return requestNoContent(ROUTES.error(ref), { ...jsonRequest(body), method: "DELETE" });
 		},
 		connect(handlers) {
 			return openEvents(ROUTES.events, handlers);

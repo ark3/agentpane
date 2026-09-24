@@ -798,16 +798,62 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.close();
 	});
 
+	function dismiss(ref: SessionRef, body: unknown): Promise<Response> {
+		return app.fetch(
+			new Request(`http://127.0.0.1${ROUTES.error(ref)}`, {
+				method: "DELETE",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body),
+			}),
+		);
+	}
+
 	it("forgets a dismissed error, so no later snapshot shows it again", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		pi.forRef(PI_SESSION)?.emitError("turn failed");
 
-		const response = await app.fetch(new Request(`http://127.0.0.1${ROUTES.error(PI_SESSION)}`, { method: "DELETE" }));
-		expect(response.status).toBe(204);
+		expect((await dismiss(PI_SESSION, { message: "turn failed" })).status).toBe(204);
 
 		const client = await openStream();
 		await client.waitForCount(1);
 		expect(client.typed("snapshot")[0]?.error).toBeNull();
+		await client.close();
+	});
+
+	it("keeps a newer error than the one a client dismissed", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const adapter = pi.forRef(PI_SESSION);
+		adapter?.emitError("first turn failed");
+		// Another client's turn fails while this one's Dismiss is on its way.
+		adapter?.emitError("second turn failed");
+
+		expect((await dismiss(PI_SESSION, { message: "first turn failed" })).status).toBe(204);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]?.error).toBe("second turn failed");
+		await client.close();
+	});
+
+	it("refuses a dismissal that does not name the error it dismisses", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		pi.forRef(PI_SESSION)?.emitError("turn failed");
+
+		expect((await dismiss(PI_SESSION, {})).status).toBe(400);
+	});
+
+	it("keeps an error the adapter raised while the prompt that started it was being admitted", async () => {
+		// A Pi `extension_error` while its extensions load, say: raised inside
+		// `start()`, which this prompt's own attach ran. Nobody had seen it when
+		// the prompt was sent, so admitting the prompt must not clear it (OW-31).
+		const raising = new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("extension failed to load") });
+		app = createApp({ index, adapters: { pi: raising } });
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello" })).status).toBe(202);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]?.error).toBe("extension failed to load");
 		await client.close();
 	});
 });

@@ -351,14 +351,16 @@ export class SessionManager {
 	 * adapter because `submit()` is one of the two points at which a session's id
 	 * can change under us -- see `#adoptRef`.
 	 */
-	async submit(ref: SessionRef, text: string, images?: ImageInput[]): Promise<void> {
+	async submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
 		const session = this.#lookup(ref);
 		if (!session?.adapter) throw new UnknownSessionError(ref);
 		this.markPrompted(session.ref);
 		// The client clears a session's error once the next prompt is admitted,
 		// unless a newer one landed meanwhile (OW-31, `submit` in
 		// `controller.ts`); this is the same rule, so the next snapshot agrees.
-		const priorError = session.error;
+		// `priorError` is what stood when the prompt was sent, so a caller that
+		// attaches first reads it before that attach: an error the start raised
+		// is newer than the prompt, and nobody had seen it to clear.
 		try {
 			await session.adapter.submit(text, images);
 			if (session.error === priorError) session.error = null;
@@ -832,6 +834,11 @@ export class SessionManager {
 		return this.#sessions.get(key)?.ref;
 	}
 
+	/** The session's held turn error, or null -- including for a session not in the table. */
+	errorOf(ref: SessionRef): string | null {
+		return this.#lookup(ref)?.error ?? null;
+	}
+
 	clearRequest(requestId: string): void {
 		const owner = this.#pendingRequests.get(requestId);
 		this.#pendingRequests.delete(requestId);
@@ -840,12 +847,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * A client dismissed the session's error. Only the next snapshot says so:
-	 * the other clients showing it keep it until then (OW-bipume).
+	 * A client dismissed the session's error, `message` being the one it showed.
+	 * A different one is newer -- another client's turn failed while the
+	 * dismissal was on its way -- and stays. Only the next snapshot says so: the
+	 * other clients showing it keep it until then (OW-bipume).
 	 */
-	clearError(ref: SessionRef): void {
+	clearError(ref: SessionRef, message: string): void {
 		const session = this.#lookup(ref);
-		if (session) session.error = null;
+		if (session?.error === message) session.error = null;
 	}
 
 	/**

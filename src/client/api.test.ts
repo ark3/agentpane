@@ -190,6 +190,19 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("dismisses a session's error by DELETE, naming the error it dismisses (OW-bipume)", async () => {
+		const fetch = fetchRecorder(new Response(null, { status: 204 }));
+		const api = createAgentpaneApi({ fetch });
+		const ref = { backend: "pi", id: "/a b.jsonl" } as const;
+
+		await expect(api.dismissError(ref, "turn failed")).resolves.toBeUndefined();
+		expect(fetch).toHaveBeenCalledWith(ROUTES.error(ref), {
+			method: "DELETE",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ message: "turn failed" }),
+		});
+	});
+
 	it("turns a JSON API error into an ApiClientError", async () => {
 		const fetch = fetchRecorder(response({ error: "not_found", detail: "missing session" }, 404));
 		const api = createAgentpaneApi({ fetch });
