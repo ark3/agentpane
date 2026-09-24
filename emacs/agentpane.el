@@ -73,7 +73,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 83 tests, 83 results as expected, 0 unexpected
+;;     Ran 84 tests, 84 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1609,9 +1609,12 @@ another buffer holds the ref, since only here is a second holder meant."
     (kill-buffer other)))
 
 (defun agentpane--set-status (params)
-  "Show the streaming, compaction and model fields of PARAMS in the mode line,
-and keep the streaming field in `agentpane--streaming' and the model in
-`agentpane--model'.
+  "Show the streaming, compaction, model and effort fields of PARAMS in the
+mode line, and keep the streaming field in `agentpane--streaming' and the
+model in `agentpane--model'.
+The effort is the one the status reports, named right after the model as a
+turn's meta line names it, and absent when the status's is null: no model's
+default stands in for it, which would take a `models/list' (OW-zobiro).
 When streaming ends, the last node is redrawn, since it was drawn as the
 pending turn, a tool call with no result on it as running, and the helper
 re-sends no node for the change; and reading view's tail status goes."
@@ -1627,7 +1630,8 @@ re-sends no node for the change; and reading view's tail status goes."
               (list (and (eq (plist-get params :isStreaming) t) "streaming")
                     (let ((compaction (plist-get params :compaction)))
                       (and compaction (concat "compaction " compaction)))
-                    (plist-get params :model))))
+                    (plist-get params :model)
+                    (plist-get params :effort))))
   (setq agentpane--model (plist-get params :model))
   (agentpane--show-reading-tail)
   (agentpane--show-mode-line))

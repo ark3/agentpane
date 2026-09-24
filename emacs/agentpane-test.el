@@ -724,6 +724,20 @@ whose model is not known, prompts for nothing, sends no
                  '((sessions/attach) nil
                    "No model is known yet for this session; try again once one is"))))
 
+(ert-deftest agentpane-test-mode-line-names-the-reported-effort ()
+  "A status that reports an effort names it in the mode line right after the
+model, so a choice made with `agentpane-set-effort' shows before the first
+turn; one whose effort is null names none."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--draw [])
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "gpt-5.6-luna" :effort "high"))
+      (should (equal mode-line-process " [gpt-5.6-luna · high]"))
+      (agentpane--set-status
+       (list :session ref :isStreaming :json-false :model "gpt-5.6-luna" :effort nil))
+      (should (equal mode-line-process " [gpt-5.6-luna]")))))
+
 (ert-deftest agentpane-test-undo-in-prompt-leaves-nodes-alone ()
   "Undo in the prompt region undoes the draft, never a node redraw that
 arrived while it was being typed."
