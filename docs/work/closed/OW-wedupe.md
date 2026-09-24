@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Detaching any new session before its first turn previews an id with no store file, because every backend renames its virtual ref at attach
@@ -35,3 +36,23 @@ A test beside the existing OW-vasubu/OW-tewave detach tests in `src/client/contr
 Rework or retire the existing virtual-exit tests so they drive a ref production can actually hold.
 What signal distinguishes "nothing on disk" once the id is no longer `virtual:` — a summary field the server derives from the store, or something else — is the implementer's call; it must cover forks, which the `virtual` flag does not.
 If the Emacs client gains a close path, it gets the same behaviour or its own card per `AGENTS.md`, "Both clients".
+
+## Close note
+
+Landed on main as 768b49a, 6928989 and 118a652.
+
+The signal is a new `SessionSummary.onDisk` in `src/shared/protocol.ts`: true once the session index has listed the session.
+The three store parsers (`src/server/sessions/{pi,codex,claude}.ts`) report it true; `SessionManager` carries `ManagedSession.onDisk`, set true for a store attach, false for `createVirtual` and a recipe fork, set true by `list()` when the index row for a live session appears (so `summaryOf`, which does not walk the index, remembers it), and cleared when a Pi fork moves the parent's container in `#adoptRef`.
+`detach()` in `src/client/controller.ts` reads `onDisk` off the summary row after the close; false or no row takes the startup-view exit and its phantom-row re-list, otherwise it previews (OW-tewave).
+Rejected: the `virtual:` id and `ManagedSession.virtual`, for the reasons the card gave.
+
+Known window: detaching after a first turn but before the turn-end `sessions-changed` re-list lands (session-manager.ts, the `if (streamingChanged) this.broadcaster.sessionsChanged()` after OW-furinu's comment) takes the startup view; the exit's re-list brings the row back and a click previews it. Noted in the comment above the branch.
+
+Verified: in `src/client/controller.test.ts` the two virtual-ref exit tests were replaced by ones driving `create()` with a ref renamed at attach, plus a fork test via `forkAndSubmit`; the three went red against main's controller.ts (`api.preview` called with the created ref; phantom row still listed) and green after, re-run by the dispatching session.
+"previews a session created here once a listing has found its first turn on disk" passes on the old code by design and was shown red by forcing the startup exit.
+Four `describe("onDisk")` tests in `src/server/http/session-manager.test.ts` were red before the field existed, and the implementer broke the `list()` marking and the fork clearing each in turn to show them red.
+`bun run check` passed (1255 tests); `bun run test:browser` passed 22/22 in the implementer's worktree.
+D9 and D21 in `docs/DESIGN.md` now say the exit reads `onDisk`.
+
+Emacs: `src/emacs/protocol.ts` passes `SessionSummary` through, so the helper now carries `onDisk`; `agentpane--detach` never closes, so nothing changed there.
+Filed OW-zaniye for the pre-existing stale `detachSession` docblock in `App.svelte`.
