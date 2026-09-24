@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Claude Code resume and fork still pass --model, overriding the model the CLI restores from the store itself
@@ -38,3 +39,11 @@ A turn is not needed and is not licensed off haiku (`AGENTS.md`, "Evidence").
 
 A test in `src/server/adapters/claude/adapter.test.ts`, red first, asserts the resume and fork-at-entry spawns carry whatever the measurement licenses: no `model` where the CLI was shown to restore it, or the id that puts the recorded model in force.
 The measurement is recorded in `docs/MANUAL_TESTING.md`, and the module docblock sentence above says what the code now does.
+
+## Close note
+
+Measured on the home server 2026-09-23, `claude 2.1.280`, no turn off haiku, on a haiku store and hand-edited copies of it: a `--resume` with no `--model` puts in force the `message.model` of the last assistant line a model ran (skipping `<synthetic>`), over the settings' family and the file's attachment and `cost-state` lines; a `--fork-session` spawn puts in force its kept prefix's, not the file's last; and a stored `claude-opus-5-5` comes back as the settings' `claude-opus-5-5[1m]`, so the `[1m]` variant is the settings' widening, which the old `--model` dropped.
+`ClaudeAdapter` in `src/server/adapters/claude/adapter.ts` now spawns a resume and a fork at a real entry with no `--model`, and names the prefix's stored model (not the parent's latest) as a fork's model; the parent's model rides a fork's spawn only when the kept prefix names none, as before, and a session-start fork is a fresh spawn as before.
+A test in `src/server/adapters/claude/adapter.test.ts` failed against the old code on both the resume and the fork spawn; six existing spawn assertions were updated.
+Evidence: `docs/MANUAL_TESTING.md`, "Which stored model a Claude Code resume and fork restore with no `--model` (OW-tebibo)"; OW-nabano's section, D23 and the module docblock now say the same.
+The label question: after a resume the label is the store's resolved id, which misses the `[1m]` variant, and a session-start fork of that session spawns with that id and drops the variant; leaving the model unknown for `listedModelFor` would mislabel it `default`, so that is filed as OW-faledu rather than fixed here.
