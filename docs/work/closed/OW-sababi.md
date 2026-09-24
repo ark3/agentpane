@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # A fork before the first message runs at the parent's model and effort, not the backend's defaults
@@ -33,3 +34,11 @@ Pi forks inside the process holding the parent (`fork` in `src/server/adapters/p
 - For Codex, either a test red first showing a no-turn fork's first `turn/start` carrying the parent's model and effort, or the report shows from the code and an existing test that it already does.
 - The Claude module docblock and D23's "Applied per backend" sentence say what the code now does; `bun run check` passes.
 No live run is needed: the effort flag's effect on a spawn is already measured.
+
+## Close note
+
+A Claude Code fork at `CLAUDE_FORK_SESSION_START` now spawns with `--effort` at the parent's effort in force when cut (`this.effort`, from the last `get_settings`), and with none for a parent whose model has no effort, per D23's "A fork that keeps no turn" (OW-difowo).
+The effort rides `forkOf.effort` in `StartOptions` (`src/server/adapters/types.ts`), because only Claude's `fork()` builds `forkOf` and only its `start()` reads it, so no other start path or adapter sees a field it would silently ignore.
+Two tests in `src/server/adapters/claude/adapter.test.ts` go through the real `fork()` and `start()`: the effort-carrying one failed against the old code, and the null-effort one went red with `fork()` deliberately broken to always send an effort; `bun run check` passes on main.
+Codex has no fork that keeps no turn yet: at index 0 `fork()` sends no `lastTurnId`, which keeps the whole thread (OW-hojefo), so its borrower reads the parent's last `turn_context`; OW-hojefo now carries the D23 rule for whichever fix lands, and D23 says so.
+Pi forks inside the parent's process and re-reads `get_state`, so it carries both by construction; nothing changed there.
