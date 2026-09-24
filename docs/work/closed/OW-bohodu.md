@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # D9 says a virtual session materialises on its first prompt; Pi has materialised at attach since 0.84.1, in ~23 places
@@ -37,3 +38,23 @@ Load-bearing: that attach, not the first prompt, is when Pi writes the file, and
 Incidental: the wording each site lands on.
 
 Done when `rg 'materialis|first prompt' src/ docs/` read through by hand leaves no copy asserting the false version, D9 says what is actually true and names the version it was measured on, and `bun run check` is green.
+
+## Close note
+
+D9 corrected and every non-test copy of "a virtual session materialises on its first prompt" retired, in two docs commits on main: "docs: record when a new Claude Code or Pi session first reaches disk (OW-bohodu)" and "docs: say in D9 that every backend renames at attach and writes at the first turn (OW-bohodu)".
+
+The measurement overturned part of the card's premise.
+Live on the home server, 2026-09-23: `claude 2.1.280` (spawned as ClaudeAdapter does, `--model haiku`) wrote nothing under `~/.claude` in 15 s with no prompt, and its store file appeared 0.3 s after the first user message; `pi 0.87.1` named its sessionFile from `get_state` at start but the file did not exist until the first turn's reply ended, confirmed in Pi's source (`_persist` in `dist/core/session-manager.js` writes nothing until an assistant message exists).
+Pi was run outside sbox with a throwaway PI_CODING_AGENT_DIR, because this session's sandbox mounts `~/.pi/agent` read-only.
+With Codex from OW-hojefo (`codex-cli 0.156.0`), all three backends replace the `virtual:` id at attach and none writes before the first turn.
+HANDOFF finding 41 had read "the file already exists" at start from a rename that shows only the name; the row now says named, not written.
+Recorded in `docs/MANUAL_TESTING.md`, "When a new Claude Code or Pi session first reaches disk (OW-bohodu)".
+
+D9 now says this per backend with versions, keeps the first-prompt path (Pi's post-submit get_state probe, markPrompted, the fake's materialiseOnSubmit) as the case `virtual` describes, and says neither a non-`virtual:` id nor a cleared `virtual` flag means a file exists.
+No code changed.
+
+Dependence: `detach()`'s `selected.id.startsWith("virtual:")` exit in `src/client/controller.ts` depends on the stale reading on every backend, not only Codex, and forks reach the same state; OW-wedupe was widened to carry that, and D21 notes it.
+Everything else read (SessionManager's fromStore/index, App.svelte `detachable`, the model gates, the Emacs client, the unbuilt D12 reaper) decides from state, not the id prefix, and is safe.
+Test-file comments were out of scope and went to OW-yoyabo.
+
+Verified: bun run check green (54 files, 1249 tests); an adversarial reader traced each new claim to the code and found two missed copies (fork_attach_probe.py, D21) and three over-claims, all fixed before landing.
