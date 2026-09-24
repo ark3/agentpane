@@ -3,7 +3,7 @@ labels: [change]
 blocked-by: [OW-gusifo]
 ---
 
-# Pi's dialog requests are held until the session is killed, and one Pi times out is never retracted
+# Pi's dialog requests are held until the session is killed
 
 Found 2026-09-24 by the cold read of OW-gusifo, which is Codex-only in effect.
 
@@ -13,15 +13,17 @@ So a Pi dialog hangs the turn until the session is killed, which is what D2a in 
 That paragraph's reasoning names no backend, though the section around it is written about Codex; applying it to Pi is this card's reading, not a recorded decision.
 
 A dialog request may carry a `timeout` (`src/server/adapters/pi/protocol.ts`), and when Pi times one out nothing tells the manager, so even after OW-gusifo the server would go on holding it and every snapshot re-send it.
-OW-geveja covers the adapter's own half of that timeout: the stale `pendingUiRequests` entry and the error a late reply raises.
+
+Amended 2026-09-24 at execution: once a dialog is cancelled the instant it is published, no timeout can pass while the server holds it, so a test that a timed-out dialog is retracted would pass with no code behind it.
+That path is live again only once OW-bijera holds dialogs, so it moved, with OW-geveja's Pi half, to OW-siguzo, blocked by OW-bijera.
 
 No live Pi dialog request has ever been observed (OW-johano, OW-25), so this card is driven by fakes.
 
-Load-bearing: a Pi dialog request is cancelled rather than held, the user is told what arrived by an error naming the method, and the request leaves the server's held list through OW-gusifo's retraction, whether it was cancelled or timed out.
-Incidental: whether the cancel goes out at arrival or through `reply`, and whether this card absorbs OW-geveja's Pi half.
+Load-bearing: a Pi dialog request is cancelled rather than held, the user is told what arrived by an error naming the method, and the request leaves the server's held list through OW-gusifo's retraction.
+The cancel mirrors OW-zisumi's Codex decline in the `"request"` case of `applyEffects` in `src/server/adapters/codex/adapter.ts`: publish, then the adapter's own `reply(id, null)`, then `onRequestResolved`, then the error.
 
 ## Done when
 
-- Tests in `src/server/adapters/pi/process.test.ts`, red first: a dialog request arriving is answered `cancelled: true`, an error names its method, and the request is retracted; a dialog whose `timeout` passes is retracted.
+- Tests in `src/server/adapters/pi/process.test.ts`, red first: a dialog request arriving is answered `cancelled: true`, an error names its method, and the request is retracted.
 - D2a says that its decline binds Pi's dialog requests too.
 - `bun run check` passes.
