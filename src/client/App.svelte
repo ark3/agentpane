@@ -1327,6 +1327,14 @@
 		</ul>
 	{/if}
 
+	{#if selectedSession?.unrestoredModel}
+		<!-- D23's "says why not" (OW-pubeju). It follows the field, which the
+		     server clears only on a successful model change; a first cut. -->
+		<p class="warning" role="status" aria-label="Unrestored model">
+			This conversation last ran on {selectedSession.unrestoredModel}, which could not be restored; it is running on {selectedModelLabel} instead.
+		</p>
+	{/if}
+
 	{#if selectedSession && selectedSession.requests.length > 0}
 		<p class="warning">
 			The agent is blocked on a request agentpane cannot answer: {selectedSession.requests

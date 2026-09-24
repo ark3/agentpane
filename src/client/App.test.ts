@@ -472,6 +472,27 @@ describe("App", () => {
 		expect(screen.getByText("backend/reported")).toHaveClass("model-label");
 	});
 
+	it("names the recorded model a resume could not restore, and says nothing when it did (OW-pubeju)", () => {
+		const snapshot = (unrestoredModel: string | null) => reduceServerEvent(state({ selected: piSession }), {
+			type: "snapshot",
+			session: piSession,
+			seq: 1,
+			messages: [user("stored")],
+			isStreaming: false,
+			compaction: null,
+			model: "backend/fallback",
+			effort: null,
+			unrestoredModel,
+		}).state;
+
+		const fellBack = render(App, { props: { controller: new FakeController(view({ state: snapshot("backend/recorded") })) } });
+		expect(screen.getByRole("status", { name: "Unrestored model" })).toHaveTextContent("backend/recorded");
+		fellBack.unmount();
+
+		render(App, { props: { controller: new FakeController(view({ state: snapshot(null) })) } });
+		expect(screen.queryByRole("status", { name: "Unrestored model" })).not.toBeInTheDocument();
+	});
+
 	const effortModels: ModelInfo[] = [
 		{
 			id: "opaque/current",
