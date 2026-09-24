@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-jitoni]
+closed: done
 ---
 
 # The browser does not show a Pi session's unrestoredModel, so a resume that fell back still reads as the chosen model
@@ -16,3 +17,14 @@ A resumed session with messages cannot change model from either client (the gate
 If it lands on the composer's action row, AGENTS.md asks for `bun run test:browser` by hand before committing.
 
 Done when a test in `src/client/**`, fed a snapshot whose `unrestoredModel` names a model, shows the notice naming it, red first and green after, and a snapshot with `unrestoredModel: null` shows none.
+
+## Close note
+
+Landed in `src/client/App.svelte`: a `<p class="warning" role="status" aria-label="Unrestored model">` beside the backend-notices list names `selectedSession.unrestoredModel` and the model in force, and renders nothing when the field is null.
+It follows the field with no client-side dismissal, since the server clears it only on a successful `setModel`.
+It is not in the composer's action row, because the field is only ever set on a session that already has messages, where the model select is replaced by a plain label.
+Verified by a test in `src/client/App.test.ts` ("names the recorded model a resume could not restore, and says nothing when it did (OW-pubeju)"), which feeds a real `snapshot` through `reduceServerEvent`.
+With the UI hunk reversed, that test failed with "Unable to find an accessible element with the role "status" and name "Unrestored model"", and it passed with the hunk restored; the null half was also shown to fail against an always-true condition.
+`bun run check` passed: 1300 tests, svelte-check clean.
+Not run: `bun run test:browser`, because the change does not touch the action row or `.conversation`.
+While reviewing, we found that none of the shell's banners, this one included, has a grid area; that is filed as OW-watajo.
