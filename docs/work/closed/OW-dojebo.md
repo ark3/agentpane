@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # A fork inside a Pi process spawned with a suffixed --model may put that level back in force without recording it
@@ -21,3 +22,12 @@ Incidental: the remedy, for instance stripping a trailing level from `bound.mode
 
 - A live run on the home server, with `pi --model openrouter/deepseek/deepseek-v4.1-flash:high` and the throwaway `PI_CODING_AGENT_DIR` method of OW-pubulu's section of `docs/MANUAL_TESTING.md`, records with the version what `get_state` and the session file show after such a fork.
 - If the level snaps back, a test in `src/server/adapters/pi/process.test.ts` forks a session spawned with a suffixed model after `setEffort`, and asserts the level in force after the fork is the chosen one, shown red first; if it does not, the run's record is the whole of the work.
+
+## Close note
+
+Measured live on the home server with `pi 0.87.1` (docs/MANUAL_TESTING.md, "A Pi fork in a process spawned with a suffixed `--model` puts the suffix's level back, unrecorded (OW-dojebo)"): a process spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high` and set to `off` or `low` answered `get_state` at `high` after a fork, with no `thinking_level_changed`, and the next turn's provider request (logged by a throwaway `before_provider_request` extension) asked for `high`, while the forked file still named the chosen level last, so a reload labels that turn wrong.
+An unsuffixed spawn kept the chosen level across the same fork, so the suffix is the cause.
+Fix: `PiAdapter.fork` in `src/server/adapters/pi/process.ts` re-sends `chosenEffort` when the post-fork `get_state` names another level, as `setModel` already does; pinned by "re-asserts the chosen level after a fork, which puts a suffixed --model's level back (OW-dojebo)" in `process.test.ts`, seen red without the fix and green with it; `bun run check` passes.
+D23's claim that a Pi fork carries model and effort by construction is retired, and the `thinkingLevel` docblock and "Model refs" comment in `protocol.ts` say why the re-send exists.
+The re-send itself was not run live against Pi.
+The same source path read as also putting the spawn's `--model` back over a `set_model` choice; filed as OW-sinoha.
