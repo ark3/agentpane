@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # A request that stops being pending stays held by the server and drawn in both clients, because nothing retracts it
@@ -47,3 +48,20 @@ Codex is the only backend that detects a resolution; Pi's dialog requests are OW
 - A test in `src/emacs/helper.test.ts` and one in `emacs/agentpane-test.el` show the transcript buffer losing the request's line on a retraction, each red first.
 - D2a's paragraph "A resolved request has no wire event" says the gap is closed.
 - `bun run check` and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, both pass.
+
+## Close note
+
+Landed in dc06746.
+A new `request-resolved` ServerEvent (`src/shared/protocol.ts`), sent by `Broadcaster.requestResolved`, retracts a request however it stopped being pending.
+`SessionManager.clearRequest` removes the request from `requests` and `#pendingRequests` and broadcasts the event, whether the reply route calls it or the new optional `BackendAdapter.onRequestResolved` hook does; `#start` subscribes that hook.
+The Codex adapter fires the hook on `serverRequest/resolved`, under the id it published the request with, and only for a request `reply` has not already answered.
+The Codex reducer now reads `serverRequest/resolved` ahead of its thread guard.
+That way a subagent thread's request, which is routed to the parent (OW-futewo), is retracted too: only the adapter that published the wire id maps it.
+Clients: `reduceServerEvent` drops the request from `view.requests`; the Emacs helper forwards the event as `session/requestResolved`, and `agentpane--drop-request` in `emacs/agentpane.el` removes that request's line.
+OW-zisumi can fire `onRequestResolved` from an adapter that declines a request itself.
+The claim "auto-approval, or another client" is now marked unmeasured in all three places it appeared: `reducer.ts`, `adapter.ts` and D2a.
+D2a's paragraph now opens "A request that stops being pending is retracted on the wire".
+Verified with new tests in session-manager.test.ts (the adapter-resolved path and the reply route), adapter.test.ts (same-thread and child-thread), session-state.test.ts, helper.test.ts and agentpane-test.el.
+The implementer saw each new test fail first.
+The dispatching session reproduced the failures of the child-thread adapter test (reducer change reverted) and the ERT test (agentpane.el reverted).
+`bun run check` passes (1348 tests), and so does the ERT suite (93).
