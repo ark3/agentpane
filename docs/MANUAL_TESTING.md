@@ -2855,9 +2855,64 @@ So the owner's opus copy in OW-nabano, which read `claude-opus-5-5[1m]` resumed 
 **What the adapter makes of it.**
 `ClaudeAdapter` now spawns a resume, and a fork at a real entry, with no `--model`, and names the model the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, over the parent's -- in `getState().model` (`src/server/adapters/claude/adapter.ts`, module doc).
 The parent's model, which `fork()` still hands over, rides a fork's spawn only when the kept prefix names none, and a fork before the first message is a fresh spawn that carries it as before.
+Since OW-faledu, below, that stored id is only the first name: the start read of `get_settings` renames it by the model in force, so what `fork()` hands over carries the `[1m]` variant.
 `src/server/adapters/claude/adapter.test.ts` pins the resume and the fork spawns, and failed against the old code on both.
 
 **Not established.**
 What the CLI restores for a fork whose kept prefix holds no assistant line a model ran was not tried; the adapter passes the parent's model there, as it did for every fork before.
 The `[1m]` widening was seen for `opus[1m]` only; whether another model with a `[1m]` variant widens the same way was not tried.
 No turn ran on a resumed or forked process, so the evidence is `applied.model`, not a new store line, and nothing here went through agentpane's server, the browser or Emacs.
+
+## What `--model` puts a resumed Claude Code session's `[1m]` variant back in force (OW-faledu)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-faledu` worktree cut at `fadb732`.
+No user message was written to any child: every spawn was driven by `get_settings`, and some by `initialize`, and exited when its stdin closed.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages ...`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+The driver was a throwaway Python script, not kept, that printed only `get_settings`'s `applied.model`, `applied.effort` and `effective.model`, and each `initialize` entry's `value` and `resolvedModel`, never the account block.
+The owner's `~/.claude/settings.json` named `model: "opus[1m]"`, and its sha256 was the same after the runs as before.
+
+The fresh spawns each carried a new `--session-id`, and no store file appeared for any of them.
+The resumes used two copies of the OW-hokaye store `ea370c4e-...`, whose two assistant lines record `claude-sonnet-5`, written under fresh session ids into the worktree's own project directory with every session id rewritten: S left as it was, and D with both assistant lines' `message.model` set to `claude-opus-5-5`, the id the owner's opus store lines record.
+The original was only read, and its sha256 matched afterwards; the resumes appended bookkeeping lines to the copies, and the copies and the project directory were deleted afterwards.
+
+**What a fresh spawn puts in force, which is what a fork before the first message is.**
+
+| `--model` | settings `opus[1m]` | `--settings '{"model":"sonnet"}'` |
+|---|---|---|
+| none | `claude-opus-5-5[1m]` | `claude-sonnet-5` |
+| `opus[1m]` | `claude-opus-5-5[1m]` | `claude-opus-5-5[1m]` |
+| `claude-opus-5-5[1m]` | `claude-opus-5-5[1m]` | `claude-opus-5-5[1m]` |
+| `claude-opus-5-5` | `claude-opus-5-5` | `claude-opus-5-5` |
+| `default` | `claude-opus-5-5[1m]` | |
+| `sonnet` | `claude-sonnet-5` | |
+| `haiku` | `claude-haiku-4-5-20251001` | |
+| `claude-sonnet-5[1m]` | `claude-sonnet-5[1m]` | |
+| `claude-fable-5-1[1m]` | `claude-fable-5-1` | |
+| `claude-fable-5-1` | `claude-fable-5-1` | |
+
+`applied.effort` read `high` on every row but `haiku`'s, where it read `null`, and `effective.model` read the settings' model on every row.
+So `--model claude-opus-5-5`, what agentpane handed a session-start fork of a resumed opus session until this card, dropped the variant, and each of `opus[1m]` and the resolved id `claude-opus-5-5[1m]` kept it whatever the settings named.
+Every id passed put in force the `resolvedModel` `initialize` lists for it, `claude-fable-5-1[1m]`'s suffixless one included, and every resolved id passed put itself back.
+
+**What a resume reads, and what `initialize` lists beside it.**
+
+| Spawn | `applied.model` |
+|---|---|
+| `--resume` D | `claude-opus-5-5[1m]` |
+| `--resume` D, `--settings '{"model":"sonnet"}'` | `claude-opus-5-5` |
+| `--resume` S | `claude-sonnet-5` |
+| `--resume` S, `--settings '{"model":"sonnet"}'` | `claude-sonnet-5` |
+
+Every `initialize` in this run, fresh or resumed and under either settings model, listed the same five entries: `default` and `opus[1m]` resolving to `claude-opus-5-5[1m]`, `claude-fable-5-1[1m]` to `claude-fable-5-1`, `sonnet` to `claude-sonnet-5`, and `haiku` to `claude-haiku-4-5-20251001`.
+So a resumed process names its model in force with the variant, and the listed ids map it back, except for D under `sonnet`'s settings, whose `claude-opus-5-5` no entry resolves to.
+
+**What the adapter makes of it.**
+`ClaudeAdapter` still names the stored model first on a resume and on a fork at a real entry, and its start read of `get_settings` now renames it by `applied.model`: the listed id whose `resolvedModel` that is, never `default`, or `applied.model` itself where no listed id resolves to it (`readSettings` and `listedModelFor` in `src/server/adapters/claude/adapter.ts`, module doc).
+`default` is left out because it names the account's recommended model (OW-kakide), which need not stay the one the conversation ran.
+So D resumed is named `opus[1m]`, S `sonnet`, and D under `sonnet`'s settings `claude-opus-5-5`, and `fork()` hands that name to a fork before the first message, whose fresh spawn then puts the parent's model back in force by the table above.
+`src/server/adapters/claude/adapter.test.ts` pins that and failed against the old code, which named `claude-opus-5-5` and spawned the fork with it.
+
+**Not established.**
+The `init` event that a turn brings still replaces the adapter's model with the id it reports, and what it reports for an `opus[1m]` session was not measured, since that needs a turn on opus; if it lacks the variant, a session-start fork after a turn on the resumed process drops it again.
+Whether a listed id's `resolvedModel` follows a change to the account's recommended model on a process already running was not measured, as in OW-kakide.
+Nothing here went through agentpane's server, the browser or Emacs.

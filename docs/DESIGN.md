@@ -812,7 +812,7 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
-Applied per backend by OW-sayaju for Codex, and for Claude Code by OW-nabano, which re-asserts the effort, and OW-tebibo, which dropped the `--model` a resume and a fork at an entry had carried; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
+Applied per backend by OW-sayaju for Codex, and for Claude Code by OW-nabano, which re-asserts the effort, OW-tebibo, which dropped the `--model` a resume and a fork at an entry had carried, and OW-faledu, which names a restored model by what the CLI put in force, so that a fork before the first message, a fresh spawn, carries the `[1m]` variant a resume had widened it to; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
 
 ## The backend adapter contract
 
