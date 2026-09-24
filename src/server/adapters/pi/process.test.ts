@@ -808,6 +808,70 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(h.adapter.getState().effort).toBe("low");
 	});
 
+	it("never pairs the old model with the level set_model resets to (OW-zasozo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const seen: [string | null, string | null][] = [];
+		h.adapter.onUpdate((state) => seen.push([state.model, state.effort]));
+
+		const changed = h.adapter.setModel("openrouter/anthropic/claude-fable-5");
+		// On 0.87.1 Pi announces the reset before it answers `set_model`.
+		h.child.emitLine({ type: "thinking_level_changed", level: "medium" });
+		// Any other update in that window carries the effort too.
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		h.child.respondTo("set_model", NO_OFF);
+		await changed;
+
+		const flash = "openrouter/deepseek/deepseek-v4.1-flash";
+		const fable = "openrouter/anthropic/claude-fable-5";
+		// FLASH has no `medium` at all.
+		expect(seen.filter(([model, effort]) => model === flash && effort !== "high")).toEqual([]);
+		expect(seen.at(-1)).toEqual([fable, "medium"]);
+	});
+
+	it("reports the new model's level while the chosen one is re-sent (OW-zasozo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const set = h.adapter.setEffort("low");
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+		// An extension moves the level away from the one chosen.
+		h.child.emitLine({ type: "thinking_level_changed", level: "max" });
+		const seen: [string | null, string | null][] = [];
+		h.adapter.onUpdate((state) => seen.push([state.model, state.effort]));
+
+		const changed = h.adapter.setModel("openrouter/anthropic/claude-fable-5");
+		h.child.emitLine({ type: "thinking_level_changed", level: "medium" });
+		h.child.respondTo("set_model", NO_OFF);
+		await flush();
+		// An update while the re-sent `low` is still in flight.
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await changed;
+
+		const fable = "openrouter/anthropic/claude-fable-5";
+		expect(seen.filter(([model]) => model === fable)).toEqual([
+			[fable, "medium"],
+			[fable, "low"],
+			[fable, "low"],
+		]);
+	});
+
+	it("follows Pi's level again after it refuses a set_model", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+
+		const refused = h.adapter.setModel("openrouter/nope/nothing");
+		h.child.failCommand("set_model", "Model not found: openrouter/nope/nothing");
+		await expect(refused).rejects.toBeInstanceOf(BackendRefusedError);
+		h.child.emitLine({ type: "thinking_level_changed", level: "max" });
+
+		expect(h.adapter.getState().effort).toBe("max");
+	});
+
 	it("names the level in force on each assistant turn, which the footer shows", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });

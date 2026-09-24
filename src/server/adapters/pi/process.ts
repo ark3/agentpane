@@ -182,6 +182,14 @@ export class PiAdapter implements BackendAdapter {
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
 	private chosenEffort: string | null = null;
+	/**
+	 * True while `set_model` awaits its answer. On `pi 0.87.1` the level it
+	 * resets to is announced before that answer (MANUAL_TESTING OW-ruzuhu), so
+	 * taking it at once would pair the old model with the new model's level in
+	 * every update until the answer names the model (OW-zasozo). It is recorded
+	 * and held until then.
+	 */
+	private settingModel = false;
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
@@ -531,13 +539,17 @@ export class PiAdapter implements BackendAdapter {
 	/** Takes `provider/modelId` only, and sends it unchanged; see "Model refs" in `protocol.ts`. */
 	async setModel(model: string): Promise<void> {
 		const { provider, modelId } = splitModelRef(model);
-		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId }).catch(
-			(error: unknown) => {
+		this.settingModel = true;
+		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId })
+			.catch((error: unknown) => {
 				throw error instanceof PiCommandError ? new BackendRefusedError(modelRefusal(model, error.message)) : error;
-			},
-		);
+			})
+			.finally(() => {
+				this.settingModel = false;
+			});
 		this.model = modelToInfo(response.data).id;
 		this.reasoning = response.data.reasoning === true;
+		this.syncEffort();
 		if (this.chosenEffort !== null && thinkingLevels(response.data).includes(this.chosenEffort)) {
 			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: this.chosenEffort });
 		} else {
@@ -596,7 +608,7 @@ export class PiAdapter implements BackendAdapter {
 		}
 		if (parsed.type === "thinking_level_changed") {
 			this.thinkingLevel = parsed.level;
-			if (this.syncEffort()) this.emitUpdate();
+			if (!this.settingModel && this.syncEffort()) this.emitUpdate();
 			return;
 		}
 
