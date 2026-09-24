@@ -678,8 +678,9 @@ export class CodexAdapter implements BackendAdapter {
 	 * Codex forks at *turn* granularity (`ThreadForkParams.lastTurnId`), not at
 	 * item granularity, so a fork point is a turn id even though the UI shows
 	 * the user message inside it. `thread/rollback` -- DESIGN's other
-	 * suggestion -- is marked DEPRECATED in the generated bindings and is not
-	 * used here.
+	 * suggestion -- was marked DEPRECATED in the bindings vendored on
+	 * 2026-08-10, is gone from the `codex-cli 0.156.0` ones, and is not used
+	 * here.
 	 *
 	 * A turn can hold more than one user message: steering a running turn
 	 * (D16) appends a second `userMessage` item to it, and `mapping.ts` gives

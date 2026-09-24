@@ -356,7 +356,7 @@ describe("reasoning effort", () => {
 	function turn(reducer: CodexReducer): AssistantTurn {
 		reducer.handle(
 			completedItem(
-				{ type: "agentMessage", id: "a", text: "answered", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "a", text: "answered", phase: null, memoryCitation: null, delivery: null, questions: null },
 				10,
 			),
 		);
@@ -426,7 +426,7 @@ describe("streaming assembly (text fixture)", () => {
 				params: {
 					threadId: "t",
 					turnId: "u",
-					item: { type: "agentMessage", id, text: "", phase: null, memoryCitation: null },
+					item: { type: "agentMessage", id, text: "", phase: null, memoryCitation: null, delivery: null, questions: null },
 					startedAtMs: 1,
 				},
 			});
@@ -451,6 +451,8 @@ describe("streaming assembly (text fixture)", () => {
 					text: "authoritative completion",
 					phase: "final_answer",
 					memoryCitation: null,
+					delivery: null,
+					questions: null,
 				},
 				completedAtMs: 2,
 			},
@@ -514,7 +516,7 @@ describe("item lifecycle regressions", () => {
 		});
 		reducer.handle(
 			startedItem(
-				{ type: "agentMessage", id: "after", text: "after", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "after", text: "after", phase: null, memoryCitation: null, delivery: null, questions: null },
 				30,
 			),
 		);
@@ -534,7 +536,7 @@ describe("item lifecycle regressions", () => {
 		const reducer = new CodexReducer({ now: () => 1 });
 		reducer.handle(
 			startedItem(
-				{ type: "agentMessage", id: "a", text: "", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "a", text: "", phase: null, memoryCitation: null, delivery: null, questions: null },
 				100,
 			),
 		);
@@ -552,6 +554,8 @@ describe("item lifecycle regressions", () => {
 					text: "final",
 					phase: "final_answer",
 					memoryCitation: null,
+					delivery: null,
+					questions: null,
 				},
 				900,
 			),
@@ -566,7 +570,7 @@ describe("item lifecycle regressions", () => {
 		reducer.handle(startedItem({ type: "reasoning", id: "first", summary: [], content: [] }, 10));
 		reducer.handle(
 			startedItem(
-				{ type: "agentMessage", id: "second", text: "later", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "second", text: "later", phase: null, memoryCitation: null, delivery: null, questions: null },
 				20,
 			),
 		);
@@ -593,7 +597,7 @@ describe("item lifecycle regressions", () => {
 		{
 			name: "agent message",
 			started: startedItem(
-				{ type: "agentMessage", id: "agent", text: "", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "agent", text: "", phase: null, memoryCitation: null, delivery: null, questions: null },
 				10,
 			),
 			delta: {
@@ -601,7 +605,7 @@ describe("item lifecycle regressions", () => {
 				params: { threadId: "t", turnId: "u", itemId: "agent", delta: "live" },
 			} satisfies CodexServerMessage,
 			completed: completedItem(
-				{ type: "agentMessage", id: "agent", text: "done", phase: null, memoryCitation: null },
+				{ type: "agentMessage", id: "agent", text: "done", phase: null, memoryCitation: null, delivery: null, questions: null },
 				20,
 			),
 		},
@@ -885,7 +889,7 @@ describe("defensive handling", () => {
 					items: [],
 					itemsView: "full",
 					status: "failed",
-					error: { message: "model exploded", codexErrorInfo: null, additionalDetails: null },
+					error: { message: "model exploded", codexErrorInfo: null, additionalDetails: null, misalignment: null },
 					startedAt: 1,
 					completedAt: 2,
 					durationMs: 1_000,
@@ -901,7 +905,7 @@ describe("defensive handling", () => {
 			r.handle({
 				method: "error",
 				params: {
-					error: { message: "stream reset", codexErrorInfo: null, additionalDetails: null },
+					error: { message: "stream reset", codexErrorInfo: null, additionalDetails: null, misalignment: null },
 					willRetry: false,
 					threadId: "t",
 					turnId: "u",
@@ -920,7 +924,7 @@ describe("defensive handling", () => {
 		return {
 			method: "error",
 			params: {
-				error: { message, codexErrorInfo: "other", additionalDetails: null },
+				error: { message, codexErrorInfo: "other", additionalDetails: null, misalignment: null },
 				willRetry,
 				threadId: "t",
 				turnId,
@@ -938,7 +942,7 @@ describe("defensive handling", () => {
 					items: [],
 					itemsView: "summary",
 					status: "failed",
-					error: { message, codexErrorInfo: "other", additionalDetails: null },
+					error: { message, codexErrorInfo: "other", additionalDetails: null, misalignment: null },
 					startedAt: 1,
 					completedAt: 2,
 					durationMs: 1_618,
@@ -1009,6 +1013,7 @@ describe("item types with no fixture yet", () => {
 			appContext: null,
 			pluginId: null,
 			readOnlyHint: true,
+			mcpAppUi: null,
 			result: { content: [{ type: "text", text: "a result" }], structuredContent: null, _meta: null },
 			error: null,
 			durationMs: 12,
@@ -1033,6 +1038,7 @@ describe("item types with no fixture yet", () => {
 			appContext: null,
 			pluginId: null,
 			readOnlyHint: null,
+			mcpAppUi: null,
 			result: null,
 			error: { message: "server unreachable" },
 			durationMs: null,
@@ -1081,6 +1087,7 @@ describe("item types with no fixture yet", () => {
 			id: "g1",
 			status: "completed",
 			revisedPrompt: null,
+			failure: null,
 			result: "data:image/png;base64,QUJD",
 		});
 		expect((inline[0] as AssistantMessage).content).toEqual([
@@ -1091,6 +1098,7 @@ describe("item types with no fixture yet", () => {
 			id: "g2",
 			status: "completed",
 			revisedPrompt: null,
+			failure: null,
 			result: "/tmp/generated.png",
 		});
 		expect((referenced[0] as AssistantMessage).content).toEqual([
@@ -1204,6 +1212,12 @@ describe("item types with no fixture yet", () => {
 			]);
 		});
 
+		it("degrades an image given by fileId to a file reference", () => {
+			expect(userContent({ type: "image", fileId: "file-abc" })).toEqual([
+				{ type: "text", text: "[image: file-abc]" },
+			]);
+		});
+
 		it("degrades audio to a url reference", () => {
 			expect(userContent({ type: "audio", url: "https://example.test/clip.wav" })).toEqual([
 				{ type: "text", text: "[audio: https://example.test/clip.wav]" },
@@ -1240,7 +1254,7 @@ describe("hydrate (cold start)", () => {
 					id: "turn-1",
 					items: [
 						{ type: "userMessage", id: "u1", clientId: null, content: [{ type: "text", text: "hi", text_elements: [] }] },
-						{ type: "agentMessage", id: "a1", text: "hello", phase: "final_answer", memoryCitation: null },
+						{ type: "agentMessage", id: "a1", text: "hello", phase: "final_answer", memoryCitation: null, delivery: null, questions: null },
 					],
 					itemsView: "full",
 					status: "completed",

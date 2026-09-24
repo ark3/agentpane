@@ -159,6 +159,9 @@ function imageFromUrl(url: string): ImageContent | TextContent {
  *
  * `localImage`/`localAudio` reference a path the server can read but this
  * reducer cannot (it is pure), so they degrade to a text reference.
+ * An `image` given by `fileId` rather than `url` (new in the `codex-cli
+ * 0.156.0` bindings) degrades the same way, since the reducer cannot resolve
+ * a file id either.
  */
 export function userInputToContent(inputs: UserInput[]): (TextContent | ImageContent)[] {
 	const out: (TextContent | ImageContent)[] = [];
@@ -168,7 +171,7 @@ export function userInputToContent(inputs: UserInput[]): (TextContent | ImageCon
 				out.push({ type: "text", text: input.text });
 				break;
 			case "image":
-				out.push(imageFromUrl(input.url));
+				out.push("url" in input ? imageFromUrl(input.url) : { type: "text", text: `[image: ${input.fileId}]` });
 				break;
 			case "localImage":
 				out.push({ type: "text", text: `[image: ${input.path}]` });

@@ -726,7 +726,7 @@ Nothing carried the correspondence — `PaneMessage` has no id and D11 freezes `
 D16's steering broke the convention on Codex, and the failure was silent in the worst way available: with a later turn present the ordinal still resolved, to a point one whole turn past where the user pointed, with no error and nothing on screen to notice.
 
 Making Codex answer one point per user message was the obvious repair and is wrong.
-`ThreadForkParams.lastTurnId` is the only cut Codex offers and `thread/rollback` is deprecated in the generated bindings, so a per-message point would be a point that cannot be forked at — worse than none.
+`ThreadForkParams.lastTurnId` is the only cut Codex offers and `thread/rollback` was deprecated in the bindings vendored on 2026-08-10 and is gone from the `codex-cli 0.156.0` ones, so a per-message point would be a point that cannot be forked at — worse than none.
 Folding the steered message into its turn's first message was also declined: it hides a steer that really shipped.
 
 So the unevenness is shipped instead.
