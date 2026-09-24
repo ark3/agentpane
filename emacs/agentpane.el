@@ -48,6 +48,9 @@
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
+;; A turn error stays drawn until a snapshot arrives without it -- the
+;; server clears it once the next prompt is admitted -- and `C-c C-d' in
+;; the transcript buffer dismisses it at once.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -74,7 +77,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-24) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 91 tests, 91 results as expected, 0 unexpected
+;;     Ran 92 tests, 92 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1372,6 +1375,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "C-<return>") #'agentpane-send)
     (define-key map (kbd "C-c C-a") #'agentpane-abort)
+    (define-key map (kbd "C-c C-d") #'agentpane-dismiss-error)
     map)
   "Keymap for `agentpane-transcript-mode'.")
 
@@ -1930,6 +1934,25 @@ The first prompt on a previewed session attaches it."
        (agentpane--request 'sessions/compact
                            (list :session (agentpane--ref agentpane--session))
                            #'ignore t)))))
+
+(defun agentpane-dismiss-error ()
+  "Dismiss this buffer's turn error through `sessions/dismissError'.
+The server holds the error for every later snapshot (OW-bipume), so it is
+told, naming the error drawn last, the one it holds, so that a newer one
+survives; the buffer drops every drawn error at once, as the browser's
+banner goes before its dismissal has answered (OW-desufa)."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (let ((errors (ewoc-collect agentpane--ewoc (lambda (data) (plist-member data :error)))))
+      (unless errors
+        (user-error "No turn error to dismiss"))
+      (agentpane--request 'sessions/dismissError
+                          (list :session (agentpane--ref agentpane--session)
+                                :message (plist-get (car (last errors)) :error))
+                          #'ignore t)
+      (agentpane--above-prompt
+       (lambda ()
+         (ewoc-filter agentpane--ewoc (lambda (data) (not (plist-member data :error)))))))))
 
 (defun agentpane--read-model (backend)
   "Read a model id for BACKEND from its `models/list', with completion.

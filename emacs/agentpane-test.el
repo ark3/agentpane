@@ -441,6 +441,27 @@ naming what it is (OW-bipume)."
       (should (equal (agentpane-test--indices) '(0 1)))
       (should-not (string-search "⚠" (buffer-string))))))
 
+(ert-deftest agentpane-test-dismiss-error-names-it-to-the-server ()
+  "`C-c C-d', pressed in the prompt region, dismisses the drawn turn error
+through `sessions/dismissError', naming the one drawn last, which is the one
+the server holds, so the server clears it and no newer one; the buffer
+drops every drawn error at once, as the browser's banner goes (OW-desufa)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking nil nil
+      (agentpane-test--with-session ref
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+               :error "Turn failed upstream" :requests [] :notices []))
+        (agentpane--on-notification
+         nil 'session/error (list :session ref :message "Turn failed again"))
+        (goto-char (point-max))
+        (call-interactively (key-binding (kbd "C-c C-d")))
+        (should (equal sent `((sessions/dismissError :session ,ref
+                                                     :message "Turn failed again"))))
+        (should (equal (agentpane-test--indices) '(0 1)))
+        (should-not (string-search "⚠" (buffer-string)))))))
+
 (ert-deftest agentpane-test-request-is-drawn-where-it-arrives ()
   "A `session/request' appends the same warning line a snapshot draws for it."
   (let ((ref '(:backend "codex" :id "t1")))

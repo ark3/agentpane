@@ -142,6 +142,10 @@
  * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
  *   -> `null`. `close` kills the subprocess and stops this session's
  *   notifications.
+ * - `sessions/dismissError` -- `{ session, message }` -> `null`. Clears the
+ *   session's turn error, so later `session/snapshot`s carry `error: null`,
+ *   but only while `message` is still the error the server holds: a newer
+ *   one survives the dismissal of the one Emacs was showing (OW-desufa).
  * - `sessions/detach` -- `{ session }` -> `null`. Stops this session's
  *   notifications and does nothing else: no HTTP call, and the session goes
  *   on running on the server. Sent when Emacs stops showing a session.
@@ -213,6 +217,7 @@ import type {
 	AgentRequestReply,
 	BackendId,
 	CreateSessionRequest,
+	DismissErrorRequest,
 	ForkPoint,
 	ForkRequest,
 	ModelInfo,
@@ -231,6 +236,7 @@ export interface HelperRequests {
 	"sessions/abort": { params: { session: SessionRef }; result: null };
 	"sessions/compact": { params: { session: SessionRef }; result: null };
 	"sessions/close": { params: { session: SessionRef }; result: null };
+	"sessions/dismissError": { params: { session: SessionRef } & DismissErrorRequest; result: null };
 	"sessions/detach": { params: { session: SessionRef }; result: null };
 	"sessions/setModel": { params: { session: SessionRef; model: string }; result: null };
 	"sessions/setEffort": { params: { session: SessionRef; effort: string }; result: null };

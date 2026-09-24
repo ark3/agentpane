@@ -156,6 +156,7 @@ describe("requests", () => {
 			[`GET ${ROUTES.forkPoints(pi)}`]: () => json({ points: [{ id: "e1", text: "hi", index: 0 }] }),
 			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
 			[`POST ${ROUTES.reply("req-1")}`]: noContent,
+			[`DELETE ${ROUTES.error(pi)}`]: noContent,
 		});
 		const requests = [
 			["sessions/create", { cwd: "/work", backend: "pi" }, pi],
@@ -169,6 +170,7 @@ describe("requests", () => {
 			["sessions/forkPoints", { session: pi }, [{ id: "e1", text: "hi", index: 0 }]],
 			["sessions/fork", { session: pi, entryId: "e1" }, codex],
 			["requests/reply", { requestId: "req-1", response: { decision: "accept" } }, null],
+			["sessions/dismissError", { session: pi, message: "boom" }, null],
 		] as const;
 		requests.forEach(([method, params], index) => io.send({ jsonrpc: "2.0", id: index + 10, method, params }));
 		await io.until(requests.length);
@@ -183,6 +185,8 @@ describe("requests", () => {
 			requestId: "req-1",
 			response: { decision: "accept" },
 		});
+		// Named, so the server clears it only while it is still the one held (OW-desufa).
+		expect(calls.find((call) => call.url === ROUTES.error(pi))?.body).toEqual({ message: "boom" });
 	});
 
 	it("carries a server rejection through as a JSON-RPC error with the server's text", async () => {

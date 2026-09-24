@@ -241,6 +241,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			attached.delete(sessionKey(session));
 			return null;
 		},
+		"sessions/dismissError": async ({ session, message }) => {
+			await api.dismissError(session, message);
+			return null;
+		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
 		"sessions/detach": async ({ session }) => {
