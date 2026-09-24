@@ -814,9 +814,16 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
-Applied per backend by OW-sayaju for Codex, and for Claude Code by OW-nabano, which re-asserts the effort, OW-tebibo, which dropped the `--model` a resume and a fork at an entry had carried, and OW-faledu, which names a restored model by what the CLI put in force, so that a fork before the first message, a fresh spawn, carries the `[1m]` variant a resume had widened it to, and OW-sababi, which spawns that fork with `--effort` at the parent's effort in force when it was cut, and with none for a parent whose model has no effort; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
-On Codex no `thread/fork` keeps no turn: as of `codex-cli 0.156.0` one with no `lastTurnId` kept the parent's whole history, and one naming an empty or unknown turn was refused (`docs/MANUAL_TESTING.md`, OW-hojefo).
-So OW-hojefo made its fork at the first fork point a fresh thread, spawned by its own adapter as Claude Code's is, carrying the parent's model onto `thread/start` and the parent's effort onto every `turn/start`, since that `thread/start` answered `config.toml`'s effort.
+What each backend needs from agentpane under this decision:
+
+- **Codex** (OW-sayaju, OW-hojefo): a resume and a fork at an entry re-assert the model and effort the rollout's last `turn_context` recorded.
+  No `thread/fork` keeps no turn: as of `codex-cli 0.156.0`, one with no `lastTurnId` kept the parent's whole history, and one naming an empty or unknown turn was refused (`docs/MANUAL_TESTING.md`, OW-hojefo).
+  So a fork at the first fork point is a fresh thread its own adapter starts, carrying the parent's model onto `thread/start` and the parent's effort onto every `turn/start`, since that `thread/start` answered `config.toml`'s effort.
+- **Claude Code** (OW-nabano, OW-tebibo, OW-faledu, OW-sababi): a resume and a fork at an entry pass no `--model`, since the CLI restores the stored model itself, `[1m]` variant included, and re-assert the stored effort, which it does not.
+  A restored model is named by what the CLI put in force, so a fork before the first message, which is a fresh spawn, carries the `[1m]` variant a resume widened it to.
+  That fork also spawns with `--effort` at the parent's effort in force when it was cut, or with none for a model that has no effort.
+- **Pi** (OW-pubulu): nothing to re-assert.
+  It restores both itself, so its resume spawn carries no `--model` at all, and it forks inside the process that holds the parent.
 
 ## The backend adapter contract
 

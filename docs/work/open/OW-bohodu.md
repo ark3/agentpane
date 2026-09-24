@@ -23,9 +23,11 @@ So the fact has been recorded and contradicted in the same repository for weeks,
 Finding 41 says why and the caution is the load-bearing constraint on this card: a `virtual` session whose backend has not yet written a file is exactly what D9 describes, and Pi's startup write may be a property of how `pi --mode rpc` starts rather than a promise.
 So this is a correction to what the comments claim, plus a decision about what D9 should say, and explicitly not a code removal.
 
-Also unmeasured, and a boundary on how far the sweep may claim: attach-time materialisation is measured on **Pi only**.
-Whether Codex and Claude Code materialise at attach is not known, so the shared copies in `src/shared/protocol.ts` and D9 must not be rewritten as if it were a property of all three.
-That measurement is worth its own card if the sweep turns out to need it.
+A boundary on how far the sweep may claim: the backends differ, so the shared copies in `src/shared/protocol.ts` and D9 must not be rewritten as if one backend's behaviour were all three's.
+Pi writes its session file at attach, as above.
+Codex, as of `codex-cli 0.156.0`, gives the session its thread id at attach -- `CodexAdapter.start()` runs `thread/start`, and the session manager renames the `virtual:` ref then -- but writes no rollout until the first turn; `thread/resume` of a turnless thread failed with `-32600 no rollout found for thread id` (`docs/MANUAL_TESTING.md`, "What a Codex fork at the first user message keeps, and what could keep nothing (OW-hojefo)").
+So on Codex a non-`virtual:` id does not mean anything is on disk; OW-wedupe is the code that depends on that reading, and it is fixed there, not here.
+Claude Code is unmeasured: measure it with no turn -- spawn a fresh session as agentpane does and look for its store file before any prompt -- or have D9 say it is not known.
 
 What is not yet known, and is why this is not a pure comment sweep: whether any site *depends* on the stale reading or merely describes it.
 `detach()`'s virtual exit is the reassuring case -- its predicate `selected.id.startsWith("virtual:")` is still correct, since the id is `virtual:` exactly while nothing is on disk, and only its stated reason is wrong.
