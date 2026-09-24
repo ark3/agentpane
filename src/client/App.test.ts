@@ -35,6 +35,7 @@ function summary(
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		onDisk: true,
 		...overrides,
 	};
 }

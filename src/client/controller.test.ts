@@ -29,6 +29,7 @@ function summary(session: SessionRef, cwd = "/work"): SessionSummary {
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		onDisk: true,
 	};
 }
 

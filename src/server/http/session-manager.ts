@@ -64,6 +64,14 @@ interface ManagedSession {
 	 * a `virtual:` id means nothing to Pi or Codex.
 	 */
 	fromStore: boolean;
+	/**
+	 * Whether the session index has listed this session, reported as
+	 * `SessionSummary.onDisk`. `fromStore` cannot stand in: it is fixed at
+	 * creation, and a session created here reaches the store at its first turn
+	 * (D9). `list()` sets it once the index has the file, so `summaryOf` -- which
+	 * does not walk the index -- can say so too; a fork clears it (`#adoptRef`).
+	 */
+	onDisk: boolean;
 	adapter?: BackendAdapter;
 	subscriptions: Unsubscribe[];
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
@@ -254,6 +262,7 @@ export class SessionManager {
 			model,
 			virtual: true,
 			fromStore: false,
+			onDisk: false,
 			subscriptions: [],
 			lastStreaming: false,
 			lastCompaction: null,
@@ -453,6 +462,9 @@ export class SessionManager {
 			// at all until its first turn ends (OW-japuzo), so it would often have
 			// nothing to return.
 			session.stored = undefined;
+			// Likewise the index's word that a file exists was about the parent. The
+			// fork's own may or may not be there yet; the next `list()` says which.
+			session.onDisk = false;
 			// `#start` seeded `createdAt` from the parent's stored summary, and
 			// `#ownSummary` reports it as `updatedAt` too. The fork's container came
 			// into being now, and a stamp days older would sort a brand-new fork
@@ -498,6 +510,7 @@ export class SessionManager {
 				cwd: forkStart.start.cwd,
 				virtual: false,
 				fromStore: false,
+				onDisk: false,
 				subscriptions: [],
 				lastStreaming: false,
 				lastCompaction: null,
@@ -563,6 +576,7 @@ export class SessionManager {
 				cwd: summary.cwd,
 				virtual: false,
 				fromStore: true,
+				onDisk: true,
 				subscriptions: [],
 				lastStreaming: false,
 				lastCompaction: null,
@@ -902,6 +916,8 @@ export class SessionManager {
 			// no alias, so a fork's parent -- a genuine second conversation -- is
 			// not caught here (`#adoptRef`).
 			if (this.#aliases.has(key)) continue;
+			const live = this.#sessions.get(key);
+			if (live) live.onDisk = true;
 			byKey.set(key, { ...summary, ...this.#liveOverlay(summary.ref) });
 		}
 		for (const session of this.#sessions.values()) {
@@ -939,6 +955,7 @@ export class SessionManager {
 			createdAt: session.createdAt,
 			updatedAt: session.createdAt,
 			...this.#liveOverlay(session.ref),
+			onDisk: session.onDisk,
 		};
 	}
 

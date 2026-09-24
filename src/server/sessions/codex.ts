@@ -188,6 +188,7 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 		updatedAt: stat.mtime.toISOString(),
 		status: "detached",
 		isStreaming: false,
+		onDisk: true,
 	};
 }
 

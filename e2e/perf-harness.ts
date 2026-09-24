@@ -65,6 +65,7 @@ function summaryFor(id: string, index: number): SessionSummary {
 		updatedAt: new Date(1786419855000 + index * 1000).toISOString(),
 		status: "attached",
 		isStreaming: false,
+		onDisk: true,
 	};
 }
 

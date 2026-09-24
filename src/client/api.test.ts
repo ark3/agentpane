@@ -21,6 +21,7 @@ const summary: SessionSummary = {
 	updatedAt: "2026-01-01T00:00:01.000Z",
 	status: "detached",
 	isStreaming: false,
+	onDisk: true,
 };
 
 function response(body: unknown, status = 200): Response {

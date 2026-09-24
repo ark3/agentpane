@@ -20,7 +20,7 @@ const pi: SessionRef = { backend: "pi", id: "/tmp/a.jsonl" };
 const codex: SessionRef = { backend: "codex", id: "thread-1" };
 
 function summary(ref: SessionRef): SessionSummary {
-	return { ref, cwd: "/work", preview: null, createdAt: null, updatedAt: null, status: "attached", isStreaming: false };
+	return { ref, cwd: "/work", preview: null, createdAt: null, updatedAt: null, status: "attached", isStreaming: false, onDisk: true };
 }
 
 function fixtureMessages(): PaneMessage[] {

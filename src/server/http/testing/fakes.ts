@@ -446,5 +446,6 @@ export function storedSession(ref: SessionRef, cwd: string, at = "2026-08-10T00:
 		updatedAt: at,
 		status: "detached",
 		isStreaming: false,
+		onDisk: true,
 	};
 }

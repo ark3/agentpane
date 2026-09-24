@@ -104,6 +104,7 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
 		updatedAt: stat.mtime.toISOString(),
 		status: "detached",
 		isStreaming: false,
+		onDisk: true,
 	};
 }
 

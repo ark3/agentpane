@@ -1185,6 +1185,70 @@ describe("lifecycle", () => {
 	});
 });
 
+/**
+ * `onDisk` is what a client asks before it previews a session it just
+ * detached, and neither the id nor `virtual` can answer it: every backend
+ * renames a new session at attach and writes nothing until the first turn
+ * (D9), and a fork starts with no file on every backend (OW-wedupe). So the
+ * answer is the index's.
+ */
+describe("onDisk", () => {
+	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
+
+	it("is true for a session attached from the store", async () => {
+		await sessions.attach(REF);
+
+		expect(sessions.summaryOf(REF)?.onDisk).toBe(true);
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(REF))?.onDisk).toBe(true);
+	});
+
+	it("stays false for a session renamed at attach until the index lists it, and then sticks", async () => {
+		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
+		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
+		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
+		await sessions.attach(virtualRef);
+		const real: SessionRef = { backend: "pi", id: REAL };
+		expect(sessions.canonicalRef(virtualRef)).toEqual(real);
+
+		// Renamed and prompted, and still nothing written: the id and `virtual`
+		// have both moved, and neither says a file exists.
+		sessions.markPrompted(real);
+		expect(sessions.summaryOf(real)?.onDisk).toBe(false);
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(real))?.onDisk).toBe(false);
+
+		// The first turn has written the store.
+		index.summaries.push(storedSession(real, WORKSPACE));
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(real))?.onDisk).toBe(true);
+		// The attach response is the other way a client learns it, and it cannot
+		// ask the index: `summaryOf` has to remember what the listing saw.
+		expect(sessions.summaryOf(real)?.onDisk).toBe(true);
+	});
+
+	it("is false for a fork attached from its recipe", async () => {
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		const claude = new FakeAdapterFactory({ forkMode: "claude" });
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+		const forked = await sessions.fork(claudeRef, "e1");
+
+		await sessions.attach(forked);
+
+		expect(sessions.summaryOf(forked)?.onDisk).toBe(false);
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(forked))?.onDisk).toBe(false);
+	});
+
+	it("is false for a fork that moved the parent's container, whose answer was the parent's", async () => {
+		await sessions.attach(REF);
+		expect(sessions.summaryOf(REF)?.onDisk).toBe(true);
+
+		const forked = await sessions.fork(REF, "e1");
+
+		expect(sessions.summaryOf(forked)?.onDisk).toBe(false);
+		expect((await sessions.list()).find((s) => sessionKey(s.ref) === sessionKey(forked))?.onDisk).toBe(false);
+	});
+});
+
 describe("teardown racing a startup", () => {
 	// `start()` is the window in which an adapter already owns a sandboxed child
 	// but the manager has not recorded it: `#sessions` only learns about the
