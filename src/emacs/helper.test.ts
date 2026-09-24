@@ -389,6 +389,18 @@ describe("notifications", () => {
 		});
 	});
 
+	it("passes a request's retraction through as session/requestResolved (OW-gusifo)", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "request", session: pi, seq: 2, request: { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} } });
+		source.emit({ type: "request-resolved", session: pi, seq: 3, requestId: "r1" });
+		await io.until(4);
+		const [, , resolved] = io.notifications();
+		expect(resolved).toEqual({ jsonrpc: "2.0", method: "session/requestResolved", params: { session: pi, requestId: "r1" } });
+	});
+
 	it("passes a notice through as session/notice, not session/error (OW-tujiya)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });

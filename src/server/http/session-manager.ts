@@ -90,11 +90,11 @@ interface ManagedSession {
 	 * way to learn of it. Each follows the lifecycle the client applies to its
 	 * own copy, or a snapshot would resurrect what the client had cleared:
 	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`),
-	 * a request leaves when it is answered (`clearRequest`), and notices only
-	 * accumulate -- save that one identical to a notice already held is neither
-	 * held nor fanned out again (OW-piloni). They live on the container, so a
-	 * rename carries them and a close drops them; a fork's re-key keeps all but
-	 * `error` (`#adoptRef`).
+	 * a request leaves when it stops being pending (`clearRequest`, which
+	 * retracts it on the wire), and notices only accumulate -- save that one
+	 * identical to a notice already held is neither held nor fanned out again
+	 * (OW-piloni). They live on the container, so a rename carries them and a
+	 * close drops them; a fork's re-key keeps all but `error` (`#adoptRef`).
 	 */
 	error: string | null;
 	requests: AgentRequest[];
@@ -700,6 +700,8 @@ export class SessionManager {
 				this.broadcaster.notice(bound.ref, notice);
 			});
 			if (offNotice) bound.subscriptions.push(offNotice);
+			const offResolved = adapter.onRequestResolved?.((requestId) => this.clearRequest(requestId));
+			if (offResolved) bound.subscriptions.push(offResolved);
 			await adapter.start(
 				forkStart?.start ?? {
 					cwd: bound.cwd,
@@ -851,11 +853,18 @@ export class SessionManager {
 		return this.#lookup(ref)?.error ?? null;
 	}
 
+	/**
+	 * The request stopped being pending: answered through the reply route, or
+	 * reported resolved by the adapter. Dropped from what snapshots carry and
+	 * retracted on the wire (OW-gusifo).
+	 */
 	clearRequest(requestId: string): void {
 		const owner = this.#pendingRequests.get(requestId);
 		this.#pendingRequests.delete(requestId);
 		const session = owner === undefined ? undefined : this.#sessions.get(owner);
-		if (session) session.requests = session.requests.filter((request) => request.requestId !== requestId);
+		if (!session) return;
+		session.requests = session.requests.filter((request) => request.requestId !== requestId);
+		this.broadcaster.requestResolved(session.ref, requestId);
 	}
 
 	/**

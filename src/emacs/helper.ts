@@ -150,6 +150,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			case "request":
 				notify({ method: "session/request", params: { session: view.ref, request: event.request } });
 				return;
+			case "request-resolved":
+				notify({ method: "session/requestResolved", params: { session: view.ref, requestId: event.requestId } });
+				return;
 		}
 	};
 

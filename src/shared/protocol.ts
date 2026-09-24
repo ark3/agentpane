@@ -184,8 +184,8 @@ export type ServerEvent =
 			 * What the `error`, `request` and `notice` events below have told the
 			 * session's clients so far, as the server still holds it (OW-bipume):
 			 * the last turn error, null once the next prompt is admitted or a
-			 * client dismisses it (`ROUTES.error`); every request not yet
-			 * answered, oldest first; and every notice, oldest first. Here because
+			 * client dismisses it (`ROUTES.error`); every request still pending,
+			 * oldest first; and every notice, oldest first. Here because
 			 * a snapshot is the only thing that introduces a session to a client,
 			 * so one that connects, reconnects or first attaches after the event
 			 * went out learns of it nowhere else. A client takes all three from
@@ -209,6 +209,18 @@ export type ServerEvent =
 	  }
 	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
 	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }
+	| {
+			/**
+			 * The request `requestId` names is no longer pending, however it
+			 * stopped being so -- answered through `ROUTES.reply`, or resolved or
+			 * declined without it (OW-gusifo). Drop it. A client that missed this
+			 * converges on the next snapshot, whose `requests` no longer holds it.
+			 */
+			type: "request-resolved";
+			session: SessionRef;
+			seq: number;
+			requestId: string;
+	  }
 	| {
 			/** A turn ended in an error the transcript alone would not convey. */
 			type: "error";

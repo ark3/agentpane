@@ -216,21 +216,20 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// too: it is followed immediately by `broadcastSnapshot(to)` (`broadcaster.ts`),
 	// so the entry it builds is filled a moment later rather than left hollow.
 	//
-	// These five arms are not, however, unreachable before that introduction, and
-	// what they drop there is worth naming. `#start` subscribes `onUpdate`,
-	// `onRequest`, `onError` and `onNotice` before it awaits `adapter.start(...)`,
-	// and `#adoptRef(session, "fork")` re-keys a live Pi container onto the fork's
-	// ref with no snapshot behind it (D20, OW-suhoto), so all five can fan out
-	// under a key no client holds a view of. None of that is lost: the snapshot
-	// that follows carries `messages`, `isStreaming`, `compaction` and `model`
-	// wholesale, and since OW-bipume the session's `error`, `requests` and
+	// These six arms are not, however, unreachable before that introduction, and what
+	// they drop there is worth naming. `#start` subscribes `onUpdate`, `onRequest`,
+	// `onError`, `onNotice` and `onRequestResolved` before it awaits
+	// `adapter.start(...)`, and `#adoptRef(session, "fork")` re-keys a live Pi
+	// container onto the fork's ref with no snapshot behind it (D20, OW-suhoto), so
+	// all six can fan out under a key no client holds a view of. None of that is lost:
+	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and
+	// `model` wholesale, and since OW-bipume the session's `error`, `requests` and
 	// `notices` too, which the server holds for exactly this -- and for the client
-	// that reconnects or connects later, which never saw the event at all. What
-	// the snapshot carries is the only restoring path a client has, which is why
-	// the fix lives there and not in letting an event resurrect a dead view here:
-	// that costs more than it buys -- a resurrecting `error` lights the alert
-	// banner over a session the user just detached, where the `status` above only
-	// lit a dot.
+	// that reconnects or connects later, which never saw the event at all. What the
+	// snapshot carries is the only restoring path a client has, which is why the fix
+	// lives there and not in letting an event resurrect a dead view here: that costs
+	// more than it buys -- a resurrecting `error` lights the alert banner over a
+	// session the user just detached, where the `status` above only lit a dot.
 	//
 	// Ignoring is silent on purpose: no recovery is requested either. A recovery
 	// here would `api.attach` the session and spawn the subprocess again behind
@@ -267,6 +266,9 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			break;
 		case "request":
 			view.requests = [...view.requests, event.request];
+			break;
+		case "request-resolved":
+			view.requests = view.requests.filter((request) => request.requestId !== event.requestId);
 			break;
 		case "notice":
 			view.notices = [...view.notices, event.notice];

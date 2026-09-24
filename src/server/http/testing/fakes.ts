@@ -190,6 +190,7 @@ export class FakeAdapter implements BackendAdapter {
 
 	#updates = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	#requests = new Set<(request: AgentRequest) => void>();
+	#resolved = new Set<(requestId: string) => void>();
 	#errors = new Set<(message: string) => void>();
 	#notices = new Set<(notice: AgentNotice) => void>();
 	#nextRequestId = 1;
@@ -223,6 +224,7 @@ export class FakeAdapter implements BackendAdapter {
 		this.disposals++;
 		this.#updates.clear();
 		this.#requests.clear();
+		this.#resolved.clear();
 		this.#errors.clear();
 		this.#notices.clear();
 		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release();
@@ -294,6 +296,11 @@ export class FakeAdapter implements BackendAdapter {
 	onRequest(cb: (request: AgentRequest) => void): Unsubscribe {
 		this.#requests.add(cb);
 		return () => this.#requests.delete(cb);
+	}
+
+	onRequestResolved(cb: (requestId: string) => void): Unsubscribe {
+		this.#resolved.add(cb);
+		return () => this.#resolved.delete(cb);
 	}
 
 	onError(cb: (message: string) => void): Unsubscribe {
@@ -375,6 +382,11 @@ export class FakeAdapter implements BackendAdapter {
 		};
 		for (const cb of [...this.#requests]) cb(request);
 		return request;
+	}
+
+	/** The request stopped being pending without the reply route (OW-gusifo). */
+	emitRequestResolved(requestId: string): void {
+		for (const cb of [...this.#resolved]) cb(requestId);
 	}
 
 	emitError(message: string): void {

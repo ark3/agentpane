@@ -1803,6 +1803,34 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
 	});
 
+	it("retracts a request answered through the reply route on the wire (OW-gusifo)", async () => {
+		await sessions.attach(REF);
+		const request = pi.forRef(REF)!.emitRequest("approval");
+		const events = connect();
+
+		sessions.clearRequest(request.requestId);
+
+		expect(events.filter((event) => event.type === "request-resolved")).toEqual([
+			expect.objectContaining({ session: REF, requestId: request.requestId }),
+		]);
+	});
+
+	it("drops and retracts a request the adapter reports resolved (OW-gusifo)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const resolved = adapter.emitRequest("approval");
+		const pending = adapter.emitRequest("elicitation");
+		const events = connect();
+
+		adapter.emitRequestResolved(resolved.requestId);
+
+		expect(events.filter((event) => event.type === "request-resolved")).toEqual([
+			expect.objectContaining({ session: REF, requestId: resolved.requestId }),
+		]);
+		expect(sessions.sessionOfRequest(resolved.requestId)).toBeUndefined();
+		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
+	});
+
 	it("clears the error when the next prompt is admitted, as the client does (OW-31)", async () => {
 		await sessions.attach(REF);
 		pi.forRef(REF)!.emitError("turn failed");

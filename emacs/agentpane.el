@@ -408,6 +408,7 @@ transcript buffer holding it, if there is one."
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--upsert (list :error (plist-get params :message))))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
+            ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
             ('session/renamed (agentpane--rekey (plist-get params :to)))))))))
 
@@ -1150,6 +1151,17 @@ turn and no longer is."
        (when previous
          (ewoc-invalidate agentpane--ewoc previous))))
     (agentpane--show-reading-tail)))
+
+(defun agentpane--drop-request (request-id)
+  "Drop the `(:request REQUEST)' node drawn for REQUEST-ID, if there is one.
+The request is no longer pending, and the line saying the agent is
+blocked on it would say what is not so (OW-gusifo)."
+  (agentpane--above-prompt
+   (lambda ()
+     (ewoc-filter agentpane--ewoc
+                  (lambda (node)
+                    (not (equal request-id
+                                (plist-get (plist-get node :request) :requestId))))))))
 
 (defun agentpane--above-prompt (redraw)
   "Call REDRAW, which changes only the read-only text above the prompt region.

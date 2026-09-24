@@ -180,7 +180,7 @@
  *   Emacs was attached to hear them (OW-bipume): `error` (string or `null`)
  *   the last turn error, `null` again once a later prompt is admitted or a
  *   client dismisses it; `requests` (array, always, possibly empty) every
- *   request not yet answered, oldest first, each the `request` a
+ *   request still pending, oldest first, each the `request` a
  *   `session/request` carried; and `notices` (array, always, possibly empty)
  *   every notice, oldest first, each the `notice` a `session/notice` carried.
  *   The buffer draws all three after `nodes`, since a snapshot arrives at
@@ -195,7 +195,12 @@
  *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
  *   backend's own method name) and `payload` -- and `issuerThreadId` where a
  *   Codex subagent issued it. Every later `session/snapshot` carries it
- *   again, in `requests`, until it is answered.
+ *   again, in `requests`, until it stops being pending, which
+ *   `session/requestResolved` says.
+ * - `session/requestResolved` -- `{ session, requestId }`. The request a
+ *   `session/request` carried under `requestId` is no longer pending --
+ *   answered, or resolved or declined without an answer (OW-gusifo). Drop
+ *   its line; one Emacs never drew is nothing to drop.
  * - `session/notice` -- `{ session, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
@@ -263,6 +268,7 @@ export type HelperNotification =
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; message: string } }
 	| { method: "session/request"; params: { session: SessionRef; request: AgentRequest } }
+	| { method: "session/requestResolved"; params: { session: SessionRef; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; notice: AgentNotice } }
 	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef } }
 	| { method: "sessions/changed"; params?: undefined };

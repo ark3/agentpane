@@ -48,7 +48,7 @@ export type CodexEffect =
 	| { type: "compaction"; compaction: "requesting" | "running" | null }
 	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a, OW-futewo). */
 	| { type: "request"; requestId: RequestId; kind: string; payload: unknown; issuerThreadId?: string | null }
-	/** Codex resolved a pending request itself (auto-approval, another client). */
+	/** Codex says a request it sent is no longer pending (`serverRequest/resolved`). */
 	| { type: "request-resolved"; requestId: RequestId }
 	| { type: "error"; message: string }
 	/** A warning Codex sent that is neither a failure nor transcript state (OW-tujiya). */
@@ -227,6 +227,15 @@ export class CodexReducer {
 	}
 
 	private handleNotification(message: CodexNotification): CodexEffect[] {
+		// Ahead of the thread guard: a subagent thread's request is routed to its
+		// parent's adapter (`CodexConnection.#recipientFor`, OW-futewo), but its
+		// resolution names the child's thread and the guard would drop it. The
+		// wire id is what identifies the request -- JSON-RPC gives the
+		// connection one id space -- and only the adapter that published it
+		// holds a mapping for that id (OW-gusifo).
+		if (message.method === "serverRequest/resolved") {
+			return [{ type: "request-resolved", requestId: message.params.requestId }];
+		}
 		const notificationThreadId = threadIdOf(message);
 		if (this.threadId && notificationThreadId && notificationThreadId !== this.threadId) return [];
 
@@ -326,9 +335,6 @@ export class CodexReducer {
 				slot.item.changes = message.params.changes;
 				return this.remap(slot);
 			}
-
-			case "serverRequest/resolved":
-				return [{ type: "request-resolved", requestId: message.params.requestId }];
 
 			case "error":
 				// Read from `resources/codex-protocol/v2/ErrorNotification.ts`, not

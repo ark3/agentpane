@@ -210,6 +210,7 @@ export class CodexAdapter implements BackendAdapter {
 
 	private updateListeners = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	private requestListeners = new Set<(request: AgentRequest) => void>();
+	private resolvedListeners = new Set<(requestId: string) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private noticeListeners = new Set<(notice: AgentNotice) => void>();
 
@@ -491,6 +492,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.connection = null;
 		this.updateListeners.clear();
 		this.requestListeners.clear();
+		this.resolvedListeners.clear();
 		this.errorListeners.clear();
 		this.noticeListeners.clear();
 		this.clearPendingRequests();
@@ -804,6 +806,18 @@ export class CodexAdapter implements BackendAdapter {
 		return () => this.requestListeners.delete(cb);
 	}
 
+	/**
+	 * A published request Codex reported resolved (`serverRequest/resolved`)
+	 * before `reply` answered it (OW-gusifo). A child thread's request, routed
+	 * here by `CodexConnection.#recipientFor`, counts: the reducer passes the
+	 * notification through whatever thread it names, and only the adapter that
+	 * published the wire id holds a mapping for it.
+	 */
+	onRequestResolved(cb: (requestId: string) => void): Unsubscribe {
+		this.resolvedListeners.add(cb);
+		return () => this.resolvedListeners.delete(cb);
+	}
+
 	onError(cb: (message: string) => void): Unsubscribe {
 		this.errorListeners.add(cb);
 		return () => this.errorListeners.delete(cb);
@@ -1006,13 +1020,19 @@ export class CodexAdapter implements BackendAdapter {
 					break;
 				}
 				case "request-resolved":
-					// Codex resolved it without us (auto-approval, or another
-					// client). Drop it so a late `reply` is a no-op.
+					// Codex resolved one `reply` has not answered. Drop it so a late
+					// `reply` is a no-op, and tell the server, which holds it too.
+					// What resolves one without us -- auto-approval, another client of
+					// the app-server -- is unmeasured: the only `serverRequest/resolved`
+					// captured, in `tool-edit.jsonl` (`codex-cli 0.147.0`), followed
+					// the capture harness's own answer.
 					{
 						const wireKey = wireRequestKey(effect.requestId);
 						const externalId = this.externalRequestIds.get(wireKey);
-						if (externalId) this.pendingRequests.delete(externalId);
 						this.externalRequestIds.delete(wireKey);
+						if (!externalId) break;
+						this.pendingRequests.delete(externalId);
+						for (const listener of [...this.resolvedListeners]) listener(externalId);
 					}
 					break;
 				case "error":

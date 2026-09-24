@@ -477,6 +477,27 @@ drops every drawn error at once, as the browser's banner goes (OW-desufa)."
         (should (< (agentpane-test--position "Looking.") at
                    (agentpane-test--position "── prompt")))))))
 
+(ert-deftest agentpane-test-request-resolved-drops-its-line ()
+  "A `session/requestResolved' drops the line drawn for the request it
+names and no other, leaving the draft in the prompt region alone
+(OW-gusifo)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (dolist (id '("r1" "r2"))
+        (agentpane--on-notification
+         nil 'session/request
+         (list :session ref
+               :request `(:requestId ,id :session (:backend "codex" :id "t1")
+                          :kind ,(concat "kind/" id) :payload nil))))
+      (goto-char (point-max))
+      (insert "draft")
+      (agentpane--on-notification
+       nil 'session/requestResolved (list :session ref :requestId "r1"))
+      (should-not (string-search "kind/r1" (buffer-string)))
+      (should (string-search "kind/r2" (buffer-string)))
+      (should (equal (agentpane-test--indices) '(0 1 nil)))
+      (should (string-suffix-p "draft" (buffer-string))))))
+
 (ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
   "While the session streams, the last node draws no meta line and an
 earlier one does, and the last one's appears once a status says the

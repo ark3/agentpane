@@ -157,6 +157,10 @@ export class Broadcaster {
 		this.#fanout({ type: "request", session: ref, seq: this.#bump(ref), request });
 	}
 
+	requestResolved(ref: SessionRef, requestId: string): void {
+		this.#fanout({ type: "request-resolved", session: ref, seq: this.#bump(ref), requestId });
+	}
+
 	error(ref: SessionRef, message: string): void {
 		this.#fanout({ type: "error", session: ref, seq: this.#bump(ref), message });
 	}

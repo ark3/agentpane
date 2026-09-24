@@ -116,15 +116,15 @@ A turn that carries on from a "no" it can read beats a session that has to be de
 The user is told what arrived in both cases; silently refusing on the agent's behalf is the one outcome ruled out.
 
 This is provisional and OW-bijera is what revisits it: once a human can answer, holding becomes the right behaviour again for the kinds they can answer.
-It is therefore sequenced *before* bijera rather than after, because declining honestly needs the retraction this contract has always lacked -- see the paragraph below.
+It is therefore sequenced *before* bijera rather than after, because declining honestly needs a retraction, which this contract lacked until OW-gusifo -- see the paragraph below.
 
-**A resolved request has no wire event, and that is a gap, not a decision.**
-`ServerEvent` carries `request` and nothing that retracts it, so no event tells a client a request stopped being pending.
-Since OW-bipume the server holds each session's pending requests and every `snapshot` carries them, and the client's snapshot arm replaces its `requests` with them (`src/client/session-state.ts`); between snapshots the `request` arm only appends.
-So a request answered through agentpane's reply route leaves the client's view at the next snapshot, with no event of its own.
-A request Codex resolves itself, through auto-approval or another client of the app-server, does not leave at all: the Codex reducer produces a `request-resolved` effect that the adapter consumes and drops, so the server never learns of it and goes on holding the request.
-Since OW-bipume that request therefore stays on every snapshot, and a reload no longer clears it either.
-The missing piece is carrying that effect out of the adapter to the server's held requests and a wire event, not the detection (OW-gusifo).
+**A request that stops being pending is retracted on the wire, closing what was a gap and never a decision (OW-gusifo).**
+Until then `ServerEvent` carried `request` and nothing that retracted it.
+Since OW-bipume the server holds each session's pending requests and every `snapshot` carries them, so a request answered through agentpane's reply route left clients' views only at the next snapshot, and one Codex reported resolved left nothing at all: the adapter dropped it, the server went on holding it, and every snapshot re-sent it.
+Now a `request-resolved` event carrying the `requestId` retracts a request however it stopped being pending: `SessionManager.clearRequest` broadcasts it after the reply route answers, and does the same for an adapter's `onRequestResolved`, which the Codex adapter fires on `serverRequest/resolved` for a request `reply` had not answered, and which an adapter answering a request itself can fire as well.
+Both clients drop the request on it -- the browser from `view.requests` (`src/client/session-state.ts`), Emacs its warning line through the helper's `session/requestResolved` -- and a client that missed it converges on the next snapshot, whose `requests` no longer hold it.
+A subagent thread's request is routed to its parent's adapter (OW-futewo) while its `serverRequest/resolved` names the child's thread, so the Codex reducer reads that notification ahead of its thread guard and lets the wire id, which only the adapter that published the request maps, decide who acts on it.
+What makes Codex resolve a request without agentpane's answer is unmeasured: auto-approval or another client of the app-server was assumed, but the only `serverRequest/resolved` captured, in `resources/fixtures/codex/tool-edit.jsonl` (`codex-cli 0.147.0`), followed the capture harness's own answer.
 
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.

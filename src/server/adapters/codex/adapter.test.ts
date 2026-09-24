@@ -2220,6 +2220,44 @@ describe("CodexAdapter request replies", () => {
 		]);
 	});
 
+	it("reports a published request Codex resolved under the id it was published with (OW-gusifo)", async () => {
+		const threadId = "resolving-thread";
+		const { adapter, proc } = await startedAdapter({ threadId });
+		const requests: AgentRequest[] = [];
+		const resolved: string[] = [];
+		adapter.onRequest((request) => requests.push(request));
+		adapter.onRequestResolved((requestId) => resolved.push(requestId));
+		proc.emit({ id: 7, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-1" } });
+		proc.emit({ id: 8, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-2" } });
+
+		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 7 } });
+		// Answered through `reply`, which the server clears on its own.
+		await adapter.reply(requests[1]?.requestId ?? "", { decision: "accept" });
+		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 8 } });
+
+		expect(resolved).toEqual([requests[0]?.requestId]);
+	});
+
+	it("reports a child-thread request routed through the parent resolved, though the notification names the child (OW-gusifo)", async () => {
+		const parentThreadId = "parent-thread";
+		const childThreadId = "child-thread";
+		const { adapter, proc } = await startedAdapter({ threadId: parentThreadId });
+		const requests: AgentRequest[] = [];
+		const resolved: string[] = [];
+		adapter.onRequest((request) => requests.push(request));
+		adapter.onRequestResolved((requestId) => resolved.push(requestId));
+		proc.emit({
+			id: "child-approval-1",
+			method: "item/commandExecution/requestApproval",
+			params: { threadId: childThreadId, turnId: "turn-1", itemId: "item-1", startedAtMs: 1000, command: "echo test" },
+		});
+
+		proc.emit({ method: "serverRequest/resolved", params: { threadId: childThreadId, requestId: "child-approval-1" } });
+
+		expect(requests[0]?.issuerThreadId).toBe(childThreadId);
+		expect(resolved).toEqual([requests[0]?.requestId]);
+	});
+
 	it("does not set issuerThreadId for a same-thread blocking request (OW-futewo)", async () => {
 		const threadId = "same-thread";
 		const { adapter, proc } = await startedAdapter({ threadId });

@@ -335,6 +335,18 @@ describe("client session state", () => {
 		expect(result.state.sessions[sessionKey(ref)]?.requests).toEqual([request]);
 	});
 
+	it("drops a request the server retracts, keeping the others (OW-gusifo)", () => {
+		const resolved: AgentRequest = { requestId: "request-1", session: ref, kind: "approval", payload: {} };
+		const pending: AgentRequest = { requestId: "request-2", session: ref, kind: "elicitation", payload: {} };
+		let state = reduceServerEvent(stateAtSequence(ref, 1), { type: "request", session: ref, seq: 2, request: resolved }).state;
+		state = reduceServerEvent(state, { type: "request", session: ref, seq: 3, request: pending }).state;
+
+		const result = reduceServerEvent(state, { type: "request-resolved", session: ref, seq: 4, requestId: "request-1" });
+
+		expect(result.state.sessions[sessionKey(ref)]?.requests).toEqual([pending]);
+		expect(result.recover).toEqual([]);
+	});
+
 	it("clears a session's persisted error and leaves an unaffected session's state untouched (OW-31)", () => {
 		const withError = reduceServerEvent(stateAtSequence(ref, 1), {
 			type: "error",

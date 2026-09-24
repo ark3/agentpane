@@ -177,6 +177,14 @@ export interface BackendAdapter {
 	onRequest(cb: (request: AgentRequest) => void): Unsubscribe;
 	/** Answer a pending request. `response` is backend-shaped; null declines. */
 	reply(requestId: string, response: unknown): Promise<void>;
+	/**
+	 * Fires when a request `onRequest` published stops being pending other
+	 * than through `reply` -- the backend resolved it, or the adapter answered
+	 * it itself (OW-gusifo). `requestId` is the id it was published under.
+	 * Optional because only the Codex adapter detects one; the others leave
+	 * it out.
+	 */
+	onRequestResolved?(cb: (requestId: string) => void): Unsubscribe;
 
 	/** Fires when a turn fails in a way the transcript does not convey. */
 	onError(cb: (message: string) => void): Unsubscribe;
