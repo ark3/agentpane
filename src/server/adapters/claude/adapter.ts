@@ -49,20 +49,29 @@
  *   `--effort` at the level the last hydrated assistant message records --
  *   for a fork, the kept prefix's -- because the store, not agentpane, holds
  *   the conversation's effort (D23). The flag, not `apply_flag_settings`
- *   after attach, because it is in force from the process's first instant
- *   and rides the spawn beside `--model`. Measured on the home server,
+ *   after attach, because it is in force from the process's first instant.
+ *   Measured on the home server, 2026-09-23, `claude 2.1.280`, no turn
+ *   (docs/MANUAL_TESTING.md, OW-nabano): `--effort low` and `--effort max`
+ *   on a `--resume` read back `low` and `max` -- `max` too, though it is
+ *   session-scoped and named by no settings source -- and `--effort low` on
+ *   a `--fork-session` spawn read `low`; `--effort bogus` was ignored rather
+ *   than failing the spawn;
+ *   and a later `apply_flag_settings` still overrode the flag. The start read
+ *   is what makes `getState().effort` true for every path.
+ *   The model, unlike the effort, the CLI restores itself, so a resume and a
+ *   fork at a real entry are spawned with no `--model`, and the stored model
+ *   is only what `getState().model` names. Measured on the home server,
  *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md,
- *   OW-nabano): `--effort low` and `--effort max` on a `--resume` read back
- *   `low` and `max` -- `max` too, though it is session-scoped and named by
- *   no settings source -- and `--effort low` on a `--fork-session` spawn
- *   read `low`; `--effort bogus` was ignored rather than failing the spawn;
- *   and a later `apply_flag_settings` still overrode the flag. The same run
- *   found the CLI restoring the model itself: a `--resume` and a
- *   `--fork-session` spawn of a sonnet session with no `--model` put the
- *   store's `claude-sonnet-5` in force over the settings' `opus[1m]`. The
- *   adapter nonetheless still passes one: the stored model on a resume, and
- *   the parent's on a fork. The start read is what makes `getState().effort`
- *   true for every path.
+ *   OW-tebibo): with the settings naming `opus[1m]`, a `--resume` with no
+ *   `--model` put in force the `message.model` of the last assistant line
+ *   that is not `<synthetic>`, even where that line alone was hand-edited;
+ *   a `--fork-session` spawn put in force its kept prefix's, not the file's
+ *   last; and a stored `claude-opus-5-5` came back as `claude-opus-5-5[1m]`,
+ *   a variant that passing the stored id would drop. A fork's kept prefix
+ *   may name a different model from the parent's latest, so the prefix's is
+ *   the fork's; the parent's model, which `fork()` hands over, rides the
+ *   spawn only when the prefix names none, as does a model given at start
+ *   to a resume.
  *   Each assistant turn is named with the effort in force when it started,
  *   and a resumed one with the `effort` its store line records.
  * - A session nobody chose a model on still names one before its first turn,
@@ -226,17 +235,25 @@ export class ClaudeAdapter implements BackendAdapter {
 			// so it is a fresh session in the same workspace rather than a resume.
 			const { parentId, entryId } = opts.forkOf;
 			if (entryId === CLAUDE_FORK_SESSION_START) {
-				await this.attachProcess({ cwd: opts.cwd, sessionId: this.currentRef.id });
+				await this.attachProcess({ cwd: opts.cwd, sessionId: this.currentRef.id, ...this.chosenModel() });
 			} else {
 				const kept = await this.readForkHistory(parentId, entryId);
 				if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 				this.applyEffects(this.reducer.hydrate(kept.map((entry) => entry.record)));
-				this.adoptStoredModel();
+				// The CLI restores the kept prefix's model itself (module doc), so it
+				// outranks the parent's, which `fork()` hands over and which rides the
+				// spawn only for a prefix that names none.
+				const stored = this.lastHydratedAssistant();
+				if (stored) {
+					this.model = stored.model;
+					this.emitUpdate();
+				}
 				await this.attachProcess({
 					cwd: opts.cwd,
 					resumeId: parentId,
 					forkAtEntryId: entryId,
 					sessionId: this.currentRef.id,
+					...(stored ? {} : this.chosenModel()),
 					...this.storedEffort(),
 				});
 			}
@@ -250,12 +267,19 @@ export class ClaudeAdapter implements BackendAdapter {
 			this.applyEffects(this.reducer.hydrate(entries.map((entry) => entry.record)));
 			this.adoptStoredModel();
 			this.currentRef = { backend: "claude", id: opts.resumeId };
-			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId, ...this.storedEffort() });
+			// Only a model given at start rides the spawn: the CLI restores the
+			// stored one itself (module doc).
+			await this.attachProcess({
+				cwd: opts.cwd,
+				resumeId: opts.resumeId,
+				...(opts.model ? { model: opts.model } : {}),
+				...this.storedEffort(),
+			});
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		} else {
 			const sessionId = this.mintSessionId();
 			this.currentRef = { backend: "claude", id: sessionId };
-			await this.attachProcess({ cwd: opts.cwd, sessionId });
+			await this.attachProcess({ cwd: opts.cwd, sessionId, ...this.chosenModel() });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		}
 		await this.readSettings();
@@ -539,6 +563,11 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.emitUpdate();
 	}
 
+	/** The model known so far, as a spawn option for a session whose store restores none. */
+	private chosenModel(): { model?: string } {
+		return this.model ? { model: this.model } : {};
+	}
+
 	/**
 	 * The effort the last hydrated assistant message ran at, as the resume or
 	 * fork's spawn option: a `--resume` does not restore it (module doc, D23).
@@ -568,12 +597,12 @@ export class ClaudeAdapter implements BackendAdapter {
 		resumeId?: string;
 		sessionId?: string;
 		forkAtEntryId?: string;
+		model?: string;
 		effort?: string;
 	}): Promise<void> {
 		const spawner = this.options.spawn ?? spawnClaude;
 		const proc = spawner({
 			...spawnOpts,
-			...(this.model ? { model: this.model } : {}),
 			...(this.options.env ? { env: this.options.env } : {}),
 		});
 		const ownership: Ownership = { proc, live: true };

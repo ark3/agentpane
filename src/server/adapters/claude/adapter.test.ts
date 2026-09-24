@@ -108,7 +108,7 @@ describe("ClaudeAdapter lifecycle", () => {
 		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
 
 		expect(h.spawns).toEqual([
-			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model" },
+			{ cwd: "/workspace", resumeId: "stored-id" },
 		]);
 		expect(h.adapter.ref).toEqual({ backend: "claude", id: "stored-id" });
 		expect(h.adapter.getState().messages.map((m) => m.role)).toEqual([
@@ -130,7 +130,7 @@ describe("ClaudeAdapter lifecycle", () => {
 
 		expect(h.adapter.getState().model).toBe("last-model");
 		expect(h.spawns).toEqual([
-			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model" },
+			{ cwd: "/workspace", resumeId: "stored-id" },
 		]);
 	});
 
@@ -360,7 +360,7 @@ describe("ClaudeAdapter turns", () => {
 
 		// Told at spawn, so no turn can run at the CLI's default first.
 		expect(h.spawns).toEqual([
-			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model", effort: "max" },
+			{ cwd: "/workspace", resumeId: "stored-id", effort: "max" },
 		]);
 		expect(h.adapter.getState().effort).toBe("max");
 	});
@@ -395,7 +395,7 @@ describe("ClaudeAdapter turns", () => {
 		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
 
 		expect(h.spawns).toEqual([
-			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model", effort: "max" },
+			{ cwd: "/workspace", resumeId: "stored-id", effort: "max" },
 		]);
 	});
 
@@ -894,6 +894,39 @@ describe("ClaudeAdapter fork", () => {
 		expect(updates).toHaveBeenCalled();
 	});
 
+	/**
+	 * As of `claude 2.1.280`, a `--resume` and a `--fork-session` spawn with no
+	 * `--model` put in force the model the last assistant line records -- for
+	 * the fork, the kept prefix's -- and a `--model` would override it
+	 * (docs/MANUAL_TESTING.md, OW-tebibo).
+	 */
+	it("resumes and forks at an entry with no model, naming the one the store restores (OW-tebibo)", async () => {
+		const parent = harness({ entries: storedEntries(), ids: ["forked-1"] });
+		await parent.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+		const forked = await parent.adapter.fork("a2");
+		const fork = harness({ entries: storedEntries(), ref: forked.ref });
+		await fork.adapter.start(forked.start ?? { cwd: "/workspace" });
+
+		expect(parent.spawns).toEqual([{ cwd: "/workspace", resumeId: "parent" }]);
+		expect(parent.adapter.getState().model).toBe("last-model");
+		// The parent's second turn ran on another model; the prefix's is the fork's.
+		expect(fork.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "parent", forkAtEntryId: "a2", sessionId: "forked-1" },
+		]);
+		expect(fork.adapter.getState().model).toBe("m");
+	});
+
+	it("forks at an entry with the parent's model when the kept prefix names none", async () => {
+		const h = harness({ entries: storedEntries(), ref: { backend: "claude", id: "forked-1" } });
+
+		await h.adapter.start({ cwd: "/workspace", forkOf: { parentId: "parent", entryId: "u1" }, model: "haiku" });
+
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "parent", forkAtEntryId: "u1", sessionId: "forked-1", model: "haiku" },
+		]);
+		expect(h.adapter.getState().model).toBe("haiku");
+	});
+
 	it("starts a fork on its own child, hydrated from the parent's truncated history", async () => {
 		const h = harness({ entries: storedEntries(), ref: { backend: "claude", id: "forked-1" } });
 
@@ -905,7 +938,6 @@ describe("ClaudeAdapter fork", () => {
 				resumeId: "parent",
 				forkAtEntryId: "a2",
 				sessionId: "forked-1",
-				model: "m",
 			},
 		]);
 		expect(h.adapter.ref).toEqual({ backend: "claude", id: "forked-1" });
@@ -934,7 +966,6 @@ describe("ClaudeAdapter fork", () => {
 				resumeId: "parent",
 				forkAtEntryId: "a2",
 				sessionId: "forked-1",
-				model: "m",
 				effort: "low",
 			},
 		]);
