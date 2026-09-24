@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane-new-session sends the effort without awaiting the model, so a slow setModel gets the effort refused against the old model
@@ -17,3 +18,20 @@ The docstring of `agentpane-new-session` now describes this window; the fix woul
 ## Done when
 
 - An Emacs-side test (or a helper test, if the ordering can be pinned there) shows the effort request sent only after the model request answered, red first against the current fire-and-forget order.
+
+## Close note
+
+Landed in 290cdfd.
+`agentpane-set-model` now takes an optional THEN, which runs once the server has answered `sessions/setModel`, runs at once for an empty model, and never runs if the request fails.
+`agentpane-new-session` sends the model as soon as it is read, then sends the effort after both the model's reply and the effort's minibuffer read, whichever comes last.
+A failed model is reported in the echo area and the effort read for it is not sent.
+The docstring sentence describing the old race is gone.
+Interactive `M-x agentpane-set-model` and `agentpane-set-effort` are unchanged.
+
+Verified by the new ERT test `agentpane-test-new-session-sends-the-effort-once-the-model-answers`, whose harness holds the setModel reply until `agentpane-new-session` returns.
+Run against the pre-fix `emacs/agentpane.el` it failed, with the effort sent before the reply; after the fix the full suite passes, 86/86.
+Emacs-only change, so `bun run check` was not needed.
+
+Left as is:
+A setModel that exceeds jsonrpc.el's default 10s timeout but still succeeds on the server now drops the effort, where before the effort was sent anyway.
+If a first prompt goes out before the model answers, the effort's prompt gate raises its user-error inside the reply callback rather than at the command.
