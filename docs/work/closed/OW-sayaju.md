@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A chosen Codex effort is lost when the conversation is reopened after its app-server exits, and a fork never inherits it
@@ -34,3 +35,18 @@ Two related unknowns from the same run belong to whoever works this: a resume on
 
 - A test reopens a Codex conversation whose rollout's last `turn_context` records a model and effort and asserts the next `turn/start` carries that effort, and that model unless Codex was measured restoring it, shown red first.
 - A test forks such a conversation and asserts the fork's first `turn/start` carries the parent's effort and model, shown red first -- or a live run records in `docs/MANUAL_TESTING.md` that `thread/fork` already carries the override, with the `codex-cli` version, and the test asserts what the adapter relies on instead.
+
+## Close note
+
+A Codex resume, and a fork's borrower, now read the model and effort the rollout's last `turn_context` recorded and re-assert them per D23: the effort on every `turn/start`, the model in place of the one the resume answered unless a model was given at start.
+A fork is read through its `history_base`, so it takes its kept prefix's last turn, not the parent's latest.
+The reader is `readCodexLastTurnSettings` in `src/server/sessions/codex.ts`, the preview's walk keeping only `turn_context`; `CodexAdapterOptions.codexRoot` lets tests point it at a throwaway store instead of `~/.codex/sessions`.
+The stored model rides `turn/start` only, never `thread/resume`, because naming a model on a resume resets the effort.
+
+Measured on the home server 2026-09-23, `codex-cli 0.156.0`, two turns on `gpt-5.6-luna`, with the config set to `gpt-5.6-terra` at `high` so thread, config and model default differed (`docs/MANUAL_TESTING.md`, "What model and effort a Codex resume and fork run at (OW-sayaju)"):
+a `thread/resume` naming no model restores the thread's model and effort, fresh or on the holding app-server; a resume naming the model resets the effort to the config's and records that, so a later bare resume restores the reset, not the last turn; `thread/fork` carries neither, answering the config's pair, and a turn on it ran at the config's effort.
+That overturned OW-kokalo's reading ("an override lasts as long as the app-server"); its section, the `private effort` docblock and D23's Codex row and model sentence in `docs/DESIGN.md` were corrected.
+
+Tests in `src/server/adapters/codex/adapter.test.ts`: "resumes at the effort the rollout's last turn ran at, not the one the resume reports (D23)" and "starts a fork at the model and effort the kept prefix's last turn ran at (D23)", both red with the adoption removed (re-checked by the dispatching session), the fork test also red with the prefix bound removed; `bun run check` green on main, 1229 tests.
+Not isolated: whether `turn/start` naming a model with no effort resets the effort; no fork cut at an earlier turn was run live.
+Findings the run surfaced were already carded: OW-hojefo (first-turn fork sends no `lastTurnId`), OW-9 (`setModel` leaves the reducer's model stale), OW-siboja (index ignores `CODEX_HOME`).
