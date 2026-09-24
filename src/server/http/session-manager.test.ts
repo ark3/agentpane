@@ -1777,6 +1777,23 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: "resume failed halfway", notices: [notice] })]);
 	});
 
+	it("holds and fans out a notice the adapter repeats only once (OW-piloni)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const other = { ...notice, message: "another key" };
+		const events = connect();
+
+		adapter.emitNotice(notice);
+		adapter.emitNotice({ ...notice });
+		adapter.emitNotice(other);
+
+		expect(events.filter((event) => event.type === "notice")).toEqual([
+			expect.objectContaining({ session: REF, notice }),
+			expect.objectContaining({ session: REF, notice: other }),
+		]);
+		expect(snapshots(connect())[0]?.notices).toEqual([notice, other]);
+	});
+
 	it("drops a request once it is answered", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;

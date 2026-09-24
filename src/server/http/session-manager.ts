@@ -91,8 +91,10 @@ interface ManagedSession {
 	 * own copy, or a snapshot would resurrect what the client had cleared:
 	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`),
 	 * a request leaves when it is answered (`clearRequest`), and notices only
-	 * accumulate. They live on the container, so a rename carries them and a
-	 * close drops them; a fork's re-key keeps all but `error` (`#adoptRef`).
+	 * accumulate -- save that one identical to a notice already held is neither
+	 * held nor fanned out again (OW-piloni). They live on the container, so a
+	 * rename carries them and a close drops them; a fork's re-key keeps all but
+	 * `error` (`#adoptRef`).
 	 */
 	error: string | null;
 	requests: AgentRequest[];
@@ -684,6 +686,16 @@ export class SessionManager {
 				}),
 			);
 			const offNotice = adapter.onNotice?.((notice) => {
+				// One condition the backend repeats -- a thread-less warning that recurs
+				// on every fork and fork-point listing -- is one notice (OW-piloni).
+				const repeated = bound.notices.some(
+					(held) =>
+						held.kind === notice.kind &&
+						held.message === notice.message &&
+						held.details === notice.details &&
+						held.path === notice.path,
+				);
+				if (repeated) return;
 				bound.notices = [...bound.notices, notice];
 				this.broadcaster.notice(bound.ref, notice);
 			});
