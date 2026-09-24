@@ -1065,6 +1065,69 @@ describe("item types with no fixture yet", () => {
 		expect((messages[1] as ToolResultMessage).content).toEqual([{ type: "text", text: "done" }]);
 	});
 
+	describe("functionCallOutput (OW-vevizo)", () => {
+		// The two shapes `codex-cli 0.156.0` sent for a `turn/start` carrying
+		// `toolOutput` (docs/MANUAL_TESTING.md, OW-vevizo): `item/started` and
+		// `item/completed` with the same whole item, no call in front of it.
+		function drive(item: ThreadItem) {
+			const r = reducer();
+			r.handle({ method: "item/started", params: { threadId: "t", turnId: "u", item, startedAtMs: 7 } });
+			r.handle({ method: "item/completed", params: { threadId: "t", turnId: "u", item, completedAtMs: 7 } });
+			return r;
+		}
+
+		it("draws a string output as a tool result named for the bare tool", () => {
+			const r = drive({ type: "functionCallOutput", id: "fco_1", name: "probe_tool", namespace: null, output: "the output" });
+			expect(r.unmappedItemTypes.has("functionCallOutput")).toBe(false);
+			const [call, result] = r.getState().messages as [AssistantMessage, ToolResultMessage];
+			expect(call.content).toEqual([{ type: "toolCall", id: "fco_1", name: "probe_tool", arguments: {} }]);
+			expect(result).toMatchObject({ role: "toolResult", toolCallId: "fco_1", toolName: "probe_tool", isError: false });
+			expect(result.content).toEqual([{ type: "text", text: "the output" }]);
+		});
+
+		it("draws a content-item list's text and image under a namespaced name", () => {
+			const r = drive({
+				type: "functionCallOutput",
+				id: "fco_2",
+				name: "probe_tool",
+				namespace: "probe_ns",
+				output: [
+					{ type: "input_text", text: "the output" },
+					{ type: "input_image", image_url: "data:image/png;base64,QUJD" },
+				],
+			});
+			expect(r.unmappedItemTypes.has("functionCallOutput")).toBe(false);
+			const [call, result] = r.getState().messages as [AssistantMessage, ToolResultMessage];
+			const block = call.content[0];
+			expect(block?.type === "toolCall" && block.name).toBe("probe_ns__probe_tool");
+			expect(result.toolName).toBe("probe_ns__probe_tool");
+			expect(result.content).toEqual([
+				{ type: "text", text: "the output" },
+				{ type: "image", data: "QUJD", mimeType: "image/png" },
+			]);
+		});
+
+		it("degrades the parts it cannot draw to plain references", () => {
+			// Built from the generated type; no run sent these parts.
+			const r = drive({
+				type: "functionCallOutput",
+				id: "fco_3",
+				name: "probe_tool",
+				namespace: null,
+				output: [
+					{ type: "input_image", file_id: "file-1" },
+					{ type: "input_audio", audio_url: "https://example.com/a.wav" },
+					{ type: "encrypted_content", encrypted_content: "gAAAA" },
+				],
+			});
+			expect((r.getState().messages[1] as ToolResultMessage).content).toEqual([
+				{ type: "text", text: "[image: file-1]" },
+				{ type: "text", text: "[audio: https://example.com/a.wav]" },
+				{ type: "text", text: "[encrypted content]" },
+			]);
+		});
+	});
+
 	it("maps webSearch to a tool pair", () => {
 		const messages = complete({
 			type: "webSearch",

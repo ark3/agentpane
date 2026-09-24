@@ -464,6 +464,36 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			);
 		}
 
+		case "functionCallOutput": {
+			// New in the `codex-cli 0.156.0` bindings, and seen live on 0.156.0
+			// (docs/MANUAL_TESTING.md, OW-vevizo): a client's `turn/start` that
+			// carries `toolOutput` with an empty `input` opens its turn with this
+			// item, and the model answers it. It is a tool output with no call in
+			// front of it, so there are no arguments and no status to read, and
+			// nothing marks it as failed. agentpane never sends `toolOutput`; the
+			// item reaches it from a thread another client drove.
+			const name = item.namespace ? `${item.namespace}__${item.name}` : item.name;
+			// A string output is one text part; a list is the Responses API's
+			// content items. A `file_id` image degrades to a reference, as a
+			// `fileId` user image does, and ciphertext is not worth showing.
+			const parts = typeof item.output === "string"
+				? [{ type: "input_text", text: item.output } as const]
+				: item.output;
+			const content: (TextContent | ImageContent)[] = [];
+			for (const part of parts) {
+				if (part.type === "input_text") content.push({ type: "text", text: part.text });
+				else if (part.type === "input_image") {
+					content.push("image_url" in part ? imageFromUrl(part.image_url) : { type: "text", text: `[image: ${part.file_id}]` });
+				} else if (part.type === "input_audio") content.push({ type: "text", text: `[audio: ${part.audio_url}]` });
+				else content.push({ type: "text", text: "[encrypted content]" });
+			}
+			return toolPair(
+				ctx,
+				{ type: "toolCall", id: item.id, name, arguments: {} },
+				{ content, isError: false, details: { namespace: item.namespace, tool: item.name } },
+			);
+		}
+
 		case "webSearch": {
 			const results = item.results ?? [];
 			return toolPair(
