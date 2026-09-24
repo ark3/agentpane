@@ -34,7 +34,7 @@
 
 import { CodexClient, type CodexClientView } from "./jsonrpc.ts";
 import type { CodexProcess } from "./process.ts";
-import { isCodexServerRequest, isRecord, type CodexServerMessage, type RequestId } from "./protocol.ts";
+import { isCodexNotification, isCodexServerRequest, isRecord, type CodexServerMessage, type RequestId } from "./protocol.ts";
 
 export interface CodexConnectionHandlers {
 	/** Notifications and `ServerRequest`s -- everything we did not ask for. */
@@ -118,8 +118,24 @@ export class CodexConnection {
 		}
 		// Notifications go to everyone and each reducer drops what is not its
 		// thread's (`reducer.ts`, `handleNotification`'s guard). That guard is the
-		// same one D19's subagent threads already rely on.
-		for (const holder of [...this.#holders]) holder.handlers.onMessage(msg);
+		// same one D19's subagent threads already rely on -- save for a warning
+		// naming a thread no holder drives, which would reach no session at all.
+		// That is usually a subagent's thread, but a closed session's thread
+		// still running here is one too. A dropped warning is one nobody can ever
+		// learn of, so it goes out as though it named no thread, and every
+		// session this app-server serves hears it, as the `CodexAdapter.onNotice`
+		// docblock describes for a thread-less one (owner, 2026-09-24, OW-weyefe).
+		// Which session spawned a subagent cannot be read off the wire, as
+		// `#recipientFor` explains. The cast covers `guardianWarning`, whose
+		// generated `threadId` is a non-null string; the reducer reads it through
+		// `threadIdOf`, which takes a null.
+		const delivered =
+			isCodexNotification(msg) &&
+			(msg.method === "warning" || msg.method === "guardianWarning") &&
+			!this.#holders.some((holder) => holder.threadId === msg.params.threadId)
+				? ({ ...msg, params: { ...msg.params, threadId: null } } as CodexServerMessage)
+				: msg;
+		for (const holder of [...this.#holders]) holder.handlers.onMessage(delivered);
 	}
 
 	/**

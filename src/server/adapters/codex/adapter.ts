@@ -806,9 +806,12 @@ export class CodexAdapter implements BackendAdapter {
 	 * adapter. One naming no thread -- a `configWarning`, a
 	 * `deprecationNotice`, a `warning` with a null `threadId` -- is about the
 	 * app-server itself, so it reaches every session that app-server serves,
-	 * each of which is running on the thing it warns about. Not D13's
-	 * session-less `notice` arm: that is for conditions belonging to no
-	 * session, and this one belongs to exactly these.
+	 * each of which is running on the thing it warns about. So does a `warning`
+	 * or `guardianWarning` naming a thread no session drives -- usually a D19
+	 * subagent's -- which the connection hands out as though it named none
+	 * rather than let every reducer drop it (`CodexConnection.#deliver`,
+	 * OW-weyefe). Not D13's session-less `notice` arm: that is for conditions
+	 * belonging to no session, and this one belongs to exactly these.
 	 */
 	onNotice(cb: (notice: AgentNotice) => void): Unsubscribe {
 		this.noticeListeners.add(cb);

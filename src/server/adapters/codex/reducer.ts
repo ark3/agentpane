@@ -341,7 +341,9 @@ export class CodexReducer {
 			// model with no metadata drew a `warning` and then ran the turn
 			// (docs/MANUAL_TESTING.md, OW-wawuzu), so none of these may reach the
 			// `error` effect, whose contract is a turn that failed. A thread-scoped
-			// one for another thread never gets here: the guard above drops it.
+			// one for another thread never gets here: the guard above drops it. One
+			// for a thread no session drives arrives with its `threadId` nulled
+			// (`CodexConnection.#deliver`, OW-weyefe).
 			case "warning":
 			case "guardianWarning":
 				return [{ type: "notice", notice: { kind: message.method, message: message.params.message, details: null, path: null } }];

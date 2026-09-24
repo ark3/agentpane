@@ -2268,6 +2268,29 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		expect(toBorrower.mock.calls.map(([notice]) => notice.message)).toEqual(["unknown key", "the fork's"]);
 	});
 
+	it("gives a warning naming a thread no session drives to every session on the connection (OW-weyefe)", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const toParent = vi.fn();
+		const toBorrower = vi.fn();
+		parent.onNotice(toParent);
+		borrower.onNotice(toBorrower);
+
+		proc.emit({ method: "warning", params: { threadId: "thread-subagent", message: "a subagent's" } });
+		proc.emit({ method: "guardianWarning", params: { threadId: "thread-subagent", message: "a subagent's guardian" } });
+		proc.emit({ method: "guardianWarning", params: { threadId: "thread-forked", message: "the fork's guardian" } });
+
+		expect(toParent.mock.calls.map(([notice]) => [notice.kind, notice.message])).toEqual([
+			["warning", "a subagent's"],
+			["guardianWarning", "a subagent's guardian"],
+		]);
+		expect(toBorrower.mock.calls.map(([notice]) => [notice.kind, notice.message])).toEqual([
+			["warning", "a subagent's"],
+			["guardianWarning", "a subagent's guardian"],
+			["guardianWarning", "the fork's guardian"],
+		]);
+	});
+
 	it("ignores the parent's live turn while its own resume is still in flight", async () => {
 		// The window the borrower fails OPEN in if its identity is not seeded
 		// before the shared line stream reaches it: a fork of a STREAMING parent
