@@ -327,6 +327,21 @@ Costs tokens: four real model turns, each on the AGENTS.md pin.
 Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-22.
 What it showed is `docs/MANUAL_TESTING.md`, "A Codex fork's rollout names where its inherited history ends (OW-buligi)".
 
+## `codex_history_paging_probe.py`
+
+Proves: **which Codex history loads draw the "Full-history hydration is deprecated for paginated threads" `deprecationNotice`, and that `thread/turns/list` at `itemsView: "full"` pages out the same turns and items for `paginated` and `legacy` threads alike** (OW-kelene).
+Every call under test runs in a fresh `codex app-server`, against a thread it starts with two turns and against any rollouts named with `--rollout`, which it copies into its temporary `CODEX_HOME` and never writes back.
+
+```bash
+python3 codex_history_paging_probe.py [--rollout ~/.codex/sessions/.../rollout-....jsonl ...] [--json <path>]
+```
+
+Imports `AppServer` from `codex_fork_same_process_probe.py`, and removes its temporary `CODEX_HOME` on exit.
+Costs tokens: two real model turns, each on the AGENTS.md pin.
+
+Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
+What it showed is `docs/MANUAL_TESTING.md`, "Which Codex history loads draw the full-history deprecation, and what replaces them (OW-kelene)".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's

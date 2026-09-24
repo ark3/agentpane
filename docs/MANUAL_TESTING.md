@@ -3268,3 +3268,46 @@ Before that change the adapter took the fork's `get_state` at its word, so a ses
 No turn ran on a snapped-back fork, so that it would have run on the spawn's model rests on `get_state`, and what its assistant message would record was not run.
 Only the fork at the second user message was run, and only with an unsuffixed spawn; a suffixed spawn moved by `set_model` would by OW-dojebo's result put both the model and the suffix's level back, and that was not run.
 The remedy was run as commands sent by hand, not through the adapter, and nothing here went through `sbox`, agentpane's server, the browser or Emacs.
+
+## Which Codex history loads draw the full-history deprecation, and what replaces them (OW-kelene)
+
+Run on the home server 2026-09-24, **`codex-cli 0.156.0`**, from the `card/OW-kelene` worktree cut at `27e871c`.
+The CLI half was measured by `resources/probes/codex_history_paging_probe.py`, which runs every call under test in a fresh `codex app-server` so that a notice sent once per process could not hide behind an earlier call.
+It ran in a temporary `CODEX_HOME` holding copies of `auth.json` and `config.toml`, removed on exit, with two turns on `gpt-5.6-luna`: one reply, and one that ran `echo two` so a `commandExecution` item was in the comparison.
+Four stored rollouts were copied in from the home server's `~/.codex/sessions`, read-only: two written by `codex-cli 0.150.1` with `history_mode: "legacy"` (6 and 3 turns), and two with `history_mode: "paginated"`, one written by 0.147.0 holding a `contextCompaction` and one by 0.156.0 (2 and 3 turns).
+Of the home server's 119 rollouts that day, the 32 `legacy` ones were all written by 0.150.1; every other version, 0.147.0 included, wrote `paginated`.
+
+**The notice.**
+It arrived as a notification naming no thread, `{"method": "deprecationNotice", "params": {"summary": "...", "details": null}}`, just before the response to the call that drew it.
+The summary read "Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`." for `thread/read`, and "...; use `excludeTurns: true`, then page with ..." for `thread/resume` and `thread/fork`.
+Two `thread/read {includeTurns: true}` calls in one process drew two notices: it is sent per call, not once per process.
+
+**Which calls drew it.**
+For each `paginated` thread, exactly three: `thread/read` with `includeTurns: true`, `thread/resume` without `excludeTurns`, and `thread/fork` without `excludeTurns`.
+`thread/read` with `includeTurns` absent or `false`, `thread/resume` and `thread/fork` with `excludeTurns: true`, `thread/turns/list` and `thread/items/list` drew nothing.
+No call on either `legacy` thread drew it, full-history loads included.
+So agentpane drew it three ways: `listForkPoints()`'s `thread/read`, every reattach's `thread/resume` including a fork's borrower's, and `fork()`'s `thread/fork`.
+
+**History modes.**
+`thread/start` answered `historyMode: "paginated"`, and so did both forks of that thread.
+The two 0.150.1 rollouts read as `legacy`, and their forks were `legacy` too.
+The five recorded fixtures under `resources/fixtures/codex/` that carry a thread, all started `ephemeral: true` by `codex-cli` 0.147.0 to 0.153.4, answered `legacy`.
+
+**What pages the same turns.**
+`thread/turns/list` with `sortDirection: "asc"`, paged at `limit: 2` so that every thread took more than one page but the two-turn ones, answered the same turn ids in the same order as `thread/read {includeTurns: true}` for all five threads, both modes.
+At `itemsView: "full"` every turn's items and every other field of the turn were identical to the full-history read's.
+At the default `summary` they were not: the two-turn fresh thread's tool turn, `userMessage, reasoning, agentMessage, commandExecution, reasoning, agentMessage`, came back as `userMessage, agentMessage`, and the compacted turn lost its `contextCompaction`; at `notLoaded` every turn came back with no items.
+`thread/items/list` regrouped by `turnId` matched for the `paginated` threads, but answered a `legacy` one with `-32601 thread/items/list is not supported yet`.
+`thread/resume {excludeTurns: true}` answered `turnsBackwardsCursor` and `itemsBackwardsCursor` for a `paginated` thread and null for both on a `legacy` one.
+So one path serves both modes: `thread/turns/list` at `itemsView: "full"`, and no branch on `historyMode`.
+
+**A copying artifact, not a CLI fact.**
+The two copied `paginated` rollouts answered `thread/read {includeTurns: true}`, `thread/turns/list` and `thread/items/list` with zero turns in the processes that ran before any `thread/resume` of them, and with all their turns once one had.
+Their history evidently needs an index a resume builds, which the copy did not carry, and the thread `thread/start` created in the same home, never copied, answered every call in full from the first.
+agentpane always resumes before it reads, so nothing depends on this.
+
+**`initialTurnsPage` is experimental.**
+`ThreadResumeInitialTurnsPageParams` and `TurnsPage` sit in the vendored bindings with nothing referencing them; `codex app-server generate-ts --experimental` puts them on `ThreadResumeParams.initialTurnsPage` and `ThreadResumeResponse.initialTurnsPage`.
+A `thread/resume` naming it after an `initialize` with `capabilities: null` was refused with `-32600 thread/resume.initialTurnsPage requires experimentalApi capability`, and after one with `experimentalApi: true` answered the page.
+agentpane does not opt into the experimental API, so it pages with a separate `thread/turns/list`.
+
