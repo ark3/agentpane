@@ -1,47 +1,49 @@
 ---
-labels: [change]
+labels: [change, emacs]
 ---
 
-# A resolved ServerRequest has no wire event, so the client can never retract one — which is what blocks declining a request nothing can answer
+# A request that stops being pending stays held by the server and drawn in both clients, because nothing retracts it
 
-D2a decided on 2026-09-11 (OW-yikoyo) that a request the browser cannot answer is declined rather than held.
-This card is that decision's implementation, and the wire gap below is why it is one card rather than a two-line change.
+Rewritten 2026-09-24 from a cold read against the code as it stood after OW-bipume.
+Until then this card also carried declining at arrival the requests nothing can answer (D2a, OW-yikoyo); that half is now OW-zisumi, blocked by this one, because declining honestly needs the retraction this card builds.
 
-`src/shared/protocol.ts` (the `ServerEvent` union), `src/server/http/broadcaster.ts`, `src/server/http/session-manager.ts` (`#pendingRequests`), `src/client/session-state.ts` (the `request` arm of `reduceServerEvent`), `src/server/adapters/codex/adapter.ts` (`applyEffects`, the `"request"` and `"request-resolved"` cases).
+Since OW-bipume the server holds each session's pending requests (`ManagedSession.requests` in `src/server/http/session-manager.ts`, beside `#pendingRequests`, which maps a request id to its session for routing), every `snapshot` carries them, and each client replaces its own list from the snapshot.
+Between snapshots nothing removes one: the `ServerEvent` union in `src/shared/protocol.ts` has `request` and no event that retracts it, and the `request` arm of `reduceServerEvent` in `src/client/session-state.ts` only appends.
 
-## Why the obvious implementation is wrong
+A request stops being pending in one of three ways, and today:
 
-Declining at arrival without publishing kills a tested subsystem: the request namespace per adapter lifetime, the typed reverse mapping for pre-adoption requests, wire-id scoping across sessions, and numeric-versus-string wire ids all become unreachable, and OW-futewo's `issuerThreadId` with them.
-That was measured, not guessed -- it takes eight tests in `src/server/adapters/codex/adapter.test.ts` red, and they become meaningless rather than adaptable.
-OW-bijera needs that machinery working, so tearing it down now is rework booked in advance.
+- **Answered through the reply route** (the reply case of `sessionAction` in `src/server/http/app.ts` calls `adapter.reply`, then `SessionManager.clearRequest`): it leaves both of the manager's maps and so the next snapshot, but no event says so, and the browser's warning and Emacs's line stand until something else sends a snapshot.
+- **Reported resolved by Codex** (`serverRequest/resolved`, which `CodexReducer` turns into a `request-resolved` effect, consumed by the `"request-resolved"` case of `applyEffects` in `src/server/adapters/codex/adapter.ts`): the adapter clears its own maps and tells the manager nothing, so the server holds the request for good, every snapshot re-sends it, and not even a reload clears the warning or re-enables Tools -> Detach (`detachable` in `src/client/App.svelte`).
+- **Answered by the adapter itself**: OW-nujawi's arrival error answers before publishing, so that one never lands; OW-zisumi will add kinds that are published and then declined at once.
 
-Declining *and* publishing is worse, and this is the part to understand before starting.
-`reduceServerEvent`'s `request` arm appends to `view.requests` and nothing anywhere removes from it.
-So a published-then-answered request leaves `App.svelte`'s warning standing -- "The agent is blocked on a request agentpane cannot answer ... end the session to clear it" -- over a turn that carried on without it.
-Today that warning is at least true. That version makes it a lie that never clears.
+Two facts the surrounding comments get wrong, read from the fixture and the source on 2026-09-24:
 
-## What is actually missing
+- The only `serverRequest/resolved` ever captured, in `resources/fixtures/codex/tool-edit.jsonl` (`codex-cli 0.147.0`), follows the capture harness's own answer to the request.
+  Codex resolving a request without us -- "auto-approval, or another client", as the comments beside `request-resolved` in `src/server/adapters/codex/reducer.ts` and `adapter.ts`, and D2a's paragraph "A resolved request has no wire event" in `docs/DESIGN.md`, all put it -- has never been observed.
+  Mark every copy unmeasured in the same change.
+- A subagent thread's request is routed to the parent session (`#deliver` in `src/server/adapters/codex/connection.ts`, OW-futewo), but its `serverRequest/resolved` names the child's `threadId` (`resources/codex-protocol/v2/ServerRequestResolvedNotification.ts`), and the guard at the top of `handleNotification` in `reducer.ts` drops a notification naming a thread other than its own.
+  So a retraction resting on that notification alone never fires for such a request.
 
-`ServerEvent` has `request` and nothing that retracts it.
-No client is told a request stopped being pending: not the one that answered it, not a second client watching, and not one watching Codex auto-approve.
-`src/server/adapters/codex/reducer.ts` already emits a `request-resolved` effect for that last case and `applyEffects` consumes it to clean its own maps and emits nothing outward, so the detection exists and the wire does not.
+In service of the browser's warning ("The agent is blocked on a request agentpane cannot answer"), Emacs's `⚠` line for a request, and the Detach gate saying what is true.
+Load-bearing:
 
-## Shape
+- A request that stops being pending, by any of the three ways, leaves the manager's `requests` and `#pendingRequests` and is retracted live on the wire.
+- That includes a request a subagent thread raised through the parent.
+- A client that missed the retraction converges on the next snapshot, which already carries the held list.
+- Both clients act on it.
+  In Emacs, the helper's `switch` on `event.type` in `src/emacs/helper.ts` has no default and would drop a new variant silently, and `emacs/agentpane.el` appends a `(:request ...)` node on `session/request` and removes one only when a `session/snapshot` redraws the buffer; the helper answering a retraction with a fresh `session/snapshot` is enough if it keeps that side small.
+  The `src/emacs/protocol.ts` docblock that says a request is carried "until it is answered" is brought in line either way.
 
-Publish the request as now, answer it at arrival, and broadcast the retraction, so the warning appears and clears rather than standing.
-Whether the retraction is its own `ServerEvent` variant or a field on an existing one is the implementer's call; what matters is that a client which missed the middle of the exchange converges.
-Amended 2026-09-24 after OW-bipume landed: the server now holds each session's pending requests (`ManagedSession.requests` in `src/server/http/session-manager.ts`), every `snapshot` carries them, and a client replaces its `requests` from the snapshot rather than preserving its own, so OW-1's preserve rule no longer describes the code.
-A request answered through the reply route already leaves the server's copy (`clearRequest`) and so the next snapshot, but no event retracts it live.
-A request Codex resolves itself still reaches nobody: `applyEffects` consumes `request-resolved` and tells the manager nothing, so the server keeps holding it, every later snapshot re-sends it, and since OW-bipume not even a page reload clears the warning or re-enables Tools -> Detach.
-So the retraction has to reach the manager's held `requests` as well as the wire, and a snapshot is then a sufficient convergence path for a client that missed the event.
+Incidental: whether the retraction is its own `ServerEvent` variant (it takes a `seq`, as `request` does) or a field on another, and the name of the adapter hook that carries it out -- `BackendAdapter` in `src/server/adapters/types.ts` has `onRequest` and `reply`, and `src/server/http/testing/fakes.ts` holds the fake adapter the manager's tests drive.
 
-The decline shape comes from `DECLINE_RESPONSES` where the kind has one, and a JSON-RPC error where it does not, which is what OW-nujawi already does for unknown kinds; this card makes the known kinds behave the same way with a proper "no" instead of an error.
+Codex is the only backend that detects a resolution; Pi's dialog requests are OW-yosuzo's, and Claude Code raises none.
 
 ## Done when
 
-A known approval kind arriving is answered with its decline shape, the turn is not left blocked, an error naming the kind reaches the client, and the pending request is retracted so no warning survives the exchange -- watched red first, since today it is held pending.
-
-The eight correlation tests are rewritten rather than deleted: the wire-id scoping, the numeric-versus-string handling and the per-lifetime namespace are all still exercised, now through the auto-answer path instead of through `reply()`.
-If any of them cannot be rewritten to cover the same logic, say which and why in the close note -- that is the signal that this card removed coverage rather than relocating it.
-
-`docs/DESIGN.md` D2a's closing paragraph names this card as the gap's owner; update it to say the gap is closed.
+- A test in `src/server/http/session-manager.test.ts`, modelled on "drops a request once it is answered", has the fake adapter raise a request and then report it resolved, and asserts a retraction on the wire and an empty `requests` on the next snapshot, red first.
+- The same file asserts that the reply route's clear broadcasts a retraction too.
+- A test in `src/server/adapters/codex/adapter.test.ts` asserts that `serverRequest/resolved` for a published request reaches the new hook under the id it was published with, including for a child-thread request routed as in "identifies a child-thread blocking request and routes it through the parent (OW-futewo)", red first.
+- A test in `src/client/session-state.test.ts` asserts a retraction removes the request from `view.requests`.
+- A test in `src/emacs/helper.test.ts` and one in `emacs/agentpane-test.el` show the transcript buffer losing the request's line on a retraction, each red first.
+- D2a's paragraph "A resolved request has no wire event" says the gap is closed.
+- `bun run check` and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, both pass.

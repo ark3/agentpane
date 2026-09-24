@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+blocked-by: [OW-zisumi]
 ---
 
 # Nothing in the client can answer an agent's approval request, so a `ServerRequest` hangs the turn forever behind one line of text.
@@ -27,19 +28,21 @@ The client half does not exist.
 	</p>
 ```
 
-OW-nujawi narrowed what reaches that block: as of that card, a Codex `ServerRequest` whose kind has no entry in `DECLINE_RESPONSES` is errored out at arrival and never becomes pending, so the only kinds that still land here are the three the adapter knows a decline shape for -- which are exactly the ones this card is about.
+OW-nujawi narrowed what reaches that block: as of that card, a Codex `ServerRequest` whose kind has no entry in `DECLINE_RESPONSES` is errored out at arrival and never becomes pending, so the only kinds that still land here are the three the adapter knows a decline shape for.
+OW-zisumi declines those three at arrival too, and D2a's paragraph "This is provisional" sequences it before this card, so once it lands nothing Codex sends is held here at all.
+This card is then what makes holding right again for the kinds a human can answer, and it undoes that decline for them.
 
 D2a's own words are that an unanswered request hangs the turn. Codex raises
 one for `item/fileChange/requestApproval`; a real capture is in
 `resources/fixtures/codex/tool-edit.jsonl`. So a turn that asks for approval
 cannot be finished from agentpane at all -- only killed.
 
-The client also never forgets a request once it arrives. `reduceServerEvent`'s
-`request` case (`src/client/session-state.ts`) only appends, and the `snapshot`
-case spreads the previous view, so the array survives a re-subscribe. Whether a
-snapshot *should* clear it is `OW-1`, still open. Either way a reply needs its
-own removal path: the server clears its own map after `adapter.reply()` and
-emits nothing about it, so the browser is never told.
+Amended 2026-09-24: since OW-bipume the server holds each session's pending requests, every snapshot carries them, and the client replaces its list from the snapshot (`src/client/session-state.ts`), so a reload shows what is still pending; OW-1 closed moot on that.
+Between snapshots the `request` arm only appends; OW-gusifo adds the retraction that tells every client a request stopped being pending, one answered through the reply route included.
+
+Emacs is in the same position as the browser.
+The helper already forwards `requests/reply` to that route (`src/emacs/helper.ts`, OW-refibu), but nothing in `emacs/agentpane.el` sends it, and its request line says nothing in Emacs answers it yet.
+Under `AGENTS.md`, "Both clients", answering lands in both clients here, or the Emacs half gets its own card, labelled `emacs` and blocked by this one.
 
 ## Settle this before building it
 
