@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-riluye]
+closed: done
 ---
 
 # Codex fork points and resume hydration load a thread's whole history, which codex-cli 0.156.0 deprecates for paginated threads
@@ -50,3 +51,23 @@ The home server's `~/.codex` was read-only in an earlier session's sandbox; OW-s
 - A `legacy` thread is covered the same way, by whichever path the measurement chose.
 - A live reattach and a fork on the home server, driven through agentpane on `gpt-5.6-luna`, show no deprecation notice, recorded in `docs/MANUAL_TESTING.md` with the CLI version.
 - `bun run check` passes.
+
+## Close note
+
+Landed on main 2026-09-24 as 4dc30ed (measurement), 29466dc (fix), a80b757 (live run).
+
+Measured on `codex-cli 0.156.0` (docs/MANUAL_TESTING.md, "Which Codex history loads draw the full-history deprecation, and what replaces them (OW-kelene)"):
+- The notice arrives once per call, as a `deprecationNotice` notification that names no thread.
+- On a `paginated` thread three calls draw it: `thread/read` with `includeTurns: true`, and `thread/resume` or `thread/fork` without `excludeTurns`. agentpane made all three. No call draws it on a `legacy` thread.
+- `thread/start` creates `paginated` threads. Only the rollouts `codex-cli 0.150.1` wrote read as `legacy`.
+- `thread/turns/list` with `sortDirection: "asc"` and `itemsView: "full"` returns the same turns and items as a full-history load, for both modes. The default `summary` view drops the reasoning, tool and compaction items.
+- `thread/items/list` refuses `legacy` threads with `-32601`.
+- `initialTurnsPage` on resume needs the `experimentalApi` capability.
+
+What was built: one code path for both modes. Every `thread/resume` and `thread/fork` sends `excludeTurns: true`. A new `readTurns` helper pages `thread/turns/list` to the last cursor, and it feeds the reattach repaint, the fork borrower's repaint, and `listForkPoints()`.
+Verification:
+- New tests in `adapter.test.ts` run once for `paginated` and once for `legacy`. All 7 failed against the old adapter, which the reviewer re-confirmed, and they pass with the change.
+- A live reattach and fork through the real adapter factory on `gpt-5.6-luna` drew five notices before the change and none after, with the same roles and the same fork points at the same indices.
+- `bun run check` passes.
+Probes are kept in `resources/probes/codex_history_paging_probe.py` and `resources/probes/agentpane_codex_history_live.ts`.
+Filed OW-vijuyi for the window between the resume and the hydrate that this change widened.
