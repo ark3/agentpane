@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-gusifo]
+closed: done
 ---
 
 # A Codex request agentpane cannot answer is held until the session is killed, where D2a decided it is declined
@@ -47,3 +48,19 @@ Each is rewritten so it still covers the logic its name claims; if one cannot be
 - The tests listed above are rewritten as that section says.
 - D2a's paragraphs "And when the browser cannot answer either" and "This is provisional" read true of the code.
 - `bun run check` passes.
+
+## Close note
+
+Landed as "fix: decline a Codex request nothing can answer instead of holding it (OW-zisumi)".
+The `"request"` case of `applyEffects` in `src/server/adapters/codex/adapter.ts` still publishes a kind with a `DECLINE_RESPONSES` entry, then calls `this.reply(key, null)` (which writes synchronously, having no `await`), fires `onRequestResolved` with the published id, and emits a session error naming the kind.
+Order on the wire and to listeners: publish, decline, retract, error.
+The adapter fires `onRequestResolved` only from this arrival decline, not from `reply` in general, so a human's answer through the reply route still retracts once, from `app.ts`; `clearRequest` is idempotent either way.
+
+Verified: the new adapter test "declines a request it has a decline shape for through reply, names it in an error, and retracts it (OW-zisumi)" and the session-manager test "carries no request the Codex adapter declined at arrival, and does carry the error naming it (OW-zisumi)" (real `CodexAdapterFactory` over a fake process) were both red against main's adapter and green after; `bun run check` passed on main, 1350 tests.
+
+The listed tests were rewritten to assert the arrival decline under each typed wire id, per-adapter scoping, the OW-futewo routing with and without `issuerThreadId`, one response across parent and borrower, and the pre-adoption typed reverse mapping; the two decline-shape tests now assert the whole response list, so they test the shape on purpose.
+Two OW-gusifo tests the card did not list also relied on a held request and were rewritten to the negative half.
+Coverage removed rather than moved: `wireRequestKey`'s `0`/`"0"` separation, `clearPendingRequests` on a failed start, and the positive `serverRequest/resolved` path are all unreachable while every request is declined at arrival; OW-nobeko, blocked by OW-bijera, carries restoring them.
+
+`src/client/App.svelte`'s "end the session to clear it" warning was left as is: for Codex the retraction empties `requests`, so it no longer stands after the exchange, and it remains true for Pi's held `extension_ui_request` dialogs.
+D2a's "And when the browser cannot answer either" and "This is provisional" paragraphs, the OW-gusifo paragraph, D7a, and the `approvalPolicy` and `reply` docblocks now describe the decline.
