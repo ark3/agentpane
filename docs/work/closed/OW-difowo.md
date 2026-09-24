@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # Should a Claude Code fork before the first message carry the parent's effort, as it carries its model?
@@ -14,3 +15,9 @@ D23 in `docs/DESIGN.md` ("A conversation's model and effort are read back from i
 The decision is whether a session-start fork is a new conversation that starts at defaults (and then arguably should not carry the model either), or a copy of the parent's settings that should carry both; and whether Codex's and Pi's session-start forks already answer that question one way, which the answer should match.
 
 Done when the decision is recorded in D23, and, if it changes behaviour, a card for the change is filed blocked by nothing but this one.
+
+## Close note
+
+Decided by the owner on 2026-09-23: a fork that keeps no turn, one cut before the first message, runs at the parent's model and effort as they stand when it is cut, as the parent's conversation begun again rather than a new one at the backend's defaults.
+Recorded in D23 of `docs/DESIGN.md`, in the paragraph opening "A fork that keeps no turn".
+The change is OW-sababi: Claude Code's session-start fork carried the parent's model but not its effort, and Codex's no-turn fork is to be checked; Pi forks inside the parent's process and carries both by construction.

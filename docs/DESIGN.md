@@ -804,6 +804,8 @@ As of `claude 2.1.280`, a `--resume` with no `--model` put in force the model th
 On a resume and on a fork, a conversation runs at the model and effort its store's last turn recorded, and agentpane re-asserts them wherever the backend does not restore them itself.
 The start-only gate is what makes the last turn enough: every stored turn names the same pair, so the last one's is the one chosen.
 Where the backend restores a value itself, agentpane's part is not to override it; on Pi, a resume spawn whose `--model` carries a `:<thinking>` suffix overrides the recorded level (OW-ruzuhu's run).
+A fork that keeps no turn, one cut before the first message, has no stored turn to read back, and runs at the parent's model and effort as they stand when it is cut: it is the parent's conversation begun again, not a new one at the backend's defaults.
+Set by the owner on 2026-09-23 (OW-difowo), when Claude Code's such fork carried the parent's model but not its effort; Pi's forks in the process that holds the parent, so it carries both by construction.
 
 **Why not a copy of agentpane's own.**
 D13's paragraph on names already weighed this and chose the backend: no second copy to keep coherent, and agentpane stays one more UI over the agent rather than a store beside it.
