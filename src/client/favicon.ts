@@ -57,9 +57,10 @@ export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
 }
 
 /**
- * Carry a watched session across its rename (D9: every new session gets one, on
- * its first prompt). Without this the set is orphaned under the old key and the
- * badge misses the one turn it was armed for.
+ * Carry a watched session across its rename (D9: every new session gets one at
+ * attach, and may get another on its first prompt). Without this the set is
+ * orphaned under the old key and the badge misses the one turn it was armed
+ * for.
  */
 export function watchRename(watch: TurnWatch, from: string, to: string): TurnWatch {
 	const sawStreaming = watch.waiting.get(from);

@@ -96,7 +96,7 @@ Costs, accepted knowingly:
 If the client ever becomes chatty and needs constantly correlated replies, this is the decision to revisit — a single WebSocket would then be tidier.
 
 One thing building the transport added to the event union, because it is not optional and prose would not have survived the gap between the two halves: **`renamed`**.
-A session's id changes under the client during normal use — Pi's id *is* its JSONL path (D9) and a `virtual` session has no path until its first prompt materialises one — so the id the browser created a session with is not the id it keeps.
+A session's id changes under the client during normal use — every backend replaces a `virtual` session's minted id with its own at attach, and the first prompt may move it again (D9) — so the id the browser created a session with is not the id it keeps.
 The server keeps honouring the old id on REST routes indefinitely, but every event after the change carries the new one, so a client that ignores `renamed` renders a live session into a transcript nothing updates.
 See D9's "Three states".
 
@@ -298,9 +298,28 @@ So:
 **Three states**, from pipane, which is what makes listing everything cheap:
 
 - `virtual` — workspace chosen, nothing on disk yet.
-  Materialised on first prompt (pipane uses a `__new__` sentinel), so browsing never litters the backend's store with empty sessions.
+  It stays `virtual` until its first prompt (pipane uses a `__new__` sentinel), so browsing never litters the backend's store with empty sessions.
 - `detached` — exists on disk, no subprocess.
 - `attached` — live subprocess.
+
+**A `virtual` session's id and its store file arrive at different times**, and neither is the first prompt everywhere.
+The server mints a `virtual:` id at creation, and every backend replaces it at attach:
+
+- Pi reports its session file's path from `start()`'s `get_state`, as of `pi 0.84.1` (`docs/HANDOFF.md` finding 41), `pi 0.85.1` and `pi 0.87.1` (`docs/MANUAL_TESTING.md`, OW-jamoyi and OW-bohodu).
+- Codex's `thread/start` names the thread, as of `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md`, OW-hojefo).
+- Claude Code's id is the uuid the adapter mints for `--session-id`, so it is known before the process exists.
+
+What reaches disk waits for the first turn on all three.
+As of `claude 2.1.280`, the store file appeared 0.3 s after the first user message was written and not in 15 s before it; as of `pi 0.87.1`, the path `get_state` named held no file until the first turn's reply had ended; as of `codex-cli 0.156.0`, no rollout existed until the first turn, and `thread/resume` of a thread with none was refused.
+On Claude Code and Pi a process closed before its first prompt left nothing behind (`docs/MANUAL_TESTING.md`, OW-bohodu).
+Finding 41 read Pi 0.84.1's file as already on disk at start, but its evidence was the rename, which shows only the name.
+
+So an id without the `virtual:` prefix does not mean anything is on disk.
+The server tracks the `virtual` state apart from the id (`ManagedSession.virtual`, cleared by `markPrompted`), and while it is set nothing is on disk, but its clearing does not mean a file exists either.
+It clears as the first prompt is sent, before any backend above has written, and a fork's container starts with it clear and no file behind it (OW-japuzo, OW-hojefo); OW-wedupe is the code that reads it the other way.
+The first prompt can still move the id on Pi: `PiAdapter` probes `get_state` again after its first `submit()`.
+That probe has not fired on the Pi versions above, since `start()` already resolved the id, and it stays, because a backend that has named nothing by the end of attach is exactly what `virtual` describes.
+`ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- but `init` arrives after `submit()` has settled, so the manager hears of such a move only at the next point it re-reads `ref`.
 
 **Spawn only on attach.**
 The list needs metadata only — id, cwd, timestamp, and a preview — all cheap to read from the file.
@@ -401,7 +420,7 @@ Both are gated by the same **exemption predicate** — the load-bearing part of 
 2. **Never evict a session blocked on a pending request** (D2a).
    A Codex approval dialog is idle by token-flow but is holding a human hostage; killing it strands the turn.
 3. **Never evict a `virtual`, unmaterialized session.**
-   Before the first prompt writes JSONL there is nothing on disk to rehydrate from — eviction would be data loss, not detach.
+   Before its first turn there is nothing on disk to rehydrate from, whatever id attach gave it (D9) — eviction would be data loss, not detach.
 
 **Two clocks, not one**, because the triggers ask different questions:
 
@@ -461,7 +480,7 @@ This file holds what the *user* authored, which cannot.
 - Written on every toggle -- the file is small and toggles are human-paced, so debouncing would be complexity with no case behind it -- via a temp file and `rename`.
   One process, one writer, loopback: no lock.
   (Pi, by contrast, takes a lock under `~/.pi/agent` merely to *read*.)
-- Keyed by `sessionKey(ref)`, and **no mark on a `virtual` session**: D9's rename on first prompt would strand a key placed before it.
+- Keyed by `sessionKey(ref)`, and **no mark on a `virtual` session**: D9's rename, at attach and possibly again at the first prompt, would strand a key placed before it.
 - The server does not filter.
   `SessionSummary` carries the mark and the client decides what to draw, because a "show hidden" control needs the rows in hand either way and this leaves the route's meaning unchanged.
 
@@ -734,6 +753,7 @@ The reconnect re-list subsumes it for a stored session -- a detach with the stre
 It stays on `detach()`'s virtual exit, because the row a virtual detach leaves behind is a different kind of wrong.
 A detached stored session lists with an untrue `status` and is otherwise real: the transcript is on disk and a click reaches it.
 A detached virtual session is gone everywhere -- nothing on disk, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and `readSessionPreview` answers a `virtual:` ref with an empty-but-non-null transcript, so a click strands the user on precisely the screen OW-vasubu exists to keep them off.
+As of D9's correction (OW-bohodu) that exit does not run for a session created here: attach replaces the `virtual:` id before any prompt, so a session detached before its first turn falls through to the preview and reaches that phantom after all, which OW-wedupe carries.
 A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 
 Not on the first open, which is the whole of the mechanism's subtlety.
@@ -812,7 +832,7 @@ D13's paragraph on names already weighed this and chose the backend: no second c
 The D13 file holds marks, not this.
 A value read from the store also covers a session started outside agentpane, which no copy of agentpane's could.
 
-A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
+A `virtual` session has nothing to lose: nothing is on disk before its first turn (D9), and its choice lives in memory until that turn is written.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
 What each backend needs from agentpane under this decision:
 

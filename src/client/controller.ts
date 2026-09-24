@@ -1143,10 +1143,11 @@ export function createController(
 			// client has attached lists as `attached` -- the status is about the
 			// process, not the store (`session-manager.ts`, `#liveOverlay`) -- so
 			// the status would miss the commonest case of all, a session created
-			// here and detached before its first prompt. The `virtual:` id
-			// `createVirtual` mints is replaced by a `renamed` event the moment a
-			// first prompt materialises a file, so it is true exactly while there
-			// is nothing on disk.
+			// here and detached before its first prompt. The ref misses it too:
+			// every backend replaces the `virtual:` id `createVirtual` mints at
+			// attach, while nothing reaches disk until the first turn (D9), so
+			// such a session skips this exit and is previewed below with no file
+			// behind it (OW-wedupe).
 			if (selected.id.startsWith("virtual:")) {
 				// This exit asks for the listing itself, and the non-virtual one below
 				// does not (D21). The difference is what the stale row means. A
@@ -1164,8 +1165,8 @@ export function createController(
 				publish({ state: { ...view.state, selected: null }, preview: null });
 				return;
 			}
-			// A non-virtual session has a transcript on disk, so it ends where a
-			// click on its now-detached row would have put the user (OW-tewave).
+			// A session with a transcript on disk ends where a click on its
+			// now-detached row would have put the user (OW-tewave).
 			await controller.preview(selected);
 		},
 		clearError() {

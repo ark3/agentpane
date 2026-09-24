@@ -99,24 +99,27 @@ const KILL_GRACE_MS = 1_000;
 
 export class PiAdapter implements BackendAdapter {
 	/**
-	 * Pi's session id *is* its JSONL path (D9), and for a `virtual` session that
-	 * path does not exist until Pi writes it. So `ref` is not stable at
-	 * construction: it holds whatever the caller named the session until Pi
-	 * reports the real `sessionFile`, at which point it is adopted.
+	 * Pi's session id *is* its JSONL path (D9), and for a `virtual` session Pi
+	 * chooses that path itself. So `ref` is not stable at construction: it
+	 * holds whatever the caller named the session until Pi reports the real
+	 * `sessionFile`, at which point it is adopted. As of `pi 0.87.1` Pi names
+	 * the path from `start()`'s `get_state`, though it writes no file there
+	 * until the first turn's reply ends (MANUAL_TESTING OW-bohodu).
 	 *
 	 * For the server: **re-read `adapter.ref` after `start()` and after the
 	 * first `submit()` resolves.** Those are the two points at which it can
-	 * change, both are awaited, and a session keyed by the pre-materialisation
-	 * id will not be findable on disk afterwards.
+	 * change, both are awaited, and a session keyed by the id it was created
+	 * with will not be findable on disk afterwards.
 	 */
 	get ref(): SessionRef {
 		return this.sessionRef;
 	}
 	private sessionRef: SessionRef;
 	/**
-	 * False until Pi has told us the session's real file. A fresh session
-	 * materialises on its first prompt (D9), so this can stay false across
-	 * `start()` and only resolve after the first turn.
+	 * False until Pi has told us the session's real file. On `pi 0.84.1`,
+	 * `0.85.1` and `0.87.1` a fresh session's is named at start (HANDOFF finding
+	 * 41, MANUAL_TESTING OW-bohodu), but a Pi that names none there leaves this
+	 * false across `start()`, to resolve after the first turn.
 	 */
 	private idResolved = false;
 
@@ -363,9 +366,11 @@ export class PiAdapter implements BackendAdapter {
 		};
 		await this.sendCommand<PiResponseFor<"prompt">>(cmd);
 
-		// A `virtual` session materialises on its first prompt (D9), so this is
-		// the earliest Pi can name the file it just created. One extra round
-		// trip, only until the id resolves -- after that this is skipped.
+		// For a Pi that named no file at `start()`, this is the next point it can
+		// name one. Pi 0.84.1, 0.85.1 and 0.87.1 named it at start (HANDOFF
+		// finding 41, MANUAL_TESTING OW-bohodu), so this is skipped there; it
+		// stays for the `virtual` case D9 describes.
+		// One extra round trip, only until the id resolves.
 		//
 		// Awaited, because the manager reads `ref` the moment `submit()` settles
 		// and a rename that lands later is one it will never hear about. But not
@@ -375,7 +380,7 @@ export class PiAdapter implements BackendAdapter {
 		// answers by preserving the draft to send again. Resending would put a
 		// second copy of a running prompt into the same turn. Leaving the id
 		// unresolved instead costs one more probe on the next prompt, which is
-		// the same path a session that had not materialised yet already takes.
+		// the same path a session whose id had not resolved yet already takes.
 		if (!this.idResolved) {
 			try {
 				const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
@@ -464,7 +469,7 @@ export class PiAdapter implements BackendAdapter {
 		// `false` is retired, but this is one sample of a race, not an
 		// invariant). Nothing here depends on it -- the consequence is that a
 		// discarded fork can leave a real session file for the picker to walk.
-		// Unlike `adoptSessionFile` (the one-time virtual->real materialisation, gated
+		// Unlike `adoptSessionFile` (the one-time virtual->real id adoption, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file
 		// unconditionally.

@@ -112,8 +112,9 @@ def worker_filter_for(backend: str):
 def follow_renames(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> dict[str, str]:
     """Where `ref` has moved to, if a `renamed` chain moved it.
 
-    Pi's id is its JSONL path and changes at the first prompt (D9), so a probe
-    that holds the ref it created stops matching its own session's events.
+    Every backend replaces a `virtual:` ref at attach (D9), and Pi's id is its
+    JSONL path, so a probe that holds the ref it created stops matching its
+    own session's events.
     """
     current = ref
     for _, event in events:

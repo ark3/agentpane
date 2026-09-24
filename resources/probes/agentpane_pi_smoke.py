@@ -13,10 +13,11 @@ Three things only this harness can establish:
   nothing ran Pi through the real wrapper chain until this harness did.
   It has since: HANDOFF findings 39-42 (work laptop, pi 0.84.1) and
   MANUAL_TESTING's OW-moradi section (home server, pi 0.85.1).
-* **The rename.** Pi's session id *is* its JSONL path (D9), and a `virtual`
-  session has no path until its first prompt writes one. The id therefore
-  changes under the client mid-conversation, which Codex never does. That is
-  the contract most likely to be wrong, and it is only observable live.
+* **The rename.** Pi's session id *is* its JSONL path (D9), which Pi chooses
+  itself, so a `virtual` session's id changes under the client -- at attach
+  on pi 0.84.1, 0.85.1 and 0.87.1, or on the first prompt for a Pi that names
+  no path at start. That is the contract most likely to be wrong, and it is
+  only observable live.
 * **Signal propagation.** DESIGN's third open question is settled for Codex
   and assumed for Pi. Killing the server has to reach an agent two `exec`s
   down inside `bwrap`, or every closed session leaks a live agent.
@@ -265,13 +266,15 @@ def main() -> int:
 
         # -- 2. Pi names the session, and the id changes under the client ---
         #
-        # D9 says a `virtual` session has no JSONL path until its first prompt
-        # writes one, so this check was originally written to fire after the
-        # prompt. Observed instead on pi 0.84.1: the session file exists by the
-        # time `start()`'s `get_state` probe answers, so the rename lands during
-        # *attach*. Both orderings are legitimate -- the adapter's contract is
-        # that `ref` is unstable at two points, not that it changes at exactly
-        # one -- so scan the whole stream and record which one actually happened.
+        # D9 once said a `virtual` session has no JSONL path until its first
+        # prompt writes one, so this check was originally written to fire after
+        # the prompt. Observed instead on pi 0.84.1: Pi has named the session
+        # file by the time `start()`'s `get_state` probe answers, so the rename
+        # lands during *attach* (on 0.87.1 the file itself is not written until
+        # the first turn's reply ends). Both orderings are legitimate -- the
+        # adapter's contract is that `ref` is unstable at two points, not that
+        # it changes at exactly one -- so scan the whole stream and record which
+        # one actually happened.
         def renamed(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in events:
                 if event.get("type") == "renamed" and event.get("from") == virtual_ref:

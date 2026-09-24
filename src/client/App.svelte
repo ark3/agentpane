@@ -385,8 +385,9 @@
 		});
 		// Re-key the local follow/scroll maps synchronously, ahead of the state
 		// publish above and thus ahead of the effects below that key off it --
-		// otherwise a session's own rename (D9: every new session gets one, on
-		// its first prompt) orphans its in-flight follow state under the old key.
+		// otherwise a session's own rename (D9: every new session gets one, at
+		// attach and possibly again on its first prompt) orphans its in-flight
+		// follow state under the old key.
 		const unsubscribeRename = controller.onRename((from, to) =>
 			rekeySession(sessionKey(from), sessionKey(to)),
 		);
@@ -442,7 +443,8 @@
 	 * badge's turn watch -- from one session key to another.
 	 *
 	 * Two things move a session's key under an in-flight turn. A `renamed` event
-	 * (D9: every new session gets one on its first prompt), and a fork, where
+	 * (D9: every new session gets one at attach, and may get another on its
+	 * first prompt), and a fork, where
 	 * Pi renames but Codex answers with a brand-new ref it renames nothing to
 	 * (OW-hezidi). Orphaning this state under the old key strands follow mode
 	 * mid-turn, which is what OW-27 was.
@@ -1135,8 +1137,8 @@
 		if (view.sending) return;
 		armFollow(edit?.index);
 		armBadge();
-		// Both arms above are keyed on the session as it stands now, and D9
-		// renames it on its first prompt -- so the key to disarm, or to re-key the
+		// Both arms above are keyed on the session as it stands now, and D9 can
+		// rename it on its first prompt -- so the key to disarm, or to re-key the
 		// fork from, is tracked through any rename that lands while the request is
 		// in flight, the way the controller tracks its own ref.
 		let armedKey = view.state.selected ? sessionKey(view.state.selected) : null;

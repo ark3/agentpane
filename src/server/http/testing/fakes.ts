@@ -84,12 +84,14 @@ export interface FakeAdapterOptions {
 	/**
 	 * Adopt this id when `start()` resolves. Mirrors `PiAdapter`, whose `ref` is
 	 * not stable at construction: Pi's session id *is* its JSONL path (D9), so a
-	 * resumed session learns its own id from `get_state` during start.
+	 * session learns its own id from `get_state` during start -- a resumed one,
+	 * and a fresh one too as of `pi 0.84.1` (HANDOFF finding 41).
 	 */
 	materialiseOnStart?: string;
 	/**
-	 * Adopt this id when the first `submit()` resolves -- the `virtual` case,
-	 * where the path does not exist until the first prompt creates it.
+	 * Adopt this id when the first `submit()` resolves -- a `virtual` session
+	 * whose backend names nothing until the first prompt, the case D9 keeps
+	 * `PiAdapter`'s post-submit probe for.
 	 */
 	materialiseOnSubmit?: string;
 	/** Emit this state change from inside `start()`, before it resolves. */
@@ -393,7 +395,7 @@ export class FakeAdapterFactory implements AdapterFactory {
 	/**
 	 * The most recently created adapter for a session, found by either the id it
 	 * was created with or the one it has since adopted -- so a test written
-	 * against the pre-materialisation ref keeps working across the rename.
+	 * against the ref it was created with keeps working across the rename.
 	 */
 	forRef(ref: SessionRef): FakeAdapter | undefined {
 		const key = sessionKey(ref);

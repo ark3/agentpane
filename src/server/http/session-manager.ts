@@ -242,8 +242,8 @@ export class SessionManager {
 
 	/**
 	 * D9: a `virtual` session is a workspace choice and nothing more. Nothing
-	 * touches the backend's store until the first prompt, so browsing never
-	 * litters it with empty sessions.
+	 * touches the backend's store until its first turn, whatever id attach
+	 * gives it, so browsing never litters it with empty sessions.
 	 */
 	createVirtual(cwd: string, backend: BackendId, model?: string): SessionRef {
 		if (!this.#adapters[backend]) throw new UnknownBackendError(backend);
@@ -388,10 +388,11 @@ export class SessionManager {
 	 * Honour the adapter contract that `ref` is not stable. Two different things
 	 * can move it and the caller is the only one that knows which, so it says:
 	 *
-	 *  - `"rename"` -- one conversation took a new id. `PiAdapter` documents that
-	 *    its id changes when `start()` resolves and when the first `submit()`
-	 *    resolves, because Pi's session id IS its JSONL path (D9) and a `virtual`
-	 *    session has no path until its first prompt writes one. The old id is an
+	 *  - `"rename"` -- one conversation took a new id. Every backend replaces a
+	 *    `virtual` session's minted id at attach, and some can move it again on
+	 *    the first prompt: `PiAdapter` documents that its id can change when
+	 *    `start()` resolves and when the first `submit()` resolves, because Pi's
+	 *    session id IS its JSONL path (D9). The old id is an
 	 *    older name for this same conversation, so it stays alive as an alias for
 	 *    clients still holding it.
 	 *  - `"fork"` -- a SECOND conversation now exists. The container still moves,
@@ -734,7 +735,11 @@ export class SessionManager {
 		if (streamingChanged) this.broadcaster.sessionsChanged();
 	}
 
-	/** Mark a virtual session as materialised. Called on the first prompt (D9). */
+	/**
+	 * Mark a virtual session as prompted, which is when D9 counts it as leaving
+	 * `virtual`. Called on the first prompt. Its id may have changed long before,
+	 * at attach, so this flag and not the id says whether it can be on disk.
+	 */
 	markPrompted(ref: SessionRef): void {
 		const session = this.#lookup(ref);
 		if (session?.virtual) {

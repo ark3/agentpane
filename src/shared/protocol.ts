@@ -68,7 +68,7 @@ export interface SessionRef {
 }
 
 /**
- * - `virtual`  workspace chosen, nothing on disk yet; materialises on first prompt
+ * - `virtual`  workspace chosen, nothing on disk yet; stays so until its first prompt (D9)
  * - `detached` exists in the backend's store, no subprocess running
  * - `attached` live subprocess
  */
@@ -170,10 +170,11 @@ export type ServerEvent =
 			 * A session's id changed under the client. Re-key everything held under
 			 * `from` to `session`; a `snapshot` for the new ref follows immediately.
 			 *
-			 * This is not an edge case, it is the normal life of a new Pi session.
-			 * Pi's id *is* its JSONL path (D9), and a `virtual` session has no path
-			 * until its first prompt materialises one -- so the id the browser
-			 * created a session with is not the id it keeps. The server honours the
+			 * This is not an edge case, it is the normal life of a new session.
+			 * Every backend replaces a `virtual` session's minted id with its own
+			 * at attach, and the first prompt may move it again, depending on the
+			 * backend (D9) -- so the id the browser created a session with is not
+			 * the id it keeps. The server honours the
 			 * old id on REST routes indefinitely, but every event from here on
 			 * carries the new one, so a client that ignores this renders a live
 			 * session into a transcript nothing updates.
@@ -198,7 +199,7 @@ export interface ListSessionsResponse {
 	sessions: SessionSummary[];
 }
 
-/** POST /api/sessions -- creates a `virtual` session; nothing hits disk until the first prompt. */
+/** POST /api/sessions -- creates a `virtual` session; nothing hits disk until its first turn (D9). */
 export interface CreateSessionRequest {
 	cwd: string;
 	backend: BackendId;

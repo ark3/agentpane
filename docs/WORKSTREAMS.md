@@ -27,8 +27,8 @@ Outstanding work lives only in the card deck.
 Two contracts the server has to honour, both documented at their definitions:
 
 - **Re-read `adapter.ref` after `start()` and after the first `submit()`.**
-  Pi's session id *is* its JSONL path (D9), and a `virtual` session has no path until its first prompt materialises it.
-  The adapter adopts the real `sessionFile` as soon as Pi reports one, so a session keyed by the pre-materialisation id will not be findable on disk afterwards.
+  Pi's session id *is* its JSONL path (D9), which Pi names from `start()`'s `get_state` as of `pi 0.87.1`, though the file is not written until the first turn; the probe after the first `submit()` covers a Pi that has named nothing by then.
+  The adapter adopts the real `sessionFile` as soon as Pi reports one, so a session keyed by its minted `virtual:` id will never match a file on disk.
 - **`start({ resumeId })` hydrates the transcript itself**, via `get_messages`.
   The caller does not need to re-query; a resumed adapter already holds the conversation by the time `start()` resolves.
 
