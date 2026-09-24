@@ -48,6 +48,22 @@
  *   makes `getState().effort` true for both.
  *   Each assistant turn is named with the effort in force when it started,
  *   and a resumed one with the `effort` its store line records.
+ * - A session nobody chose a model on still names one before its first turn,
+ *   because the clients offer efforts by the session's model and would
+ *   otherwise offer none (OW-kakide). The start read of `get_settings` also
+ *   carries `applied.model`, the model in force, but as a resolved id
+ *   (`claude-opus-5-5[1m]`), not a listed one; `initialize`'s entries each
+ *   carry the `resolvedModel` behind their `value`, so the resolved id is
+ *   mapped back through them (`listedModelFor`). Measured on the home server,
+ *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md, OW-kakide):
+ *   `default` resolved to the account's recommended model whatever the
+ *   settings named, and a settings `model` of `sonnet` put `claude-sonnet-5`
+ *   in force, which maps to `sonnet`. So `default` is named only when it
+ *   resolves to the model actually in force, and `--model default` or
+ *   `set_model` to it then put that same model in force -- which is what
+ *   makes it safe for `fork()` to hand the named model to the fork's spawn.
+ *   Only a session with no model yet adopts one this way: a model chosen at
+ *   start or since is never overwritten.
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
@@ -216,7 +232,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			await this.attachProcess({ cwd: opts.cwd, sessionId });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		}
-		await this.readEffort();
+		await this.readSettings();
 		if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 	}
 
@@ -408,14 +424,14 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.model = model;
 		// A chosen effort outlives the switch, applied only while the model has
 		// effort at all (module doc), so what is in force is read, not kept.
-		await this.readEffort();
+		await this.readSettings();
 		this.emitUpdate();
 	}
 
 	/** Sent now over the control channel; the effort in force is then read back (module doc). */
 	async setEffort(effort: string): Promise<void> {
 		await this.sendControl({ subtype: "apply_flag_settings", settings: { effortLevel: effort } });
-		await this.readEffort();
+		await this.readSettings();
 		this.emitUpdate();
 	}
 
@@ -449,11 +465,20 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	// -- internals ----------------------------------------------------------
 
-	/** Adopt the effort the CLI will send on its next request. */
-	private async readEffort(): Promise<void> {
+	/**
+	 * Adopt the effort the CLI will send on its next request, and, while no
+	 * model is known, name the listed one in force (module doc).
+	 */
+	private async readSettings(): Promise<void> {
 		const response = await this.sendControl({ subtype: "get_settings" });
 		const applied = isRecord(response) && isRecord(response.applied) ? response.applied : null;
-		if (applied) this.effort = typeof applied.effort === "string" ? applied.effort : null;
+		if (!applied) return;
+		this.effort = typeof applied.effort === "string" ? applied.effort : null;
+		if (this.model !== null || typeof applied.model !== "string") return;
+		const listed = listedModelFor(applied.model, await this.sendControl({ subtype: "initialize" }));
+		if (listed === null || this.model !== null) return;
+		this.model = listed;
+		this.emitUpdate();
 	}
 
 	private mintSessionId(): string {
@@ -633,6 +658,21 @@ async function defaultReadStoreEntries(
 	const file = await findClaudeSessionFile(root, sessionId);
 	if (!file) return [];
 	return readClaudeMessageEntries(file);
+}
+
+/**
+ * The listed id, among `initialize`'s model entries, whose `resolvedModel` is
+ * `resolved`, or null when none is. Several can share one: as of `claude
+ * 2.1.280`, `default` and `opus[1m]` both resolved to `claude-opus-5-5[1m]`.
+ * Then `default` wins when it is among them, since this only names a model
+ * for a session nobody chose one on, and otherwise the first in list order.
+ */
+function listedModelFor(resolved: string, response: unknown): string | null {
+	const models = isRecord(response) && Array.isArray(response.models) ? response.models : [];
+	const matches = (models as ClaudeModelDescriptor[])
+		.filter((model) => model?.resolvedModel === resolved && typeof model.value === "string")
+		.map((model) => model.value as string);
+	return matches.includes("default") ? "default" : (matches[0] ?? null);
 }
 
 /** The fork point's label: the text of the user message the reducer built. */

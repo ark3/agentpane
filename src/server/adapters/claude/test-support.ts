@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { asClaudeEvent, isRecord, type ClaudeEvent } from "./protocol.ts";
+import { asClaudeEvent, isRecord, type ClaudeEvent, type ClaudeModelDescriptor } from "./protocol.ts";
 
 export type FixtureName =
 	| "text-turn"
@@ -99,15 +99,19 @@ export function authoritativeBlocks(lines: ClaudeEvent[], type: string): Record<
  * A `ClaudeProcess` that never spawns anything. `written` sees every line the
  * adapter sends; `emit` pushes an event back as if the CLI had written it.
  *
- * `get_settings` is the one control request it answers itself, reporting
- * `appliedEffort` as `applied.effort`: every `start()` sends one, and a test
- * that had to answer it by hand would be about that, not about its subject.
+ * `get_settings` is the one control request it always answers itself,
+ * reporting `appliedEffort` and `appliedModel` as `applied.effort` and
+ * `applied.model`: every `start()` sends one, and a test that had to answer it
+ * by hand would be about that, not about its subject. `initialize` it answers
+ * only once `initializeModels` is set, so a test can still answer it by hand.
  */
 export class FakeClaudeProcess {
 	readonly written: Record<string, unknown>[] = [];
 	killed = false;
 	killCount = 0;
 	appliedEffort: string | null = null;
+	appliedModel: string | null = null;
+	initializeModels: ClaudeModelDescriptor[] | null = null;
 
 	private lineHandlers: ((line: string) => void)[] = [];
 	private spawnHandlers: (() => void)[] = [];
@@ -143,8 +147,22 @@ export class FakeClaudeProcess {
 					response: {
 						subtype: "success",
 						request_id: message.request_id,
-						response: { applied: { effort: this.appliedEffort } },
+						response: { applied: { effort: this.appliedEffort, model: this.appliedModel } },
 					},
+				}),
+			);
+		}
+		const models = this.initializeModels;
+		if (
+			models &&
+			message.type === "control_request" &&
+			isRecord(message.request) &&
+			message.request.subtype === "initialize"
+		) {
+			queueMicrotask(() =>
+				this.emit({
+					type: "control_response",
+					response: { subtype: "success", request_id: message.request_id, response: { models } },
 				}),
 			);
 		}

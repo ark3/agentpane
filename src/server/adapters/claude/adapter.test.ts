@@ -6,6 +6,7 @@ import type { SessionRef } from "../../../shared/protocol.ts";
 import type { ClaudeStoreMessageEntry } from "../../sessions/claude.ts";
 import { ClaudeAdapter, ClaudeAdapterFactory, CLAUDE_FORK_SESSION_START } from "./adapter.ts";
 import type { ClaudeProcess, ClaudeSpawnOptions } from "./process.ts";
+import type { ClaudeModelDescriptor } from "./protocol.ts";
 import { FakeClaudeProcess, readFixture } from "./test-support.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "claude", id: "virtual:test" };
@@ -62,6 +63,10 @@ function harness(options: {
 	ref?: SessionRef;
 	/** What each child's `get_settings` reports as `applied.effort`. */
 	appliedEffort?: string | null;
+	/** What each child's `get_settings` reports as `applied.model`. */
+	appliedModel?: string | null;
+	/** Each child's `initialize` model entries; unset, `initialize` goes unanswered. */
+	models?: ClaudeModelDescriptor[];
 } = {}): Harness {
 	const procs: FakeClaudeProcess[] = [];
 	const spawns: ClaudeSpawnOptions[] = [];
@@ -71,6 +76,8 @@ function harness(options: {
 			spawns.push(opts);
 			const proc = new FakeClaudeProcess();
 			proc.appliedEffort = options.appliedEffort ?? null;
+			proc.appliedModel = options.appliedModel ?? null;
+			proc.initializeModels = options.models ?? null;
 			procs.push(proc);
 			return proc;
 		},
@@ -441,6 +448,62 @@ describe("ClaudeAdapter session controls", () => {
 
 		expect(h.proc().lastControlRequest("get_settings")).toBeDefined();
 		expect(h.adapter.getState().effort).toBe("high");
+	});
+
+	describe("naming the model in force when none was chosen", () => {
+		// As `claude 2.1.280` answered on the home server, 2026-09-23: `default`
+		// and `opus[1m]` share a resolved id, and haiku lists no effort.
+		const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+		const MODELS: ClaudeModelDescriptor[] = [
+			{ value: "default", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
+			{ value: "opus[1m]", resolvedModel: "claude-opus-5-5[1m]", supportedEffortLevels: EFFORTS },
+			{ value: "sonnet", resolvedModel: "claude-sonnet-5", supportedEffortLevels: EFFORTS },
+			{ value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
+		];
+
+		it("names the listed default, whose efforts the clients then offer, before any turn", async () => {
+			const h = harness({ appliedEffort: "high", appliedModel: "claude-opus-5-5[1m]", models: MODELS });
+			const updates = vi.fn();
+			h.adapter.onUpdate(updates);
+			await h.adapter.start({ cwd: "/workspace" });
+
+			expect(h.adapter.getState().model).toBe("default");
+			expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ model: "default" }), undefined);
+			const listed = (await h.adapter.listModels()).find((model) => model.id === h.adapter.getState().model);
+			expect(listed?.efforts.map((effort) => effort.id)).toEqual(EFFORTS);
+			// Nothing was chosen, so the spawn carried no `--model`.
+			expect(h.spawns[0]?.model).toBeUndefined();
+		});
+
+		it("names default over an earlier entry sharing its resolved id", async () => {
+			const models = [MODELS[1], MODELS[0]] as ClaudeModelDescriptor[];
+			const h = harness({ appliedModel: "claude-opus-5-5[1m]", models });
+			await h.adapter.start({ cwd: "/workspace" });
+
+			expect(h.adapter.getState().model).toBe("default");
+		});
+
+		it("names the one listed id a settings default resolves to", async () => {
+			const h = harness({ appliedEffort: "high", appliedModel: "claude-sonnet-5", models: MODELS });
+			await h.adapter.start({ cwd: "/workspace" });
+
+			expect(h.adapter.getState().model).toBe("sonnet");
+		});
+
+		it("names nothing when no listed id resolves to the model in force", async () => {
+			const h = harness({ appliedModel: "claude-unlisted-1", models: MODELS });
+			await h.adapter.start({ cwd: "/workspace" });
+
+			expect(h.adapter.getState().model).toBeNull();
+		});
+
+		it("keeps a chosen model and asks no initialize for it", async () => {
+			const h = harness({ appliedModel: "claude-opus-5-5[1m]", models: MODELS });
+			await h.adapter.start({ cwd: "/workspace", model: "opus[1m]" });
+
+			expect(h.adapter.getState().model).toBe("opus[1m]");
+			expect(h.proc().lastControlRequest("initialize")).toBeUndefined();
+		});
 	});
 
 	it("sends a chosen effort as apply_flag_settings and reports what the CLI then applies", async () => {
