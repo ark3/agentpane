@@ -342,6 +342,21 @@ Costs tokens: two real model turns, each on the AGENTS.md pin.
 Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
 What it showed is `docs/MANUAL_TESTING.md`, "Which Codex history loads draw the full-history deprecation, and what replaces them (OW-kelene)".
 
+## `agentpane_codex_history_live.ts`
+
+Proves: **agentpane's own `CodexAdapter` reattaches and forks a thread without drawing that notice**, through the production spawner and `sbox`, and lets the same run be pointed at an older checkout to see what it drew (OW-kelene).
+Without `--thread` it first starts a thread and drives two tiny turns; with one it spends no model turn at all.
+
+```bash
+CODEX_HOME=<temp home with copied auth.json and config.toml> \
+  bun agentpane_codex_history_live.ts --root <checkout> --workspace <git dir> [--thread <id>]
+```
+
+Costs tokens: two real model turns on `gpt-5.6-luna` without `--thread`, none with it.
+
+Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
+What it showed is the same `docs/MANUAL_TESTING.md` section.
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's

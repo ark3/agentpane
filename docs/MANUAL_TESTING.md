@@ -3311,3 +3311,21 @@ agentpane always resumes before it reads, so nothing depends on this.
 A `thread/resume` naming it after an `initialize` with `capabilities: null` was refused with `-32600 thread/resume.initialTurnsPage requires experimentalApi capability`, and after one with `experimentalApi: true` answered the page.
 agentpane does not opt into the experimental API, so it pages with a separate `thread/turns/list`.
 
+**What the adapter makes of it.**
+`CodexAdapter` sends `excludeTurns: true` on every `thread/resume` and `thread/fork`, and reads a thread's turns with `thread/turns/list`, oldest first at `itemsView: "full"`, following `nextCursor` to the last page, for a reattach's repaint, a borrower's repaint and `listForkPoints()` alike (`readTurns` in `src/server/adapters/codex/adapter.ts`).
+`src/server/adapters/codex/adapter.test.ts` pins, for a `paginated` and a `legacy` thread each, that nothing the adapter writes asks for a whole history, that no notice arrives from a fake that sends this one when 0.156.0 did, and that the reattach paints the transcript a whole-history hydrate painted, with the same fork points at the same indices.
+Against the adapter before the change those cases failed on the `thread/resume` without `excludeTurns` and the `thread/read` with `includeTurns`; with the change, cutting `readTurns` to one page or asking for `summary` failed them again, and dropping `excludeTurns` from the borrower's resume failed its own case.
+
+**Through agentpane, before and after.**
+`resources/probes/agentpane_codex_history_live.ts` drives the real `CodexAdapterFactory` with its production spawner, `direnv exec <workspace> sbox -- codex app-server`, from the checkout its `--root` names, in a temporary `CODEX_HOME` under `/tmp` with copies of `auth.json` and `config.toml` and a throwaway git workspace, both removed afterwards.
+It started a thread from the worktree and drove two turns on `gpt-5.6-luna`, then reattached it in a fresh adapter, listed its fork points, forked at the second and started the fork's borrower.
+A first attempt spent one more turn on a thread of its own before the driver submitted into it too early; that thread was not used.
+From the worktree, after the change: the reattach painted `user, assistant, user, assistant`, the fork points were the two turns at indices 0 and 2, the fork painted `user, assistant`, and no adapter heard any notice.
+The same thread, reattached and forked from the main checkout at `27e871c`, before the change: the same roles, the same two fork points at the same indices, the same fork transcript, and five `deprecationNotice`s — the reattach heard its own resume's, `listForkPoints`' `thread/read`'s, `fork()`'s `thread/fork`'s and the borrower's resume's, and the borrower heard its own.
+A copied 0.150.1 `legacy` rollout, three turns, reattached and forked with no model turn from each checkout, painted the same twelve messages and the same three fork points at indices 0, 4 and 6 from both, and neither heard a notice.
+
+**Not established.**
+Nothing here went through agentpane's HTTP server, the browser or Emacs; the session layer between them and the adapter was not changed.
+The comparison through agentpane is of roles and fork points, not of message content; content equality is what the unit tests assert.
+A reattach to a thread whose turn is still running, which only the borrowed re-attach of OW-voyezi reaches, now has a window between the resume's answer and the last page in which live notifications apply to a reducer that the hydrate then resets; it was not exercised.
+`thread/turns/list`'s default page size was not read, since the adapter names none and follows every cursor.
