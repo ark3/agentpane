@@ -114,14 +114,17 @@ The sentence above assumed the browser is a place a request can be answered, and
 So a request nothing can answer was being held until the user killed the session, and the user was told that killing it was the remedy.
 A turn that carries on from a "no" it can read beats a session that has to be destroyed, and the model can try something else -- which is the case for declining rather than erroring where a decline shape exists, since a JSON-RPC error reads as a broken client rather than a refusal.
 The user is told what arrived in both cases; silently refusing on the agent's behalf is the one outcome ruled out.
+The Codex adapter does this since OW-zisumi: a kind with an entry in `DECLINE_RESPONSES` (`src/server/adapters/codex/protocol.ts`) is published as before, then declined at once through the adapter's own `reply(id, null)`, retracted through `onRequestResolved`, and named in a session error; a kind with no entry is errored out at arrival and never published (OW-nujawi).
 
 This is provisional and OW-bijera is what revisits it: once a human can answer, holding becomes the right behaviour again for the kinds they can answer.
 It is therefore sequenced *before* bijera rather than after, because declining honestly needs a retraction, which this contract lacked until OW-gusifo -- see the paragraph below.
+The decline goes through `reply` after publishing, rather than replacing the publish, so that the request namespace, the typed reverse mapping and wire-id scoping stay on the live path: what bijera removes is the decline, not machinery it would have to rebuild.
 
 **A request that stops being pending is retracted on the wire, closing what was a gap and never a decision (OW-gusifo).**
 Until then `ServerEvent` carried `request` and nothing that retracted it.
 Since OW-bipume the server holds each session's pending requests and every `snapshot` carries them, so a request answered through agentpane's reply route left clients' views only at the next snapshot, and one Codex reported resolved left nothing at all: the adapter dropped it, the server went on holding it, and every snapshot re-sent it.
-Now a `request-resolved` event carrying the `requestId` retracts a request however it stopped being pending: `SessionManager.clearRequest` broadcasts it after the reply route answers, and does the same for an adapter's `onRequestResolved`, which the Codex adapter fires on `serverRequest/resolved` for a request `reply` had not answered, and which an adapter answering a request itself can fire as well.
+Now a `request-resolved` event carrying the `requestId` retracts a request however it stopped being pending: `SessionManager.clearRequest` broadcasts it after the reply route answers, and does the same for an adapter's `onRequestResolved`, which the Codex adapter fires on `serverRequest/resolved` for a request `reply` had not answered, and on its own decline at arrival (OW-zisumi).
+Until OW-bijera the first finds nothing to act on, since every request the Codex adapter publishes is answered before the next line is read.
 Both clients drop the request on it -- the browser from `view.requests` (`src/client/session-state.ts`), Emacs its warning line through the helper's `session/requestResolved` -- and a client that missed it converges on the next snapshot, whose `requests` no longer hold it.
 A subagent thread's request is routed to its parent's adapter (OW-futewo) while its `serverRequest/resolved` names the child's thread, so the Codex reducer reads that notification ahead of its thread guard and lets the wire id, which only the adapter that published the request maps, decide who acts on it.
 What makes Codex resolve a request without agentpane's answer is unmeasured: auto-approval or another client of the app-server was assumed, but the only `serverRequest/resolved` captured, in `resources/fixtures/codex/tool-edit.jsonl` (`codex-cli 0.147.0`), followed the capture harness's own answer.
@@ -242,8 +245,8 @@ One seam, no PATH dependency, testable.
 ### D7a. Codex approval policy: `never`, set by the adapter
 
 agentpane sets `approvalPolicy: "never"` on every Codex thread it creates, rather than inheriting Codex's `on-request` default.
-The intent is to avoid permission prompts, not to route them into agentpane's UI: agentpane has no approval dialog, so an approval `ServerRequest` renders as a single warning naming the kind and the turn then hangs until the session is killed.
-The real trade is "no dialog" against "a hung turn", and the hung turn is worse.
+The intent is to avoid permission prompts, not to route them into agentpane's UI: agentpane has no approval dialog, so an approval `ServerRequest` is refused at arrival -- declined where it has a decline shape, errored out otherwise -- and named in a session error (D2a).
+When this was decided the trade was "no dialog" against "a hung turn", and the hung turn is worse; since OW-zisumi what `on-request` would cost instead is an approval refused at arrival.
 
 The site is `CodexAdapterOptions.approvalPolicy` in `src/server/adapters/codex/adapter.ts`, beside `sandbox`, applied at thread creation exactly the way `sandbox` is.
 Not sbox: sbox injects its flags before the subcommand (`codex --sandbox danger-full-access app-server`), and a CLI approval flag there would be the same no-op the sandbox flag already is for `app-server` (OW-37).

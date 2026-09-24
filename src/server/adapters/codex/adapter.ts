@@ -66,11 +66,12 @@ export interface CodexAdapterOptions {
 	sandbox?: SandboxMode;
 	/**
 	 * Start threads with this approval policy. Defaults to `never` (D7a):
-	 * agentpane's UI has no approval dialog, so an approval `ServerRequest`
-	 * renders as an unsupported-request warning and hangs the turn until the
-	 * session is killed. Codex's own default is `on-request`, so this has to be
-	 * sent explicitly; it belongs here rather than in sbox's flags or a global
-	 * `~/.codex/config.toml` for the reasons D7a gives.
+	 * agentpane's UI has no approval dialog, so an approval `ServerRequest` is
+	 * refused at arrival -- declined where it has a decline shape, errored out
+	 * otherwise -- and named in a session error (D2a). Codex's own default is
+	 * `on-request`, so this has to be sent explicitly; it belongs here rather
+	 * than in sbox's flags or a global `~/.codex/config.toml` for the reasons
+	 * D7a gives.
 	 */
 	approvalPolicy?: AskForApproval;
 	env?: NodeJS.ProcessEnv;
@@ -808,7 +809,8 @@ export class CodexAdapter implements BackendAdapter {
 
 	/**
 	 * A published request Codex reported resolved (`serverRequest/resolved`)
-	 * before `reply` answered it (OW-gusifo). A child thread's request, routed
+	 * before `reply` answered it (OW-gusifo), or one this adapter declined
+	 * itself at arrival (OW-zisumi). A child thread's request, routed
 	 * here by `CodexConnection.#recipientFor`, counts: the reducer passes the
 	 * notification through whatever thread it names, and only the adapter that
 	 * published the wire id holds a mapping for it.
@@ -848,7 +850,8 @@ export class CodexAdapter implements BackendAdapter {
 	 * decision shape the method expects -- an approval answered with a JSON-RPC
 	 * error would read as a client failure rather than a "no". Only kinds with
 	 * such a shape are ever pending: `applyEffects` errors the rest out at
-	 * arrival rather than publishing them.
+	 * arrival rather than publishing them, and until a human can answer
+	 * (OW-bijera) declines these through here as soon as it has published them.
 	 */
 	async reply(requestId: string, response: unknown): Promise<void> {
 		const client = this.requireClient();
@@ -1017,6 +1020,15 @@ export class CodexAdapter implements BackendAdapter {
 						...(effect.issuerThreadId ? { issuerThreadId: effect.issuerThreadId } : {}),
 					};
 					for (const listener of [...this.requestListeners]) listener(request);
+					// Nothing can answer it yet -- the browser has no way to (OW-bijera)
+					// -- so it is declined rather than held until the session is killed
+					// (D2a, OW-zisumi), and through `reply`, the path a human's "no"
+					// will take once one can be given. `reply` writes synchronously.
+					void this.reply(key, null);
+					for (const listener of [...this.resolvedListeners]) listener(key);
+					this.emitError(
+						`codex sent a request agentpane cannot answer yet (${effect.kind}); agentpane declined it`,
+					);
 					break;
 				}
 				case "request-resolved":

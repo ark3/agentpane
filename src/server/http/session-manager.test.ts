@@ -1831,6 +1831,34 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
 	});
 
+	it("carries no request the Codex adapter declined at arrival, and does carry the error naming it (OW-zisumi)", async () => {
+		// The real adapter, since what is under test is that its own decline
+		// reaches the table: a `FakeAdapter` would only replay what it was told.
+		const ref: SessionRef = { backend: "codex", id: "thread-declining" };
+		const proc = new FakeCodexProcess();
+		proc.onWrite((message) => {
+			const id = message["id"];
+			if (typeof id !== "number") return;
+			if (message["method"] === "initialize") proc.emit({ id, result: { userAgent: "test" } });
+			if (message["method"] === "thread/resume") proc.emit({ id, result: { thread: { id: ref.id, turns: [] }, model: "m" } });
+			if (message["method"] === "thread/turns/list") proc.emit({ id, result: { data: [], nextCursor: null, backwardsCursor: null } });
+		});
+		index = new FakeSessionIndex([storedSession(ref, WORKSPACE)]);
+		const codex = new CodexAdapterFactory({ spawn: () => proc, codexRoot: join(tmpdir(), "agentpane-codex-no-store") });
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(ref);
+
+		proc.emit({
+			id: 9,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: ref.id, turnId: "turn-1", itemId: "item-1" },
+		});
+
+		expect(snapshots(connect())).toEqual([
+			expect.objectContaining({ session: ref, requests: [], error: expect.stringContaining("item/fileChange/requestApproval") }),
+		]);
+	});
+
 	it("clears the error when the next prompt is admitted, as the client does (OW-31)", async () => {
 		await sessions.attach(REF);
 		pi.forRef(REF)!.emitError("turn failed");

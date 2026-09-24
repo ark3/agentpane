@@ -2086,13 +2086,18 @@ describe("CodexAdapter request replies", () => {
 		});
 		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
 		const requests: AgentRequest[] = [];
+		const resolved: string[] = [];
 		adapter.onRequest((request) => requests.push(request));
+		adapter.onRequestResolved((requestId) => resolved.push(requestId));
 
 		await adapter.start({ cwd: "/workspace" });
+		// Declined at arrival (OW-zisumi); Codex's resolution and a late reply
+		// then find nothing pending under the typed wire id.
 		proc.emit({ method: "serverRequest/resolved", params: { requestId: 0 } });
 		await adapter.reply(requests[0]?.requestId ?? "", { decision: "accept" });
 
-		expect(responses(proc)).toEqual([]);
+		expect(responses(proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
+		expect(resolved).toEqual([requests[0]?.requestId]);
 	});
 
 	it("scopes equal wire request ids to their adapter sessions", async () => {
@@ -2100,20 +2105,24 @@ describe("CodexAdapter request replies", () => {
 		const second = await startedAdapter({ threadId: "thread-second" });
 		const firstRequests: AgentRequest[] = [];
 		const secondRequests: AgentRequest[] = [];
+		const firstResolved: string[] = [];
+		const secondResolved: string[] = [];
 		first.adapter.onRequest((request) => firstRequests.push(request));
 		second.adapter.onRequest((request) => secondRequests.push(request));
+		first.adapter.onRequestResolved((requestId) => firstResolved.push(requestId));
+		second.adapter.onRequestResolved((requestId) => secondResolved.push(requestId));
 
 		first.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
 		second.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
 		const firstId = firstRequests[0]?.requestId ?? "";
 		const secondId = secondRequests[0]?.requestId ?? "";
 
+		// Each adapter declines its own under its own published id, on its own wire.
 		expect(firstId).not.toBe(secondId);
-		await first.adapter.reply(firstId, { decision: "accept" });
-		expect(responses(first.proc)).toEqual([{ id: 0, result: { decision: "accept" } }]);
-		expect(responses(second.proc)).toEqual([]);
-		await second.adapter.reply(secondId, { decision: "decline" });
+		expect(responses(first.proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
 		expect(responses(second.proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
+		expect(firstResolved).toEqual([firstId]);
+		expect(secondResolved).toEqual([secondId]);
 	});
 
 	it("distinguishes numeric and string wire request ids", async () => {
@@ -2127,48 +2136,36 @@ describe("CodexAdapter request replies", () => {
 		const stringId = requests[1]?.requestId ?? "";
 
 		expect(numericId).not.toBe(stringId);
-		await adapter.reply(numericId, { decision: "numeric" });
-		await adapter.reply(stringId, { decision: "string" });
 		expect(responses(proc)).toEqual([
-			{ id: 0, result: { decision: "numeric" } },
-			{ id: "0", result: { decision: "string" } },
+			{ id: 0, result: { decision: "decline" } },
+			{ id: "0", result: { decision: "decline" } },
 		]);
 	});
 
 	it("correlates replies to the original numeric request id", async () => {
-		const { adapter, proc } = await startedAdapter({ threadId: "thread-correlate" });
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
+		const { proc } = await startedAdapter({ threadId: "thread-correlate" });
+
 		proc.emit({ id: 23, method: "item/fileChange/requestApproval", params: { itemId: "edit-1" } });
 
-		await adapter.reply(requests[0]?.requestId ?? "", { decision: "accept" });
-
-		expect(proc.written.at(-1)).toEqual({ id: 23, result: { decision: "accept" } });
+		expect(proc.written.at(-1)).toEqual({ id: 23, result: { decision: "decline" } });
 	});
 
 	it("declines approvals with their protocol response shape", async () => {
-		const { adapter, proc } = await startedAdapter();
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
+		const { proc } = await startedAdapter();
+
 		proc.emit({ id: "approval-1", method: "item/fileChange/requestApproval", params: {} });
 
-		await adapter.reply(requests[0]?.requestId ?? "", null);
-
-		expect(proc.written.at(-1)).toEqual({ id: "approval-1", result: { decision: "decline" } });
+		expect(responses(proc)).toEqual([{ id: "approval-1", result: { decision: "decline" } }]);
 	});
 
 	it("declines MCP elicitations with their generated protocol response shape", async () => {
-		const { adapter, proc } = await startedAdapter();
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
+		const { proc } = await startedAdapter();
+
 		proc.emit({ id: "elicitation-1", method: "mcpServer/elicitation/request", params: {} });
 
-		await adapter.reply(requests[0]?.requestId ?? "", null);
-
-		expect(proc.written.at(-1)).toEqual({
-			id: "elicitation-1",
-			result: { action: "decline", content: null, _meta: null },
-		});
+		expect(responses(proc)).toEqual([
+			{ id: "elicitation-1", result: { action: "decline", content: null, _meta: null } },
+		]);
 	});
 
 	it("answers a request kind it has no handler for and names it in an error (OW-nujawi)", async () => {
@@ -2185,6 +2182,31 @@ describe("CodexAdapter request replies", () => {
 		]);
 		expect(errors).toEqual([expect.stringContaining("workspace/trust/request")]);
 		expect(requests).not.toHaveBeenCalled();
+	});
+
+	it("declines a request it has a decline shape for through reply, names it in an error, and retracts it (OW-zisumi)", async () => {
+		const threadId = "thread-declining";
+		const { adapter, proc } = await startedAdapter({ threadId });
+		const requests: AgentRequest[] = [];
+		const errors: string[] = [];
+		const resolved: { requestId: string; answered: unknown[] }[] = [];
+		adapter.onRequest((request) => requests.push(request));
+		adapter.onError((message) => errors.push(message));
+		adapter.onRequestResolved((requestId) => resolved.push({ requestId, answered: responses(proc) }));
+		const reply = vi.spyOn(adapter, "reply");
+
+		proc.emit({
+			id: 41,
+			method: "item/commandExecution/requestApproval",
+			params: { threadId, turnId: "turn-1", itemId: "item-1", startedAtMs: 1, command: "rm -rf build" },
+		});
+
+		expect(requests).toHaveLength(1);
+		const requestId = requests[0]?.requestId;
+		expect(reply).toHaveBeenCalledExactlyOnceWith(requestId, null);
+		// Retracted once the decline is on the wire, not before.
+		expect(resolved).toEqual([{ requestId, answered: [{ id: 41, result: { decision: "decline" } }] }]);
+		expect(errors).toEqual([expect.stringContaining("item/commandExecution/requestApproval")]);
 	});
 
 	it("identifies a child-thread blocking request and routes it through the parent (OW-futewo)", async () => {
@@ -2212,15 +2234,13 @@ describe("CodexAdapter request replies", () => {
 		expect(request?.session.id).toBe(parentThreadId);
 		expect(request?.kind).toBe("item/commandExecution/requestApproval");
 
-		// Verify the request stays pending and replyable through the parent adapter
-		await adapter.reply(request?.requestId ?? "", { decision: "accept" });
-
+		// Answered through the parent adapter, under the child's wire id.
 		expect(responses(proc)).toEqual([
-			{ id: "child-approval-1", result: { decision: "accept" } },
+			{ id: "child-approval-1", result: { decision: "decline" } },
 		]);
 	});
 
-	it("reports a published request Codex resolved under the id it was published with (OW-gusifo)", async () => {
+	it("reports a request it declined resolved once, under the id it was published with, and not again when Codex resolves it (OW-gusifo)", async () => {
 		const threadId = "resolving-thread";
 		const { adapter, proc } = await startedAdapter({ threadId });
 		const requests: AgentRequest[] = [];
@@ -2230,15 +2250,14 @@ describe("CodexAdapter request replies", () => {
 		proc.emit({ id: 7, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-1" } });
 		proc.emit({ id: 8, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-2" } });
 
+		// Codex follows an answer with `serverRequest/resolved` (`tool-edit.jsonl`).
 		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 7 } });
-		// Answered through `reply`, which the server clears on its own.
-		await adapter.reply(requests[1]?.requestId ?? "", { decision: "accept" });
 		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 8 } });
 
-		expect(resolved).toEqual([requests[0]?.requestId]);
+		expect(resolved).toEqual([requests[0]?.requestId, requests[1]?.requestId]);
 	});
 
-	it("reports a child-thread request routed through the parent resolved, though the notification names the child (OW-gusifo)", async () => {
+	it("reports a child-thread request routed through the parent resolved once, and not again when Codex's notification names the child (OW-gusifo)", async () => {
 		const parentThreadId = "parent-thread";
 		const childThreadId = "child-thread";
 		const { adapter, proc } = await startedAdapter({ threadId: parentThreadId });
@@ -2251,6 +2270,7 @@ describe("CodexAdapter request replies", () => {
 			method: "item/commandExecution/requestApproval",
 			params: { threadId: childThreadId, turnId: "turn-1", itemId: "item-1", startedAtMs: 1000, command: "echo test" },
 		});
+		expect(resolved).toEqual([requests[0]?.requestId]);
 
 		proc.emit({ method: "serverRequest/resolved", params: { threadId: childThreadId, requestId: "child-approval-1" } });
 
@@ -2279,11 +2299,8 @@ describe("CodexAdapter request replies", () => {
 		expect(request?.issuerThreadId).toBeUndefined();
 		expect(request?.session.id).toBe(threadId);
 
-		// Verify it's still replyable
-		await adapter.reply(request?.requestId ?? "", { decision: "accept" });
-
 		expect(responses(proc)).toEqual([
-			{ id: "same-approval-1", result: { decision: "accept" } },
+			{ id: "same-approval-1", result: { decision: "decline" } },
 		]);
 	});
 });
@@ -2629,7 +2646,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		const seen: { who: string; request: AgentRequest }[] = [];
 		parent.onRequest((request) => seen.push({ who: "parent", request }));
 		borrower.onRequest((request) => seen.push({ who: "fork", request }));
-
+		const before = responses(proc).length;
 		proc.emit({
 			id: 77,
 			method: "item/fileChange/requestApproval",
@@ -2638,9 +2655,6 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 
 		expect(seen).toHaveLength(1);
 		expect(seen[0]?.who).toBe("parent");
-
-		const before = responses(proc).length;
-		await parent.reply(seen[0]?.request.requestId as string, null);
 		expect(responses(proc).length - before).toBe(1);
 	});
 
