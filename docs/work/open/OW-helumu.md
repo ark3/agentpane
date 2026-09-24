@@ -18,7 +18,9 @@ Codex does not have this gap in the same shape: its `reducer.remap` spreads the 
 That is the current effort, not the one each turn ran at, so copying Codex would put a wrong label on turns from before an effort change.
 
 The per-turn truth exists on disk.
-As of `pi 0.87.1` the session file carries a `thinking_level_change` entry at every change, ahead of the turns it governs (`docs/MANUAL_TESTING.md`, "A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)", which lists a session file's entries in order), and `get_entries` is already spoken by the adapter.
+As of `pi 0.87.1` the session file carries a `thinking_level_change` entry at every change, ahead of the turns it governs (`docs/MANUAL_TESTING.md`, "A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)", which lists a session file's entries in order), and `get_entries` can read it.
+That command is in the adapter's command union in `src/server/adapters/pi/protocol.ts`, but nothing sends it yet and its response is untyped.
+As of `pi 0.87.1`, `get_entries` in `dist/modes/rpc/rpc-mode.js` answers `{ entries, leafId }` with every entry in the file, abandoned branches included, so a walk wants the active branch from `leafId`; `rpc-types.d.ts` in the same package carries the shapes.
 Load-bearing: a turn's label is the level in force when it ran, read from those entries, not the level in force when it was loaded -- D23 in `docs/DESIGN.md`, read per turn.
 Incidental: whether the walk reads `get_entries` or the session file, and whether one pass serves both the resume and fork paths.
 
