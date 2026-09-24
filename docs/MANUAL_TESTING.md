@@ -3329,3 +3329,33 @@ Nothing here went through agentpane's HTTP server, the browser or Emacs; the ses
 The comparison through agentpane is of roles and fork points, not of message content; content equality is what the unit tests assert.
 A reattach to a thread whose turn is still running, which only the borrowed re-attach of OW-voyezi reaches, now has a window between the resume's answer and the last page in which live notifications apply to a reducer that the hydrate then resets; it was not exercised.
 `thread/turns/list`'s default page size was not read, since the adapter names none and follows every cursor.
+
+## A Codex turn started with `toolOutput` opens with a `functionCallOutput` item (OW-vevizo)
+
+Run on the home server 2026-09-24, **`codex-cli 0.156.0`**, on `gpt-5.6-luna`, from the `card/OW-vevizo` worktree cut at `e380fb4`.
+The question was whether the `functionCallOutput` variant the 0.156.0 bindings added to `ThreadItem` ever arrives on the wire, and in what shape.
+The bindings name one way in: `TurnStartParams.toolOutput`, a `TurnToolOutput` of `{name, namespace, output}` whose `output` is the same `FunctionCallOutputBody` the item carries.
+The harness was a throwaway Python script, not kept, driving a bare `codex app-server` in a temporary `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, with a `git init` work directory, both removed afterwards.
+It sent `initialize`, a `thread/start` naming the model, and two `turn/start`s naming it again.
+
+**`toolOutput` must come without input.**
+A first run sent each `toolOutput` alongside a one-line text `input` and was refused, `-32600` with the message `` `toolOutput` cannot be combined with nonempty `input` ``, so no turn ran; a `thread/turns/list` afterwards was refused too, because the thread was "not materialized yet".
+
+**With `input: []`, the turn's first item is the output.**
+A second run sent `toolOutput: {name: "probe_tool", namespace: null, output: "<text>"}` and then `{name: "probe_tool", namespace: "probe_ns", output: [{type: "input_text", ...}, {type: "input_image", image_url: "data:image/png;base64,..."}]}`, each with an empty `input`.
+Each `turn/start` answered a turn at `inProgress`, and after `turn/started` the turn's first items were an `item/started` and an `item/completed` for `functionCallOutput`, stamped the same millisecond and each carrying the whole item: `{type, id, name, namespace, output}`, the `output` exactly as sent, string or list, and the `id` prefixed `fco_`.
+By `emittedAtMs` it arrived 1655 ms after `turn/started` on the first turn and 37 ms after it on the second.
+There were no deltas for it and no call item in front of it.
+Each turn then ran as an ordinary reply: an empty `reasoning` item, an `agentMessage`, `thread/tokenUsage/updated` and `turn/completed` at `status: "completed"`.
+`turn/completed`'s `summary` view listed the `agentMessage` alone; `thread/turns/list` at `itemsView: "full"` listed `functionCallOutput, reasoning, agentMessage` for both turns, the item as it had streamed.
+
+**On disk.**
+The rollout stored each as a `response_item` of `type: "function_call_output"` carrying `id`, `name`, `namespace` (absent when null) and `output`, and **no `call_id`**, followed by an `event_msg` `item_completed` whose item is `type: "FunctionCallOutput"`.
+
+**What the adapter makes of it.**
+`mapItem` in `src/server/adapters/codex/mapping.ts` draws it as a tool pair named `namespace__name` or `name`, with empty arguments and a result that is never an error; `src/server/adapters/codex/reducer.test.ts` drives both captured shapes through `item/started` and `item/completed`.
+
+**Not established.**
+Nothing here went through agentpane's server, the browser or Emacs, and agentpane itself never sends `toolOutput`, so the item reaches a session only from a thread another client drove.
+Whether Codex emits the item any other way -- for a function call the model makes, say -- was not probed; the turns that ran here made none.
+Read from the code, not run: the session preview's reader in `src/server/sessions/codex.ts` returns nothing for a `function_call_output` without a `call_id`, so the preview drops this record.
