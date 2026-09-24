@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # The init event a Claude Code turn brings replaces the adapter's model with its own id, and nobody knows whether that id keeps the [1m] variant
@@ -29,3 +30,13 @@ So this card cannot be closed by a session alone: it needs either the owner's le
 
 The `init` model for a `[1m]` turn is recorded in `docs/MANUAL_TESTING.md` with `claude --version`.
 If it lacks the variant, a test in `src/server/adapters/claude/adapter.test.ts`, red first, shows a session-start fork taken after a turn spawning with a model that puts the `[1m]` variant in force; if it keeps it, the OW-faledu "Not established" sentence is retired and the close note says so.
+
+## Close note
+
+Measured on the home server 2026-09-23, `claude 2.1.280`, with two one-word turns on `claude-sonnet-5[1m]` under the owner's explicit leave for this card (AGENTS.md otherwise pins agent turns to haiku): a turn's `init` event names the model in force with its variant, `claude-sonnet-5[1m]`, fresh and on a resume, the same id `get_settings`'s `applied.model` reports; `message_start`, the `assistant` event and the store's assistant line name `claude-sonnet-5` without it.
+So `handleLine` replacing the adapter's model with `init`'s id keeps the variant, and a session-start fork after a turn still puts it back in force (OW-faledu's table); no adapter change was needed.
+A test in `src/server/adapters/claude/adapter.test.ts` pins the fork after a turn on a resumed `opus[1m]` session; it failed with the variant stripped from `init`'s id and passes on the real code.
+Side finding: a resume widens the restored model by the store's `model` attachment line (`modelId: "claude-sonnet-5[1m]"`) as well as by the settings, shown on hand-edited copies; OW-tebibo's and OW-nabano's sections now say so.
+Not measured: an opus turn, so `init` naming `claude-opus-5-5[1m]` is the sonnet relation applied to opus.
+After a turn the label is `init`'s raw id (e.g. `claude-opus-5-5[1m]`), not a listed picker id; that is the label issue OW-kakide already noted and was left alone.
+Evidence: `docs/MANUAL_TESTING.md`, "What model a Claude Code turn's `init` names on a `[1m]` session (OW-lizupu)".
