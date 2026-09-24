@@ -1487,6 +1487,28 @@ describe("turn boundaries", () => {
 
 		expect(events).toEqual([expect.objectContaining({ type: "status", effort: "low" })]);
 	});
+
+	it("carries the recorded model a resume could not restore on status and snapshot, and its clearing (OW-jitoni)", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+
+		adapter.model = "openrouter/fallback";
+		adapter.unrestoredModel = "openrouter/recorded";
+		adapter.emitUnlocalisedChange();
+		adapter.messages = [userMessage("hello")];
+		adapter.emitUnlocalisedChange();
+		adapter.unrestoredModel = undefined;
+		adapter.emitUnlocalisedChange();
+
+		expect(events).toEqual([
+			expect.objectContaining({ type: "status", model: "openrouter/fallback", unrestoredModel: "openrouter/recorded" }),
+			expect.objectContaining({ type: "snapshot", model: "openrouter/fallback", unrestoredModel: "openrouter/recorded" }),
+			// Nothing else changed, so only this status says it cleared.
+			expect.objectContaining({ type: "status", model: "openrouter/fallback", unrestoredModel: null }),
+		]);
+	});
 });
 
 describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () => {

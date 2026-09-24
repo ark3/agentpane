@@ -110,7 +110,12 @@
  * `session` in every payload is a ref, `{ backend, id }`, exactly as the HTTP
  * API's `SessionRef`; `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
- * session's next turn runs at, `null` when the backend reports none.
+ * session's next turn runs at, `null` when the backend reports none; and so
+ * is `unrestoredModel`, the model the session's store last recorded when the
+ * backend could not restore it on a resume or a fork and `model` is a
+ * fallback in its place (D23, OW-jitoni), `null` otherwise. Only Pi reports
+ * one. It outlives the first turn on the fallback, which records the fallback
+ * as though chosen, and clears once a `sessions/setModel` succeeds.
  *
  * Requests, by `method`, with `params` and `result`:
  *
@@ -163,11 +168,12 @@
  * `sessions/changed`:
  *
  * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model,
- *   effort }`.
+ *   effort, unrestoredModel }`.
  *   Replaces everything the buffer holds; also how a session first appears
  *   after `sessions/attach`, and how a missed event is healed.
  * - `session/node` -- `{ session, node }`. One node to replace by `index`.
- * - `session/status` -- `{ session, isStreaming, compaction, model, effort }`.
+ * - `session/status` -- `{ session, isStreaming, compaction, model, effort,
+ *   unrestoredModel }`.
  * - `session/error` -- `{ session, message }`. A turn error, or an agent
  *   request nothing in Emacs answers yet, as text saying what kind arrived.
  *   Not carried by a snapshot, so a re-snapshot does not replay it.
@@ -214,6 +220,7 @@ export interface SessionStatusParams {
 	compaction: "requesting" | "running" | null;
 	model: string | null;
 	effort: string | null;
+	unrestoredModel: string | null;
 }
 
 export type HelperNotification =

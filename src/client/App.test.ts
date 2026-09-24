@@ -454,6 +454,7 @@ describe("App", () => {
 			compaction: null,
 			model: "backend/reported",
 			effort: null,
+			unrestoredModel: null,
 		}).state;
 
 		render(App, { props: { controller: new FakeController(view({ state: attached })) } });
@@ -830,6 +831,7 @@ describe("App", () => {
 			compaction: null,
 			model: null,
 			effort: null,
+			unrestoredModel: null,
 		}).state;
 
 		const controller = new FakeController(view({ state: current }));
@@ -2032,7 +2034,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		// The composer only replaces the Attach button once the session is live,
 		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -2551,7 +2553,7 @@ describe("App", () => {
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null });
+			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 			await controller.select(piSession);
 			await tick();
 
@@ -2567,7 +2569,7 @@ describe("App", () => {
 
 			// The fork's own turn, start to finish, with the tab in the background.
 			const turn = (isStreaming: boolean) =>
-				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null });
+				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null });
 			turn(true);
 			await tick();
 			turn(false);

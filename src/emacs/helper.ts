@@ -92,6 +92,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		compaction: view.compaction ?? null,
 		model: view.model,
 		effort: view.effort,
+		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
 	const notifySnapshot = (view: SessionView): void => {

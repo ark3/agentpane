@@ -99,7 +99,7 @@ function emit(event: ServerEvent): void {
 
 function snapshot(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort });
+	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -111,7 +111,7 @@ function upsert(index: number, message: AgentMessage): void {
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort });
+	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort, unrestoredModel: null });
 }
 
 function summary(): SessionSummary {
@@ -222,7 +222,7 @@ const api: AgentpaneApi = {
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {
 			seq += 1;
-			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort });
+			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort, unrestoredModel: null });
 		});
 	},
 	async close() {},

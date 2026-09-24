@@ -27,6 +27,7 @@ import {
 	buildUiReplyCommand,
 	createInitialPiState,
 	type PiReducerState,
+	recordedModel,
 	reducePiNotification,
 	withLoadedEfforts,
 } from "./reducer.ts";
@@ -133,6 +134,26 @@ export class PiAdapter implements BackendAdapter {
 	private readonly splitter = new LfLineSplitter();
 	private state: PiReducerState = createInitialPiState();
 	private model: string | null = null;
+	/**
+	 * The model the session file last recorded, when `model` is another: Pi
+	 * could not restore it and fell back (D23, OW-jitoni). As of `pi 0.87.1` a
+	 * resume whose recorded model had left the catalogue ran the settings
+	 * default, one whose provider lost its auth ran another provider's default
+	 * or resolved `unknown`, and Pi said so nowhere over RPC
+	 * (docs/MANUAL_TESTING.md, OW-zujofa). So it is inferred here, by comparing
+	 * what `get_entries` records (`recordedModel` in `reducer.ts`) with what
+	 * `get_state` names, and only for a branch holding messages, since Pi
+	 * restores a model only for such a session.
+	 *
+	 * Read wherever the transcript is read back -- a resume's start, and a
+	 * fork, which D23 holds to the same promise -- and cleared by a
+	 * `setModel` that succeeds, after which the model in force is one chosen.
+	 * A turn does not clear it: the first turn on the fallback records the
+	 * fallback, so every later resume restores that without a mismatch to see,
+	 * and from then on this is the only thing still saying the recorded model
+	 * was lost, for as long as this process lives.
+	 */
+	private unrestoredModel: string | null = null;
 	/**
 	 * Pi's thinking level is the effort (OW-ruzuhu). It is read, not assumed:
 	 * `get_state` names it at start and after a fork, and Pi announces every
@@ -312,7 +333,8 @@ export class PiAdapter implements BackendAdapter {
 	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu),
 	 * each clamped to its turn's model in the catalogue (OW-lehita).
 	 * Both callers read `get_state` first, because whether the current model
-	 * reasons decides what an `off` turn on it is named.
+	 * reasons decides what an `off` turn on it is named, and because the model
+	 * it names is what `unrestoredModel` compares the recorded one with.
 	 */
 	private async hydrateMessages(): Promise<void> {
 		const [messages, entries, catalogue] = await Promise.all([
@@ -320,6 +342,8 @@ export class PiAdapter implements BackendAdapter {
 			this.sendCommand<PiResponseFor<"get_entries">>({ type: "get_entries" }),
 			this.sendCommand<PiResponseFor<"get_available_models">>({ type: "get_available_models" }),
 		]);
+		const recorded = messages.data.messages.length > 0 ? recordedModel(entries.data.entries, entries.data.leafId) : null;
+		this.unrestoredModel = recorded !== null && recorded !== this.model ? recorded : null;
 		const current = { model: this.model, reasoning: this.reasoning };
 		const labelled = withLoadedEfforts(
 			messages.data.messages,
@@ -530,7 +554,14 @@ export class PiAdapter implements BackendAdapter {
 	// -- state ----------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { messages: this.state.messages, isStreaming: this.state.isStreaming, compaction: this.state.compaction, model: this.model, effort: this.state.effort };
+		return {
+			messages: this.state.messages,
+			isStreaming: this.state.isStreaming,
+			compaction: this.state.compaction,
+			model: this.model,
+			effort: this.state.effort,
+			unrestoredModel: this.unrestoredModel,
+		};
 	}
 
 	onUpdate(cb: UpdateListener): Unsubscribe {
@@ -573,6 +604,7 @@ export class PiAdapter implements BackendAdapter {
 				this.settingModel = false;
 			});
 		this.model = modelToInfo(response.data).id;
+		this.unrestoredModel = null;
 		this.reasoning = response.data.reasoning === true;
 		this.syncEffort();
 		if (this.chosenEffort !== null && thinkingLevels(response.data).includes(this.chosenEffort)) {
@@ -710,13 +742,7 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	private emitUpdate(changedIndex?: number): void {
-		const snapshot: AdapterState = {
-			messages: this.state.messages,
-			isStreaming: this.state.isStreaming,
-			compaction: this.state.compaction,
-			model: this.model,
-			effort: this.state.effort,
-		};
+		const snapshot = this.getState();
 		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
 	}
 

@@ -179,6 +179,8 @@ export class FakeAdapter implements BackendAdapter {
 	compactions = 0;
 	model?: string;
 	effort?: string;
+	/** What `AdapterState.unrestoredModel` reports; set it and emit to drive a change. */
+	unrestoredModel?: string;
 
 	// -- state ---------------------------------------------------------------
 	messages: AgentMessage[] = [];
@@ -278,7 +280,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	getState(): AdapterState {
-		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null };
+		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null, unrestoredModel: this.unrestoredModel ?? null };
 	}
 
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {

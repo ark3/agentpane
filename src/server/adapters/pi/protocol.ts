@@ -119,10 +119,9 @@ export type PiResponse =
 
 /**
  * One entry of a Pi session file, as `get_entries` returns it: `SessionEntryBase`
- * from `core/session-manager.d.ts` in 0.87.1, plus the fields of the two kinds
- * this adapter reads. The other kinds (`model_change`, `compaction`,
- * `branch_summary`, `custom`, ...) carry only the base fields as far as it is
- * concerned.
+ * from `core/session-manager.d.ts` in 0.87.1, plus the fields of the three kinds
+ * this adapter reads. The other kinds (`compaction`, `branch_summary`,
+ * `custom`, ...) carry only the base fields as far as it is concerned.
  */
 export interface PiSessionEntry {
 	type: string;
@@ -134,6 +133,9 @@ export interface PiSessionEntry {
 	message?: AgentMessage;
 	/** On `type: "thinking_level_change"`: the level in force from here on. */
 	thinkingLevel?: string;
+	/** On `type: "model_change"`: the model in force from here on, as `provider` and its catalogue `id`. */
+	provider?: string;
+	modelId?: string;
 }
 
 /** Narrow `PiResponse` to the one matching a given command's `type`. */

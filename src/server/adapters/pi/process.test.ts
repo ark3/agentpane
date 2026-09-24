@@ -1151,6 +1151,134 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 	});
 });
 
+describe("PiAdapter recorded model a resume could not restore (OW-jitoni)", () => {
+	// As of `pi 0.87.1` a resume whose recorded model had left the catalogue ran
+	// the settings default, and one whose provider lost its auth resolved
+	// `unknown`, saying nothing over RPC (docs/MANUAL_TESTING.md, OW-zujofa).
+	const RECORDED = { provider: "openrouter", id: "deepseek/deepseek-v0-nonexistent", name: "Gone", reasoning: true };
+	const FALLBACK = { provider: "openrouter", id: "google/gemini-2.5-flash-lite", name: "Flash Lite", reasoning: true };
+	const UNKNOWN = { provider: "unknown", id: "unknown", name: "unknown", reasoning: false };
+	const T0 = Date.parse("2026-09-24T10:00:00.000Z");
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+	type Model = { provider: string; id: string };
+	const prompt = (seconds: number): AgentMessage => ({ role: "user", content: [{ type: "text", text: "hi" }], timestamp: T0 + seconds * 1000 }) as AgentMessage;
+	const reply = (seconds: number, model: Model): AgentMessage =>
+		({ role: "assistant", content: [{ type: "text", text: "ok" }], provider: model.provider, model: model.id, timestamp: T0 + seconds * 1000 }) as AgentMessage;
+	const entry = (id: string, parentId: string | null, fields: Record<string, unknown>) => ({ id, parentId, timestamp: new Date(T0).toISOString(), ...fields });
+	const modelChange = (id: string, parentId: string | null, model: Model) => entry(id, parentId, { type: "model_change", provider: model.provider, modelId: model.id });
+	const message = (id: string, parentId: string | null, m: AgentMessage) => entry(id, parentId, { type: "message", message: m });
+
+	/** A session that ran one turn on `RECORDED`, as OW-zujofa's file held it. */
+	const u1 = prompt(1);
+	const a1 = reply(2, RECORDED);
+	const ranOnRecorded = [modelChange("m", null, RECORDED), message("u1", "m", u1), message("a1", "u1", a1)];
+
+	async function resume(h: Harness, inForce: Model | null, messages: AgentMessage[], entries: unknown[], leafId: string | null): Promise<void> {
+		const started = h.adapter.start({ cwd: WORKSPACE, resumeId: REF.id });
+		h.child.respondTo("get_state", { model: inForce, thinkingLevel: "high", isStreaming: false, sessionFile: REF.id });
+		await flush();
+		h.child.respondTo("get_messages", { messages });
+		h.child.respondTo("get_entries", { entries, leafId });
+		h.child.respondTo("get_available_models", { models: [FALLBACK] });
+		await started;
+	}
+
+	it("names the recorded model when the model in force is another, in the snapshot the resume emits", async () => {
+		const h = makeHarness();
+		const updates: { model: string | null; unrestoredModel?: string | null }[] = [];
+		h.adapter.onUpdate((state) => updates.push(state));
+
+		await resume(h, FALLBACK, [u1, a1], ranOnRecorded, "a1");
+
+		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/google/gemini-2.5-flash-lite", unrestoredModel: "openrouter/deepseek/deepseek-v0-nonexistent" });
+		// The hydration snapshot is the first thing the manager broadcasts: it
+		// has to carry the loss, since no turn has run yet.
+		expect(updates).toHaveLength(1);
+		expect(updates[0]).toMatchObject({ model: "openrouter/google/gemini-2.5-flash-lite", unrestoredModel: "openrouter/deepseek/deepseek-v0-nonexistent" });
+	});
+
+	it("names nothing when the resume restored the recorded model", async () => {
+		const h = makeHarness();
+		await resume(h, RECORDED, [u1, a1], ranOnRecorded, "a1");
+
+		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/deepseek/deepseek-v0-nonexistent", unrestoredModel: null });
+	});
+
+	it("names the recorded model when the resume resolved no model at all", async () => {
+		const h = makeHarness();
+		await resume(h, UNKNOWN, [u1, a1], ranOnRecorded, "a1");
+
+		expect(h.adapter.getState()).toMatchObject({ model: "unknown/unknown", unrestoredModel: "openrouter/deepseek/deepseek-v0-nonexistent" });
+	});
+
+	it("reads the recorded model as Pi does: the active branch's last model change or assistant turn", async () => {
+		const h = makeHarness();
+		const entries = [
+			modelChange("m", null, RECORDED),
+			message("u1", "m", u1),
+			// A turn on another model after the change is what Pi restores from.
+			message("a1", "u1", reply(2, FALLBACK)),
+			// An abandoned branch naming the other model is not.
+			modelChange("x", "a1", RECORDED),
+		];
+
+		await resume(h, FALLBACK, [u1, reply(2, FALLBACK)], entries, "a1");
+
+		expect(h.adapter.getState().unrestoredModel).toBeNull();
+	});
+
+	it("names nothing for a session with no messages, which Pi does not restore a model for", async () => {
+		const h = makeHarness();
+		await resume(h, FALLBACK, [], [modelChange("m", null, RECORDED)], "m");
+
+		expect(h.adapter.getState().unrestoredModel).toBeNull();
+	});
+
+	it("keeps naming it after a turn on the fallback, which records the fallback, and clears it once a model is chosen", async () => {
+		const h = makeHarness();
+		await resume(h, FALLBACK, [u1, a1], ranOnRecorded, "a1");
+
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "message_start", message: reply(4, FALLBACK) });
+		h.child.emitLine({ type: "message_end", message: reply(4, FALLBACK) });
+		h.child.emitLine({ type: "agent_settled" });
+		expect(h.adapter.getState().unrestoredModel).toBe("openrouter/deepseek/deepseek-v0-nonexistent");
+
+		const updates: { unrestoredModel?: string | null }[] = [];
+		h.adapter.onUpdate((state) => updates.push(state));
+		const set = h.adapter.setModel("openrouter/google/gemini-2.5-flash-lite");
+		h.child.respondTo("set_model", FALLBACK);
+		await set;
+
+		expect(h.adapter.getState().unrestoredModel).toBeNull();
+		expect(updates.at(-1)?.unrestoredModel).toBeNull();
+	});
+
+	it("reads it again at a fork, from the branch the fork kept", async () => {
+		const h = makeHarness();
+		await resume(h, FALLBACK, [u1, a1], ranOnRecorded, "a1");
+		const u2 = prompt(3);
+		const a2 = reply(4, FALLBACK);
+		const u3 = prompt(5);
+
+		// Cut after the turn that ran on the fallback: that branch records it.
+		const forked = h.adapter.fork("u3");
+		h.child.respondTo("fork", { text: "hi", cancelled: false });
+		await flush();
+		h.child.respondTo("get_state", { model: FALLBACK, thinkingLevel: "high", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await flush();
+		h.child.respondTo("get_messages", { messages: [u1, a1, u2, a2] });
+		h.child.respondTo("get_entries", {
+			entries: [...ranOnRecorded, message("u2", "a1", u2), message("a2", "u2", a2), message("u3", "a2", u3)],
+			leafId: "a2",
+		});
+		h.child.respondTo("get_available_models", { models: [FALLBACK] });
+		await forked;
+
+		expect(h.adapter.getState().unrestoredModel).toBeNull();
+	});
+});
+
 describe("PiAdapter teardown", () => {
 	it("treats stderr as diagnostics, not as per-chunk errors", async () => {
 		const h = makeHarness();

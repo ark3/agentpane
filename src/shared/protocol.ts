@@ -151,6 +151,14 @@ export type ServerEvent =
 			model: string | null;
 			/** The reasoning effort governing the conversation's next turn, or null when there is none to report. */
 			effort: string | null;
+			/**
+			 * The model the conversation's store last recorded, when the backend
+			 * could not restore it on a resume or fork and `model` is a fallback in
+			 * its place (D23, OW-jitoni); null otherwise. Only Pi reports one. It
+			 * outlives the first turn on the fallback, which records the fallback
+			 * as though chosen, and clears once a model is set.
+			 */
+			unrestoredModel: string | null;
 	  }
 	| {
 			/**
@@ -164,7 +172,7 @@ export type ServerEvent =
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null }
+	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
 	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }
 	| {
 			/** A turn ended in an error the transcript alone would not convey. */

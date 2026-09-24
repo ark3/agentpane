@@ -14,6 +14,8 @@ export interface SessionView {
 	compaction?: "requesting" | "running" | null;
 	model: string | null;
 	effort: string | null;
+	/** The wire's `unrestoredModel`: a recorded model the backend could not restore (OW-jitoni). */
+	unrestoredModel?: string | null;
 	seq: number | null;
 	error: string | null;
 	requests: AgentRequest[];
@@ -155,6 +157,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			compaction: event.compaction,
 			model: event.model,
 			effort: event.effort,
+			unrestoredModel: event.unrestoredModel,
 			seq: event.seq,
 		};
 		return result(updateSession(state, view));
@@ -245,6 +248,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			view.compaction = event.compaction;
 			view.model = event.model;
 			view.effort = event.effort;
+			view.unrestoredModel = event.unrestoredModel;
 			break;
 		case "error":
 			view.error = event.message;

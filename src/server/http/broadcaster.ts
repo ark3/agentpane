@@ -42,7 +42,7 @@ export function formatSseFrame(event: ServerEvent): string {
 
 /** State the broadcaster needs to build a snapshot, supplied by the session manager. */
 export interface SnapshotSource {
-	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null } | null;
+	(ref: SessionRef): { messages: AgentMessage[]; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel?: string | null } | null;
 }
 
 export class Broadcaster {
@@ -94,6 +94,7 @@ export class Broadcaster {
 			compaction: state.compaction,
 			model: state.model,
 			effort: state.effort,
+			unrestoredModel: state.unrestoredModel ?? null,
 		});
 	}
 
@@ -112,6 +113,7 @@ export class Broadcaster {
 			compaction: state.compaction,
 			model: state.model,
 			effort: state.effort,
+			unrestoredModel: state.unrestoredModel ?? null,
 		});
 	}
 
@@ -125,8 +127,9 @@ export class Broadcaster {
 		compaction: "requesting" | "running" | null,
 		model: string | null,
 		effort: string | null,
+		unrestoredModel: string | null,
 	): void {
-		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction, model, effort });
+		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction, model, effort, unrestoredModel });
 	}
 
 	request(ref: SessionRef, request: AgentRequest): void {

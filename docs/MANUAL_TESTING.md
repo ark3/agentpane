@@ -3166,6 +3166,7 @@ Pi emits nothing the adapter could relay, so no code changed.
 The adapter names the model `get_state` reports, so a session whose recorded model was lost is labelled with the fallback as if it had been chosen, and one that resolved nothing is labelled `unknown/unknown` (`modelToInfo` in `src/server/adapters/pi/protocol.ts`, read at the source).
 The mismatch stays readable from what `hydrateMessages` in `src/server/adapters/pi/process.ts` already fetches on a resume: `get_messages` and `get_entries` name the recorded model while `get_state` names another.
 Noticing it would be agentpane's own inference, not a message from Pi, and nothing here built it.
+OW-jitoni later built that inference: the adapter reports the recorded model as `unrestoredModel`, shown by unit tests over a fake Pi, not by a live run.
 
 **Not established.**
 No turn ran on a fallback; by `getSessionContextSettings`, read at the source in OW-pubulu's section, that turn's assistant message would name the fallback model, and every later resume would restore it as the recorded one.

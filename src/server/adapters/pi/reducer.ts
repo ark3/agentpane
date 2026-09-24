@@ -238,16 +238,9 @@ export function withLoadedEfforts(
 	catalogue: Model<any>[],
 ): AgentMessage[] {
 	const models = new Map(catalogue.map((model) => [`${model.provider}/${model.id}`, model]));
-	const byId = new Map(entries.map((entry) => [entry.id, entry]));
-	const branch: PiSessionEntry[] = [];
-	for (let entry = leafId ? byId.get(leafId) : undefined; entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
-		branch.push(entry);
-	}
-	branch.reverse();
-
 	const changes: { at: number; level: string }[] = [];
 	const levels = new Map<number, string | null>();
-	for (const entry of branch) {
+	for (const entry of activeBranch(entries, leafId)) {
 		if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
 			changes.push({ at: Date.parse(entry.timestamp), level: entry.thinkingLevel });
 		}
@@ -271,6 +264,35 @@ export function withLoadedEfforts(
 		if (message.role !== "assistant") return message;
 		return withEffort(message, levels.get(message.timestamp) ?? null);
 	});
+}
+
+/**
+ * The model the active branch last recorded, as `provider/id`, or null where
+ * it records none: the last `model_change` entry or assistant message on it,
+ * whichever comes later. That is the model Pi tries to restore on a resume,
+ * `getSessionContextSettings` in `core/session-manager.js`, read at the source
+ * in `pi 0.87.1`.
+ */
+export function recordedModel(entries: PiSessionEntry[], leafId: string | null): string | null {
+	let model: string | null = null;
+	for (const entry of activeBranch(entries, leafId)) {
+		if (entry.type === "model_change" && entry.provider && entry.modelId) {
+			model = `${entry.provider}/${entry.modelId}`;
+		} else if (entry.type === "message" && entry.message?.role === "assistant") {
+			model = `${entry.message.provider}/${entry.message.model}`;
+		}
+	}
+	return model;
+}
+
+/** The branch ending at `leafId`, root first: `get_entries` also returns abandoned branches. */
+function activeBranch(entries: PiSessionEntry[], leafId: string | null): PiSessionEntry[] {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	const branch: PiSessionEntry[] = [];
+	for (let entry = leafId ? byId.get(leafId) : undefined; entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
+		branch.push(entry);
+	}
+	return branch.reverse();
 }
 
 function reduceAssistantDelta(

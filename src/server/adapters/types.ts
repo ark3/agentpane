@@ -26,6 +26,15 @@ export interface AdapterState {
 	 * else the one the backend reported; null for a backend that reports none.
 	 */
 	effort: string | null;
+	/**
+	 * The model the conversation's store last recorded, when the backend
+	 * could not restore it and `model` is a fallback in its place (D23,
+	 * OW-jitoni); null or absent otherwise. Only Pi reports one, and only by
+	 * inference: as of `pi 0.87.1` it fell back without a word over RPC
+	 * (docs/MANUAL_TESTING.md, OW-zujofa). When it is set and cleared is
+	 * `PiAdapter`'s docblock on the field.
+	 */
+	unrestoredModel?: string | null;
 }
 
 export type Unsubscribe = () => void;
