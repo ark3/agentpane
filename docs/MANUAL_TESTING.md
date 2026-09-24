@@ -3269,6 +3269,52 @@ No turn ran on a snapped-back fork, so that it would have run on the spawn's mod
 Only the fork at the second user message was run, and only with an unsuffixed spawn; a suffixed spawn moved by `set_model` would by OW-dojebo's result put both the model and the suffix's level back, and that was not run.
 The remedy was run as commands sent by hand, not through the adapter, and nothing here went through `sbox`, agentpane's server, the browser or Emacs.
 
+## A Pi fork at the first message of a resumed session runs at the settings default when it keeps no message (OW-riyeku)
+
+Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-riyeku` worktree cut at `fd329e6`.
+The method was OW-dojebo's, above: `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, a throwaway workspace beside it, a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc` directly and logging every stdout and stderr line, and on every spawn `--extension` naming a throwaway `before_provider_request` handler that appended the request payload's `model` and `reasoning` fields to a file.
+They were left under `/var/tmp/ow-riyeku` and not committed.
+The owner's `~/.pi/agent/settings.json` read `ec0098ff...` before and after.
+The question was what model and level a fork at the first user message runs at in a process spawned `--session <file>` with no `--model`, the shape agentpane's resume spawn takes (OW-jamoyi), where the adapter has no model or level chosen in that process to re-send (OW-sinoha).
+Read at the source, `createAgentSession` in `dist/core/sdk.js` restores the branch's model and level only when `buildSessionContext()` returns messages (lines 83 to 121), and otherwise takes the settings default through `findInitialModel`, then the per-model level or `defaultThinkingLevel`; whether the system message such a fork keeps (OW-dojebo's section) counts was left open.
+Four turns ran in all, every one on `openrouter/deepseek/deepseek-v4.1-flash` at `reasoning.effort` `high`, each answering `ok` for $0.00025 or less, and no process wrote anything to stderr.
+
+**The session.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high` under the unchanged settings copy, it ran two turns of `Do not use any tools. Reply with exactly: ok`.
+The file read `session`, `model_change`, `thinking_level_change` `high`, a message with role `system`, then the two turns' user and assistant messages: eight lines.
+The throwaway `settings.json` was then rewritten to `defaultModel` `google/gemini-2.5-flash-lite` under the same `defaultProvider` `openrouter`, with `defaultThinkingLevel` `low` and `modelThinkingLevels` emptied, and a fresh `pi --mode rpc` read that model at `low`.
+
+**Written by `0.87.1`: the kept system message counts, and the fork restores both.**
+A bare `pi --mode rpc --session <file>` read `get_state` as `openrouter/deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, `messageCount` 5.
+`fork` at the first of the two entries `get_fork_messages` named answered `cancelled: false` with no events, and `get_state` then read the same model at `high`, `messageCount` 1, on the moved-to session file.
+`get_entries` read `model_change`, `thinking_level_change` `high` and the system message, with the leaf on the system message, so that message is what `buildSessionContext` counted.
+A second run on a copy took the same steps and sent one turn after the fork: it asked for `model` `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `high`, and the forked file read the three kept entries followed by that turn's user and assistant messages, with no model or level entry added.
+
+**Written without a system message: the settings default, and recorded.**
+Pi records that system message only since `0.86.0`, whose CHANGELOG adds "transcript-backed mid-conversation system prompt and tool changes" (read, not run), and none of the nine session files in the owner's `~/.pi/agent/sessions`, all written 2026-09-14 to 2026-09-16, before that release, holds one.
+A copy of the session with the system message removed and the first user message reparented onto the `thinking_level_change` resumed bare at the recorded model at `high`, `messageCount` 4.
+`fork` at its first user message answered `cancelled: false` with no events, and `get_state` then read `openrouter/google/gemini-2.5-flash-lite` at `thinkingLevel: "low"`, `messageCount` 0: the settings default at the settings default level.
+Unlike OW-sinoha's snap-back, this one is recorded: `get_entries` read the kept `model_change` and `thinking_level_change` `high`, then a new `model_change` naming the settings default and a `thinking_level_change` `low`, the leaf on the last, which are the entries `createAgentSession` appends for a session with no messages (line 269).
+A copy of one of the owner's own session files, its branch holding a `thinking_level_change` `off` and two `model_change` entries ahead of its first user message, resumed at `openrouter/deepseek/deepseek-v4.1-flash` at `high`, `messageCount` 34, and forked at that message the same way: `gemini-2.5-flash-lite` at `low`, `messageCount` 0, and the same two entries appended.
+No turn ran after either fork, since it would have run off the pin.
+Neither forked file was on disk when its process exited, and nor was the one forked from the `0.87.1` file with no turn after it: as for a fresh session (OW-bohodu), nothing reached the disk before a reply.
+
+**The remedy's commands, run by hand.**
+A third copy took the system-less steps up to the fork and read the same `get_state`.
+`set_model` back to the recorded model succeeded and left `get_state` at that model at `low`, since no `modelThinkingLevels` entry named it, and `set_thinking_level` `high` announced `thinking_level_changed` `high` and left it at `high`.
+`get_entries` read the four entries above followed by a `model_change` naming the recorded model and a `thinking_level_change` `high`.
+The turn after that asked for `model` `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `high`, and the forked file, now on disk, held those six entries, then a system message, then that turn's user and assistant messages.
+
+**What agentpane makes of it.**
+As of `fd329e6` the adapter re-sends a model and level after a fork only when `setModel` or `setEffort` chose them in the same process (`fork` in `src/server/adapters/pi/process.ts`), and a resume spawn chooses neither.
+So a fork at the first message of a session written before `0.86.0` runs at the settings default, labelled with it as if it were the parent's, and `unrestoredModel` stays null because the kept branch holds no message to compare.
+
+**Not established.**
+The system-less file was made by hand from one `0.87.1` wrote, and the owner's was copied, not driven through agentpane; which Pi version wrote the owner's files was not checked beyond their dates.
+No turn ran on the fallback, so that it would run on the settings default rests on `get_state`.
+A fork at the first message through a spawn with `--model` was not run; by the source, that model and any suffix's level are taken there, which are the parent's unless `set_model` or `set_thinking_level` chose others, the cases OW-sinoha's and OW-dojebo's sections ran.
+Nothing here went through `sbox`, agentpane's server, the browser or Emacs.
+
 ## Which Codex history loads draw the full-history deprecation, and what replaces them (OW-kelene)
 
 Run on the home server 2026-09-24, **`codex-cli 0.156.0`**, from the `card/OW-kelene` worktree cut at `27e871c`.
