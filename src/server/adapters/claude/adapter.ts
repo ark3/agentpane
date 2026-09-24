@@ -48,8 +48,12 @@
  *   of the latter read `high` too. So a resume and a fork are spawned with
  *   `--effort` at the level the last hydrated assistant message records --
  *   for a fork, the kept prefix's -- because the store, not agentpane, holds
- *   the conversation's effort (D23). The flag, not `apply_flag_settings`
- *   after attach, because it is in force from the process's first instant.
+ *   the conversation's effort (D23). A fork before the first message keeps no
+ *   prefix, so `fork()` hands it the parent's effort in force, as the last
+ *   `get_settings` read it, and it is spawned with `--effort` at that; a
+ *   parent whose model has no effort read null and hands over none (D23,
+ *   OW-sababi). The flag, not `apply_flag_settings` after attach, because it
+ *   is in force from the process's first instant.
  *   Measured on the home server, 2026-09-23, `claude 2.1.280`, no turn
  *   (docs/MANUAL_TESTING.md, OW-nabano): `--effort low` and `--effort max`
  *   on a `--resume` read back `low` and `max` -- `max` too, though it is
@@ -261,9 +265,15 @@ export class ClaudeAdapter implements BackendAdapter {
 			// and the history it starts with is the parent's, truncated inclusive
 			// of the cut (OW-mayuza). A cut before the first entry keeps nothing,
 			// so it is a fresh session in the same workspace rather than a resume.
-			const { parentId, entryId } = opts.forkOf;
+			const { parentId, entryId, effort } = opts.forkOf;
 			if (entryId === CLAUDE_FORK_SESSION_START) {
-				await this.attachProcess({ cwd: opts.cwd, sessionId: this.currentRef.id, ...this.chosenModel() });
+				// No kept prefix names an effort, so the parent's rides the spawn (D23).
+				await this.attachProcess({
+					cwd: opts.cwd,
+					sessionId: this.currentRef.id,
+					...this.chosenModel(),
+					...(effort ? { effort } : {}),
+				});
 			} else {
 				const kept = await this.readForkHistory(parentId, entryId);
 				if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
@@ -459,12 +469,16 @@ export class ClaudeAdapter implements BackendAdapter {
 		const cwd = this.cwd;
 		if (!this.ownership || !cwd) throw new Error("claude adapter not started");
 		const parentId = this.currentRef.id;
-		if (entryId !== CLAUDE_FORK_SESSION_START) await this.readForkHistory(parentId, entryId);
+		const atStart = entryId === CLAUDE_FORK_SESSION_START;
+		if (!atStart) await this.readForkHistory(parentId, entryId);
+		// Only a fork that keeps no turn takes the parent's effort; one at an entry
+		// reads its kept prefix's (module doc).
+		const effort = atStart && this.effort ? { effort: this.effort } : {};
 		return {
 			ref: { backend: "claude", id: this.mintSessionId() },
 			start: {
 				cwd,
-				forkOf: { parentId, entryId },
+				forkOf: { parentId, entryId, ...effort },
 				...(this.model ? { model: this.model } : {}),
 			},
 		};

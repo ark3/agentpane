@@ -1003,6 +1003,38 @@ describe("ClaudeAdapter fork", () => {
 	});
 
 	/**
+	 * A fork before the first message keeps no turn to read an effort from, so
+	 * it runs at the parent's in force when cut (D23), and the flag is what puts
+	 * it there: as of `claude 2.1.280`, `--effort` took effect on a spawn
+	 * (docs/MANUAL_TESTING.md, OW-nabano).
+	 */
+	it("forks before the first message at the effort the parent runs at (D23)", async () => {
+		const parent = harness({ entries: storedEntries(), ids: ["forked-1"], appliedEffort: "max" });
+		await parent.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+		expect(parent.adapter.getState().effort).toBe("max");
+
+		const forked = await parent.adapter.fork(CLAUDE_FORK_SESSION_START);
+		const fork = harness({ entries: storedEntries(), ref: forked.ref });
+		await fork.adapter.start(forked.start ?? { cwd: "/workspace" });
+
+		expect(fork.spawns).toEqual([
+			{ cwd: "/workspace", sessionId: "forked-1", model: "last-model", effort: "max" },
+		]);
+	});
+
+	it("forks before the first message with no effort when the parent's model has none", async () => {
+		// As of `claude 2.1.280`, haiku applied a null effort (OW-hokaye).
+		const parent = harness({ entries: storedEntries(), ids: ["forked-1"], appliedEffort: null });
+		await parent.adapter.start({ cwd: "/workspace", resumeId: "parent" });
+
+		const forked = await parent.adapter.fork(CLAUDE_FORK_SESSION_START);
+		const fork = harness({ entries: storedEntries(), ref: forked.ref });
+		await fork.adapter.start(forked.start ?? { cwd: "/workspace" });
+
+		expect(fork.spawns).toEqual([{ cwd: "/workspace", sessionId: "forked-1", model: "last-model" }]);
+	});
+
+	/**
 	 * As of `claude 2.1.280`, a resume restores the stored model widened to the
 	 * `[1m]` variant the settings or the store's `model` attachment name, and
 	 * a fresh spawn with `--model claude-opus-5-5` drops it, while `--model

@@ -47,9 +47,12 @@ export interface StartOptions {
 	/**
 	 * Start as the fork `fork()` minted but did not run, keeping the parent's
 	 * history through `entryId`. The adapter's own `ref` already carries the
-	 * fork's id, so this only names what it is a fork OF.
+	 * fork's id, so this names what it is a fork OF, and `effort` the parent's
+	 * effort in force when it was cut, for a cut that keeps no turn to read one
+	 * from (D23). Here rather than beside `model` because only a fork carries
+	 * it: no other start is handed an effort, and no other adapter reads one.
 	 */
-	forkOf?: { parentId: string; entryId: string };
+	forkOf?: { parentId: string; entryId: string; effort?: string };
 }
 
 /**
