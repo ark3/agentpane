@@ -187,7 +187,8 @@ export class PiAdapter implements BackendAdapter {
 	 * resets to is announced before that answer (MANUAL_TESTING OW-ruzuhu), so
 	 * taking it at once would pair the old model with the new model's level in
 	 * every update until the answer names the model (OW-zasozo). It is recorded
-	 * and held until then.
+	 * and held until then, or until `set_model` fails, when whatever level
+	 * arrived meanwhile is the old model's and is reported as it stands.
 	 */
 	private settingModel = false;
 	private disposed = false;
@@ -542,6 +543,7 @@ export class PiAdapter implements BackendAdapter {
 		this.settingModel = true;
 		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId })
 			.catch((error: unknown) => {
+				if (this.syncEffort()) this.emitUpdate();
 				throw error instanceof PiCommandError ? new BackendRefusedError(modelRefusal(model, error.message)) : error;
 			})
 			.finally(() => {

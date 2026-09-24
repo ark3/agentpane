@@ -860,7 +860,23 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		]);
 	});
 
-	it("follows Pi's level again after it refuses a set_model", async () => {
+	it("reports a level that changed while a refused set_model was in flight (OW-zasozo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
+		const seen: [string | null, string | null][] = [];
+		h.adapter.onUpdate((state) => seen.push([state.model, state.effort]));
+
+		const refused = h.adapter.setModel("openrouter/anthropic/claude-fable-5");
+		// A `set_thinking_level` sent alongside lands on the old model.
+		h.child.emitLine({ type: "thinking_level_changed", level: "max" });
+		h.child.failCommand("set_model", "No API key for openrouter");
+		await expect(refused).rejects.toBeInstanceOf(BackendRefusedError);
+
+		expect(h.adapter.getState().effort).toBe("max");
+		expect(seen).toEqual([["openrouter/deepseek/deepseek-v4.1-flash", "max"]]);
+	});
+
+	it("follows Pi's level again after it refuses a set_model (OW-zasozo)", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: FLASH, thinkingLevel: "high" });
 
