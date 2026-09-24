@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # detachSession's docblock in App.svelte says a detach always stays on the transcript
@@ -15,3 +16,8 @@ The docblock is in service of a reader deciding what the Detach control does; th
 ## Done when
 
 The docblock names both outcomes -- the read-only preview for a session with a transcript on disk, the startup view otherwise -- or points at `detach()` for them, and `bun run check` passes.
+
+## Close note
+
+Landed in 8ae4e82: the docblock on `detachSession` in `src/client/App.svelte` now names both landings of `detach()` -- a session with a transcript on disk stays on it as a read-only preview (OW-tewave), one with nothing on disk lands on the startup view (OW-vasubu) -- and points at `detach()` in `controller.ts` for why.
+`bun run check` passed: 54 files, 1268 tests.
