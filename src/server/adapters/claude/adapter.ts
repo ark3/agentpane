@@ -110,8 +110,9 @@
  *   `set_model` to it then put that same model in force -- which is what
  *   makes it safe for `fork()` to hand the named model to the fork's spawn.
  *   Only a session with no model yet, or only its store's (above), adopts one
- *   this way, and only the former prefers `default`: a model chosen at start
- *   or since is never overwritten.
+ *   this way, and only the former prefers `default`: this read never
+ *   overwrites a model chosen at start or since, though a turn's `init` does
+ *   (above).
  * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
  *   and the jail is the confinement boundary -- the same rationale DESIGN
  *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
