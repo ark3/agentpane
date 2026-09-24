@@ -964,6 +964,111 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(h.adapter.getState().effort).toBe("off");
 	});
 
+	it("re-asserts the chosen model, then the chosen level, after a fork, which puts the spawn's --model back (OW-sinoha)", async () => {
+		const SPAWNED = { provider: "openrouter", id: "google/gemini-2.5-flash-lite", name: "Flash Lite", reasoning: true };
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE, model: "openrouter/google/gemini-2.5-flash-lite" });
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: REF.id });
+		await started;
+		const changed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash");
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.respondTo("set_model", FLASH);
+		await changed;
+		const set = h.adapter.setEffort("low");
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const forked = h.adapter.fork("u2");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await flush();
+		// Measured on 0.87.1: the fork rebuilds the session from the spawn's
+		// command line, so its `--model` is in force again, announced by no event
+		// and recorded nowhere, while the chosen level survives it.
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await flush();
+		expect(h.child.lastSent("set_model")).toMatchObject({ provider: "openrouter", modelId: "deepseek/deepseek-v4.1-flash" });
+		expect(h.child.sent().filter((command) => command.type === "set_model")).toHaveLength(2);
+		// And `set_model` puts the level back to the settings default, as it did live.
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.respondTo("set_model", FLASH);
+		await flush();
+		const afterFork = h.child.sent().slice(h.child.sent().findIndex((command) => command.type === "fork"));
+		expect(afterFork.map((command) => command.type).filter((type) => type.startsWith("set_"))).toEqual(["set_model", "set_thinking_level"]);
+		expect(h.child.lastSent("set_thinking_level")).toMatchObject({ level: "low" });
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await flush();
+		const u1 = { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 };
+		const a1 = { role: "assistant", content: [{ type: "text", text: "ok" }], provider: FLASH.provider, model: FLASH.id, timestamp: 2 };
+		h.child.respondTo("get_messages", { messages: [u1, a1] });
+		h.child.respondTo("get_entries", {
+			entries: [
+				{ type: "model_change", id: "m1", parentId: null, timestamp: "2026-09-24T10:00:00.000Z", provider: SPAWNED.provider, modelId: SPAWNED.id },
+				{ type: "model_change", id: "m2", parentId: "m1", timestamp: "2026-09-24T10:00:00.000Z", provider: FLASH.provider, modelId: FLASH.id },
+				{ type: "message", id: "u1", parentId: "m2", timestamp: "2026-09-24T10:00:01.000Z", message: u1 },
+				{ type: "message", id: "a1", parentId: "u1", timestamp: "2026-09-24T10:00:02.000Z", message: a1 },
+			],
+			leafId: "a1",
+		});
+		h.child.respondTo("get_available_models", { models: [FLASH, SPAWNED] });
+		await forked;
+
+		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/deepseek/deepseek-v4.1-flash", effort: "low", unrestoredModel: null });
+	});
+
+	it("still completes a fork whose re-sent model is refused, naming the chosen model as unrestored (OW-sinoha)", async () => {
+		const SPAWNED = { provider: "openrouter", id: "google/gemini-2.5-flash-lite", name: "Flash Lite", reasoning: true };
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE, model: "openrouter/google/gemini-2.5-flash-lite" });
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: REF.id });
+		await started;
+		const changed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash");
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.respondTo("set_model", FLASH);
+		await changed;
+		const set = h.adapter.setEffort("low");
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await set;
+
+		const forked = h.adapter.fork("u2");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await flush();
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await flush();
+		// The chosen model left the catalogue or lost its auth since it was chosen.
+		h.child.failCommand("set_model", "Model not found: openrouter/deepseek/deepseek-v4.1-flash");
+		await flush();
+		// The chosen level still goes to the model actually in force.
+		expect(h.child.lastSent("set_thinking_level")).toMatchObject({ level: "low" });
+		expect(h.child.sent().filter((command) => command.type === "set_thinking_level")).toHaveLength(2);
+		h.child.emitLine({ type: "thinking_level_changed", level: "low" });
+		h.child.respondTo("set_thinking_level");
+		await flush();
+		const u1 = { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 };
+		const a1 = { role: "assistant", content: [{ type: "text", text: "rewound" }], provider: FLASH.provider, model: FLASH.id, timestamp: 2 };
+		h.child.respondTo("get_messages", { messages: [u1, a1] });
+		h.child.respondTo("get_entries", {
+			entries: [
+				{ type: "model_change", id: "m1", parentId: null, timestamp: "2026-09-24T10:00:00.000Z", provider: SPAWNED.provider, modelId: SPAWNED.id },
+				{ type: "model_change", id: "m2", parentId: "m1", timestamp: "2026-09-24T10:00:00.000Z", provider: FLASH.provider, modelId: FLASH.id },
+				{ type: "message", id: "u1", parentId: "m2", timestamp: "2026-09-24T10:00:01.000Z", message: u1 },
+				{ type: "message", id: "a1", parentId: "u1", timestamp: "2026-09-24T10:00:02.000Z", message: a1 },
+			],
+			leafId: "a1",
+		});
+		h.child.respondTo("get_available_models", { models: [SPAWNED] });
+		await expect(forked).resolves.toEqual({ ref: { backend: "pi", id: "/home/u/.pi/agent/sessions/s-fork.jsonl" } });
+
+		expect(h.adapter.getState()).toMatchObject({
+			model: "openrouter/google/gemini-2.5-flash-lite",
+			effort: "low",
+			unrestoredModel: "openrouter/deepseek/deepseek-v4.1-flash",
+		});
+		expect(h.adapter.getState().messages).toHaveLength(2);
+	});
+
 	it("keeps the level a turn started at when the level changes before it ends", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: FLASH, thinkingLevel: "low" });

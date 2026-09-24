@@ -135,6 +135,17 @@ export class PiAdapter implements BackendAdapter {
 	private state: PiReducerState = createInitialPiState();
 	private model: string | null = null;
 	/**
+	 * The model a `setModel` last put in force, re-sent after a fork. Measured on
+	 * the home server, 2026-09-24, `pi 0.87.1` (docs/MANUAL_TESTING.md,
+	 * OW-sinoha): spawned with `--model` naming one model and moved to another by
+	 * `set_model`, a fork answered `get_state` with the spawn's model, with no
+	 * event and no `model_change` in the forked file, which still named the
+	 * chosen model. Pi rebuilds a forked session from the options its command
+	 * line parsed, `--model` included, as it does the suffix's level (OW-dojebo,
+	 * in the docblock on `thinkingLevel`).
+	 */
+	private chosenModel: string | null = null;
+	/**
 	 * The model the session file last recorded, when `model` is another: Pi
 	 * could not restore it and fell back (D23, OW-jitoni). As of `pi 0.87.1` a
 	 * resume whose recorded model had left the catalogue ran the settings
@@ -148,10 +159,11 @@ export class PiAdapter implements BackendAdapter {
 	 * Read wherever the transcript is read back -- a resume's start, and a
 	 * fork, which D23 holds to the same promise -- and cleared by a
 	 * `setModel` that succeeds, after which the model in force is one chosen.
-	 * A fork has a cause of its own: as read at the source of `pi 0.87.1`, not
-	 * run, a process spawned with `--model` puts that model back at a fork
-	 * over one `set_model` chose (OW-sinoha), and then this names the chosen
-	 * model though it is neither out of the catalogue nor without auth.
+	 * A fork has one more way to put another model in force: as measured on
+	 * `pi 0.87.1`, a process spawned with `--model` puts that model back at a
+	 * fork over one `set_model` chose (OW-sinoha). The fork re-sends the chosen
+	 * model before it reads the transcript back, so that one reaches this
+	 * field only when Pi refuses the re-send.
 	 * A turn does not clear it: the first turn on the fallback records the
 	 * fallback, so every later resume restores that without a mismatch to see,
 	 * and from then on this is the only thing still saying the recorded model
@@ -540,9 +552,22 @@ export class PiAdapter implements BackendAdapter {
 		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
 			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
 		}
-		// A fork rebuilds the session from this process's command line, so a
-		// `--model` suffix is in force again over the chosen level, silently and
-		// unrecorded (OW-dojebo, in the docblock on `thinkingLevel`).
+		// A fork rebuilds the session from this process's command line, so the
+		// spawn's `--model` is in force again over the chosen model (OW-sinoha,
+		// in the docblock on `chosenModel`), and its suffix over the chosen level
+		// (OW-dojebo, in the docblock on `thinkingLevel`), silently and
+		// unrecorded. The model goes first, since `set_model` resets the level;
+		// `setModel` re-sends the chosen level itself, and clears
+		// `unrestoredModel`. Pi has already forked, so a refusal -- the chosen
+		// model left the catalogue or lost its auth since it was chosen -- must
+		// not fail the fork: it falls through, the level below goes to the
+		// spawn's model still in force, and the read-back names the chosen model
+		// as `unrestoredModel`.
+		if (this.chosenModel !== null && this.model !== this.chosenModel) {
+			await this.setModel(this.chosenModel).catch((error: unknown) => {
+				if (!(error instanceof BackendRefusedError)) throw error;
+			});
+		}
 		if (this.chosenEffort !== null && this.thinkingLevel !== this.chosenEffort) {
 			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: this.chosenEffort });
 		}
@@ -608,6 +633,7 @@ export class PiAdapter implements BackendAdapter {
 				this.settingModel = false;
 			});
 		this.model = modelToInfo(response.data).id;
+		this.chosenModel = this.model;
 		this.unrestoredModel = null;
 		this.reasoning = response.data.reasoning === true;
 		this.syncEffort();

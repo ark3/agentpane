@@ -3214,7 +3214,7 @@ So it is the suffix that comes back, not the settings default.
 `fork` in `dist/core/agent-session-runtime.js` replaces the session through `createRuntime` (line 225 for a persisted session), and `createRuntime` in `dist/main.js` hands `createAgentSessionFromServices` the options `buildSessionOptions` parsed from the process's command line (lines 662 and 663), which take a `--model` suffix as `thinkingLevel` (line 377).
 `createAgentSession` in `dist/core/sdk.js` takes an explicit `thinkingLevel` over the branch's recorded one (line 116) and, for a session with messages, appends a `thinking_level_change` only when the branch has none (line 263).
 `createRuntime` then calls `setThinkingLevel` with the level already in force (line 672), which appends nothing, as in OW-lehita's section above.
-The same `createRuntime` takes `options.model` over the branch's model (`sdk.js` line 85), so by that reading a fork also puts the spawn's `--model` back over a model `set_model` chose; that was not run.
+The same `createRuntime` takes `options.model` over the branch's model (`sdk.js` line 85), so by that reading a fork also puts the spawn's `--model` back over a model `set_model` chose; OW-sinoha's section, below, ran that and found it so.
 
 **What agentpane makes of it.**
 The adapter re-sends the chosen level after a fork whenever `get_state` answers another (`fork` in `src/server/adapters/pi/process.ts`), as it already did after `set_model`, and `src/server/adapters/pi/process.test.ts` pins it: a session spawned with the suffix and set to `off` sends `set_thinking_level` `off` again when the fork's `get_state` reads `high`.
@@ -3224,3 +3224,47 @@ A session whose level was never chosen runs at the suffix's level, which is also
 **Not established.**
 The adapter's re-send was not run live; it rests on the unit test and on `set_thinking_level` having been measured to take effect and be recorded (OW-ruzuhu's section).
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs.
+
+## A Pi fork puts the spawn's `--model` back over a model `set_model` chose, unrecorded (OW-sinoha)
+
+Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-sinoha` worktree cut at `7e46543`.
+The method was OW-dojebo's, above: `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, a throwaway workspace beside it, a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc` directly, and on every spawn `--extension` naming a throwaway `before_provider_request` handler that appended the request payload's `model` and `reasoning` fields to a file; none of them kept.
+`settings.json` was copied unchanged, so it named `openrouter/deepseek/deepseek-v4.1-flash` as the default and `high` in `modelThinkingLevels` for it.
+The owner's `~/.pi/agent/settings.json` read `ec0098ff...` before and after, and the directories were removed.
+The question was whether a fork, which Pi carries out inside the process that holds the parent, keeps a model chosen by `set_model` when that process was spawned with a `--model` naming another, since agentpane spawns a fresh Pi session with `--model` and D23's gate lets its model change before the first prompt.
+OW-dojebo's section read the answer at the source, `options.model` taken over the branch's model, and did not run it.
+
+**The roles, reversed to keep every turn on the pin.**
+AGENTS.md pins every Pi turn to `openrouter/deepseek/deepseek-v4.1-flash`, so the pinned model was the one chosen, and the spawn named another: `--model openrouter/google/gemini-2.5-flash-lite`, which `get_state` resolved right after spawn at `thinkingLevel: "medium"`, `reasoning: true`.
+No turn ran on it.
+Five turns ran in all, every one on the pinned model, each answering `ok` for $0.00026 or less, and no process wrote anything to stderr.
+
+**Chosen, then forked: the spawn's model is back, and the file does not say so.**
+Spawned as above, `set_model` to the pinned model left `get_state` naming it at `high`, the settings entry, and `set_thinking_level` `low` left it at `low`.
+Two prompts of `Do not use any tools. Reply with exactly: ok` each asked for `model` `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `low`.
+`get_fork_messages` named both user entries, and `fork` at the second answered `cancelled: false` with no events at all.
+`get_state` then read `openrouter/google/gemini-2.5-flash-lite`, the spawn's model, at `thinkingLevel: "low"`, on the moved-to session file, with `messageCount` 3.
+`get_entries` read `model_change` naming the spawn's model, `thinking_level_change` `medium`, `model_change` naming the pinned model, `thinking_level_change` `high` and then `low`, the system message, and the first turn's user and assistant messages, the assistant naming the pinned model; the leaf was that assistant message.
+So the forked file's last model is the chosen one, and nothing recorded the model now in force.
+The turn after the fork was not sent, since it would have run off the pin.
+A bare `pi --mode rpc --session <forked file>` read `get_state` once, with no prompt: the pinned model at `low`.
+The chosen level survived the fork, as in OW-dojebo's unsuffixed control: it is only a suffix that comes back.
+
+**The remedy's commands, run by hand.**
+A second run took the same steps up to the fork, forked at the second prompt again, and read the same `get_state`: the spawn's model at `low`.
+It then sent what the adapter now sends.
+`set_model` back to the pinned model announced `thinking_level_changed` `high` and left `get_state` at the pinned model at `high`, so the settings entry reset the level, as in OW-ruzuhu's section.
+`set_thinking_level` `low` announced `low` and left `get_state` at the pinned model at `low`.
+`get_entries` read the kept branch followed by `model_change` naming the pinned model, `thinking_level_change` `high` and `thinking_level_change` `low`, with the leaf on the last.
+The turn after that asked for `model` `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `low`, and the forked file grew by its user and assistant messages, the assistant naming the pinned model.
+A bare resume of that file read the pinned model at `low`, with the same entries plus that turn.
+
+**What agentpane makes of it.**
+The adapter remembers the model a `setModel` put in force, and after a fork whose `get_state` names another it sends that model again through `setModel`, which re-sends the chosen level itself because `set_model` resets it, and clears `unrestoredModel` (`fork` and `chosenModel` in `src/server/adapters/pi/process.ts`).
+`src/server/adapters/pi/process.test.ts` pins it: a session spawned on one model, moved to the pinned one and set to `low`, sends `set_model` and then `set_thinking_level` `low` when the fork's `get_state` names the spawn's model, and ends on the pinned model at `low` with no `unrestoredModel`.
+Before that change the adapter took the fork's `get_state` at its word, so a session header would have named the spawn's model while `unrestoredModel`, comparing it with the recorded one, named the chosen model; that was read from the code, not run.
+
+**Not established.**
+No turn ran on a snapped-back fork, so that it would have run on the spawn's model rests on `get_state`, and what its assistant message would record was not run.
+Only the fork at the second user message was run, and only with an unsuffixed spawn; a suffixed spawn moved by `set_model` would by OW-dojebo's result put both the model and the suffix's level back, and that was not run.
+The remedy was run as commands sent by hand, not through the adapter, and nothing here went through `sbox`, agentpane's server, the browser or Emacs.

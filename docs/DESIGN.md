@@ -830,7 +830,7 @@ The start-only gate is what makes the last turn enough: every stored turn names 
 Where the backend restores a value itself, agentpane's part is not to override it; on Pi, a resume spawn whose `--model` carries a `:<thinking>` suffix overrides the recorded level (OW-ruzuhu's run).
 A fork that keeps no turn, one cut before the first message, has no stored turn to read back, and runs at the parent's model and effort as they stand when it is cut: it is the parent's conversation begun again, not a new one at the backend's defaults.
 Set by the owner on 2026-09-23 (OW-difowo), when Claude Code's such fork carried the parent's model but not its effort.
-Pi forks inside the process that holds the parent, but that does not carry both by construction: as of `pi 0.87.1` that fork rebuilds the session from the process's command line, so a `--model` suffix's level comes back over the chosen one (`docs/MANUAL_TESTING.md`, OW-dojebo).
+Pi forks inside the process that holds the parent, but that does not carry both by construction: as of `pi 0.87.1` that fork rebuilds the session from the process's command line, so a `--model` suffix's level comes back over the chosen one, and the `--model` itself over a model `set_model` chose (`docs/MANUAL_TESTING.md`, OW-dojebo and OW-sinoha).
 
 **Why not a copy of agentpane's own.**
 D13's paragraph on names already weighed this and chose the backend: no second copy to keep coherent, and agentpane stays one more UI over the agent rather than a store beside it.
@@ -848,10 +848,10 @@ What each backend needs from agentpane under this decision:
 - **Claude Code** (OW-nabano, OW-tebibo, OW-faledu, OW-sababi): a resume and a fork at an entry pass no `--model`, since the CLI restores the stored model itself, `[1m]` variant included, and re-assert the stored effort, which it does not.
   A restored model is named by what the CLI put in force, so a fork before the first message, which is a fresh spawn, carries the `[1m]` variant a resume widened it to.
   That fork also spawns with `--effort` at the parent's effort in force when it was cut, or with none for a model that has no effort.
-- **Pi** (OW-pubulu, OW-dojebo): nothing to re-assert on a resume, and the chosen level on a fork.
+- **Pi** (OW-pubulu, OW-dojebo, OW-sinoha): nothing to re-assert on a resume, and the chosen model and level on a fork.
   It restores both itself, so its resume spawn carries no `--model` at all.
   It forks inside the process that holds the parent, and as of `pi 0.87.1` a process spawned with `--model <m>:<level>` ran the turn after a fork at that level, over the level chosen before the first prompt, with its `get_state` naming it and the forked file recording nothing, so the adapter re-sends the chosen level after a fork.
-  Read at the source and not run, that fork also takes the spawn's `--model` over a model `set_model` chose.
+  As of the same version that fork also took the spawn's `--model` over a model `set_model` chose, with `get_state` naming the spawn's model and the forked file still naming the chosen one (`docs/MANUAL_TESTING.md`, OW-sinoha), so the adapter re-sends the chosen model after a fork, before the level, since `set_model` resets the level.
 
 ## The backend adapter contract
 

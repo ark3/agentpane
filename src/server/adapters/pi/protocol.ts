@@ -269,7 +269,9 @@ export type PiOutputLine = PiResponse | PiNotification;
 //    `pi 0.87.1`. So `provider/modelId:thinkingLevel`, the form AGENTS.md's
 //    model pin is written in, starts a session and sets its level too, and
 //    sets it again at every fork in that process (OW-dojebo), which is why
-//    `PiAdapter.fork` re-sends a chosen level.
+//    `PiAdapter.fork` re-sends a chosen level. The model it names comes back
+//    at every fork too, over one `set_model` chose (OW-sinoha), so the fork
+//    re-sends a chosen model first.
 //
 // That suffix is the gap: sent to `set_model` it answered "Model not found"
 // (`pi 0.85.1`, 2026-09-16, OW-pizaki). Nothing strips it, because the level
