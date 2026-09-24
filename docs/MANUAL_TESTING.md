@@ -1865,6 +1865,7 @@ The field can only ever see an `extension_ui_request` carrying a dialog method â
 The abort and shutdown phases are still outside every window, exactly as they were before this change, because the card asked for the tool turn and nothing wider.
 And the `tool_turn` key is written only after `tool_turn_idle` resolves, so it exists only on the happy path: a dialog request that actually *blocked* the turn is precisely what would stop that turn reaching idle, the 180-second wait would raise, and the blob would carry no `tool_turn` key at all â€” shape-identical to a bare run, though the run would report `"result": "fail"` naming that wait.
 So this window can witness a non-blocking `request` event during the tool turn, and cannot witness a blocking one; OW-johano carries that.
+Since OW-yosuzo (2026-09-24) agentpane cancels a Pi dialog at arrival instead of holding it, so a dialog no longer blocks the tool turn, and this window would witness one as a `request` event.
 
 **What this does to finding 42.**
 `docs/HANDOFF.md` finding 42 was rewritten in the same change to say what was measured rather than what the old field appeared to say.

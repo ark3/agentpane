@@ -264,6 +264,7 @@ export class PiAdapter implements BackendAdapter {
 
 	private readonly updateListeners = new Set<UpdateListener>();
 	private readonly requestListeners = new Set<RequestListener>();
+	private readonly resolvedListeners = new Set<(requestId: string) => void>();
 	private readonly errorListeners = new Set<ErrorListener>();
 
 	private readonly pendingCommands = new Map<string, PendingCommand>();
@@ -626,6 +627,16 @@ export class PiAdapter implements BackendAdapter {
 		return () => this.requestListeners.delete(cb);
 	}
 
+	/**
+	 * A dialog this adapter cancelled itself at arrival (OW-yosuzo), reported
+	 * under the id it was published with. Pi has no notification of its own for
+	 * a dialog that stops being pending.
+	 */
+	onRequestResolved(cb: (requestId: string) => void): Unsubscribe {
+		this.resolvedListeners.add(cb);
+		return () => this.resolvedListeners.delete(cb);
+	}
+
 	async reply(requestId: string, response: unknown): Promise<void> {
 		const method = this.state.pendingUiRequests[requestId];
 		if (!method) {
@@ -727,7 +738,18 @@ export class PiAdapter implements BackendAdapter {
 		this.state = result.state;
 		if (changed) this.emitUpdate(result.changedIndex);
 		if (result.request) {
+			const { requestId, kind } = result.request;
 			this.emitRequest({ session: this.ref, ...result.request });
+			// Nothing can answer a dialog yet -- the browser has no way to
+			// (OW-bijera) -- so it is cancelled rather than held until the session
+			// is killed (D2a, OW-yosuzo), and through `reply`, the path a human's
+			// "no" will take once one can be given. `reply` writes synchronously.
+			// The write fails only once the process is going away -- a line still
+			// arriving after `dispose()` -- and that end is reported, or
+			// deliberately not, by `handleClose`, so there is nothing to add here.
+			this.reply(requestId, null).catch(() => {});
+			for (const cb of [...this.resolvedListeners]) cb(requestId);
+			this.emitError(`Pi sent a dialog agentpane cannot answer yet (${kind}); agentpane cancelled it`);
 		}
 		if (result.error) this.emitError(result.error);
 	}

@@ -114,9 +114,11 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 				? { ...state.pendingUiRequests, [id]: method as PiDialogMethod }
 				: state.pendingUiRequests;
 			const nextState = isDialog ? { ...state, pendingUiRequests } : state;
-			// Only dialog methods (select/confirm/input/editor) actually block
-			// on a human -- that's the contract `BackendAdapter.onRequest` documents
-			// ("Fires when the agent asks the human something and blocks"). The
+			// Only dialog methods (select/confirm/input/editor) block Pi until
+			// answered -- that's the contract `BackendAdapter.onRequest` documents
+			// ("Fires when the agent asks the human something and blocks"). Until a
+			// human can answer one (OW-bijera), the adapter cancels each as soon as
+			// it has published it rather than holding it (D2a, OW-yosuzo). The
 			// fire-and-forget methods (notify/setStatus/setWidget/setTitle/
 			// set_editor_text) are presentation hints with no reply and no home in
 			// the frozen `ServerEvent` union; see this workstream's report for why

@@ -159,8 +159,9 @@ def parse_args() -> argparse.Namespace:
         help=(
             "also prompt for a shell tool call and assert a toolCall block reaches the wire. "
             "Off by default because it is the most model-dependent criterion here -- the model "
-            "has to choose to call a tool. Verified working; if Pi ever does block on an "
-            "approval dialog the check times out and fails rather than hanging."
+            "has to choose to call a tool. Verified working; a Pi dialog does not block the "
+            "turn, since agentpane cancels it at arrival (OW-yosuzo), and shows up in "
+            "agent_requests_seen instead."
         ),
     )
     return parser.parse_args()

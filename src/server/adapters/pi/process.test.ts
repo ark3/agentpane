@@ -553,11 +553,15 @@ describe("PiAdapter notification fan-out", () => {
 });
 
 describe("PiAdapter request/reply (D2a)", () => {
-	it("surfaces a blocking dialog and sends the matching extension_ui_response", async () => {
+	it("publishes a dialog, cancels it under its own request id, retracts it, and names its method in an error (OW-yosuzo)", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 		const requests: { requestId: string; kind: string }[] = [];
+		const resolved: { requestId: string; answered: Record<string, any>[] }[] = [];
+		const answered = () => h.child.sent().filter((c) => c.type === "extension_ui_response");
 		h.adapter.onRequest((r) => requests.push({ requestId: r.requestId, kind: r.kind }));
+		h.adapter.onRequestResolved((requestId) => resolved.push({ requestId, answered: answered() }));
+		const reply = vi.spyOn(h.adapter, "reply");
 
 		h.child.emitLine({
 			type: "extension_ui_request",
@@ -568,26 +572,71 @@ describe("PiAdapter request/reply (D2a)", () => {
 		});
 
 		expect(requests).toEqual([{ requestId: "ui-1", kind: "confirm" }]);
-		await h.adapter.reply("ui-1", true);
+		expect(reply).toHaveBeenCalledExactlyOnceWith("ui-1", null);
 		// Correlates on the *request* id, not a fresh command id -- an
-		// extension_ui_response is a reply, not a new command.
-		expect(h.child.lastSent("extension_ui_response")).toEqual({
-			type: "extension_ui_response",
-			id: "ui-1",
-			confirmed: true,
-		});
+		// extension_ui_response is a reply, not a new command. Retracted once
+		// the cancel is on the wire, not before.
+		expect(resolved).toEqual([
+			{ requestId: "ui-1", answered: [{ type: "extension_ui_response", id: "ui-1", cancelled: true }] },
+		]);
+		expect(h.errors).toEqual([expect.stringContaining("confirm")]);
+	});
+
+	it("cancels every dialog method, and a late reply finds nothing pending", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		h.child.emitLine({ type: "extension_ui_request", id: "s", method: "select", title: "Pick", options: ["a", "b"] });
+		h.child.emitLine({ type: "extension_ui_request", id: "i", method: "input", title: "Name?" });
+		h.child.emitLine({ type: "extension_ui_request", id: "e", method: "editor", title: "Edit", prefill: "x" });
+
+		await expect(h.adapter.reply("s", "a")).rejects.toThrow(/No pending Pi UI request/);
+		expect(h.child.sent().filter((c) => c.type === "extension_ui_response")).toEqual([
+			{ type: "extension_ui_response", id: "s", cancelled: true },
+			{ type: "extension_ui_response", id: "i", cancelled: true },
+			{ type: "extension_ui_response", id: "e", cancelled: true },
+		]);
+		expect(h.errors).toEqual([
+			expect.stringContaining("select"),
+			expect.stringContaining("input"),
+			expect.stringContaining("editor"),
+		]);
 	});
 
 	it("does not surface fire-and-forget presentation methods as requests", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 		const onRequest = vi.fn();
+		const onResolved = vi.fn();
 		h.adapter.onRequest(onRequest);
+		h.adapter.onRequestResolved(onResolved);
 
 		h.child.emitLine({ type: "extension_ui_request", id: "ui-2", method: "notify", message: "done" });
 
 		expect(onRequest).not.toHaveBeenCalled();
+		// Nothing to cancel and nothing to retract: a notify expects no reply.
+		expect(onResolved).not.toHaveBeenCalled();
+		expect(h.child.sent().filter((c) => c.type === "extension_ui_response")).toEqual([]);
+		expect(h.errors).toEqual([]);
 		await expect(h.adapter.reply("ui-2", "x")).rejects.toThrow(/No pending Pi UI request/);
+	});
+
+	it("does not fail on a dialog that arrives after dispose, when the cancel has no pipe to go to", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		h.child.autoClose = false;
+		const requests = vi.fn();
+		h.adapter.onRequest(requests);
+
+		const disposing = h.adapter.dispose();
+		// stdout is still delivering what Pi wrote before it saw the signal.
+		h.child.emitLine({ type: "extension_ui_request", id: "ui-3", method: "confirm", title: "Late?", message: "" });
+		await Promise.resolve();
+		h.child.emit("close", 0, "SIGTERM");
+		await disposing;
+
+		expect(requests).toHaveBeenCalledOnce();
+		expect(h.child.sent().filter((c) => c.type === "extension_ui_response")).toEqual([]);
 	});
 });
 

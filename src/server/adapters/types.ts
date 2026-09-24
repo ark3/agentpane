@@ -181,8 +181,8 @@ export interface BackendAdapter {
 	 * Fires when a request `onRequest` published stops being pending other
 	 * than through `reply` -- the backend resolved it, or the adapter answered
 	 * it itself (OW-gusifo). `requestId` is the id it was published under.
-	 * Optional because only the Codex adapter detects one; the others leave
-	 * it out.
+	 * Optional because only the Codex and Pi adapters fire it; Claude Code's,
+	 * which publishes no requests, leaves it out.
 	 */
 	onRequestResolved?(cb: (requestId: string) => void): Unsubscribe;
 
