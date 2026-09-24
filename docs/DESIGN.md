@@ -784,7 +784,7 @@ D14 gained its sentence scoping the pointer rule to the browser client in the sa
 The owner took this on 2026-09-23, after OW-kokalo, OW-ruzuhu and OW-hokaye landed a chosen effort for all three backends and each measured what a resume keeps of it.
 
 A conversation's model and effort are chosen before its first prompt and fixed after it, by a gate in each client (`setModel` in `src/client/controller.ts`, `agentpane--check-model-gate` in `emacs/agentpane.el`).
-Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses them, and OW-pubulu found that for the model first.
+Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses agentpane's copy; OW-jamoyi's run saw a Pi resume spawn carry no model after a close, and OW-pubulu found that Pi restores it itself.
 
 Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries.
 What each restores on a resume differs, measured for effort on 2026-09-23 (`docs/MANUAL_TESTING.md`, the three sections named for those cards, and OW-sayaju's for Codex):
@@ -795,7 +795,8 @@ What each restores on a resume differs, measured for effort on 2026-09-23 (`docs
 | Codex (`codex-cli 0.156.0`) | the level its latest settings record names, which is the chosen one unless a resume that named a model reset it to the config's; a fork takes the config's |
 | Claude Code (`claude 2.1.280`) | the default, not the chosen level |
 
-What each restores of the model has been measured for Codex and Claude Code, not Pi, and only narrowly.
+What each restores of the model has been measured for all three, and only narrowly.
+As of `pi 0.87.1`, a `--session` resume with no `--model` ran the model the session file last recorded over a settings default naming another, and an unsuffixed `--model` replaced that model while keeping the recorded level (`docs/MANUAL_TESTING.md`, OW-pubulu).
 As of `codex-cli 0.156.0`, a `thread/resume` naming no model answered the model the thread's last turn ran over `config.toml`'s, in a fresh app-server and in the one holding the thread, while `thread/fork` answered `config.toml`'s (`docs/MANUAL_TESTING.md`, OW-sayaju).
 As of `claude 2.1.280`, a `--resume` of one sonnet session, and a `--fork-session` spawn of it cut at its last assistant line, each with no `--model`, put the model the store recorded in force over the settings' `opus[1m]`; the owner's opus session, resumed the same way, could not tell the store's model from the settings' (`docs/MANUAL_TESTING.md`, OW-nabano).
 
@@ -811,7 +812,7 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first prompt (D9), and its choice lives in memory until the prompt writes the first turn.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
-Applied per backend by OW-sayaju for Codex, OW-nabano for Claude Code, and OW-pubulu for Pi's model.
+Applied per backend by OW-sayaju for Codex and OW-nabano for Claude Code; on Pi, which restores both itself, OW-pubulu found nothing to re-assert, and its resume spawn carries no `--model` at all.
 
 ## The backend adapter contract
 

@@ -2192,7 +2192,7 @@ So the D9 walk, which reads rollouts, cannot see a Codex name, and only a runnin
 The `threads` table on 0.154.0 also carries `is_pinned` and `archived`, and the protocol has `thread/archive` and `thread/unarchive`; on this machine both columns were zero across 101 threads.
 That is recorded in D13, where it belongs, since it bears on a decision rather than on a card.
 
-## `DELETE` then attach resumes a real Pi session, and the resumed spawn drops the model (OW-jamoyi)
+## `DELETE` then attach resumes a real Pi session, and the resumed spawn carries no `--model` (OW-jamoyi)
 
 Run on the home server 2026-09-16 against `pi 0.85.1`, driven at the HTTP routes with `curl` against `bun run start` on port 4173, with `/api/events` captured throughout.
 The capture and the server log were scratch files under `/tmp` and **did not survive the run**, so what is below is the whole of the record; the session file it wrote is still at `~/.pi/agent/sessions/--tmp-ow-resume-probe--/2026-09-16T23-33-27-765Z_01a0ac91-*.jsonl` unless something has since cleaned `/tmp`.
@@ -2213,11 +2213,11 @@ The `DELETE` returned 204 in 0.028s and the kill was synchronous with it: `kill 
 **The resumed spawn carries `--session` and no `--model`.**
 The first spawn's argv ended `pi --mode rpc --model openrouter/deepseek/deepseek-v4.1-flash:high`; the second ended `pi --mode rpc --session <path>`, with no model flag at all.
 This is structural rather than a fluke of the run: `close()` drops the session from the manager's table, so the re-attach takes `#start`'s `!session` branch, which rebuilds the record from the index with `fromStore: true` and no `model` key, and the spawn's `...(bound.model ? { model: bound.model } : {})` then contributes nothing.
-It could not do otherwise as things stand -- `SessionSummary` carries no `model` field, so the store path has no model to restore even if it asked.
+Nothing on the store path could have passed one: `SessionSummary` carries no `model` field.
 What the resumed process actually ran on is **not** established by this run, and could not have been: `~/.pi/agent/settings.json` held the same model *and* the same `thinkingLevel: high` the flag had asked for, so neither axis could have shown a difference.
-The thinking-level axis was settled later, on `pi 0.87.1`: a resume with `--session` alone keeps the level the session file last recorded over both settings defaults (OW-ruzuhu's section, below); the model axis is still open.
-Pi writes a `model_change` entry into its session file, and whether a resume replays it was not tested; settling this needs a resume whose logged model differs deliberately from the settings default, read back through `get_state`.
-Filed as OW-pubulu.
+Both axes were settled later, on `pi 0.87.1`: a resume with `--session` alone keeps the level the session file last recorded over both settings defaults (OW-ruzuhu's section, below), and runs the model it last recorded over a settings default naming another (OW-pubulu's section, below).
+So the missing `--model` is what D23 asks of a Pi resume, not a model lost: Pi restores both itself, and a suffixed `--model` would override the level.
+Filed as OW-pubulu, which settled it.
 Also found on the way, on this version: `POST /api/sessions/:backend/:id/model` accepted `provider/modelId` but rejected the `:thinkingLevel` suffix that `--model` takes, answering 500 with `Model not found: openrouter/deepseek/deepseek-v4.1-flash:high` -- a 400 case surfacing as a 500.
 Filed as OW-pizaki.
 
@@ -2532,7 +2532,7 @@ The session file reads `session`, `model_change`, `thinking_level_change` `high`
 
 **A resume keeps the level the session file recorded, not the settings default.**
 After `DELETE` stopped agentpane's process, the throwaway `settings.json` was rewritten so that each source named a different level: `modelThinkingLevels` naming `max` for the pinned model and `defaultThinkingLevel: "low"`, against the session's recorded `off`.
-`pi --mode rpc --session <file>`, which is the shape agentpane's resume spawn takes today (OW-pubulu), answered `get_state` with the pinned model at `thinkingLevel: "off"`, and `get_messages` returned all three messages.
+`pi --mode rpc --session <file>`, which is the shape agentpane's resume spawn took as of `685a612` (OW-pubulu's section, below), answered `get_state` with the pinned model at `thinkingLevel: "off"`, and `get_messages` returned all three messages.
 Adding `--model openrouter/deepseek/deepseek-v4.1-flash` without a suffix still read `off`.
 Adding `--model openrouter/deepseek/deepseek-v4.1-flash:high` read `high`: the suffix overrides the level the session recorded, so a resume spawn that carries the pin as written would silently undo a chosen level.
 A fresh session with no flags read `max`, the per-model setting, which shows the rewritten settings file was read at all.
@@ -2719,3 +2719,35 @@ Run through that function by a one-off `bun` script, the parent's rollout answer
 Whether a `turn/start` naming the thread's own model with no effort resets the effort, as a resume naming it does, was not isolated; the adapter sends the stored effort beside the model whenever the store names one.
 No fork was cut at an earlier turn, so the kept-prefix bound rests on OW-buligi's reading of `history_base`.
 Whether `model` or `config` on `thread/fork` would carry the pair was not tried.
+
+## What model a Pi resume runs on (OW-pubulu)
+
+Run on the home server 2026-09-23, **`pi 0.87.1`**, from the `card/OW-pubulu` worktree cut at `685a612`.
+Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, and in a throwaway workspace beside it, so the session file landed in the throwaway directory and the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and both directories were removed.
+The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` directly, not through `sbox` or agentpane's server.
+One turn ran in all.
+
+**The session.**
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, the pin as written, `get_state` read that model at `thinkingLevel: "high"`.
+The prompt `Do not use any tools. Reply with exactly: ok` answered `ok` for $0.00026.
+The session file reads `session`, a `model_change` naming `openrouter` and `deepseek/deepseek-v4.1-flash`, a `thinking_level_change` naming `high`, then the system, user and assistant messages, the assistant one naming the same provider and model.
+
+**A resume runs the model the file recorded, not the settings default.**
+The throwaway `settings.json` was then rewritten so that nothing in it named what the file recorded: `defaultModel` `google/gemini-2.5-flash-lite` under the same `defaultProvider` `openrouter`, `defaultThinkingLevel` `max`, and `modelThinkingLevels` naming `low` for both models.
+A fresh `pi --mode rpc` with no flags read `openrouter/google/gemini-2.5-flash-lite` at `low`, so the rewritten file was read.
+`pi --mode rpc --session <file>`, the shape agentpane's resume spawn takes, read `openrouter/deepseek/deepseek-v4.1-flash` at `high`, and `get_messages` returned the three messages.
+Adding `--model openrouter/deepseek/deepseek-v4.1-flash` with no suffix read the same.
+Adding `--model openrouter/google/gemini-2.5-flash-lite` with no suffix read that model at `high`: an unsuffixed `--model` replaces the recorded model and keeps the recorded level.
+No resume drove a turn, and the session file still held its six lines afterwards, so none of them wrote a `model_change` of its own.
+
+**The source agrees.**
+`createAgentSession` in `dist/core/sdk.js`, given no model and a session that has messages, takes the model the session context names, and keeps it if the catalogue has it and its provider has auth; only otherwise does it fall to `findInitialModel`, which reads the settings default.
+`getSessionContextSettings` in `dist/core/session-manager.js` names whichever of a `model_change` entry or an assistant message comes last on the branch.
+
+**What agentpane makes of it.**
+The resume spawn carries no `--model`, which is D23 being met rather than a model lost: Pi restores the pair the file recorded, a `--model` naming another model would replace the recorded one, and a suffixed `--model` would override the recorded level.
+`src/server/http/session-manager.test.ts` pins that a Pi session created on a suffixed model, prompted, closed and re-attached resumes with `resumeId` and no model, and the note at `#start`'s spawn in `src/server/http/session-manager.ts` says why.
+
+**Not established.**
+A resume whose recorded model has left the catalogue or lost its auth was read at the source only: Pi then falls back to the settings default, and agentpane would name whatever `get_state` reports.
+Nothing here went through `sbox`, agentpane's server, the browser or Emacs; the adapter reads the model in force from the same `get_state` the driver read.
