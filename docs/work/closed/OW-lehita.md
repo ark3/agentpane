@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi level set on resume without an entry in the session file would mislabel loaded turns after it
@@ -23,3 +24,15 @@ Incidental: how the adapter compensates if it does not -- for instance appending
 
 - A live run records, with the Pi version, whether each of the two paths appends a `thinking_level_change` entry.
 - If either path leaves no entry, a test in `src/server/adapters/pi/process.test.ts` reloads a turn streamed after such a resume and asserts it carries the level it ran at, shown red first; if both paths do append one, the run's record is the whole of the work, and the `withLoadedEfforts` docblock says so.
+
+## Close note
+
+Measured live on the home server, `pi 0.87.1`, on `openrouter/deepseek/deepseek-v4.1-flash`, recorded in `docs/MANUAL_TESTING.md` under "A Pi resume that clamps the recorded level, or overrides it, records no level (OW-lehita)": neither path appends a `thinking_level_change`.
+A bare `--session` resume of a copy hand-edited to record `minimal` ran at `low` and left `minimal` the only level; resumes with `--model ...:low` and `--thinking off` ran at those levels, recorded nothing, and a later bare resume read the earlier `high` again.
+
+The clamp is recoverable and is now fixed: `withLoadedEfforts` in `src/server/adapters/pi/reducer.ts` clamps each recorded level to the turn's model from `get_available_models`, which `hydrateMessages()` in `src/server/adapters/pi/process.ts` now fetches, via `clampThinkingLevel` in `src/server/adapters/pi/protocol.ts` (a faithful transcription of `pi-ai`'s).
+The override is recoverable nowhere, since the level lives only in the command line of a gone process; the docblock says so.
+The new test in `src/server/adapters/pi/process.test.ts` ("names a turn after a resume that clamped the recorded level...") went red without the clamp line (`expected [ 'user', 'medium', 'user', 'medium' ] to deeply equal [ 'user', 'medium', 'user', 'high' ]`) and green with it; `bun run check` passed.
+
+The adversarial read found the clamp assumes the model's catalogue entry is unchanged since the turn ran, which the pinned model's own history contradicts (0.85.1 vs 0.87.1); the docs now say so and OW-niwube carries it.
+It also found a fork inside a process spawned with a suffixed `--model` may reapply that level unrecorded, filed as OW-dojebo.
