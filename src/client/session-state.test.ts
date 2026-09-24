@@ -272,6 +272,31 @@ describe("client session state", () => {
 		expect(result.state.sessions[sessionKey(other)]?.error).toBeNull();
 	});
 
+	it("keeps a notice on its session and leaves the session's error as it was (OW-tujiya)", () => {
+		const notice = { kind: "warning", message: "fallback metadata", details: null, path: null };
+		const failed = reduceServerEvent(stateAtSequence(ref, 1), {
+			type: "error",
+			session: ref,
+			seq: 2,
+			message: "turn failed",
+		}).state;
+
+		const noticed = reduceServerEvent(failed, { type: "notice", session: ref, seq: 3, notice }).state;
+
+		expect(noticed.sessions[sessionKey(ref)]?.notices).toEqual([notice]);
+		expect(noticed.sessions[sessionKey(ref)]?.error).toBe("turn failed");
+
+		const second = { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml:3:5" };
+		const both = reduceServerEvent(noticed, { type: "notice", session: ref, seq: 4, notice: second }).state;
+		expect(both.sessions[sessionKey(ref)]?.notices).toEqual([notice, second]);
+
+		// A clean session's error stays null: a notice is not an error.
+		const clean = reduceServerEvent(stateAtSequence(ref, 1), { type: "notice", session: ref, seq: 2, notice }).state;
+		expect(clean.sessions[sessionKey(ref)]?.error).toBeNull();
+		// Nor does clearing the error, as the next prompt does (OW-31), clear the notice.
+		expect(clearSessionError(both, ref).sessions[sessionKey(ref)]?.notices).toEqual([notice, second]);
+	});
+
 	it("retains a pending request for its session", () => {
 		const request: AgentRequest = {
 			requestId: "request-1",

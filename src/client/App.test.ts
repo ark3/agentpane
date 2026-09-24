@@ -2112,6 +2112,37 @@ describe("App", () => {
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
+	it("draws a session's notices apart from the error banner (OW-tujiya)", async () => {
+		const controller = new FakeController(view({
+			state: state({
+				selected: codexSession,
+				sessions: {
+					"codex:codex-1": {
+						ref: codexSession,
+						messages: [],
+						isStreaming: false,
+						seq: 1,
+						error: null,
+						requests: [],
+						notices: [
+							{ kind: "warning", message: "Model metadata not found", details: null, path: null },
+							{ kind: "configWarning", message: "Unknown key", details: "Remove it", path: "/c.toml:3:5" },
+						],
+					},
+				},
+			}),
+		}));
+		render(App, { props: { controller } });
+
+		const notices = screen.getByRole("status", { name: "Backend notices" });
+		expect(within(notices).getAllByRole("listitem")).toHaveLength(2);
+		expect(notices).toHaveTextContent("Model metadata not found");
+		expect(notices).toHaveTextContent("Unknown key");
+		expect(notices).toHaveTextContent("Remove it");
+		expect(notices).toHaveTextContent("/c.toml:3:5");
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
 	it("shows Stop only while the selected session is streaming", async () => {
 		const controller = new FakeController(view({
 			state: state({

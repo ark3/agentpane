@@ -1313,6 +1313,20 @@
 		</p>
 	{/if}
 
+	{#if selectedSession?.notices?.length}
+		<!-- The backend's non-fatal notices (OW-tujiya): not the error banner above,
+		     and nothing dismisses them yet; a first cut. -->
+		<ul class="notices" role="status" aria-label="Backend notices">
+			{#each selectedSession.notices as notice, i (i)}
+				<li>
+					<span>{notice.message}</span>
+					{#if notice.details}<span class="notice-details">{notice.details}</span>{/if}
+					{#if notice.path}<code class="notice-path">{notice.path}</code>{/if}
+				</li>
+			{/each}
+		</ul>
+	{/if}
+
 	{#if selectedSession && selectedSession.requests.length > 0}
 		<p class="warning">
 			The agent is blocked on a request agentpane cannot answer: {selectedSession.requests

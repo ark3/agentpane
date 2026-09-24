@@ -348,6 +348,10 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 }
 .error button { flex: 0 0 auto; color: inherit; }
 .warning { margin: 0; color: var(--ap-warning); }
+.notices { margin: 0; padding: 0; list-style: none; color: var(--ap-warning); font-size: var(--ap-text-sm); }
+.notices li { display: flex; flex-wrap: wrap; gap: 0 var(--ap-space-2); }
+.notices li::before { content: "ℹ"; }
+.notice-details, .notice-path { color: var(--ap-fg-muted); }
 
 @media (max-width: 42rem) {
 	.shell {

@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
+	type AgentNotice,
 	type AgentRequest,
 	type ServerEvent,
 	type SessionRef,
@@ -19,6 +20,12 @@ export interface SessionView {
 	seq: number | null;
 	error: string | null;
 	requests: AgentRequest[];
+	/**
+	 * The backend's non-fatal notices, oldest first (OW-tujiya). Kept apart
+	 * from `error` on purpose: nothing that clears an error clears these, and
+	 * like `error` and `requests` no snapshot carries them.
+	 */
+	notices?: AgentNotice[];
 }
 
 export interface ClientState {
@@ -255,6 +262,9 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			break;
 		case "request":
 			view.requests = [...view.requests, event.request];
+			break;
+		case "notice":
+			view.notices = [...(view.notices ?? []), event.notice];
 			break;
 	}
 
