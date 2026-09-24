@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # Codex accepts any model string with 204 and fails only at the next turn
@@ -22,3 +23,14 @@ So settle whether Codex accepts ids it does not list without such a turn: compar
 If that leaves the question open, the card closes on its second branch, with the reason written beside `CodexAdapter.setModel`.
 
 Done when the live answer is recorded in `docs/MANUAL_TESTING.md` with the CLI version, and either `setModel` refuses an unknown model as `BackendRefusedError` (400), pinned by a test seen red first, or the reason Codex cannot be validated up front is written where the next reader of `CodexAdapter.setModel` will meet it.
+
+## Close note
+
+Closed on the card's second branch: `CodexAdapter.setModel` still stores any string, and its docblock now says why.
+Live run on the home server 2026-09-24, `codex-cli 0.156.0`, ChatGPT-account login, recorded in `docs/MANUAL_TESTING.md` under "What a Codex turn on a model that does not exist does".
+Codex refused nothing locally: `thread/start` and `turn/start` both accepted `agentpane-no-such-model`, the turn ran on "fallback metadata" after a `warning` notification, and the upstream API answered 400 `invalid_request_error` ("not supported when using Codex with a ChatGPT account") as an `error` notification and a failed `turn/completed`, about 1.6s in.
+Two such turns were sent, one bare and one through agentpane; neither reported tokens or a `token_count`.
+`model/list` answered four ids, and `includeHidden: true` added `gpt-reserve` and `codex-auto-review`; the adapter's `listModels()` sends no `includeHidden`.
+Whether the upstream refuses every real unlisted id, or an API-key login or another `model_provider` would, cannot be read from a made-up id under the model pin, so validating against `listModels()` could reject a model Codex would run.
+Through agentpane today the model POST answers 204, the prompt 202, and the failure arrives as two identical SSE `error` events carrying the raw upstream JSON; filed as OW-vofawi.
+Both clients offer only listed ids, so an unlisted id reaches `setModel` only from a direct HTTP or JSON-RPC caller.
