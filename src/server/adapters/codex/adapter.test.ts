@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentRequest, SessionRef } from "../../../shared/protocol.ts";
 import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
 import type { CodexProcess } from "./process.ts";
+import type { Thread } from "./protocol.ts";
+import { CodexReducer } from "./reducer.ts";
 import { FakeCodexProcess } from "./test-support.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
@@ -117,29 +119,75 @@ interface HappyServerOptions {
 	holdThreadStart?: boolean;
 	failCompact?: string;
 	failSteer?: string;
+	/** The stored thread's `historyMode`; `paginated` is what `thread/start` created as of `codex-cli` 0.156.0. */
+	historyMode?: "legacy" | "paginated";
+}
+
+/**
+ * The notice `codex-cli` 0.156.0 sent, naming no thread, for each full-history
+ * load of a `paginated` thread: a `thread/resume` or `thread/fork` without
+ * `excludeTurns`, and a `thread/read` with `includeTurns`. A `legacy` thread
+ * drew none (docs/MANUAL_TESTING.md, OW-kelene).
+ */
+function fullHistoryDeprecation(proc: AdapterProcess, options: HappyServerOptions): void {
+	if ((options.historyMode ?? "paginated") !== "paginated") return;
+	proc.emit({
+		method: "deprecationNotice",
+		params: { summary: "Full-history hydration is deprecated for paginated threads", details: null },
+	});
+}
+
+/**
+ * One `thread/turns/list` page, as `codex-cli` 0.156.0 answered it: one turn
+ * per page here, so a transcript of two turns or more is paged, and `summary`
+ * -- the default -- keeping only a turn's first user message and last agent
+ * message, which is what the measured summaries held.
+ */
+function turnsPage(turns: unknown[], params: Record<string, unknown>): unknown {
+	const ordered = params["sortDirection"] === "asc" ? turns : [...turns].reverse();
+	const at = typeof params["cursor"] === "string" ? Number(params["cursor"]) : 0;
+	const view = params["itemsView"] ?? "summary";
+	const data = ordered.slice(at, at + 1).map((raw) => {
+		const turn = raw as { items: { type: string }[] };
+		if (view === "full") return turn;
+		if (view === "notLoaded") return { ...turn, items: [], itemsView: view };
+		const user = turn.items.find((item) => item.type === "userMessage");
+		const agent = turn.items.findLast((item) => item.type === "agentMessage");
+		return { ...turn, items: [user, agent].filter(Boolean), itemsView: view };
+	});
+	return { data, nextCursor: at + 1 < ordered.length ? String(at + 1) : null, backwardsCursor: null };
 }
 
 function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions = {}): void {
 	let turn = 0;
+	const historyMode = options.historyMode ?? "paginated";
 	proc.onWrite((message) => {
 		const id = message["id"];
 		if (typeof id !== "number") return;
+		const params = (message["params"] ?? {}) as Record<string, unknown>;
 		switch (message["method"]) {
 			case "initialize":
 				proc.emit({ id, result: { userAgent: "test" } });
 				break;
 			case "thread/start":
-			case "thread/resume":
+			case "thread/resume": {
 				if (options.holdThreadStart) break;
+				// A start has no history; a resume carries it all unless told not to.
+				const full = message["method"] === "thread/resume" && params["excludeTurns"] !== true;
+				if (full) fullHistoryDeprecation(proc, options);
 				proc.emit({
 					id,
 					result: {
-						thread: { id: options.threadId ?? "thread-real", turns: options.turns ?? [] },
+						thread: { id: options.threadId ?? "thread-real", historyMode, turns: full ? (options.turns ?? []) : [] },
 						model: options.model ?? "gpt-started",
 						modelProvider: options.modelProvider ?? "openai",
 						reasoningEffort: options.reasoningEffort ?? null,
 					},
 				});
+				break;
+			}
+			case "thread/turns/list":
+				proc.emit({ id, result: turnsPage(options.turns ?? [], params) });
 				break;
 			case "model/list":
 				proc.emit({ id, result: { data: options.models ?? [], nextCursor: null } });
@@ -150,11 +198,18 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 					proc.emit({ id, result: { turn: { id: `turn-${turn}` } } });
 				}
 				break;
-			case "thread/read":
-				proc.emit({ id, result: { thread: { id: options.threadId ?? "thread-real", turns: options.turns ?? [] } } });
+			case "thread/read": {
+				const full = params["includeTurns"] === true;
+				if (full) fullHistoryDeprecation(proc, options);
+				proc.emit({
+					id,
+					result: { thread: { id: options.threadId ?? "thread-real", historyMode, turns: full ? (options.turns ?? []) : [] } },
+				});
 				break;
+			}
 			case "thread/fork":
-				proc.emit({ id, result: { thread: { id: "thread-forked", turns: [] } } });
+				if (params["excludeTurns"] !== true) fullHistoryDeprecation(proc, options);
+				proc.emit({ id, result: { thread: { id: "thread-forked", historyMode, turns: [] } } });
 				break;
 			case "turn/steer": {
 				// OW-tifuha, codex-cli 0.154.0: the result names the steered turn.
@@ -256,7 +311,7 @@ describe("CodexAdapter lifecycle", () => {
 		expect(adapter.getState().model).toBe("gpt-started");
 	});
 
-	it("resumes a stored thread and hydrates its returned transcript", async () => {
+	it("resumes a stored thread and hydrates its paged transcript", async () => {
 		const proc = new AdapterProcess();
 		configureHappyServer(proc, {
 			threadId: STORED_REF.id,
@@ -293,12 +348,13 @@ describe("CodexAdapter lifecycle", () => {
 
 		await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
 
-		expect(methods(proc)).toEqual(["initialize", "thread/resume"]);
+		expect(methods(proc)).toEqual(["initialize", "thread/resume", "thread/turns/list"]);
 		expect(request(proc, "thread/resume")["params"]).toEqual({
 			threadId: STORED_REF.id,
 			cwd: "/workspace",
 			sandbox: "danger-full-access",
 			approvalPolicy: "never",
+			excludeTurns: true,
 		});
 		expect(adapter.getState().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 		expect(adapter.getState().messages[0]).toMatchObject({
@@ -333,6 +389,7 @@ describe("CodexAdapter lifecycle", () => {
 			cwd: "/workspace",
 			sandbox: "danger-full-access",
 			approvalPolicy: "never",
+			excludeTurns: true,
 		});
 	});
 
@@ -1762,6 +1819,114 @@ describe("CodexAdapter fork points", () => {
 	});
 });
 
+describe("CodexAdapter history loading (OW-kelene)", () => {
+	// As of `codex-cli` 0.156.0 a full-history load of a `paginated` thread --
+	// `thread/resume` or `thread/fork` without `excludeTurns`, `thread/read`
+	// with `includeTurns` -- drew a `deprecationNotice`, while
+	// `thread/turns/list` at `itemsView: "full"` answered the same turns with
+	// the same items for `paginated` and `legacy` threads alike
+	// (docs/MANUAL_TESTING.md, OW-kelene). The fake server here answers the same
+	// way, so each case runs for both modes.
+
+	/** Three turns: one with a hidden reasoning item, one steered, so indices are not item positions. */
+	function storedTurns(): unknown[] {
+		const user = (id: string, text: string) => ({
+			type: "userMessage",
+			id,
+			clientId: null,
+			content: [{ type: "text", text, text_elements: [] }],
+		});
+		const agent = (id: string, text: string) => ({ type: "agentMessage", id, text, phase: "final_answer", memoryCitation: null });
+		const turn = (id: string, n: number, items: unknown[]) => ({
+			id,
+			items,
+			itemsView: "full",
+			status: "completed",
+			error: null,
+			startedAt: 1_700_000_000 + n,
+			completedAt: 1_700_000_001 + n,
+			durationMs: 1000,
+		});
+		return [
+			turn("turn-one", 0, [user("user-a", "first ask"), { type: "reasoning", id: "reason-a", summary: [], content: [] }, agent("agent-a", "an answer")]),
+			turn("turn-two", 2, [user("user-b", "second ask"), agent("agent-b", "part one"), user("user-steer", "also this"), agent("agent-c", "part two")]),
+			turn("turn-three", 4, [user("user-c", "third ask"), agent("agent-d", "last answer")]),
+		];
+	}
+
+	/** What hydrating the whole history at once painted, which is what a reattach painted before. */
+	function paintedWhole(turns: unknown[]): unknown[] {
+		const reducer = new CodexReducer();
+		reducer.setIdentity({ threadId: STORED_REF.id, model: "gpt-started", modelProvider: "openai" });
+		reducer.hydrate({ id: STORED_REF.id, turns: turns as Thread["turns"] });
+		return reducer.getState().messages;
+	}
+
+	/** No request the adapter wrote asked for the whole history in one answer. */
+	function expectNoFullHistoryLoad(proc: AdapterProcess): void {
+		for (const message of proc.written) {
+			const params = (message["params"] ?? {}) as Record<string, unknown>;
+			expect(params["includeTurns"], `${String(message["method"])} asked for includeTurns`).not.toBe(true);
+			if (message["method"] === "thread/resume" || message["method"] === "thread/fork") {
+				expect(params["excludeTurns"], `${String(message["method"])} without excludeTurns`).toBe(true);
+			}
+		}
+	}
+
+	describe.each(["paginated", "legacy"] as const)("a %s thread", (historyMode) => {
+		it("repaints a reattach with the transcript and fork points a whole-history load gave, and draws no deprecation", async () => {
+			const turns = storedTurns();
+			const proc = new AdapterProcess();
+			configureHappyServer(proc, { threadId: STORED_REF.id, turns, historyMode });
+			const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
+			const notices = vi.fn();
+			adapter.onNotice(notices);
+
+			await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+			expect(adapter.getState().messages).toEqual(paintedWhole(turns));
+			expect(await adapter.listForkPoints()).toEqual([
+				{ id: "turn-one", text: "first ask", index: 0 },
+				{ id: "turn-two", text: "second ask", index: 2 },
+				{ id: "turn-three", text: "third ask", index: 6 },
+			]);
+			expectNoFullHistoryLoad(proc);
+			expect(notices).not.toHaveBeenCalled();
+		});
+
+		it("forks at a turn of a reattached thread without a whole-history load", async () => {
+			const turns = storedTurns();
+			const proc = new AdapterProcess();
+			configureHappyServer(proc, { threadId: STORED_REF.id, turns, historyMode });
+			const adapter = new CodexAdapter(STORED_REF, { spawn: () => proc, codexRoot: NO_STORE });
+			const notices = vi.fn();
+			adapter.onNotice(notices);
+			await adapter.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+			await adapter.fork("turn-three");
+
+			expect(request(proc, "thread/fork")["params"]).toMatchObject({ threadId: STORED_REF.id, lastTurnId: "turn-two" });
+			expectNoFullHistoryLoad(proc);
+			expect(notices).not.toHaveBeenCalled();
+		});
+
+		it("lists the fork points of a thread started here, whose turns only the server holds", async () => {
+			// `fork()` falls back to listing when it has no turn order, which is the
+			// case for a thread this adapter started and then drove.
+			const turns = storedTurns();
+			const { adapter, proc } = await startedAdapter({ threadId: "thread-live", turns, historyMode });
+			const notices = vi.fn();
+			adapter.onNotice(notices);
+
+			await adapter.fork("turn-two");
+
+			expect(request(proc, "thread/fork")["params"]).toMatchObject({ threadId: "thread-live", lastTurnId: "turn-one" });
+			expectNoFullHistoryLoad(proc);
+			expect(notices).not.toHaveBeenCalled();
+		});
+	});
+});
+
 describe("CodexAdapter reducer effects", () => {
 	it("publishes a warning as a notice and not as an error (OW-tujiya)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-events" });
@@ -2112,6 +2277,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		/** What a fork and a resume of it answer with, as `thread/fork` left it: the config's defaults. */
 		forkSettings?: { model: string; reasoningEffort: string };
 		codexRoot?: string;
+		/** The turns the fork inherited, which `thread/turns/list` pages out for any thread but the parent. */
+		forkTurns?: unknown[];
 	}
 
 	function shareableServer(proc: AdapterProcess, options: ShareableOptions = {}): void {
@@ -2136,18 +2303,23 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 						}
 						const settings =
 							threadId !== "thread-parent" && options.forkSettings ? options.forkSettings : { model: "m" };
-						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, ...settings } });
+						const full = params["excludeTurns"] !== true && threadId !== "thread-parent";
+						const turns = full ? (options.forkTurns ?? []) : [];
+						proc.emit({ id, result: { thread: { id: threadId, turns }, ...settings } });
 					};
 					if (options.holdResume) void options.holdResume.promise.then(answer);
 					else answer();
 					break;
 				}
-				case "thread/read":
+				case "thread/turns/list":
 					proc.emit({
 						id,
-						result: {
-							thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }] },
-						},
+						result: turnsPage(
+							options.forkTurns && params["threadId"] !== "thread-parent"
+								? options.forkTurns
+								: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }],
+							params,
+						),
 					});
 					break;
 				case "thread/fork":
@@ -2199,6 +2371,24 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			sandbox: "danger-full-access",
 			approvalPolicy: "never",
 		});
+	});
+
+	it("repaints the fork's inherited transcript from pages, never a whole-history resume (OW-kelene)", async () => {
+		const forkTurns = twoStoredTurns();
+		const { proc, forked, borrower } = await forkedPair({ forkTurns });
+
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+
+		expect(request(proc, "thread/fork")["params"]).toMatchObject({ excludeTurns: true });
+		expect(request(proc, "thread/resume")["params"]).toMatchObject({ threadId: "thread-forked", excludeTurns: true });
+		expect(borrower.getState().messages).toMatchObject([
+			{ role: "user", content: [{ type: "text", text: "first prompt" }] },
+			{ role: "user", content: [{ type: "text", text: "second prompt" }] },
+		]);
+		expect(await borrower.listForkPoints()).toEqual([
+			{ id: "turn-first", text: "first prompt", index: 0 },
+			{ id: "turn-second", text: "second prompt", index: 1 },
+		]);
 	});
 
 	it("starts a fork at the model and effort the kept prefix's last turn ran at (D23)", async () => {

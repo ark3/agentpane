@@ -157,7 +157,7 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.
 
-Re-querying the agent (Pi `get_messages`, Codex `thread/read`, Claude Code's own store file) remains the **cold-start** path — server restarted, or attaching to a session that predates it.
+Re-querying the agent (Pi `get_messages`, Codex `thread/turns/list`, Claude Code's own store file) remains the **cold-start** path — server restarted, or attaching to a session that predates it.
 That is not an alternative to the above; it is how the server populates a transcript it does not yet have.
 
 ### D4. Client framework: Svelte 5
@@ -344,7 +344,7 @@ Two corrections from building this, both verified:
 Deliberately *not* doing: parsing the on-disk JSONL into `AgentMessage[]` to display a detached transcript without spawning.
 It would avoid a subprocess, but it means a second, format-dependent mapping per backend, kept in sync with a format we have already watched drift.
 One protocol→`AgentMessage` mapping per backend is the point of the adapter contract.
-Transcripts come from `thread/read` / `get_entries` on an attached session; since subprocesses outlive connections, switching back to a recent session is instant anyway.
+Transcripts come from `thread/turns/list` / `get_entries` on an attached session; since subprocesses outlive connections, switching back to a recent session is instant anyway.
 
 **Session identity is backend-qualified**: `{backend, id}` (`BackendId`).
 Pi's id is its JSONL path; Codex's is a UUIDv7 thread id; Claude Code's is the session uuid its store file is named after.

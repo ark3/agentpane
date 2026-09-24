@@ -1245,7 +1245,7 @@ describe("item types with no fixture yet", () => {
 });
 
 describe("hydrate (cold start)", () => {
-	it("replays a thread/read response into a transcript", () => {
+	it("replays a thread's turns into a transcript", () => {
 		const r = new CodexReducer({ now: () => 1 });
 		const effects = r.hydrate({
 			id: "thread-1",

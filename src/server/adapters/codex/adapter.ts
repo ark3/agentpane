@@ -33,11 +33,12 @@ import {
 	type ModelListResponse,
 	type RequestId,
 	type SandboxMode,
-	type Thread,
 	type ThreadForkResponse,
-	type ThreadReadResponse,
 	type ThreadResumeResponse,
 	type ThreadStartResponse,
+	type ThreadTurnsListParams,
+	type ThreadTurnsListResponse,
+	type Turn,
 	type TurnStartResponse,
 	type UserInput,
 } from "./protocol.ts";
@@ -290,6 +291,8 @@ export class CodexAdapter implements BackendAdapter {
 						sandbox: this.sandbox,
 						approvalPolicy: this.approvalPolicy,
 						...(this.model ? { model: this.model } : {}),
+						// The turns are paged in below instead (see `readTurns`).
+						excludeTurns: true,
 					})
 				: await client.request<ThreadStartResponse>("thread/start", {
 						cwd: opts.cwd,
@@ -314,12 +317,16 @@ export class CodexAdapter implements BackendAdapter {
 				reasoningEffort: started.reasoningEffort,
 			});
 
-			// `thread/resume` returns the thread's turns, so a reattach repaints
-			// without a second round trip (D3's cold-start path).
-			if (opts.resumeId && started.thread.turns?.length) {
-				this.applyEffects(this.reducer.hydrate(started.thread));
+			// A reattach repaints from the thread's turns, paged in after the
+			// resume (D3's cold-start path; see `readTurns`).
+			if (opts.resumeId) {
+				const turns = await readTurns(client, started.thread.id);
 				assertOwned();
-				this.rememberTurns(started.thread);
+				if (turns.length) {
+					this.applyEffects(this.reducer.hydrate({ id: started.thread.id, turns }));
+					assertOwned();
+					this.rememberTurns(turns);
+				}
 			}
 
 			assertOwned();
@@ -383,6 +390,7 @@ export class CodexAdapter implements BackendAdapter {
 			sandbox: this.sandbox,
 			approvalPolicy: this.approvalPolicy,
 			...(this.model ? { model: this.model } : {}),
+			excludeTurns: true,
 		});
 		assertOwned();
 		const stored = await this.readStoredTurn(resumed.thread.id);
@@ -399,10 +407,12 @@ export class CodexAdapter implements BackendAdapter {
 			modelProvider: resumed.modelProvider,
 			reasoningEffort: resumed.reasoningEffort,
 		});
-		if (resumed.thread.turns?.length) {
-			this.applyEffects(this.reducer.hydrate(resumed.thread));
+		const turns = await readTurns(holder, resumed.thread.id);
+		assertOwned();
+		if (turns.length) {
+			this.applyEffects(this.reducer.hydrate({ id: resumed.thread.id, turns }));
 			assertOwned();
-			this.rememberTurns(resumed.thread);
+			this.rememberTurns(turns);
 		}
 		assertOwned();
 		// `thread/resume` answers with the id it was asked for, so this is the id
@@ -691,20 +701,17 @@ export class CodexAdapter implements BackendAdapter {
 	 * a steer that really shipped.
 	 *
 	 * The index comes from the reducer's own slot map, never from a position
-	 * within `turn.items`; see `CodexReducer.indexOfItem`. The `thread/read`
-	 * here is a fresh fetch while the reducer holds the live stream, so the two
+	 * within `turn.items`; see `CodexReducer.indexOfItem`. The turns read
+	 * here are a fresh fetch while the reducer holds the live stream, so the two
 	 * can disagree about a just-started turn: a slot miss drops the point, which
 	 * costs an Edit affordance and never mis-places one.
 	 */
 	async listForkPoints(): Promise<ForkPoint[]> {
 		const client = this.requireClient();
-		const read = await client.request<ThreadReadResponse>("thread/read", {
-			threadId: this.requireThread(),
-			includeTurns: true,
-		});
-		this.rememberTurns(read.thread);
+		const turns = await readTurns(client, this.requireThread());
+		this.rememberTurns(turns);
 		const points: ForkPoint[] = [];
-		for (const turn of read.thread.turns ?? []) {
+		for (const turn of turns) {
 			const first = firstUserItem(turn.items ?? []);
 			if (!first) continue;
 			const index = this.reducer.indexOfItem(first.id);
@@ -759,6 +766,8 @@ export class CodexAdapter implements BackendAdapter {
 			sandbox: this.sandbox,
 			approvalPolicy: this.approvalPolicy,
 			...(this.options.ephemeral ? { ephemeral: true } : {}),
+			// Nothing here reads the fork's turns; its own adapter pages them in.
+			excludeTurns: true,
 		});
 		// Codex flushes the forked rollout to disk here, before any turn, so the
 		// index finds it -- but finding it is not enough to open it. As of
@@ -1043,8 +1052,8 @@ export class CodexAdapter implements BackendAdapter {
 		return readCodexLastTurnSettings(this.options.codexRoot ?? codexSessionsRoot(), threadId);
 	}
 
-	private rememberTurns(thread: Pick<Thread, "turns">): void {
-		this.turnOrder = (thread.turns ?? []).map((turn) => turn.id);
+	private rememberTurns(turns: Turn[]): void {
+		this.turnOrder = turns.map((turn) => turn.id);
 	}
 
 	/**
@@ -1065,6 +1074,39 @@ export class CodexAdapter implements BackendAdapter {
 		if (!this.threadId) throw new Error("codex adapter has no thread");
 		return this.threadId;
 	}
+}
+
+/**
+ * Every turn of the thread, oldest first, each with all of its items.
+ *
+ * Paged through `thread/turns/list` rather than loaded whole by `thread/resume`,
+ * `thread/fork` or `thread/read {includeTurns:true}`. As of `codex-cli` 0.156.0
+ * each of those three drew a `deprecationNotice` -- "Full-history hydration is
+ * deprecated for paginated threads" -- on every call for a `paginated` thread,
+ * which is what `thread/start` created, while `thread/turns/list` at
+ * `itemsView: "full"` answered the same turn ids with the same items for
+ * `paginated` and `legacy` threads alike and drew nothing
+ * (docs/MANUAL_TESTING.md, OW-kelene). So one path serves both modes.
+ * `itemsView` is spelled out because its default, `summary`, kept only some of
+ * a turn's items, and the reducer's replay needs every one.
+ *
+ * Every page is fetched: transcripts are small, and loading only the recent
+ * end would be a change of its own.
+ */
+async function readTurns(client: CodexClientView, threadId: string): Promise<Turn[]> {
+	const turns: Turn[] = [];
+	let cursor: string | null = null;
+	do {
+		const page: ThreadTurnsListResponse = await client.request<ThreadTurnsListResponse>("thread/turns/list", {
+			threadId,
+			sortDirection: "asc",
+			itemsView: "full",
+			...(cursor ? { cursor } : {}),
+		} satisfies ThreadTurnsListParams);
+		turns.push(...page.data);
+		cursor = page.nextCursor;
+	} while (cursor);
+	return turns;
 }
 
 /**

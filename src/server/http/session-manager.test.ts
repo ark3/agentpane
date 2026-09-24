@@ -1615,12 +1615,10 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
 						break;
 					}
-					case "thread/read":
+					case "thread/turns/list":
 						proc.emit({
 							id,
-							result: {
-								thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }] },
-							},
+							result: { data: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }], nextCursor: null, backwardsCursor: null },
 						});
 						break;
 					case "thread/fork": {

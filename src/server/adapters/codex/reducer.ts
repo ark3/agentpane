@@ -181,9 +181,9 @@ export class CodexReducer {
 	}
 
 	/**
-	 * Cold start (D3): replay a `Thread` fetched with `thread/read
-	 * {includeTurns:true}` into a transcript. Items arrive already completed,
-	 * so this is the same path with no deltas.
+	 * Cold start (D3): replay a thread's turns, paged in with
+	 * `thread/turns/list` at `itemsView: "full"`, into a transcript. Items
+	 * arrive already completed, so this is the same path with no deltas.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		this.reset();
