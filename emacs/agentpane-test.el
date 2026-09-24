@@ -368,6 +368,28 @@ the last, above the prompt region."
                  (agentpane-test--position "Appended.")
                  (agentpane-test--position "── prompt"))))))
 
+(ert-deftest agentpane-test-notice-is-its-own-node ()
+  "A `session/notice' appends a notice node above the prompt region, drawn
+with its details and path and in its own face, and not as an `(:error ...)'."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/notice
+       (list :session ref
+             :notice '(:kind "configWarning" :message "Unknown key"
+                       :details "Remove it" :path "/c.toml:3:5")))
+      (let ((data (ewoc-data (ewoc-nth agentpane--ewoc -1))))
+        (should (plist-member data :notice))
+        (should-not (plist-member data :error)))
+      (should-not (string-search "⚠" (buffer-string)))
+      (let ((at (agentpane-test--position "ℹ Unknown key")))
+        (should (eq (get-text-property at 'face) 'agentpane-notice))
+        (should (< (agentpane-test--position "Looking.")
+                   at
+                   (agentpane-test--position "Remove it")
+                   (agentpane-test--position "/c.toml:3:5")
+                   (agentpane-test--position "── prompt")))))))
+
 (ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
   "While the session streams, the last node draws no meta line and an
 earlier one does, and the last one's appears once a status says the

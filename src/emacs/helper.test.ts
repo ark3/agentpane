@@ -381,6 +381,18 @@ describe("notifications", () => {
 		expect(request).toMatchObject({ method: "session/error", params: { session: pi, message: expect.stringContaining("item/fileChange/requestApproval") } });
 	});
 
+	it("passes a notice through as session/notice, not session/error (OW-tujiya)", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		const notice = { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml:3:5" };
+		source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "notice", session: pi, seq: 2, notice });
+		await io.until(3);
+		const [, noticed] = io.notifications();
+		expect(noticed).toEqual({ jsonrpc: "2.0", method: "session/notice", params: { session: pi, notice } });
+	});
+
 	it("carries the recorded model a resume could not restore on session/snapshot, and its clearing on session/status (OW-jitoni)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });

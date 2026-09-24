@@ -71,10 +71,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-23) ends, after one "passed" line
+;; which on Emacs 31.1 (measured 2026-09-24) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 85 tests, 85 results as expected, 0 unexpected
+;;     Ran 87 tests, 87 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -130,6 +130,10 @@ thinking share.")
 (defface agentpane-warning
   '((t :inherit warning))
   "Face for an aborted or errored turn and an errored tool call.")
+
+(defface agentpane-notice
+  '((t :inherit shadow))
+  "Face for a backend's non-fatal notice, set apart from a turn error.")
 
 (defface agentpane-prose
   '((t :inherit variable-pitch))
@@ -397,6 +401,7 @@ transcript buffer holding it, if there is one."
             ('session/node (agentpane--upsert (plist-get params :node)))
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--upsert (list :error (plist-get params :message))))
+            ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
             ('session/renamed (agentpane--rekey (plist-get params :to)))))))))
 
 ;;;; Rendering HTML through shr
@@ -969,7 +974,10 @@ consecutive assistant turns run together the way they do there; a user turn
 is the one raised surface, a tinted box with an accent bar down its left
 edge, with a blank line on either side.  Neither carries a role label.
 NODE may instead be `(:error MESSAGE)', a `session/error' drawn as a
-warning line where it arrived.  A node reading view elides draws nothing;
+warning line where it arrived, or `(:notice NOTICE)', a `session/notice'
+drawn there too, as its message with its details and path, if any, on the
+lines below, in `agentpane-notice' so it does not read as an error.  A
+node reading view elides draws nothing;
 see `agentpane--elided-p'.  Everything drawn is read-only, so only the
 prompt region below the nodes takes typing."
   (setq agentpane--fitted-width (agentpane--window-width))
@@ -978,6 +986,16 @@ prompt region below the nodes takes typing."
      ((plist-member node :error)
       (insert (propertize (concat "⚠ " (plist-get node :error)) 'face 'agentpane-warning)
               "\n"))
+     ((plist-member node :notice)
+      (let ((notice (plist-get node :notice)))
+        (insert (propertize
+                 (mapconcat #'identity
+                            (delq nil (list (concat "ℹ " (plist-get notice :message))
+                                            (plist-get notice :details)
+                                            (plist-get notice :path)))
+                            "\n  ")
+                 'face 'agentpane-notice)
+                "\n")))
      ((agentpane--elided-p node))
      (t (agentpane--pp-node node)))
     (add-text-properties start (point) '(read-only t front-sticky (read-only)))))
@@ -1082,10 +1100,10 @@ node."
 (defun agentpane--upsert (node)
   "Redraw the drawn node whose index is NODE's in place, or append NODE.
 A node's `index' is its place in the session's flat message array, so the
-match is by that and never by position; an `(:error MESSAGE)' has no index
-and always appends.  Text after the redrawn node, the prompt region
-included, moves with it, and so does a point there: at the end of the
-buffer before, at the end after.
+match is by that and never by position; an `(:error MESSAGE)' or a
+`(:notice NOTICE)' has no index and always appends.  Text after the
+redrawn node, the prompt region included, moves with it, and so does a
+point there: at the end of the buffer before, at the end after.
 A node appended with an index becomes the last, and while the session
 streams the one it follows is redrawn, since it was drawn as the pending
 turn and no longer is."

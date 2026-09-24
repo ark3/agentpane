@@ -177,6 +177,14 @@
  * - `session/error` -- `{ session, message }`. A turn error, or an agent
  *   request nothing in Emacs answers yet, as text saying what kind arrived.
  *   Not carried by a snapshot, so a re-snapshot does not replay it.
+ * - `session/notice` -- `{ session, notice }`. Something non-fatal the
+ *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
+ *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
+ *   it), `message` (string, the line to show), `details` (string or `null`,
+ *   further guidance) and `path` (string or `null`, the file it is about,
+ *   with `:LINE:COLUMN` where the backend named a place in it). As of
+ *   `codex-cli 0.156.0` only Codex sends any. Not carried by a snapshot
+ *   either.
  * - `session/renamed` -- `{ from, to }`. Re-key the buffer; a
  *   `session/snapshot` for `to` follows.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
@@ -185,6 +193,7 @@
  */
 
 import type {
+	AgentNotice,
 	AgentRequestReply,
 	BackendId,
 	CreateSessionRequest,
@@ -228,6 +237,7 @@ export type HelperNotification =
 	| { method: "session/node"; params: { session: SessionRef; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; message: string } }
+	| { method: "session/notice"; params: { session: SessionRef; notice: AgentNotice } }
 	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef } }
 	| { method: "sessions/changed"; params?: undefined };
 
