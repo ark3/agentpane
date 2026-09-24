@@ -2603,6 +2603,7 @@ Neither the `system` `init` event nor the `assistant` events on the stream carri
 **A resume of that session runs at the default.**
 After the adapter was disposed, a second `ClaudeAdapter` started on the same session with `resumeId` and `model: "sonnet"`, no turn.
 Its `get_settings` read `applied.effort: "high"`, so the chosen `low` did not survive the process, while the two hydrated assistant messages carried `effort: "low"` from their store lines.
+Agentpane no longer resumes at that default: it now spawns a resume with `--effort` at the level the store records, as the OW-nabano section below records.
 
 **Not established.**
 Whether `perTurnEffort` ever differs from `effort` on a store line: the owner's sessions carry both equal, and this run's carried `null` beside `low`.
@@ -2638,3 +2639,39 @@ Because `default` is only named when it resolves to the model in force, a fork s
 **Not established.**
 Nothing here went through the browser or Emacs; both read the session's `model` from the same status the adapter's state feeds.
 Whether `default`'s resolved id follows a change to the account's recommended model on a process already running was not measured.
+
+## What model and effort a Claude Code resume and fork run at, and how the effort is put back (OW-nabano)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-nabano` worktree cut at `d427c35`.
+No user message was written to any child: every spawn was driven by control requests alone and exited when its stdin closed.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages ...`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+The driver was a throwaway Python script that printed only the model and effort fields of `get_settings` and the token counts of `get_context_usage`; nothing was saved.
+The owner's `~/.claude/settings.json` named `model: "opus[1m]"` and no `effortLevel`, and its sha256 was the same after the runs as before.
+
+Two store files were copied into the worktree's project directory and resumed from the worktree, so neither original was opened for writing, and both originals' sha256 matched afterwards:
+`ea370c4e-...`, the OW-hokaye session whose two assistant lines record `model: "claude-sonnet-5"` and `effort: "low"`, and the owner's `00a72d03-...`, whose 172 assistant lines record `claude-opus-5-5` at `max`.
+The resumes appended lines to the copies, as OW-hokaye found; the copies were deleted afterwards, and no store file appeared for any of the fork or fresh session ids.
+
+**The model comes back on its own.**
+`--resume ea370c4e-...` with no `--model` read `applied.model: "claude-sonnet-5"`, while `effective.model` still read the settings' `opus[1m]` and a fresh spawn with no `--model` read `claude-opus-5-5[1m]`.
+A `--resume ... --resume-session-at <last assistant uuid> --fork-session --session-id <new>` spawn with no `--model` read `claude-sonnet-5` too.
+`--resume` with `--model claude-sonnet-5`, the id as the store line writes it, read the same.
+The owner's copy, resumed with no `--model`, read `claude-opus-5-5[1m]`, which the settings would have named anyway; with `--model claude-opus-5-5` it read `claude-opus-5-5`, and `get_context_usage` reported 246379 of `maxTokens: 1000000` both ways.
+
+**The effort does not, and both ways back hold it, `max` included.**
+Every spawn without an effort read `applied.effort: "high"`: the sonnet copy resumed with and without `--model`, its fork, and the owner's copy resumed with no `--model`.
+`--effort low` on a `--resume` read `low`, and on the `--fork-session` spawn read `low`.
+`--effort max` on a `--resume` read `max`, on the sonnet copy and on the owner's copy with `--model claude-opus-5-5`, though `max` appeared in no entry of `sources` and not in `effective`.
+`apply_flag_settings` with `low` or `max` on a resumed process read the same, under a `flagSettings` source that named `low` and, for `max`, named no level.
+The spawn flag lands in no settings layer at all: after `--effort low`, `effective.effortLevel` read `null` and no `flagSettings` source existed.
+`--effort bogus` did not fail the spawn: `applied.effort` read `high`, the same accept-and-ignore OW-hokaye found for `apply_flag_settings`.
+After `--effort low`, `set_model` to `haiku` read `null` and `set_model` back to `claude-sonnet-5` read `low` again; after `apply_flag_settings` with `max`, the same round trip read `max` again.
+After `--effort low`, `apply_flag_settings` with `high` read `high`, so a later choice still overrides the spawn flag.
+
+**What the adapter makes of it.**
+`ClaudeAdapter` spawns a resume, and a fork at a real entry, with `--effort` at the level the last hydrated assistant message a model ran records -- for a fork, the kept prefix's, and never a `<synthetic>` notice the CLI wrote itself -- and still passes a model id as `--model` (`src/server/adapters/claude/adapter.ts`, module doc).
+The start read of `get_settings` stays the report of what is in force.
+
+**Not established.**
+Whether the model the CLI restores on its own is the store line's id or something it records elsewhere: on the owner's copy the settings' model and the stored one differ only by `[1m]`, so that resume could not tell them apart.
+No turn ran at a restored effort, so nothing here reads `CLAUDE_EFFORT` or a new store line after a resume; OW-hokaye's run is what ties `applied.effort` to the effort a turn runs at.

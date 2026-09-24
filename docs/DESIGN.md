@@ -795,7 +795,7 @@ What each restores on a resume differs, measured for effort on 2026-09-23 (`docs
 | Codex (`codex-cli 0.156.0`) | the default, not the chosen level |
 | Claude Code (`claude 2.1.280`) | the default, not the chosen level |
 
-What each restores of the model has not been measured for any of the three.
+What each restores of the model has been measured only for Claude Code, and only narrowly: as of `claude 2.1.280`, a `--resume` of one sonnet session, and a `--fork-session` spawn of it cut at its last assistant line, each with no `--model`, put the model the store recorded in force over the settings' `opus[1m]`; the owner's opus session, resumed the same way, could not tell the store's model from the settings' (`docs/MANUAL_TESTING.md`, OW-nabano).
 
 **The decision.**
 On a resume and on a fork, a conversation runs at the model and effort its store's last turn recorded, and agentpane re-asserts them wherever the backend does not restore them itself.
