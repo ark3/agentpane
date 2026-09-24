@@ -3110,11 +3110,12 @@ Resuming the third copy with `--thinking off` did the same at `off`.
 A bare resume of each read `high`, the level recorded before the override, so the override governed only the process it was given to and is on no record once that process ends.
 
 **The source agrees.**
-`createAgentSession` in `dist/core/sdk.js` restores the branch's last recorded level (line 119), clamps it to the model it resolved (line 138), and appends a `thinking_level_change` only when the branch has none (line 262); given `options.thinkingLevel`, which `dist/main.js` sets from a `--model` suffix (line 378) or from `--thinking` (line 405), it takes that level instead and appends nothing either.
+`createAgentSession` in `dist/core/sdk.js` restores the branch's last recorded level (line 119), clamps it to the model it resolved (line 138), and appends a `thinking_level_change` only when the branch has none (line 262); given `options.thinkingLevel`, which `dist/main.js` sets from a `--model` suffix (line 377) or from `--thinking` (line 405), it takes that level instead and appends nothing either.
 `dist/main.js` then calls `setThinkingLevel` with the level already in force (lines 670 to 672), and `setThinkingLevel` in `dist/core/agent-session.js` appends only when the level changes (line 1761), which it does not.
 
 **What agentpane makes of it.**
 A clamp is recoverable, because Pi clamps a recorded level to a model the same way on every resume, and a level Pi does record is already clamped to the model then in force.
+Both hold only while the model's catalogue entry is unchanged: this model's levels changed between `pi 0.85.1` and `0.87.1` ("Pi arrives on the home server" and OW-ruzuhu's section), so a turn recorded at a level its model has since dropped, such as `xhigh` on this one, now reloads labelled with the level that clamps to, `max`.
 So `withLoadedEfforts` now clamps each recorded level to its turn's model, found in the `get_available_models` catalogue that `hydrateMessages` in `src/server/adapters/pi/process.ts` fetches alongside `get_messages` and `get_entries`, with `clampThinkingLevel` in `src/server/adapters/pi/protocol.ts` transcribing `pi-ai`'s.
 A turn whose model has left the catalogue keeps the level recorded.
 The override is not recoverable: the level lives only in the command line of a process that is gone, and agentpane's resume spawn carries no `--model` (OW-pubulu), so the exposure is a turn driven from the `pi` CLI under an override, which reloads in agentpane labelled with the level recorded before it.

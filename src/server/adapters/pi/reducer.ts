@@ -213,8 +213,12 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * clamp changed the level, and one given `--model <ref>:<level>` or
  * `--thinking`, each appended nothing (docs/MANUAL_TESTING.md, OW-lehita).
  * The clamp recovers the first, since Pi clamps the same way each time; a
- * level Pi records is already clamped, so for it the clamp changes nothing. A
- * turn whose model has left the catalogue keeps the level recorded. The
+ * level Pi records is already clamped, so for it the clamp changes nothing.
+ * Both hold only while the model's catalogue entry is the one the turn ran
+ * under: the pinned model's levels changed between `pi 0.85.1` and `0.87.1`
+ * (docs/MANUAL_TESTING.md, OW-ruzuhu), so a turn run at a level since dropped
+ * is named at the level its model clamps it to now. A turn whose model has
+ * left the catalogue keeps the level recorded. The
  * override is recoverable nowhere: the level named on the command line is on
  * no record, so a turn driven under one, from the `pi` CLI (agentpane's
  * resume spawn carries no `--model`, OW-pubulu), reloads with the level

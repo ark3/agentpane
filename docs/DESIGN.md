@@ -812,7 +812,7 @@ What each restores on a resume differs, measured for effort on 2026-09-23 (`docs
 
 | | Effort after a resume |
 |---|---|
-| Pi (`pi 0.87.1`) | the level the session file last recorded |
+| Pi (`pi 0.87.1`) | the level the session file last recorded, clamped to the model the resume resolves, and recorded again only if the file held none (OW-lehita) |
 | Codex (`codex-cli 0.156.0`) | the level its latest settings record names, which is the chosen one unless a resume that named a model reset it to the config's; a fork takes the config's |
 | Claude Code (`claude 2.1.280`) | the default, not the chosen level |
 
