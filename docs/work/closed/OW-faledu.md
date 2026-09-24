@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A resumed Claude Code session names its store's resolved model id, and a fork before its first message spawns with that id, dropping the [1m] variant
@@ -27,3 +28,12 @@ Load-bearing: a session-start fork of a resumed session runs the model the paren
 
 A test in `src/server/adapters/claude/adapter.test.ts`, red first, shows a resumed session whose `get_settings` answers `applied.model: "claude-opus-5-5[1m]"` forked at `CLAUDE_FORK_SESSION_START` spawning with a model that puts `claude-opus-5-5[1m]` in force (or with none, if a measurement shows the CLI then runs the settings' model and that is the parent's), and `getState().model` after the resume naming what the test decides the label is.
 Any live measurement it needs runs with no turn off haiku (`AGENTS.md`, "Evidence") and goes in `docs/MANUAL_TESTING.md`.
+
+## Close note
+
+Measured on the home server 2026-09-23, `claude 2.1.280`, no turn, owner settings `opus[1m]`: a fresh `--model claude-opus-5-5` puts `claude-opus-5-5` in force, while `opus[1m]` and `claude-opus-5-5[1m]` each put `claude-opus-5-5[1m]` in force under either settings model; a resumed copy of a store naming `claude-opus-5-5` reads `applied.model: "claude-opus-5-5[1m]"`, and `initialize` answers the same list fresh or resumed.
+`ClaudeAdapter` in `src/server/adapters/claude/adapter.ts` still names the stored model first on a resume and a fork at an entry, then `readSettings` renames it by `applied.model`: the listed id whose `resolvedModel` it is, never `default` (the account's recommended model, OW-kakide), or `applied.model` itself where none resolves to it; a model chosen at start or by `setModel` is never renamed.
+So a resumed opus session is labelled `opus[1m]`, and `fork()` hands that to a session-start fork, whose fresh spawn keeps the variant.
+Five tests in `src/server/adapters/claude/adapter.test.ts`; three failed against the old code (the fork spawned `claude-opus-5-5`, labels `claude-opus-5-5`, `claude-sonnet-5`, `m`); `bun run check` passes on main.
+Evidence: `docs/MANUAL_TESTING.md`, "What `--model` puts a resumed Claude Code session's `[1m]` variant back in force (OW-faledu)"; D23 and the module docblock updated.
+Left open: the `init` event a turn brings still overwrites the model with its own id, unmeasured for a `[1m]` turn (OW-lizupu), and a session-start fork carries the parent's model but not its effort (OW-difowo).
