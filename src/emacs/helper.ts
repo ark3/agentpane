@@ -98,7 +98,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const notifySnapshot = (view: SessionView): void => {
 		notify({
 			method: "session/snapshot",
-			params: { ...statusOf(view), nodes: projectTranscript(view.messages, view.isStreaming, render) },
+			params: {
+				...statusOf(view),
+				nodes: projectTranscript(view.messages, view.isStreaming, render),
+				notices: view.notices,
+			},
 		});
 	};
 

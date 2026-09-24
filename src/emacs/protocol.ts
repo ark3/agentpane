@@ -168,9 +168,13 @@
  * `sessions/changed`:
  *
  * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model,
- *   effort, unrestoredModel }`.
+ *   effort, unrestoredModel, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
- *   after `sessions/attach`, and how a missed event is healed.
+ *   after `sessions/attach`, and how a missed event is healed. `notices`
+ *   (array, always, possibly empty) is every `session/notice` the helper has
+ *   passed on for the session, oldest first, each the `notice` it carried;
+ *   the buffer redraws them after `nodes`, since a snapshot arrives at every
+ *   Codex turn's start and end and would otherwise wipe them (OW-tujiya).
  * - `session/node` -- `{ session, node }`. One node to replace by `index`.
  * - `session/status` -- `{ session, isStreaming, compaction, model, effort,
  *   unrestoredModel }`.
@@ -182,9 +186,9 @@
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
  *   it), `message` (string, the line to show), `details` (string or `null`,
  *   further guidance) and `path` (string or `null`, the file it is about,
- *   with `:LINE:COLUMN` where the backend named a place in it). As of
- *   `codex-cli 0.156.0` only Codex sends any. Not carried by a snapshot
- *   either.
+ *   with `:LINE:COLUMN` where the backend named a place in it). Only the
+ *   Codex adapter produces any. Unlike `session/error`, every later
+ *   `session/snapshot` carries it again, in `notices`.
  * - `session/renamed` -- `{ from, to }`. Re-key the buffer; a
  *   `session/snapshot` for `to` follows.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
@@ -233,7 +237,7 @@ export interface SessionStatusParams {
 }
 
 export type HelperNotification =
-	| { method: "session/snapshot"; params: SessionStatusParams & { nodes: TranscriptNode[] } }
+	| { method: "session/snapshot"; params: SessionStatusParams & { nodes: TranscriptNode[]; notices: AgentNotice[] } }
 	| { method: "session/node"; params: { session: SessionRef; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; message: string } }

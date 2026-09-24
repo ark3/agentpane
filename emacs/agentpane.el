@@ -74,7 +74,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-24) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 87 tests, 87 results as expected, 0 unexpected
+;;     Ran 88 tests, 88 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -397,7 +397,8 @@ transcript buffer holding it, if there is one."
              (agentpane--keeping-points
               (lambda ()
                 (agentpane--draw (plist-get params :nodes)
-                                 (agentpane--transcript-header agentpane--session)))))
+                                 (agentpane--transcript-header agentpane--session)
+                                 (plist-get params :notices)))))
             ('session/node (agentpane--upsert (plist-get params :node)))
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--upsert (list :error (plist-get params :message))))
@@ -1062,11 +1063,14 @@ label between two rules, naming the context size it folded when above 0."
           (add-face-text-property body-start (point) 'agentpane-user-box t))))
     (when userp (insert "\n"))))
 
-(defun agentpane--draw (nodes &optional header)
+(defun agentpane--draw (nodes &optional header notices)
   "Draw NODES, a sequence of node plists, as this buffer's ewoc under HEADER.
 Replaces every node the buffer held and leaves the prompt region below them
 as it was; expanded folds survive the redraw, since they are keyed by node
-index and part ordinal rather than by position.  Point goes to the first
+index and part ordinal rather than by position.  NOTICES, the sequence of
+notices a `session/snapshot' carries, are drawn after NODES as
+`(:notice NOTICE)' nodes, so a snapshot keeps the notices the session has
+had; an `(:error MESSAGE)' node is not kept.  Point goes to the first
 node."
   (agentpane--above-prompt
    (lambda ()
@@ -1084,6 +1088,8 @@ node."
            (and (> (length nodes) 0) (plist-get (elt nodes (1- (length nodes))) :index)))
      (seq-doseq (node nodes)
        (ewoc-enter-last agentpane--ewoc node))
+     (seq-doseq (notice notices)
+       (ewoc-enter-last agentpane--ewoc (list :notice notice)))
      (goto-char (point-min))
      (when (ewoc-nth agentpane--ewoc 0)
        (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))

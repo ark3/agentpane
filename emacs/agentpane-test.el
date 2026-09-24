@@ -390,6 +390,23 @@ with its details and path and in its own face, and not as an `(:error ...)'."
                    (agentpane-test--position "/c.toml:3:5")
                    (agentpane-test--position "── prompt")))))))
 
+(ert-deftest agentpane-test-notice-survives-a-snapshot ()
+  "A `session/snapshot' carrying the session's notices, as the one a Codex
+turn's end sends does, redraws them as notice nodes after its nodes."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (notice '(:kind "warning" :message "Fallback metadata" :details nil :path nil)))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification nil 'session/notice (list :session ref :notice notice))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+             :notices (vector notice)))
+      (should (equal (agentpane-test--indices) '(0 1 nil)))
+      (should (equal (ewoc-data (ewoc-nth agentpane--ewoc -1)) (list :notice notice)))
+      (should (< (agentpane-test--position "Looking.")
+                 (agentpane-test--position "ℹ Fallback metadata")
+                 (agentpane-test--position "── prompt"))))))
+
 (ert-deftest agentpane-test-meta-waits-for-the-streaming-turn-to-end ()
   "While the session streams, the last node draws no meta line and an
 earlier one does, and the last one's appears once a status says the

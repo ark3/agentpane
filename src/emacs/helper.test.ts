@@ -276,7 +276,7 @@ describe("notifications", () => {
 		source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(2);
 		expect(io.notifications()).toEqual([
-			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null } },
+			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, notices: [] } },
 		]);
 
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi } });
@@ -393,6 +393,21 @@ describe("notifications", () => {
 		expect(noticed).toEqual({ jsonrpc: "2.0", method: "session/notice", params: { session: pi, notice } });
 	});
 
+	it("carries the notices a session already has on every later session/snapshot (OW-tujiya)", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		const notice = { kind: "warning", message: "fallback metadata", details: null, path: null };
+		source.emit({ type: "snapshot", session: pi, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "notice", session: pi, seq: 2, notice });
+		// A Codex turn's start or end re-snapshots the session (`#onUpdate` with no index).
+		source.emit({ type: "snapshot", session: pi, seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(4);
+		const [first, , second] = io.notifications();
+		expect(first).toMatchObject({ method: "session/snapshot", params: { notices: [] } });
+		expect(second).toMatchObject({ method: "session/snapshot", params: { session: pi, isStreaming: true, notices: [notice] } });
+	});
+
 	it("carries the recorded model a resume could not restore on session/snapshot, and its clearing on session/status (OW-jitoni)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
@@ -404,7 +419,7 @@ describe("notifications", () => {
 		expect(snapshot).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded" },
+			params: { session: pi, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded", notices: [] },
 		});
 		expect(status).toEqual({
 			jsonrpc: "2.0",
