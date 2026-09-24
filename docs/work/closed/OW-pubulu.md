@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A resumed session spawns with no --model, so agentpane stops asserting the model it was given
@@ -43,3 +44,12 @@ With `--session` alone, which is today's resume spawn, `get_state` read `off`: a
 `--model` without a suffix also kept `off`, but `--model openrouter/deepseek/deepseek-v4.1-flash:high` read `high`, so the suffix overrides the session's own level.
 That constrains the fix here: a resume spawn that restores the model must pass it **without** the `:<level>` suffix, or it silently undoes the effort the user chose through OW-ruzuhu's `set_thinking_level`.
 The model axis is still unmeasured.
+
+## Close note
+
+Measured on the home server 2026-09-23, `pi 0.87.1`, with a throwaway `PI_CODING_AGENT_DIR`: after one turn on `openrouter/deepseek/deepseek-v4.1-flash:high`, the settings were rewritten to default to `google/gemini-2.5-flash-lite` at other levels, and `pi --mode rpc --session <file>` with no `--model` read back the recorded deepseek model at `high` via `get_state`.
+An unsuffixed `--model` naming another model replaces the recorded model and keeps the level; a suffixed one overrides the level (OW-ruzuhu).
+`createAgentSession` in Pi's `dist/core/sdk.js` agrees: the session's model is restored before the settings default is consulted, unless it has left the catalogue or lost its auth (filed as OW-zujofa).
+So the resume spawn that carries no `--model` already meets D23, and no behaviour changed.
+Landed: a note at `#start`'s spawn in `src/server/http/session-manager.ts` and on `PiSpawnOptions.model`, a `session-manager.test.ts` lifecycle test pinning that a closed and re-attached Pi session starts with `resumeId` and no model (red when `close()` was made to carry the model back through the store path), `docs/MANUAL_TESTING.md` "What model a Pi resume runs on (OW-pubulu)", and D23 updated to state Pi's model axis.
+`bun run check` passes; an adversarial reader found no code defect and four doc wordings still framing the missing flag as a loss, fixed before landing.
