@@ -2962,3 +2962,41 @@ On the sonnet session the replacement is a no-op: the model given at start, and 
 **Not established.**
 No turn ran on opus, so that `init` names `claude-opus-5-5[1m]` on an `opus[1m]` session is the sonnet relation applied to it, not a measurement.
 Nothing here went through agentpane's server, the browser or Emacs.
+
+## What a Codex fork at the first user message keeps, and what could keep nothing (OW-hojefo)
+
+Run on the home server 2026-09-23, **`codex-cli 0.156.0`**, from the `card/OW-hojefo` worktree cut at `f48224f`.
+It was measured on one bare `codex app-server` driven with the adapter's own request shapes, `sandbox: "danger-full-access"` and `approvalPolicy: "never"` on every thread-creation request, by a throwaway Python script that was not kept; it reused `AppServer` from `resources/probes/codex_fork_same_process_probe.py` and read the rollouts the way `resources/probes/codex_fork_history_probe.py` does.
+Three turns ran in all, each naming `model: "gpt-5.6-luna"` and `effort: "low"`, each a one-word reply.
+The process ran in a temporary `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, with the copy's `model` changed to `gpt-5.6-terra` and its `model_reasoning_effort` to `high` as OW-sayaju's was, in a throwaway workspace beside it; both were removed afterwards.
+The question was OW-sayaju's open one: its one-turn parent could not tell "a fork with no `lastTurnId` keeps everything" from "keeps the first turn".
+
+**The parent.**
+`thread/start` naming `gpt-5.6-luna` answered it at `high`, and two turns ran, replying `ONE` and `TWO`.
+Its rollout held 25 lines and 45382 bytes, the first turn ending at line 13 with its `task_complete` and the second at line 25 with its own.
+
+**A `thread/fork` with no `lastTurnId` keeps the whole parent.**
+`thread/fork` naming only `threadId`, `cwd` and the two policies, the request the adapter sent at the first fork point, answered a thread whose `turns` held both of the parent's, `ONE` and `TWO`, and `thread/read` of the fork answered the same two.
+The fork's rollout held two lines, its `session_meta` and a `thread_settings_applied` naming `gpt-5.6-terra` at `high`.
+Its `session_meta` carried `forked_from_ordinal_exclusive: 25` and `history_base: {end_ordinal_exclusive: 25, end_byte_offset: 45382}` naming the parent: the base is the parent's whole file, 25 lines and its every byte.
+The control, `thread/fork` with `lastTurnId` naming the first turn, answered one turn and a base at ordinal 13, byte 33569, as OW-buligi's reading says.
+So the adapter's fork at the first user message carried that message and everything after it, where the other backends' forks at a message are exclusive of it.
+
+**No `thread/fork` keeps nothing.**
+`lastTurnId: ""` was refused with `-32600 turn not found: ` and a well-formed UUID naming no turn with `-32600 turn not found: <uuid>`.
+`codex app-server generate-ts` from this build names no other field that cuts history: its `ThreadForkParams` differs from the bindings under `resources/codex-protocol/` only by an `excludeTurns` flag, which leaves the response's `thread.turns` unpopulated, not the fork.
+
+**A fresh thread is the fork that keeps nothing, and it has to be spawned, not borrowed.**
+On the same app-server, `thread/start` naming `gpt-5.6-luna` answered it at the config's `high`, and no rollout existed for it.
+`thread/resume` of that thread, the request a fork's borrower starts with, was refused with `-32600 no rollout found for thread id <id>` on the app-server that had just started it, with and without `model`.
+A turn on it naming `gpt-5.6-luna` at `low` replied `THREE`, and only then did its rollout appear, 13 lines with no `forked_from_id` or `history_base` and one `turn_context` recording `gpt-5.6-luna` at `low`; `thread/read` answered that one turn.
+
+**What the adapter makes of it.**
+`CodexAdapter.fork` at the first fork point now sends no request: it hands back a recipe, `{ cwd, model, forkOf: { parentId, entryId, effort } }` under a `virtual:` placeholder ref, which the fork's own adapter starts as a `thread/start` in its own app-server, the way Claude Code's session-start fork is spawned.
+The attach renames the placeholder to the thread `thread/start` names, as a D9 virtual session's is.
+The model rides `thread/start` and every `turn/start`, and the effort, which `thread/start` would have answered from the config, rides every `turn/start` from `forkOf.effort` (D23).
+`src/server/adapters/codex/adapter.test.ts` pins the recipe and the start, and `src/server/http/session-manager.test.ts` pins the attach spawning a second app-server and renaming the fork; all three were red before the change.
+
+**Not established.**
+Nothing here went through `sbox`, agentpane's server, the browser or Emacs, and no no-turn fork was driven end to end through agentpane.
+Whether a fresh thread closed before its first turn leaves anything behind was not read: it has no rollout to leave.
