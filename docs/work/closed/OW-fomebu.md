@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # Codex warning notifications are dropped, so neither client says a turn ran on fallback model metadata
@@ -15,3 +16,9 @@ A fresh live run naming an unknown model needs the owner's leave: the exception 
 
 Surfacing a warning is a user-facing capability, so under "Both clients" in `AGENTS.md` it lands in the browser and the Emacs client together, or goes onto both wires with a card per client.
 Done when the decision — which of the four methods surface, if any, and as what (the existing `error` effect, a new effect, or a transcript node) — is recorded in the docblock of `CodexReducer`'s `default` branch or `docs/DESIGN.md`, and, where it says to surface one, the cards that build it are filed.
+
+## Close note
+
+Decided by the owner on 2026-09-24: agentpane surfaces all four of Codex's warning notifications -- `warning`, `guardianWarning`, `deprecationNotice` and `configWarning` -- as a non-fatal notice, distinct from the error banner, in the browser and in `agentpane-mode`.
+Deferring until one was seen was considered and rejected, because nothing could show one: the reducer's `default` branch drops them without a trace, and across the home server's 119 Codex rollouts on 2026-09-24 no warning or error event type was ever stored, so a rollout cannot serve as the tripwire either.
+The work is OW-tujiya, one card landing the notice in both clients as `AGENTS.md`, "Both clients", allows; it also rewrites the `default` branch's comment in `CodexReducer`, which is where this card asked for the decision to be recorded.
