@@ -123,9 +123,11 @@ export interface AgentRequest {
 
 /**
  * Something the backend wants the human to know that is not a failure and not
- * transcript state (OW-tujiya): as of `codex-cli 0.156.0`, Codex's `warning`,
- * `guardianWarning`, `deprecationNotice` and `configWarning` notifications,
- * which Codex keeps out of its rollouts, so nothing reveals one after the fact.
+ * transcript state (OW-tujiya): Codex's `warning`, `guardianWarning`,
+ * `deprecationNotice` and `configWarning` notifications. On 2026-09-24, with
+ * `codex-cli 0.156.0` installed, none of the home server's 119 rollouts held
+ * a warning or error event type, so a rollout is not known to reveal one after
+ * the fact.
  *
  * `kind` is the backend's own method name, not normalised, as for
  * `AgentRequest`. `message` is the one line to show; `details` is the

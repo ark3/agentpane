@@ -183,8 +183,8 @@ export interface BackendAdapter {
 	/**
 	 * Fires when the backend says something non-fatal the human should see
 	 * (OW-tujiya). Never an error: nothing here says a turn failed, so it
-	 * must not ride `onError`. Optional because only Codex sends any as of
-	 * `codex-cli 0.156.0`; an adapter whose backend has none leaves it out.
+	 * must not ride `onError`. Optional because only the Codex adapter
+	 * implements it; the others leave it out.
 	 */
 	onNotice?(cb: (notice: AgentNotice) => void): Unsubscribe;
 

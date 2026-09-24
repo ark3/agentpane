@@ -1333,9 +1333,10 @@ describe("ServerRequest issuer thread identification (OW-futewo)", () => {
 });
 
 describe("warning notifications (OW-tujiya)", () => {
-	// The one shape observed live is a `warning` naming the thread whose
-	// `turn/start` drew it (`codex-cli 0.156.0`, docs/MANUAL_TESTING.md,
-	// OW-wawuzu); the other three are read from `resources/codex-protocol/v2/`.
+	// The only one observed live is a `warning` a `turn/start` drew
+	// (`codex-cli 0.156.0`, docs/MANUAL_TESTING.md, OW-wawuzu), which records
+	// its message but not its `threadId`; every shape here, that one's
+	// included, is read from `resources/codex-protocol/v2/`.
 	const reducer = () => {
 		const r = new CodexReducer({ now: () => 1 });
 		r.setIdentity({ threadId: "t" });

@@ -22,8 +22,10 @@ export interface SessionView {
 	requests: AgentRequest[];
 	/**
 	 * The backend's non-fatal notices, oldest first (OW-tujiya). Kept apart
-	 * from `error` on purpose: nothing that clears an error clears these, and
-	 * like `error` and `requests` no snapshot carries them.
+	 * from `error` on purpose: nothing that clears an error clears these. Like
+	 * `error` and `requests`, no `snapshot` event carries them, so the snapshot
+	 * arm keeps them; the Emacs helper reads them from here onto its own
+	 * `session/snapshot`.
 	 */
 	notices: AgentNotice[];
 }
@@ -211,17 +213,18 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// too: it is followed immediately by `broadcastSnapshot(to)` (`broadcaster.ts`),
 	// so the entry it builds is filled a moment later rather than left hollow.
 	//
-	// These four arms are not, however, unreachable before that introduction, and
+	// These five arms are not, however, unreachable before that introduction, and
 	// what they drop there is worth naming. `#start` subscribes `onUpdate`,
-	// `onRequest` and `onError` before it awaits `adapter.start(...)`, and
-	// `#adoptRef(session, "fork")` re-keys a live Pi container onto the fork's ref
-	// with no snapshot behind it (D20, OW-suhoto), so all four can fan out under a
-	// key no client holds a view of. For `upsert` and `status` that costs nothing:
-	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and
-	// `model` wholesale. For `error` and `requests` it is a real loss, because no
-	// snapshot carries either field -- but that loss is the pre-existing one, not a
-	// new class: neither field survives an SSE reconnect or reaches a client that
-	// connects later, and `AttachSessionResponse` does not carry them either. Closing
+	// `onRequest`, `onError` and `onNotice` before it awaits `adapter.start(...)`,
+	// and `#adoptRef(session, "fork")` re-keys a live Pi container onto the fork's
+	// ref with no snapshot behind it (D20, OW-suhoto), so all five can fan out
+	// under a key no client holds a view of. For `upsert` and `status` that costs
+	// nothing: the snapshot that follows carries `messages`, `isStreaming`,
+	// `compaction` and `model` wholesale. For `error`, `requests` and `notices` it
+	// is a real loss, because no snapshot sent to the browser carries any of them
+	// -- but that loss is the pre-existing one, not a new class: none of them
+	// survives an SSE reconnect or reaches a client that connects later, and
+	// `AttachSessionResponse` does not carry them either. Closing
 	// it means putting them in the snapshot or publishing the adapter earlier, on the
 	// server (OW-bipume); it does not mean letting an event resurrect a dead view
 	// here, which costs more than it buys -- a resurrecting `error` lights the alert
