@@ -2124,10 +2124,12 @@ stayed hidden, holding the session.
 The efforts offered are the model's just chosen, since the status naming
 it may not have arrived, or with an empty choice those of the model the
 session already has, if a status has named it (OW-vozaku).  The effort is
-sent after the model, and holds whichever the server takes first: it is
-one the new model lists, and the Codex adapter's `setModel' replaces only
-an effort the new model does not list (src/server/adapters/codex/adapter.ts
-at 9850a05, read, not run live)."
+sent after the model without awaiting its reply, and the server checks it
+against the model the session holds when it arrives, refusing one that
+model does not list (OW-tewofe).  The effort's minibuffer read in between
+all but ensures the model is taken first; an effort that overtook it would
+be checked against the old model, and refused in the echo area if that
+one does not list it."
   (interactive (list (completing-read "Backend: " '("codex" "claude" "pi") nil t)))
   (let* ((cwd (agentpane--current-cwd))
          (ref (jsonrpc-request (agentpane--connection) 'sessions/create

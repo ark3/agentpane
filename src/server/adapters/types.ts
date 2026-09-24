@@ -176,9 +176,11 @@ export interface BackendAdapter {
 	setModel(model: string): Promise<void>;
 	/**
 	 * Choose the reasoning effort from the next turn on, one of the current
-	 * model's `ModelInfo.efforts`. An adapter whose `listModels` offers no
-	 * efforts rejects. Like `setModel`, nothing here refuses it after the first
-	 * prompt; before-the-first-prompt-only is the clients' rule.
+	 * model's `ModelInfo.efforts`. The effort route checks that against
+	 * `getState().model` and `listModels` before calling this, and refuses
+	 * any other, so an adapter takes what it is given (OW-tewofe). Like
+	 * `setModel`, nothing here refuses it after the first prompt;
+	 * before-the-first-prompt-only is the clients' rule.
 	 */
 	setEffort(effort: string): Promise<void>;
 	listModels(): Promise<ModelInfo[]>;

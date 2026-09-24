@@ -376,6 +376,22 @@ export function createApp(deps: AppDeps): App {
 					return error(400, "bad_request", "effort is required");
 				}
 				const adapter = await sessions.attach(ref);
+				// Checked here, not trusted to the backend: as of `claude 2.1.280`
+				// and `pi 0.87.1` each answered success for a level the model lacks,
+				// and Codex stores any string for the next turn (OW-tewofe). The
+				// model is matched by id, as both clients match it to offer efforts,
+				// so a model that is null or not listed offers none.
+				const { model } = adapter.getState();
+				const listed = (await adapter.listModels()).find((info) => info.id === model);
+				const efforts = listed?.efforts.map((option) => option.id) ?? [];
+				if (!efforts.includes(body.value.effort)) {
+					const offered = efforts.length > 0 ? `one of ${efforts.join(", ")}` : "none";
+					return error(
+						400,
+						"bad_request",
+						`effort "${body.value.effort}" is not one the session's model (${model ?? "not yet known"}) lists; it offers ${offered}`,
+					);
+				}
 				await adapter.setEffort(body.value.effort);
 				return noContent();
 			}

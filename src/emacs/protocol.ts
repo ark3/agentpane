@@ -145,8 +145,9 @@
  *   where that is `null` to whatever the backend then picks, which the
  *   `session/status` that follows reports.
  * - `sessions/setEffort` -- `{ session, effort }` -> `null`. `effort` is one of
- *   the session's model's `efforts` ids, taking effect from the next turn; a
- *   backend that lists none refuses it.
+ *   the session's model's `efforts` ids, taking effect from the next turn;
+ *   the server refuses any other with a 400, and any at all while that
+ *   model lists none or is not yet known.
  * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
  * - `requests/reply` -- `{ requestId, response }` -> `null`.

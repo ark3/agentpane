@@ -824,9 +824,39 @@ describe("fork, model, and enumeration routes", () => {
 			},
 		]);
 
+		expect((await post(ROUTES.model(CODEX_SESSION), { model: "cx-1" })).status).toBe(204);
 		expect((await post(ROUTES.effort(CODEX_SESSION), { effort: "low" })).status).toBe(204);
 		expect(withEfforts.forRef(CODEX_SESSION)?.effort).toBe("low");
 		expect((await post(ROUTES.effort(CODEX_SESSION), {})).status).toBe(400);
+	});
+
+	/**
+	 * Every backend took any string: Claude Code and Pi answered success and
+	 * applied something else or nothing, and Codex stored it for the next
+	 * turn, so the route answered 204 for a choice no client offers.
+	 */
+	it("refuses an effort the session's model does not list, before the adapter sees it (OW-tewofe)", async () => {
+		const factory = new FakeAdapterFactory({
+			models: [
+				{ id: "cx-1", label: "Codex One", efforts: [{ id: "low", description: "Fast" }], defaultEffort: "low" },
+				{ id: "cx-plain", label: "Codex Plain", efforts: [], defaultEffort: null },
+			],
+		});
+		app = createApp({ index, adapters: { pi, codex: factory } });
+
+		// No model known yet: the clients offer no effort then, and neither does this.
+		const unknown = await post(ROUTES.effort(CODEX_SESSION), { effort: "low" });
+		expect(unknown.status).toBe(400);
+		expect((await unknown.json()) as ApiError).toMatchObject({ error: "bad_request" });
+
+		await post(ROUTES.model(CODEX_SESSION), { model: "cx-1" });
+		const unlisted = await post(ROUTES.effort(CODEX_SESSION), { effort: "extreme" });
+		expect(unlisted.status).toBe(400);
+		expect((await unlisted.json()) as ApiError).toMatchObject({ error: "bad_request" });
+
+		await post(ROUTES.model(CODEX_SESSION), { model: "cx-plain" });
+		expect((await post(ROUTES.effort(CODEX_SESSION), { effort: "low" })).status).toBe(400);
+		expect(factory.forRef(CODEX_SESSION)?.effort).toBeUndefined();
 	});
 
 	it("lists models per backend, and merged when unfiltered", async () => {

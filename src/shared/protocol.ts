@@ -306,7 +306,9 @@ export interface SetModelRequest {
 
 /**
  * POST /api/sessions/:backend/:id/effort -- one of the model's `efforts` ids,
- * taking effect from the next turn. A backend that lists no efforts rejects it.
+ * taking effect from the next turn. Any other answers 400 `bad_request`, as
+ * does any effort while the session's model lists none or is not in the
+ * listing, and never reaches the backend (OW-tewofe).
  */
 export interface SetEffortRequest {
 	effort: string;
