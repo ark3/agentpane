@@ -3068,6 +3068,7 @@ The second harness ran `bun run start` on port 44191 with that `CODEX_HOME`, whi
 The SSE stream carried a snapshot at `isStreaming: true`, the user message, a snapshot at `isStreaming: false` and then two identical `error` events whose `message` was the raw JSON string above.
 Read from the code: the `isStreaming: false` snapshot is the `systemError` status change, since the reducer ends streaming on any status other than `active`, and the two errors are the `error` notification and the failed `turn/completed`, both cases in `src/server/adapters/codex/reducer.ts`.
 The `warning` notification did not reach the SSE stream; that reducer has no case for it and its `default` branch drops it.
+Since OW-tujiya it does, as a `notice` event rather than an `error`: the reducer has a case for it and for Codex's three other warning notifications.
 The server logged nothing for the turn.
 The session stayed usable over the HTTP API: `POST .../model` with `gpt-5.6-luna` answered 204 and the next prompt streamed `ok`.
 The failed turn's user message stays in the transcript with no reply, so the clients' D23 gate (`setModel` in `src/client/controller.ts`) would refuse that switch.

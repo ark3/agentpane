@@ -13,7 +13,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../shared/protocol.ts";
 
 export interface AdapterState {
 	messages: AgentMessage[];
@@ -180,6 +180,13 @@ export interface BackendAdapter {
 
 	/** Fires when a turn fails in a way the transcript does not convey. */
 	onError(cb: (message: string) => void): Unsubscribe;
+	/**
+	 * Fires when the backend says something non-fatal the human should see
+	 * (OW-tujiya). Never an error: nothing here says a turn failed, so it
+	 * must not ride `onError`. Optional because only Codex sends any as of
+	 * `codex-cli 0.156.0`; an adapter whose backend has none leaves it out.
+	 */
+	onNotice?(cb: (notice: AgentNotice) => void): Unsubscribe;
 
 	// -- session controls ---------------------------------------------------
 	setModel(model: string): Promise<void>;

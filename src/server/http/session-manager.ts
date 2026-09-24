@@ -634,6 +634,8 @@ export class SessionManager {
 				}),
 				adapter.onError((message) => this.broadcaster.error(bound.ref, message)),
 			);
+			const offNotice = adapter.onNotice?.((notice) => this.broadcaster.notice(bound.ref, notice));
+			if (offNotice) bound.subscriptions.push(offNotice);
 			await adapter.start(
 				forkStart?.start ?? {
 					cwd: bound.cwd,

@@ -750,6 +750,24 @@ describe("server-initiated requests (D2a)", () => {
 	});
 });
 
+describe("backend notices (OW-tujiya)", () => {
+	it("carries a notice out over SSE for its own session, and not as an error", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		await get(ROUTES.session(CODEX_SESSION));
+		const client = await openStream();
+		const notice = { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml:3:5" };
+
+		codex.forRef(CODEX_SESSION)?.emitNotice(notice);
+		await client.until(() => client.typed("notice").length === 1);
+
+		const [event] = client.typed("notice");
+		expect(event).toMatchObject({ type: "notice", session: CODEX_SESSION, notice });
+		expect(typeof event?.seq).toBe("number");
+		expect(client.typed("error")).toEqual([]);
+		await client.close();
+	});
+});
+
 describe("fork, model, and enumeration routes", () => {
 	it("lists fork points from the attached agent", async () => {
 		const withPoints = new FakeAdapterFactory({

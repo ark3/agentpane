@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import type { AgentNotice, AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
 import { codexSessionsRoot } from "../../sessions/index.ts";
 import type {
@@ -210,6 +210,7 @@ export class CodexAdapter implements BackendAdapter {
 	private updateListeners = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	private requestListeners = new Set<(request: AgentRequest) => void>();
 	private errorListeners = new Set<(message: string) => void>();
+	private noticeListeners = new Set<(notice: AgentNotice) => void>();
 
 	constructor(ref: SessionRef, options: CodexAdapterOptions = {}) {
 		this.currentRef = ref;
@@ -480,6 +481,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
+		this.noticeListeners.clear();
 		this.clearPendingRequests();
 		this.turnId = null;
 		this.interruptedTurnId = null;
@@ -797,6 +799,23 @@ export class CodexAdapter implements BackendAdapter {
 	}
 
 	/**
+	 * Codex's four warning notifications (OW-tujiya). Which sessions hear one
+	 * follows from the connection they share: every adapter on an app-server
+	 * gets every line it writes (a fork's borrower, OW-lajehi), and the
+	 * reducer's cross-thread guard keeps one naming a thread to that thread's
+	 * adapter. One naming no thread -- a `configWarning`, a
+	 * `deprecationNotice`, a `warning` with a null `threadId` -- is about the
+	 * app-server itself, so it reaches every session that app-server serves,
+	 * each of which is running on the thing it warns about. Not D13's
+	 * session-less `notice` arm: that is for conditions belonging to no
+	 * session, and this one belongs to exactly these.
+	 */
+	onNotice(cb: (notice: AgentNotice) => void): Unsubscribe {
+		this.noticeListeners.add(cb);
+		return () => this.noticeListeners.delete(cb);
+	}
+
+	/**
 	 * Answer a blocking `ServerRequest` (D2a). `null` declines, using the
 	 * decision shape the method expects -- an approval answered with a JSON-RPC
 	 * error would read as a client failure rather than a "no". Only kinds with
@@ -984,6 +1003,9 @@ export class CodexAdapter implements BackendAdapter {
 					break;
 				case "error":
 					this.emitError(effect.message);
+					break;
+				case "notice":
+					for (const listener of [...this.noticeListeners]) listener(effect.notice);
 					break;
 			}
 		}

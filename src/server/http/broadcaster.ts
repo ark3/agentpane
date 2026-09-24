@@ -19,6 +19,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
+	type AgentNotice,
 	type AgentRequest,
 	type ServerEvent,
 	type SessionRef,
@@ -138,6 +139,10 @@ export class Broadcaster {
 
 	error(ref: SessionRef, message: string): void {
 		this.#fanout({ type: "error", session: ref, seq: this.#bump(ref), message });
+	}
+
+	notice(ref: SessionRef, notice: AgentNotice): void {
+		this.#fanout({ type: "notice", session: ref, seq: this.#bump(ref), notice });
 	}
 
 	sessionsChanged(): void {

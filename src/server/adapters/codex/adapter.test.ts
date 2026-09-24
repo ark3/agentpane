@@ -1763,6 +1763,24 @@ describe("CodexAdapter fork points", () => {
 });
 
 describe("CodexAdapter reducer effects", () => {
+	it("publishes a warning as a notice and not as an error (OW-tujiya)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-events" });
+		const notices = vi.fn();
+		const errors = vi.fn();
+		adapter.onNotice(notices);
+		adapter.onError(errors);
+
+		proc.emit({ method: "warning", params: { threadId: "thread-events", message: "fallback metadata" } });
+
+		expect(notices).toHaveBeenCalledExactlyOnceWith({
+			kind: "warning",
+			message: "fallback metadata",
+			details: null,
+			path: null,
+		});
+		expect(errors).not.toHaveBeenCalled();
+	});
+
 	it("binds reduction to the thread returned by thread/start", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-parent" });
 		const updates = vi.fn();
@@ -2232,6 +2250,22 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		} finally {
 			await rm(codexRoot, { recursive: true, force: true });
 		}
+	});
+
+	it("gives a notice naming no thread to every session on the connection, and one naming a thread to that thread's alone (OW-tujiya)", async () => {
+		const { proc, parent, borrower, forked } = await forkedPair();
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+		const toParent = vi.fn();
+		const toBorrower = vi.fn();
+		parent.onNotice(toParent);
+		borrower.onNotice(toBorrower);
+
+		proc.emit({ method: "configWarning", params: { summary: "unknown key", details: null } });
+		proc.emit({ method: "warning", params: { threadId: "thread-forked", message: "the fork's" } });
+		proc.emit({ method: "warning", params: { threadId: "thread-parent", message: "the parent's" } });
+
+		expect(toParent.mock.calls.map(([notice]) => notice.message)).toEqual(["unknown key", "the parent's"]);
+		expect(toBorrower.mock.calls.map(([notice]) => notice.message)).toEqual(["unknown key", "the fork's"]);
 	});
 
 	it("ignores the parent's live turn while its own resume is still in flight", async () => {

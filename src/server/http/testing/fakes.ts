@@ -14,6 +14,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import type {
+	AgentNotice,
 	AgentRequest,
 	ForkPoint,
 	ListSessionsQuery,
@@ -190,6 +191,7 @@ export class FakeAdapter implements BackendAdapter {
 	#updates = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	#requests = new Set<(request: AgentRequest) => void>();
 	#errors = new Set<(message: string) => void>();
+	#notices = new Set<(notice: AgentNotice) => void>();
 	#nextRequestId = 1;
 
 	/** Not stable at construction -- see `materialiseOnStart`/`materialiseOnSubmit`. */
@@ -222,6 +224,7 @@ export class FakeAdapter implements BackendAdapter {
 		this.#updates.clear();
 		this.#requests.clear();
 		this.#errors.clear();
+		this.#notices.clear();
 		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release();
 		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
@@ -298,6 +301,11 @@ export class FakeAdapter implements BackendAdapter {
 		return () => this.#errors.delete(cb);
 	}
 
+	onNotice(cb: (notice: AgentNotice) => void): Unsubscribe {
+		this.#notices.add(cb);
+		return () => this.#notices.delete(cb);
+	}
+
 	async setModel(model: string): Promise<void> {
 		await this.options.onSetModel?.(model);
 		this.model = model;
@@ -371,6 +379,10 @@ export class FakeAdapter implements BackendAdapter {
 
 	emitError(message: string): void {
 		for (const cb of [...this.#errors]) cb(message);
+	}
+
+	emitNotice(notice: AgentNotice): void {
+		for (const cb of [...this.#notices]) cb(notice);
 	}
 
 	async reply(requestId: string, response: unknown): Promise<void> {
