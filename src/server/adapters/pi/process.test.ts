@@ -1069,6 +1069,66 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(h.adapter.getState().messages).toHaveLength(2);
 	});
 
+	it("re-asserts the parent's model, then its level, after a resumed session's fork that keeps no message (OW-riyeku)", async () => {
+		const DEFAULT = { provider: "openrouter", id: "google/gemini-2.5-flash-lite", name: "Flash Lite", reasoning: true };
+		const u1 = { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 };
+		const a1 = { role: "assistant", content: [{ type: "text", text: "ok" }], provider: FLASH.provider, model: FLASH.id, timestamp: 2 };
+		const recorded = [
+			{ type: "model_change", id: "m1", parentId: null, timestamp: "2026-09-24T10:00:00.000Z", provider: FLASH.provider, modelId: FLASH.id },
+			{ type: "thinking_level_change", id: "t1", parentId: "m1", timestamp: "2026-09-24T10:00:00.000Z", thinkingLevel: "high" },
+		];
+		const h = makeHarness();
+		// A resume spawn carries no `--model`, so nothing is chosen in this process.
+		const started = h.adapter.start({ cwd: WORKSPACE, resumeId: REF.id });
+		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "high", isStreaming: false, sessionFile: REF.id, messageCount: 2 });
+		await flush();
+		h.child.respondTo("get_messages", { messages: [u1, a1] });
+		h.child.respondTo("get_entries", {
+			entries: [
+				...recorded,
+				{ type: "message", id: "u1", parentId: "t1", timestamp: "2026-09-24T10:00:01.000Z", message: u1 },
+				{ type: "message", id: "a1", parentId: "u1", timestamp: "2026-09-24T10:00:02.000Z", message: a1 },
+			],
+			leafId: "a1",
+		});
+		h.child.respondTo("get_available_models", { models: [FLASH, DEFAULT] });
+		await started;
+
+		const forked = h.adapter.fork("u1");
+		h.child.respondTo("fork", { text: "hi", cancelled: false });
+		await flush();
+		// Measured on 0.87.1: a fork at the first user message of a session file
+		// holding no system message keeps no message, and Pi rebuilds it at the
+		// settings default model and level, announced by no event.
+		h.child.respondTo("get_state", { model: DEFAULT, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl", messageCount: 0 });
+		await flush();
+		expect(h.child.sent().filter((command) => command.type === "set_model")).toEqual([
+			expect.objectContaining({ provider: FLASH.provider, modelId: FLASH.id }),
+		]);
+		// With no `modelThinkingLevels` entry for it, `set_model` kept `low`, as it did live.
+		h.child.respondTo("set_model", FLASH);
+		await flush();
+		expect(h.child.lastSent("set_thinking_level")).toMatchObject({ level: "high" });
+		h.child.emitLine({ type: "thinking_level_changed", level: "high" });
+		h.child.respondTo("set_thinking_level");
+		await flush();
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", {
+			entries: [
+				...recorded,
+				{ type: "model_change", id: "m2", parentId: "t1", timestamp: "2026-09-24T10:01:00.000Z", provider: DEFAULT.provider, modelId: DEFAULT.id },
+				{ type: "thinking_level_change", id: "t2", parentId: "m2", timestamp: "2026-09-24T10:01:00.000Z", thinkingLevel: "low" },
+				{ type: "model_change", id: "m3", parentId: "t2", timestamp: "2026-09-24T10:01:01.000Z", provider: FLASH.provider, modelId: FLASH.id },
+				{ type: "thinking_level_change", id: "t3", parentId: "m3", timestamp: "2026-09-24T10:01:01.000Z", thinkingLevel: "high" },
+			],
+			leafId: "t3",
+		});
+		h.child.respondTo("get_available_models", { models: [FLASH, DEFAULT] });
+		await forked;
+
+		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/deepseek/deepseek-v4.1-flash", effort: "high", unrestoredModel: null });
+	});
+
 	it("keeps the level a turn started at when the level changes before it ends", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: FLASH, thinkingLevel: "low" });

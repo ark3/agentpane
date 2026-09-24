@@ -74,7 +74,7 @@ export type PiResponse =
 			type: "response";
 			command: "get_state";
 			success: true;
-			data: { model: Model<any> | null; thinkingLevel?: string; isStreaming: boolean; sessionFile?: string };
+			data: { model: Model<any> | null; thinkingLevel?: string; isStreaming: boolean; sessionFile?: string; messageCount?: number };
 	  }
 	| { id?: string; type: "response"; command: "set_model"; success: true; data: Model<any> }
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }

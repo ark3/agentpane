@@ -143,6 +143,17 @@ export class PiAdapter implements BackendAdapter {
 	 * chosen model. Pi rebuilds a forked session from the options its command
 	 * line parsed, `--model` included, as it does the suffix's level (OW-dojebo,
 	 * in the docblock on `thinkingLevel`).
+	 *
+	 * So it covers only a model chosen in this process, and a resume spawn,
+	 * which carries no `--model`, chooses none. Same version, measured on the
+	 * home server, 2026-09-24 (docs/MANUAL_TESTING.md, OW-riyeku): Pi restores
+	 * a forked branch's model and level only when the branch holds a message,
+	 * and a fork at the first user message of a file with no system message,
+	 * which every file written before `pi 0.86.0` lacks, kept none. It answered
+	 * `get_state` with `messageCount` 0 at the settings default model and
+	 * level, with no event, and appended a `model_change` and a
+	 * `thinking_level_change` naming them. So after such a fork `fork` re-sends
+	 * the model and level in force before it, whether chosen or not.
 	 */
 	private chosenModel: string | null = null;
 	/**
@@ -159,11 +170,13 @@ export class PiAdapter implements BackendAdapter {
 	 * Read wherever the transcript is read back -- a resume's start, and a
 	 * fork, which D23 holds to the same promise -- and cleared by a
 	 * `setModel` that succeeds, after which the model in force is one chosen.
-	 * A fork has one more way to put another model in force: as measured on
+	 * A fork has two more ways to put another model in force: as measured on
 	 * `pi 0.87.1`, a process spawned with `--model` puts that model back at a
-	 * fork over one `set_model` chose (OW-sinoha). The fork re-sends the chosen
-	 * model before it reads the transcript back, so that one reaches this
-	 * field only when Pi refuses the re-send.
+	 * fork over one `set_model` chose (OW-sinoha), and a fork that keeps no
+	 * message puts the settings default in force (OW-riyeku). The fork re-sends
+	 * the chosen model, or for the second the parent's, before it reads the
+	 * transcript back, so the first reaches this field only when Pi refuses the
+	 * re-send, and the second never does, since its branch holds no message.
 	 * A turn does not clear it: the first turn on the fallback records the
 	 * fallback, so every later resume restores that without a mismatch to see,
 	 * and from then on this is the only thing still saying the recorded model
@@ -519,6 +532,7 @@ export class PiAdapter implements BackendAdapter {
 	}
 
 	async fork(entryId: string): Promise<ForkResult> {
+		const parent = { model: this.model, level: this.thinkingLevel };
 		const forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
 		// A `session_before_fork` extension handler can veto the fork, and Pi
 		// reports that as `success: true` with `data.cancelled: true` (rpc.md,
@@ -563,13 +577,22 @@ export class PiAdapter implements BackendAdapter {
 		// not fail the fork: it falls through, the level below goes to the
 		// spawn's model still in force, and the read-back names the chosen model
 		// as `unrestoredModel`.
-		if (this.chosenModel !== null && this.model !== this.chosenModel) {
-			await this.setModel(this.chosenModel).catch((error: unknown) => {
+		//
+		// A fork that keeps no message has nothing for Pi to restore from, so it
+		// puts the settings default model and level in force, and records them
+		// (OW-riyeku, in the docblock on `chosenModel`). D23 holds such a fork to
+		// the parent's model and level as they stood when it was cut, chosen or
+		// not, so those are what goes back.
+		const keptNoMessage = state.data.messageCount === 0;
+		const model = keptNoMessage ? parent.model : this.chosenModel;
+		const level = keptNoMessage ? parent.level : this.chosenEffort;
+		if (model !== null && this.model !== model) {
+			await this.setModel(model).catch((error: unknown) => {
 				if (!(error instanceof BackendRefusedError)) throw error;
 			});
 		}
-		if (this.chosenEffort !== null && this.thinkingLevel !== this.chosenEffort) {
-			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level: this.chosenEffort });
+		if (level !== null && this.thinkingLevel !== level) {
+			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level });
 		}
 		// `fork` emits no message events of its own, so our held transcript is now
 		// stale; re-fetch the rewound branch wholesale -- the same cold-start path

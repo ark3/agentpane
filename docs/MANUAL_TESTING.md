@@ -3306,12 +3306,16 @@ A third copy took the system-less steps up to the fork and read the same `get_st
 The turn after that asked for `model` `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `high`, and the forked file, now on disk, held those six entries, then a system message, then that turn's user and assistant messages.
 
 **What agentpane makes of it.**
-As of `fd329e6` the adapter re-sends a model and level after a fork only when `setModel` or `setEffort` chose them in the same process (`fork` in `src/server/adapters/pi/process.ts`), and a resume spawn chooses neither.
-So a fork at the first message of a session written before `0.86.0` runs at the settings default, labelled with it as if it were the parent's, and `unrestoredModel` stays null because the kept branch holds no message to compare.
+Before this change the adapter re-sent a model and level after a fork only when `setModel` or `setEffort` had chosen them in the same process, and a resume spawn chooses neither.
+So a fork at the first message of a session written before `0.86.0` would have run at the settings default, labelled with it as if it were the parent's, with `unrestoredModel` null because the kept branch holds no message to compare; that was read from the code, not run.
+Now `fork` in `src/server/adapters/pi/process.ts` notes the model and level in force before the fork, and when the fork's `get_state` answers `messageCount` 0, Pi's own condition for restoring nothing, it re-sends that model through `setModel` and then that level, the commands run by hand above.
+`src/server/adapters/pi/process.test.ts` pins it: a resumed session at the pinned model at `high`, forked at its first user message to a `get_state` naming the settings default at `low` with `messageCount` 0, sends `set_model` for the pinned model and then `set_thinking_level` `high`, and ends on the pinned model at `high` with no `unrestoredModel`.
+A fork that keeps a message still re-sends only what was chosen, since Pi restores the kept branch's own model and level.
 
 **Not established.**
 The system-less file was made by hand from one `0.87.1` wrote, and the owner's was copied, not driven through agentpane; which Pi version wrote the owner's files was not checked beyond their dates.
 No turn ran on the fallback, so that it would run on the settings default rests on `get_state`.
+The adapter's re-send was not run live; it rests on the unit test and on the same commands sent by hand above.
 A fork at the first message through a spawn with `--model` was not run; by the source, that model and any suffix's level are taken there, which are the parent's unless `set_model` or `set_thinking_level` chose others, the cases OW-sinoha's and OW-dojebo's sections ran.
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs.
 
