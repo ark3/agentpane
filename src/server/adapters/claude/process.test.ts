@@ -41,6 +41,24 @@ describe("buildClaudeSpawnCommand", () => {
 		expect(args).toEqual([...BASE, "--model", "haiku", "--resume", "parent-id"]);
 	});
 
+	it("resumes at an effort when one is set", () => {
+		const { args } = buildClaudeSpawnCommand({
+			cwd: "/workspace",
+			model: "claude-sonnet-5",
+			effort: "max",
+			resumeId: "parent-id",
+		});
+		expect(args).toEqual([
+			...BASE,
+			"--model",
+			"claude-sonnet-5",
+			"--effort",
+			"max",
+			"--resume",
+			"parent-id",
+		]);
+	});
+
 	it("forks pre-tip with --resume-session-at --fork-session and a chosen id", () => {
 		const { args } = buildClaudeSpawnCommand({
 			cwd: "/workspace",

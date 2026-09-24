@@ -30,7 +30,7 @@
  *   itself tolerates two live children on one workspace (MANUAL_TESTING
  *   OW-japuzo). The parent's store
  *   file is untouched and no lineage marker exists on disk (OW-mayuza).
- * - The effort is set on the running process, not at spawn: `setEffort`
+ * - A chosen effort is set on the running process: `setEffort`
  *   sends `apply_flag_settings` with `effortLevel`, and what the CLI then runs
  *   at is read back from `get_settings`'s `applied.effort` -- at start, after
  *   `setEffort` and after `setModel` -- rather than assumed. Measured on the
@@ -39,13 +39,30 @@
  *   applied null with the choice still held, and it came back on a
  *   `set_model` to one with effort; an unknown level was accepted and
  *   ignored, which is why nothing here trusts the request alone.
- *   The choice lives in the process's flag-settings layer. The store names
- *   the effort each turn ran at, but a `--resume` spawn does not restore it
- *   and runs at the settings or model default: a sonnet session whose turn
- *   ran at `low`, and a copy of one whose every stored turn ran at `max`,
- *   each resumed at `high`, and a `--fork-session` spawn of the latter read
- *   `high` too. So a fork starts at that default; the start read is what
- *   makes `getState().effort` true for both.
+ *   The choice lives in the process's flag-settings layer and dies with
+ *   the process.
+ *   The store names the effort each turn ran at, but a `--resume` spawn does
+ *   not restore it and runs at the settings or model default: a sonnet
+ *   session whose turn ran at `low`, and a copy of one whose every stored
+ *   turn ran at `max`, each resumed at `high`, and a `--fork-session` spawn
+ *   of the latter read `high` too. So a resume and a fork are spawned with
+ *   `--effort` at the level the last hydrated assistant message records --
+ *   for a fork, the kept prefix's -- because the store, not agentpane, holds
+ *   the conversation's effort (D23). The flag, not `apply_flag_settings`
+ *   after attach, because it is in force from the process's first instant
+ *   and rides the spawn beside `--model`. Measured on the home server,
+ *   2026-09-23, `claude 2.1.280`, no turn (docs/MANUAL_TESTING.md,
+ *   OW-nabano): `--effort low` and `--effort max` on a `--resume` read back
+ *   `low` and `max` -- `max` too, though it is session-scoped and named by
+ *   no settings source -- and `--effort low` on a `--fork-session` spawn
+ *   read `low`; `--effort bogus` was ignored rather than failing the spawn;
+ *   and a later `apply_flag_settings` still overrode the flag. The same run
+ *   found the CLI restoring the model itself: a `--resume` and a
+ *   `--fork-session` spawn of a sonnet session with no `--model` put the
+ *   store's `claude-sonnet-5` in force over the settings' `opus[1m]`. The
+ *   adapter nonetheless still passes one: the stored model on a resume, and
+ *   the parent's on a fork. The start read is what makes `getState().effort`
+ *   true for every path.
  *   Each assistant turn is named with the effort in force when it started,
  *   and a resumed one with the `effort` its store line records.
  * - A session nobody chose a model on still names one before its first turn,
@@ -76,7 +93,13 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { UserMessage } from "@earendil-works/pi-ai";
-import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import type {
+	AgentRequest,
+	AssistantTurn,
+	ForkPoint,
+	ModelInfo,
+	SessionRef,
+} from "../../../shared/protocol.ts";
 import {
 	findClaudeSessionFile,
 	readClaudeMessageEntries,
@@ -113,6 +136,8 @@ import { ClaudeReducer, type ClaudeEffect } from "./reducer.ts";
 export const CLAUDE_FORK_SESSION_START = "session-start";
 
 const DEFAULT_CLAUDE_ROOT = join(homedir(), ".claude", "projects");
+/** The `message.model` of an assistant store line the CLI wrote itself (`lastHydratedAssistant`). */
+const SYNTHETIC_MODEL = "<synthetic>";
 const TURN_ACTIVE_ERROR = "claude adapter cannot submit while a turn is active";
 
 export interface ClaudeAdapterOptions {
@@ -212,6 +237,7 @@ export class ClaudeAdapter implements BackendAdapter {
 					resumeId: parentId,
 					forkAtEntryId: entryId,
 					sessionId: this.currentRef.id,
+					...this.storedEffort(),
 				});
 			}
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
@@ -224,7 +250,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			this.applyEffects(this.reducer.hydrate(entries.map((entry) => entry.record)));
 			this.adoptStoredModel();
 			this.currentRef = { backend: "claude", id: opts.resumeId };
-			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId });
+			await this.attachProcess({ cwd: opts.cwd, resumeId: opts.resumeId, ...this.storedEffort() });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		} else {
 			const sessionId = this.mintSessionId();
@@ -507,14 +533,34 @@ export class ClaudeAdapter implements BackendAdapter {
 	/** Adopt the model the last hydrated assistant message names, if nothing else has. */
 	private adoptStoredModel(): void {
 		if (this.model !== null) return;
-		const messages = this.reducer.getState().messages;
-		for (let i = messages.length - 1; i >= 0; i -= 1) {
-			const message = messages[i];
-			if (message?.role !== "assistant") continue;
-			this.model = message.model;
-			this.emitUpdate();
-			break;
-		}
+		const last = this.lastHydratedAssistant();
+		if (!last) return;
+		this.model = last.model;
+		this.emitUpdate();
+	}
+
+	/**
+	 * The effort the last hydrated assistant message ran at, as the resume or
+	 * fork's spawn option: a `--resume` does not restore it (module doc, D23).
+	 */
+	private storedEffort(): { effort?: string } {
+		const effort = this.lastHydratedAssistant()?.effort;
+		return effort ? { effort } : {};
+	}
+
+	/**
+	 * The last assistant message a model ran. The CLI writes notices of its own
+	 * as assistant store lines -- as of `claude 2.1.270`, a session-limit notice
+	 * with `isApiErrorMessage: true`, `message.model: "<synthetic>"` and no
+	 * `effort` -- and hydration keeps only the model, so that is the marker.
+	 */
+	private lastHydratedAssistant(): AssistantTurn | undefined {
+		return this.reducer
+			.getState()
+			.messages.findLast(
+				(message): message is AssistantTurn =>
+					message.role === "assistant" && message.model !== SYNTHETIC_MODEL,
+			);
 	}
 
 	private attachProcess(spawnOpts: {
@@ -522,6 +568,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		resumeId?: string;
 		sessionId?: string;
 		forkAtEntryId?: string;
+		effort?: string;
 	}): Promise<void> {
 		const spawner = this.options.spawn ?? spawnClaude;
 		const proc = spawner({

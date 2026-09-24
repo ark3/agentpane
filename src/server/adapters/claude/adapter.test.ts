@@ -350,6 +350,55 @@ describe("ClaudeAdapter turns", () => {
 		expect(h.adapter.getState().effort).toBe("high");
 	});
 
+	it("resumes at the model and effort the store's last assistant line records (D23)", async () => {
+		const entries = storedEntries();
+		const last = entries.at(-1);
+		if (last) last.record = { ...last.record, effort: "max" };
+		const h = harness({ entries, appliedEffort: "max" });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+
+		// Told at spawn, so no turn can run at the CLI's default first.
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model", effort: "max" },
+		]);
+		expect(h.adapter.getState().effort).toBe("max");
+	});
+
+	it("resumes past a synthetic assistant line to the last turn a model ran (D23)", async () => {
+		const entries = storedEntries();
+		const last = entries.at(-1);
+		if (last) last.record = { ...last.record, effort: "max" };
+		// Shaped like a real store line (`claude 2.1.270`): the CLI's own
+		// session-limit notice, with no effort.
+		const notice = {
+			id: "04d1020c-b051-4c71-8530-e1c5319c1d83",
+			role: "assistant",
+			model: "<synthetic>",
+			stop_reason: "stop_sequence",
+			content: [{ type: "text", text: "You've hit your session limit" }],
+		};
+		entries.push({
+			uuid: "s1",
+			type: "assistant",
+			record: {
+				type: "assistant",
+				uuid: "s1",
+				timestamp: "2026-08-25T12:01:00.000Z",
+				isApiErrorMessage: true,
+				error: "rate_limit",
+				message: notice,
+			},
+		});
+		const h = harness({ entries });
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+
+		expect(h.spawns).toEqual([
+			{ cwd: "/workspace", resumeId: "stored-id", model: "last-model", effort: "max" },
+		]);
+	});
+
 	it("aborts via the interrupt control request and tolerates an error reply", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
@@ -754,6 +803,29 @@ describe("ClaudeAdapter fork", () => {
 		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 		const assistant = messages[1] as { content: { type: string }[] };
 		expect(assistant.content.map((block) => block.type)).toEqual(["thinking", "text"]);
+	});
+
+	it("starts a fork at the effort the kept prefix's last assistant line records (D23)", async () => {
+		const entries = storedEntries();
+		// Every line of one message carries its effort, as in a real store.
+		for (const entry of entries) {
+			if (entry.type !== "assistant") continue;
+			entry.record = { ...entry.record, effort: entry.uuid === "a3" ? "max" : "low" };
+		}
+		const h = harness({ entries, ref: { backend: "claude", id: "forked-1" } });
+
+		await h.adapter.start({ cwd: "/workspace", forkOf: { parentId: "parent", entryId: "a2" } });
+
+		expect(h.spawns).toEqual([
+			{
+				cwd: "/workspace",
+				resumeId: "parent",
+				forkAtEntryId: "a2",
+				sessionId: "forked-1",
+				model: "m",
+				effort: "low",
+			},
+		]);
 	});
 
 	it("forks before the first message as a fresh session in the same workspace", async () => {

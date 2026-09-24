@@ -34,6 +34,8 @@ export interface ClaudeSpawnOptions {
 	 */
 	cwd: string;
 	model?: string;
+	/** Start at this effort (`--effort`); how the adapter restores a stored one on a resume or fork. */
+	effort?: string;
 	/** Resume this stored session (`--resume`). */
 	resumeId?: string;
 	/**
@@ -85,6 +87,7 @@ export function buildClaudeSpawnCommand(opts: ClaudeSpawnOptions): {
 		"--include-partial-messages",
 	];
 	if (opts.model) args.push("--model", opts.model);
+	if (opts.effort) args.push("--effort", opts.effort);
 	if (opts.resumeId) args.push("--resume", opts.resumeId);
 	if (opts.forkAtEntryId) args.push("--resume-session-at", opts.forkAtEntryId, "--fork-session");
 	if (opts.sessionId) args.push("--session-id", opts.sessionId);
