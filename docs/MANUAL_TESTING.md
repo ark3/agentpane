@@ -2676,6 +2676,50 @@ The start read of `get_settings` stays the report of what is in force.
 Whether the model the CLI restores on its own is the store line's id or something it records elsewhere: on the owner's copy the settings' model and the stored one differ only by `[1m]`, so that resume could not tell them apart.
 No turn ran at a restored effort, so nothing here reads `CLAUDE_EFFORT` or a new store line after a resume; OW-hokaye's run is what ties `applied.effort` to the effort a turn runs at.
 
+## What a Claude Code `set_model` writes to stdout and to the store (OW-hiligu)
+
+Run on the home server 2026-09-23, **`claude 2.1.280`**, from the `card/OW-hiligu` worktree cut at `f86eaf1`.
+An earlier run that day had seen a `set_model` on a `--resume`d session put an event with `type: "user"` on stdout, and had kept only its `type`.
+Each child was spawned the way agentpane spawns it, `direnv exec <cwd> sbox -- claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --model haiku ...`, with the worktree as `cwd` and every `CLAUDE*` variable and `AI_AGENT` removed from its environment.
+Every `set_model` went to `sonnet` and then back to `haiku`, and the two turns that ran were on `haiku`, each asking for the single word `ok`.
+The driver was a throwaway Python script, not kept, that recorded every stdout line whole and re-read the store file after each step; the `initialize` response's account block was not recorded.
+The one store file involved was created by these runs, under the worktree's own project directory, and no other store was opened.
+
+**A fresh session before its first turn: nothing.**
+Spawned with `--session-id` and sent `initialize`, `get_settings`, `set_model` to `sonnet` and `set_model` to `haiku`, the child wrote the four `control_response`s and nothing else, and no store file existed for the session id after it exited.
+A second fresh spawn sent the same four requests and then one turn: the pre-turn `set_model`s again wrote no event, and the store's first message line was the prompt, with `parentUuid: null`, so they left nothing there either.
+The `control-discovery` fixture, a `set_model` before the first turn on `claude 2.1.238`, has no `user` event either.
+
+**After a turn, and on a resume: one `user` event per `set_model`, ahead of its response.**
+On that second process, after its turn's `result`, each `set_model` wrote exactly one event before its `control_response`:
+
+```json
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `sonnet (claude-sonnet-5)`</local-command-stdout>"},"session_id":"bfe6341d-5ffb-4dc7-a07e-5b61c65c88f1","parent_tool_use_id":null,"uuid":"d3e968dd-165a-4f90-9a8a-0f0281d3890a","timestamp":"2026-09-24T01:17:31.324Z","isReplay":true}
+```
+
+The switch back wrote the same shape with ``Set model to `haiku (claude-haiku-4-5-20251001)` ``.
+Those seven keys are the whole event: `message.content` is a bare string, not a block array, and there is no `subtype`, `isSynthetic` or `isMeta`.
+A `--resume` of that session with no turn wrote the same event for each `set_model`, and so did a `--resume` sent the two `set_model`s alone, with no `initialize` or `get_settings` first; that last capture is `resources/fixtures/claude/set-model.jsonl`.
+
+**The store: nothing until a turn runs on the same process, then three lines each.**
+No `set_model` added a store line while its process ran, and on exit the file gained only a `cost-state` line and at most a `mode` line, the bookkeeping OW-hokaye found a resume leaves.
+So the second process's two post-turn `set_model`s, the no-turn resume's two and the fixture capture's two never reached the store at all: none of their six `uuid`s is in the file, and the turn a later process ran on it wrote only that process's own two.
+A `--resume` that sent the two `set_model`s and then a turn did write them, with that turn, ahead of its prompt line, three `user` lines per `set_model` sharing the turn's `promptId`:
+an `isMeta: true` line whose content is a `<local-command-caveat>` telling the model to ignore what follows, a line whose content is `<command-name>/model</command-name>` with `<command-args>sonnet</command-args>`, and a line carrying the same `<local-command-stdout>` text under the live event's own `uuid`, with no `isReplay`.
+Each content is a bare string, and the six lines carry the store's usual keys (`parentUuid`, `cwd`, `version`, `gitBranch` and the rest).
+
+**What the adapter makes of it.**
+Nothing, on either path, and that is now pinned by two tests in `src/server/adapters/claude/adapter.test.ts`.
+Live, `handleUser` in `src/server/adapters/claude/reducer.ts` drops the event twice over: once for `isReplay: true`, and again because `<local-command-stdout>` is one of the prefixes `isSyntheticClaudeUserText` treats as wrapper text.
+From the store, the reducer reads no `isMeta`, but all three lines open with a prefix that function names, so hydration and `listForkPoints`, which replays the store through the same reducer, drop them too.
+Run through `readClaudeMessageEntries` and `ClaudeReducer.hydrate` by a one-off `bun` script, the real store file's 12 message entries, 8 of them `user`, hydrated to `user`, `assistant`, `user`, `assistant`, and `parseClaudeSession`'s preview read the prompt.
+The fork point for the prompt after the `/model` lines names the `<local-command-stdout>` line as its cut, so a fork there keeps those lines, and they hydrate to nothing on the fork as well.
+With both guards removed the two tests failed, the live one on two extra `user` messages and the store one on three; with either guard alone the live test passed, and with the prefix filter alone the store test passed.
+
+**Not established.**
+Whether any path other than a turn on the same process writes a `set_model`'s lines, such as `/compact`, was not tried.
+Neither client offers a model choice once a transcript has a message in it, as of `f86eaf1` (`App.svelte`'s picker and `agentpane-set-model`), so a live event reaches the adapter only through a direct call to the `model` route, which does not check; nothing here went through either client.
+
 ## What model and effort a Codex resume and fork run at (OW-sayaju)
 
 Run on the home server 2026-09-23, **`codex-cli 0.156.0`**, from the `card/OW-sayaju` worktree cut at `0386840`.
