@@ -50,7 +50,9 @@ export interface StartOptions {
 	 * fork's id, so this names what it is a fork OF, and `effort` the parent's
 	 * effort in force when it was cut, for a cut that keeps no turn to read one
 	 * from (D23). Here rather than beside `model` because only a fork carries
-	 * it: no other start is handed an effort, and no other adapter reads one.
+	 * it: no other start is handed an effort. Claude Code and Codex read it;
+	 * Codex, whose fork before the first message is a fresh thread, reads
+	 * nothing else here (OW-hojefo).
 	 */
 	forkOf?: { parentId: string; entryId: string; effort?: string };
 }

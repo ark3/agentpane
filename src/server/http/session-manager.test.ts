@@ -1471,6 +1471,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		readonly procs: LockingProcess[] = [];
 		readonly #locks = new Map<string, LockingProcess>();
 		#forks = 0;
+		#starts = 0;
 
 		spawn = (): CodexProcess => {
 			const proc = new LockingProcess((dead) => {
@@ -1501,10 +1502,21 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
 						break;
 					}
+					case "thread/start": {
+						// Nothing is on disk until a first turn (OW-hojefo), but the
+						// process that started the thread holds it all the same.
+						this.#starts += 1;
+						const threadId = `thread-fresh-${this.#starts}`;
+						this.#locks.set(threadId, proc);
+						proc.emit({ id, result: { thread: { id: threadId, turns: [] }, model: "m" } });
+						break;
+					}
 					case "thread/read":
 						proc.emit({
 							id,
-							result: { thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }] } },
+							result: {
+								thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }] },
+							},
 						});
 						break;
 					case "thread/fork": {
@@ -1539,7 +1551,7 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 
 	async function attachedPair(): Promise<void> {
 		await sessions.attach(parentRef);
-		const forked = await sessions.fork(parentRef, "turn-1");
+		const forked = await sessions.fork(parentRef, "turn-2");
 		expect(forked).toEqual(forkRef);
 		await sessions.attach(forked);
 		expect(cluster.procs).toHaveLength(1);
@@ -1566,6 +1578,24 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		expect(cluster.procs).toHaveLength(1);
 		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
 			[sessionKey(parentRef), sessionKey(forkRef)].sort(),
+		);
+	});
+
+	it("opens a fork that keeps no turn as a fresh thread on a child of its own (OW-hojefo)", async () => {
+		await sessions.attach(parentRef);
+		const forked = await sessions.fork(parentRef, "turn-1");
+
+		// No `thread/fork` keeps nothing, so nothing is minted until the attach,
+		// and the placeholder is renamed to the thread `thread/start` names, as a
+		// virtual session's is (D9).
+		expect(forked.id).toMatch(/^virtual:/);
+		expect(cluster.procs[0]?.lastRequest("thread/fork")).toBeUndefined();
+		const adapter = await sessions.attach(forked);
+
+		expect(cluster.procs).toHaveLength(2);
+		expect(adapter.ref).toEqual({ backend: "codex", id: "thread-fresh-1" });
+		expect(sessions.liveRefs().map(sessionKey).sort()).toEqual(
+			[sessionKey(parentRef), sessionKey(adapter.ref)].sort(),
 		);
 	});
 

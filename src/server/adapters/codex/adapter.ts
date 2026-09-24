@@ -167,10 +167,11 @@ export class CodexAdapter implements BackendAdapter {
 	 * this turn and subsequent turns". `setEffort` sets it, and so do a resume
 	 * and a fork, from the effort the store's last turn ran at (D23): the
 	 * rollout's last `turn_context`, for a fork the last one it kept of its
-	 * parent's. The model that turn ran goes into `model` the same way. Null
-	 * when neither has named one, and then nothing is sent and the thread runs
-	 * at what `thread/start` or `thread/resume` reported, which is what
-	 * `getState` names instead.
+	 * parent's. The model that turn ran goes into `model` the same way. A fork
+	 * that keeps no turn has none to read and is started with the parent's pair
+	 * instead (`fork`, OW-hojefo). Null when neither has named one, and then
+	 * nothing is sent and the thread runs at what `thread/start` or
+	 * `thread/resume` reported, which is what `getState` names instead.
 	 *
 	 * Re-asserted from the store rather than left to Codex, because what Codex
 	 * keeps depends on the path. Measured on the home server, 2026-09-23,
@@ -233,6 +234,9 @@ export class CodexAdapter implements BackendAdapter {
 		this.startCalled = true;
 		this.cwd = opts.cwd;
 		if (opts.model) this.model = opts.model;
+		// Only a fork that keeps no turn carries one: the parent's, since its
+		// `thread/start` answers the config's (see `fork`).
+		if (opts.forkOf?.effort) this.effort = opts.forkOf.effort;
 		if (this.borrowed) return this.startBorrowed(opts.model);
 
 		// Re-attaching a thread a live app-server still holds. That happens when
@@ -712,9 +716,32 @@ export class CodexAdapter implements BackendAdapter {
 		if (!this.turnOrder.length) await this.listForkPoints();
 		const index = this.turnOrder.indexOf(entryId);
 		if (index < 0) throw new Error(`unknown fork point: ${entryId}`);
+		// No `thread/fork` keeps nothing. As of `codex-cli` 0.156.0 one with no
+		// `lastTurnId` kept the parent's whole history, and one naming `""` or
+		// an unknown turn was refused with `-32600 turn not found`
+		// (`docs/MANUAL_TESTING.md`, OW-hojefo). So a fork at the first user
+		// message is a fresh thread in the parent's workspace, as Claude Code's
+		// session-start fork is: nothing is minted here, its own adapter spawns
+		// its own app-server and `thread/start`s it, and the id is a placeholder
+		// until that names the thread, as a D9 virtual session's is. No borrower,
+		// since there is no thread whose writer lock this process holds. It runs
+		// at the parent's model and effort in force, which nothing stored could
+		// give back (D23).
+		if (index === 0) {
+			if (!cwd) throw new Error("codex adapter not started");
+			const { model, effort } = this.getState();
+			return {
+				ref: { backend: "codex", id: `virtual:${randomUUID()}` },
+				start: {
+					cwd,
+					...(model ? { model } : {}),
+					forkOf: { parentId: this.requireThread(), entryId, ...(effort ? { effort } : {}) },
+				},
+			};
+		}
 		// `lastTurnId` is inclusive, so forking *at* a user message means
 		// keeping everything through the turn before it.
-		const lastTurnId = index > 0 ? this.turnOrder[index - 1] : undefined;
+		const lastTurnId = this.turnOrder[index - 1];
 		// Both policies are spelled out because a fork inherits `approvalPolicy`
 		// from its parent but NOT `sandbox`, which falls back to app-server's
 		// `workspaceWrite` -- a silent downgrade from the thread being forked

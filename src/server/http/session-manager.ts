@@ -147,7 +147,9 @@ export class SessionManager {
 	 *  - Codex's fork IS on disk, but only the app-server that minted it may
 	 *    open it (`codex-cli` 0.154.0, OW-lajehi). Its entry also carries
 	 *    `adapter` -- the fork's own, built by the parent's adapter and already
-	 *    holding a share of the parent's child.
+	 *    holding a share of the parent's child. A Codex fork that keeps no turn
+	 *    is minted by nothing until its attach, and its entry is `start` alone,
+	 *    as Claude Code's is (OW-hojefo).
 	 *
 	 * That second shape changes what an abandoned entry costs, and D17's answer
 	 * with it. An abandoned recipe is three strings; an abandoned live handle is
@@ -345,7 +347,11 @@ export class SessionManager {
 	 *    `session.ref`. Only the app-server that minted that thread may open it
 	 *    (OW-lajehi), so `fork()` also hands over the fork's own adapter, already
 	 *    sharing the parent's connection; `#pendingForks` holds it, with the
-	 *    resume that starts it, until the attach.
+	 *    resume that starts it, until the attach. A fork at the first user
+	 *    message is the exception: no `thread/fork` keeps nothing, so it takes
+	 *    Claude Code's path below, and the attach renames its placeholder ref
+	 *    to the thread its `thread/start` names, as a virtual session's is
+	 *    (OW-hojefo).
 	 *  - Claude Code's `fork` takes Codex's path -- its own ref is unchanged and
 	 *    the parent keeps its child and its turn (OW-razoki) -- but nothing has
 	 *    recorded the fork yet, so it also hands back the `StartOptions` its own

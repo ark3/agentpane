@@ -189,6 +189,27 @@ function responses(proc: AdapterProcess): WireMessage[] {
 	return proc.written.filter((message) => !("method" in message));
 }
 
+/** Two completed turns, each opened by one user message, for a fork to cut between. */
+function twoStoredTurns(): unknown[] {
+	return ["first", "second"].map((name, n) => ({
+		id: `turn-${name}`,
+		items: [
+			{
+				type: "userMessage",
+				id: `user-${name}`,
+				clientId: null,
+				content: [{ type: "text", text: `${name} prompt`, text_elements: [] }],
+			},
+		],
+		itemsView: "full",
+		status: "completed",
+		error: null,
+		startedAt: 1_700_000_000 + n,
+		completedAt: 1_700_000_001 + n,
+		durationMs: 1000,
+	}));
+}
+
 async function startedAdapter(
 	options: HappyServerOptions & CodexAdapterOptions = {},
 	ref: SessionRef = VIRTUAL_REF,
@@ -296,33 +317,9 @@ describe("CodexAdapter lifecycle", () => {
 	it("carries both policies onto the forked thread", async () => {
 		// A fork is a thread-creation path like start and resume, and Codex does
 		// not inherit the parent's policies onto it (D7a).
-		const { adapter, proc } = await startedAdapter(
-			{
-				threadId: STORED_REF.id,
-				turns: [
-					{
-						id: "turn-stored",
-						items: [
-							{
-								type: "userMessage",
-								id: "user-stored",
-								clientId: null,
-								content: [{ type: "text", text: "saved prompt", text_elements: [] }],
-							},
-						],
-						itemsView: "full",
-						status: "completed",
-						error: null,
-						startedAt: 1_700_000_000,
-						completedAt: 1_700_000_001,
-						durationMs: 1000,
-					},
-				],
-			},
-			STORED_REF,
-		);
+		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, turns: twoStoredTurns() }, STORED_REF);
 
-		const forked = await adapter.fork("turn-stored");
+		const forked = await adapter.fork("turn-second");
 
 		// Codex has already flushed the forked thread, but only this app-server
 		// may open it, so `fork()` hands over the adapter that will drive it
@@ -332,9 +329,67 @@ describe("CodexAdapter lifecycle", () => {
 		expect(forked.adapter).toBeDefined();
 		expect(request(proc, "thread/fork")["params"]).toEqual({
 			threadId: STORED_REF.id,
+			lastTurnId: "turn-first",
 			cwd: "/workspace",
 			sandbox: "danger-full-access",
 			approvalPolicy: "never",
+		});
+	});
+
+	it("forks at the first user message as a fresh thread, never a `thread/fork` (OW-hojefo)", async () => {
+		// As of `codex-cli` 0.156.0 a `thread/fork` with no `lastTurnId` kept the
+		// parent's whole history, and one naming no real turn was refused, so no
+		// fork request keeps nothing (docs/MANUAL_TESTING.md, OW-hojefo). The fork
+		// is a new thread in the parent's workspace, spawned by its own adapter
+		// the way Claude Code's session-start fork is.
+		const { adapter, proc } = await startedAdapter(
+			{ threadId: STORED_REF.id, turns: twoStoredTurns(), model: "gpt-parent", reasoningEffort: "medium" },
+			STORED_REF,
+		);
+		await adapter.setEffort("low");
+
+		const forked = await adapter.fork("turn-first");
+
+		expect(methods(proc)).not.toContain("thread/fork");
+		expect(forked.adapter).toBeUndefined();
+		expect(forked.ref.backend).toBe("codex");
+		expect(forked.ref.id).toMatch(/^virtual:/);
+		expect(forked.start).toEqual({
+			cwd: "/workspace",
+			model: "gpt-parent",
+			forkOf: { parentId: STORED_REF.id, entryId: "turn-first", effort: "low" },
+		});
+	});
+
+	it("starts a fork that keeps no turn at the parent's model and effort (D23, OW-hojefo)", async () => {
+		// Nothing is stored for it to read back, and `thread/start` answers the
+		// config's effort (OW-sayaju, OW-hojefo), so the pair rides the start.
+		const proc = new AdapterProcess();
+		configureHappyServer(proc, { threadId: "thread-fresh", model: "gpt-parent", reasoningEffort: "high" });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc, codexRoot: NO_STORE });
+
+		await adapter.start({
+			cwd: "/workspace",
+			model: "gpt-parent",
+			forkOf: { parentId: STORED_REF.id, entryId: "turn-first", effort: "low" },
+		});
+
+		expect(methods(proc)).toEqual(["initialize", "thread/start"]);
+		expect(request(proc, "thread/start")["params"]).toEqual({
+			cwd: "/workspace",
+			model: "gpt-parent",
+			sandbox: "danger-full-access",
+			approvalPolicy: "never",
+		});
+		expect(adapter.ref).toEqual({ backend: "codex", id: "thread-fresh" });
+		expect(adapter.getState()).toMatchObject({ model: "gpt-parent", effort: "low" });
+
+		await adapter.submit("go");
+
+		expect(request(proc, "turn/start")["params"]).toMatchObject({
+			threadId: "thread-fresh",
+			model: "gpt-parent",
+			effort: "low",
 		});
 	});
 
@@ -2072,7 +2127,9 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				case "thread/read":
 					proc.emit({
 						id,
-						result: { thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }] } },
+						result: {
+							thread: { id: params["threadId"], turns: [{ id: "turn-1", items: [] }, { id: "turn-2", items: [] }] },
+						},
 					});
 					break;
 				case "thread/fork":
@@ -2097,9 +2154,10 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		shareableServer(proc, options);
 		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc, codexRoot: options.codexRoot ?? NO_STORE });
 		await parent.start({ cwd: "/workspace" });
-		// `fork()` needs a turn to cut at; `thread/read` above answers one.
+		// `fork()` needs a turn to cut at, past the first: a fork at the first
+		// keeps no turn and is no `thread/fork` at all (OW-hojefo).
 		await parent.listForkPoints();
-		const forked = await parent.fork("turn-1");
+		const forked = await parent.fork("turn-2");
 		const borrower = forked.adapter as CodexAdapter | undefined;
 		if (!borrower) throw new Error("fork() handed back no adapter to drive the fork with");
 		return { proc, parent, borrower, forked };
@@ -2130,7 +2188,8 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		// resume of it on the app-server that minted it, answered the config's
 		// defaults, and a turn sent on it naming no effort ran at the config's
 		// (docs/MANUAL_TESTING.md, OW-sayaju). The fork's rollout holds only its
-		// own records and names its parent's as its history (OW-buligi), so the
+		// own records and names its parent's as its history (OW-buligi), ending
+		// where the `lastTurnId` a fork at the second message sends ends, so the
 		// parent's second turn, past the cut, is not the fork's.
 		const parentLines = [
 			{ type: "session_meta", payload: { id: "thread-parent" } },
@@ -2364,7 +2423,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		const { proc, parent, borrower, forked } = await forkedPair();
 		await borrower.start(forked.start as { cwd: string; resumeId: string });
 		await borrower.listForkPoints();
-		const grandchild = (await borrower.fork("turn-1")).adapter as CodexAdapter | undefined;
+		const grandchild = (await borrower.fork("turn-2")).adapter as CodexAdapter | undefined;
 		if (!grandchild) throw new Error("a fork of a fork handed back no adapter");
 
 		await parent.dispose();
