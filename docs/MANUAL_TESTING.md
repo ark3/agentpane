@@ -2497,19 +2497,19 @@ The effort was read back from three places: the assistant message on the SSE wir
 The driver ran twice, on threads `01a0d045-f945-...` and `01a0d046-65c1-...`, with the same readings.
 No `thread/settings/updated` notification arrived after the overriding `turn/start` in the bare probe below, whose notifications were all listed, so as of this version the notification the generated types offer does not report a `turn/start` override, and the rollout's `turn_context` is where the effort a turn ran at is written down.
 
-**A resume in a fresh app-server reports the default, not the override.**
+**A resume in a fresh app-server that names the model reports the default, not the override.**
 The second driver's attempt to measure this through agentpane failed for a reason of the run's own making: after `DELETE`, the re-attach answered 404, because the session index walks `~/.codex/sessions` and the thread's rollout was under the temporary `CODEX_HOME`.
 So it was measured on `codex app-server` directly, with the adapter's own request shapes, over two app-server processes on one temporary `CODEX_HOME`.
 The first run read the resume's answer; a second added the `thread/read` and the third turn below, and agreed with the first on everything both read.
 In the first process, `thread/start` with `model: "gpt-5.6-luna"` answered `reasoningEffort: "medium"`; a `turn/start` with `effort: "low"` ran at `low` by its `turn_context`; a second `turn/start` with no effort also ran at `low`; and `thread/read` then answered `reasoningEffort: "low"`.
 That process was terminated, and in a fresh one `thread/resume` with the same `model` and no effort -- `ThreadResumeParams` has no effort field -- answered `reasoningEffort: "medium"`.
 The rollout recorded a `thread_settings_applied` event with `reasoning_effort: "medium"` at the resume, and a third turn sent with no effort ran at `medium` by its `turn_context`.
-So an override lasts as long as the app-server that received it, and a resume elsewhere falls back to the default.
-That default was named by both the model's `defaultReasoningEffort` and the config's `model_reasoning_effort`, so this run cannot say which of the two a resume restores.
-The adapter holds the chosen effort for its own lifetime and resends it on every `turn/start`, so within one attach this changes nothing; a conversation reopened after its app-server exits runs, and reports, the default again (`private effort` in `src/server/adapters/codex/adapter.ts`).
+This run read that as an override lasting only as long as the app-server that received it, and OW-sayaju's run overturned it: a fresh resume that names no model restores the override, and it is naming the model on the resume, as this one did, that resets the effort (below, "What model and effort a Codex resume and fork run at").
+That default was named by both the model's `defaultReasoningEffort` and the config's `model_reasoning_effort`, so this run could not say which of the two the reset lands on; OW-sayaju's, whose config named a different one, found it is the config's.
+The adapter no longer leaves the effort to the resume: it re-asserts the one the rollout's last turn ran at (`private effort` in `src/server/adapters/codex/adapter.ts`).
 
 **Not established.**
-A resume on the app-server that still holds the thread, which is what a fork's borrower and a re-attach through the connection registry do, was not tried.
+A resume on the app-server that still holds the thread, which is what a fork's borrower and a re-attach through the connection registry do, was not tried here; OW-sayaju's run found it keeps the override.
 Nor was a model change mid-conversation without a chosen effort, where the thread's reported effort may not be one the new model lists.
 
 ## A Pi turn at a chosen thinking level, what `set_model` does to it, and what a resume keeps (OW-ruzuhu)
@@ -2675,3 +2675,47 @@ The start read of `get_settings` stays the report of what is in force.
 **Not established.**
 Whether the model the CLI restores on its own is the store line's id or something it records elsewhere: on the owner's copy the settings' model and the stored one differ only by `[1m]`, so that resume could not tell them apart.
 No turn ran at a restored effort, so nothing here reads `CLAUDE_EFFORT` or a new store line after a resume; OW-hokaye's run is what ties `applied.effort` to the effort a turn runs at.
+
+## What model and effort a Codex resume and fork run at (OW-sayaju)
+
+Run on the home server 2026-09-23, **`codex-cli 0.156.0`**, from the `card/OW-sayaju` worktree cut at `0386840`.
+It was measured on bare `codex app-server` processes driven with the adapter's own request shapes by a throwaway Python script that was not kept, and two turns ran in all, each naming `model: "gpt-5.6-luna"`.
+The processes shared a temporary `CODEX_HOME` under `/var/tmp` holding copies of `auth.json` and `config.toml`, removed afterwards.
+The copy's `model` was changed to `gpt-5.6-terra` and its `model_reasoning_effort` to `high`, so that the thread's pair, the config's pair, and the model's `defaultReasoningEffort` of `medium` were three different answers.
+`model/list` listed the four models OW-kokalo's run found, each with `defaultReasoningEffort: "medium"`.
+
+**The thread.**
+In app-server A, `thread/start` with `model: "gpt-5.6-luna"` answered `gpt-5.6-luna` at `reasoningEffort: "high"`, the config's effort rather than the model's.
+One `turn/start` with `effort: "low"` ran, and its `turn_context` recorded `gpt-5.6-luna` at `low`.
+
+**A resume on the app-server that still holds the thread keeps the override.**
+`thread/resume` of that thread on A, naming no model, answered `gpt-5.6-luna` at `low`.
+That is the request a re-attach through the connection registry makes.
+
+**`thread/fork` carries neither the model nor the effort.**
+`thread/fork` on A, with no `lastTurnId` and no `model`, answered `gpt-5.6-terra` at `high`, the config's pair.
+The fork's rollout was on disk when the request returned, holding its header, whose `history_base` named the parent at ordinal 13, the end of its one turn, and a `thread_settings_applied` naming `gpt-5.6-terra` at `high`.
+`thread/resume` of the fork on A, the request a fork's borrower makes, answered the same.
+A `turn/start` on the fork naming `model: "gpt-5.6-luna"` and no effort ran at `gpt-5.6-luna` and `high` by its `turn_context`.
+So until OW-sayaju a fork ran on the config's model and effort, invisibly on the home server, whose `config.toml` names `gpt-5.6-luna` at `medium`.
+
+**A fresh resume naming no model restores both.**
+A was terminated, and in a fresh app-server B `thread/resume` of the parent naming no model answered `gpt-5.6-luna` at `low`, neither of the config's, and wrote a `thread_settings_applied` naming the same.
+The fork, resumed the same way in B, answered `gpt-5.6-luna` at `high`, the pair its own turn ran at.
+No turn ran in B, so the evidence for the restored pair is the answer and the settings record, not a turn.
+
+**Naming the model on a resume is what resets the effort.**
+In a fresh app-server C, `thread/resume` of the parent with `model: "gpt-5.6-luna"`, the shape OW-kokalo's run sent, answered `high` and wrote a `thread_settings_applied` at `high`.
+In a fresh D after it, a resume naming no model answered `high` too, though the thread's last `turn_context` still recorded `low`.
+So a resume restores the thread's latest settings record, not its last turn, and OW-kokalo's `medium` was the reset landing on that run's config.
+
+**What the adapter makes of it.**
+`CodexAdapter` reads the rollout's last `turn_context` on every resume, following a fork's `history_base` to the prefix it kept (`readCodexLastTurnSettings` in `src/server/sessions/codex.ts`).
+It sends that effort on every `turn/start`, and puts that model in place of the one the resume answered unless a model was given at start (`private effort` in `src/server/adapters/codex/adapter.ts`).
+The model rides `turn/start` and never `thread/resume`, since naming one there resets the effort.
+Run through that function by a one-off `bun` script, the parent's rollout answered `gpt-5.6-luna` at `low`, and a copy of the fork's rollout cut to the two lines it held when `thread/fork` returned answered the same through its base.
+
+**Not established.**
+Whether a `turn/start` naming the thread's own model with no effort resets the effort, as a resume naming it does, was not isolated; the adapter sends the stored effort beside the model whenever the store names one.
+No fork was cut at an earlier turn, so the kept-prefix bound rests on OW-buligi's reading of `history_base`.
+Whether `model` or `config` on `thread/fork` would carry the pair was not tried.

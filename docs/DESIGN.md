@@ -787,15 +787,17 @@ A conversation's model and effort are chosen before its first prompt and fixed a
 Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses them, and OW-pubulu found that for the model first.
 
 Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries.
-What each restores on a resume differs, measured for effort on 2026-09-23 (`docs/MANUAL_TESTING.md`, the three sections named for those cards):
+What each restores on a resume differs, measured for effort on 2026-09-23 (`docs/MANUAL_TESTING.md`, the three sections named for those cards, and OW-sayaju's for Codex):
 
 | | Effort after a resume |
 |---|---|
 | Pi (`pi 0.87.1`) | the level the session file last recorded |
-| Codex (`codex-cli 0.156.0`) | the default, not the chosen level |
+| Codex (`codex-cli 0.156.0`) | the level its latest settings record names, which is the chosen one unless a resume that named a model reset it to the config's; a fork takes the config's |
 | Claude Code (`claude 2.1.280`) | the default, not the chosen level |
 
-What each restores of the model has been measured only for Claude Code, and only narrowly: as of `claude 2.1.280`, a `--resume` of one sonnet session, and a `--fork-session` spawn of it cut at its last assistant line, each with no `--model`, put the model the store recorded in force over the settings' `opus[1m]`; the owner's opus session, resumed the same way, could not tell the store's model from the settings' (`docs/MANUAL_TESTING.md`, OW-nabano).
+What each restores of the model has been measured for Codex and Claude Code, not Pi, and only narrowly.
+As of `codex-cli 0.156.0`, a `thread/resume` naming no model answered the model the thread's last turn ran over `config.toml`'s, in a fresh app-server and in the one holding the thread, while `thread/fork` answered `config.toml`'s (`docs/MANUAL_TESTING.md`, OW-sayaju).
+As of `claude 2.1.280`, a `--resume` of one sonnet session, and a `--fork-session` spawn of it cut at its last assistant line, each with no `--model`, put the model the store recorded in force over the settings' `opus[1m]`; the owner's opus session, resumed the same way, could not tell the store's model from the settings' (`docs/MANUAL_TESTING.md`, OW-nabano).
 
 **The decision.**
 On a resume and on a fork, a conversation runs at the model and effort its store's last turn recorded, and agentpane re-asserts them wherever the backend does not restore them itself.
