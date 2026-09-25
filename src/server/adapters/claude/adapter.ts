@@ -21,7 +21,8 @@
  * - `fork()` runs nothing. It mints the fork's session id and returns the
  *   `StartOptions` (`forkOf`) that spawn it, leaving this adapter on the parent
  *   with its child, its ref and its in-flight turn intact -- so like Codex, and
- *   unlike Pi, `adapter.ref` does not change and `#adoptRef` no-ops (OW-razoki).
+ *   unlike Pi, `adapter.ref` does not change and `onRefChanged` stays silent
+ *   (OW-razoki).
  *   The fork becomes a full session when the manager attaches it: a second
  *   adapter, started with `forkOf`, spawns `--resume <parentId>
  *   --resume-session-at <entryId> --fork-session --session-id <forkId>`.
@@ -236,6 +237,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	private updateListeners = new Set<(state: AdapterState, changedIndex?: number) => void>();
 	private requestListeners = new Set<(request: AgentRequest) => void>();
 	private errorListeners = new Set<(message: string) => void>();
+	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
 
 	constructor(ref: SessionRef, options: ClaudeAdapterOptions = {}) {
 		this.currentRef = ref;
@@ -248,8 +250,10 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * or resumed one, and again if an `init` event names a different
 	 * `session_id` -- the CLI is authoritative about its own store, and `init`
 	 * arrives with the first turn, so that second move lands well after
-	 * `start()` resolved (`handleLine`). `fork()` does NOT move it: the fork is
-	 * a second session with an adapter of its own (OW-razoki).
+	 * `start()` resolved (`handleLine`). Each move is announced through
+	 * `onRefChanged` as a rename, and a resume of the id already held announces
+	 * nothing. `fork()` does NOT move it: the fork is a second session with an
+	 * adapter of its own (OW-razoki).
 	 */
 	get ref(): SessionRef {
 		return this.currentRef;
@@ -309,7 +313,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 			this.applyEffects(this.reducer.hydrate(entries.map((entry) => entry.record)));
 			this.adoptStoredModel();
-			this.currentRef = { backend: "claude", id: opts.resumeId };
+			this.moveTo(opts.resumeId);
 			// Only a model given at start rides the spawn: the CLI restores the
 			// stored one itself (module doc).
 			await this.attachProcess({
@@ -321,7 +325,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		} else {
 			const sessionId = this.mintSessionId();
-			this.currentRef = { backend: "claude", id: sessionId };
+			this.moveTo(sessionId);
 			await this.attachProcess({ cwd: opts.cwd, sessionId, ...this.chosenModel() });
 			if (this.disposed) throw new Error("claude adapter start aborted: disposed during startup");
 		}
@@ -343,6 +347,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.updateListeners.clear();
 		this.requestListeners.clear();
 		this.errorListeners.clear();
+		this.refListeners.clear();
 		this.rejectPendingControls(new Error("claude adapter disposed"));
 		await ownership?.proc.kill();
 	}
@@ -507,6 +512,11 @@ export class ClaudeAdapter implements BackendAdapter {
 	onError(cb: (message: string) => void): Unsubscribe {
 		this.errorListeners.add(cb);
 		return () => this.errorListeners.delete(cb);
+	}
+
+	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe {
+		this.refListeners.add(cb);
+		return () => this.refListeners.delete(cb);
 	}
 
 	/** Inert: nothing fires `onRequest` under sbox's bypassPermissions (see module doc). */
@@ -709,10 +719,9 @@ export class ClaudeAdapter implements BackendAdapter {
 		if (event.type === "system" && event.subtype === "init") {
 			const sessionId = (event as { session_id?: unknown }).session_id;
 			// `--session-id`/`--resume` make this a confirmation, but the CLI is
-			// authoritative about its own store.
-			if (typeof sessionId === "string" && sessionId && sessionId !== this.currentRef.id) {
-				this.currentRef = { backend: "claude", id: sessionId };
-			}
+			// authoritative about its own store. Announced before this line's
+			// update and the reducer's effects, which belong to the new id.
+			if (typeof sessionId === "string" && sessionId) this.moveTo(sessionId);
 			const model = (event as { model?: unknown }).model;
 			if (typeof model === "string" && model && model !== this.model) {
 				this.model = model;
@@ -782,6 +791,13 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const listener of [...this.errorListeners]) listener(message);
+	}
+
+	/** Take `sessionId` as the id, announcing it when it is a different one. */
+	private moveTo(sessionId: string): void {
+		if (sessionId === this.currentRef.id) return;
+		this.currentRef = { backend: "claude", id: sessionId };
+		for (const listener of [...this.refListeners]) listener(this.currentRef, "rename");
 	}
 
 	private requireProc(): ClaudeProcess {

@@ -85,10 +85,11 @@ export interface FakeAdapterOptions {
 	 */
 	modelsNeedStart?: boolean;
 	/**
-	 * Adopt this id when `start()` resolves. Mirrors `PiAdapter`, whose `ref` is
-	 * not stable at construction: Pi's session id *is* its JSONL path (D9), so a
-	 * session learns its own id from `get_state` during start -- a resumed one,
-	 * and a fresh one too as of `pi 0.84.1` (HANDOFF finding 41).
+	 * Adopt this id at the end of `start()`, before it resolves. Mirrors
+	 * `PiAdapter`, whose `ref` is not stable at construction: Pi's session id
+	 * *is* its JSONL path (D9), so a session learns its own id from `get_state`
+	 * during start -- a resumed one, and a fresh one too as of `pi 0.84.1`
+	 * (HANDOFF finding 41).
 	 */
 	materialiseOnStart?: string;
 	/**
@@ -111,8 +112,8 @@ export interface FakeAdapterOptions {
 	/**
 	 * How `fork()` behaves, so the backends' asymmetric forks can be modelled:
 	 *  - "pi" (default): the process's active file MOVES, so the adapter adopts a
-	 *    new id (`${ref.id}#fork-${entryId}`) and returns it -- `#adoptRef`
-	 *    re-keys.
+	 *    new id (`${ref.id}#fork-${entryId}`), announces it as a `"fork"`, and
+	 *    returns it.
 	 *  - "codex": a new thread is minted that this adapter is NOT driving, so its
 	 *    own `ref` is left unchanged while `fork()` returns the new thread's ref.
 	 *  - "claude": like "codex", except that nothing has recorded the fork yet,
@@ -193,6 +194,7 @@ export class FakeAdapter implements BackendAdapter {
 	#resolved = new Set<(requestId: string) => void>();
 	#errors = new Set<(message: string) => void>();
 	#notices = new Set<(notice: AgentNotice) => void>();
+	#refChanges = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
 	#nextRequestId = 1;
 
 	/** Not stable at construction -- see `materialiseOnStart`/`materialiseOnSubmit`. */
@@ -227,6 +229,7 @@ export class FakeAdapter implements BackendAdapter {
 		this.#resolved.clear();
 		this.#errors.clear();
 		this.#notices.clear();
+		this.#refChanges.clear();
 		if (first && this.options.forkMode === "shared") this.options.sharedChild?.release();
 		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
@@ -239,9 +242,12 @@ export class FakeAdapter implements BackendAdapter {
 		}
 	}
 
-	/** Adopt a real backend id, as Pi does once it names the file it just wrote. */
+	/**
+	 * Adopt a real backend id and announce it as a rename, as Pi does once it
+	 * names the file it just wrote, and Claude Code once an `init` names another.
+	 */
 	materialiseAs(id: string): void {
-		this.#ref = { ...this.#ref, id };
+		this.#moveTo({ ...this.#ref, id }, "rename");
 	}
 
 	async abort(): Promise<void> {
@@ -280,7 +286,7 @@ export class FakeAdapter implements BackendAdapter {
 				adapter: new FakeAdapter(forkedRef, { ...this.options, ...this.options.forkOptions }),
 			};
 		}
-		if (this.options.forkMode !== "codex") this.#ref = forkedRef;
+		if (this.options.forkMode !== "codex") this.#moveTo(forkedRef, "fork");
 		return { ref: forkedRef };
 	}
 
@@ -311,6 +317,11 @@ export class FakeAdapter implements BackendAdapter {
 	onNotice(cb: (notice: AgentNotice) => void): Unsubscribe {
 		this.#notices.add(cb);
 		return () => this.#notices.delete(cb);
+	}
+
+	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe {
+		this.#refChanges.add(cb);
+		return () => this.#refChanges.delete(cb);
 	}
 
 	async setModel(model: string): Promise<void> {
@@ -404,6 +415,12 @@ export class FakeAdapter implements BackendAdapter {
 	#emit(changedIndex?: number): void {
 		const state = this.getState();
 		for (const cb of [...this.#updates]) cb(state, changedIndex);
+	}
+
+	#moveTo(ref: SessionRef, cause: "rename" | "fork"): void {
+		if (sessionKey(ref) === sessionKey(this.#ref)) return;
+		this.#ref = ref;
+		for (const cb of [...this.#refChanges]) cb(ref, cause);
 	}
 }
 

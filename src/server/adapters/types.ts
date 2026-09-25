@@ -3,7 +3,7 @@
  *
  * FROZEN INTERFACE (DESIGN "The backend adapter contract"). The Pi, Codex,
  * and Claude Code adapters all implement it; changing it changes all three --
- * raise it before editing.
+ * raise it before editing. D24 raised `onRefChanged` (OW-nikogo).
  *
  * An adapter owns one sandboxed subprocess's stdio and is responsible for one
  * thing above all: producing and maintaining an `AgentMessage[]` plus a
@@ -99,6 +99,7 @@ export type ForkResult =
 	| { ref: SessionRef; start: StartOptions; adapter: BackendAdapter };
 
 export interface BackendAdapter {
+	/** The backend's own id for the session, which can change; `onRefChanged` says when. */
 	readonly ref: SessionRef;
 
 	// -- lifecycle ----------------------------------------------------------
@@ -152,7 +153,8 @@ export interface BackendAdapter {
 	/**
 	 * Branch a second conversation off this one at `entryId`. This adapter keeps
 	 * driving the session it already has -- except on Pi, whose fork moves the
-	 * live process's own file, so its `ref` changes and the manager re-keys.
+	 * live process's own file, so its `ref` changes and `onRefChanged` fires
+	 * with `"fork"`.
 	 */
 	fork(entryId: string): Promise<ForkResult>;
 
@@ -168,6 +170,18 @@ export interface BackendAdapter {
 	 * quadratic over a long turn.
 	 */
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe;
+	/**
+	 * Fires the moment `ref` takes a different id, synchronously and before the
+	 * adapter emits anything else under it, so the manager re-keys the session
+	 * as the adapter moves rather than at some later point it looks (D24). An
+	 * assignment of the id already held fires nothing.
+	 *
+	 * `cause` is the split OW-kekoji settled: `"rename"` is one conversation
+	 * taking a new id -- every backend's at attach, Pi's at the first prompt,
+	 * Claude Code's at an `init` naming another -- and `"fork"` is Pi's live
+	 * process moving onto a second conversation, leaving the first behind.
+	 */
+	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe;
 
 	/**
 	 * Fires when the agent asks the human something and blocks (D2a). The

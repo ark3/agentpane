@@ -282,6 +282,36 @@ describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
 		expect(adapter.ref.id).toBe("/home/u/.pi/agent/sessions/materialised.jsonl");
 	});
 
+	it("announces the adopted file as a rename, at start or at the first prompt, and nothing for the id it holds (D24, OW-nikogo)", async () => {
+		const h = makeHarness();
+		const seen: string[] = [];
+		h.adapter.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+		await startAdapter(h, { sessionFile: REF.id });
+		expect(seen).toEqual([]);
+
+		const named = makeHarness();
+		const atStart = new PiAdapter({ backend: "pi", id: "__new__" }, { spawn: () => named.child as unknown as PiChild });
+		atStart.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+		const startedNamed = atStart.start({ cwd: WORKSPACE });
+		named.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/real.jsonl" });
+		await startedNamed;
+		expect(seen.splice(0)).toEqual(["rename /home/u/.pi/agent/sessions/real.jsonl"]);
+
+		const later = makeHarness();
+		const adapter = new PiAdapter({ backend: "pi", id: "__new__" }, { spawn: () => later.child as unknown as PiChild });
+		adapter.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+		const started = adapter.start({ cwd: WORKSPACE });
+		later.child.respondTo("get_state", { model: null, isStreaming: false });
+		await started;
+		expect(seen).toEqual([]);
+		const submitted = adapter.submit("first prompt");
+		later.child.respondTo("prompt");
+		await Promise.resolve();
+		later.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/materialised.jsonl" });
+		await submitted;
+		expect(seen).toEqual(["rename /home/u/.pi/agent/sessions/materialised.jsonl"]);
+	});
+
 	it("stops re-probing once the id is known, so later prompts cost one round trip", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
@@ -1104,6 +1134,39 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		await forked;
 
 		expect(h.adapter.getState()).toMatchObject({ model: "openrouter/deepseek/deepseek-v4.1-flash", effort: "low", unrestoredModel: null });
+	});
+
+	it("announces the fork's file before the model re-send's update and the hydrate's (D24, OW-nikogo)", async () => {
+		const SPAWNED = { provider: "openrouter", id: "google/gemini-2.5-flash-lite", name: "Flash Lite", reasoning: true };
+		const MOVED = "/home/u/.pi/agent/sessions/s-fork.jsonl";
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE, model: "openrouter/google/gemini-2.5-flash-lite" });
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: REF.id });
+		await started;
+		const changed = h.adapter.setModel("openrouter/deepseek/deepseek-v4.1-flash");
+		h.child.respondTo("set_model", FLASH);
+		await changed;
+		const seen: string[] = [];
+		h.adapter.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+		h.adapter.onUpdate((state) => seen.push(`update ${state.model} ${state.messages.length}`));
+
+		const forked = h.adapter.fork("u2");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await flush();
+		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "medium", isStreaming: false, sessionFile: MOVED });
+		await flush();
+		h.child.respondTo("set_model", FLASH);
+		await flush();
+		h.child.respondTo("get_messages", { messages: [userMessage("kept")] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [FLASH, SPAWNED] });
+		await forked;
+
+		expect(seen).toEqual([
+			`fork ${MOVED}`,
+			"update openrouter/deepseek/deepseek-v4.1-flash 0",
+			"update openrouter/deepseek/deepseek-v4.1-flash 1",
+		]);
 	});
 
 	it("still completes a fork whose re-sent model is refused, naming the chosen model as unrestored (OW-sinoha)", async () => {

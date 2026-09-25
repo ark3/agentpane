@@ -2415,6 +2415,32 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		return { proc, parent, borrower, forked };
 	}
 
+	it("announces a fresh start's thread id once, and nothing for a fork, its borrower's start or a resume (D24, OW-nikogo)", async () => {
+		const seen: string[] = [];
+		const record = (who: string) => (ref: SessionRef, cause: string) => seen.push(`${who} ${cause} ${ref.id}`);
+		const proc = new AdapterProcess();
+		shareableServer(proc);
+		const parent = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc, codexRoot: NO_STORE });
+		parent.onRefChanged(record("parent"));
+		await parent.start({ cwd: "/workspace" });
+		expect(seen.splice(0)).toEqual(["parent rename thread-parent"]);
+
+		await parent.listForkPoints();
+		const forked = await parent.fork("turn-2");
+		const borrower = forked.adapter as CodexAdapter;
+		borrower.onRefChanged(record("borrower"));
+		await borrower.start(forked.start as { cwd: string; resumeId: string });
+
+		const resumeProc = new AdapterProcess();
+		configureHappyServer(resumeProc, { threadId: STORED_REF.id });
+		const resumed = new CodexAdapter(STORED_REF, { spawn: () => resumeProc, codexRoot: NO_STORE });
+		resumed.onRefChanged(record("resumed"));
+		await resumed.start({ cwd: "/workspace", resumeId: STORED_REF.id });
+
+		expect(seen).toEqual([]);
+		expect(parent.ref).toEqual({ backend: "codex", id: "thread-parent" });
+	});
+
 	it("hands back an adapter to start as a plain resume of the flushed fork", async () => {
 		const { proc, forked, borrower } = await forkedPair();
 

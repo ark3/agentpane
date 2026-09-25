@@ -219,6 +219,7 @@ export class CodexAdapter implements BackendAdapter {
 	private resolvedListeners = new Set<(requestId: string) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private noticeListeners = new Set<(notice: AgentNotice) => void>();
+	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
 
 	constructor(ref: SessionRef, options: CodexAdapterOptions = {}) {
 		this.currentRef = ref;
@@ -230,7 +231,10 @@ export class CodexAdapter implements BackendAdapter {
 
 	/**
 	 * The live session ref. A `virtual` session (D9) has no Codex thread id
-	 * until `thread/start` returns, so this changes once during `start()`.
+	 * until `thread/start` returns, so this changes once during `start()`, and
+	 * `onRefChanged` says so. Every other assignment sets the id already held:
+	 * a resume's, and the borrower's in `adoptConnection` and `startBorrowed`.
+	 * A fork moves nothing here (OW-22).
 	 */
 	get ref(): SessionRef {
 		return this.currentRef;
@@ -338,7 +342,7 @@ export class CodexAdapter implements BackendAdapter {
 
 			assertOwned();
 			this.threadId = started.thread.id;
-			this.currentRef = { backend: "codex", id: started.thread.id };
+			this.moveTo(started.thread.id);
 			holder.claim(started.thread.id);
 		} catch (error) {
 			this.clearPendingRequests();
@@ -422,10 +426,10 @@ export class CodexAdapter implements BackendAdapter {
 		this.rememberTurns(turns);
 		assertOwned();
 		// `thread/resume` answers with the id it was asked for, so this is the id
-		// `adoptConnection` already installed and `#adoptRef` no-ops on it -- no
+		// `adoptConnection` already installed and announces nothing -- no
 		// `renamed` for a fork, which is what D20/OW-suhoto requires.
 		this.threadId = resumed.thread.id;
-		this.currentRef = { backend: "codex", id: resumed.thread.id };
+		this.moveTo(resumed.thread.id);
 		holder.claim(resumed.thread.id);
 	}
 
@@ -451,7 +455,7 @@ export class CodexAdapter implements BackendAdapter {
 		this.borrowed = true;
 		this.cwd = cwd;
 		this.threadId = threadId;
-		this.currentRef = { backend: "codex", id: threadId };
+		this.moveTo(threadId);
 		this.reducer.setIdentity({ threadId });
 		const ownership: ClientOwnership = { proc: connection.proc, client: null, ready: false };
 		this.ownership = ownership;
@@ -848,6 +852,21 @@ export class CodexAdapter implements BackendAdapter {
 	onNotice(cb: (notice: AgentNotice) => void): Unsubscribe {
 		this.noticeListeners.add(cb);
 		return () => this.noticeListeners.delete(cb);
+	}
+
+	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe {
+		this.refListeners.add(cb);
+		return () => this.refListeners.delete(cb);
+	}
+
+	/**
+	 * Take `threadId` as the id, announcing it when it is a different one. Always
+	 * a rename: a Codex fork is another thread with an adapter of its own.
+	 */
+	private moveTo(threadId: string): void {
+		if (threadId === this.currentRef.id) return;
+		this.currentRef = { backend: "codex", id: threadId };
+		for (const listener of [...this.refListeners]) listener(this.currentRef, "rename");
 	}
 
 	/**

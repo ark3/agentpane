@@ -175,6 +175,37 @@ describe("ClaudeAdapter lifecycle", () => {
 		expect(h.adapter.getState().model).toBe("claude-haiku-accepted");
 	});
 
+	it("announces the init's session id before that line's update and the reducer's effects (D24, OW-nikogo)", async () => {
+		const h = harness();
+		const seen: string[] = [];
+		h.adapter.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+		await h.adapter.start({ cwd: "/workspace" });
+		expect(seen.splice(0)).toEqual(["rename minted-1"]);
+		h.adapter.onUpdate((state) => seen.push(`update ${state.model}`));
+		await h.adapter.submit("hi");
+		seen.length = 0;
+
+		h.proc().emit({ type: "system", subtype: "init", session_id: "cli-chosen", model: "claude-haiku-accepted" });
+		h.proc().emit({ type: "system", subtype: "init", session_id: "cli-chosen", model: "claude-haiku-accepted" });
+
+		expect(seen[0]).toBe("rename cli-chosen");
+		expect(seen.slice(1).every((entry) => entry.startsWith("update "))).toBe(true);
+		expect(seen.slice(1)).toContain("update claude-haiku-accepted");
+		expect(seen.filter((entry) => entry.startsWith("rename"))).toHaveLength(1);
+	});
+
+	it("announces nothing for a resume, which holds the id already, or for a fork, which moves nothing (D24, OW-nikogo)", async () => {
+		const h = harness({ entries: storedEntries(), ref: { backend: "claude", id: "stored-id" } });
+		const seen: string[] = [];
+		h.adapter.onRefChanged((ref, cause) => seen.push(`${cause} ${ref.id}`));
+
+		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
+		await h.adapter.fork("u2");
+
+		expect(seen).toEqual([]);
+		expect(h.adapter.ref).toEqual({ backend: "claude", id: "stored-id" });
+	});
+
 	it("disposes idempotently, killing the child once and rejecting pending controls", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });

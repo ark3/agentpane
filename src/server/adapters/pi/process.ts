@@ -45,6 +45,7 @@ import {
 type UpdateListener = (state: AdapterState, changedIndex?: number) => void;
 type RequestListener = (request: AgentRequest) => void;
 type ErrorListener = (message: string) => void;
+type RefListener = (ref: SessionRef, cause: "rename" | "fork") => void;
 
 interface PendingCommand {
 	resolve: (response: unknown) => void;
@@ -112,10 +113,9 @@ export class PiAdapter implements BackendAdapter {
 	 * the path from `start()`'s `get_state`, though it writes no file there
 	 * until the first turn's reply ends (MANUAL_TESTING OW-bohodu).
 	 *
-	 * For the server: **re-read `adapter.ref` after `start()` and after the
-	 * first `submit()` resolves.** Those are the two points at which it can
-	 * change, both are awaited, and a session keyed by the id it was created
-	 * with will not be findable on disk afterwards.
+	 * It moves at three points, each announced through `onRefChanged` as it
+	 * happens: `start()`'s `get_state` and, for a Pi that named no file there,
+	 * the first `submit()`'s, both `"rename"`; and every `fork()`, `"fork"`.
 	 */
 	get ref(): SessionRef {
 		return this.sessionRef;
@@ -266,6 +266,7 @@ export class PiAdapter implements BackendAdapter {
 	private readonly requestListeners = new Set<RequestListener>();
 	private readonly resolvedListeners = new Set<(requestId: string) => void>();
 	private readonly errorListeners = new Set<ErrorListener>();
+	private readonly refListeners = new Set<RefListener>();
 
 	private readonly pendingCommands = new Map<string, PendingCommand>();
 	private nextCommandId = 0;
@@ -352,9 +353,7 @@ export class PiAdapter implements BackendAdapter {
 	private adoptSessionFile(sessionFile: string | undefined): void {
 		if (this.idResolved || !sessionFile) return;
 		this.idResolved = true;
-		if (sessionFile !== this.sessionRef.id) {
-			this.sessionRef = { ...this.sessionRef, id: sessionFile };
-		}
+		this.moveTo(sessionFile, "rename");
 	}
 
 	/**
@@ -466,8 +465,7 @@ export class PiAdapter implements BackendAdapter {
 		// stays for the `virtual` case D9 describes.
 		// One extra round trip, only until the id resolves.
 		//
-		// Awaited, because the manager reads `ref` the moment `submit()` settles
-		// and a rename that lands later is one it will never hear about. But not
+		// Awaited, so the rename is announced before `submit()` settles. But not
 		// allowed to fail the submit: Pi has already accepted the prompt above,
 		// and `submit()` rejecting means "the turn was not admitted" (the frozen
 		// contract) -- which the HTTP layer relays as a 500 and the browser
@@ -568,14 +566,18 @@ export class PiAdapter implements BackendAdapter {
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file
 		// unconditionally.
+		//
+		// The `fork` response names no file, so this is where the move is learnt,
+		// and it is announced at once, before the re-sends and the hydrate below
+		// emit anything under it (D24). Anything Pi emits between the `fork`
+		// response and this answer still goes out under the parent's ref; as of
+		// `pi 0.87.1` nothing arrived there (docs/MANUAL_TESTING.md, OW-dutute).
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
+		if (state.data.sessionFile) this.moveTo(state.data.sessionFile, "fork");
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
 		if (state.data.model) this.reasoning = state.data.model.reasoning === true;
 		this.thinkingLevel = state.data.thinkingLevel ?? this.thinkingLevel;
 		this.syncEffort();
-		if (state.data.sessionFile && state.data.sessionFile !== this.sessionRef.id) {
-			this.sessionRef = { ...this.sessionRef, id: state.data.sessionFile };
-		}
 		// A fork rebuilds the session from this process's command line, so the
 		// spawn's `--model` is in force again over the chosen model (OW-sinoha,
 		// in the docblock on `chosenModel`), and its suffix over the chosen level
@@ -659,6 +661,11 @@ export class PiAdapter implements BackendAdapter {
 	onError(cb: ErrorListener): Unsubscribe {
 		this.errorListeners.add(cb);
 		return () => this.errorListeners.delete(cb);
+	}
+
+	onRefChanged(cb: RefListener): Unsubscribe {
+		this.refListeners.add(cb);
+		return () => this.refListeners.delete(cb);
 	}
 
 	// -- session controls -----------------------------------------------------
@@ -836,5 +843,12 @@ export class PiAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const cb of this.errorListeners) cb(message);
+	}
+
+	/** Take `sessionFile` as the id, announcing it when it is a different one. */
+	private moveTo(sessionFile: string, cause: "rename" | "fork"): void {
+		if (sessionFile === this.sessionRef.id) return;
+		this.sessionRef = { ...this.sessionRef, id: sessionFile };
+		for (const cb of this.refListeners) cb(this.sessionRef, cause);
 	}
 }
