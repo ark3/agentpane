@@ -972,9 +972,10 @@ export function createController(
 				if (disposed) return null;
 				// The backends reach "attached to the fork" from opposite directions,
 				// and this one line covers all of them. Pi's fork moved the live
-				// process onto the new file, so the manager has already re-keyed and
-				// this attach finds it; Codex and Claude Code each minted a
-				// conversation nothing is driving, and this attach is what spawns it.
+				// process onto the new file, so the manager already holds a container
+				// named by the fork's ref and this attach finds it; Codex and Claude
+				// Code each minted a conversation nothing is driving, and this attach
+				// is what spawns it.
 				// A fork is a selection change, so the intent bumps -- a preview poll
 				// still in flight must not put its old transcript back over the fork.
 				//

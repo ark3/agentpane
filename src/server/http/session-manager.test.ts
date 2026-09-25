@@ -358,7 +358,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(renaming.created[0]?.disposed).toBe(true);
 	});
 
-	it("re-keys when Claude Code's init names another session after submit() resolved (OW-hikefi)", async () => {
+	it("names the container by the session Claude Code's init names after submit() resolved (OW-hikefi)", async () => {
 		// `init` arrives with the turn, after `submit()` admitted it, so no point
 		// the manager could poll at follows it.
 		const proc = new FakeClaudeProcess();
@@ -526,7 +526,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
 	// OW-razoki): only Pi's adapter announces a `"fork"`, and SessionManager.fork
 	// must handle every shape.
-	it("re-keys, without emitting `renamed`, when a Pi-style fork moves the active file", async () => {
+	it("moves the adapter onto the fork's container, without emitting `renamed`, when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
 		const events: { from: SessionRef; to: SessionRef }[] = [];
 		const prevRenamed = broadcaster.renamed.bind(broadcaster);
@@ -939,7 +939,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.liveRefs()).toEqual([forked]);
 	});
 
-	it("does not re-key a session that was closed while its fork was in flight", async () => {
+	it("puts no fork's container into the table for a session closed while its fork was in flight", async () => {
 		// DELETE and POST .../fork are plain concurrent handlers under
 		// `Bun.serve` (app.ts); nothing serializes them. `close()` empties the
 		// table before its first await, and the adapter announces its move long
@@ -977,7 +977,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.isAttached(forked)).toBe(false);
 	});
 
-	it("does not re-key a session that was disposed while its fork was in flight", async () => {
+	it("puts no fork's container into the table for a session disposed while its fork was in flight", async () => {
 		// Same window as the test above, with shutdown in place of DELETE.
 		// `disposeAll()` clears the table before its first await, and the parked
 		// `fork` announces its move afterwards -- so were each ManagedSession not
@@ -1013,10 +1013,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.isAttached(forked)).toBe(false);
 	});
 
-	it("leaves an older alias of the parent pointing at the parent", async () => {
+	it("leaves an older name of the parent resolving to nothing, not to the fork", async () => {
 		// A `virtual:` id that materialised into the parent is an older name for
-		// the PARENT's conversation. Following the container onto the fork would
-		// recreate the bug one level up: a stale client handle that can kill the
+		// the PARENT's conversation. Handing it to the fork's container would
+		// recreate the bug one level up: a stale client ref that can kill the
 		// live fork.
 		const renaming = new FakeAdapterFactory({
 			materialiseOnSubmit: "/home/u/.pi/agent/sessions/materialised.jsonl",
@@ -1029,9 +1029,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 		const forked = await sessions.fork(virtualRef, "e1");
 
-		// The alias still names the parent, which is now detached, so it misses
-		// -- and a miss is what `canonicalRef` reports by handing `ref` back. Had
-		// it followed the container it would resolve to the fork instead.
+		// The name left with the parent's container, which is now detached, so it
+		// misses -- and a miss is what `canonicalRef` reports by handing `ref`
+		// back. Had it gone to the fork's container it would resolve to the fork.
 		expect(sessions.canonicalRef(virtualRef)).toEqual(virtualRef);
 		expect(sessions.canonicalRef(virtualRef)).not.toEqual(forked);
 		expect(sessions.adapterFor(virtualRef)).toBeUndefined();
