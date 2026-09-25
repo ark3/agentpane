@@ -656,7 +656,7 @@ export class SessionManager {
 				error: null,
 				requests: [],
 				notices: [],
-					queue: Promise.resolve(),
+				queue: Promise.resolve(),
 				createdAt: this.#now(),
 			};
 		}
@@ -726,7 +726,7 @@ export class SessionManager {
 				error: null,
 				requests: [],
 				notices: [],
-					queue: Promise.resolve(),
+				queue: Promise.resolve(),
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};

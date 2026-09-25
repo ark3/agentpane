@@ -859,6 +859,12 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			await gate.promise;
 			return fork(entryId);
 		};
+		// `PiAdapter.dispose()` leaves its listeners subscribed, so the fake's
+		// clearing of them must not stand in for the manager's unsubscription,
+		// which is what this test is about.
+		adapter.dispose = async () => {
+			adapter.disposed = true;
+		};
 
 		const forking = sessions.fork(REF, "e1");
 		await sessions.close(REF);
@@ -875,10 +881,11 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// `disposeAll()` clears the table before its first await, and the parked
 		// `fork` announces its move afterwards -- so were each ManagedSession not
 		// unsubscribed in that same run, it would re-insert the disposed
-		// container under the fork's id, into the table shutdown just emptied. `liveRefs()` then hands
-		// that dead session to a browser reconnecting mid-shutdown (the event
-		// stream sends `retry: 500`), and `isAttached()`/`adapterFor()` hand out
-		// its disposed adapter to the abort and compact routes.
+		// container under the fork's id, into the table shutdown just emptied.
+		// `liveRefs()` then hands that dead session to a browser reconnecting
+		// mid-shutdown (the event stream sends `retry: 500`), and
+		// `isAttached()`/`adapterFor()` hand out its disposed adapter to the
+		// abort and compact routes.
 		await sessions.attach(REF);
 		const adapter = pi.created[0];
 		if (!adapter) throw new Error("no adapter");
@@ -889,6 +896,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		adapter.fork = async (entryId) => {
 			await gate.promise;
 			return fork(entryId);
+		};
+		// As above: a disposal that leaves the listeners in place, as Pi's does.
+		adapter.dispose = async () => {
+			adapter.disposed = true;
 		};
 
 		const forking = sessions.fork(REF, "e1");
