@@ -70,10 +70,10 @@
  * session. Each held node goes out in its last state but in the place of its
  * first upsert since the last send, so a new node is never drawn ahead of
  * one that came before it, which Emacs appends in arrival order. Emacs
- * relies on that order too: the status that ends streaming redraws the tail from
- * the node it holds, and a newly appended node redraws the one before it.
- * Every upsert waits, the first after a quiet spell too, which leaves one
- * timer and no second state to keep; a node goes out sooner only when a
+ * relies on that order too: the status that ends streaming redraws the tail
+ * from the node it holds, and a newly appended node redraws the one before
+ * it. Every upsert waits, the first after a quiet spell too, which leaves
+ * one timer and no second state to keep; a node goes out sooner only when a
  * write forces it. A held node is rendered from the transcript as it stood
  * at its upsert, not from the current state, which a later snapshot may have
  * rewound past it, so it is exactly the node the unthrottled stream would

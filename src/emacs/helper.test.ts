@@ -744,6 +744,43 @@ describe("the node throttle (OW-jeruye)", () => {
 		expect(since()).toEqual([2]);
 	});
 
+	it("sends a held node before a notification for another attached session", async () => {
+		const { io, source } = start({ ...attachRoutes(pi), ...attachRoutes(codex) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: codex } });
+		await io.until(2);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [user], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(4);
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		source.emit({ type: "upsert", session: pi, handle: h(pi), seq: 2, index: 1, message: said("a") });
+		source.emit({ type: "status", session: codex, handle: h(codex), seq: 2, ...statusOf(true) });
+		expect(io.out.slice(4).map((message) => [message["method"], (message["params"] as { handle: string }).handle])).toEqual([
+			["session/node", h(pi)],
+			["session/status", h(codex)],
+		]);
+	});
+
+	it("sends a held node as it stood at its upsert, under its own handle, before a snapshot that moves its ref to a new handle", async () => {
+		const { io, source, upsert } = await streaming();
+		upsert(1, said("a"));
+		source.emit({ type: "snapshot", session: pi, handle: "h2", seq: 0, messages: [user], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		expect(io.out.slice(2).map((message) => [message["method"], (message["params"] as { handle: string }).handle])).toEqual([
+			["session/node", h(pi)],
+			["session/snapshot", "h2"],
+		]);
+		expect(textOf(io.out[2]!)).toEqual(["a"]);
+	});
+
+	it("never sends a node held for a session closed by its ref alone, only the reply", async () => {
+		const { io, upsert, since } = await streaming({ [`DELETE ${ROUTES.session(pi)}`]: noContent });
+		upsert(1, said("a"));
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi } });
+		await settle();
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual([2]);
+	});
+
 	it("drops a held node when the input ends, and resolves without waiting out the interval", async () => {
 		const { io, done, upsert, since } = await streaming();
 		upsert(1, said("a"));
