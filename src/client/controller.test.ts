@@ -1380,7 +1380,7 @@ describe("client controller", () => {
 		const compacted = controller.compact();
 		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
 
-		// The server re-keys the session while the POST is in flight (D9): the
+		// The server renames the session while the POST is in flight (D9): the
 		// reducer carries the requesting mark to the new key and drops the old.
 		api.emit({ type: "renamed", session: attachedRef, seq: 2, from: ref });
 

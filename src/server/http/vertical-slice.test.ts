@@ -158,7 +158,7 @@ describe("offline vertical slice", () => {
 
 	it("leaves a browser that did not fork on the parent it was reading (OW-suhoto)", async () => {
 		// Pi is the only backend whose own ref moves on fork, so it is the only one
-		// that reaches `#adoptRef`'s fork path at all. The parent is detached, not
+		// that reaches `#forkOnto` at all. The parent is detached, not
 		// renamed: it is still on disk and still listed, so a second browser that
 		// was reading it must keep both its selection and its transcript.
 		const parent: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/parent.jsonl" };

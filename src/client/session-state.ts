@@ -219,8 +219,8 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// These six arms are not, however, unreachable before that introduction, and what
 	// they drop there is worth naming. `#start` subscribes `onUpdate`, `onRequest`,
 	// `onError`, `onNotice` and `onRequestResolved` before it awaits
-	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces re-keys its live
-	// container onto the fork's ref with no `renamed` (`#adoptRef`, D20, OW-suhoto),
+	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces moves it onto a
+	// container of the fork's with no `renamed` (`#forkOnto`, D20, OW-suhoto),
 	// so all six can fan out under a key no client holds a view of until the fork's
 	// hydrate or its attach snapshots it. None of that is lost:
 	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and

@@ -274,8 +274,9 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	// `PiAdapter.ref` is not stable at construction: Pi's session id IS its JSONL
 	// path (D9), which Pi names from start()'s get_state, and a backend that has
 	// named nothing by the end of attach names it at the first prompt instead. The
-	// adapter announces each move through `onRefChanged` and the manager re-keys
-	// on it (D24); these are that contract.
+	// adapter announces each move through `onRefChanged` and the manager writes
+	// the new id onto the container as one more name (D24); these are that
+	// contract.
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 
 	it("adopts the id the adapter took during start()", async () => {
@@ -537,7 +538,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const forked = await sessions.fork(REF, "e1");
 
 		// FakeAdapter's Pi fork adopts `${id}#fork-e1`; the manager returns that
-		// moved ref and re-keys the table to it.
+		// moved ref and moves the adapter onto a container named by it.
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 		expect(forked).toEqual(moved);
 		expect(sessions.liveRefs()).toEqual([moved]);
@@ -650,9 +651,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
-	// container genuinely moves -- the one live adapter is driving the fork now
-	// -- but the parent is a second conversation, not an older name for this
-	// one, so no alias is written and the parent's ref stops resolving at all.
+	// adapter genuinely moves -- the one live adapter is driving the fork now,
+	// from a container of the fork's own -- but the parent is a second
+	// conversation, not an older name for this one, so none of its names goes
+	// with it and the parent's ref stops resolving at all.
 	// It is detached, in the sense D9 and D12 already define, and the next
 	// attach rehydrates it. Pi is the only backend that reaches this now
 	// (OW-razoki), and the index below still reports the parent's stored session
@@ -827,9 +829,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("does not hand the fork the parent's stored preview", async () => {
-		// `#adoptRef` re-keys the parent's own container onto the fork, so
-		// `session.stored` -- the index's answer about the PARENT -- would ride
-		// along and `summaryOf` would dress it in the fork's ref. Since OW-kekoji
+		// The fork's container is built from the parent's (`#forkOnto`), and
+		// `session.stored` -- the index's answer about the PARENT -- carried
+		// over would have `summaryOf` dress it in the fork's ref. Since OW-kekoji
 		// the parent is listed too, so the attach response would draw the fork's
 		// row character-for-character identical to the parent's until the next
 		// refetch.
@@ -863,7 +865,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const forked = await sessions.fork(REF, "e1");
 
 		// The index still reports the parent -- its store file is untouched --
-		// and nothing aliases its key away, so a client can still see it and
+		// and no held container has it as an outgrown name, so a client can see it and
 		// re-attach to it alongside the fork.
 		const listed = await sessions.list().then((l) => l.map((s) => sessionKey(s.ref)));
 		expect(listed).toContain(sessionKey(forked));
@@ -871,7 +873,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	it("keeps the parent in list() when a Codex-style fork leaves the ref unchanged", async () => {
-		// The contrast: no re-key means no alias, so the parent stays listed.
+		// The contrast: the parent's container keeps its ref, so it stays listed.
 		const codexRef: SessionRef = { backend: "codex", id: "thread-parent" };
 		const codex = new FakeAdapterFactory({ forkMode: "codex" });
 		index = new FakeSessionIndex([storedSession(codexRef, WORKSPACE)]);
@@ -904,10 +906,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// `Bun.serve` (app.ts); nothing serializes them. `close()` empties the
 		// table before its first await, and the adapter announces its move long
 		// afterwards -- here, once Pi's parked fork round trip resumes. Were the
-		// container still subscribed, that would put it back into `#sessions`
-		// under the fork's id, with an adapter that is already disposed, and
+		// container still subscribed, that would put a fork's container into
+		// `#sessions`, with an adapter that is already disposed, and
 		// `#disposing` never catches it because `close()` computed its keys
-		// before the re-key.
+		// before the fork.
 		await sessions.attach(REF);
 		const adapter = pi.created[0];
 		if (!adapter) throw new Error("no adapter");
@@ -1657,9 +1659,10 @@ describe("teardown racing a startup", () => {
 	});
 
 	it("does not resurrect a closed session when the adapter renames itself on start", async () => {
-		// `#adoptRef` re-keys the session into the table. Run against a session
-		// that has already been closed, it puts it back -- a closed conversation
-		// reappearing in the list under an id the client never asked for.
+		// A rename writes the new id into the table as a name of the container.
+		// Run against a session that has already been closed, it puts a name
+		// back -- a closed conversation reappearing in the list under an id the
+		// client never asked for.
 		const gate = deferred();
 		const RENAMED = "/home/u/.pi/agent/sessions/real.jsonl";
 		const renaming = new FakeAdapterFactory({
