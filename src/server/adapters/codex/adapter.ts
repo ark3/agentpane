@@ -327,7 +327,7 @@ export class CodexAdapter implements BackendAdapter {
 			// A reattach repaints from the thread's turns, paged in after the
 			// resume (D3's cold-start path; see `readTurns`).
 			if (opts.resumeId) {
-				const turns = await readTurns(client, started.thread.id, () => this.reducer.pageRequested());
+				const turns = await readTurns(client, started.thread.id);
 				assertOwned();
 				if (turns.length) {
 					this.applyEffects(this.reducer.hydrate({ id: started.thread.id, turns }));
@@ -416,11 +416,10 @@ export class CodexAdapter implements BackendAdapter {
 		});
 		const turns = await readTurns(holder, resumed.thread.id, () => this.reducer.pageRequested());
 		assertOwned();
-		if (turns.length) {
-			this.applyEffects(this.reducer.hydrate({ id: resumed.thread.id, turns }));
-			assertOwned();
-			this.rememberTurns(turns);
-		}
+		// Even with no turns: the hydrate is what ends the reducer's page read.
+		this.applyEffects(this.reducer.hydrate({ id: resumed.thread.id, turns }));
+		assertOwned();
+		this.rememberTurns(turns);
 		assertOwned();
 		// `thread/resume` answers with the id it was asked for, so this is the id
 		// `adoptConnection` already installed and `#adoptRef` no-ops on it -- no
@@ -988,13 +987,9 @@ export class CodexAdapter implements BackendAdapter {
 					break;
 				case "running-turn":
 					// What `turn/started` would have set, had it not gone out before
-					// the attach (OW-dirazu). A turn the stream already named is
-					// newer than the page, and keeps its place.
-					if (this.turnId) break;
+					// the attach (OW-dirazu).
 					this.turnId = effect.turnId;
-					if (!this.turnStartPending && !this.turnBusy) {
-						this.turnBusy = { source: "lifecycle", turnId: effect.turnId };
-					}
+					this.turnBusy = { source: "lifecycle", turnId: effect.turnId };
 					break;
 				case "reset":
 				case "streaming":

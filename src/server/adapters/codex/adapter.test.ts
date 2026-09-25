@@ -2762,11 +2762,38 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				expect(methods(proc)).not.toContain("turn/interrupt");
 			});
 
-			it("shows a compaction the listing names by a turn with no user message", async () => {
+			it("stays idle when the thread went idle while the history was paged in", async () => {
+				const idle = { method: "thread/status/changed", params: { threadId: "thread-forked", status: { type: "idle" } } };
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [idle]);
+
+				expect(reattached.getState().isStreaming).toBe(false);
+				await reattached.abort();
+				expect(methods(proc)).not.toContain("turn/interrupt");
+			});
+
+			it("shows a compaction the listing names by a turn with no items", async () => {
 				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([])], []);
 
 				expect(reattached.getState()).toMatchObject({ isStreaming: true, compaction: "running" });
 				await expect(reattached.submit("and also")).rejects.toThrow("cannot submit while a turn is active");
+			});
+
+			it("does not read a turn past its compaction as compacting", async () => {
+				const compacted = { type: "contextCompaction", id: "compaction-live" };
+				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([compacted])], []);
+
+				expect(reattached.getState()).toMatchObject({ isStreaming: true, compaction: null });
+			});
+
+			it("adopts no turn on a cold resume, where no turn can be running", async () => {
+				const { adapter, proc } = await startedAdapter(
+					{ threadId: STORED_REF.id, turns: [...twoStoredTurns(), running([userMessage])] },
+					STORED_REF,
+				);
+
+				expect(adapter.getState().isStreaming).toBe(false);
+				await adapter.abort();
+				expect(methods(proc)).not.toContain("turn/interrupt");
 			});
 		});
 	});

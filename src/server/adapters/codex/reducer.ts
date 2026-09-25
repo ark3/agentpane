@@ -97,13 +97,13 @@ export class CodexReducer {
 	private streaming = false;
 	private compaction: "requesting" | "running" | null = null;
 	/**
-	 * Between `pageRequested` and `hydrate`: the history is being paged in,
-	 * so a headless slot keeps its deltas for the merge, and a turn the stream
-	 * ends is remembered in `endedTurnIds` against a page that may still list
-	 * it running.
+	 * Non-null between the first `pageRequested` and `hydrate`, which is only
+	 * on a borrowed re-attach: the history is being paged in, so a headless
+	 * slot keeps its deltas for the merge. `turn` and `compaction` record that
+	 * the stream set that state since, which is newer than any page and so
+	 * wins over what the listing says of it (OW-dirazu).
 	 */
-	private paging = false;
-	private endedTurnIds = new Set<string>();
+	private pageRead: { turn: boolean; compaction: boolean } | null = null;
 	private now: () => number;
 	private identity: { api: string; provider: string; model: string; effort: string | null };
 
@@ -196,15 +196,16 @@ export class CodexReducer {
 	}
 
 	/**
-	 * Cold start (D3): replay a thread's turns, paged in with
-	 * `thread/turns/list` at `itemsView: "full"`, into a transcript. Items
-	 * arrive already completed, so this is the same path with no deltas.
+	 * Replay a thread's turns, paged in with `thread/turns/list` at
+	 * `itemsView: "full"`, into a transcript: the whole of it on a cold start
+	 * (D3), and merged with the live stream on a borrowed re-attach. A listed
+	 * item takes the same path as a live one; only a headless slot's deltas
+	 * are laid on it.
 	 *
-	 * Merged with what the live stream already built (OW-vijuyi). A re-attach
-	 * over an app-server that still holds the thread hears it from
-	 * `CodexAdapter.adoptConnection` on, so a turn still running there streams
-	 * while the history is paged in. The listing owns what went before the
-	 * attach, and the stream what came after it:
+	 * The merge (OW-vijuyi). A re-attach over an app-server that still holds
+	 * the thread hears it from `CodexAdapter.adoptConnection` on, so a turn
+	 * still running there streams while the history is paged in. The listing
+	 * owns what went before the attach, and the stream what came after it:
 	 *
 	 * - An item the stream opened with `item/started`, or completed, keeps its
 	 *   live slot in place of the listed copy, since that slot holds the whole
@@ -219,32 +220,37 @@ export class CodexReducer {
 	 *   complete (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu) -- so a
 	 *   headless slot's head showed only when `item/completed` replaced it.
 	 *
-	 * The running turn is the listing's too. As of that version `thread/
-	 * resume` read the thread `active` but named no turn and replayed no
-	 * `turn/started`, and the listing named the turn `inProgress`: a user turn
-	 * with its `userMessage` first, a compaction's with no items at all. So a
-	 * last turn listed `inProgress` that the stream has not ended since the
-	 * page was asked for is streaming, a compaction when it lists no user
-	 * message, and its id goes to the shell as a `running-turn` effect. A turn
-	 * the stream started keeps the streaming state it set.
+	 * The running turn is the listing's too, unless the stream has spoken of
+	 * it since the page was asked for. As of that version `thread/resume` read
+	 * the thread `active` but named no turn and replayed no `turn/started`,
+	 * and the listing named the turn `inProgress`: a user turn with its
+	 * `userMessage` first, a compaction's with no items at all. So a last turn
+	 * listed `inProgress` is streaming, and a compaction when it lists no items
+	 * at all, and its id goes to the shell as a `running-turn` effect -- save
+	 * that streaming or compaction state the stream set during the read wins
+	 * over the listing's. Only on a re-attach: a cold start's app-server is
+	 * fresh and can be running no turn, whatever its listing says.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;
 		this.slots = new Map();
 		this.threadId = thread.id;
+		const read = this.pageRead;
+		this.pageRead = null;
 		for (const turn of thread.turns) {
 			this.turnId = turn.id;
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
 			for (const item of turn.items) {
 				const slot = live.get(item.id);
-				if (slot && !slot.sincePage) {
+				const headless = read ? slot?.sincePage : null;
+				if (slot && !headless) {
 					this.slots.set(item.id, slot);
 					continue;
 				}
 				this.applyItem(item, timestamp, !slot);
 				const merged = this.slots.get(item.id);
-				if (!merged || !slot?.sincePage) continue;
-				for (const apply of slot.sincePage) apply(merged.item);
+				if (!merged || !headless) continue;
+				for (const apply of headless) apply(merged.item);
 				this.remap(merged);
 			}
 		}
@@ -253,13 +259,11 @@ export class CodexReducer {
 
 		const effects: CodexEffect[] = [];
 		const last = thread.turns.at(-1);
-		if (last?.status === "inProgress" && !this.endedTurnIds.has(last.id)) {
+		if (read && !read.turn && last?.status === "inProgress") {
 			this.streaming = true;
-			if (!this.compaction && !last.items.some((item) => item.type === "userMessage")) this.compaction = "running";
+			if (!read.compaction && last.items.length === 0) this.compaction = "running";
 			effects.push({ type: "running-turn", turnId: last.id });
 		}
-		this.paging = false;
-		this.endedTurnIds.clear();
 		effects.push({ type: "reset" });
 		return effects;
 	}
@@ -277,7 +281,7 @@ export class CodexReducer {
 	 * no partial item was ever listed for one to belong to.
 	 */
 	pageRequested(): void {
-		this.paging = true;
+		this.pageRead ??= { turn: false, compaction: false };
 		for (const slot of this.slots.values()) if (slot.sincePage) slot.sincePage = [];
 	}
 
@@ -335,7 +339,6 @@ export class CodexReducer {
 
 			case "turn/completed": {
 				const turn = message.params.turn;
-				if (this.paging) this.endedTurnIds.add(turn.id);
 				const effects: CodexEffect[] = this.setCompaction(null);
 				// NOTE: `turn.items` here is a *summary* view (`itemsView:
 				// "summary"` in every fixture) -- only the final agent message.
@@ -369,6 +372,7 @@ export class CodexReducer {
 						return this.setCompaction("running");
 					}
 					this.compaction = null;
+					if (this.pageRead) this.pageRead.compaction = true;
 				}
 				return this.applyItem(message.params.item, at, completed);
 			}
@@ -571,7 +575,7 @@ export class CodexReducer {
 		}
 		if (!slot) return [];
 		if (!apply(slot.item, delta)) return [];
-		if (slot.sincePage && this.paging) slot.sincePage.push((item) => apply(item, delta));
+		if (slot.sincePage && this.pageRead) slot.sincePage.push((item) => apply(item, delta));
 		return this.remap(slot);
 	}
 
@@ -582,12 +586,14 @@ export class CodexReducer {
 	// -- turn-level state ---------------------------------------------------
 
 	private setStreaming(isStreaming: boolean): CodexEffect[] {
+		if (this.pageRead) this.pageRead.turn = true;
 		if (this.streaming === isStreaming) return [];
 		this.streaming = isStreaming;
 		return [{ type: "streaming", isStreaming }];
 	}
 
 	private setCompaction(compaction: "requesting" | "running" | null): CodexEffect[] {
+		if (this.pageRead) this.pageRead.compaction = true;
 		if (this.compaction === compaction) return [];
 		this.compaction = compaction;
 		return [{ type: "compaction", compaction }];
