@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane--fit-header binary-searches each folded header with string-pixel-width, about eight layouts a header, where one vertical-motion to a pixel column finds the same cut
@@ -53,3 +54,29 @@ Out of scope: `visual-wrap-prefix-function`, called by `agentpane--insert-html` 
 Red first, then green, in `emacs/agentpane-test.el`: with `string-pixel-width` (and whatever the new measure calls) counted by advice, drawing a tool whose summary is ten times the fitted width costs at most three measurements, where the current search costs about eight.
 Since `vertical-motion` needs a real display, that test and one asserting the new cut equals the binary search's on a mix of summary lengths run in a tty Emacs, not batch, and the Commentary of `emacs/agentpane.el` gives the command that runs them.
 The batch suite passes as that Commentary gives it, with its pass count updated.
+
+## Close note
+
+Landed on main 2026-09-25 in eight commits citing OW-tujula: 3c310e8 through 4048010.
+`agentpane--fit-header` in `emacs/agentpane.el` now cuts a long header with `agentpane--cut-by-motion`, one `vertical-motion` to the pixel column where the summary must end plus one check.
+To do that, it lays out the ellipsis and tail, then the marker and head, then the summary, in a work buffer that copies the transcript's face remapping and has `line-prefix`, line numbers, `word-wrap` and bidi reordering turned off.
+The old binary search survives as `agentpane--cut-by-search`, which is also the fallback when the check fails.
+It is used outright in batch (`noninteractive`, where on Emacs 31.1 the motion does not move), when the fit window is on a frame other than the selected one, and for a summary holding a tab or a newline.
+
+Layouts per header in an 80x24 tty Emacs 31.1:
+- 1 when the header fits.
+- 3 when it is cut, with the meta kept or with no meta; the old search took 11–12.
+- 5 when the meta will not fit and neither will the summary alone.
+- 9 in a window scrolled horizontally, since the check fails there and the search runs below the landing.
+
+Checked in a tty and, by the implementer, in the owner's GTK Emacs 31.1 over `emacsclient --eval` with a variable-pitch remapping in a temp buffer, agentpane not loaded.
+In that GTK probe, 42 of 48 cases equalled the search's cut, and the other 6 were where nothing fits at 200 px, for both measures.
+An adversarial reader compared the new `fit-header` against main's over 29,328 tty cases with `equal-including-properties`, at every width from 3 to 80 columns, over combining, emoji, RTL, CJK and control-character summaries.
+It found only the newline case, the frame mismatch, an hscroll guard that cost more than it saved, and an untested batch guard, all fixed before landing.
+
+Tests in `emacs/agentpane-test.el`:
+- tty (tagged `tty`, skipped in batch, run by `agentpane-test-run-tty` with the `script` command the Commentary gives): `agentpane-test-cut-header-measures-at-most-three-times`, red at 11 against the old code; `agentpane-test-motion-cuts-where-the-search-does`; `agentpane-test-motion-only-on-the-selected-frame`.
+- batch: `agentpane-test-long-summary-keeps-its-start-and-the-meta`, red with the `noninteractive` guard removed.
+
+Batch: `Ran 112 tests, 109 results as expected, 0 unexpected, 3 skipped`; tty: `Ran 3 tests, 3 results as expected, 0 unexpected`, exit 0.
+Filed from the read: OW-gogona (a newline in a summary draws a two-line header, pre-existing), OW-vipiso (fit-header measures in the selected frame, pre-existing), OW-dipuse (the Emacs 31 floor is stated nowhere).
