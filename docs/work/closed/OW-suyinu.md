@@ -1,6 +1,7 @@
 ---
 labels: [change, d24]
 blocked-by: [OW-nikogo]
+closed: done
 ---
 
 # The manager keys a live session by a handle it mints, keeps every backend id the session has had as names on the container, and carries the handle on the session summary and on every per-session event of both wires
@@ -73,3 +74,13 @@ Incidental: the handle's format; whether `handle` on `SessionSummary` is optiona
   Client comments such as `src/client/session-state.ts`'s rename arm stay, since the clients still key by ref until OW-kimaya.
 - `bun run check` green.
 - A cold read before execution, as OW-nikogo says; this is the larger of the two.
+
+## Close note
+
+Landed on `main` (8c554e1..d6dd5e0). `SessionManager` keys every live container by a handle it mints from its own counter (`h1`, `h2`, ...), keeps every backend id and `#start` spelling as `names` on it through one `#names` map (which replaced `#aliases`), and `Broadcaster.#seq` is keyed by handle. `handle` rides `SessionSummary` and every per-session `ServerEvent` arm as an optional field (OW-kimaya makes the events' field required), and every per-session helper notification; the helper strips a `handle` param before any HTTP body. `AgentRequest` gained none.
+
+A rename writes `ref` and adds a name. A Pi fork (`#forkOnto`) makes a new container with a new handle, moving the adapter, subscriptions, requests, notices, `last*` mirrors, pending requests and the queue; the parent leaves the table with all its names and no adapter, so a verb queued on it behind the fork rejects with `UnknownSessionError` (`#serially` reads the adapter when the verb runs). `renamedInStart` is gone: a startup lives on its container as `starting`, `#attaching` keys only the spelling an attach asked for, a failed start restores `ref` and drops names it added, and only the `renamed` wire event of an in-start rename waits for publish. `#pendingForks` stays keyed by backend key, and `close()` discards parked entries under every name of the container.
+
+The cold read before execution amended this card (commit 4b2f49f): the parent leaves the table rather than staying detached in it, `#pendingForks` gets no handle at park time, and `AgentRequest` gets no handle. The adversarial read caught one regression, fixed before landing: the fork's container first got an empty queue, letting a verb on the fork's ref run during the fork's `set_model`/`get_messages` tail. That was the wrong owner, not a missing guard: the queue follows the adapter.
+
+Verified with new tests in session-manager, broadcaster and helper test files, each shown red first against the old code or under mutation. The OW-nikogo rename and fork suites stay green except two cases rewritten by design (OW-zovaye's second concurrent fork now rejects; OW-sewewe's fork-then-setModel ordering uses a fork that moves no ref), and vertical-slice's OW-suhoto test stays green. `bun run check` passed on `main`: 54 files, 1402 tests. D9, D11, D12, D21, D24 and WORKSTREAMS were rewritten to the landed state, and OW-33's copy of the bookkeeping constraint was amended (f5a64a0). The review's two pre-existing teardown oddities were filed as OW-vodinu and OW-ganapi.
