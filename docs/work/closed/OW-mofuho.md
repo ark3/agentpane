@@ -1,6 +1,7 @@
 ---
 labels: [change, d24, emacs]
 blocked-by: [OW-kimaya, OW-danifa]
+closed: done
 ---
 
 # The `renamed` event leaves both wires once both clients key a live session by its handle
@@ -37,3 +38,22 @@ It is narrowed below to the event's own spellings, and prose that describes the 
 - The vertical-slice test for a rename at attach (`vertical-slice.test.ts`, "follows a materialised id when renamed is immediately followed by a snapshot") asserts the snapshot under the handle carries the new ref and that no `renamed` arrives, red against a server still emitting it.
 - A helper test and the ert test above show an attach answered under a new ref still draws its snapshot in the buffer that asked, with no `session/renamed` on the wire.
 - `bun run check` green and ert green.
+
+## Close note
+
+The `renamed` SSE event and the Emacs helper's `session/renamed` are gone from both wires.
+A rename is now `sessionsChanged` plus a snapshot under the handle carrying the new ref, from `SessionManager.#rename`; the tail of `#start` no longer announces a rename inside `start()`, because `attach` sends `sessionsChanged` and a snapshot after every start.
+The `announce` hold in `#rename` stays, for the `sessionsChanged` alone: it would otherwise point clients at a listing that a start failing after its rename takes back (removing it turned three session-manager tests red).
+`SseTestClient` keys by handle.
+
+The non-mechanical part was agentpane-mode's attach answered under another ref, where `session/renamed` had been the only pre-reply link from the asked-for ref to the handle.
+Relying on the reply arriving before the snapshot does not work: as of jsonrpc.el 1.0.29 on Emacs 31.1, an async reply arriving while a synchronous `jsonrpc-request` is outstanding runs only after that request returns, while notifications run at once.
+The reproduction is in `docs/MANUAL_TESTING.md`, "jsonrpc.el runs an async reply after later notifications (OW-mofuho)".
+An Emacs-side table of unclaimed snapshots was tried and rejected: the adversarial read showed it was a guard that missed a failed reply (the buffer never got the handle, and the helper fed it forever) and non-snapshot notifications in the window.
+The ownership change that landed: the helper tags the first `session/snapshot` under the handle with `askedFor` (the asked-for ref), only when this attach is the handle's first attachment, and `agentpane--notified-buffer` binds that snapshot to the buffer that sent the attach, ahead of the plain by-ref match.
+A handle-less `sessions/detach` by the asked-for ref also drops an attachment whose tagged snapshot has not yet gone out.
+
+Verified: vertical-slice "follows a materialised id by the snapshot under the handle, with no renamed on the wire" red against the old server and green after; the ert tests `agentpane-test-attach-answered-under-a-new-ref-*` and `agentpane-test-attach-under-a-new-ref-*` and the helper tests for `askedFor` red against the intermediate commits and green after; `bun run check` 1416/1416 and ert 102/102 on main.
+The done-condition grep finds only past-tense history and `not.toContain("renamed")` assertions.
+
+Still open, and no worse than before this card: a buffer killed after its tagged snapshot was sent but before Emacs handled it detaches by the asked-for ref, and the helper keeps sending under that handle, as it did with the old `session/renamed`.
