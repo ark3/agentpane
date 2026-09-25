@@ -53,6 +53,14 @@ export class UnknownSessionError extends Error {
 	}
 }
 
+/** `setEffort` named a level the session's model does not list (OW-tewofe). */
+export class EffortNotOfferedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "EffortNotOfferedError";
+	}
+}
+
 interface ManagedSession {
 	ref: SessionRef;
 	/** The workspace the subprocess is (or will be) jailed to. */
@@ -110,11 +118,18 @@ interface ManagedSession {
 	 */
 	torndown?: boolean;
 	/**
-	 * `fork()` calls in flight on this container. A count, not a flag: two
-	 * clients can fork one session at once, and the first to finish must not
-	 * reopen the window for the other -- see `#onUpdate`.
+	 * `fork()` calls in flight on this container -- see `#onUpdate`. A count was
+	 * chosen when two clients' forks could overlap; since `queue` runs them one
+	 * at a time it never exceeds one.
 	 */
 	forking: number;
+	/**
+	 * The tail of this session's mutations, which `#serially` runs one at a time
+	 * (D24). On the container and not in a map keyed by ref, so a re-key carries
+	 * it (`#adoptRef`). Always settles fulfilled: a verb's rejection is its
+	 * caller's, not the next verb's.
+	 */
+	queue: Promise<void>;
 }
 
 /**
@@ -296,6 +311,7 @@ export class SessionManager {
 			requests: [],
 			notices: [],
 			forking: 0,
+			queue: Promise.resolve(),
 			createdAt: this.#now(),
 		});
 		this.broadcaster.sessionsChanged();
@@ -349,26 +365,86 @@ export class SessionManager {
 	}
 
 	/**
+	 * Run one of a session's mutating verbs once every verb queued on it before
+	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
+	 * `setModel`, `setEffort`, `compact` and `reply`. Every route is a concurrent
+	 * `Bun.serve` handler and any number of clients can drive one session, so
+	 * without this two of them overlap on one adapter -- two `setModel`s sharing
+	 * Pi's one `settingModel` flag (OW-woyifu), or an effort checked against the
+	 * model a set-model in flight is replacing (OW-zayefe).
+	 *
+	 * It orders admission and nothing more. `submit` settles when the backend
+	 * admits the turn, not when the turn ends, so nothing here waits behind a
+	 * running turn and D16 stands as the adapters implement it. It dedupes
+	 * nothing: the same prompt sent twice is admitted twice. The adapters' own
+	 * guards stay theirs, each closing a window that ends on a backend event
+	 * this cannot see. Admission is not quick everywhere, though: Pi answers
+	 * `compact` only once the compaction is done -- `pi 0.84.2`'s response comes
+	 * after `compaction_end` in `resources/fixtures/pi/compact.jsonl` -- so on
+	 * Pi whatever is queued behind a compaction waits for it (OW-jileku).
+	 * `reply` joins safely only while no queued verb waits on a request being
+	 * answered, which holds because every adapter disposes of a request as it
+	 * arrives (OW-yosuzo for Pi); a reply a human gives (OW-bijera) would sit
+	 * behind the very verb waiting for it.
+	 *
+	 * Left out, each for its own reason:
+	 *
+	 *  - `abort`. It exists to reach a running turn, which is never an item here,
+	 *    so all it could wait behind is a settings call, a compaction or a fork,
+	 *    and a stop must not wait out a Pi compaction. Left out, it also stays
+	 *    what it was for the second abort `forkAndSubmit` sends ahead of a Pi
+	 *    fork (OW-relehi): harmless, since the fork abandons the turn (D15).
+	 *  - `listForkPoints`. A read: it changes nothing a verb here depends on,
+	 *    and its answer can be stale by the time a client acts on it whether or
+	 *    not it waits.
+	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
+	 *    already collapses concurrent attaches; each route attaches, then queues.
+	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
+	 *    `torndown` and `#terminate`, and waits behind nothing. A verb still
+	 *    queued when it runs reaches the disposed adapter, as an overlapping one
+	 *    always did; most verbs fail there, but a Codex set-model with no effort
+	 *    chosen only records the model and answers success.
+	 *
+	 * The session and its adapter are taken at the call, not when the verb
+	 * runs. So a verb sent on a Pi parent's ref and queued behind a fork of it
+	 * runs on the fork, which the fork's split from a rename (`#adoptRef`,
+	 * OW-kekoji) says the parent's ref must never do; one overlapping the fork
+	 * could before, and the queue makes it certain. OW-suyinu owns that case:
+	 * there a Pi fork is a new container, and the parent's keeps no adapter.
+	 */
+	async #serially<T>(ref: SessionRef, verb: (session: ManagedSession, adapter: BackendAdapter) => Promise<T>): Promise<T> {
+		const session = this.#lookup(ref);
+		const adapter = session?.adapter;
+		if (!session || !adapter) throw new UnknownSessionError(ref);
+		const run = session.queue.then(() => verb(session, adapter));
+		session.queue = run.then(
+			() => {},
+			() => {},
+		);
+		return run;
+	}
+
+	/**
 	 * Drive a turn. This goes through the manager rather than straight at the
 	 * adapter because `submit()` is one of the two points at which a session's id
-	 * can change under us -- see `#adoptRef`.
+	 * can change under us -- see `#adoptRef` -- and because it queues (`#serially`).
 	 */
-	async submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
-		const session = this.#lookup(ref);
-		if (!session?.adapter) throw new UnknownSessionError(ref);
-		this.markPrompted(session.ref);
-		// The client clears a session's error once the next prompt is admitted,
-		// unless a newer one landed meanwhile (OW-31, `submit` in
-		// `controller.ts`); this is the same rule, so the next snapshot agrees.
-		// `priorError` is what stood when the prompt was sent, so a caller that
-		// attaches first reads it before that attach: an error the start raised
-		// is newer than the prompt, and nobody had seen it to clear.
-		try {
-			await session.adapter.submit(text, images);
-			if (session.error === priorError) session.error = null;
-		} finally {
-			this.#adoptRef(session, "rename");
-		}
+	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
+		return this.#serially(ref, async (session, adapter) => {
+			this.markPrompted(session.ref);
+			// The client clears a session's error once the next prompt is admitted,
+			// unless a newer one landed meanwhile (OW-31, `submit` in
+			// `controller.ts`); this is the same rule, so the next snapshot agrees.
+			// `priorError` is what stood when the prompt was sent, so a caller that
+			// attaches first reads it before that attach: an error the start raised
+			// is newer than the prompt, and nobody had seen it to clear.
+			try {
+				await adapter.submit(text, images);
+				if (session.error === priorError) session.error = null;
+			} finally {
+				this.#adoptRef(session, "rename");
+			}
+		});
 	}
 
 	/**
@@ -406,25 +482,64 @@ export class SessionManager {
 	 * still listed, still attachable, but no longer reachable through the
 	 * container that moved. That is why this passes `"fork"`: unlike a rename,
 	 * the parent's id must not become an alias for the fork (`#adoptRef`,
-	 * OW-kekoji).
+	 * OW-kekoji). And like `submit`, it queues (`#serially`).
 	 */
-	async fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
-		const session = this.#lookup(ref);
-		if (!session?.adapter) throw new UnknownSessionError(ref);
-		session.forking += 1;
-		try {
-			const forked = await session.adapter.fork(entryId);
-			if (forked.start) {
-				this.#pendingForks.set(sessionKey(forked.ref), {
-					start: forked.start,
-					...(forked.adapter ? { adapter: forked.adapter } : {}),
-				});
+	fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
+		return this.#serially(ref, async (session, adapter) => {
+			session.forking += 1;
+			try {
+				const forked = await adapter.fork(entryId);
+				if (forked.start) {
+					this.#pendingForks.set(sessionKey(forked.ref), {
+						start: forked.start,
+						...(forked.adapter ? { adapter: forked.adapter } : {}),
+					});
+				}
+				return forked.ref;
+			} finally {
+				session.forking -= 1;
+				this.#adoptRef(session, "fork");
 			}
-			return forked.ref;
-		} finally {
-			session.forking -= 1;
-			this.#adoptRef(session, "fork");
-		}
+		});
+	}
+
+	setModel(ref: SessionRef, model: string): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.setModel(model));
+	}
+
+	/**
+	 * Checked here, not trusted to the backend: as of `claude 2.1.280` and
+	 * `pi 0.87.1` each answered success for a level the model lacks, and Codex
+	 * stores any string for the next turn (OW-tewofe). The model is matched by
+	 * id, as both clients match it to offer efforts, so a model that is null or
+	 * not listed offers none. Inside the queue, so the model checked against is
+	 * the one a set-model queued ahead of this left (OW-zayefe).
+	 */
+	setEffort(ref: SessionRef, effort: string): Promise<void> {
+		return this.#serially(ref, async (_session, adapter) => {
+			const { model } = adapter.getState();
+			const listed = (await adapter.listModels()).find((info) => info.id === model);
+			const efforts = listed?.efforts.map((option) => option.id) ?? [];
+			if (!efforts.includes(effort)) {
+				const offered = efforts.length > 0 ? `one of ${efforts.join(", ")}` : "none";
+				throw new EffortNotOfferedError(
+					`effort "${effort}" is not one the session's model (${model ?? "not yet known"}) lists; it offers ${offered}`,
+				);
+			}
+			await adapter.setEffort(effort);
+		});
+	}
+
+	compact(ref: SessionRef): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.compact());
+	}
+
+	/** Answer a request the session's agent raised (D2a), then stop holding it. */
+	reply(ref: SessionRef, requestId: string, response: unknown): Promise<void> {
+		return this.#serially(ref, async (_session, adapter) => {
+			await adapter.reply(requestId, response);
+			this.clearRequest(requestId);
+		});
 	}
 
 	/**
@@ -560,6 +675,7 @@ export class SessionManager {
 				requests: [],
 				notices: [],
 				forking: 0,
+				queue: Promise.resolve(),
 				createdAt: this.#now(),
 			};
 		}
@@ -630,6 +746,7 @@ export class SessionManager {
 				requests: [],
 				notices: [],
 				forking: 0,
+				queue: Promise.resolve(),
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};

@@ -44,6 +44,7 @@ import { type BackendAdapter, BackendRefusedError } from "../adapters/types.ts";
 import { Broadcaster, type SseClient } from "./broadcaster.ts";
 import type { AppDeps } from "./deps.ts";
 import {
+	EffortNotOfferedError,
 	ServerShuttingDownError,
 	SessionManager,
 	UnknownBackendError,
@@ -306,8 +307,7 @@ export function createApp(deps: AppDeps): App {
 				// what turns the backend's compaction events into the transcript
 				// marker; this route just admits the request (OW-72).
 				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
-				const adapter = requireAttached(ref);
-				await adapter.compact();
+				await sessions.compact(ref);
 				return noContent();
 			}
 			case "error": {
@@ -381,8 +381,8 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.model !== "string") {
 					return error(400, "bad_request", "model is required");
 				}
-				const adapter = await sessions.attach(ref);
-				await adapter.setModel(body.value.model);
+				await sessions.attach(ref);
+				await sessions.setModel(ref, body.value.model);
 				return noContent();
 			}
 			case "effort": {
@@ -392,24 +392,10 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.effort !== "string") {
 					return error(400, "bad_request", "effort is required");
 				}
-				const adapter = await sessions.attach(ref);
-				// Checked here, not trusted to the backend: as of `claude 2.1.280`
-				// and `pi 0.87.1` each answered success for a level the model lacks,
-				// and Codex stores any string for the next turn (OW-tewofe). The
-				// model is matched by id, as both clients match it to offer efforts,
-				// so a model that is null or not listed offers none.
-				const { model } = adapter.getState();
-				const listed = (await adapter.listModels()).find((info) => info.id === model);
-				const efforts = listed?.efforts.map((option) => option.id) ?? [];
-				if (!efforts.includes(body.value.effort)) {
-					const offered = efforts.length > 0 ? `one of ${efforts.join(", ")}` : "none";
-					return error(
-						400,
-						"bad_request",
-						`effort "${body.value.effort}" is not one the session's model (${model ?? "not yet known"}) lists; it offers ${offered}`,
-					);
-				}
-				await adapter.setEffort(body.value.effort);
+				await sessions.attach(ref);
+				// The manager refuses a level the model does not list, with
+				// `EffortNotOfferedError` (OW-tewofe).
+				await sessions.setEffort(ref, body.value.effort);
 				return noContent();
 			}
 			default:
@@ -487,10 +473,8 @@ export function createApp(deps: AppDeps): App {
 			// that gets this should stop waiting rather than retry forever.
 			return error(404, "unknown_request", `no pending request ${requestId}`);
 		}
-		const adapter = sessions.adapterFor(ref);
-		if (!adapter) return error(409, "not_attached", `session ${sessionKey(ref)} is no longer running`);
-		await adapter.reply(requestId, body.value.response ?? null);
-		sessions.clearRequest(requestId);
+		if (!sessions.isAttached(ref)) return error(409, "not_attached", `session ${sessionKey(ref)} is no longer running`);
+		await sessions.reply(ref, requestId, body.value.response ?? null);
 		return noContent();
 	}
 
@@ -505,6 +489,7 @@ export function createApp(deps: AppDeps): App {
 					return error(503, "server_shutting_down", err.message);
 				}
 				if (err instanceof BackendRefusedError) return error(400, "backend_refused", err.message);
+				if (err instanceof EffortNotOfferedError) return error(400, "bad_request", err.message);
 				const ref = sessionRefFromRequest(request);
 				logError(`${ref ? `session ${sessionKey(ref)}: ` : ""}${describe(err)}`);
 				return error(500, "internal_error", describe(err));

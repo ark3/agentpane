@@ -1962,3 +1962,89 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: null, requests: [], notices: [] })]);
 	});
 });
+
+describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
+	type Verb = "setModel" | "setEffort" | "fork";
+
+	/**
+	 * Park each call of the three verbs at the adapter until the test settles
+	 * it, logging when each call begins at the adapter and when it settles. The
+	 * fake's default fork mode is Pi's, which moves the adapter's ref.
+	 */
+	function holdVerbs(adapter: FakeAdapter) {
+		const log: string[] = [];
+		const gates: { resolve: () => void; reject: (error: Error) => void }[] = [];
+		for (const verb of ["setModel", "setEffort", "fork"] as const) {
+			const original = adapter[verb].bind(adapter) as (arg: string) => Promise<unknown>;
+			(adapter as unknown as Record<Verb, (arg: string) => Promise<unknown>>)[verb] = async (arg) => {
+				log.push(`begin ${verb}`);
+				try {
+					await new Promise<void>((resolve, reject) => gates.push({ resolve, reject }));
+					return await original(arg);
+				} finally {
+					log.push(`end ${verb}`);
+				}
+			};
+		}
+		return { log, gates };
+	}
+
+	async function flush(): Promise<void> {
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+	}
+
+	async function attachHeld() {
+		pi = new FakeAdapterFactory({
+			models: [{ id: "m", label: "M", efforts: [{ id: "high", description: "High" }], defaultEffort: "high" }],
+		});
+		sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		adapter.model = "m";
+		return holdVerbs(adapter);
+	}
+
+	const call: Record<Verb, () => Promise<unknown>> = {
+		setModel: () => sessions.setModel(REF, "m"),
+		setEffort: () => sessions.setEffort(REF, "high"),
+		fork: () => sessions.fork(REF, "e1"),
+	};
+
+	it.each([
+		["setModel", "setEffort"],
+		["setEffort", "setModel"],
+		["fork", "setModel"],
+		["setModel", "fork"],
+	] as const)("begins %s, then %s at the adapter only once the first has settled", async (first, second) => {
+		const { log, gates } = await attachHeld();
+
+		const one = call[first]();
+		const two = call[second]();
+		await flush();
+		expect(log).toEqual([`begin ${first}`]);
+
+		gates[0]?.resolve();
+		await one;
+		await flush();
+		expect(log).toEqual([`begin ${first}`, `end ${first}`, `begin ${second}`]);
+
+		gates[1]?.resolve();
+		await two;
+		expect(log).toEqual([`begin ${first}`, `end ${first}`, `begin ${second}`, `end ${second}`]);
+	});
+
+	it("runs the next verb after one that rejects", async () => {
+		const { log, gates } = await attachHeld();
+
+		const one = call.setModel();
+		const two = call.setEffort();
+		await flush();
+		gates[0]?.reject(new Error("set_model failed"));
+		await expect(one).rejects.toThrow("set_model failed");
+		await flush();
+		expect(log).toEqual(["begin setModel", "end setModel", "begin setEffort"]);
+
+		gates[1]?.resolve();
+		await expect(two).resolves.toBeUndefined();
+	});
+});

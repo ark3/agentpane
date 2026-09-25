@@ -27,6 +27,7 @@ import { BackendRefusedError } from "../adapters/types.ts";
 import { type App, createApp } from "./app.ts";
 import {
 	assistantMessage,
+	deferred,
 	FakeAdapterFactory,
 	FakeSessionIndex,
 	storedSession,
@@ -880,6 +881,74 @@ describe("fork, model, and enumeration routes", () => {
 	it("sets the model", async () => {
 		expect((await post(ROUTES.model(PI_SESSION), { model: "pi-2" })).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.model).toBe("pi-2");
+	});
+
+	it("hands two overlapping model requests to the adapter one at a time (OW-sewewe)", async () => {
+		const log: [string, string][] = [];
+		const entered = [deferred(), deferred()];
+		const gates = [deferred(), deferred()];
+		let calls = 0;
+		const held = new FakeAdapterFactory({
+			async onSetModel(model) {
+				const n = calls++;
+				log.push(["begin", model]);
+				entered[n]?.resolve();
+				await gates[n]?.promise;
+				log.push(["end", model]);
+			},
+		});
+		app = createApp({ index, adapters: { pi: held } });
+		await get(ROUTES.session(PI_SESSION));
+
+		const one = post(ROUTES.model(PI_SESSION), { model: "pi-2" });
+		const two = post(ROUTES.model(PI_SESSION), { model: "pi-3" });
+		await entered[0]?.promise;
+		// Time for the other request to read its body and reach the adapter, which
+		// is all it needs when nothing orders the two.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(log).toHaveLength(1);
+
+		gates[0]?.resolve();
+		gates[1]?.resolve();
+		expect((await one).status).toBe(204);
+		expect((await two).status).toBe(204);
+		const [firstModel, secondModel] = log.filter(([phase]) => phase === "begin").map(([, model]) => model);
+		expect(log).toEqual([
+			["begin", firstModel],
+			["end", firstModel],
+			["begin", secondModel],
+			["end", secondModel],
+		]);
+		expect(new Set([firstModel, secondModel])).toEqual(new Set(["pi-2", "pi-3"]));
+	});
+
+	it("checks an effort against the model a set-model sent just before it chose (OW-sewewe, OW-zayefe)", async () => {
+		const entered = deferred();
+		const gate = deferred();
+		const factory = new FakeAdapterFactory({
+			models: [
+				{ id: "cx-plain", label: "Codex Plain", efforts: [], defaultEffort: null },
+				{ id: "cx-1", label: "Codex One", efforts: [{ id: "low", description: "Fast" }], defaultEffort: "low" },
+			],
+			async onSetModel(model) {
+				if (model !== "cx-1") return;
+				entered.resolve();
+				await gate.promise;
+			},
+		});
+		app = createApp({ index, adapters: { pi, codex: factory } });
+		await post(ROUTES.model(CODEX_SESSION), { model: "cx-plain" });
+
+		// The effort is sent while the model that lists it is still being set.
+		const model = post(ROUTES.model(CODEX_SESSION), { model: "cx-1" });
+		await entered.promise;
+		const effort = post(ROUTES.effort(CODEX_SESSION), { effort: "low" });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		gate.resolve();
+
+		expect((await model).status).toBe(204);
+		expect((await effort).status).toBe(204);
+		expect(factory.forRef(CODEX_SESSION)?.effort).toBe("low");
 	});
 
 	it("answers 400 with the backend's reason when it refuses the model, and 500 when it fails (OW-pizaki)", async () => {
