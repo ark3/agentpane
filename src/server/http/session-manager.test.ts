@@ -1088,6 +1088,50 @@ describe("a container keyed by a handle", () => {
 		expect(pi.created).toHaveLength(1);
 	});
 
+	it("hands a Pi fork the requests its process is blocked on, answerable and retractable there", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const answered = adapter.emitRequest("approval");
+		const retracted = adapter.emitRequest("approval");
+
+		const forked = await sessions.fork(REF, "e1");
+
+		expect(sessions.sessionOfRequest(answered.requestId)).toEqual(forked);
+		await sessions.reply(forked, answered.requestId, { decision: "accept" });
+		adapter.emitRequestResolved(retracted.requestId);
+		expect(adapter.replies.map((reply) => reply.requestId)).toEqual([answered.requestId]);
+		expect(sessions.sessionOfRequest(answered.requestId)).toBeUndefined();
+		const events: ServerEvent[] = [];
+		const client = broadcaster.addClient((chunk) => {
+			for (const line of chunk.split("\n")) {
+				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+			}
+		});
+		broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
+		expect(events).toEqual([expect.objectContaining({ type: "snapshot", session: forked, requests: [] })]);
+	});
+
+	it("unsubscribes the adapter a Pi fork took when the fork's container is closed", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		// As in the teardown tests: a disposal that leaves the listeners in place,
+		// as Pi's does, so only the manager's unsubscription can deafen it.
+		adapter.dispose = async () => {
+			adapter.disposed = true;
+		};
+		const forked = await sessions.fork(REF, "e1");
+
+		await sessions.close(forked);
+		const frames: string[] = [];
+		broadcaster.addClient((chunk) => frames.push(chunk));
+		adapter.append(userMessage("after the close"));
+		adapter.materialiseAs("/home/u/.pi/agent/sessions/after.jsonl");
+
+		expect(frames.filter((frame) => frame.startsWith("data: "))).toEqual([]);
+		expect(sessions.liveHandles()).toEqual([]);
+		expect(sessions.summaryOf({ backend: "pi", id: "/home/u/.pi/agent/sessions/after.jsonl" })).toBeNull();
+	});
+
 	it("leaves a closed container reachable by no name", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
