@@ -1,6 +1,7 @@
 ---
 labels: [change, d24, browser-testing]
 blocked-by: [OW-suyinu]
+closed: done
 ---
 
 # The shared reducer and the browser key a live view by its handle, so no client code tracks a rename
@@ -62,3 +63,18 @@ Load-bearing:
 - The sentences that call the handle optional until this card, in `src/shared/protocol.ts`, `src/emacs/helper.ts` and D11 and D24 of `docs/DESIGN.md`, D21's reconnect-gap sentence, D17's "re-keyed onto the landed ref", and `docs/WORKSTREAMS.md` "What the transport expects of its callers" are rewritten to what landed; client docblocks describing re-keying by ref follow.
 - `src/emacs/helper.test.ts`'s attach and rename tests stay green with the helper reading by handle.
 - `bun run check` green.
+
+## Close note
+
+Landed on `main` (a799378..1494a90).
+The shared reducer in `src/client/session-state.ts` keys `ClientState.sessions` by the handle the server mints, and an event under a handle carrying a new `session` rewrites the view's `ref`, the summary carrying the handle, and `selected` where it named the old ref (`followRef`); `handleOf`/`viewOf` find a view from a ref through the view, else the summary, which is the only holder between an attach reply and its snapshot.
+The `renamed` arm is a no-op until OW-mofuho. `handle` is required on every per-session `ServerEvent` arm, and the attach reply is typed `LiveSessionSummary`, whose handle is required.
+The controller's six rename closures, `renameListeners` and `onRename` are gone, and its per-session sets and maps key by handle; `ReduceResult.recover` carries the handle.
+`App.svelte` keys per-tab state by `keyOf` (handle, else the ref for previews); `rekeySession` survives for a fork, which `forkAndSubmit` now resolves by the attach reply's handle, and for a key that moves under one selected ref (preview to attach, detach to preview, a re-attach elsewhere); `watchRename`/`renameSessionTurnMarks` became `watchMove`/`moveSessionTurnMarks`.
+The Emacs helper keeps `attached` by handle with the ref last told Emacs, resolves `sessions/detach`/`close` through it, still forwards `session/renamed`, and moves an attachment onto a new handle whose snapshot brings a ref Emacs was told.
+
+Two defects the adversarial read found were fixed before landing, both at the owner: the snapshot arm drops any other view carrying its ref (`withoutOtherViewsOf`), since the server maps each name to one handle, so a session re-attached elsewhere no longer leaves a frozen view in front of the live one; and `SessionManager` prefixes its handle counter with a per-manager random UUID, since a browser tab and the helper outlive a restart and a restarted server's `h1` moved the selection onto another session.
+Decisions: `setSessionCompaction` marks only an existing view (compact before the snapshot shows the server's `compaction` once it lands); `applyAttached(…, false, …)` kept with its comparison by ref (OW-yasewo, OW-tatebi), recorded at both callers.
+
+Verified: every named reducer, controller, App, favicon and session-turns test rewritten to stage the new ref on a status or snapshot under the same handle with no `renamed`, each shown red against the ref-keyed code by restoring HEAD files; the review fixes each shown red first (two managers both minted `h1`; the reducer held views h1 and h2 for R; the fork-arming App test read scrollTop 0 for 400). `bun run check` green on `main`: 54 files, 1412 tests; each intermediate commit checked. `bun run test:browser` green, 26/26, on the branch tree, whose `src`, `e2e`, `public` and `emacs` are identical to `main`'s.
+OW-pehoba closed moot (OW-wedupe's `onDisk` had already retired the `virtual:` prefix). Filed: OW-wedeli (helper detach by a pre-rename ref, pre-existing) and OW-keleti (a dead handle's view that a rename hides from the snapshot, plus unselected per-tab state left under a dead handle).
