@@ -5,9 +5,11 @@
  * reads this as JSON with no type checker behind it, and this docblock is what
  * the elisp author reads. It names every field, its JSON type, and when it is
  * present; the TypeScript below says the same thing to the compiler. Change
- * the two together, and raise it before changing either. D24 raised it once:
+ * the two together, and raise it before changing either. D24 raised it twice:
  * the `handle` every per-session notification carries, and every request
- * accepts, below (OW-suyinu).
+ * accepts, below (OW-suyinu); and the retirement of `session/renamed`, with
+ * the snapshot `sessions/attach` sends for a ref it did not ask for moved
+ * after its reply (OW-mofuho).
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -113,6 +115,8 @@
  * API's `SessionRef`; `handle` (string) is the session's
  * `SessionSummary.handle`, the name the server gave the live session: opaque,
  * never moved by a rename, and a different one for a fork (D24, OW-suyinu).
+ * A rename is said by nothing else: the `session` of any notification under
+ * a handle is the session's ref from then on.
  * Every per-session notification below carries it, absent only where the
  * server sent none, and every request that takes a `session` accepts one
  * beside it and sends it nowhere, `sessions/detach` and `sessions/close`
@@ -142,9 +146,12 @@
  *   at when none is chosen.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, carrying the session's `handle`. Its `ref` is
- *   authoritative and may differ from the one asked for; when it does, a
- *   `session/renamed` from the one asked for has gone out before the reply, from the stream or else from the helper,
- *   unless a `sessions/detach` for it landed while the attach was in flight.
+ *   authoritative and may differ from the one asked for; when it does, the
+ *   `session/snapshot` under the new ref and the summary's `handle` follows
+ *   the reply, unless the stream already carried the asked-for ref under that
+ *   handle, or a `sessions/detach` for it landed while the attach was in
+ *   flight. Notifications under the new ref that went out before the reply
+ *   named a handle no buffer yet held; that snapshot supersedes them.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
@@ -223,12 +230,6 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
- * - `session/renamed` -- `{ from, to, handle }`. The session's ref is now
- *   `to`; a `session/snapshot` for `to` follows. `handle` is the one the
- *   session held before and holds after, so a buffer keyed by it has nothing
- *   to re-key; agentpane-mode does key by it, takes `to` as the buffer's ref,
- *   and takes `handle` from this for a buffer whose attach asked for `from`
- *   and has not been answered (OW-danifa).
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
  *   while it was down is gone.
@@ -295,7 +296,6 @@ export type HelperNotification =
 	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
-	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef; handle?: string } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {

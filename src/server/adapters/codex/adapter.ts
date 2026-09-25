@@ -427,7 +427,7 @@ export class CodexAdapter implements BackendAdapter {
 		assertOwned();
 		// `thread/resume` answers with the id it was asked for, so this is the id
 		// `adoptConnection` already installed and announces nothing -- no
-		// `renamed` for a fork, which is what D20/OW-suhoto requires.
+		// rename for a fork, which is what D20/OW-suhoto requires.
 		this.threadId = resumed.thread.id;
 		this.moveTo(resumed.thread.id);
 		holder.claim(resumed.thread.id);

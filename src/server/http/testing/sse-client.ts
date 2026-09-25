@@ -10,6 +10,10 @@
  * implies: track `seq` per session, and treat a gap as "I missed something,
  * re-snapshot". Encoding that here is what lets a server test assert the
  * recovery actually recovers.
+ *
+ * Like the browser's reducer, it keys what it holds by the session's handle
+ * and takes the ref from each event under it, so a rename moves the ref and
+ * nothing else (D24); a ref asked about is the one a handle last carried.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -20,6 +24,8 @@ export class SseTestClient {
 	/** Sessions where a `seq` gap was observed. Per D3 the cure is a fresh snapshot. */
 	readonly gaps: string[] = [];
 
+	/** By handle, as are the three below: the `sessionKey` of the ref it last carried, most recent event last. */
+	readonly #refs = new Map<string, string>();
 	readonly #transcripts = new Map<string, AgentMessage[]>();
 	readonly #seq = new Map<string, number>();
 	readonly #streaming = new Map<string, boolean>();
@@ -64,20 +70,16 @@ export class SseTestClient {
 	#accept(event: ServerEvent): void {
 		if (this.options.drop?.(event, this.#received++)) return;
 		this.events.push(event);
-		if (event.type === "renamed") {
-			// The client half of the rename: everything held under the old id moves
-			// to the new one. Without this a browser keeps rendering a transcript
-			// that nothing will ever update again.
-			this.#rekey(sessionKey(event.from), sessionKey(event.session));
-		}
 		if (event.type !== "sessions-changed") {
-			const key = sessionKey(event.session);
+			const key = event.handle;
+			this.#refs.delete(key);
+			this.#refs.set(key, sessionKey(event.session));
 			if (event.type === "snapshot") {
 				this.#transcripts.set(key, [...event.messages]);
 				this.#streaming.set(key, event.isStreaming);
 			} else {
 				const expected = (this.#seq.get(key) ?? 0) + 1;
-				if (event.seq !== expected) this.gaps.push(key);
+				if (event.seq !== expected) this.gaps.push(sessionKey(event.session));
 				if (event.type === "upsert") {
 					const messages = this.#transcripts.get(key) ?? [];
 					messages[event.index] = event.message;
@@ -95,25 +97,23 @@ export class SseTestClient {
 		}
 	}
 
-	#rekey(from: string, to: string): void {
-		for (const map of [this.#transcripts, this.#streaming, this.#seq] as Map<string, unknown>[]) {
-			if (!map.has(from)) continue;
-			map.set(to, map.get(from));
-			map.delete(from);
-		}
+	/** The handle whose events named `ref` most recently, if any handle's last one did. */
+	#handleOf(ref: SessionRef): string {
+		const key = sessionKey(ref);
+		return [...this.#refs].findLast(([, held]) => held === key)?.[0] ?? "";
 	}
 
 	/** The transcript this client would be rendering right now. */
 	transcript(ref: SessionRef): AgentMessage[] {
-		return this.#transcripts.get(sessionKey(ref)) ?? [];
+		return this.#transcripts.get(this.#handleOf(ref)) ?? [];
 	}
 
 	isStreaming(ref: SessionRef): boolean {
-		return this.#streaming.get(sessionKey(ref)) ?? false;
+		return this.#streaming.get(this.#handleOf(ref)) ?? false;
 	}
 
 	seq(ref: SessionRef): number {
-		return this.#seq.get(sessionKey(ref)) ?? 0;
+		return this.#seq.get(this.#handleOf(ref)) ?? 0;
 	}
 
 	typed<T extends ServerEvent["type"]>(type: T): Extract<ServerEvent, { type: T }>[] {

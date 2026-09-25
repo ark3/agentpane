@@ -95,11 +95,12 @@ Costs, accepted knowingly:
 
 If the client ever becomes chatty and needs constantly correlated replies, this is the decision to revisit — a single WebSocket would then be tidier.
 
-One thing building the transport added to the event union, because it is not optional and prose would not have survived the gap between the two halves: **`renamed`**.
+One thing the event union carries because it is not optional, and prose would not have survived the gap between the two halves: **a `handle` beside every session ref**.
 A session's id changes under the client during normal use — every backend replaces a `virtual` session's minted id with its own at attach, and the first prompt may move it again (D9) — so the id the browser created a session with is not the id it keeps.
-The server keeps honouring the old id on REST routes indefinitely, but every event after the change carries the new one, so a client that ignores `renamed` renders a live session into a transcript nothing updates.
+The server keeps honouring the old id on REST routes indefinitely, but every event after the change carries the new one, beside the handle the server minted for the live session and never changes (D24), and the change itself goes out as a snapshot under that handle carrying the new ref.
+A client that keyed a live session by its ref would render it into a transcript nothing updates; both clients key by the handle and take the ref as an attribute of every event under it.
 See D9's "Three states".
-D24 retires this event: once both clients key a live session by the handle the server mints, an id change is an attribute carried on the next event under that handle, and the arm leaves the union with OW-mofuho.
+Building the transport first added a `renamed` arm for this, which every client had to answer by re-keying its maps; D24 retired it once both clients keyed by the handle (OW-mofuho).
 
 ### D2a. Server-initiated requests
 
@@ -332,6 +333,7 @@ That probe has not fired on the Pi versions above, since `start()` already resol
 `ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- and `init` arrives after `submit()` has settled.
 The manager hears of every such move as it happens: each adapter announces its id change through `onRefChanged` (D24, OW-nikogo), where the manager once re-read `ref` at three points and missed the `init` altogether (OW-hikefi).
 A move is one more name on the session's container, which the manager keys by a handle it mints and a rename never changes, so every id the session has had keeps resolving to it while every event carries the current one beside the handle (D24, OW-suyinu).
+Clients follow a move the same way: both key a live session by that handle and take the ref from each event under it, and what says a move on the wire is a snapshot under the handle carrying the new ref, which the attach broadcasts for a move inside `start()` and `SessionManager.#rename` for a later one (OW-kimaya, OW-danifa, OW-mofuho).
 
 **Spawn only on attach.**
 The list needs metadata only — id, cwd, timestamp, and a preview — all cheap to read from the file.
@@ -384,7 +386,7 @@ Both ends of D2/D3 are ours, so the SSE event union and the REST request/respons
 Snapshot, upsert, and server-request events are a discriminated union on a `type` field with the `seq` and session id at the top level.
 
 This is the one place worth being concrete rather than leaving to implementation judgement: the two halves are written at different times and will drift if the contract is only described in prose.
-D24 added a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retires `renamed` once both clients key by it (OW-mofuho).
+D24 added a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retired the `renamed` event once both clients keyed by it (OW-mofuho).
 The handle is required on every per-session event since the browser's reducer keys its views by it (OW-kimaya), and stays optional on `SessionSummary`, since a session only the backend's store knows has none.
 
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
@@ -452,7 +454,7 @@ Free one and retry.
 
 **Bookkeeping constraint (load-bearing).**
 The recency stamp lives on the `ManagedSession` object or in a side map keyed by its handle, **never in a side map keyed by a backend id**.
-Pi's id changes under us (D9's `renamed`), and since D24 a rename is one more name on the same container, whose handle never changes (OW-suyinu) — so a stamp on the object or under the handle follows the rename automatically, whereas an id-keyed side map would strand it under the old `virtual:` key.
+Pi's id changes under us (D9), and since D24 a rename is one more name on the same container, whose handle never changes (OW-suyinu) — so a stamp on the object or under the handle follows the rename automatically, whereas an id-keyed side map would strand it under the old `virtual:` key.
 The reaper must evict the container itself, reached by its handle or through `#lookup` from any of its names, like everything else; evicting by a backend id the container has since outgrown would miss it and reintroduce the double-spawn-on-stale-id bug the name table exists to close.
 
 **Cost this shifts.**
@@ -756,7 +758,7 @@ The owner took this on 2026-09-16 (OW-vukoku).
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
 `Last-Event-ID` appears nowhere in `src/`, so there is no cursor and no replay buffer either: a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
-So is a `renamed`, and the opening snapshot names only the new ref.
+So is the snapshot under the handle that says a rename, as the `renamed` event was until OW-mofuho retired it, and the opening snapshot names only the new ref.
 Since OW-kimaya that strands nothing in the browser: its views are keyed by the handle each snapshot carries beside the ref, so the opening snapshot moves the view, its summary and the selection onto the new ref (D24).
 Nor does a detach and re-attach by another client while the stream was down, which gives the session a new handle: the opening snapshot under it drops the view the old handle held for that ref, since a ref names one live session.
 Both rest on no restarted server minting a handle a client already holds, which D24 now guarantees.
@@ -890,9 +892,9 @@ Three narrower choices produce nearly every race card, each one family, and this
 
 **Identity: the backend's mutable id is the key, and the manager polls for changes.**
 A `SessionRef` is the backend's own id (D9), which every backend replaces at attach, which Pi can move again at the first prompt and moves at every fork, and which `#start` canonicalises across spellings (OW-fumegi).
-`BackendAdapter.ref` is a getter, and the contract tells the manager to re-read it after `start()`, `submit()` and `fork()` settle; `SessionManager.#adoptRef` does, at those three points, re-keying `#sessions` and `#pendingRequests`, retargeting `#aliases`, and broadcasting `renamed`, which each client answers by re-keying its own maps.
+`BackendAdapter.ref` is a getter, and the contract told the manager to re-read it after `start()`, `submit()` and `fork()` settle; `SessionManager.#adoptRef` did, at those three points, re-keying `#sessions` and `#pendingRequests`, retargeting `#aliases`, and broadcasting `renamed`, which each client answered by re-keying its own maps.
 Every identity change lands between the adapter's move and the manager's next look, which is OW-zovaye and OW-nuzepi on a Pi fork and OW-hikefi on a Claude Code `init` that renames.
-Every client map keyed by the id needs a rename tracker: `agentpane--rekey` and `agentpane--absorb` in Emacs (OW-jafini) until OW-danifa keyed its buffers by the handle, keeping the merge only for an attach reply naming a handle another buffer holds, and the `session/renamed` the helper synthesizes for the three orderings OW-nuwive found, as the browser needed six closures in `src/client/controller.ts`, `rekeySession` and `watchRename` until OW-kimaya keyed its maps by the handle; and D12's bookkeeping constraint exists only to keep a stamp off such a map.
+Every client map keyed by the id needed a rename tracker: `agentpane--rekey` and `agentpane--absorb` in Emacs (OW-jafini) until OW-danifa keyed its buffers by the handle, keeping the merge only for an attach reply naming a handle another buffer holds, and the `session/renamed` the helper synthesized for the three orderings OW-nuwive found until OW-mofuho retired it, as the browser needed six closures in `src/client/controller.ts`, `rekeySession` and `watchRename` until OW-kimaya keyed its maps by the handle; and D12's bookkeeping constraint exists only to keep a stamp off such a map.
 Roughly seventy cards in the deck touch a rename, a re-key or an alias.
 
 Two changes, in two cards.
@@ -900,7 +902,8 @@ An adapter announces its identity change as an event, `onRefChanged(ref, cause)`
 OW-hikefi's body named this fix on 2026-09-16, and it is the raise the FROZEN INTERFACE note in `src/server/adapters/types.ts` asks for.
 One point kept its wait under OW-nikogo: a rename announced inside `start()`, which all three adapters make, was held in a variable local to that `#start` call and applied once the adapter was published, because `#attaching` held the startup only under the requested and canonical keys, and re-keying earlier would have let a `close()` or an attach under the new name miss the startup.
 OW-suyinu retired that wait: the container carries its startup, so the rename is written the moment it is announced, a `close()` or an attach under the new name finds the one startup, and what the adapter emits during start goes out under the new ref.
-Two things of the wait stay, and neither is a key: a start that fails after renaming undoes the rename, restoring `ref` and dropping the names the start added, since a virtual container outlives the failure and a retry would otherwise resume an id its adapter never stored; and the `renamed` event for such a rename goes out at the publish, so that a failed start leaves none on the wire, a hold on the wire alone that leaves with `renamed` (OW-mofuho).
+Two things of the wait stay, and neither is a key: a start that fails after renaming undoes the rename, restoring `ref` and dropping the names the start added, since a virtual container outlives the failure and a retry would otherwise resume an id its adapter never stored; and nothing goes on the wire for such a rename until the publish, so that a failed start leaves nothing there.
+That hold was written for the `renamed` event and outlived it (OW-mofuho): the snapshot that now says a rename could not go out before the publish anyway, since the snapshot source answers nothing for a container with no adapter, but the `sessionsChanged` beside it would point every client at a listing naming a ref the failed start takes back, and the attach's own `sessionsChanged` and snapshot under the handle say the rename once the start is published.
 OW-nikogo landed the event, and with it a Pi fork's hydrate reaches every client as a snapshot under the fork's ref, where it had been dropped; between the event and the hydrate the fork's ref reads the parent's un-rewound transcript, which the hydrate or the fork's attach heals, and a route on the parent's ref misses from the event on, as on any detached parent (OW-kekoji, D20).
 Since OW-suyinu the manager keys a live session by a handle it mints, opaque and never changed, and carries every backend id the session has had, and every spelling `#start` canonicalised, as names on the container, so a rename is an attribute write and a lookup by any old name still resolves, which is D9's promise that the old id keeps working on REST routes.
 No map holding a container is keyed by a name.
@@ -908,17 +911,18 @@ A handle is never minted twice, by one server process or by a restarted one: eac
 A startup is on its container as `starting` once the container exists, which is how an attach or a `close()` under any of its names finds it; `#attaching` also holds every startup under the spelling its attach asked for, which is how a stored session's attach is found before its container exists and how `disposeAll()` reaches every startup, so for an existing container the two hold the same startup.
 `#pendingForks` and `#disposing` stay keyed by backend id, since neither holds a container.
 The handle rides `SessionSummary` for a session the manager holds and every per-session event on both wires.
-Since OW-kimaya it is required on every per-session event, and the shared reducer, the browser's controller and per-tab maps, and the Emacs helper's attached set key by it, so none of them tracks a rename; agentpane-mode keys its buffers by it since OW-danifa, taking from `renamed` the ref it moves to, as from any notification under the handle, and the handle of an attach whose reply has not yet come, and `renamed` is retired once that handle has another route (OW-mofuho).
+Since OW-kimaya it is required on every per-session event, and the shared reducer, the browser's controller and per-tab maps, and the Emacs helper's attached set key by it, so none of them tracks a rename; agentpane-mode keys its buffers by it since OW-danifa, taking the ref from any notification under the handle.
+Since OW-mofuho no event says a rename on either wire: the server sends a snapshot under the handle carrying the new ref, and for an attach answered under another ref than it asked for, the helper sends that snapshot after the attach's reply, which is what gives the buffer the handle; until then the helper's `session/renamed` had been that buffer's only link from the asked-for ref to the handle.
 In the browser a live view's ref is an attribute that any event under its handle may move, and the selection, which names a row and is therefore a ref, follows it.
 A rename never moves a browser key; three things do.
 A fork, which is another session under another handle, takes the prompt armed on its parent.
 A selection that stays on one ref while its key changes keeps its per-tab state under the new key: a stored session's preview is keyed by its ref until its attach gives it a handle, a detach takes it back to the ref, and a re-attach elsewhere gives it a new handle.
 A snapshot introducing a ref under a new handle drops any other view of that ref, since the server maps a name to one handle.
-What the split between a rename and a fork settled stays in force: a fork's container takes none of the parent's names, broadcasts no `renamed`, does not take the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and the fork's id as its only name, which takes the adapter, its subscriptions and queue, and the parent's pending requests and notices, and leaves the parent's container out of the table with no adapter.
+What the split between a rename and a fork settled stays in force: a fork's container takes none of the parent's names, broadcasts nothing under the parent's handle, does not take the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and the fork's id as its only name, which takes the adapter, its subscriptions and queue, and the parent's pending requests and notices, and leaves the parent's container out of the table with no adapter.
 Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), and a parked fork gets its handle at the attach that builds its container, since until then nothing is emitted for it and `ForkResponse` carries a ref only (OW-lajehi).
 Teardown stops an event-driven rename or fork by unsubscribing: `close()` and `disposeAll()` drop a container's subscriptions in the same synchronous run that takes it out of the table, so no event reaches `#rename` or `#forkOnto` for it afterwards, and the `ManagedSession.torndown` flag that stopped the polled re-key is retired with the polling (OW-yavewa, OW-jimasu, OW-nikogo).
 D13's file is keyed by the backend id and stays so: it names a session on disk, which is an identity a handle does not have.
-D21's reconnect gap closed in the browser when OW-kimaya keyed its views by the handle: a `renamed` missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref, and a re-attach elsewhere in that window leaves one view of the ref, under the new handle; in agentpane-mode it closed with OW-danifa, whose buffers the same snapshot moves, except where a rename and a re-attach elsewhere fall in one outage (D21).
+D21's reconnect gap closed in the browser when OW-kimaya keyed its views by the handle: a rename missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref, and a re-attach elsewhere in that window leaves one view of the ref, under the new handle; in agentpane-mode it closed with OW-danifa, whose buffers the same snapshot moves, except where a rename and a re-attach elsewhere fall in one outage (D21).
 
 **Serialisation: nothing on the server runs one session's mutations one at a time.**
 The routes in `src/server/http/app.ts` reach the adapter directly for set-model, set-effort, compact, abort, fork points and reply, and only `submit` and `fork` go through the manager, for the re-key and not for order; OW-yavewa's close note records that nothing serialises the routes, each a concurrent `Bun.serve` handler.

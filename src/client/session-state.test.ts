@@ -158,10 +158,10 @@ describe("client session state", () => {
 		expect(result.refreshSessions).toBe(false);
 	});
 
-	// What the handle fixes is the `renamed` that never arrived -- one dropped
-	// while the stream was down (D21), or one a late stream never carried -- so
-	// these stage the new ref on an ordinary event under the same handle, with
-	// no `renamed` before it (D24, OW-kimaya).
+	// A rename reaches a client as nothing but a new ref on an event under the
+	// handle it already holds: the server sends a snapshot (OW-mofuho), but the
+	// reducer takes the ref from any event, so these stage it on an ordinary
+	// event under the same handle (D24, OW-kimaya).
 	it("takes a new ref from a status under a known handle, and the selection and its summary follow", () => {
 		const result = reduceServerEvent(stateAtSequence(oldRef, 2), {
 			type: "status",
@@ -243,14 +243,6 @@ describe("client session state", () => {
 			message: userMessage("streamed"),
 		}).state;
 		expect(viewOf(streamed, ref)?.messages).toEqual([userMessage("before"), userMessage("after the re-attach"), userMessage("streamed")]);
-	});
-
-	it("moves nothing on renamed, which names the handle every view is already keyed by", () => {
-		const state = stateAtSequence(oldRef, 2);
-		const result = reduceServerEvent(state, { type: "renamed", from: oldRef, session: newRef, handle: h(oldRef), seq: 3 });
-
-		expect(result.state).toBe(state);
-		expect(result.recover).toEqual([]);
 	});
 
 	it("finds a ref's handle through the view carrying it, else the summary carrying it, and none for a preview", () => {

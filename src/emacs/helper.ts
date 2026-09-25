@@ -39,15 +39,16 @@
  * `sessions/close` stop the attachment under it, and without one the
  * attachment Emacs was last told that ref for (`forget` below).
  * agentpane-mode's detach carries its buffer's handle, and one without is
- * sent only from a buffer that sent an attach. `session/renamed` goes out
- * for every `renamed` under an attached handle until the event leaves the
- * wire (OW-mofuho). agentpane-mode keys its buffers by the handle and
- * re-keys nothing on it (OW-danifa): it takes `to` as the ref, as it takes
- * `session` from any notification, and takes the handle from one whose
- * `from` is the ref an attach of its asked for, before that attach's
- * reply, which is the only route a snapshot `sessions/attach` sends under
- * the new ref before the reply has to that buffer
- * (`agentpane--notified-buffer` in emacs/agentpane.el). The hand-rolled
+ * sent only from a buffer that sent an attach. No notification says a
+ * rename: agentpane-mode keys its buffers by the handle (OW-danifa) and
+ * takes the ref from any notification under it, as the reducer does, so the
+ * snapshot under the handle that follows a rename on the server is all it
+ * needs (OW-mofuho). The one place that is not enough is an attach answered
+ * under another ref than it asked for, whose snapshot under the new ref
+ * reaches a buffer that holds only the asked-for ref and no handle yet;
+ * `sessions/attach` below sends that snapshot after its reply, which names
+ * the handle, rather than before it (`agentpane--notified-buffer` in
+ * emacs/agentpane.el). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
@@ -71,7 +72,17 @@ export interface HelperOptions {
 	reconnectDelayMs?: number;
 }
 
-type Handlers = { [M in keyof HelperRequests]: (params: HelperRequests[M]["params"]) => Promise<HelperRequests[M]["result"]> };
+/**
+ * `afterReply` queues a write for straight after this request's reply, in the
+ * same synchronous run, so nothing the stream delivers can land between the
+ * two. Only `sessions/attach` uses it.
+ */
+type Handlers = {
+	[M in keyof HelperRequests]: (
+		params: HelperRequests[M]["params"],
+		afterReply: (send: () => void) => void,
+	) => Promise<HelperRequests[M]["result"]>;
+};
 
 interface JsonRpcRequest {
 	jsonrpc?: string;
@@ -153,16 +164,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		for (const { ref } of result.recover) api.attach(ref).catch(() => undefined);
 		if (event.type === "sessions-changed") return;
 
-		// Before the `state === before` return below, which every `renamed`
-		// takes: the reducer's arm is a no-op, and agentpane-mode takes `to`
-		// as the ref from the notification, and the handle for an attach of its
-		// not yet answered (OW-danifa). A pending attach on the old ref moves here, as it would
-		// have been re-keyed by ref.
-		if (event.type === "renamed") {
-			if (!isAttached(event.handle, event.from, event.session)) return;
-			notify({ method: "session/renamed", params: { from: event.from, to: event.session, handle: event.handle } });
-			return;
-		}
 		if (state === before) return;
 
 		const { handle } = event;
@@ -262,34 +263,37 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/create": (params) => api.createSession(params),
 		"models/list": ({ backend }) => api.listModels(backend),
-		"sessions/attach": async ({ session }) => {
+		"sessions/attach": async ({ session }, afterReply) => {
 			openStream();
 			const key = sessionKey(session);
 			pending.add(key);
 			try {
 				const summary = await api.attach(session);
 				// The route's ref is authoritative and may differ from the one asked
-				// for with no `renamed` reaching this stream: an attach through an
-				// alias an earlier rename left behind answers the new ref and
-				// broadcasts only its snapshot, and the `renamed` a first start
-				// broadcasts misses a stream the server has not yet registered, whose
-				// opening snapshot then carries the new ref alone (`SessionManager`'s
-				// `attach` and `#rename`, src/server/http/session-manager.ts).
-				// Filtered by the asked-for key, that snapshot was dropped, so the
-				// rename is said here, before the reply, with the snapshot the reducer
-				// holds for the new ref if one has arrived; one still on its way is
-				// forwarded when it does. Both carry the summary's handle, and the
-				// attach moves from the ref it asked for onto it. An attach no longer
-				// pending was moved already, by an event under the handle that
-				// carried the asked-for ref -- a `renamed` from it among them -- or
-				// dropped by a `sessions/detach` sent while this attach was in
-				// flight, which a reply that lands after it must not undo.
+				// for: an attach through an alias an earlier rename left behind
+				// answers the new ref, and so does a first start that renamed a
+				// `virtual` id, and the snapshot either broadcasts carries only the
+				// new ref (`SessionManager`'s `attach` and `#rename`,
+				// src/server/http/session-manager.ts). Filtered by the asked-for key,
+				// that snapshot was dropped; and before the reply agentpane-mode's
+				// buffer holds only the asked-for ref and no handle, so it would
+				// drop it too. So the attach moves onto the summary's handle here,
+				// and the snapshot the reducer holds under it goes out after the
+				// reply, which is what gives the buffer that handle; one still on
+				// its way is forwarded when it arrives. Read when sent, so an event
+				// forwarded between here and the reply, which the buffer drops for
+				// the same reason, is in it. An attach no longer pending was moved
+				// already, by an event under the handle that carried the asked-for
+				// ref, which the buffer matched by that ref, or dropped by a
+				// `sessions/detach` sent while this attach was in flight, which a
+				// reply that lands after it must not undo.
 				if (pending.delete(key)) {
 					attached.set(summary.handle, sessionKey(summary.ref));
 					if (sessionKey(summary.ref) !== key) {
-						notify({ method: "session/renamed", params: { from: session, to: summary.ref, handle: summary.handle } });
-						const view = state.sessions[summary.handle];
-						if (view) notifySnapshot(view, summary.handle);
+						afterReply(() => {
+							const view = state.sessions[summary.handle];
+							if (view && attached.has(summary.handle)) notifySnapshot(view, summary.handle);
+						});
 					}
 				}
 				return summary;
@@ -348,14 +352,16 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const respond = async (request: JsonRpcRequest): Promise<void> => {
 		const { id, method } = request;
 		if (id === undefined || id === null) return; // A notification from Emacs: nothing to answer, and none is defined.
-		const handler = (handlers as Record<string, (params: unknown) => Promise<unknown>>)[method ?? ""];
+		const handler = (handlers as Record<string, (params: unknown, afterReply: (send: () => void) => void) => Promise<unknown>>)[method ?? ""];
 		if (!handler) {
 			write(encodeFrame({ jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${JSON.stringify(method)}` } }));
 			return;
 		}
+		const after: (() => void)[] = [];
 		try {
-			const result = await handler(request.params);
+			const result = await handler(request.params, (send) => after.push(send));
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));
+			for (const send of after) send();
 		} catch (error: unknown) {
 			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(error) }));
 		}

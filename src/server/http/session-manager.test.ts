@@ -41,6 +41,22 @@ beforeEach(() => {
 	sessions = new SessionManager({ index, adapters: { pi } }, broadcaster);
 });
 
+/** Every event `broadcaster` sends from here on, as a client receives it. */
+function broadcastEvents(): ServerEvent[] {
+	const events: ServerEvent[] = [];
+	broadcaster.addClient((chunk) => {
+		for (const line of chunk.split("\n")) {
+			if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+		}
+	});
+	return events;
+}
+
+/** The events among `events` that name `ref`. */
+function naming(ref: SessionRef, events: ServerEvent[]): ServerEvent[] {
+	return events.filter((event) => "session" in event && sessionKey(event.session) === sessionKey(ref));
+}
+
 describe("attach", () => {
 	it("spawns once even when two attaches race", async () => {
 		const [a, b] = await Promise.all([sessions.attach(REF), sessions.attach(REF)]);
@@ -372,18 +388,14 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		const adapter = await sessions.attach(virtualRef);
 		const minted: SessionRef = { backend: "claude", id: "minted" };
 		expect(sessions.canonicalRef(virtualRef)).toEqual(minted);
-		const renamed: { from: SessionRef; to: SessionRef }[] = [];
-		const prevRenamed = broadcaster.renamed.bind(broadcaster);
-		broadcaster.renamed = (from, session) => {
-			renamed.push({ from, to: session.ref });
-			prevRenamed(from, session);
-		};
+		const handle = sessions.summaryOf(minted)?.handle;
+		const events = broadcastEvents();
 
 		await sessions.submit(minted, "hi");
 		proc.emit({ type: "system", subtype: "init", session_id: "cli-chosen" });
 
 		const chosen: SessionRef = { backend: "claude", id: "cli-chosen" };
-		expect(renamed).toEqual([{ from: minted, to: chosen }]);
+		expect(naming(chosen, events)).toEqual([expect.objectContaining({ type: "snapshot", handle })]);
 		expect(sessions.liveRefs()).toEqual([chosen]);
 		expect(sessions.adapterFor(chosen)).toBe(adapter);
 		expect(sessions.adapterFor(minted)).toBe(adapter);
@@ -393,8 +405,8 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	describe("a rename announced inside start()", () => {
 		// All three adapters rename there. The container is keyed by its handle
 		// and holds the startup itself, so the new id is written as a name at
-		// once and reaches that startup; only the `renamed` event waits for the
-		// adapter to be published (D24, OW-suyinu).
+		// once and reaches that startup; only the wire waits for the adapter to
+		// be published (D24, OW-suyinu, OW-mofuho).
 		const real: SessionRef = { backend: "pi", id: REAL };
 
 		/** A factory whose adapters rename during `start()`, then do `after` before it settles. */
@@ -414,16 +426,6 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			return factory;
 		}
 
-		function recordRenames(): { from: SessionRef; to: SessionRef; published: boolean }[] {
-			const renamed: { from: SessionRef; to: SessionRef; published: boolean }[] = [];
-			const prevRenamed = broadcaster.renamed.bind(broadcaster);
-			broadcaster.renamed = (from, session) => {
-				renamed.push({ from, to: session.ref, published: sessions.adapterFor(session.ref) !== undefined });
-				prevRenamed(from, session);
-			};
-			return renamed;
-		}
-
 		/** Attach REF through a factory that renames inside `start()`, parked just after the rename. */
 		async function attachParkedAfterRename(during?: (adapter: FakeAdapter) => void) {
 			const gate = deferred();
@@ -434,30 +436,33 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 				await gate.promise;
 			});
 			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-			const renamed = recordRenames();
+			const wire = broadcastEvents();
 			const attaching = sessions.attach(REF);
 			await renamedInside.promise;
-			return { factory, renamed, attaching, release: () => gate.resolve() };
+			return { factory, wire, attaching, release: () => gate.resolve() };
 		}
 
 		it("writes the new name at once, and an attach under it joins the one startup", async () => {
-			const { factory, renamed, attaching, release } = await attachParkedAfterRename();
+			const { factory, wire, attaching, release } = await attachParkedAfterRename();
 
 			expect(sessions.canonicalRef(REF)).toEqual(real);
-			expect(sessions.summaryOf(real)?.handle).toBe(sessions.summaryOf(REF)?.handle);
+			const handle = sessions.summaryOf(REF)?.handle;
+			expect(sessions.summaryOf(real)?.handle).toBe(handle);
 			const joining = sessions.attach(real);
-			// Held for the publish: a start that still fails must leave none.
-			expect(renamed).toEqual([]);
+			// Held for the publish: a start that still fails must leave nothing.
+			expect(wire).toEqual([]);
 
 			release();
 			expect(await joining).toBe(await attaching);
 			expect(factory.created).toHaveLength(1);
-			expect(renamed).toEqual([{ from: REF, to: real, published: true }]);
+			// Said once, by the attach, and under the handle.
+			expect(wire.map((event) => event.type)).toEqual(["sessions-changed", "snapshot"]);
+			expect(wire[1]).toMatchObject({ session: real, handle });
 			expect(sessions.liveRefs()).toEqual([real]);
 		});
 
 		it("stops the one startup when closed under the new name", async () => {
-			const { factory, renamed, attaching, release } = await attachParkedAfterRename();
+			const { factory, wire, attaching, release } = await attachParkedAfterRename();
 
 			await sessions.close(real);
 			release();
@@ -465,37 +470,31 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
 			expect(factory.created).toHaveLength(1);
 			expect(factory.created[0]?.disposed).toBe(true);
-			expect(renamed).toEqual([]);
+			expect(naming(real, wire)).toEqual([]);
 			expect(sessions.liveRefs()).toEqual([]);
 			expect(sessions.summaryOf(REF)).toBeNull();
 			expect(sessions.summaryOf(real)).toBeNull();
 		});
 
 		it("sends what the adapter emits during start under the new ref", async () => {
-			const events: ServerEvent[] = [];
-			broadcaster.addClient((chunk) => {
-				for (const line of chunk.split("\n")) {
-					if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-				}
-			});
-			const { release, attaching } = await attachParkedAfterRename((adapter) => adapter.append(userMessage("hello")));
+			const { wire, release, attaching } = await attachParkedAfterRename((adapter) => adapter.append(userMessage("hello")));
 
-			expect(events).toEqual([expect.objectContaining({ type: "upsert", session: real, index: 0 })]);
+			expect(wire).toEqual([expect.objectContaining({ type: "upsert", session: real, index: 0 })]);
 			release();
 			await attaching;
-			expect(events.filter((event) => "session" in event && sessionKey(event.session) === sessionKey(REF))).toEqual([]);
+			expect(naming(REF, wire)).toEqual([]);
 		});
 
-		it("leaves no rename, no alias and no `renamed` behind when start() then fails", async () => {
+		it("leaves no rename, no alias and nothing on the wire behind when start() then fails", async () => {
 			const factory = renamingInsideStart(async () => {
 				throw new Error("get_messages failed");
 			});
 			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
-			const renamed = recordRenames();
+			const wire = broadcastEvents();
 
 			await expect(sessions.attach(REF)).rejects.toThrow("get_messages failed");
 
-			expect(renamed).toEqual([]);
+			expect(wire).toEqual([]);
 			expect(sessions.canonicalRef(REF)).toEqual(REF);
 			expect(sessions.summaryOf(real)).toBeNull();
 			expect(sessions.liveRefs()).toEqual([]);
@@ -526,14 +525,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
 	// OW-razoki): only Pi's adapter announces a `"fork"`, and SessionManager.fork
 	// must handle every shape.
-	it("moves the adapter onto the fork's container, without emitting `renamed`, when a Pi-style fork moves the active file", async () => {
+	it("moves the adapter onto the fork's container, naming the fork under nothing of the parent's, when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
-		const events: { from: SessionRef; to: SessionRef }[] = [];
-		const prevRenamed = broadcaster.renamed.bind(broadcaster);
-		broadcaster.renamed = (from, session) => {
-			events.push({ from, to: session.ref });
-			prevRenamed(from, session);
-		};
+		const parentHandle = sessions.summaryOf(REF)?.handle;
+		const events = broadcastEvents();
 
 		const forked = await sessions.fork(REF, "e1");
 
@@ -542,10 +537,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 		expect(forked).toEqual(moved);
 		expect(sessions.liveRefs()).toEqual([moved]);
-		// But no `renamed`: the parent was not renamed, it was left behind as a
-		// second conversation, and that event tells every browser the opposite
-		// (OW-suhoto).
-		expect(events).toEqual([]);
+		// But nothing under the parent's handle names the fork: the parent was not
+		// renamed, it was left behind as a second conversation, and a new ref under
+		// its handle tells every client the opposite (OW-suhoto).
+		expect(events.filter((event) => "handle" in event && event.handle === parentHandle)).toEqual([]);
 	});
 
 	it("does NOT re-key when a Codex-style fork leaves the adapter's own ref unchanged", async () => {
@@ -554,12 +549,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		index = new FakeSessionIndex([storedSession(codexRef, WORKSPACE)]);
 		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
 		await sessions.attach(codexRef);
-		const renamed: { from: SessionRef; to: SessionRef }[] = [];
-		const prevRenamed = broadcaster.renamed.bind(broadcaster);
-		broadcaster.renamed = (from, session) => {
-			renamed.push({ from, to: session.ref });
-			prevRenamed(from, session);
-		};
+		const events = broadcastEvents();
 
 		const forked = await sessions.fork(codexRef, "e1");
 
@@ -568,7 +558,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		// The parent session is still keyed by its original id -- no re-key, no rename.
 		expect(sessions.canonicalRef(codexRef)).toEqual(codexRef);
 		expect(sessions.liveRefs()).toEqual([codexRef]);
-		expect(renamed).toEqual([]);
+		expect(events.filter((event) => "session" in event && sessionKey(event.session) !== sessionKey(codexRef))).toEqual([]);
 	});
 
 	// Claude Code's shape (OW-razoki): `fork()` mints the fork's id and the
@@ -630,7 +620,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		// The CLI is authoritative about its own store, so a Claude session can
 		// rename under us after `start()` -- `ClaudeAdapter` adopts the id `init`
-		// reports. The client follows `renamed` and holds the new ref from there.
+		// reports. The client follows the snapshot under the handle and holds the
+		// new ref from there.
 		const claude = new FakeAdapterFactory({ forkMode: "claude", materialiseOnSubmit: "fork-real" });
 		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
 		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
@@ -843,12 +834,14 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			expect(await forking).toEqual(moved);
 		});
 
-		it("says `renamed` before the first thing it broadcasts under a ref the adapter took with no fork in flight", async () => {
+		it("sends a snapshot under the handle before the first thing it broadcasts under a ref the adapter took with no fork in flight", async () => {
 			// A rename, not a fork: `ClaudeAdapter` adopts the id a `system init`
 			// reports whenever it arrives, mid-turn included (OW-hikefi). The
-			// container follows at once, and every client re-keys on `renamed`
-			// before the turn's first upsert under the new ref reaches it.
+			// container follows at once, and every client has the new ref, under
+			// the handle it already holds, before the turn's first upsert under it
+			// reaches it.
 			await sessions.attach(REF);
+			const handle = sessions.summaryOf(REF)?.handle;
 			const adapter = pi.forRef(REF);
 			if (!adapter) throw new Error("no adapter");
 			const events = collectEvents();
@@ -859,9 +852,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 
 			expect(under(REF, events)).toEqual([]);
 			expect(under(renamed, events)).toMatchObject([
-				{ type: "renamed", from: REF },
-				{ type: "snapshot", messages: [] },
-				{ type: "upsert", index: 0 },
+				{ type: "snapshot", handle, messages: [] },
+				{ type: "upsert", handle, index: 0 },
 			]);
 		});
 	});
@@ -2355,7 +2347,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 
 		await sessions.submit(virtualRef, "first");
 
-		// The snapshot `renamed` is followed by, under the new ref.
+		// The snapshot the rename broadcasts under the handle, carrying the new ref.
 		expect(snapshots(events).at(-1)).toEqual(
 			expect.objectContaining({ session: { backend: "pi", id: REAL }, error: "turn failed", requests: [request], notices: [notice] }),
 		);

@@ -627,11 +627,9 @@ handle."
         (let ((live (agentpane--transcript-buffer (list :ref alias)))
               (preview (agentpane--transcript-buffer (list :ref canonical))))
           (with-current-buffer live (agentpane--attach))
-          (agentpane--on-notification nil 'session/renamed
-                                      (list :from alias :to canonical :handle "h1"))
+          (funcall (cdr (pop held)) t)
           (agentpane--on-notification nil 'session/snapshot
                                       (list :session canonical :handle "h1" :nodes []))
-          (funcall (cdr (pop held)) t)
           (should (buffer-live-p preview))
           (setq sent nil)
           (kill-buffer preview)
@@ -643,14 +641,15 @@ handle."
             (should (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(4)))))))))
 
-(ert-deftest agentpane-test-renamed-under-the-handle-moves-the-ref ()
-  "A `session/renamed' under the handle a buffer holds moves the buffer's
-ref to `to', the ref the helper names the session by from then on."
+(ert-deftest agentpane-test-status-under-the-handle-moves-the-ref ()
+  "A notification under the handle a buffer holds that is not a snapshot,
+naming another ref, moves the buffer's ref there too: the ref the helper
+names the session by from then on."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
     (agentpane-test--with-session from
       (setq agentpane--handle "h1")
-      (agentpane--on-notification nil 'session/renamed (list :from from :to to :handle "h1"))
+      (agentpane--on-notification nil 'session/status (list :session to :handle "h1" :isStreaming t))
       (should (agentpane--same-ref-p (agentpane--ref agentpane--session) to)))))
 
 (ert-deftest agentpane-test-listed-handle-finds-its-buffer ()
@@ -664,12 +663,12 @@ whatever ref the summary names, so no second buffer opens on the session."
                    (list :ref '(:backend "claude" :id "pending-1") :handle "h1"))
                   holder)))))
 
-(ert-deftest agentpane-test-attach-renamed-before-its-reply-draws-the-snapshot ()
+(ert-deftest agentpane-test-attach-answered-under-a-new-ref-draws-the-snapshot-after-its-reply ()
   "An attach whose reply names another ref than the one asked for, which the
-helper precedes with a `session/renamed' from the asked-for ref and the
-snapshot under the new one (`sessions/attach' in src/emacs/helper.ts),
-leaves the buffer drawn from that snapshot, holding the reply's handle
-and ref."
+helper follows with the snapshot under the new one (`sessions/attach' in
+src/emacs/helper.ts), leaves the buffer drawn from that snapshot, holding
+the reply's handle and ref: the reply is what joins the asked-for ref to
+the handle the snapshot carries."
   (let ((asked '(:backend "claude" :id "pending-1"))
         (ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
@@ -677,13 +676,11 @@ and ref."
             attached (list :ref ref :handle "h1"))
       (let ((buffer (agentpane--transcript-buffer (list :ref asked))))
         (with-current-buffer buffer (agentpane--attach))
-        (agentpane--on-notification nil 'session/renamed
-                                    (list :from asked :to ref :handle "h1"))
+        (funcall (cdr (pop held)) t)
         (agentpane--on-notification
          nil 'session/snapshot
          (list :session ref :handle "h1"
                :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
-        (funcall (cdr (pop held)) t)
         (with-current-buffer buffer
           (should (equal (agentpane-test--indices) '(3)))
           (should (equal agentpane--handle "h1"))
@@ -724,9 +721,9 @@ handle \"h1\" at a ref it has since left for `canonical', and a buffer
 `previewing' holding it at the ref `alias' and no handle, whose attach the
 helper answers with the session's summary, and every request answered as
 `agentpane-test--forking' answers it.  BODY sends the attach.
-The reply naming `canonical' has overtaken the `session/renamed' that
-would move `holder' there, which it may, the two being unordered (D2), so
-only the handle joins the two buffers."
+The reply naming `canonical' has overtaken the notification under the
+handle that would move `holder' there, which it may, the two being
+unordered (D2), so only the handle joins the two buffers."
   (declare (indent 0))
   `(let ((canonical '(:backend "claude" :id "real-2"))
          (alias '(:backend "claude" :id "pending-1")))

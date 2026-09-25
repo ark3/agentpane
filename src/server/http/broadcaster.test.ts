@@ -151,18 +151,17 @@ describe("sequence bookkeeping", () => {
 		const renamed: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/b.jsonl" };
 
 		session.ref = renamed;
-		broadcaster.renamed(REF, session);
+		broadcaster.broadcastSnapshot(HANDLE);
 		broadcaster.upsert(session, 0, userMessage("hi"));
 
 		// Nothing is copied from the old ref's counter to the new one's: there is
-		// only the handle's, and `renamed` continues it before the snapshot that
-		// follows it resets it.
-		expect(events.map((event) => [event.type, "seq" in event ? event.seq : null])).toEqual([
-			["status", 1],
-			["upsert", 2],
-			["renamed", 3],
-			["snapshot", 0],
-			["upsert", 1],
+		// only the handle's, which the snapshot carrying the new ref resets, as
+		// every broadcast snapshot does (OW-mofuho).
+		expect(events.map((event) => [event.type, "seq" in event ? event.seq : null, "session" in event ? event.session : null])).toEqual([
+			["status", 1, REF],
+			["upsert", 2, REF],
+			["snapshot", 0, renamed],
+			["upsert", 1, renamed],
 		]);
 		expect(broadcaster.seqOf(HANDLE)).toBe(1);
 	});
@@ -181,7 +180,6 @@ describe("the handle (D24, OW-suyinu)", () => {
 		broadcaster.requestResolved(session, "r1");
 		broadcaster.error(session, "boom");
 		broadcaster.notice(session, notice);
-		broadcaster.renamed({ backend: "pi", id: "virtual:1" }, session);
 
 		expect(events.map((event) => event.type)).toEqual([
 			"snapshot",
@@ -191,8 +189,6 @@ describe("the handle (D24, OW-suyinu)", () => {
 			"request-resolved",
 			"error",
 			"notice",
-			"renamed",
-			"snapshot",
 		]);
 		for (const event of events) expect(event).toMatchObject({ session: REF, handle: HANDLE });
 	});

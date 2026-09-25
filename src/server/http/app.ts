@@ -242,8 +242,8 @@ export function createApp(deps: AppDeps): App {
 			await sessions.attach(ref);
 			// `summary.ref` is authoritative and may differ from the URL: attaching
 			// is where a session first adopts its backend's own id (D9). Clients
-			// also hear about it as a `renamed` SSE event. `summary.handle` does not
-			// move with it (D24).
+			// also hear about it in the snapshot the attach broadcasts under
+			// `summary.handle`, which does not move with it (D24, OW-mofuho).
 			const summary = sessions.summaryOf(ref);
 			if (!summary) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
 			const body: AttachSessionResponse = { session: summary };
@@ -343,9 +343,9 @@ export function createApp(deps: AppDeps): App {
 				//     disk byte-identical), and the adapter announces the move, so
 				//     the manager moves the adapter onto a container of its own,
 				//     with a handle of its own, through `#forkOnto` before the fork
-				//     hydrates. It broadcasts no `renamed`: the parent is a second
-				//     conversation, not an older name (OW-suhoto). The ref it
-				//     returns is the moved file.
+				//     hydrates. Nothing under the parent's handle names the fork:
+				//     the parent is a second conversation, not an older name
+				//     (OW-suhoto). The ref it returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread the parent's adapter is
 				//     not driving; Codex flushes that rollout to disk immediately,
 				//     before any turn. The index therefore finds it, but nothing else

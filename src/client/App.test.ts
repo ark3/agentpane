@@ -207,7 +207,7 @@ class FakeController implements AgentpaneController {
 	 * (OW-mifuki).
 	 */
 	forkResult: LiveSessionSummary | null = null;
-	/** Stands in for whatever the server does mid-fork, e.g. Pi's `renamed`. */
+	/** Stands in for whatever the server does mid-fork, e.g. Pi's move onto the fork's handle. */
 	onForkAndSubmit: ((index: number) => void) | null = null;
 
 	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[]) {
@@ -839,9 +839,9 @@ describe("App", () => {
 	it("labels a just-prompted session by its own first user message while the server preview is still null", async () => {
 		// A first prompt on a virtual Pi session that attach left unnamed
 		// (broadcaster.ts, D9): sessions-changed, then the snapshot for the new
-		// ref under the session's handle. The `renamed` the server sends between
-		// them is left out, as a stream that dropped it would (D21): under the
-		// handle the row finds its live view without it (D24, OW-kimaya).
+		// ref under the session's handle, which is all the server says of a
+		// rename (OW-mofuho): under the handle the row finds its live view
+		// (D24, OW-kimaya).
 		// Replayed through the real reducer rather than hand-assembled, so the
 		// end state is the one the client would actually hold.
 		const virtualRef: SessionRef = { backend: "pi", id: "virtual:abc" };
@@ -2727,7 +2727,7 @@ describe("App", () => {
 			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], piSession, false, "h-parent"),
 		}));
 		// Pi's fork moves the live process onto a new file, which is a new session
-		// under a new handle and sends no `renamed` (D24, OW-suhoto). The real
+		// under a new handle and names nothing under the parent's (D24, OW-suhoto). The real
 		// `forkAndSubmit` attaches the fork's ref and publishes the selection
 		// *before* it resolves, so the fake does too; the shell moves what it
 		// armed on the parent's handle onto the fork's once it resolves.
@@ -2821,7 +2821,7 @@ describe("App", () => {
 		const el = container.querySelector(".conversation") as HTMLElement;
 		const reworded = user("reworded");
 		// What the real `forkAndSubmit` does: it attaches the ref the fork returned
-		// and publishes that selection *before* it resolves. No `renamed` ever fires.
+		// and publishes that selection *before* it resolves. Nothing re-keys the parent.
 		controller.forkResult = { ...summary(forkRef), handle: sessionKey(forkRef) };
 		controller.onForkAndSubmit = () => {
 			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });

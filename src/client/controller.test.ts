@@ -231,10 +231,9 @@ describe("client controller", () => {
 	});
 
 	// The rename tests below stage the new ref on an ordinary event under the
-	// session's handle with no `renamed` before it -- the one a dropped stream
-	// (D21) or a late one never delivers -- since the handle is what makes the
-	// outcome hold without one, and nothing in the controller tracks a rename
-	// (D24, OW-kimaya).
+	// session's handle, which is all a rename is on the wire (OW-mofuho) -- the
+	// server sends a snapshot, but any event under the handle moves the ref --
+	// and nothing in the controller tracks a rename (D24, OW-kimaya).
 	it("carries a pending set through a virtual session rename", async () => {
 		const api = new FakeApi();
 		const setting = deferred<void>();

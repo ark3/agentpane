@@ -116,7 +116,7 @@ describe("offline vertical slice", () => {
 		await events.close();
 	});
 
-	it("follows a materialised id when renamed is immediately followed by a snapshot", async () => {
+	it("follows a materialised id by the snapshot under the handle, with no renamed on the wire", async () => {
 		const materialised: SessionRef = { backend: "codex", id: "thread-offline-proof" };
 		const codex = new FakeAdapterFactory({
 			materialiseOnSubmit: materialised.id,
@@ -131,6 +131,7 @@ describe("offline vertical slice", () => {
 		const created = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "codex" })).json()) as CreateSessionResponse;
 		await request(ROUTES.session(created.ref));
 		await events.until(() => events.typed("snapshot").length === 1, "the virtual attach snapshot");
+		const { handle } = events.typed("snapshot")[0]!;
 
 		expect((await post(ROUTES.prompt(created.ref), { text: "materialise" })).status).toBe(202);
 		await events.until(
@@ -138,17 +139,16 @@ describe("offline vertical slice", () => {
 			"the materialised snapshot",
 		);
 
-		const renamedAt = events.events.findIndex((event) => event.type === "renamed");
-		expect(events.events.slice(renamedAt, renamedAt + 2).map((event) => event.type)).toEqual([
-			"renamed",
-			"snapshot",
-		]);
-		expect(events.typed("renamed")[0]).toMatchObject({ from: created.ref, session: materialised });
+		// The first event naming the new ref is a snapshot under the handle the
+		// session had all along, and nothing announces the rename beside it (D24).
+		const movedAt = events.events.findIndex((event) => event.type !== "sessions-changed" && sessionKey(event.session) === sessionKey(materialised));
+		expect(events.events[movedAt]).toMatchObject({ type: "snapshot", session: materialised, handle });
+		expect(events.events.map((event) => event.type)).not.toContain("renamed");
 
 		const state = reduceEvents(created.ref, events.events);
 		expect(state.selected).toEqual(materialised);
 		expect(viewOf(state, created.ref)).toBeUndefined();
-		expect(Object.keys(state.sessions)).toEqual([events.typed("renamed")[0]!.handle]);
+		expect(Object.keys(state.sessions)).toEqual([handle]);
 		expect(transcript(state, materialised)).toEqual([
 			userMessage("materialise"),
 			assistantMessage("saved"),
@@ -197,8 +197,8 @@ describe("offline vertical slice", () => {
 		expect(transcript(state, parent)).toEqual([userMessage("hello"), assistantMessage("parent reply")]);
 		expect(viewOf(state, fork)).toBeUndefined();
 		// And the reason it holds: nothing was renamed, a second conversation was
-		// created, so no `renamed` reaches anyone.
-		expect(onlooker.typed("renamed")).toEqual([]);
+		// created under a handle of its own, so no event re-keys anyone.
+		expect(onlooker.events.map((event) => event.type)).not.toContain("renamed");
 		await onlooker.close();
 	});
 });

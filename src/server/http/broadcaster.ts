@@ -186,19 +186,6 @@ export class Broadcaster {
 		this.#fanout({ type: "sessions-changed" });
 	}
 
-	/**
-	 * A session adopted another backend id (D9), `session.ref` being the new one.
-	 * Told to everyone, then followed by a snapshot under the new ref. The
-	 * counter is the handle's and goes on counting across it, so a client that
-	 * has been counting this session's events and is about to re-key them sees
-	 * no gap, and the snapshot then resets both ends together, as it always
-	 * does. Stays until both clients key by the handle (OW-mofuho).
-	 */
-	renamed(from: SessionRef, session: Addressed): void {
-		this.#fanout({ type: "renamed", ...this.#address(session), from });
-		this.broadcastSnapshot(session.handle);
-	}
-
 	/** Drop a closed session's counter, so the map does not grow with the uptime. */
 	forget(handle: string): void {
 		this.#seq.delete(handle);

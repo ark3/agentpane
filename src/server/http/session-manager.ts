@@ -575,9 +575,9 @@ export class SessionManager {
 	 *    and `#forkOnto` moves the adapter onto a container of its own, before
 	 *    the adapter re-sends the model and level and hydrates the fork's
 	 *    transcript -- so what it emits from there goes out under the fork's
-	 *    ref and handle, never the parent's (OW-zovaye, OW-nuzepi). It emits no
-	 *    `renamed` -- see `#forkOnto`. The value the adapter returns IS its new
-	 *    ref.
+	 *    ref and handle, never the parent's (OW-zovaye, OW-nuzepi). Nothing
+	 *    under the parent's handle names the fork -- see `#forkOnto`. The value
+	 *    the adapter returns IS its new ref.
 	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
 	 *    driving; its own `ref` is unchanged and it announces nothing. The returned
 	 *    ref points at the freshly-flushed forked thread, which differs from
@@ -665,20 +665,29 @@ export class SessionManager {
 	 * re-keyed, since the handle the table is keyed by does not move
 	 * (OW-suyinu).
 	 *
+	 * On the wire a rename is the list invalidation and a snapshot under the
+	 * handle, carrying the new ref; every client keys a live session by the
+	 * handle and takes the ref from any event under it, so nothing else is
+	 * said (OW-mofuho).
+	 *
 	 * `announce` is false for a rename inside `start()`: the name is written at
-	 * once, so a `close()` or an attach under it finds the one startup, but the
-	 * `renamed` goes out when `#start` publishes the adapter, so that a start
-	 * that fails after renaming leaves none on the wire. That hold is on the
-	 * wire alone, and leaves with `renamed` (OW-mofuho).
+	 * once, so a `close()` or an attach under it finds the one startup, but
+	 * nothing goes on the wire until the start can no longer fail, and then
+	 * `attach` says it, in the `sessionsChanged` and snapshot it sends for every
+	 * start. The hold outlived the event that once said a rename, for which it
+	 * was written. The snapshot alone would not need it -- the snapshot source
+	 * answers nothing for a container with no adapter published, so it would
+	 * not go out -- but the `sessionsChanged` would send every client to a
+	 * listing naming the new ref, which a start that then fails takes back
+	 * with nothing on the wire to say so.
 	 */
 	#rename(session: ManagedSession, next: SessionRef, announce: boolean): void {
 		if (sessionKey(next) === sessionKey(session.ref)) return;
-		const from = session.ref;
 		session.ref = next;
 		this.#addName(session, sessionKey(next));
 		if (!announce) return;
 		this.broadcaster.sessionsChanged();
-		this.broadcaster.renamed(from, session);
+		this.broadcaster.broadcastSnapshot(session.handle);
 	}
 
 	/**
@@ -705,14 +714,15 @@ export class SessionManager {
 	 * parent's ref would hold one that prompts -- or, through `close()`, kills
 	 * -- the agent the user is talking to on the fork (OW-kekoji).
 	 *
-	 * No `renamed`: that event means "this conversation took a new id", and
-	 * every browser that hears it discards what it holds under the old one and
-	 * follows its selection across. On a fork that is false for every browser,
-	 * and actively wrong for the ones that did not fork -- it would throw away a
-	 * parent transcript the server still lists and drag a reader onto a
-	 * conversation nobody there opened (OW-suhoto). `sessionsChanged` alone; the
-	 * browser that forked has the fork's ref from the response and attaches it,
-	 * which is what snapshots it.
+	 * Nothing under the parent's handle names the fork: an event there
+	 * carrying a new ref means "this conversation took a new id", and every
+	 * client that holds the handle follows its view and selection across. On a
+	 * fork that is false for every client, and actively wrong for the ones
+	 * that did not fork -- it would throw away a parent transcript the server
+	 * still lists and drag a reader onto a conversation nobody there opened
+	 * (OW-suhoto). `sessionsChanged` alone; the client that forked has the
+	 * fork's ref from the response and attaches it, which is what snapshots it
+	 * under the fork's own handle.
 	 */
 	#forkOnto(parent: ManagedSession, next: SessionRef): ManagedSession {
 		const fork = this.#container(next, {
@@ -978,13 +988,9 @@ export class SessionManager {
 		bound.lastModel = initialState.model;
 		bound.lastEffort = initialState.effort;
 		bound.lastUnrestoredModel = initialState.unrestoredModel ?? null;
-		// The `renamed` a rename inside `start()` -- a `virtual` id becoming the
-		// backend's own (D9) -- held back until the start could no longer fail;
-		// see `#rename`.
-		if (sessionKey(bound.ref) !== sessionKey(refBeforeStart)) {
-			this.broadcaster.sessionsChanged();
-			this.broadcaster.renamed(refBeforeStart, bound);
-		}
+		// A rename inside `start()` -- a `virtual` id becoming the backend's own
+		// (D9) -- was held off the wire until the start could no longer fail;
+		// `attach` says it once this returns (`#rename`).
 		return bound;
 	}
 

@@ -165,10 +165,12 @@ function updateSession(state: ClientState, handle: string, view: SessionView): C
 
 /**
  * The ref is an attribute of the view (D24): an event under a handle whose
- * `session` is not the ref the view held has moved it, whether or not a
- * `renamed` reached this client first -- one missed while the stream was down
- * (D21), or one a late stream never carried. The summary carrying the handle
- * or the old ref, and `selected` where it named the old ref, move with it,
+ * `session` is not the ref the view held has moved it, and that is all a
+ * rename is on the wire: the server sends a snapshot under the handle
+ * carrying the new ref and nothing else (OW-mofuho), and one lost to a
+ * dropped stream (D21) is made good by the reconnect's opening snapshot,
+ * which carries the current ref under the same handle. The summary carrying
+ * the handle or the old ref, and `selected` where it named the old ref, move with it,
  * because they are compared by ref: `aria-pressed`, `selectedSummary`, and
  * `detach()`, which finds the `onDisk` summary by ref and previews by ref,
  * where an old `virtual:` id reads an empty transcript (OW-vasubu).
@@ -292,13 +294,6 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 		);
 	}
 
-	// A no-op, kept only until OW-mofuho takes the event off the wire. The
-	// handle it carries is the one the view is already keyed by, and the
-	// snapshot `Broadcaster.renamed` sends straight after it carries the new
-	// ref, which the arm above writes like any other attribute. Its `seq` is
-	// not counted here; that snapshot resets the count (D3).
-	if (event.type === "renamed") return result(state);
-
 	// From here on the arms only *update* a view; none of them may create one
 	// (OW-pezazo). Creating was resurrecting sessions this client had deliberately
 	// dropped: `detach` in `controller.ts` removes the live view while events for
@@ -316,8 +311,8 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// they drop there is worth naming. `#start` subscribes `onUpdate`, `onRequest`,
 	// `onError`, `onNotice` and `onRequestResolved` before it awaits
 	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces moves it onto a
-	// container of the fork's, under a new handle, with no `renamed` (`#forkOnto`,
-	// D20, D24, OW-suhoto), so all six can fan out under a handle no client holds
+	// container of the fork's, under a new handle, naming nothing under the
+	// parent's (`#forkOnto`, D20, D24, OW-suhoto), so all six can fan out under a handle no client holds
 	// a view of until the fork's hydrate or its attach snapshots it. None of that
 	// is lost:
 	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and

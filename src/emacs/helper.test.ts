@@ -325,33 +325,32 @@ describe("notifications", () => {
 		expect(calls.map((call) => call.url)).toEqual([ROUTES.session(codex), ROUTES.session(alias)]);
 	});
 
-	it("re-keys on renamed and says so before the snapshot that follows", async () => {
+	it("forwards the snapshot under the handle that names a rename, and nothing beside it", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
 		await io.until(1);
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
-		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		await io.until(4);
-		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed", "session/snapshot"]);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/renamed", params: { from: virtual, to: pi, handle: h(virtual) } });
-		expect(io.notifications()[2]).toMatchObject({ params: { session: pi, handle: h(virtual), isStreaming: true } });
+		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(3);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/snapshot"]);
+		expect(io.notifications()[1]).toMatchObject({ params: { session: pi, handle: h(virtual), isStreaming: true } });
 	});
 
-	it("stops on a sessions/detach by the ref a renamed told Emacs", async () => {
+	it("stops on a sessions/detach by the ref a snapshot under the handle told Emacs", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
 		await io.until(1);
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
+		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await io.until(3);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi } });
 		await io.until(4);
-		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: pi, handle: h(virtual), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed"]);
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/snapshot"]);
 	});
 
 	// OW-wedeli: resolved by the ref alone, a detach naming the ref from
@@ -362,14 +361,13 @@ describe("notifications", () => {
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
 		await io.until(1);
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		await io.until(4);
+		await io.until(3);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: virtual, handle: h(virtual) } });
-		await io.until(5);
+		await io.until(4);
 		source.emit({ type: "status", session: pi, handle: h(virtual), seq: 1, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed", "session/snapshot"]);
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/snapshot"]);
 	});
 
 	it("keeps forwarding a session Emacs attached when a second attach of its ref fails", async () => {
@@ -389,9 +387,11 @@ describe("notifications", () => {
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
 	});
 
-	it("says the rename an attach reply reveals with no renamed event, with the snapshot it dropped, before the reply", async () => {
-		// An attach through an alias: the route answers the new ref and
-		// broadcasts only its snapshot, which lands before the reply.
+	it("sends the snapshot it dropped for an attach answered under another ref after the reply, which names the handle", async () => {
+		// An attach through an alias: the route answers the new ref, and its
+		// snapshot, under that ref, lands before the reply. Filtered by the
+		// asked-for ref it went nowhere, and before the reply no buffer holds the
+		// handle it carries.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -400,29 +400,30 @@ describe("notifications", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(3);
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/renamed", "session/snapshot", 1]);
-		expect(io.out[0]).toEqual({ jsonrpc: "2.0", method: "session/renamed", params: { from: alias, to: pi, handle: h(pi) } });
+		await io.until(2);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "session/snapshot"]);
+		expect(io.out[0]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
 		expect(io.out[1]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
 
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
-		await io.until(4);
-		expect(io.out[3]).toMatchObject({ method: "session/status", params: { session: pi, handle: h(pi), isStreaming: false } });
+		await io.until(3);
+		expect(io.out[2]).toMatchObject({ method: "session/status", params: { session: pi, handle: h(pi), isStreaming: false } });
 	});
 
-	it("says a rename the stream already carried once, when the attach reply repeats it", async () => {
+	it("sends no second snapshot for an attach the stream already moved onto its handle, when the reply names another ref", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(virtual)}`]: () => {
 				source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-				source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
+				source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 				return json({ session: summary(pi, h(virtual)) });
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
 		await io.until(3);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/renamed", 1]);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/snapshot", 1]);
 	});
 
 	// On main the attached set was keyed by ref, so a session Emacs had attached
@@ -587,7 +588,6 @@ describe("the handle (D24, OW-suyinu)", () => {
 		await io.until(1);
 		const request = { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} };
 		source.emit(snapshotOf(virtual, 1));
-		source.emit({ type: "renamed", session: pi, handle, seq: 2, from: virtual });
 		source.emit(snapshotOf(pi, 0));
 		source.emit({ type: "upsert", session: pi, handle, seq: 1, index: 0, message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 } });
 		source.emit({ type: "status", session: pi, handle, seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
@@ -596,12 +596,11 @@ describe("the handle (D24, OW-suyinu)", () => {
 		source.emit({ type: "request", session: pi, handle, seq: 5, request });
 		source.emit({ type: "request-resolved", session: pi, handle, seq: 6, requestId: "r1" });
 		source.emit({ type: "sessions-changed" });
-		await io.until(11);
+		await io.until(10);
 
 		const perSession = io.notifications().filter((message) => message["method"] !== "sessions/changed");
 		expect(perSession.map((message) => message["method"])).toEqual([
 			"session/snapshot",
-			"session/renamed",
 			"session/snapshot",
 			"session/node",
 			"session/status",
@@ -613,7 +612,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		for (const message of perSession) expect(message["params"]).toMatchObject({ handle });
 	});
 
-	it("rides the summary sessions/attach answers, and the rename and snapshot it says for a ref the stream never renamed", async () => {
+	it("rides the summary sessions/attach answers, and the snapshot it sends after the reply for a ref the stream never named", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -622,12 +621,12 @@ describe("the handle (D24, OW-suyinu)", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(3);
+		await io.until(2);
+		await new Promise((resolve) => setTimeout(resolve, 5));
 
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/renamed", "session/snapshot", 1]);
-		expect(io.out[0]).toEqual({ jsonrpc: "2.0", method: "session/renamed", params: { from: alias, to: pi, handle } });
-		expect(io.out[1]).toMatchObject({ params: { session: pi, handle } });
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "session/snapshot"]);
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { ...summary(pi), handle } });
+		expect(io.out[1]).toMatchObject({ params: { session: pi, handle } });
 	});
 
 	it("accepts the handle beside the session on a request, and forwards it into no HTTP body", async () => {

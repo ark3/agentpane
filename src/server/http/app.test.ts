@@ -608,9 +608,12 @@ describe("prompting", () => {
 		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
 
 		const real: SessionRef = { backend: "pi", id: REAL };
-		await client.until(() => client.typed("renamed").length === 1, "the rename");
-		expect(client.typed("renamed")[0]?.from).toEqual(ref);
-		expect(client.typed("renamed")[0]?.session).toEqual(real);
+		const naming = (at: SessionRef) => client.typed("snapshot").filter((event) => sessionKey(event.session) === sessionKey(at));
+		await client.until(() => naming(real).length === 1, "the snapshot under the new ref");
+		// Said by a snapshot under the handle the session had all along, and by
+		// nothing beside it (OW-mofuho).
+		expect(naming(real)[0]?.handle).toBe(naming(ref)[0]?.handle);
+		expect(client.events.map((event) => event.type)).not.toContain("renamed");
 
 		// A client that follows the rename keeps the conversation, under the new id
 		// and only the new id.

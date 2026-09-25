@@ -4,9 +4,10 @@
  * FROZEN INTERFACE (DESIGN D11). Both ends of the transport are ours and are
  * written by different people at different times, so this is the one place
  * DESIGN asks for concreteness rather than judgement. Changing anything here
- * breaks work in flight -- raise it before editing. D24 raised it once: the
+ * breaks work in flight -- raise it before editing. D24 raised it twice: the
  * `handle` on `SessionSummary` and beside `session` on every per-session
- * event (OW-suyinu).
+ * event (OW-suyinu), and the retirement of the event that had said a rename,
+ * once both clients keyed by that handle (OW-mofuho).
  *
  * Shape follows DESIGN D2 (SSE for server->client, REST for client->server)
  * and D3 (the server is authoritative; it sends assembled state, never raw
@@ -180,6 +181,14 @@ export interface AgentRequestReply {
  * moves (D24, OW-suyinu). The counter `seq` counts is the handle's. The
  * browser's reducer keys every live view by it (OW-kimaya), so an event under
  * a handle it holds updates that view's ref as an ordinary attribute.
+ *
+ * That is all a rename is on the wire, and it is not an edge case but the
+ * normal life of a new session: every backend replaces a `virtual` session's
+ * minted id at attach, and the first prompt may move it again (D9), so the id
+ * a client created a session with is not the id it keeps. Each time, a
+ * `snapshot` under the handle carrying the new ref goes out, and every event
+ * after it carries that ref. The server honours the old id on REST routes
+ * indefinitely, so a request in flight across the move still lands.
  */
 export type ServerEvent =
 	| {
@@ -269,34 +278,6 @@ export type ServerEvent =
 			seq: number;
 			notice: AgentNotice;
 	  }
-	| {
-			/**
-			 * A session's id changed under the client, from `from` to `session`; a
-			 * `snapshot` carrying the new ref follows immediately.
-			 *
-			 * This is not an edge case, it is the normal life of a new session.
-			 * Every backend replaces a `virtual` session's minted id with its own
-			 * at attach, and the first prompt may move it again, depending on the
-			 * backend (D9) -- so the id the browser created a session with is not
-			 * the id it keeps. The server honours the
-			 * old id on REST routes indefinitely, but every event from here on
-			 * carries the new one, so a client that ignores this renders a live
-			 * session into a transcript nothing updates.
-			 *
-			 * `handle` is the one the session held before the rename and holds
-			 * after it: a client keyed by it has nothing to re-key (D24). The
-			 * browser's reducer is, and ignores this event (OW-kimaya); the Emacs
-			 * helper still forwards it as `session/renamed`, on which agentpane-mode
-			 * re-keys nothing since OW-danifa, taking from it the ref it moves to and
-			 * the handle of an attach not yet answered. It stays on the wire until
-			 * OW-mofuho.
-			 */
-			type: "renamed";
-			session: SessionRef;
-			handle: string;
-			seq: number;
-			from: SessionRef;
-	  }
 	/** The session list changed (created, deleted, or newly attached). Refetch it. */
 	| { type: "sessions-changed" };
 
@@ -326,8 +307,8 @@ export interface CreateSessionResponse {
  * GET /api/sessions/:backend/:id -- "open this session": spawns if needed and
  * snapshots over SSE. The transcript is deliberately not in this body (D3); what
  * is here is the summary, whose `ref` is *authoritative*. It can differ from the
- * ref in the URL, because a session adopts its backend id on attach -- see the
- * `renamed` event.
+ * ref in the URL, because a session adopts its backend id on attach -- see
+ * `ServerEvent`, whose snapshot under the summary's `handle` carries it too.
  */
 export interface AttachSessionResponse {
 	session: LiveSessionSummary;

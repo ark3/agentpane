@@ -399,10 +399,10 @@ non-nil, on the way out."
 Every one but `sessions/changed' is about one session, and goes to the
 transcript buffer `agentpane--notified-buffer' finds for it, if any.
 That buffer takes the notification's handle, and its `session' as the
-session's ref, `to' for a `session/renamed': the ref is an attribute any
-notification may move, and nothing is re-keyed, so a rename needs no
-handling of its own.  A buffer's name never carries the ref (OW-mikayi),
-and neither does its composer's."
+session's ref: the ref is an attribute any notification may move, and
+nothing is re-keyed, so a rename needs no handling of its own, and the
+helper sends none (OW-mofuho).  A buffer's name never carries the ref
+\(OW-mikayi), and neither does its composer's."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
     (let ((buffer (agentpane--notified-buffer method params)))
@@ -410,8 +410,7 @@ and neither does its composer's."
         (with-current-buffer buffer
           (when (plist-get params :handle)
             (setq agentpane--handle (plist-get params :handle)))
-          (agentpane--hold-ref
-           (plist-get params (if (eq method 'session/renamed) :to :session)))
+          (agentpane--hold-ref (plist-get params :session))
           (pcase method
             ('session/snapshot
              (agentpane--set-status params)
@@ -432,22 +431,22 @@ and neither does its composer's."
 (defun agentpane--notified-buffer (method params)
   "The transcript buffer the notification METHOD, with PARAMS, is about.
 The buffer holding the notification's handle; failing that, one holding
-its ref -- `from' for a `session/renamed', else `session' -- as below,
-which then takes the handle; else nil, and the notification is dropped.
+its `session' as below, which then takes the handle; else nil, and the
+notification is dropped.
 
 By the ref, a buffer holding no handle, which for a notification is one
 whose attach has not yet answered: the helper sends nothing for a
 session no buffer asked to attach.  The attach's snapshot and its reply
 are unordered (D2), so its first notifications can arrive before the
-reply names the handle.  Where the reply names another ref than the one
-asked for, the helper says so first, with a `session/renamed' from the
-asked-for ref sent before the reply, and with it the snapshot under the
-new one if it holds that snapshot already; one still on its way comes
-after (`sessions/attach' in src/emacs/helper.ts).  The handle is taken
-from that `session/renamed', and the snapshot, whenever it comes, finds
-the buffer by it.  That event is the only link from the asked-for ref to
-the handle before the reply, so whatever retires it from the wire
-\(OW-mofuho) has to give a snapshot sent before the reply another route.
+reply names the handle, and they find the buffer by the ref it asked
+for.  Where the reply names another ref than the one asked for, nothing
+before the reply joins the two, so the helper sends the snapshot under
+the new ref after the reply, which gives the buffer the handle that
+snapshot finds it by (`sessions/attach' in src/emacs/helper.ts, and
+`agentpane--attached-as').  That holds because jsonrpc.el 1.0.29, on
+Emacs 31.1, hands each message it reads to a timer of its own, in the
+order the messages arrived (`jsonrpc--process-filter', read 2026-09-25),
+so the reply's callback has run before the snapshot is looked at.
 
 A `session/snapshot' also moves a buffer from one handle to another, and
 looks for such a buffer first: a snapshot is how a ref reaches the helper
@@ -458,7 +457,7 @@ because a buffer holding the ref and no handle may be one only
 previewing a stored session that an attached buffer was since renamed
 onto, which the helper never fed."
   (let ((handle (plist-get params :handle))
-        (ref (plist-get params (if (eq method 'session/renamed) :from :session))))
+        (ref (plist-get params :session)))
     (or (and handle (agentpane--buffer-holding handle))
         (and (eq method 'session/snapshot)
              (agentpane--buffer-for ref (lambda () agentpane--handle)))
