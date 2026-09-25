@@ -755,11 +755,17 @@ a header is fitted to, since the motion stops where that window would wrap
 the line.  It is nil in batch Emacs, where the motion does not move: on
 Emacs 31.1 on 2026-09-25 it returned 0 and left point where it was in
 `emacs --batch', though on a daemon's frame from before any client's it
-moved as far as asked.  And it is nil when the window is scrolled
-horizontally, which shifts the column the motion stops at by the scroll,
-even in a buffer the window does not show."
+moved as far as asked.  It is nil when the window is on a frame other than
+the selected one: the width a header is fitted to and the measure it is
+checked with are the selected frame's, while the motion lays text out in
+its window's frame's fonts, so where those are wider the motion stops
+short, and the check does not catch a start that is too short.  And it
+is nil when the window is scrolled horizontally, which shifts the column
+the motion stops at by the scroll, even in a buffer the window does not
+show."
   (let ((window (agentpane--fit-window)))
     (and (not noninteractive)
+         (eq (window-frame window) (selected-frame))
          (zerop (window-hscroll window))
          window)))
 

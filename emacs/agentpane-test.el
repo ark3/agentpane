@@ -396,6 +396,21 @@ columns to the window's."
                   (push (list width summary tail motion search) mismatches))))))))
     (should-not mismatches)))
 
+(ert-deftest agentpane-test-motion-only-on-the-selected-frame ()
+  "A transcript shown only on a frame other than the selected one is cut by
+the search, since its headers are measured in the selected frame."
+  :tags '(tty)
+  (skip-unless (not noninteractive))
+  (let ((frame (make-frame)))
+    (unwind-protect
+        (with-temp-buffer
+          (agentpane-transcript-mode)
+          (set-window-buffer (frame-root-window frame) (current-buffer))
+          (should (eq (agentpane--fit-window) (frame-root-window frame)))
+          (should-not (eq frame (selected-frame)))
+          (should-not (agentpane--motion-window)))
+      (delete-frame frame))))
+
 ;;;; Notifications driving an attached buffer, with no process
 
 (defmacro agentpane-test--with-session (ref &rest body)
