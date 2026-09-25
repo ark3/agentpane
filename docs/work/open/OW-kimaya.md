@@ -21,6 +21,7 @@ The helper, `src/emacs/helper.ts`, reads the same reducer, `state.sessions[key]`
 The reducer keys `sessions` by handle; any arm under a handle updates the view's `ref` from the event's `session` as an ordinary attribute, and the `renamed` arm becomes a no-op kept only until OW-mofuho removes the event.
 `selected` stays a `SessionRef`, the row the user chose, previews included, and a live view is found from a summary or a selection through its handle; how the controller pairs the two is incidental.
 The six closures and `renameListeners` go; `recoveries` and `detaching` key by handle; `App.svelte`'s per-tab maps and `sessionLabel`, and `favicon.ts`, key by handle, and `watchRename` goes.
+OW-suyinu lands `handle` optional on the events, so that no client test literal changes there; this card, the first to read it, makes it required on every per-session `ServerEvent` arm and updates the literals.
 The helper's reducer reads and its `attached` set move to the handle in the same change, since they consume the same module; its wire to Emacs is unchanged, and `session/renamed` still goes out until OW-mofuho.
 
 Load-bearing:
