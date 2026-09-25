@@ -308,6 +308,21 @@ text, and the tool call before the text carries none on its header."
     (should (< (agentpane-test--position "Found it.")
                (agentpane-test--position "claude-opus-5")))))
 
+(ert-deftest agentpane-test-long-summary-keeps-its-start-and-the-meta ()
+  "A tool whose summary runs far past the window draws the summary's start,
+cut short, and the step's meta on its header."
+  (let ((summary (mapconcat #'number-to-string (number-sequence 1 300) " ")))
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (cl-letf (((symbol-function 'agentpane--window-width) (lambda () 60)))
+        (agentpane--draw
+         (vector (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                       :parts (vector (agentpane-test--tool summary "done")))))
+        (let ((header (agentpane-test--line-at "Bash")))
+          (should (string-search "Bash 1 2 3 4 5" header))
+          (should (string-search "…" header))
+          (should (string-search "claude-opus-5" header)))))))
+
 ;;;; Fold headers in a frame that lays out text, run in a tty Emacs
 
 ;; `vertical-motion' does not move in batch Emacs, so these tests are
