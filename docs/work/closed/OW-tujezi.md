@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane-mode redraws a node once per session/node it receives, so a backlog of them costs one full node redraw each where one redraw of the latest would do
@@ -32,3 +33,15 @@ Whether the redraw is a zero-delay timer, an idle timer, or something else is th
 
 Red first, then green, in `emacs/agentpane-test.el`: several `session/node` notifications for one index, handed to `agentpane--on-notification` before timers run, redraw the node once and draw the last one's content; a `session/status` arriving after a recorded node finds that node drawn before the status is applied; and a recorded node for a buffer killed before the redraw raises nothing and draws nothing.
 The batch suite passes as the Commentary of `emacs/agentpane.el` gives it, with its pass count updated.
+
+## Close note
+
+Built: a `session/node` is now recorded as the latest node for its index in buffer-local `agentpane--recorded` (`agentpane--record` in `emacs/agentpane.el`), and one `run-at-time 0` timer (`agentpane--draw-recorded`) draws each recorded index once through the unchanged `agentpane--upsert`, first-arrived indices first, so point, window start, draft and undo behave as before.
+Every other notification except a snapshot draws what is recorded before it is handled. A snapshot's `agentpane--draw` discards it instead, and a killed buffer's timer does nothing.
+Why a zero-delay timer: on Emacs 31.1 with jsonrpc.el 1.0.29, six notifications written at once reached one process-filter call, and a `run-at-time 0` timer started by the first one's handler ran after all six. A second experiment showed a timer activated during a pass of ripe timers waits for the next pass whatever its time. Both are recorded with re-run scripts in docs/MANUAL_TESTING.md under "A timer a jsonrpc.el notification handler starts runs after the rest of its chunk (OW-tujezi)". An idle timer was not measured.
+Verified: six new ert tests. They cover a backlog for one index drawing once with the last content, new indices appending in arrival order, a status finding the recorded node drawn, a notice landing after a recorded node, a snapshot discarding it, and a killed buffer raising nothing. Four were red against the old code. The status and notice tests were red with the draw-first line removed or narrowed to status only. Existing tests that assert right after a `session/node` now run the pending timer via `agentpane-test--redraw`, which put three undo tests back to exercising a redraw. The batch suite passes: Ran 108 tests, 108 results as expected.
+Adversarial read found no ordering breakage. A queued keystroke can run a command between a chunk's handlers and the draw, which is equivalent to the nodes arriving a moment later.
+Known and left:
+- A malformed node that signals in `agentpane--upsert` now also stops the notification that triggered the flush. The protocol never sends such a node, so no guard was added.
+- A `sessions/prompt` reply sharing a chunk with the user's node can clear the draft one frame before the node is drawn. That is cosmetic and was read, not observed.
+- A backlog split across several pipe reads is drawn once per read; filed as OW-gipopo.
