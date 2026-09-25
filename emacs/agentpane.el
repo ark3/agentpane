@@ -77,7 +77,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 112 tests, 109 results as expected, 0 unexpected, 3 skipped
+;;     Ran 113 tests, 110 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -481,18 +481,27 @@ only in a buffer that sent an attach and holds no handle, and ahead of
 the match by `session', which a buffer only previewing the new ref, an
 attached buffer's session having been renamed onto it, would win.
 
-A `session/snapshot' also moves a buffer from one handle to another, and
-looks for such a buffer first: a snapshot is how a ref reaches the helper
-under a new handle -- a restarted server's, or the one another client's
-re-attach minted -- and the helper then moves the attachment it holds by
-that ref onto the new handle (`onEvent' in src/emacs/helper.ts).  First,
-because a buffer holding the ref and no handle may be one only
-previewing a stored session that an attached buffer was since renamed
-onto, which the helper never fed."
+A `session/snapshot' carrying `movedFrom' goes to the buffer holding that
+handle, whatever ref it names: the helper moved that buffer's attachment
+onto the snapshot's handle, having asked the server which live handle the
+ref it last named the session by names now -- another client's re-attach,
+or one after a server restart, minted it -- and where a rename fell in the
+same outage of the helper's stream, the snapshot's ref is one the buffer
+never heard (`reconcile' in src/emacs/helper.ts, OW-gusaru).
+
+A `session/snapshot' also moves a buffer from one handle to another by
+the ref, where the buffer holds a handle: the snapshot that answers the
+buffer's own attach, sent from a handle the server no longer has, under
+the one the server minted since.  That looks for such a buffer before
+one holding the ref and no handle, which may be one only previewing a
+stored session that an attached buffer was since renamed onto, which the
+helper never fed."
   (let ((handle (plist-get params :handle))
         (ref (plist-get params :session))
-        (asked (plist-get params :askedFor)))
+        (asked (plist-get params :askedFor))
+        (moved (plist-get params :movedFrom)))
     (or (and handle (agentpane--buffer-holding handle))
+        (and moved (agentpane--buffer-holding moved))
         (and asked
              (agentpane--buffer-for asked (lambda () (and agentpane--attach-sent
                                                           (not agentpane--handle)))))

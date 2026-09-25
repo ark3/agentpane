@@ -997,8 +997,9 @@ of it."
 
 (ert-deftest agentpane-test-snapshot-under-a-new-handle-moves-the-attached-buffer ()
   "A `session/snapshot' under a handle no buffer holds, for the ref an
-attached buffer holds under another -- a restarted server's, as the helper
-forwards it -- moves that buffer onto the new handle, not a buffer only
+attached buffer holds under another, carrying no `movedFrom' -- the one
+answering that buffer's own attach, sent from a handle the server no
+longer has -- moves that buffer onto the new handle, not a buffer only
 previewing the same ref, and what follows under the new handle reaches it."
   (let ((ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
@@ -1019,6 +1020,35 @@ previewing the same ref, and what follows under the new handle reaches it."
         (agentpane-test--redraw live)
         (with-current-buffer live
           (should (equal agentpane--handle "h2"))
+          (should (equal (agentpane-test--indices) '(3 5))))
+        (with-current-buffer preview
+          (should-not agentpane--handle)
+          (should-not agentpane--ewoc))))))
+
+(ert-deftest agentpane-test-snapshot-moved-from-a-handle-moves-the-buffer-holding-it ()
+  "A `session/snapshot' carrying `movedFrom', the handle a buffer holds,
+moves that buffer onto the snapshot's handle and ref, a ref it never heard:
+a rename and a re-attach elsewhere in one outage of the helper's stream,
+which the helper learns of from the server (OW-gusaru).  Not a buffer only
+previewing the new ref, and what follows under the new handle reaches the
+one moved."
+  (let ((old '(:backend "claude" :id "real-1"))
+        (new '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (let ((live (agentpane--transcript-buffer (list :ref old)))
+            (preview (agentpane--transcript-buffer (list :ref new))))
+        (with-current-buffer live (setq agentpane--handle "h1"))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session new :handle "h2" :movedFrom "h1"
+               :nodes (vector (agentpane-test--assistant 3 "<p>Moved.</p>"))))
+        (agentpane--on-notification
+         nil 'session/node (list :session new :handle "h2"
+                                 :node (agentpane-test--assistant 5 "<p>Next.</p>")))
+        (agentpane-test--redraw live)
+        (with-current-buffer live
+          (should (equal agentpane--handle "h2"))
+          (should (agentpane--same-ref-p (agentpane--ref agentpane--session) new))
           (should (equal (agentpane-test--indices) '(3 5))))
         (with-current-buffer preview
           (should-not agentpane--handle)
