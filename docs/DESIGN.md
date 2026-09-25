@@ -99,6 +99,7 @@ One thing building the transport added to the event union, because it is not opt
 A session's id changes under the client during normal use — every backend replaces a `virtual` session's minted id with its own at attach, and the first prompt may move it again (D9) — so the id the browser created a session with is not the id it keeps.
 The server keeps honouring the old id on REST routes indefinitely, but every event after the change carries the new one, so a client that ignores `renamed` renders a live session into a transcript nothing updates.
 See D9's "Three states".
+D24 retires this event: once both clients key a live session by the handle the server mints, an id change is an attribute carried on the next event under that handle, and the arm leaves the union with OW-mofuho.
 
 ### D2a. Server-initiated requests
 
@@ -329,6 +330,7 @@ What says a file exists is the session index: `SessionSummary.onDisk` is true on
 The first prompt can still move the id on Pi: `PiAdapter` probes `get_state` again after its first `submit()`.
 That probe has not fired on the Pi versions above, since `start()` already resolved the id, and it stays, because a backend that has named nothing by the end of attach is exactly what `virtual` describes.
 `ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- but `init` arrives after `submit()` has settled, so the manager hears of such a move only at the next point it re-reads `ref`.
+That polling, at three points, is what D24 replaces: an adapter announces its id change as an event and the manager re-keys on it (OW-nikogo), and a live session is keyed by a handle the server mints, with the backend's ids as names on its container (OW-suyinu).
 
 **Spawn only on attach.**
 The list needs metadata only — id, cwd, timestamp, and a preview — all cheap to read from the file.
@@ -381,6 +383,7 @@ Both ends of D2/D3 are ours, so the SSE event union and the REST request/respons
 Snapshot, upsert, and server-request events are a discriminated union on a `type` field with the `seq` and session id at the top level.
 
 This is the one place worth being concrete rather than leaving to implementation judgement: the two halves are written at different times and will drift if the contract is only described in prose.
+D24 adds a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retires `renamed` once both clients read it (OW-mofuho).
 
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
 
@@ -449,6 +452,7 @@ Free one and retry.
 The recency stamp lives **on the `ManagedSession` object**, never in a side map keyed by id.
 Pi's id changes under us (`#adoptRef`, D9's `renamed`), and `#adoptRef` re-keys the same object while preserving its identity — so an on-object stamp follows the rename automatically, whereas an id-keyed side map would strand it under the old `virtual:` key.
 The reaper must evict via the canonical ref (`#lookup` / `canonicalRef`) like everything else, or it reintroduces the exact double-spawn-on-stale-id bug that `#adoptRef` and the alias table exist to close.
+D24 dissolves this constraint: a container keyed by a handle that never changes cannot be stranded by a rename, so a side map keyed by the handle is safe once OW-suyinu lands; until then it stands as written.
 
 **Cost this shifts.**
 Frequent eviction makes cold reattach the common path, which promoted OW-23 (`SessionIndex.get` walked both stores on every cold attach, ~0.28s) from a deferral to the hot path, and made fixing it a prerequisite to landing this rather than a follow-up.
@@ -862,6 +866,66 @@ What each backend needs from agentpane under this decision:
   As of the same version that fork also took the spawn's `--model` over a model `set_model` chose, with `get_state` naming the spawn's model and the forked file still naming the chosen one (`docs/MANUAL_TESTING.md`, OW-sinoha), so the adapter re-sends the chosen model after a fork, before the level, since `set_model` resets the level.
   As of the same version a fork at the first user message of a session file holding no system message, which every file written before `pi 0.86.0` lacks, kept no message, so Pi had nothing to restore from: `get_state` answered `messageCount` 0 at the settings default model and level, and the forked branch recorded both (`docs/MANUAL_TESTING.md`, OW-riyeku).
   A resume spawn chooses nothing for the adapter to re-send, so after a fork whose `get_state` answers `messageCount` 0 it re-sends the model and level in force before the fork, chosen or not; a `0.87.1` file keeps its system message at that fork, and Pi restores both itself.
+
+### D24. A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate lays history under the live stream
+
+The owner took this on 2026-09-24, after asking whether the race defects the deck keeps filing point at a flaw in the architecture.
+Decided and not yet built, in the sense D12 is: the prose reads as the design will once the seven cards named at the end land, and each amendment to an earlier decision says so where it stands.
+
+**What the deck showed.**
+Of the 69 cards closed between 2026-09-22 and 2026-09-24, 8 were timing or ordering defects; 34 were the model-and-effort restore stream D23 records, and most of the rest were wire gaps and `codex-cli 0.156.0` moving.
+So races were not where the time went, but they were where the fixes did not hold: six of the eight were closed with a guard at the site, a flag or a counter, and three of those six filed a sibling for the case the guard missed.
+OW-zovaye closed the push path of a Pi fork's emit under the parent's ref and filed OW-nuzepi for the pull path; OW-zasozo held Pi's level behind a `settingModel` flag and filed OW-woyifu for two calls overlapping on it; OW-vijuyi kept live slots across a Codex re-attach's hydrate and filed OW-zudase for the items that had no slot yet.
+Two other fixes created a race: OW-tewofe's route-side effort check made OW-zayefe's unsequenced Emacs requests fail, and OW-kelene's history paging widened OW-vijuyi's window.
+The architecture is not the cause.
+D2 and D3, a server-authoritative snapshot with a tail upsert, reduced once in `src/client/session-state.ts` for both clients, are what kept every one of those fixes local, and OW-bipume closed a whole class by putting three fields on the container and the snapshot.
+Three narrower choices produce nearly every race card, each one family, and this decision replaces them.
+
+**Identity: the backend's mutable id is the key, and the manager polls for changes.**
+A `SessionRef` is the backend's own id (D9), which every backend replaces at attach, which Pi can move again at the first prompt and moves at every fork, and which `#start` canonicalises across spellings (OW-fumegi).
+`BackendAdapter.ref` is a getter, and the contract tells the manager to re-read it after `start()`, `submit()` and `fork()` settle; `SessionManager.#adoptRef` does, at those three points, re-keying `#sessions` and `#pendingRequests`, retargeting `#aliases`, and broadcasting `renamed`, which each client answers by re-keying its own maps.
+Every identity change lands between the adapter's move and the manager's next look, which is OW-zovaye and OW-nuzepi on a Pi fork and OW-hikefi on a Claude Code `init` that renames.
+Every client map keyed by the id needs a rename tracker: six closures in `src/client/controller.ts`, `rekeySession` and `watchRename` in the browser, `agentpane--rekey` and `agentpane--absorb` in Emacs (OW-jafini), and the `session/renamed` the helper synthesizes for the three orderings OW-nuwive found; and D12's bookkeeping constraint exists only to keep a stamp off such a map.
+Roughly seventy cards in the deck touch a rename, a re-key or an alias.
+
+Two changes, in two cards.
+An adapter announces its identity change as an event, `onRefChanged(ref, cause)`, fired synchronously before anything else it emits under the new ref, and the manager re-keys in that handler; the three polling points go, and with them the `forking` count OW-zovaye added, since the container is under the fork's ref before the fork hydrates (OW-nikogo).
+OW-hikefi's body named this fix on 2026-09-16, and it is the raise the FROZEN INTERFACE note in `src/server/adapters/types.ts` asks for.
+Then the manager keys a live session by a handle it mints, opaque, unique for the server's lifetime and never changed, and carries every backend id the session has had as names on the container, so a rename is an attribute write and a lookup by any old name still resolves, which is D9's promise that the old id keeps working on REST routes (OW-suyinu).
+The handle rides `SessionSummary` for a session the manager holds and every per-session event on both wires, the clients key their views by it (OW-kimaya, OW-danifa), and `renamed` is retired once both do (OW-mofuho).
+What the split between a rename and a fork settled stays in force: a fork writes no alias, broadcasts no `renamed`, drops the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and none of the parent's names.
+Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), a parked fork gets its handle when parked (OW-lajehi), and teardown's `torndown` flag stops an event-driven re-key as it stops the polled one (OW-yavewa, OW-jimasu).
+D13's file is keyed by the backend id and stays so: it names a session on disk, which is an identity a handle does not have.
+D21's reconnect gap narrows: a `renamed` missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref.
+
+**Serialisation: nothing on the server runs one session's mutations one at a time.**
+The routes in `src/server/http/app.ts` reach the adapter directly for set-model, set-effort, compact, abort, fork points and reply, and only `submit` and `fork` go through the manager, for the re-key and not for order; OW-yavewa's close note records that nothing serialises the routes, each a concurrent `Bun.serve` handler.
+The browser guards itself with `pendingModelSets` and `sending` (OW-nasofa, OW-kelede); Emacs re-derived the same guards a week later (OW-yoyiya, OW-yibimi) and has none for set-model, which is OW-woyifu's whole cause; and OW-zayefe was fixed by sequencing two requests in `emacs/agentpane.el`.
+The model-and-effort pair is mirrored in three layers, each with an in-flight flag of its own: the Pi adapter's `chosenModel`, `chosenEffort` and `settingModel`, the container's `last*` mirrors, and the controller's pending sets.
+
+The change, OW-sewewe: one queue per managed session, a promise chain on the container, through which `setModel`, `setEffort`, `compact`, `fork`, `reply` and `submit` run one at a time, with the routes calling the manager for all of them.
+It orders admission only.
+`submit` resolves when the backend admits the turn, so nothing queued waits behind a running turn, D16 stands, a mid-turn prompt steering on Pi and Codex and rejected on Claude Code, and holding a prompt until a turn ends, which OW-rifezo declined, is not reintroduced.
+The guards the adapters own stay: Claude Code's `turnActive`, Codex's `interruptedTurnId` (OW-pefawi) and compaction guard, Pi's `settingModel`, each closing a window that ends on a backend event a queue of requests cannot see; with one `setModel` at a time Pi's boolean is exactly sufficient, which OW-woyifu says a counter alone would not be.
+It does not dedupe: the clients' one-prompt-at-a-time guards stay as the double-press rule.
+Close and shutdown are not queued; `#disposing`, `torndown` and `#terminate` are their order.
+Whether `abort` joins is the one question the card leaves to the executor, since a second abort ahead of a fork must stay harmless (OW-relehi).
+
+**Hydrate: replace, while the live stream keeps arriving.**
+`PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still drops a delta for an item that started before the attach, because that item has no slot (OW-zudase).
+Claude Code hydrates before it spawns and never rehydrates a live session, so it has no such window.
+The change, OW-dutute: a hydrate is a merge on every adapter that can hydrate a live session, under D20's rule that every index a client holds keeps meaning what it meant (OW-roveze), and under what a Pi fork is, a truncation that excludes the forked-at message and leaves the parent's streamed partial in the abandoned file (OW-yudoni, OW-sededi), so on Pi the merge shrinks the transcript and drops the parent's in-flight slots rather than unioning them.
+
+**How a race fix is made from here.**
+A guard at the site is not refused.
+But a guard whose adversarial read names a case it misses has found that the state has the wrong owner, and the sibling is authored as the ownership change, naming the guard it retires; a second guard is not filed.
+`AGENTS.md` carries that rule under "Evidence", and its "Dispatching an implementer" section has the reader ask the question at close time rather than a week later.
+Three of the eight are what it cost to learn this.
+
+**Decided, not yet built.**
+Seven cards, labelled `d24` and filed 2026-09-24: OW-sewewe serialises the mutations; OW-dutute makes hydrate a merge; OW-nikogo adds the identity event; OW-suyinu mints the handle and puts it on both wires, blocked by OW-nikogo; OW-kimaya keys the shared reducer and the browser by it and OW-danifa keys agentpane-mode by it, both blocked by OW-suyinu; OW-mofuho retires `renamed`, blocked by both.
+The order to run them in is settled in conversation, as `AGENTS.md` says of every set; the one proposed on the day was OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, then OW-kimaya and OW-danifa, then OW-mofuho, with a cold read at OW-nikogo and OW-suyinu before either starts.
+The open cards that close under them: OW-woyifu under OW-sewewe, OW-zudase under OW-dutute, OW-nuzepi and OW-hikefi under OW-nikogo.
 
 ## The backend adapter contract
 

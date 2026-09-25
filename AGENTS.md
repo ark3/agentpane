@@ -1,6 +1,6 @@
 # agentpane
 
-Decisions D1–D23 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
+Decisions D1–D24 in `docs/DESIGN.md`, the evidence behind the work in `docs/HANDOFF.md`.
 Work items are cards, in the deck at `docs/work/`, read and written through the `card` CLI — see "Cards" below, and run `card status`.
 
 ## Commands
@@ -74,6 +74,9 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The loss is agentpane's kill, not the CLI's; see `docs/MANUAL_TESTING.md` OW-japuzo.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
+- A race fix that adds a guard at the site, and whose adversarial read then names a case the guard misses, has found that the state has the wrong owner, not that it needs a second guard.
+  The sibling is authored as the ownership change for that state and names the guard it retires; a second guard is not filed.
+  Three of the eight race fixes closed between 2026-09-22 and 2026-09-24 produced exactly such a sibling -- OW-zovaye filed OW-nuzepi, OW-zasozo filed OW-woyifu, OW-vijuyi filed OW-zudase -- and D24 is what those three cost.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.
   Grep the flag name or the phrase; the copies are not all in docs.
   On 2026-08-20 a run flipped `moved_file_on_disk_at_fork` and left the old answer standing in `docs/MANUAL_TESTING.md`, in the conclusion that section had drawn from it, and in the `pi/process.ts` docblock a reader meets at the code (034d7dd).
@@ -121,13 +124,14 @@ Every card carries exactly one kind, given to `card new --label`:
 - `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
 - `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
 
-Five cross-cutting labels may follow that kind.
+Six cross-cutting labels may follow that kind.
 `work-laptop` marks work that needs the work laptop itself — that clone's provisioning, or the reference material addressed there by absolute path — as described under "Evidence"; it stopped gating live Pi evidence when the home server got `pi` on 2026-09-13.
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
 `emacs` groups the Emacs client work; `card list --open --label emacs` is the open set, blockers and all.
 D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 2026-09-22, and the ACP-shim stream filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` under it; OW-vibipo is the question card that chose.
 `emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
+`d24` marks the seven cards D24 filed on 2026-09-24 -- OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, OW-kimaya, OW-danifa and OW-mofuho -- and `card list --open --label d24` is that stream, blockers and all.
 
 What runs next, and in what order, is settled in conversation, not stored in the deck.
 The session proposes a set of cards in an order, and the owner either pastes that order into `card run` or asks for them to be executed in a fresh session.
@@ -168,3 +172,4 @@ Three things card cannot know, so the dispatch prompt has to carry them:
 Never `/code-review ultra` in an execution session — it has cost a full budget window.
 The old skill's blanket ban on review subagents does *not* survive with it: `card execute` positively requires dispatching an adversarial reader at finished work, and card wins there.
 Only the `/code-review ultra` ban is repo-local.
+That reader's brief carries one line card cannot know: for a fix that closes a timing or ordering defect, the reader says whether the fix is a guard at the site and, if it is, names the case the guard misses, before the card closes -- the sibling rule under "Evidence".
