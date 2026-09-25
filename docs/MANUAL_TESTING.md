@@ -3537,7 +3537,7 @@ time.sleep(1)
   (princ (format "%S\n" (reverse log))))
 ```
 
-## The Emacs helper sends at most one node per 250 ms while a turn streams (OW-jeruye)
+## The Emacs helper's timer sends a streaming node at most once per 250 ms (OW-jeruye)
 
 Measured on the home server 2026-09-25, `claude 2.1.280` with the session created at model `haiku`, `bun 1.4.0`, Python 3.14.7, the helper at cf064e1.
 A Python driver started the server from the worktree with `PORT=4291 bun run src/server/index.ts`, since the default port was taken, and `bun run src/emacs/main.ts http://127.0.0.1:4291` on pipes beside it, and timestamped every frame the helper wrote as it read it.
@@ -3553,5 +3553,6 @@ The reply's last node carried 440 words of text.
 
 **No two timer-driven sends of the node were closer than 250ms.**
 Between the 28 sends of index 1, measured where the driver read them, the smallest gap was 228.0ms, the median 263.9ms and the largest 554.1ms.
+Any other write the helper makes sends what it holds first, so a node can go out less than 250ms after its last send.
 The 228.0ms gap is the last send, forced out by the `session/snapshot` that ended streaming and read at the same millisecond as it; every other gap was at least 256.9ms.
 Nothing else the helper wrote came between the first and last of those sends.
