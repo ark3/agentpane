@@ -359,6 +359,15 @@ export class PiAdapter implements BackendAdapter {
 
 	/**
 	 * Replace the held transcript with Pi's own. Emits a snapshot, not an upsert.
+	 * On Pi this replace is the merge D24 asks of a hydrate. A fork truncates:
+	 * the branch Pi answers is every message the new session holds, and all
+	 * the transcript held past it is the parent's abandoned turn (OW-yudoni,
+	 * OW-sededi), so laying one under the other keeps nothing of the second.
+	 * As of `pi 0.87.1` no event arrived between the `fork` response and the
+	 * `get_messages` answer that followed, nor on a resume between `get_state`
+	 * and `get_messages`: the abandoned turn's last events, `agent_settled`
+	 * among them, all preceded the `fork` response (docs/MANUAL_TESTING.md,
+	 * OW-dutute). So nothing the live stream builds meanwhile is Pi's to keep.
 	 * Its messages carry no level, so each assistant turn is named from the
 	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu),
 	 * each clamped to its turn's model in the catalogue (OW-lehita).
@@ -596,8 +605,8 @@ export class PiAdapter implements BackendAdapter {
 			await this.sendCommand<PiResponseFor<"set_thinking_level">>({ type: "set_thinking_level", level });
 		}
 		// `fork` emits no message events of its own, so our held transcript is now
-		// stale; re-fetch the rewound branch wholesale -- the same cold-start path
-		// `start()` uses when resuming.
+		// stale; re-fetch the rewound branch -- the same cold-start path `start()`
+		// uses when resuming, and a replace for the reason its docblock gives.
 		this.state = { ...this.state, isStreaming: false };
 		await this.hydrateMessages();
 		// No `start`: the fork is the file this live process is already writing.

@@ -720,6 +720,46 @@ describe("PiAdapter.fork", () => {
 		expect(seen).toEqual([undefined]);
 	});
 
+	it("holds the rewound branch alone when the abandoned turn streams in the window before get_messages answers (OW-dutute)", async () => {
+		// A fork truncates (OW-yudoni, OW-sededi), so the merge D24 asks of a
+		// hydrate keeps nothing of the parent's in-flight turn. As of `pi 0.87.1`
+		// nothing arrived in this window at all: the abandoned turn's last
+		// events all preceded the `fork` response (docs/MANUAL_TESTING.md,
+		// OW-dutute). This scripts the window anyway, since a union would let
+		// the parent's partial reply into the fork's transcript.
+		const h = makeHarness();
+		await startAdapter(h);
+		const delta = (text: string) => ({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text },
+		});
+		for (const message of [userMessage("Say ALPHA"), assistantMessage("ALPHA"), userMessage("Count to 400")]) {
+			h.child.emitLine({ type: "message_start", message });
+			h.child.emitLine({ type: "message_end", message });
+		}
+		h.child.emitLine({ type: "agent_start" });
+		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		h.child.emitLine(delta("1\n"));
+		expect(h.adapter.getState().messages).toHaveLength(4);
+
+		const forked = h.adapter.fork("e-count");
+		h.child.respondTo("fork", { text: "Count to 400", cancelled: false });
+		h.child.emitLine(delta("2\n"));
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false, messageCount: 2 });
+		h.child.emitLine(delta("3\n"));
+		// Both reached the parent's partial reply, which the hydrate then drops.
+		expect(h.adapter.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "1\n2\n3\n" }] });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", { messages: [userMessage("Say ALPHA"), assistantMessage("ALPHA")] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+		await forked;
+
+		expect(h.adapter.getState().messages).toEqual([userMessage("Say ALPHA"), assistantMessage("ALPHA")]);
+		expect(h.adapter.getState().isStreaming).toBe(false);
+	});
+
 	it("rejects when an extension vetoes the fork, which Pi reports as success:true", async () => {
 		const h = makeHarness();
 		await startAdapter(h);

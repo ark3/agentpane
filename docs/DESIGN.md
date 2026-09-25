@@ -917,6 +917,11 @@ Two costs the queue brings are filed rather than guarded: on Pi a verb queued be
 `PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still drops a delta for an item that started before the attach, because that item has no slot (OW-zudase).
 Claude Code hydrates before it spawns and never rehydrates a live session, so it has no such window.
 The change, OW-dutute: a hydrate is a merge on every adapter that can hydrate a live session, under D20's rule that every index a client holds keeps meaning what it meant (OW-roveze), and under what a Pi fork is, a truncation that excludes the forked-at message and leaves the parent's streamed partial in the abandoned file (OW-yudoni, OW-sededi), so on Pi the merge shrinks the transcript and drops the parent's in-flight slots rather than unioning them.
+OW-dutute landed it, and measured each window before choosing the merge's shape (`docs/MANUAL_TESTING.md`, OW-dutute).
+As of `codex-cli 0.156.0` a `thread/turns/list` at `itemsView: "full"` taken mid-stream listed the running turn as `inProgress` with its completed items only, leaving out the `agentMessage` still streaming, and `thread/resume` replayed no `item/started` for it, so its deltas were the only copy of its text until `item/completed`.
+A delta for an item the reducer holds no slot for now opens one from the kind the delta names, laid after the history like any live slot the listing lacks, and `item/completed` replaces it where it stands; command output opens nothing, since alone it names no command.
+As of `pi 0.87.1` nothing arrived in Pi's window at all, on a fork or on a resume: the abandoned turn's last events, `agent_settled` among them, preceded the `fork` response.
+So on Pi the truncating merge is the replace `hydrateMessages` already made, and `src/server/adapters/pi/process.test.ts` pins it against a union.
 
 **How a race fix is made from here.**
 A guard at the site is not refused.
