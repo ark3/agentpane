@@ -1028,8 +1028,9 @@ previewing the same ref, and what follows under the new handle reaches it."
 (ert-deftest agentpane-test-snapshot-moved-from-a-handle-moves-the-buffer-holding-it ()
   "A `session/snapshot' carrying `movedFrom', the handle a buffer holds,
 moves that buffer onto the snapshot's handle and ref, a ref it never heard:
-a rename and a re-attach elsewhere in one outage of the helper's stream,
-which the helper learns of from the server (OW-gusaru).  Not a buffer only
+a re-attach elsewhere and then a rename of the re-attached container in one
+outage of the helper's stream, which the helper learns of from the server
+\(OW-gusaru).  Not a buffer only
 previewing the new ref, and what follows under the new handle reaches the
 one moved."
   (let ((old '(:backend "claude" :id "real-1"))

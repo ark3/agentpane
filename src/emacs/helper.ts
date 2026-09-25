@@ -246,9 +246,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * handle no attachment holds, since that is how a session reaches this
 	 * helper under a new handle -- a restarted server's, or the one another
 	 * client's re-attach minted -- and the ref it carries may be one Emacs
-	 * never heard: a rename and a re-attach elsewhere in one outage of the
-	 * stream leave the session under a new handle and a new ref at once
-	 * (OW-gusaru). Matching the snapshot's ref against the one last told
+	 * never heard: a re-attach elsewhere and then a rename of the re-attached
+	 * container, in one outage of the stream, leave the session under a new
+	 * handle and a new ref at once (OW-gusaru). Matching the snapshot's ref against the one last told
 	 * Emacs, as this did until then, missed exactly that.
 	 *
 	 * The server is asked by the ref last told Emacs, which stays a name of
@@ -263,7 +263,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * already holds it, this one is dropped, since that one is fed already.
 	 * An answer that nothing live carries the ref moves nothing, and the next
 	 * such snapshot asks again, so an attachment still follows its session
-	 * when anyone attaches it again. Nothing here attaches: the route only
+	 * once anyone attaches it again by a name the container keeps. A rename
+	 * before a close elsewhere is not one: the closed container took the link
+	 * between the ref told Emacs and the new one with it, and a re-attach by
+	 * the new ref leaves the buffer frozen (D21). Nothing here attaches: the route only
 	 * reads the server's table, so no session nobody asked to have running is
 	 * started or resurrected.
 	 *

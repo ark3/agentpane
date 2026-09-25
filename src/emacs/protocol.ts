@@ -226,8 +226,8 @@
  *   the server that the ref it last named the session by now names `handle`:
  *   the session was attached again under a new handle, by another client or
  *   after a server restart, while Emacs held the old one; and where a rename
- *   fell in the same outage of the helper's stream, `session` is a ref Emacs
- *   never heard (OW-gusaru). The
+ *   of the re-attached container fell in the same outage of the helper's
+ *   stream, `session` is a ref Emacs never heard (OW-gusaru). The
  *   buffer holding `movedFrom` takes `handle` and `session` from it.
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
  *   `index`.

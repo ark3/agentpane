@@ -485,9 +485,10 @@ A `session/snapshot' carrying `movedFrom' goes to the buffer holding that
 handle, whatever ref it names: the helper moved that buffer's attachment
 onto the snapshot's handle, having asked the server which live handle the
 ref it last named the session by names now -- another client's re-attach,
-or one after a server restart, minted it -- and where a rename fell in the
-same outage of the helper's stream, the snapshot's ref is one the buffer
-never heard (`reconcile' in src/emacs/helper.ts, OW-gusaru).
+or one after a server restart, minted it -- and where the re-attached
+container was renamed in the same outage of the helper's stream, the
+snapshot's ref is one the buffer never heard (`reconcile' in
+src/emacs/helper.ts, OW-gusaru).
 
 A `session/snapshot' also moves a buffer from one handle to another by
 the ref, where the buffer holds a handle: the snapshot that answers the
