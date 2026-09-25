@@ -33,7 +33,7 @@ Two contracts the server has to honour, both documented at their definitions:
 - **`start({ resumeId })` hydrates the transcript itself**, via `get_messages`.
   The caller does not need to re-query; a resumed adapter already holds the conversation by the time `start()` resolves.
 
-Both are now honoured, the first by the `onRefChanged` handler `SessionManager.#start` subscribes, which re-keys through `#adoptRef`.
+Both are now honoured, the first by the `onRefChanged` handler `SessionManager.#start` subscribes, which writes a renamed id onto the session's container as one more name through `#rename`, and moves a fork onto a container of its own through `#forkOnto` (D24, OW-suyinu).
 The first one was *not* honoured by the merged `wip/transport`, and it is the reason a new Pi session was unusable: the process table kept it keyed under its `virtual:` id forever, so it listed twice, was never findable on disk, and re-opening it spawned a second agent on the same session file.
 If you write another adapter, `ref` is not stable — fire `onRefChanged` where it changes, before anything else you emit under the new id, and the server will follow.
 
@@ -43,8 +43,9 @@ If you write another adapter, `ref` is not stable — fire `onRefChanged` where 
   That is where the prompt joins the session's queue (D24, OW-sewewe) and clears its error and its `virtual` flag.
   The rename above no longer depends on it: the manager hears it through `onRefChanged` whoever drove the turn.
 - **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is authoritative** and may differ from the ref in the URL, for the same reason.
-- **A client must handle the `renamed` SSE event** by re-keying everything it holds under `from`.
+- **A client must handle the `renamed` SSE event** by re-keying everything it holds under `from`, until it keys by `handle` instead.
   A snapshot under the new ref follows immediately.
+  Every per-session event and the summary of every session the server holds carry a `handle` beside the ref, which a rename never moves (D24, OW-suyinu); a client keyed by it has nothing to re-key, and `renamed` retires once both clients are (OW-kimaya, OW-danifa, OW-mofuho).
   `renamed` means one conversation took a new id, and nothing else does: the old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again, and the client is right to discard what it held under it and move its selection across.
   A fork never emits it, on any backend (OW-suhoto) — a fork creates a second conversation and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`.
 - **`/api` rejects a non-loopback `Origin`** (D8).

@@ -330,8 +330,8 @@ What says a file exists is the session index: `SessionSummary.onDisk` is true on
 The first prompt can still move the id on Pi: `PiAdapter` probes `get_state` again after its first `submit()`.
 That probe has not fired on the Pi versions above, since `start()` already resolved the id, and it stays, because a backend that has named nothing by the end of attach is exactly what `virtual` describes.
 `ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- and `init` arrives after `submit()` has settled.
-The manager hears of every such move as it happens: each adapter announces its id change through `onRefChanged` and the manager re-keys on it (D24, OW-nikogo), where it once re-read `ref` at three points and missed the `init` altogether (OW-hikefi).
-A live session keyed by a handle the server mints, with the backend's ids as names on its container, is the rest of what D24 decides (OW-suyinu).
+The manager hears of every such move as it happens: each adapter announces its id change through `onRefChanged` (D24, OW-nikogo), where the manager once re-read `ref` at three points and missed the `init` altogether (OW-hikefi).
+A move is one more name on the session's container, which the manager keys by a handle it mints and a rename never changes, so every id the session has had keeps resolving to it while every event carries the current one beside the handle (D24, OW-suyinu).
 
 **Spawn only on attach.**
 The list needs metadata only — id, cwd, timestamp, and a preview — all cheap to read from the file.
@@ -384,7 +384,7 @@ Both ends of D2/D3 are ours, so the SSE event union and the REST request/respons
 Snapshot, upsert, and server-request events are a discriminated union on a `type` field with the `seq` and session id at the top level.
 
 This is the one place worth being concrete rather than leaving to implementation judgement: the two halves are written at different times and will drift if the contract is only described in prose.
-D24 adds a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retires `renamed` once both clients read it (OW-mofuho).
+D24 added a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), optional until a client reads it (OW-kimaya), and retires `renamed` once both clients key by it (OW-mofuho).
 
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
 
@@ -450,10 +450,9 @@ This is deliberately visible: the condition should be rare (idle sessions are al
 Free one and retry.
 
 **Bookkeeping constraint (load-bearing).**
-The recency stamp lives **on the `ManagedSession` object**, never in a side map keyed by id.
-Pi's id changes under us (`#adoptRef`, D9's `renamed`), and `#adoptRef` re-keys the same object while preserving its identity — so an on-object stamp follows the rename automatically, whereas an id-keyed side map would strand it under the old `virtual:` key.
-The reaper must evict via the canonical ref (`#lookup` / `canonicalRef`) like everything else, or it reintroduces the exact double-spawn-on-stale-id bug that `#adoptRef` and the alias table exist to close.
-D24 dissolves this constraint: a container keyed by a handle that never changes cannot be stranded by a rename, so a side map keyed by the handle is safe once OW-suyinu lands; until then it stands as written.
+The recency stamp lives on the `ManagedSession` object or in a side map keyed by its handle, **never in a side map keyed by a backend id**.
+Pi's id changes under us (D9's `renamed`), and since D24 a rename is one more name on the same container, whose handle never changes (OW-suyinu) — so a stamp on the object or under the handle follows the rename automatically, whereas an id-keyed side map would strand it under the old `virtual:` key.
+The reaper must evict the container itself, reached by its handle or through `#lookup` from any of its names, like everything else; evicting by a backend id the container has since outgrown would miss it and reintroduce the double-spawn-on-stale-id bug the name table exists to close.
 
 **Cost this shifts.**
 Frequent eviction makes cold reattach the common path, which promoted OW-23 (`SessionIndex.get` walked both stores on every cold attach, ~0.28s) from a deferral to the hot path, and made fixing it a prerequisite to landing this rather than a follow-up.
@@ -756,6 +755,7 @@ The owner took this on 2026-09-16 (OW-vukoku).
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
 `Last-Event-ID` appears nowhere in `src/`, so there is no cursor and no replay buffer either: a `sessions-changed` fanout that happened while the socket was down is lost rather than deferred.
+So is a `renamed`, which strands a view held under the old ref, since the opening snapshot names only the new one; the handle each snapshot carries beside the ref closes that once the clients key by it (D24, OW-kimaya, OW-danifa).
 Of the eight `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
 `status` lights the sidebar's attached stripe and is the first conjunct of the composer Tools menu's `detachable`, which reads `"attached"` or `"virtual"`.
 `updatedAt` drives the whole sidebar ordering; it is the session file's mtime for a stored session, and `session.createdAt` for one the manager minted itself, which `#ownSummary` reports as both stamps.
@@ -890,18 +890,20 @@ Every client map keyed by the id needs a rename tracker: six closures in `src/cl
 Roughly seventy cards in the deck touch a rename, a re-key or an alias.
 
 Two changes, in two cards.
-An adapter announces its identity change as an event, `onRefChanged(ref, cause)`, fired synchronously before anything else it emits under the new ref, and the manager re-keys in that handler; the three polling points go, and with them the `forking` count and `#onUpdate` guard OW-zovaye added, since the container is under the fork's ref before the fork hydrates (OW-nikogo).
+An adapter announces its identity change as an event, `onRefChanged(ref, cause)`, fired synchronously before anything else it emits under the new ref, and the manager follows it in that handler; the three polling points go, and with them the `forking` count and `#onUpdate` guard OW-zovaye added, since the container is under the fork's ref before the fork hydrates (OW-nikogo).
 OW-hikefi's body named this fix on 2026-09-16, and it is the raise the FROZEN INTERFACE note in `src/server/adapters/types.ts` asks for.
-One point keeps its wait: a rename announced inside `start()`, which all three adapters make, is held in a variable local to that `#start` call and applied once the adapter is published, as the polled one was, because until then `#attaching` holds the startup only under the requested and canonical keys, and re-keying earlier would let a `close()` or an attach under the new name miss the startup; a start that fails therefore never renames.
-OW-suyinu, which keys the container by a handle that never changes, is where that wait dissolves.
+One point kept its wait under OW-nikogo: a rename announced inside `start()`, which all three adapters make, was held in a variable local to that `#start` call and applied once the adapter was published, because `#attaching` held the startup only under the requested and canonical keys, and re-keying earlier would have let a `close()` or an attach under the new name miss the startup.
+OW-suyinu retired that wait: the container carries its startup, so the rename is written the moment it is announced, a `close()` or an attach under the new name finds the one startup, and what the adapter emits during start goes out under the new ref.
+Two things of the wait stay, and neither is a key: a start that fails after renaming undoes the rename, restoring `ref` and dropping the names the start added, since a virtual container outlives the failure and a retry would otherwise resume an id its adapter never stored; and the `renamed` event for such a rename goes out at the publish, so that a failed start leaves none on the wire, a hold on the wire alone that leaves with `renamed` (OW-mofuho).
 OW-nikogo landed the event, and with it a Pi fork's hydrate reaches every client as a snapshot under the fork's ref, where it had been dropped; between the event and the hydrate the fork's ref reads the parent's un-rewound transcript, which the hydrate or the fork's attach heals, and a route on the parent's ref misses from the event on, as on any detached parent (OW-kekoji, D20).
-Then the manager keys a live session by a handle it mints, opaque, unique for the server's lifetime and never changed, and carries every backend id the session has had as names on the container, so a rename is an attribute write and a lookup by any old name still resolves, which is D9's promise that the old id keeps working on REST routes (OW-suyinu).
-The handle rides `SessionSummary` for a session the manager holds and every per-session event on both wires, the clients key their views by it (OW-kimaya, OW-danifa), and `renamed` is retired once both do (OW-mofuho).
-What the split between a rename and a fork settled stays in force: a fork writes no alias, broadcasts no `renamed`, drops the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and none of the parent's names.
-Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), and a parked fork gets its handle when parked (OW-lajehi).
-Teardown stops an event-driven re-key by unsubscribing: `close()` and `disposeAll()` drop a container's subscriptions in the same synchronous run that takes it out of the table, so no event reaches `#adoptRef` for it afterwards, and the `ManagedSession.torndown` flag that stopped the polled re-key is retired with the polling (OW-yavewa, OW-jimasu, OW-nikogo).
+Since OW-suyinu the manager keys a live session by a handle it mints, opaque, unique for the server's lifetime and never changed, and carries every backend id the session has had, and every spelling `#start` canonicalised, as names on the container, so a rename is an attribute write and a lookup by any old name still resolves, which is D9's promise that the old id keeps working on REST routes.
+No map holding a container, or a startup a container can be reached by, is keyed by a name; `#pendingForks` and `#disposing` stay keyed by backend id, since neither holds a container.
+The handle rides `SessionSummary` for a session the manager holds and every per-session event on both wires, optional until the clients key their views by it (OW-kimaya, OW-danifa), and `renamed` is retired once both do (OW-mofuho).
+What the split between a rename and a fork settled stays in force: a fork writes no name onto the fork, broadcasts no `renamed`, drops the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and none of the parent's names, which takes the adapter, its subscriptions, the parent's pending requests and notices, and leaves the parent's container out of the table with no adapter.
+Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), and a parked fork gets its handle at the attach that builds its container, since until then nothing is emitted for it and `ForkResponse` carries a ref only (OW-lajehi).
+Teardown stops an event-driven rename or fork by unsubscribing: `close()` and `disposeAll()` drop a container's subscriptions in the same synchronous run that takes it out of the table, so no event reaches `#rename` or `#forkOnto` for it afterwards, and the `ManagedSession.torndown` flag that stopped the polled re-key is retired with the polling (OW-yavewa, OW-jimasu, OW-nikogo).
 D13's file is keyed by the backend id and stays so: it names a session on disk, which is an identity a handle does not have.
-D21's reconnect gap narrows: a `renamed` missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref.
+D21's reconnect gap narrows once the clients key by the handle (OW-kimaya, OW-danifa): a `renamed` missed while the stream was down will no longer strand a view, since the opening snapshot under the handle carries the current ref; until they land it still does.
 
 **Serialisation: nothing on the server runs one session's mutations one at a time.**
 The routes in `src/server/http/app.ts` reach the adapter directly for set-model, set-effort, compact, abort, fork points and reply, and only `submit` and `fork` go through the manager, for the re-key and not for order; OW-yavewa's close note records that nothing serialises the routes, each a concurrent `Bun.serve` handler.
@@ -916,8 +918,9 @@ It does not dedupe: the clients' one-prompt-at-a-time guards stay as the double-
 Close and shutdown are not queued; `#disposing`, `PendingStart.torndown` and `#terminate` are their order.
 OW-sewewe landed it, and `abort` stays out: it must reach a running turn, which is never queued, so queued it could only wait behind a settings call, a fork or a Pi compaction, and out it keeps the second abort ahead of a Pi fork harmless (OW-relehi).
 `listForkPoints`, a read, and `attach`, which creates the adapter the queue sits on, stay out too; `#serially`'s docblock in `src/server/http/session-manager.ts` gives each reason.
-Two costs the queue brings are filed rather than guarded: on Pi a verb queued behind a compaction waits for it, since `pi 0.84.2` answers `compact` after `compaction_end` (OW-jileku), and a verb sent on a Pi parent's ref and queued behind its fork runs on the fork until OW-suyinu gives the fork its own container.
-Since OW-nikogo that window closes at the adapter's `onRefChanged`: a verb sent on the parent's ref after it misses `#lookup`, and only one sent before it still runs on the fork, since `#serially` takes the container at call time.
+One cost the queue brings is filed rather than guarded: on Pi a verb queued behind a compaction waits for it, since `pi 0.84.2` answers `compact` after `compaction_end` (OW-jileku).
+A second was closed by ownership: a verb sent on a Pi parent's ref and queued behind its fork ran on the fork until OW-suyinu gave the fork its own container.
+Now `#serially` takes the container at the call and its adapter when the verb runs, the queue stays with the parent's container, which keeps no adapter, and the verb fails as a call on any detached session does; one sent after the fork's `onRefChanged` misses `#lookup` altogether.
 
 **Hydrate: replace, while the live stream keeps arriving.**
 `PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still dropped a delta for an item that started before the attach, because that item had no slot (OW-zudase), until OW-dutute below.
