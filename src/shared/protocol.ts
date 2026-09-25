@@ -286,8 +286,9 @@ export type ServerEvent =
 			 * `handle` is the one the session held before the rename and holds
 			 * after it: a client keyed by it has nothing to re-key (D24). The
 			 * browser's reducer is, and ignores this event (OW-kimaya); the Emacs
-			 * helper still forwards it as `session/renamed`, which agentpane-mode
-			 * re-keys on until OW-danifa. It stays on the wire until OW-mofuho.
+			 * helper still forwards it as `session/renamed`, on which agentpane-mode
+			 * re-keys nothing since OW-danifa, taking from it only the handle of an
+			 * attach not yet answered. It stays on the wire until OW-mofuho.
 			 */
 			type: "renamed";
 			session: SessionRef;

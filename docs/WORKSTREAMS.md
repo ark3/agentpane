@@ -45,7 +45,7 @@ If you write another adapter, `ref` is not stable — fire `onRefChanged` where 
 - **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is authoritative** and may differ from the ref in the URL, for the same reason.
 - **A client keys what it holds for a live session by its `handle`**, which every per-session event carries beside the ref and a rename never moves (D24, OW-suyinu), and takes the ref from the events as an attribute that may change under it.
   The browser's reducer does (OW-kimaya): an event under a known handle whose `session` is a new ref moves the view, the summary carrying that handle and the selection onto it, so a `renamed` it never received strands nothing.
-  A client still keyed by ref must handle the `renamed` SSE event by re-keying everything it holds under `from`, as agentpane-mode does until OW-danifa; a snapshot under the new ref follows immediately, and `renamed` retires once no client needs it (OW-mofuho).
+  agentpane-mode does the same since OW-danifa, and takes from the helper's `session/renamed` only the handle of an attach whose reply has not yet come (`agentpane--notified-buffer` in `emacs/agentpane.el`); a snapshot under the new ref follows immediately, and `renamed` retires once nothing needs it (OW-mofuho).
   `renamed` means one conversation took a new id, and nothing else does: the old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again, and a client is right to move its selection across.
   A fork never emits it, on any backend (OW-suhoto) — a fork creates a second conversation and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`.
 - **`/api` rejects a non-loopback `Origin`** (D8).

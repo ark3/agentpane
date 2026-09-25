@@ -218,9 +218,11 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
- * - `session/renamed` -- `{ from, to, handle }`. Re-key the buffer; a
- *   `session/snapshot` for `to` follows. `handle` is the one the session held
- *   before and holds after, so a buffer keyed by it has nothing to re-key.
+ * - `session/renamed` -- `{ from, to, handle }`. The session's ref is now
+ *   `to`; a `session/snapshot` for `to` follows. `handle` is the one the
+ *   session held before and holds after, so a buffer keyed by it has nothing
+ *   to re-key; agentpane-mode does key by it, and takes it from this for a
+ *   buffer whose attach asked for `from` and has not been answered (OW-danifa).
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
  *   while it was down is gone.

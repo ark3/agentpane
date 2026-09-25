@@ -37,10 +37,13 @@
  * reply's summary for what `sessions/attach` says itself. Requests accept one
  * beside `session` and send it nowhere; `emacs/agentpane.el` sends none, so
  * `sessions/detach` and `sessions/close` find the handle from the ref Emacs
- * was last told for it. The
- * wire to Emacs is still keyed by ref: `session/renamed` goes out for every
- * `renamed` under an attached handle until agentpane-mode keys by the handle
- * (OW-danifa) and the event leaves the wire (OW-mofuho). The hand-rolled
+ * was last told for it. `session/renamed` goes out for every `renamed`
+ * under an attached handle until the event leaves the wire (OW-mofuho).
+ * agentpane-mode keys its buffers by the handle and re-keys nothing on it
+ * (OW-danifa), but takes the handle from one whose `from` is the ref an
+ * attach of its asked for, before that attach's reply: the only route the
+ * snapshot `sessions/attach` sends under the new ref has to that buffer
+ * (`agentpane--notified-buffer` in emacs/agentpane.el). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
@@ -147,9 +150,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (event.type === "sessions-changed") return;
 
 		// Before the `state === before` return below, which every `renamed`
-		// takes: the reducer's arm is a no-op, and agentpane-mode still re-keys
-		// on the notification (OW-danifa). A pending attach on the old ref moves
-		// here, as it would have been re-keyed by ref.
+		// takes: the reducer's arm is a no-op, and agentpane-mode takes the
+		// handle from the notification for an attach of its not yet answered
+		// (OW-danifa). A pending attach on the old ref moves here, as it would
+		// have been re-keyed by ref.
 		if (event.type === "renamed") {
 			if (!isAttached(event.handle, event.from, event.session)) return;
 			notify({ method: "session/renamed", params: { from: event.from, to: event.session, handle: event.handle } });
