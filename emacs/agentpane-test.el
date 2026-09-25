@@ -313,14 +313,12 @@ text, and the tool call before the text carries none on its header."
 (defmacro agentpane-test--with-session (ref &rest body)
   "Run BODY in a fresh transcript buffer holding the session REF, drawn with
 the fixed nodes, and kill the buffer afterwards.  Every pretty-printed node
-index is pushed onto `drawn', which BODY sees.  The buffer has sent an
-attach, so a notification naming REF reaches it before it holds a handle."
+index is pushed onto `drawn', which BODY sees."
   (declare (indent 1))
   `(let ((buffer (agentpane--transcript-buffer (list :ref ,ref)))
          (drawn nil))
      (unwind-protect
          (with-current-buffer buffer
-           (setq agentpane--attach-sent t)
            (agentpane--draw agentpane-test--nodes)
            (let ((pp (symbol-function 'agentpane--pp)))
              (cl-letf (((symbol-function 'agentpane--pp)
@@ -619,11 +617,10 @@ ref, deliberately, since only the live one holds the handle, and the
 preview, which never sent an attach, sends no `sessions/detach' when
 killed, which by that ref alone would stop the helper feeding the live
 one.  The snapshot under the ref both hold, sent before the reply, is not
-the preview's to take: it never sent an attach.  The live one draws it,
-stays attached, and hears the session under its handle."
+the preview's to take: it names the ref the live one asked for.  The live
+one draws it, stays attached, and hears the session under its handle."
   (let ((alias '(:backend "claude" :id "pending-1"))
-        (canonical '(:backend "claude" :id "real-2"))
-        (agentpane--unclaimed-snapshots (make-hash-table :test #'equal)))
+        (canonical '(:backend "claude" :id "real-2")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
         (setq hold '(sessions/attach)
@@ -632,7 +629,8 @@ stays attached, and hears the session under its handle."
               (preview (agentpane--transcript-buffer (list :ref canonical))))
           (with-current-buffer live (agentpane--attach))
           (agentpane--on-notification nil 'session/snapshot
-                                      (list :session canonical :handle "h1" :nodes []))
+                                      (list :session canonical :handle "h1" :askedFor alias
+                                            :nodes []))
           (funcall (cdr (pop held)) t)
           (should (buffer-live-p preview))
           (should-not (buffer-local-value 'agentpane--handle preview))
@@ -670,17 +668,17 @@ whatever ref the summary names, so no second buffer opens on the session."
 
 (defun agentpane-test--attach-answered-under-a-new-ref (snapshot-first)
   "Attach a buffer whose reply names another ref and a handle than the one
-it asked for, with the snapshot under that ref and handle handled before
-the reply's callback if SNAPSHOT-FIRST, else after it, and check that the
-buffer that asked drew it and holds the reply's handle and ref."
+it asked for, with the snapshot under that ref and handle, which the
+helper tags with the ref the attach asked for, handled before the reply's
+callback if SNAPSHOT-FIRST, else after it, and check that the buffer that
+asked drew it and holds the reply's handle and ref."
   (let ((asked '(:backend "claude" :id "pending-1"))
-        (ref '(:backend "claude" :id "real-2"))
-        (agentpane--unclaimed-snapshots (make-hash-table :test #'equal)))
+        (ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
       (setq hold '(sessions/attach)
             attached (list :ref ref :handle "h1"))
       (let ((buffer (agentpane--transcript-buffer (list :ref asked)))
-            (snapshot (list :session ref :handle "h1"
+            (snapshot (list :session ref :handle "h1" :askedFor asked
                             :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>")))))
         (with-current-buffer buffer (agentpane--attach))
         (if snapshot-first
@@ -700,9 +698,8 @@ buffer that asked drew it and holds the reply's handle and ref."
 snapshot under the new ref that was handled before the reply's callback,
 which the helper sends before the reply (`sessions/attach' in
 src/emacs/helper.ts), and which jsonrpc.el may also run first after a
-reply it held back as an anxious continuation: until the reply names the
-handle no buffer holds it, so it is kept under its handle and drawn when
-the reply names that handle."
+reply it held back as an anxious continuation: the snapshot's `askedFor'
+finds the buffer that asked, which takes the handle from it."
   (agentpane-test--attach-answered-under-a-new-ref t))
 
 (ert-deftest agentpane-test-attach-answered-under-a-new-ref-draws-a-snapshot-handled-after-its-reply ()
@@ -710,6 +707,61 @@ the reply names that handle."
 snapshot under the new ref handled after the reply's callback, which finds
 the buffer by the handle the reply gave it."
   (agentpane-test--attach-answered-under-a-new-ref nil))
+
+(ert-deftest agentpane-test-attach-under-a-new-ref-holds-the-handle-its-snapshot-gave-when-the-reply-fails ()
+  "An attach answered under another ref whose reply fails in Emacs -- a
+timeout, or a quit in `agentpane-new-session' -- after the helper took the
+attach still holds the handle and ref its tagged snapshot gave it: it is
+drawn, hears what follows under the handle, and its detach names the
+handle, which is what stops the helper sending for it."
+  (let ((asked '(:backend "claude" :id "virtual:1"))
+        (ref '(:backend "claude" :id "real-2"))
+        (agentpane--connection 'connection))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t)))
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/attach)
+              attached (list :ref ref :handle "h1"))
+        (let ((buffer (agentpane--transcript-buffer (list :ref asked))))
+          (with-current-buffer buffer (agentpane--attach))
+          (agentpane--on-notification
+           nil 'session/snapshot
+           (list :session ref :handle "h1" :askedFor asked
+                 :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+          (funcall (cdr (pop held)) nil)
+          (agentpane--on-notification nil 'session/status
+                                      (list :session ref :handle "h1" :isStreaming t))
+          (with-current-buffer buffer
+            (should (equal agentpane--handle "h1"))
+            (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref))
+            (should (equal (agentpane-test--indices) '(3)))
+            (should agentpane--streaming))
+          (setq sent nil)
+          (kill-buffer buffer)
+          (should (equal sent `((sessions/detach :session ,ref :handle "h1")))))))))
+
+(ert-deftest agentpane-test-attach-under-a-new-ref-hears-what-follows-its-snapshot-before-its-reply ()
+  "What follows the tagged snapshot of an attach answered under another
+ref, handled before the attach's reply -- a turn ending, here -- reaches
+the buffer by the handle the snapshot gave it, and the reply undoes none
+of it."
+  (let ((asked '(:backend "claude" :id "virtual:1"))
+        (ref '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (setq hold '(sessions/attach)
+            attached (list :ref ref :handle "h1"))
+      (let ((buffer (agentpane--transcript-buffer (list :ref asked))))
+        (with-current-buffer buffer (agentpane--attach))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1" :askedFor asked :isStreaming t
+               :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+        (agentpane--on-notification nil 'session/status
+                                    (list :session ref :handle "h1" :isStreaming :json-false))
+        (funcall (cdr (pop held)) t)
+        (with-current-buffer buffer
+          (should (equal agentpane--handle "h1"))
+          (should-not agentpane--streaming)
+          (should (equal (agentpane-test--indices) '(3))))))))
 
 (ert-deftest agentpane-test-snapshot-under-a-new-handle-moves-the-attached-buffer ()
   "A `session/snapshot' under a handle no buffer holds, for the ref an

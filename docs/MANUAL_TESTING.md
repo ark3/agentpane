@@ -3477,3 +3477,62 @@ It named no turn; the listing's `inProgress` turn is the only place the running 
 **A turn whose app-server died is listed `interrupted`.**
 `--item orphan` killed the app-server at 41 deltas and had a fresh one, on the same `CODEX_HOME`, `initialize`, `thread/resume` and list the thread, as `CodexAdapter.start` does on a cold resume.
 The resume read `thread.status` `{"type": "idle"}`, and the listing named the turn `interrupted` with its `userMessage` and a `reasoning`; nothing named it `inProgress`.
+
+## jsonrpc.el runs an async reply after later notifications (OW-mofuho)
+
+Measured on the home server 2026-09-25, Emacs 31.1 in `--batch` with its bundled `jsonrpc.el` 1.0.29, Python 3.14.7.
+
+**A reply to an asynchronous request that arrives while a synchronous request is outstanding runs after notifications written after it.**
+This is the same "anxious continuation" OW-bonode met on the same version (the section above, "The Emacs helper connection: a nested request stalls"), seen from the other side: there the parked reply belonged to the outer synchronous call, here it belongs to an asynchronous one.
+`jsonrpc-connection-receive` finds `jsonrpc--scontrol` headed by the synchronous request's id and pushes the asynchronous reply onto that entry, and `jsonrpc--continue` runs it with `run-at-time 0` only once the synchronous request has returned, while a notification that arrives meanwhile is dispatched at once.
+A fake helper answered an asynchronous `sessions/attach`, then sent a `session/snapshot` notification, then after 0.2s answered a synchronous `models/list` that Emacs had sent after the attach.
+The notification dispatcher and the attach's `:success-fn` each pushed onto one log, and the synchronous call pushed `sync-returned` when it returned.
+The log read, in order:
+
+```
+((notification session/snapshot) sync-returned (attach-reply "h1"))
+```
+
+So the snapshot was handled before the attach's reply though the helper wrote it after, and agentpane-mode cannot take a handle from an attach reply in time for the notifications that follow it whenever one of its synchronous requests (`agentpane--read-model`'s `models/list`, `agentpane-new-session`'s `sessions/create`, `agentpane--attach-now`) is outstanding.
+That is why the first snapshot of an attach answered under another ref carries `askedFor`, the ref the attach asked for, and `agentpane--notified-buffer` binds the buffer that asked by it (`sessions/attach` in `src/emacs/helper.ts`); the ert tests `agentpane-test-attach-answered-under-a-new-ref-*` and `agentpane-test-attach-under-a-new-ref-*` cover both orders and a reply that never succeeds.
+
+To re-run, write the two files below to `/tmp/jsonrpc-order/` and run `emacs --batch -l /tmp/jsonrpc-order/drive.el`.
+
+`/tmp/jsonrpc-order/fake.py`:
+
+```python
+import sys, json, time
+def read():
+    h = b""
+    while not h.endswith(b"\r\n\r\n"):
+        c = sys.stdin.buffer.read(1)
+        if not c: sys.exit(0)
+        h += c
+    n = int([l for l in h.split(b"\r\n") if l.startswith(b"Content-Length")][0].split(b":")[1])
+    return json.loads(sys.stdin.buffer.read(n))
+def send(m):
+    b = json.dumps(m).encode()
+    sys.stdout.buffer.write(b"Content-Length: %d\r\n\r\n" % len(b) + b); sys.stdout.buffer.flush()
+a = read(); b = read()  # async attach, then sync models/list
+send({"jsonrpc":"2.0","id":a["id"],"result":{"handle":"h1"}})
+send({"jsonrpc":"2.0","method":"session/snapshot","params":{"handle":"h1"}})
+time.sleep(0.2)
+send({"jsonrpc":"2.0","id":b["id"],"result":[]})
+time.sleep(1)
+```
+
+`/tmp/jsonrpc-order/drive.el`:
+
+```elisp
+(require 'jsonrpc)
+(defvar log nil)
+(let* ((proc (make-process :name "fake" :command '("python3" "/tmp/jsonrpc-order/fake.py") :connection-type 'pipe :coding 'utf-8-emacs-unix :noquery t :stderr (get-buffer-create "*err*")))
+       (conn (jsonrpc-process-connection :process proc
+               :notification-dispatcher (lambda (_c m _p) (push (list 'notification m) log)))))
+  (jsonrpc-async-request conn 'sessions/attach '(:session 1)
+                         :success-fn (lambda (r) (push (list 'attach-reply (plist-get r :handle)) log)))
+  (jsonrpc-request conn 'models/list '(:backend "pi"))
+  (push 'sync-returned log)
+  (sit-for 0.5)
+  (princ (format "%S\n" (reverse log))))
+```

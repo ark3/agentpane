@@ -394,19 +394,6 @@ non-nil, on the way out."
     (with-current-buffer buffer
       (funcall failed))))
 
-(defvar agentpane--unclaimed-snapshots (make-hash-table :test #'equal)
-  "The params of each `session/snapshot' no transcript buffer took, by the
-handle it carries, the latest for each: the snapshot of an attach whose
-reply has not yet named that handle to the buffer that asked, which
-`agentpane--attached-as' draws when it does.  See
-`agentpane--on-notification'.
-
-At most one per handle the helper sends, and it sends only for sessions a
-buffer asked to attach.  An entry goes when a reply names its handle, or
-when a later snapshot under it reaches a buffer; one whose attach this
-Emacs gave up on -- a timeout, or a buffer killed before its reply --
-stays, as the helper goes on sending for that handle too.")
-
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
 Every one but `sessions/changed' is about one session, and goes to the
@@ -415,27 +402,11 @@ That buffer takes the notification's handle, and its `session' as the
 session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
 helper sends none (OW-mofuho).  A buffer's name never carries the ref
-\(OW-mikayi), and neither does its composer's.
-
-A snapshot no buffer takes is kept in `agentpane--unclaimed-snapshots'
-until an attach reply names its handle, since the reply may be handled
-after it whatever order the helper wrote them in: jsonrpc.el 1.0.29, on
-Emacs 31.1, holds back the reply to an asynchronous request that arrives
-while a synchronous `jsonrpc-request' is outstanding -- an \"anxious
-continuation\" -- and runs it only once that request has returned, while
-notifications arriving meanwhile are handled at once
-\(`jsonrpc-connection-receive' and `jsonrpc--continue', read and
-reproduced 2026-09-25).  `agentpane--read-model', `agentpane-new-session'
-and `agentpane--attach-now' each make one.  Anything else no buffer takes
-is dropped: the snapshot replaces all of it."
+\(OW-mikayi), and neither does its composer's.  A notification no buffer
+is found for is dropped."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
-    (let ((buffer (agentpane--notified-buffer method params))
-          (handle (plist-get params :handle)))
-      (when (and handle (eq method 'session/snapshot))
-        (if buffer
-            (remhash handle agentpane--unclaimed-snapshots)
-          (puthash handle params agentpane--unclaimed-snapshots)))
+    (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
         (with-current-buffer buffer
           (when (plist-get params :handle)
@@ -462,22 +433,26 @@ is dropped: the snapshot replaces all of it."
 
 (defun agentpane--notified-buffer (method params)
   "The transcript buffer the notification METHOD, with PARAMS, is about.
-The buffer holding the notification's handle; failing that, one holding
-its `session' as below, which then takes the handle; else nil.
+The buffer holding the notification's handle; failing that, one found by
+a ref as below, which then takes the handle; else nil.
 
-By the ref, a buffer holding no handle that has sent an attach, which
-for a notification is one whose attach has not yet answered: the helper
-sends nothing for a session no buffer asked to attach.  The attach's
-snapshot and its reply are unordered (D2), so its first notifications
-can arrive before the reply names the handle, and they find the buffer
-by the ref it asked for.  Where the reply names another ref than the one
-asked for, nothing before the reply joins the two, and the snapshot under
-the new ref, which the helper sends before the reply, finds no buffer
-here; `agentpane--on-notification' keeps it until the reply names its
-handle (`sessions/attach' in src/emacs/helper.ts).  Not a buffer that
-never sent an attach, which holds no handle either: one previewing the
-ref an attached buffer's session was renamed onto, which took that
-snapshot and its handle from the buffer that asked.
+By the ref, a buffer holding no handle, which for a notification is one
+whose attach has not yet answered: the helper sends nothing for a
+session no buffer asked to attach.  The attach's snapshot and its reply
+are unordered (D2), and the reply may be handled after notifications the
+helper wrote after it: jsonrpc.el 1.0.29, on Emacs 31.1, holds back the
+reply to an asynchronous request that arrives while a synchronous one is
+outstanding, as an \"anxious continuation\", until that one returns, and
+handles notifications meanwhile (docs/MANUAL_TESTING.md, \"jsonrpc.el
+runs an async reply after later notifications\").  So a buffer takes its
+handle from the first notification that finds it, never from the reply
+alone, and everything after finds it by that handle in order.  An attach
+answered under the ref it asked for is found by `session'.  One answered
+under another ref is found by the `askedFor' its first snapshot carries,
+the ref that attach asked for (`sessions/attach' in src/emacs/helper.ts):
+only in a buffer that sent an attach and holds no handle, and ahead of
+the match by `session', which a buffer only previewing the new ref, an
+attached buffer's session having been renamed onto it, would win.
 
 A `session/snapshot' also moves a buffer from one handle to another, and
 looks for such a buffer first: a snapshot is how a ref reaches the helper
@@ -488,12 +463,15 @@ because a buffer holding the ref and no handle may be one only
 previewing a stored session that an attached buffer was since renamed
 onto, which the helper never fed."
   (let ((handle (plist-get params :handle))
-        (ref (plist-get params :session)))
+        (ref (plist-get params :session))
+        (asked (plist-get params :askedFor)))
     (or (and handle (agentpane--buffer-holding handle))
+        (and asked
+             (agentpane--buffer-for asked (lambda () (and agentpane--attach-sent
+                                                          (not agentpane--handle)))))
         (and (eq method 'session/snapshot)
              (agentpane--buffer-for ref (lambda () agentpane--handle)))
-        (agentpane--buffer-for ref (lambda () (and agentpane--attach-sent
-                                                   (not agentpane--handle)))))))
+        (agentpane--buffer-for ref (lambda () (not agentpane--handle))))))
 
 ;;;; Rendering HTML through shr
 
@@ -1440,7 +1418,8 @@ has attached nothing.")
 
 (defvar-local agentpane--attach-sent nil
   "Non-nil once this buffer has sent a `sessions/attach', whatever became of
-it; see `agentpane--detach'.")
+it; see `agentpane--detach', and `agentpane--notified-buffer', which binds
+a snapshot's `askedFor' only to such a buffer.")
 
 (defvar-local agentpane--attaching nil
   "While a `sessions/attach' this buffer sent has not answered, the callers
@@ -1731,20 +1710,15 @@ back to the session id keeps the old one."
   "Hold what SUMMARY, the reply to this buffer's `sessions/attach', names:
 the session's handle, and its ref, which is authoritative and may differ
 from the one asked for.  Return non-nil when that merged another buffer
-into this one, which then wants a snapshot; see `agentpane--absorb'.
-A snapshot under the handle that no buffer took is then handled as though
-it had arrived now; see `agentpane--unclaimed-snapshots'."
+into this one, which then wants a snapshot; see `agentpane--absorb'."
   (setq agentpane--attached agentpane--connection)
   (let* ((handle (plist-get summary :handle))
-         (other (and handle (agentpane--buffer-holding handle)))
-         (held (and handle (gethash handle agentpane--unclaimed-snapshots))))
+         (other (and handle (agentpane--buffer-holding handle))))
     (setq agentpane--handle handle)
     (agentpane--hold-ref (agentpane--ref summary))
-    (prog1 (when (and other (not (eq other (current-buffer))))
-             (agentpane--absorb other)
-             t)
-      (when held
-        (agentpane--on-notification nil 'session/snapshot held)))))
+    (when (and other (not (eq other (current-buffer))))
+      (agentpane--absorb other)
+      t)))
 
 (defvar agentpane--composer-transcript)
 
@@ -1972,10 +1946,14 @@ running, as closing a browser tab does.
 It carries the handle this buffer holds, and the helper stops what it
 sends under that handle, whatever ref the buffer last heard (OW-wedeli).
 One from a buffer holding no handle names only its ref, and the helper
-stops whatever it last named to Emacs by that ref, so it is sent only
-from a buffer that has sent an attach, whatever this buffer believes of
-that attach: one that failed here -- timed out, or quit in
-`agentpane-new-session' -- may still have succeeded in the helper, which
+stops whatever it last named to Emacs by that ref, and an attach of that
+ref it answered under another ref whose snapshot carrying `askedFor' it
+has not yet sent -- once sent, that snapshot gave this buffer the handle,
+unless the buffer was killed before handling it, and then the helper
+goes on sending under that handle.  So it is sent only from a buffer that
+has sent an attach, whatever this buffer believes of that attach: one
+that failed here -- timed out, or quit in `agentpane-new-session' -- may
+still have succeeded in the helper, which
 then holds the session, and a detach of a session it does not hold
 changes nothing.  A buffer that never sent one holds nothing in the
 helper, and its ref may be a live buffer's too: a preview of the ref a

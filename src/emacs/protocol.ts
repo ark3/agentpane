@@ -8,9 +8,9 @@
  * the two together, and raise it before changing either. D24 raised it twice:
  * the `handle` every per-session notification carries, and every request
  * accepts, below (OW-suyinu); and the retirement of `session/renamed`, whose
- * one use a rename-free `session/snapshot` cannot cover, an attach answered
- * under another ref, the receiver covers by keeping that snapshot until the
- * reply (OW-mofuho).
+ * one use no other notification covered -- joining the ref an attach asked
+ * for to the handle it was answered under -- `session/snapshot`'s
+ * `askedFor` took over (OW-mofuho).
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -148,17 +148,11 @@
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, carrying the session's `handle`. Its `ref` is
  *   authoritative and may differ from the one asked for; when it does, the
- *   `session/snapshot` under the new ref and the summary's `handle` goes out
- *   before the reply if the helper holds one yet, and else when it arrives,
- *   unless the stream already carried the asked-for ref under that handle,
- *   or a `sessions/detach` for it landed while the attach was in flight.
- *   Nothing says the asked-for ref and the new one are the same session
- *   until the reply, and the reply may be handled after that snapshot in
- *   either case: jsonrpc.el 1.0.29, on Emacs 31.1, runs the reply to an
- *   asynchronous request that arrives while a synchronous one is outstanding
- *   only once that one returns, and handles notifications meanwhile. So the
- *   receiver keeps a snapshot under a handle it holds no buffer for until an
- *   attach reply names that handle.
+ *   first notification under the summary's `handle` is a `session/snapshot`
+ *   carrying `askedFor`, sent before the reply if the helper holds one yet
+ *   and else when it arrives, unless the stream already carried the
+ *   asked-for ref under that handle, or a `sessions/detach` for it landed
+ *   while the attach was in flight.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
@@ -174,8 +168,9 @@
  *   session goes on running on the server. Sent when Emacs stops showing a
  *   session. With `handle`, the notifications under that handle stop,
  *   whatever ref `session` is; without, those for the session last named
- *   `session` to Emacs; and either way an attach of `session` still in
- *   flight.
+ *   `session` to Emacs, and those of an attach of `session` answered under
+ *   another ref whose `askedFor` snapshot has not yet gone out; and either
+ *   way an attach of `session` still in flight.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -212,6 +207,16 @@
  *   every notice, oldest first, each the `notice` a `session/notice` carried.
  *   The buffer draws all three after `nodes`, since a snapshot arrives at
  *   every Codex turn's start and end and would otherwise wipe them.
+ *   `askedFor` (a ref, only on the one snapshot `sessions/attach` above
+ *   says carries it) is the ref that attach asked for, where its reply
+ *   named another. It is request correlation, not identity: it says which
+ *   waiting attach this handle answers, so the receiver can bind the handle
+ *   to what sent that attach without waiting for the reply, which it cannot
+ *   rely on handling first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the
+ *   reply to an asynchronous request that arrives while a synchronous one
+ *   is outstanding runs only once that one returns, while notifications are
+ *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
+ *   after later notifications").
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
  *   `index`.
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
@@ -295,7 +300,13 @@ export interface SessionStatusParams {
 export type HelperNotification =
 	| {
 			method: "session/snapshot";
-			params: SessionStatusParams & { nodes: TranscriptNode[]; error: string | null; requests: AgentRequest[]; notices: AgentNotice[] };
+			params: SessionStatusParams & {
+				nodes: TranscriptNode[];
+				error: string | null;
+				requests: AgentRequest[];
+				notices: AgentNotice[];
+				askedFor?: SessionRef;
+			};
 	  }
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }

@@ -387,11 +387,12 @@ describe("notifications", () => {
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
 	});
 
-	it("sends the snapshot it dropped for an attach answered under another ref before the reply, with no rename beside it", async () => {
+	it("sends the snapshot it dropped for an attach answered under another ref before the reply, tagged with the ref asked for", async () => {
 		// An attach through an alias: the route answers the new ref, and its
 		// snapshot, under that ref, lands before the reply. Filtered by the
-		// asked-for ref it went nowhere; agentpane-mode keeps it under its handle
-		// until the reply names that handle, in whichever order it handles them.
+		// asked-for ref it went nowhere; sent now, it names that ref in
+		// `askedFor`, which is how agentpane-mode finds the buffer that asked
+		// whether or not it has handled the reply.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -403,12 +404,52 @@ describe("notifications", () => {
 		await io.until(2);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true, askedFor: alias } });
 		expect(io.out[1]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
 
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
-		await io.until(3);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(4);
 		expect(io.out[2]).toMatchObject({ method: "session/status", params: { session: pi, handle: h(pi), isStreaming: false } });
+		// The tag rides that one snapshot and nothing after it.
+		expect(io.out.slice(2).filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
+	});
+
+	it("tags the late snapshot of an attach answered under another ref when none had arrived by the reply, and nothing after it", async () => {
+		// Until a snapshot introduces the view the reducer holds nothing under
+		// the handle, and forwards nothing: every other event for a view it does
+		// not hold leaves the state as it was. So the first thing sent under the
+		// handle is that snapshot.
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await io.until(1);
+		expect(io.out[0]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
+
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(4);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => [message["method"] ?? message["id"], (message["params"] as { askedFor?: SessionRef } | undefined)?.askedFor])).toEqual([
+			[1, undefined],
+			["session/snapshot", alias],
+			["session/status", undefined],
+			["session/snapshot", undefined],
+		]);
+	});
+
+	it("stops on a sessions/detach by the ref asked for, from a buffer killed before the snapshot that would have named the handle", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await io.until(1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: alias } });
+		await io.until(2);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications()).toEqual([]);
 	});
 
 	it("sends no second snapshot for an attach the stream already moved onto its handle, when the reply names another ref", async () => {
@@ -424,6 +465,7 @@ describe("notifications", () => {
 		await io.until(3);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/snapshot", 1]);
+		expect(io.notifications().filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
 	});
 
 	// On main the attached set was keyed by ref, so a session Emacs had attached
@@ -625,7 +667,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		await new Promise((resolve) => setTimeout(resolve, 5));
 
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
-		expect(io.out[0]).toMatchObject({ params: { session: pi, handle } });
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle, askedFor: alias } });
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { ...summary(pi), handle } });
 	});
 
