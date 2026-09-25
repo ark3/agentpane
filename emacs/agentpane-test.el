@@ -363,8 +363,9 @@ per step; and so does one whose summary is right-to-left text."
 (ert-deftest agentpane-test-motion-cuts-where-the-search-does ()
   "A header cut by `vertical-motion' is the one the binary search cuts, for
 summaries that fit, that just miss and that run to many lines, of words,
-of wide characters, of right-to-left text and holding a tab, with the
-meta beside them and without, at widths from a few columns to the window's."
+of wide characters, of right-to-left text, and holding a tab or a
+newline, with the meta beside them and without, at widths from a few
+columns to the window's."
   :tags '(tty)
   (skip-unless (not noninteractive))
   (should (agentpane--motion-window))
@@ -375,7 +376,8 @@ meta beside them and without, at widths from a few columns to the window's."
                                     '(1 10 30 60 70 75 76 77 78 79 80 200 1000))
                             (list wide (concat "rg -n " wide) hebrew (concat "echo " hebrew)
                                   (propertize (concat "Thinking about\t" words)
-                                              'face 'agentpane-thinking))))
+                                              'face 'agentpane-thinking)
+                                  (concat "abc\ndef " words))))
          (head (concat (propertize "✓" 'face 'agentpane-tool-ok) " "
                        (propertize "Bash" 'face 'agentpane-tool) " "))
          (tail (propertize " · claude-opus-5 · 49k tok" 'face 'agentpane-dim))
@@ -390,7 +392,7 @@ meta beside them and without, at widths from a few columns to the window's."
               (let ((motion (agentpane--fit-header head summary tail))
                     (search (cl-letf (((symbol-function 'agentpane--motion-window) #'ignore))
                               (agentpane--fit-header head summary tail))))
-                (unless (equal motion search)
+                (unless (equal-including-properties motion search)
                   (push (list width summary tail motion search) mismatches))))))))
     (should-not mismatches)))
 

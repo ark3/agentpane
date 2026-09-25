@@ -792,9 +792,11 @@ does, and measures pure pixel columns: no `line-prefix' or line numbers
 ahead of the text, which the motion counts, no `word-wrap', which ends the
 screen line at an earlier space, and no bidi reordering, which would break
 the tie between a position and a column in right-to-left text.
-A tab's width depends on its column, which SUFFIX laid out ahead shifts,
-so a SUMMARY holding one is cut by the search instead."
-  (if (string-search "\t" summary)
+A SUMMARY holding a tab or a newline is cut by the search instead.  A
+tab's width depends on its column, which SUFFIX laid out ahead shifts;
+and `string-pixel-width' measures the widest line of a string, where the
+motion stops at the end of the first."
+  (if (string-match-p "[\t\n]" summary)
       (agentpane--cut-by-search fits summary suffix)
     (let* ((buffer (current-buffer))
            (cut (with-work-buffer
