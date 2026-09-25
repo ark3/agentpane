@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # The Emacs helper drops a sessions/detach or sessions/close that names a ref older than the last one it told Emacs
@@ -27,3 +28,8 @@ If OW-danifa is still open when this card is picked up, it is the better home fo
 ## Done when
 
 A test in `src/emacs/helper.test.ts`, red first against the current helper: attach a session, deliver `renamed` and its snapshot, then send `sessions/detach` with the pre-rename ref, and assert that no further notification for that session reaches Emacs.
+
+## Close note
+
+Folded into OW-danifa, as this card's "What would fix it" asked for when OW-danifa was still open: `sessions/detach` and `sessions/close` carry the handle the buffer holds and the helper's `forget` drops the attachment under it, whatever ref it names.
+This card's done-condition test landed there as "stops on a sessions/detach by the handle, whatever ref it names" in `src/emacs/helper.test.ts`, shown red against the pre-fix helper (bb688c1 on `main`).

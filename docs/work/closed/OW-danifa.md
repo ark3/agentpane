@@ -1,6 +1,7 @@
 ---
 labels: [change, d24, emacs, emacs-native]
 blocked-by: [OW-suyinu]
+closed: done
 ---
 
 # agentpane-mode keys a transcript buffer by its handle, so a rename re-keys nothing and two buffers can never hold one session
@@ -40,3 +41,19 @@ Load-bearing: the one-attach-at-a-time and one-send-at-a-time flags (OW-yoyiya, 
 - An ert test delivers the synthesized ordering -- `session/renamed`, then the snapshot under the new ref, then the attach reply -- and the buffer ends drawn from that snapshot, holding the reply's handle and ref.
 - `agentpane-test-pi-fork-detaches-the-parent` and `agentpane-test-pi-fork-leaves-the-parent-as-it-was` stay green.
 - ert green on the Emacs the recent Emacs cards ran on, Emacs 31.1, and `bun run check` green if `src/emacs/` is touched.
+
+## Close note
+
+Landed on `main` (3825440..58d135c, plus a00d180 and the card amendment 47cd253).
+`emacs/agentpane.el` keys a transcript buffer by the handle its attach reply carried (`agentpane--handle`); `agentpane--notified-buffer` routes every notification by handle, and the buffer's ref is an attribute any notification moves (`agentpane--hold-ref`), so `session/renamed` re-keys nothing and `agentpane--rekey` is gone.
+Before the reply a handle-less buffer is found by its ref, taking the handle from the first notification it gets, and in the helper's synthesized ordering from the `session/renamed` whose `from` is its ref: that event is the only link from the asked-for ref to the handle before the reply, so OW-mofuho must give that snapshot another route when it retires the event.
+A snapshot under a handle no buffer holds moves a buffer holding a handle at that ref onto it (server restart, re-attach elsewhere), checked before handle-less buffers.
+`agentpane--transcript-buffer` finds a buffer by a listed summary's handle first, so no second buffer opens on a live session.
+The card's premise that `agentpane--absorb` goes was wrong and was amended: an attach through one of a container's several names can answer a handle another buffer holds, so `agentpane--attached-as` still merges, then attaches again because the attach's snapshot was drawn in the killed buffer.
+A rename onto a ref a preview buffer holds no longer merges, which the adversarial read showed let the preview's kill send a ref-only `sessions/detach` that silenced the live buffer; the ownership fix, not a merge guard: `sessions/detach` and `sessions/close` carry the buffer's handle and the helper's `forget` drops by it (folding in OW-wedeli), a buffer holding no handle detaches only once it has sent an attach (`agentpane--attach-sent`), and a failed attach in the helper drops only its own pending wait.
+The Pi fork parent keeps its handle and detaches by it.
+Remaining gap recorded in the `agentpane--detach` docstring: a buffer whose attach failed in Emacs but succeeded in the helper under a handle another buffer holds still silences that one when killed.
+
+Verified: the five `agentpane-test-renamed-*` tests replaced by handle tests, each red against the ref-keyed mode or shown red by a mutant removing its branch; the regression test `renamed-onto-a-previewed-ref-leaves-the-live-buffer-attached` and `pi-fork-detaches-the-parent-by-its-handle` re-run red by the dispatching session against 84a08fe's mode; helper tests "stops on a sessions/detach by the handle, whatever ref it names" and "keeps forwarding a session Emacs attached when a second attach of its ref fails" re-run red against the pre-fix helper; `agentpane-test-pi-fork-detaches-the-parent` and `-leaves-the-parent-as-it-was` green.
+ert 99/99 on Emacs 31.1 and `bun run check` 54 files, 1414 tests, both on the branch tree, whose `src` and `emacs` match `main`'s.
+Filed: OW-gusaru (the Emacs half of OW-keleti: rename plus re-attach in one outage strands a buffer in the helper) and OW-jofodu (the helper's pending attaches keyed by ref, not by request).
