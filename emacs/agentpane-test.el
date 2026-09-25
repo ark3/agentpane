@@ -333,6 +333,17 @@ index is pushed onto `drawn', which BODY sees."
   (mapcar (lambda (data) (plist-get data :index))
           (ewoc-collect agentpane--ewoc (lambda (_) t))))
 
+(defun agentpane-test--redraw (buffer)
+  "Run, in order, the pending timers that draw the nodes BUFFER recorded,
+as the command loop runs them once the notifications before them are
+handled; see `agentpane--record'."
+  (dolist (timer (seq-filter (lambda (timer)
+                               (and (eq (timer--function timer) #'agentpane--draw-recorded)
+                                    (equal (timer--args timer) (list buffer))))
+                             timer-list))
+    (cancel-timer timer)
+    (apply (timer--function timer) (timer--args timer))))
+
 (defun agentpane-test--assistant (index html)
   "An assistant node at INDEX whose one text part renders as HTML."
   (list :index index :role "assistant"
@@ -346,6 +357,7 @@ index is pushed onto `drawn', which BODY sees."
       (agentpane--on-notification
        nil 'session/node
        (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+      (agentpane-test--redraw buffer)
       (should (equal drawn '(1)))
       (should (equal (agentpane-test--indices) '(0 1)))
       (should (string-search "Done now." (buffer-string)))
@@ -362,11 +374,85 @@ the last, above the prompt region."
       (agentpane--on-notification
        nil 'session/node
        (list :session ref :node (agentpane-test--assistant 3 "<p>Appended.</p>")))
+      (agentpane-test--redraw buffer)
       (should (equal drawn '(3)))
       (should (equal (agentpane-test--indices) '(0 1 3)))
       (should (< (agentpane-test--position "Looking.")
                  (agentpane-test--position "Appended.")
                  (agentpane-test--position "── prompt"))))))
+
+(ert-deftest agentpane-test-node-backlog-redraws-once ()
+  "Several `session/node's for one index, handled before any timer runs, as
+a backlog's are, draw that node once, with the last one's content
+\(OW-tujezi)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (dolist (html '("<p>Draft one.</p>" "<p>Draft two.</p>" "<p>Done now.</p>"))
+        (agentpane--on-notification
+         nil 'session/node (list :session ref :node (agentpane-test--assistant 1 html))))
+      (agentpane-test--redraw buffer)
+      (should (equal drawn '(1)))
+      (should (string-search "Done now." (buffer-string)))
+      (should-not (string-search "Draft" (buffer-string))))))
+
+(ert-deftest agentpane-test-node-backlog-appends-in-arrival-order ()
+  "Nodes at new indices in a backlog are appended in the order each index
+first arrived, each drawn once however often it came."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (dolist (node (list (agentpane-test--assistant 4 "<p>Four.</p>")
+                          (agentpane-test--assistant 3 "<p>Three.</p>")
+                          (agentpane-test--assistant 4 "<p>Four again.</p>")))
+        (agentpane--on-notification nil 'session/node (list :session ref :node node)))
+      (agentpane-test--redraw buffer)
+      (should (equal drawn '(3 4)))
+      (should (equal (agentpane-test--indices) '(0 1 4 3)))
+      (should (string-search "Four again." (buffer-string))))))
+
+(ert-deftest agentpane-test-status-finds-the-recorded-node-drawn ()
+  "A `session/status' arriving after a `session/node' not yet drawn draws it
+before the status is applied, so the order `agentpane--set-status' relies
+on is kept, and the redraw scheduled for it then draws nothing more."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (seen nil))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+      (let ((set-status (symbol-function 'agentpane--set-status)))
+        (cl-letf (((symbol-function 'agentpane--set-status)
+                   (lambda (params)
+                     (setq seen (string-search "Done now." (buffer-string)))
+                     (funcall set-status params))))
+          (agentpane--on-notification
+           nil 'session/status (list :session ref :isStreaming :json-false))))
+      (should seen)
+      (agentpane-test--redraw buffer)
+      (should (equal drawn '(1))))))
+
+(ert-deftest agentpane-test-snapshot-discards-the-recorded-node ()
+  "A `session/snapshot' after a `session/node' not yet drawn supersedes it:
+the snapshot's nodes are drawn and the recorded one never is."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Stale.</p>")))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes))
+      (agentpane-test--redraw buffer)
+      (should (equal drawn '(1 0)))
+      (should-not (string-search "Stale." (buffer-string))))))
+
+(ert-deftest agentpane-test-recorded-node-dies-with-its-buffer ()
+  "A `session/node' recorded for a buffer killed before its redraw runs is
+never drawn, and the redraw raises nothing."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 1 "<p>Done now.</p>")))
+      (kill-buffer buffer)
+      (agentpane-test--redraw buffer)
+      (should-not drawn))))
 
 (ert-deftest agentpane-test-notice-is-its-own-node ()
   "A `session/notice' appends a notice node above the prompt region, drawn
@@ -523,10 +609,12 @@ and the node it follows, no longer the last, is redrawn with its own."
       (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
+      (agentpane-test--redraw buffer)
       (should (string-search "· haiku" (buffer-string)))
       (should-not (string-search "— luna" (buffer-string)))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+      (agentpane-test--redraw buffer)
       (should (= 1 (count-matches "^— luna" (point-min) (point-max))))
       (should (< (agentpane-test--position "Three.")
                  (agentpane-test--position "— luna")
@@ -563,9 +651,11 @@ result on the node it follows as `ok', since that is no longer the last."
       (agentpane--on-notification nil 'session/status (list :session ref :isStreaming t))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--running-tool 3 "sleep 60")))
+      (agentpane-test--redraw buffer)
       (should (string-search "◔ Bash" (agentpane-test--line-at "sleep 60")))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 5 "<p>Five.</p>")))
+      (agentpane-test--redraw buffer)
       (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60"))))))
 
 (ert-deftest agentpane-test-pending-turn-keeps-its-warning ()
@@ -640,6 +730,7 @@ one draws it, stays attached, and hears the session under its handle."
           (agentpane--on-notification
            nil 'session/node (list :session canonical :handle "h1"
                                    :node (agentpane-test--assistant 4 "<p>Live.</p>")))
+          (agentpane-test--redraw live)
           (with-current-buffer live
             (should (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(4)))))))))
@@ -784,6 +875,7 @@ previewing the same ref, and what follows under the new handle reaches it."
         (agentpane--on-notification
          nil 'session/node (list :session ref :handle "h2"
                                  :node (agentpane-test--assistant 5 "<p>Next.</p>")))
+        (agentpane-test--redraw live)
         (with-current-buffer live
           (should (equal agentpane--handle "h2"))
           (should (equal (agentpane-test--indices) '(3 5))))
@@ -1139,6 +1231,7 @@ arrived while it was being typed."
       (agentpane--on-notification
        nil 'session/node
        (list :session ref :node (agentpane-test--assistant 1 "<p>Streaming more.</p>")))
+      (agentpane-test--redraw buffer)
       (undo-boundary)
       (let ((last-command nil)) (undo))
       (should (string-search "Streaming more." (buffer-string)))
@@ -1160,7 +1253,8 @@ a node redraw that changed the buffer's size between the presses."
                 (agentpane--on-notification
                  nil 'session/node
                  (list :session '(:backend "codex" :id "t1")
-                       :node (agentpane-test--assistant 1 text))))))
+                       :node (agentpane-test--assistant 1 text)))
+                (agentpane-test--redraw (current-buffer)))))
     (agentpane-test--with-session ref
       (buffer-enable-undo)
       (setq last-command nil)
@@ -1203,6 +1297,7 @@ Undo inhibits read-only, so a stale position edits a node's text."
          (list :session ref
                :node (agentpane-test--assistant
                       1 (concat "<p>" (string-join (make-list 40 "streaming") " ") "</p>"))))
+        (agentpane-test--redraw buffer)
         (let ((nodes (buffer-substring-no-properties (point-min) agentpane--prompt-start)))
           (agentpane-test--command 'undo)
           (should (equal (buffer-substring-no-properties (point-min) agentpane--prompt-start)
@@ -1233,6 +1328,7 @@ another buffer, since `pending-undo-list' is global."
             (agentpane--on-notification
              nil 'session/node
              (list :session ref :node (agentpane-test--assistant 1 "<p>Redrawn.</p>")))
+            (agentpane-test--redraw buffer)
             (with-current-buffer notes
               (agentpane-test--command 'undo)
               (should (equal (buffer-string) "aa ")))))
@@ -1436,6 +1532,7 @@ once the turn's text arrives or the streaming ends."
       (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (funcall running "Read" "app.ts")))
+      (agentpane-test--redraw buffer)
       (should (equal (agentpane-test--tail-status) "Read app.ts … running\n"))
       (agentpane--on-notification
        nil 'session/status (list :session ref :isStreaming :json-false))
@@ -1444,10 +1541,12 @@ once the turn's text arrives or the streaming ends."
       (should (agentpane-test--tail-status))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 2 "<p>Done.</p>")))
+      (agentpane-test--redraw buffer)
       (should-not (agentpane-test--tail-status))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (plist-put (funcall running "Bash" "again")
                                                              :index 3)))
+      (agentpane-test--redraw buffer)
       (should (equal (agentpane-test--tail-status) "Bash again … running\n"))
       (agentpane-test--press-r)
       (should-not (agentpane-test--tail-status)))))
@@ -1496,6 +1595,7 @@ shows.  A session with no nodes never shows it."
       (should (agentpane-test--hiding-p))
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (agentpane-test--assistant 4 "<p>Done.</p>")))
+      (agentpane-test--redraw buffer)
       (should-not (agentpane-test--hiding-p))
       (agentpane--on-notification
        nil 'session/snapshot

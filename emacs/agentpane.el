@@ -74,10 +74,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-24) ends, after one "passed" line
+;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" line
 ;; per test, with a line beginning
 ;;
-;;     Ran 92 tests, 92 results as expected, 0 unexpected
+;;     Ran 107 tests, 107 results as expected, 0 unexpected
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -403,7 +403,11 @@ session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
 helper sends none (OW-mofuho).  A buffer's name never carries the ref
 \(OW-mikayi), and neither does its composer's.  A notification no buffer
-is found for is dropped."
+is found for is dropped.
+A `session/node' is recorded rather than drawn; see `agentpane--record'.
+Every other notification but a snapshot, whose redraw discards what is
+recorded, draws what is recorded first, so it finds the buffer as it
+would have had each node been drawn on arrival."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
     (let ((buffer (agentpane--notified-buffer method params)))
@@ -412,6 +416,8 @@ is found for is dropped."
           (when (plist-get params :handle)
             (setq agentpane--handle (plist-get params :handle)))
           (agentpane--hold-ref (plist-get params :session))
+          (unless (memq method '(session/node session/snapshot))
+            (agentpane--draw-recorded buffer))
           (pcase method
             ('session/snapshot
              (agentpane--set-status params)
@@ -422,7 +428,7 @@ is found for is dropped."
                                  (plist-get params :notices)
                                  (plist-get params :error)
                                  (plist-get params :requests)))))
-            ('session/node (agentpane--upsert (plist-get params :node)))
+            ('session/node (agentpane--record (plist-get params :node)))
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--upsert (list :error (plist-get params :message))))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
@@ -618,6 +624,11 @@ list rows their hanging indent."
   "The index of the last node drawn, the one a streaming turn is filling.
 Kept apart from the ewoc because a snapshot draws its nodes one at a time,
 and each would otherwise be the last while it is drawn.")
+
+(defvar-local agentpane--recorded nil
+  "The nodes `session/node' brought that are not yet drawn, as an alist from
+index to the latest node at it, the index that first arrived last; see
+`agentpane--record'.")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
@@ -1148,8 +1159,10 @@ REQUESTS, the turn error, notices and pending requests a `session/snapshot'
 carries, are drawn after NODES in that order, as an `(:error MESSAGE)'
 node, `(:notice NOTICE)' nodes and `(:request REQUEST)' nodes, so a
 snapshot keeps what the server still holds for the session, including what
-arrived before this buffer was attached (OW-bipume).  Point goes to the
-first node."
+arrived before this buffer was attached (OW-bipume).  Nodes recorded and
+not yet drawn are discarded, since NODES supersede them.  Point goes to
+the first node."
+  (setq agentpane--recorded nil)
   (agentpane--above-prompt
    (lambda ()
      (delete-region (point-min) agentpane--prompt-separator)
@@ -1212,6 +1225,37 @@ turn and no longer is."
        (when previous
          (ewoc-invalidate agentpane--ewoc previous))))
     (agentpane--show-reading-tail)))
+
+(defun agentpane--record (node)
+  "Record NODE, a `session/node''s, as the latest at its index, to be drawn
+by `agentpane--draw-recorded' from a zero-delay timer.
+A node carries its whole message, and drawing it draws all of it again,
+text through shr and every fold header fitted: 2-6ms in batch Emacs for
+nodes of 2,600-8,300 characters, and about twice that in a graphical
+frame (measured 2026-09-25).  So a node superseded before it is drawn is
+not drawn at all, and a backlog costs one redraw per index however many
+nodes it holds.  jsonrpc.el parses every message in a chunk of output at
+once and runs each one's handler from a timer of its own, all at one time,
+and a timer started from one of those handlers, for a time after it, runs
+after the rest: on Emacs 31.1 with jsonrpc.el 1.0.29, six notifications
+written at once reached one process-filter call, and the timer the first
+one's handler started ran after all six (measured 2026-09-25;
+docs/MANUAL_TESTING.md, OW-tujezi).
+An index recorded for the first time is drawn after those recorded before
+it, as it would have been appended on arrival."
+  (unless agentpane--recorded
+    (run-at-time 0 nil #'agentpane--draw-recorded (current-buffer)))
+  (setf (alist-get (plist-get node :index) agentpane--recorded) node))
+
+(defun agentpane--draw-recorded (buffer)
+  "Draw the nodes BUFFER recorded, if it is still live, each once, and
+forget them; see `agentpane--record'."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((recorded (reverse agentpane--recorded)))
+        (setq agentpane--recorded nil)
+        (pcase-dolist (`(,_ . ,node) recorded)
+          (agentpane--upsert node))))))
 
 (defun agentpane--drop-request (request-id)
   "Drop the `(:request REQUEST)' node drawn for REQUEST-ID, if there is one.
