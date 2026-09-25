@@ -1055,6 +1055,18 @@ describe("a container keyed by a handle", () => {
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 	const handleOf = (ref: SessionRef) => sessions.summaryOf(ref)?.handle;
 
+	// A browser tab and the Emacs helper outlive a server restart, and key their
+	// live views by the handle (OW-kimaya), so a second process's first handle
+	// must not be the first process's.
+	it("mints a first handle no other manager mints, as a restarted server's would be", () => {
+		const restarted = new SessionManager({ index, adapters: { pi } }, new Broadcaster());
+		const before = handleOf(sessions.createVirtual(WORKSPACE, "pi"));
+		const after = restarted.summaryOf(restarted.createVirtual(WORKSPACE, "pi"))?.handle;
+		expect(before).toEqual(expect.any(String));
+		expect(after).toEqual(expect.any(String));
+		expect(after).not.toBe(before);
+	});
+
 	it("is reachable by all three names after two renames, and holds one handle throughout", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);

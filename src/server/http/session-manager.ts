@@ -66,8 +66,8 @@ export class EffortNotOfferedError extends Error {
 interface ManagedSession {
 	/**
 	 * What the table is keyed by: minted when the container comes into being
-	 * (`#container`) and never changed, opaque, and unique for the server's
-	 * lifetime (D24, OW-suyinu). It rides `SessionSummary` and every
+	 * (`#container`) and never changed, opaque, and unique across server
+	 * processes, not only within one (D24, OW-suyinu, OW-kimaya). It rides `SessionSummary` and every
 	 * per-session event beside `ref`, and a rename leaves it where it is, so
 	 * anything keyed by it -- here, in the broadcaster, or in a client -- has
 	 * nothing to re-key. A fork is another conversation and another container,
@@ -269,6 +269,8 @@ export class SessionManager {
 	readonly #now: () => string;
 	/** The last handle minted; see `#container`. */
 	#minted = 0;
+	/** What makes this manager's handles its own; see `#container`. */
+	readonly #handlePrefix = crypto.randomUUID();
 	/**
 	 * Every startup in flight, under the key its attach asked for, from that
 	 * attach until it settles: what `disposeAll()` walks to reach an adapter
@@ -329,6 +331,13 @@ export class SessionManager {
 	 * A new container, with a freshly minted handle and `ref` as its one name.
 	 * The handle comes from a counter of the manager's own: `deps.newId` mints
 	 * `virtual:` ids, and a test may pin it to one constant.
+	 *
+	 * The counter alone is unique only within this process, and the handle is
+	 * held past it: a browser tab and the Emacs helper outlive a restart, keep
+	 * their live views keyed by the handle, and take a snapshot under one they
+	 * already hold as that session's (OW-kimaya). A restarted server's `h1`
+	 * would land on the old process's `h1`. So every handle carries a prefix
+	 * drawn at random for this manager.
 	 */
 	#container(
 		ref: SessionRef,
@@ -336,7 +345,7 @@ export class SessionManager {
 			Partial<Pick<ManagedSession, "model" | "stored">>,
 	): ManagedSession {
 		return {
-			handle: `h${++this.#minted}`,
+			handle: `${this.#handlePrefix}:${++this.#minted}`,
 			ref,
 			names: new Set([sessionKey(ref)]),
 			...init,

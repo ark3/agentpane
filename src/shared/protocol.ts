@@ -98,8 +98,8 @@ export interface SessionSummary {
 	onDisk: boolean;
 	/**
 	 * The name the server gave the live session holding this conversation (D24,
-	 * OW-suyinu): opaque, unique for the server's lifetime, and never changed by
-	 * a rename, which is what `ref` does. Present for a session the server
+	 * OW-suyinu): opaque, never minted twice, even by a restarted server, and
+	 * never changed by a rename, which is what `ref` does. Present for a session the server
 	 * holds, virtual or attached; absent for one only the backend's store knows.
 	 * Every per-session `ServerEvent` carries the same string. A Pi fork is
 	 * another conversation and gets another handle; the parent's is gone.
