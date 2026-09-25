@@ -909,7 +909,9 @@ It orders admission only.
 The guards the adapters own stay: Claude Code's `turnActive`, Codex's `interruptedTurnId` (OW-pefawi) and compaction guard, Pi's `settingModel`, each closing a window that ends on a backend event a queue of requests cannot see; with one `setModel` at a time Pi's boolean is exactly sufficient, which OW-woyifu says a counter alone would not be.
 It does not dedupe: the clients' one-prompt-at-a-time guards stay as the double-press rule.
 Close and shutdown are not queued; `#disposing`, `torndown` and `#terminate` are their order.
-Whether `abort` joins is the one question the card leaves to the executor, since a second abort ahead of a fork must stay harmless (OW-relehi).
+OW-sewewe landed it, and `abort` stays out: it must reach a running turn, which is never queued, so queued it could only wait behind a settings call, a fork or a Pi compaction, and out it keeps the second abort ahead of a Pi fork harmless (OW-relehi).
+`listForkPoints`, a read, and `attach`, which creates the adapter the queue sits on, stay out too; `#serially`'s docblock in `src/server/http/session-manager.ts` gives each reason.
+Two costs the queue brings are filed rather than guarded: on Pi a verb queued behind a compaction waits for it, since `pi 0.84.2` answers `compact` after `compaction_end` (OW-jileku), and a verb sent on a Pi parent's ref and queued behind its fork runs on the fork until OW-suyinu gives the fork its own container.
 
 **Hydrate: replace, while the live stream keeps arriving.**
 `PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still drops a delta for an item that started before the attach, because that item has no slot (OW-zudase).
