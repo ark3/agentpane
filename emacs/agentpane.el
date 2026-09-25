@@ -626,8 +626,13 @@ hand it the same two strings, properties and all: on Emacs 31.1 (measured
 for it (OW-johomo).  visual-wrap offers no way in to its measure, so the
 pass runs with `string-pixel-width' bound to one that measures a string
 once and hands a later string with the same text and properties the same
-width.  Within one pass in one buffer, text and properties are all the
-width depends on, so the indent drawn is the one measuring again gives."
+width.  That is not true of strings in general: `equal-including-properties'
+does not see whether a `display' spec spanning two characters is one object
+or two copies, nor the properties inside a `display' string, and either
+changes the width.  It holds for what this pass measures, a marker matched
+fresh from its line, whose only display specs are shr's one-character
+indent and visual-wrap's `min-width', and a one-character space; so, within
+one pass in one buffer, the indent drawn is the one measuring again gives."
   (let ((dom (with-temp-buffer
                (insert html)
                (libxml-parse-html-region (point-min) (point-max))))
