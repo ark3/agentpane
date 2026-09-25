@@ -759,14 +759,10 @@ moved as far as asked.  It is nil when the window is on a frame other than
 the selected one: the width a header is fitted to and the measure it is
 checked with are the selected frame's, while the motion lays text out in
 its window's frame's fonts, so where those are wider the motion stops
-short, and the check does not catch a start that is too short.  And it
-is nil when the window is scrolled horizontally, which shifts the column
-the motion stops at by the scroll, even in a buffer the window does not
-show."
+short, and the check does not catch a start that is too short."
   (let ((window (agentpane--fit-window)))
     (and (not noninteractive)
          (eq (window-frame window) (selected-frame))
-         (zerop (window-hscroll window))
          window)))
 
 (defun agentpane--cut-by-search (fits summary suffix)
@@ -790,9 +786,10 @@ one `vertical-motion' in WINDOW and one check.
 SUFFIX is laid out ahead of PREFIX, the fold marker and the head, and then
 SUMMARY, so that one motion to WIDTH pixels stops where the summary must
 end with no measure of SUFFIX of its own.  The motion stops at the position
-closest to that pixel column, as its docstring puts it, so the start it
-finds is checked with FITS, and where it does not fit the search takes
-over below it.
+closest to that pixel column, as its docstring puts it, and a WINDOW
+scrolled horizontally moves that column right by the scroll, even in a
+buffer it does not show, so the start it finds is checked with FITS, and
+where it does not fit the search takes over below it.
 The work buffer takes this buffer's face remapping, as `string-pixel-width'
 does, and measures pure pixel columns: no `line-prefix' or line numbers
 ahead of the text, which the motion counts, no `word-wrap', which ends the

@@ -365,7 +365,7 @@ per step; and so does one whose summary is right-to-left text."
 summaries that fit, that just miss and that run to many lines, of words,
 of wide characters, of right-to-left text, and holding a tab or a
 newline, with the meta beside them and without, at widths from a few
-columns to the window's."
+columns to the window's, and with the window scrolled horizontally."
   :tags '(tty)
   (skip-unless (not noninteractive))
   (should (agentpane--motion-window))
@@ -385,15 +385,20 @@ columns to the window's."
          mismatches)
     (with-temp-buffer
       (agentpane-transcript-mode)
-      (dolist (width (list 12 30 (min 40 full) full))
-        (cl-letf (((symbol-function 'agentpane--window-width) (lambda () width)))
-          (dolist (summary summaries)
-            (dolist (tail (list nil tail))
-              (let ((motion (agentpane--fit-header head summary tail))
-                    (search (cl-letf (((symbol-function 'agentpane--motion-window) #'ignore))
-                              (agentpane--fit-header head summary tail))))
-                (unless (equal-including-properties motion search)
-                  (push (list width summary tail motion search) mismatches))))))))
+      (unwind-protect
+          (dolist (hscroll '(0 5))
+            (set-window-hscroll nil hscroll)
+            (should (agentpane--motion-window))
+            (dolist (width (list 12 30 (min 40 full) full))
+              (cl-letf (((symbol-function 'agentpane--window-width) (lambda () width)))
+                (dolist (summary summaries)
+                  (dolist (tail (list nil tail))
+                    (let ((motion (agentpane--fit-header head summary tail))
+                          (search (cl-letf (((symbol-function 'agentpane--motion-window) #'ignore))
+                                    (agentpane--fit-header head summary tail))))
+                      (unless (equal-including-properties motion search)
+                        (push (list hscroll width summary tail motion search) mismatches))))))))
+        (set-window-hscroll nil 0)))
     (should-not mismatches)))
 
 (ert-deftest agentpane-test-motion-only-on-the-selected-frame ()
