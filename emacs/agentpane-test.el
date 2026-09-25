@@ -323,6 +323,74 @@ cut short, and the step's meta on its header."
           (should (string-search "…" header))
           (should (string-search "claude-opus-5" header)))))))
 
+;;;; Hanging indents of a text part
+
+(defconst agentpane-test--wrap-html
+  "<p>A plain paragraph.</p>\n<ul>\n<li>one</li>\n<li>two<ul>\n<li>nested<ul>\n<li>deeper</li>\n</ul>\n</li>\n</ul>\n</li>\n<li>three</li>\n</ul>\n<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n<blockquote>\n<p>quoted</p>\n</blockquote>\n<p>2024 was a year.</p>\n<pre class=\"ap-code\" data-fence=\"0\"><code class=\"hljs\">- dash\n  indented</code></pre>\n"
+  "The HTML `renderMarkdown' emits for a paragraph, a bulleted list nested
+three deep, a numbered list, a quote, a paragraph opening with a number,
+and a fenced block whose lines open with a dash and with spaces.")
+
+(defun agentpane-test--wrap-layout ()
+  "Each non-empty line above the prompt as (TEXT WRAP-PREFIX DISPLAYS).
+WRAP-PREFIX is the line's `wrap-prefix', a string given as its
+`object-intervals'; DISPLAYS are the line's `display' runs, as (FROM TO
+DISPLAY) from the line's start."
+  (let (lines)
+    (goto-char (point-min))
+    (while (< (point) agentpane--prompt-separator)
+      (let ((line (buffer-substring (point) (pos-eol)))
+            (prefix (get-text-property (point) 'wrap-prefix)))
+        (unless (string-empty-p line)
+          (push (list (substring-no-properties line)
+                      (if (stringp prefix) (object-intervals prefix) prefix)
+                      (seq-keep (pcase-lambda (`(,from ,to ,props))
+                                  (when-let* ((display (plist-get props 'display)))
+                                    (list from to display)))
+                                (object-intervals line)))
+                lines)))
+      (forward-line 1))
+    (nreverse lines)))
+
+(ert-deftest agentpane-test-text-part-hanging-indents ()
+  "A drawn text part's list rows, and any line opening with a number or a dash,
+carry visual-wrap's hanging indent, a `wrap-prefix' aligned past the marker
+and a `min-width' on the marker; an indented line's prefix is its own
+indentation, and a plain line has none.  Batch Emacs measures in columns,
+so the widths here are the marker's column counts."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     (vector (list :index 1 :role "assistant"
+                   :parts (vector (list :type "text" :text "" :html agentpane-test--wrap-html)))))
+    (should
+     (equal
+      (agentpane-test--wrap-layout)
+      '(("A plain paragraph." nil nil)
+        ("* one" (space :align-to (2 . width))
+         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        ("* two" (space :align-to (2 . width))
+         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        (" * nested" (space :align-to (4 . width))
+         ((0 1 ((min-width ((4 . width))) (space :width (2.0 . width))))
+          (1 2 (min-width ((4 . width)))) (2 3 (min-width ((4 . width))))))
+        (" * deeper" (space :align-to (6 . width))
+         ((0 1 ((min-width ((6 . width))) (space :width (4.0 . width))))
+          (1 2 (min-width ((6 . width)))) (2 3 (min-width ((6 . width))))))
+        ("* three" (space :align-to (2 . width))
+         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        ("1 first" (space :align-to (2 . width))
+         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        ("2 second" (space :align-to (2 . width))
+         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        (" quoted"
+         ((0 1 (face nil shr-prefix-length 1 display (space :width (4.0 . width)))))
+         ((0 1 (space :width (4.0 . width)))))
+        ("2024 was a year." (space :align-to (5 . width))
+         ((0 1 (min-width ((5 . width)))) (1 5 (min-width ((5 . width))))))
+        ("- dash" (space :align-to (2 . width)) ((0 2 (min-width ((2 . width))))))
+        ("  indented" ((0 2 (face (agentpane-code agentpane-code-block)))) nil))))))
+
 ;;;; Fold headers in a frame that lays out text, run in a tty Emacs
 
 ;; `vertical-motion' does not move in batch Emacs, as measured on Emacs 31.1
