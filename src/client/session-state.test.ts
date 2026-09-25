@@ -10,6 +10,8 @@ import {
 	handleOf,
 	initialClientState,
 	reduceServerEvent,
+	replaceSessionSummaries,
+	viewOf,
 	type ClientState,
 } from "./session-state.ts";
 
@@ -203,6 +205,44 @@ describe("client session state", () => {
 		expect(result.state.summaries.map((item) => item.ref)).toEqual([newRef, other]);
 		expect(Object.keys(result.state.sessions)).toEqual([h(oldRef)]);
 		expect(result.state.sessions[h(oldRef)]).toMatchObject({ ref: newRef, seq: 7 });
+	});
+
+	// The server maps a name to at most one handle, so a snapshot introducing a
+	// ref under a new handle means the old handle's session is gone: here,
+	// while this tab's stream was down, another client detached R and attached
+	// it again, and the server minted h2 for it (D24).
+	it("keeps one live view per ref: a snapshot under a new handle drops the view another handle held for that ref", () => {
+		const held = { ...stateAtSequence(ref, 3), summaries: [{ ...summary(ref), handle: "h1" }] };
+		const underH1 = { ...held, sessions: { h1: held.sessions[h(ref)]! } };
+		const opened = reduceServerEvent(underH1, {
+			type: "snapshot",
+			session: ref,
+			handle: "h2",
+			seq: 0,
+			messages: [userMessage("before"), userMessage("after the re-attach")],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+			effort: null,
+			unrestoredModel: null,
+			error: null,
+			requests: [],
+			notices: [],
+		}).state;
+		// The re-list lists R attached under h2, so it evicts nothing.
+		const relisted = replaceSessionSummaries(opened, [{ ...summary(ref), handle: "h2" }], opened.sessions);
+
+		expect(Object.keys(relisted.sessions)).toEqual(["h2"]);
+		expect(handleOf(relisted, ref)).toBe("h2");
+		const streamed = reduceServerEvent(relisted, {
+			type: "upsert",
+			session: ref,
+			handle: "h2",
+			seq: 1,
+			index: 2,
+			message: userMessage("streamed"),
+		}).state;
+		expect(viewOf(streamed, ref)?.messages).toEqual([userMessage("before"), userMessage("after the re-attach"), userMessage("streamed")]);
 	});
 
 	it("moves nothing on renamed, which names the handle every view is already keyed by", () => {

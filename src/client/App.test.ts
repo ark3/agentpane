@@ -1528,6 +1528,38 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(50);
 	});
 
+	it("carries the selected session's per-tab state onto the new handle a re-attach elsewhere gave its ref (OW-kimaya)", async () => {
+		// Another client detached and attached this session again, and the server
+		// minted a new handle for it; the reducer keeps one view per ref, so the
+		// view moves from h1 to h2 under the same selection.
+		const messages = [user("question"), assistant([{ type: "text", text: "answer" }])];
+		const under = (handle: string) => state({
+			selected: piSession,
+			summaries: [summary(piSession, "P", { handle })],
+			sessions: { [handle]: { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] } },
+		});
+		const controller = new FakeController(view({ state: under("h1") }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+
+		controller.publish(view({ state: under("h2") }));
+		await tick();
+		expect(el.scrollTop).toBe(50);
+
+		const away = { ...under("h2"), selected: codexSession, summaries: [...under("h2").summaries, summary(codexSession)] };
+		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
+		controller.publish(view({ state: away }));
+		await tick();
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		controller.publish(view({ state: under("h2") }));
+		await tick();
+		expect(el.scrollTop).toBe(50);
+	});
+
 	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true (D2: cross-event ordering is not guaranteed)", async () => {
 		const old = user("old message");
 		const sessions = {

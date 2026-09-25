@@ -157,6 +157,19 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (state === before) return;
 
 		const { handle } = event;
+		// A ref names one live session, and a snapshot is what introduces one
+		// under a new handle -- a restarted server's, or the one another
+		// client's re-attach minted -- after which the reducer holds no other
+		// view of that ref. An attachment Emacs knows by that ref follows it,
+		// as it did when this set was keyed by ref.
+		if (event.type === "snapshot" && !attached.has(handle)) {
+			const key = sessionKey(event.session);
+			const held = [...attached].find(([, told]) => told === key);
+			if (held !== undefined) {
+				attached.delete(held[0]);
+				attached.set(handle, key);
+			}
+		}
 		if (!isAttached(handle, event.session, event.session)) return;
 		const view = state.sessions[handle]!;
 		switch (event.type) {

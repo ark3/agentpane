@@ -190,6 +190,27 @@ function followRef(state: ClientState, handle: string, previous: SessionView | u
 	};
 }
 
+/**
+ * A ref names at most one live session: the server maps each name to one
+ * handle (`#names` in `session-manager.ts`), so a snapshot introducing `ref`
+ * under `handle` means any other handle this client holds for it names a
+ * session the server has let go -- detached and attached again by another
+ * client, say, with a new handle minted, while this tab's stream was down or
+ * before its re-list. That view is dropped here, at the one arm that
+ * introduces views, which owns the rule; it is not a guard at a read site.
+ * Left standing, `handleOf` answered the old handle and the pane showed a
+ * frozen transcript while the new one's upserts landed unseen (OW-kimaya).
+ */
+function withoutOtherViewsOf(state: ClientState, ref: SessionRef, handle: string): ClientState {
+	let sessions: Record<string, SessionView> | undefined;
+	for (const [other, view] of Object.entries(state.sessions)) {
+		if (other === handle || !sameRef(view.ref, ref)) continue;
+		sessions ??= { ...state.sessions };
+		delete sessions[other];
+	}
+	return sessions === undefined ? state : { ...state, sessions };
+}
+
 /** Clear a session's persisted turn error, e.g. after the next prompt succeeds (OW-31). */
 export function clearSessionError(state: ClientState, handle: string): ClientState {
 	const view = state.sessions[handle];
@@ -266,7 +287,9 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			requests: [...event.requests],
 			notices: [...event.notices],
 		};
-		return result(followRef(updateSession(state, event.handle, view), event.handle, previous, event.session));
+		return result(
+			followRef(updateSession(withoutOtherViewsOf(state, event.session, event.handle), event.handle, view), event.handle, previous, event.session),
+		);
 	}
 
 	// A no-op, kept only until OW-mofuho takes the event off the wire. The

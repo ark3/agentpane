@@ -375,6 +375,32 @@ describe("notifications", () => {
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/renamed", 1]);
 	});
 
+	// On main the attached set was keyed by ref, so a session Emacs had attached
+	// kept being forwarded whatever the server did under that ref. Under the
+	// handle, a snapshot introducing that ref under a new handle -- a restarted
+	// server's, or one another client's re-attach minted -- carries it over.
+	it("keeps forwarding a session Emacs attached when a snapshot brings its ref under a new handle", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "snapshot", session: pi, handle: "h-restarted", seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: pi, handle: "h-restarted", seq: 1, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(4);
+		expect(io.notifications().map((message) => [message["method"], (message["params"] as { handle?: string }).handle])).toEqual([
+			["session/snapshot", h(pi)],
+			["session/snapshot", "h-restarted"],
+			["session/status", "h-restarted"],
+		]);
+
+		// And a detach by that ref still stops it.
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi } });
+		await io.until(5);
+		source.emit({ type: "status", session: pi, handle: "h-restarted", seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications()).toHaveLength(3);
+	});
+
 	it("passes status, error and an agent request through", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
