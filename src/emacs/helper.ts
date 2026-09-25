@@ -36,7 +36,8 @@
  * OW-suyinu), taken from the raw event being answered, or from the attach
  * reply's summary for what `sessions/attach` says itself. Requests accept one
  * beside `session` and send it nowhere; `emacs/agentpane.el` sends none, so
- * `sessions/detach` and `sessions/close` find the handle from the ref. The
+ * `sessions/detach` and `sessions/close` find the handle from the ref Emacs
+ * was last told for it. The
  * wire to Emacs is still keyed by ref: `session/renamed` goes out for every
  * `renamed` under an attached handle until agentpane-mode keys by the handle
  * (OW-danifa) and the event leaves the wire (OW-mofuho). The hand-rolled
@@ -48,7 +49,7 @@
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
-import { handleOf, initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
+import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
 import { sessionKey, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { projectTranscript, projectUpsert, type Render } from "./nodes.ts";
@@ -203,14 +204,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/**
 	 * Stop telling Emacs about the session `session` names. It sends a ref and
 	 * no handle, which resolves to the attached handle Emacs was last told that
-	 * ref for, or to the view carrying it; an attach still waiting for a handle
-	 * is dropped by the ref it asked for.
+	 * ref for; an attach still waiting for a handle is dropped by the ref it
+	 * asked for.
 	 */
 	const forget = (session: SessionRef): void => {
 		const key = sessionKey(session);
 		pending.delete(key);
-		const viewHandle = handleOf(state, session);
-		for (const [handle, told] of attached) if (told === key || handle === viewHandle) attached.delete(handle);
+		for (const [handle, told] of attached) if (told === key) attached.delete(handle);
 	};
 
 	const closeStream = (): void => {
@@ -272,7 +272,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// carried the asked-for ref -- a `renamed` from it among them -- or
 				// dropped by a `sessions/detach` sent while this attach was in
 				// flight, which a reply that lands after it must not undo.
-				if (summary.handle !== undefined && pending.delete(key)) {
+				if (pending.delete(key)) {
 					attached.set(summary.handle, sessionKey(summary.ref));
 					if (sessionKey(summary.ref) !== key) {
 						notify({ method: "session/renamed", params: { from: session, to: summary.ref, handle: summary.handle } });

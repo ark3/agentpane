@@ -570,10 +570,12 @@ export function createController(
 			try {
 				const attached = await api.attach(ref);
 				// `false` still moves the selection where it named `ref`, onto the
-				// ref the attach answers (OW-yasewo). Kept under the handle
-				// (OW-kimaya): `ref` is the gapped event's own, which the selection
-				// already follows, so the move lands on the ref that attach reports
-				// as current -- the one every later event and REST call names.
+				// ref the attach answers (OW-yasewo), and is kept under the handle
+				// (OW-kimaya). `ref` is the gapped event's own, and the reducer
+				// returns on a gap before it moves anything, so where that event is
+				// the first to carry a new ref the selection still names the old one
+				// and this moves nothing; the snapshot the attach broadcasts under
+				// the same handle moves it then, as any event with a new ref does.
 				if (!disposed) applyAttached(attached, false, ref);
 			} catch {
 				// Silent by design -- see the docblock above.

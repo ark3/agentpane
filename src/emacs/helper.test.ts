@@ -339,6 +339,21 @@ describe("notifications", () => {
 		expect(io.notifications()[2]).toMatchObject({ params: { session: pi, handle: h(virtual), isStreaming: true } });
 	});
 
+	it("stops on a sessions/detach by the ref a renamed told Emacs", async () => {
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start(attachRoutes(virtual));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
+		await io.until(3);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi } });
+		await io.until(4);
+		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed"]);
+	});
+
 	it("says the rename an attach reply reveals with no renamed event, with the snapshot it dropped, before the reply", async () => {
 		// An attach through an alias: the route answers the new ref and
 		// broadcasts only its snapshot, which lands before the reply.
