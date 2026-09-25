@@ -7,18 +7,18 @@
 		setFaviconBadge,
 		watchAbandon,
 		watchFocus,
-		watchRename,
+		watchMove,
 		watchSessions,
 		watchSubmit,
 	} from "./favicon.ts";
 	import Transcript from "./render/Transcript.svelte";
 	import { userBlocks } from "./render/types.ts";
 	import { previewMessages } from "./preview.ts";
-	import { initialClientState } from "./session-state.ts";
+	import { handleOf, initialClientState, viewOf } from "./session-state.ts";
 	import {
 		emptySessionTurnMarks,
 		foldSessionTurns,
-		renameSessionTurnMarks,
+		moveSessionTurnMarks,
 	} from "./session-turns.ts";
 	import { formatTimestamp, recency } from "./time.ts";
 
@@ -129,9 +129,9 @@
 	let promptEl = $state<HTMLTextAreaElement | undefined>();
 
 	/**
-	 * Per-session follow state (OW-27), keyed like everything else in the
-	 * client state. `anchorIndex` is the message follow-mode is tracking --
-	 * the one that was submitted -- or null when not following.
+	 * Per-session follow state (OW-27), keyed by `keyOf`. `anchorIndex` is the
+	 * message follow-mode is tracking -- the one that was submitted -- or null
+	 * when not following.
 	 */
 	interface SessionScroll {
 		/** Last scrollTop, restored when switching back to a session that is not following. */
@@ -170,6 +170,8 @@
 	/** Every live session's transition guard and retained per-row completion mark. */
 	let sessionTurnMarks = $state.raw(emptySessionTurnMarks());
 	let lastScrollKey: string | null = null;
+	/** The selection `lastScrollKey` was taken from, so a key that moves under one session is not read as a switch. */
+	let lastScrollRef: SessionRef | null = null;
 	/**
 	 * The last app-selected position awaiting native event delivery. Assignments
 	 * made before delivery coalesce to their final position in Chromium (OW-48).
@@ -195,8 +197,13 @@
 		end: ["M4 3.5 L8 7.5 L12 3.5", "M4 8.5 L8 12.5 L12 8.5"],
 	} as const;
 
-	const selectedSession = $derived(
-		view.state.selected === null ? undefined : view.state.sessions[sessionKey(view.state.selected)],
+	const selectedSession = $derived(viewOf(view.state, view.state.selected));
+	/**
+	 * Each live view's current ref -> its handle, for the session rows, which
+	 * would otherwise each scan every view and every summary (`handleOf`).
+	 */
+	const viewHandles = $derived(
+		new Map(Object.entries(view.state.sessions).map(([handle, session]) => [sessionKey(session.ref), handle])),
 	);
 	const selectedModelLabel = $derived(
 		selectedSession?.model === null || selectedSession?.model === undefined
@@ -383,14 +390,6 @@
 		const unsubscribe = controller.subscribe((next) => {
 			view = next;
 		});
-		// Re-key the local follow/scroll maps synchronously, ahead of the state
-		// publish above and thus ahead of the effects below that key off it --
-		// otherwise a session's own rename (D9: every new session gets one, at
-		// attach and possibly again on its first prompt) orphans its in-flight
-		// follow state under the old key.
-		const unsubscribeRename = controller.onRename((from, to) =>
-			rekeySession(sessionKey(from), sessionKey(to)),
-		);
 		void controller.start();
 
 		// A read-only preview polls itself, but the controller owns no DOM (OW-76),
@@ -429,7 +428,6 @@
 		return () => {
 			systemTheme.removeEventListener("change", onSystemTheme);
 			unsubscribe();
-			unsubscribeRename();
 			document.removeEventListener("visibilitychange", onTabVisibility);
 			window.removeEventListener("focus", onTabVisibility);
 			window.removeEventListener("focus", onWindowFocus);
@@ -439,15 +437,32 @@
 	});
 
 	/**
+	 * The key this tab's per-session state is held under: the session's handle
+	 * (D24), which a rename never moves, so no rename moves any of it
+	 * (OW-kimaya). A selection with no handle -- a preview of a stored session
+	 * -- keys by its ref, which is what keeps `foldSessionTurns` marking live
+	 * rows that finish while a preview is on screen.
+	 */
+	function keyOf(ref: SessionRef): string {
+		return handleOf(view.state, ref) ?? sessionKey(ref);
+	}
+
+	/** `keyOf` for a session row, through `viewHandles` rather than a scan per row. */
+	function rowKey(summary: SessionSummary): string {
+		return viewHandles.get(sessionKey(summary.ref)) ?? summary.handle ?? sessionKey(summary.ref);
+	}
+
+	/**
 	 * Move this tab's own per-session state -- follow, remembered scroll, the
 	 * badge's turn watch -- from one session key to another.
 	 *
-	 * Two things move a session's key under an in-flight turn. A `renamed` event
-	 * (D9: every new session gets one at attach, and may get another on its
-	 * first prompt), and a fork, where
-	 * Pi renames but Codex answers with a brand-new ref it renames nothing to
-	 * (OW-hezidi). Orphaning this state under the old key strands follow mode
-	 * mid-turn, which is what OW-27 was.
+	 * A rename moves nothing: it leaves the handle alone. Two things still move
+	 * a key. A fork, which on every backend is another session under another
+	 * handle (D24), so the prompt `send()` armed on the parent has to follow it
+	 * onto the fork (OW-hezidi, OW-suhoto); orphaning it on the parent strands
+	 * follow mode mid-turn, which is what OW-27 was. And a selection that stays
+	 * on one ref while its key moves, as a stored session's does from its ref to
+	 * the handle its attach gives it -- see the switch effect below.
 	 */
 	function rekeySession(fromKey: string, toKey: string): void {
 		if (fromKey === toKey) return;
@@ -462,8 +477,8 @@
 			pendingFollow.set(toKey, pending);
 		}
 		if (lastScrollKey === fromKey) lastScrollKey = toKey;
-		turnWatch = watchRename(turnWatch, fromKey, toKey);
-		sessionTurnMarks = renameSessionTurnMarks(sessionTurnMarks, fromKey, toKey);
+		turnWatch = watchMove(turnWatch, fromKey, toKey);
+		sessionTurnMarks = moveSessionTurnMarks(sessionTurnMarks, fromKey, toKey);
 	}
 
 	// jsdom is configured with rAF, but do not make this depend on it -- same
@@ -571,12 +586,12 @@
 			return;
 		}
 
-		const key = sessionKey(ref);
+		const key = keyOf(ref);
 		const state = sessionScroll.get(key);
 		if (state?.anchorIndex != null) {
 			reading = !reading;
 			await tick();
-			if (conversationEl === el && view.state.selected && sessionKey(view.state.selected) === key) {
+			if (conversationEl === el && view.state.selected && keyOf(view.state.selected) === key) {
 				// Use follow's normal frame throttle while streaming. Reconciling in
 				// this tick would replace `state.height` before Chromium delivers the
 				// shrink-generated scroll event, so the handler could mistake that
@@ -594,7 +609,7 @@
 
 		reading = !reading;
 		await tick();
-		if (conversationEl !== el || !view.state.selected || sessionKey(view.state.selected) !== key) return;
+		if (conversationEl !== el || !view.state.selected || keyOf(view.state.selected) !== key) return;
 
 		const restoredLandmark =
 			landmarkIndex === undefined
@@ -653,7 +668,7 @@
 		const el = conversationEl;
 		const ref = view.state.selected;
 		if (!el || !ref) return;
-		const state = sessionScroll.get(sessionKey(ref));
+		const state = sessionScroll.get(keyOf(ref));
 		if (state?.anchorIndex != null) {
 			const anchorEl = el.querySelector<HTMLElement>(`[data-index="${state.anchorIndex}"]`);
 			if (anchorEl) {
@@ -701,7 +716,7 @@
 		const el = conversationEl;
 		const ref = view.state.selected;
 		if (!el || !ref) return;
-		const key = sessionKey(ref);
+		const key = keyOf(ref);
 		const state = sessionScroll.get(key) ?? {
 			top: 0,
 			height: el.scrollHeight,
@@ -751,7 +766,7 @@
 			if (!node) return;
 			target = anchorTop(el, node);
 		}
-		const key = sessionKey(ref);
+		const key = keyOf(ref);
 		const state = sessionScroll.get(key) ?? {
 			top: 0,
 			height: el.scrollHeight,
@@ -781,7 +796,7 @@
 	function armFollow(from?: number): void {
 		const ref = view.state.selected;
 		if (!ref) return;
-		pendingFollow.set(sessionKey(ref), from ?? selectedSession?.messages.length ?? 0);
+		pendingFollow.set(keyOf(ref), from ?? selectedSession?.messages.length ?? 0);
 	}
 
 	/**
@@ -794,7 +809,7 @@
 	function armBadge(): void {
 		const ref = view.state.selected;
 		if (!ref) return;
-		turnWatch = watchSubmit(turnWatch, sessionKey(ref));
+		turnWatch = watchSubmit(turnWatch, keyOf(ref));
 	}
 
 	/**
@@ -814,11 +829,25 @@
 	 * it is mid-follow (submitted, then switched away before the turn ended),
 	 * re-anchors immediately against the freshly rendered DOM. A session never
 	 * opened yet has no memory, so it defaults to the bottom.
+	 *
+	 * A key that moves while the selection stays on one ref is not a switch
+	 * (OW-kimaya): a stored session attached from its preview is keyed by its
+	 * ref until the attach gives it a handle, and a detach takes it back. The
+	 * pane stays where the reader left it and the edit survives, as they did
+	 * when both were keyed by the ref; the state held under the old key moves
+	 * to the new one. A rename is not a switch either, and needs no case here:
+	 * the selection follows the ref and the handle does not move.
 	 */
 	$effect(() => {
 		const ref = view.state.selected;
-		const key = ref ? sessionKey(ref) : null;
+		const key = ref ? keyOf(ref) : null;
+		const sameRef = ref !== null && lastScrollRef !== null && sessionKey(ref) === sessionKey(lastScrollRef);
+		lastScrollRef = ref;
 		if (key === lastScrollKey) return;
+		if (sameRef && key !== null && lastScrollKey !== null) {
+			rekeySession(lastScrollKey, key);
+			return;
+		}
 		lastScrollKey = key;
 		// An edit is anchored to one transcript by index, so it cannot survive the
 		// pane moving to another one: the mark would land on an unrelated message
@@ -847,7 +876,7 @@
 	 */
 	$effect(() => {
 		const ref = view.state.selected;
-		const key = ref ? sessionKey(ref) : null;
+		const key = ref ? keyOf(ref) : null;
 		const messages = selectedSession?.messages;
 		const streaming = selectedSession?.isStreaming ?? false;
 		if (!key || !messages || key !== lastScrollKey) return;
@@ -906,7 +935,7 @@
 		for (const [key, session] of Object.entries(view.state.sessions)) {
 			streaming.set(key, session.isStreaming);
 		}
-		const selectedKey = view.state.selected === null ? null : sessionKey(view.state.selected);
+		const selectedKey = view.state.selected === null ? null : keyOf(view.state.selected);
 		sessionTurnMarks = foldSessionTurns(sessionTurnMarks, streaming, selectedKey);
 		turnWatch = watchSessions(turnWatch, streaming, document.hasFocus());
 		setFaviconBadge(turnWatch.badged);
@@ -962,7 +991,7 @@
 	}
 
 	function firstUserText(summary: SessionSummary): string {
-		for (const message of view.state.sessions[sessionKey(summary.ref)]?.messages ?? []) {
+		for (const message of view.state.sessions[rowKey(summary)]?.messages ?? []) {
 			if (message.role !== "user") continue;
 			if (typeof message.content === "string") {
 				if (message.content.trim()) return message.content.trim();
@@ -1142,39 +1171,32 @@
 		if (view.sending) return;
 		armFollow(edit?.index);
 		armBadge();
-		// Both arms above are keyed on the session as it stands now, and D9 can
-		// rename it on its first prompt -- so the key to disarm, or to re-key the
-		// fork from, is tracked through any rename that lands while the request is
-		// in flight, the way the controller tracks its own ref.
-		let armedKey = view.state.selected ? sessionKey(view.state.selected) : null;
-		const unsubscribeRename = controller.onRename((from, to) => {
-			if (armedKey === sessionKey(from)) armedKey = sessionKey(to);
-		});
+		// Both arms above are keyed on the session's handle, which a rename
+		// landing while the request is in flight (D9) leaves alone, so this is
+		// still where the arming sits when the request settles (OW-kimaya).
+		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
 			void controller.submit().then((sent) => {
-				unsubscribeRename();
 				if (!sent && armedKey) disarmSubmit(armedKey);
 			});
 			return;
 		}
 		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
-			unsubscribeRename();
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
-				// be badged about. `armedKey` has tracked any rename that landed
-				// meanwhile, so it names wherever the arming actually sits now.
+				// be badged about.
 				if (armedKey) disarmSubmit(armedKey);
 				return;
 			}
-			// No backend's fork broadcasts `renamed` (OW-suhoto), so this is where
-			// the follow armed above catches up with the ref the fork landed on --
-			// on Pi, whose live process moved onto a new file, exactly as much as on
-			// Codex, which hands back a ref nothing was renamed to. A no-op
-			// whenever the key did not move. The *landed* ref, never
+			// A fork is another session under another handle on every backend
+			// (D24) -- on Pi, whose live process moved onto a new file, exactly as
+			// much as on Codex, which hands back a ref nothing was renamed to --
+			// so this is where the follow and badge armed above move onto the
+			// fork the prompt landed on (OW-suhoto). The *landed* ref, never
 			// `state.selected`: a click mid-fork moves the selection and the
 			// controller now honours it, so reading the selection back here would
 			// move this tab's arming onto a session it never submitted to.
-			if (armedKey) rekeySession(armedKey, sessionKey(landed));
+			if (armedKey) rekeySession(armedKey, keyOf(landed));
 			if (editing === edit) editing = null;
 		});
 	}
@@ -1266,14 +1288,15 @@
 	<nav class="sessions" aria-labelledby="sessions-heading">
 		{#each filteredSummaries as summary (sessionKey(summary.ref))}
 			{@const label = sessionLabel(summary)}
+			{@const key = rowKey(summary)}
 			<!-- The summary's `isStreaming` is right only at the instant the list
 			     was read; `state.sessions` is the live map the transcript uses and
 			     is updated by every `status` event (OW-furinu). Prefer it where it
 			     has an entry. A per-row lookup deliberately, not a field on the
 			     summary: it leaves `sortedSummaries` out of the streaming path,
 			     which is OW-jineli's whole point. -->
-			{@const streaming = view.state.sessions[sessionKey(summary.ref)]?.isStreaming ?? summary.isStreaming}
-			{@const turnFinished = sessionTurnMarks.finished.has(sessionKey(summary.ref))}
+			{@const streaming = view.state.sessions[key]?.isStreaming ?? summary.isStreaming}
+			{@const turnFinished = sessionTurnMarks.finished.has(key)}
 			<button
 				type="button"
 				class="session-select"

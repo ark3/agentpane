@@ -17,7 +17,7 @@ import { render } from "@testing-library/svelte";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { flushSync, tick } from "svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sessionKey, type BackendId, type ServerEvent, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
+import { type BackendId, type ServerEvent, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 
 const { parses } = vi.hoisted(() => ({ parses: vi.fn() }));
 
@@ -49,6 +49,11 @@ const backgroundRef: SessionRef = { backend: "pi", id: "background" };
  * that hands back the same object would make the count zero for the wrong
  * reason.
  */
+/** The handle the server minted for `ref`'s live session, opaque here (D24). */
+function handleOf(ref: SessionRef): string {
+	return `h-${ref.id}`;
+}
+
 class PublishingController implements AgentpaneController {
 	private readonly listeners = new Set<(next: ControllerView) => void>();
 
@@ -61,10 +66,6 @@ class PublishingController implements AgentpaneController {
 	subscribe(listener: (next: ControllerView) => void) {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
-	}
-
-	onRename() {
-		return () => {};
 	}
 
 	publish(next: Partial<ControllerView>): void {
@@ -111,6 +112,7 @@ function summary(ref: SessionRef, updatedAt: string): SessionSummary {
 		status: "attached",
 		isStreaming: false,
 		onDisk: true,
+		handle: handleOf(ref),
 	};
 }
 
@@ -144,8 +146,8 @@ function state(selectedTurns: number): ClientState {
 		],
 		selected: selectedRef,
 		sessions: {
-			[sessionKey(selectedRef)]: session(selectedRef, transcript(selectedTurns)),
-			[sessionKey(backgroundRef)]: session(backgroundRef, []),
+			[handleOf(selectedRef)]: session(selectedRef, transcript(selectedTurns)),
+			[handleOf(backgroundRef)]: session(backgroundRef, []),
 		},
 	};
 }
@@ -174,11 +176,10 @@ function initialView(selectedTurns: number): ControllerView {
  * and rebuild the tail `Message`, a cost the real client does not pay.
  */
 function streamTen(controller: PublishingController, ref: SessionRef): number {
-	const key = sessionKey(ref);
-	const index = controller.getView().state.sessions[key]!.messages.length;
+	const index = controller.getView().state.sessions[handleOf(ref)]!.messages.length;
 	const base = assistant([], "pending");
 	let seq = 1;
-	controller.deliver({ type: "upsert", session: ref, seq: (seq += 1), index, message: base });
+	controller.deliver({ type: "upsert", session: ref, handle: handleOf(ref), seq: (seq += 1), index, message: base });
 
 	const before = parses.mock.calls.length;
 	let body = "";
@@ -187,6 +188,7 @@ function streamTen(controller: PublishingController, ref: SessionRef): number {
 		controller.deliver({
 			type: "upsert",
 			session: ref,
+			handle: handleOf(ref),
 			seq: (seq += 1),
 			index,
 			message: { ...base, content: [{ type: "text", text: body }] },

@@ -19,7 +19,8 @@
 
 /**
  * The sessions this tab is waiting on, and whether a finished turn is still
- * unseen. Keys are `sessionKey(ref)`, like everything else in the client state.
+ * unseen. Keys are the session's handle, as the client state's live views are
+ * (D24), so a rename never moves one.
  */
 export interface TurnWatch {
 	/** Session key -> whether `isStreaming` has read true since that session's submit. */
@@ -57,12 +58,12 @@ export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
 }
 
 /**
- * Carry a watched session across its rename (D9: every new session gets one at
- * attach, and may get another on its first prompt). Without this the set is
- * orphaned under the old key and the badge misses the one turn it was armed
- * for.
+ * Move a watch from the session a fork was taken from to the fork the prompt
+ * landed on, which is another session under another handle (D24). A rename
+ * needs nothing: it leaves the handle alone. Without this the watch is
+ * orphaned on the parent and the badge misses the one turn it was armed for.
  */
-export function watchRename(watch: TurnWatch, from: string, to: string): TurnWatch {
+export function watchMove(watch: TurnWatch, from: string, to: string): TurnWatch {
 	const sawStreaming = watch.waiting.get(from);
 	if (sawStreaming === undefined) return watch;
 	const waiting = new Map(watch.waiting);

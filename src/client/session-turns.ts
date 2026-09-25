@@ -2,8 +2,9 @@
  * Per-row turn completion state.
  *
  * Unlike the favicon watch, this observes every live session, whether or not
- * this tab submitted its turn. The state is pure so the transition and rename
- * rules do not depend on Svelte scheduling.
+ * this tab submitted its turn. The state is pure so the transition and move
+ * rules do not depend on Svelte scheduling. Keys are the session's handle
+ * (D24), or `sessionKey(ref)` for a selection with none.
  */
 export interface SessionTurnMarks {
 	/** The last live `isStreaming` level observed for each session. */
@@ -52,8 +53,8 @@ export function foldSessionTurns(
 	return { streaming: observed ?? marks.streaming, finished: finished ?? marks.finished };
 }
 
-/** Carry both the transition guard and any retained mark across a D9 rename. */
-export function renameSessionTurnMarks(
+/** Carry both the transition guard and any retained mark from one key to another: a fork's parent to the fork. */
+export function moveSessionTurnMarks(
 	marks: SessionTurnMarks,
 	from: string,
 	to: string,

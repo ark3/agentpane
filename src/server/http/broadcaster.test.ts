@@ -26,6 +26,7 @@ describe("framing", () => {
 		const frame = formatSseFrame({
 			type: "upsert",
 			session: REF,
+			handle: "h1",
 			seq: 1,
 			index: 0,
 			message: userMessage(text),

@@ -10,9 +10,10 @@
  * node, where `Bun.stdin` is undefined, which is why the split exists.
  *
  * What the reducer decides and what this loop decides. `reduceServerEvent`
- * applies every rule the browser learned -- re-key on `renamed`, ask for
- * recovery on a `seq` gap, ignore an event for a view it does not hold (D2)
- * -- and answers `{ state, recover, refreshSessions }` and nothing more, so
+ * applies every rule the browser learned -- key a live view by its handle and
+ * take a new ref from any event under it (D24), ask for recovery on a `seq`
+ * gap, ignore an event for a view it does not hold (D2) -- and answers
+ * `{ state, recover, refreshSessions }` and nothing more, so
  * the loop dispatches on the raw event's `type` beside that result. A `seq`
  * gap is healed the way `recover` in `$client/controller.ts` heals it: an
  * `api.attach`, after which the server broadcasts a fresh snapshot over the
@@ -23,16 +24,22 @@
  * and the REST response are unordered (D2), and it stays open. The server
  * sends an opening snapshot for every live session and broadcasts every
  * event to every client, so views Emacs never attached form in the reducer
- * too; notifications go out only for refs Emacs attached through this
- * helper and have not detached or closed since, a set kept here and
- * re-keyed on `renamed`. `sessions/changed` is unfiltered.
+ * too; notifications go out only for sessions Emacs attached through this
+ * helper and has not detached or closed since. That set is kept here by
+ * handle, like the reducer's views (OW-kimaya), so a rename moves nothing in
+ * it; an attach waits in it under the ref it asked for, since it is entered
+ * before the REST call (D2) and nothing has named a handle yet, and moves to
+ * the handle with the first event under one that carries that ref, or with
+ * the attach reply. `sessions/changed` is unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
- * OW-suyinu), which the reducer's views do not hold: it is taken from the
- * raw event being answered, or from the attach reply's summary for what
- * `sessions/attach` says itself. Requests accept one beside `session` and
- * send it nowhere. The `attached` set and the reducer stay keyed by ref
- * until the clients key by the handle (OW-kimaya, OW-danifa). The hand-rolled
+ * OW-suyinu), taken from the raw event being answered, or from the attach
+ * reply's summary for what `sessions/attach` says itself. Requests accept one
+ * beside `session` and send it nowhere; `emacs/agentpane.el` sends none, so
+ * `sessions/detach` and `sessions/close` find the handle from the ref. The
+ * wire to Emacs is still keyed by ref: `session/renamed` goes out for every
+ * `renamed` under an attached handle until agentpane-mode keys by the handle
+ * (OW-danifa) and the event leaves the wire (OW-mofuho). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
@@ -41,7 +48,7 @@
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
-import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
+import { handleOf, initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
 import { sessionKey, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { projectTranscript, projectUpsert, type Render } from "./nodes.ts";
@@ -83,7 +90,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const api = createAgentpaneApi({ fetch, openEvents: options.openEvents });
 
 	let state: ClientState = initialClientState();
-	const attached = new Set<string>();
+	/** Handle of each session Emacs has attached -> the `sessionKey` of the ref it last told Emacs, which is the one Emacs names it by. */
+	const attached = new Map<string, string>();
+	/** `sessionKey`s of attaches no event or reply has yet given a handle. */
+	const pending = new Set<string>();
 	let connection: ReturnType<typeof api.connect> | null = null;
 	let opens = 0;
 	let reconnect: ReturnType<typeof setTimeout> | undefined;
@@ -116,33 +126,45 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		});
 	};
 
+	/**
+	 * Whether Emacs attached the session `handle` names, moving a pending
+	 * attach on `ref` onto it; if so, `told` is the ref the notification about
+	 * to go out names.
+	 */
+	const isAttached = (handle: string, ref: SessionRef, told: SessionRef): boolean => {
+		if (!attached.has(handle) && !pending.delete(sessionKey(ref))) return false;
+		attached.set(handle, sessionKey(told));
+		return true;
+	};
+
 	const onEvent = (event: ServerEvent): void => {
 		const before = state;
 		const result = reduceServerEvent(before, event);
 		state = result.state;
 		if (result.refreshSessions) notify({ method: "sessions/changed" });
-		for (const ref of result.recover) api.attach(ref).catch(() => undefined);
-		if (event.type === "sessions-changed" || state === before) return;
+		for (const { ref } of result.recover) api.attach(ref).catch(() => undefined);
+		if (event.type === "sessions-changed") return;
 
+		// Before the `state === before` return below, which every `renamed`
+		// takes: the reducer's arm is a no-op, and agentpane-mode still re-keys
+		// on the notification (OW-danifa). A pending attach on the old ref moves
+		// here, as it would have been re-keyed by ref.
 		if (event.type === "renamed") {
-			const fromKey = sessionKey(event.from);
-			if (!attached.has(fromKey)) return;
-			attached.delete(fromKey);
-			attached.add(sessionKey(event.session));
+			if (!isAttached(event.handle, event.from, event.session)) return;
 			notify({ method: "session/renamed", params: { from: event.from, to: event.session, handle: event.handle } });
 			return;
 		}
+		if (state === before) return;
 
-		const key = sessionKey(event.session);
-		if (!attached.has(key)) return;
-		const view = state.sessions[key]!;
 		const { handle } = event;
+		if (!isAttached(handle, event.session, event.session)) return;
+		const view = state.sessions[handle]!;
 		switch (event.type) {
 			case "snapshot":
 				notifySnapshot(view, handle);
 				return;
 			case "upsert": {
-				const previous = before.sessions[key]!;
+				const previous = before.sessions[handle]!;
 				const node = projectUpsert(previous.messages, event.index, event.message, view.isStreaming, render);
 				notify({ method: "session/node", params: { session: view.ref, handle, node } });
 				return;
@@ -163,6 +185,19 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				notify({ method: "session/requestResolved", params: { session: view.ref, handle, requestId: event.requestId } });
 				return;
 		}
+	};
+
+	/**
+	 * Stop telling Emacs about the session `session` names. It sends a ref and
+	 * no handle, which resolves to the attached handle Emacs was last told that
+	 * ref for, or to the view carrying it; an attach still waiting for a handle
+	 * is dropped by the ref it asked for.
+	 */
+	const forget = (session: SessionRef): void => {
+		const key = sessionKey(session);
+		pending.delete(key);
+		const viewHandle = handleOf(state, session);
+		for (const [handle, told] of attached) if (told === key || handle === viewHandle) attached.delete(handle);
 	};
 
 	const closeStream = (): void => {
@@ -205,7 +240,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		"sessions/attach": async ({ session }) => {
 			openStream();
 			const key = sessionKey(session);
-			attached.add(key);
+			pending.add(key);
 			try {
 				const summary = await api.attach(session);
 				// The route's ref is authoritative and may differ from the one asked
@@ -218,22 +253,23 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// Filtered by the asked-for key, that snapshot was dropped, so the
 				// rename is said here, before the reply, with the snapshot the reducer
 				// holds for the new ref if one has arrived; one still on its way is
-				// forwarded when it does. Both carry the summary's handle, which the
-				// reducer's view does not hold. A key already gone was re-keyed by a
-				// `renamed` that did arrive, or dropped by a `sessions/detach` sent
-				// while this attach was in flight, which a reply that lands after it
-				// must not undo.
-				const next = sessionKey(summary.ref);
-				if (next !== key && attached.has(key)) {
-					attached.delete(key);
-					attached.add(next);
-					notify({ method: "session/renamed", params: { from: session, to: summary.ref, handle: summary.handle } });
-					const view = state.sessions[next];
-					if (view) notifySnapshot(view, summary.handle);
+				// forwarded when it does. Both carry the summary's handle, and the
+				// attach moves from the ref it asked for onto it. An attach no longer
+				// pending was moved already, by an event under the handle that
+				// carried the asked-for ref -- a `renamed` from it among them -- or
+				// dropped by a `sessions/detach` sent while this attach was in
+				// flight, which a reply that lands after it must not undo.
+				if (summary.handle !== undefined && pending.delete(key)) {
+					attached.set(summary.handle, sessionKey(summary.ref));
+					if (sessionKey(summary.ref) !== key) {
+						notify({ method: "session/renamed", params: { from: session, to: summary.ref, handle: summary.handle } });
+						const view = state.sessions[summary.handle];
+						if (view) notifySnapshot(view, summary.handle);
+					}
 				}
 				return summary;
 			} catch (error: unknown) {
-				attached.delete(key);
+				forget(session);
 				throw error;
 			}
 		},
@@ -252,7 +288,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/close": async ({ session }) => {
 			await api.close(session);
-			attached.delete(sessionKey(session));
+			forget(session);
 			return null;
 		},
 		"sessions/dismissError": async ({ session, message }) => {
@@ -262,7 +298,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
 		"sessions/detach": async ({ session }) => {
-			attached.delete(sessionKey(session));
+			forget(session);
 			return null;
 		},
 		"sessions/setModel": async ({ session, model }) => {

@@ -130,7 +130,6 @@ class FakeController implements AgentpaneController {
 	disposed = 0;
 	notifications = 0;
 	private listeners = new Set<(next: ControllerView) => void>();
-	private renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
 	constructor(
 		private current: ControllerView = view(),
@@ -144,16 +143,6 @@ class FakeController implements AgentpaneController {
 	subscribe(listener: (next: ControllerView) => void) {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
-	}
-
-	onRename(listener: (from: SessionRef, to: SessionRef) => void) {
-		this.renameListeners.add(listener);
-		return () => this.renameListeners.delete(listener);
-	}
-
-	/** Simulates the server's `renamed` event (D9): fires ahead of the state publish, as the real controller does. */
-	fireRename(from: SessionRef, to: SessionRef) {
-		for (const listener of this.renameListeners) listener(from, to);
 	}
 
 	async start() {
@@ -457,6 +446,7 @@ describe("App", () => {
 		const attached = reduceServerEvent(state({ selected: piSession }), {
 			type: "snapshot",
 			session: piSession,
+			handle: sessionKey(piSession),
 			seq: 1,
 			messages: [user("stored")],
 			isStreaming: false,
@@ -479,6 +469,7 @@ describe("App", () => {
 		const snapshot = (unrestoredModel: string | null) => reduceServerEvent(state({ selected: piSession }), {
 			type: "snapshot",
 			session: piSession,
+			handle: sessionKey(piSession),
 			seq: 1,
 			messages: [user("stored")],
 			isStreaming: false,
@@ -844,23 +835,27 @@ describe("App", () => {
 	});
 
 	it("labels a just-prompted session by its own first user message while the server preview is still null", async () => {
-		// The real SSE order for a first prompt on a virtual Pi session that attach
-		// left unnamed (broadcaster.ts, D9): sessions-changed, renamed, then the
-		// snapshot for the new ref. Replayed through the real reducer rather than
-		// hand-assembled, so the end state is the one the client would actually hold.
+		// A first prompt on a virtual Pi session that attach left unnamed
+		// (broadcaster.ts, D9): sessions-changed, then the snapshot for the new
+		// ref under the session's handle. The `renamed` the server sends between
+		// them is left out, as a stream that dropped it would (D21): under the
+		// handle the row finds its live view without it (D24, OW-kimaya).
+		// Replayed through the real reducer rather than hand-assembled, so the
+		// end state is the one the client would actually hold.
 		const virtualRef: SessionRef = { backend: "pi", id: "virtual:abc" };
 		const realRef: SessionRef = { backend: "pi", id: "/home/u/.pi/sessions/abc.jsonl" };
+		const handle = "h-abc";
 
 		let current = state();
 		const changed = reduceServerEvent(current, { type: "sessions-changed" });
 		expect(changed.refreshSessions).toBe(true);
 		// The refresh it asks for reads the list *before* the JSONL has the user
 		// turn, so preview comes back null -- that is the whole bug.
-		current = { ...changed.state, summaries: [summary(virtualRef, null)] };
-		current = reduceServerEvent(current, { type: "renamed", session: realRef, seq: 1, from: virtualRef }).state;
+		current = { ...changed.state, summaries: [summary(virtualRef, null, { handle })] };
 		current = reduceServerEvent(current, {
 			type: "snapshot",
 			session: realRef,
+			handle,
 			seq: 2,
 			messages: [user("Explain the crash")],
 			isStreaming: false,
@@ -1496,6 +1491,43 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(50);
 	});
 
+	it("does not read a stored session's attach from its preview as a session switch, though its key moves to the handle (OW-kimaya)", async () => {
+		const stored = [user("question"), assistant([{ type: "text", text: "answer" }])];
+		const previewing = state({ selected: piSession, summaries: [summary(piSession, "P")] });
+		const controller = new FakeController(view({ state: previewing, preview: { ref: piSession, turns: storedTurns(stored) } }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// The reader scrolls up the preview, then attaches it.
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+		const attached = state({
+			selected: piSession,
+			summaries: [summary(piSession, "P", { handle: "h-attached" })],
+			sessions: { "h-attached": { ref: piSession, messages: stored, isStreaming: false, seq: 1, error: null, requests: [] } },
+		});
+		controller.publish(view({ state: attached }));
+		await tick();
+
+		// A switch would land a session with no memory under its new key at the
+		// tail, 500.
+		expect(el.scrollTop).toBe(50);
+
+		// And what was remembered under the ref moved to the handle: away and
+		// back restores it.
+		const other = { ...attached, selected: codexSession, summaries: [...attached.summaries, summary(codexSession)] };
+		mockScrollMetrics(el, { scrollHeight: 700, clientHeight: 500 });
+		controller.publish(view({ state: other }));
+		await tick();
+		expect(el.scrollTop).toBe(200);
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		controller.publish(view({ state: attached }));
+		await tick();
+		expect(el.scrollTop).toBe(50);
+	});
+
 	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true (D2: cross-event ordering is not guaranteed)", async () => {
 		const old = user("old message");
 		const sessions = {
@@ -1558,8 +1590,9 @@ describe("App", () => {
 	it("keeps following across a virtual session's rename on its first submit (D9: when attach named none)", async () => {
 		const virtualSession: SessionRef = { backend: "pi", id: "virtual:1" };
 		const realSession: SessionRef = { backend: "pi", id: "pi-77" };
+		// One session under one handle, before the rename and after it (D24).
 		const sessions = {
-			"pi:virtual:1": { ref: virtualSession, messages: [], isStreaming: false, seq: null, error: null, requests: [] },
+			"h-1": { ref: virtualSession, messages: [], isStreaming: false, seq: null, error: null, requests: [] },
 		};
 		const controller = new FakeController(view({
 			draft: "First prompt",
@@ -1572,9 +1605,8 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		expect(controller.submitted).toBe(1);
 
-		// The server accepts the prompt and, in the same tick, renames the
-		// session (virtual -> real) before its snapshot/upsert events arrive.
-		controller.fireRename(virtualSession, realSession);
+		// The server accepts the prompt and renames the session (virtual -> real);
+		// the view under its handle, and the selection, follow the new ref.
 		const submittedMessage = user("First prompt");
 		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
 		controller.publish(view({
@@ -1582,7 +1614,7 @@ describe("App", () => {
 			state: state({
 				selected: realSession,
 				sessions: {
-					"pi:pi-77": { ref: realSession, messages: [submittedMessage], isStreaming: false, seq: 1, error: null, requests: [] },
+					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: false, seq: 1, error: null, requests: [] },
 				},
 			}),
 		}));
@@ -1590,22 +1622,23 @@ describe("App", () => {
 		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
 		mockContentTop(anchorEl, el, 5000);
 
-		// The assistant streams a reply under the new (post-rename) key.
+		// The assistant streams a reply under the new ref.
 		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
 		controller.publish(view({
 			state: state({
 				selected: realSession,
 				sessions: {
-					"pi:pi-77": { ref: realSession, messages: [submittedMessage], isStreaming: true, seq: 2, error: null, requests: [] },
+					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: true, seq: 2, error: null, requests: [] },
 				},
 			}),
 		}));
 		await tick();
 		await nextFrame();
 
-		// Follow must have engaged despite the rename -- if pendingFollow/sessionScroll
-		// were still keyed under the pre-rename "pi:virtual:1", this would read 0
-		// (jumped-and-stuck) instead of tracking to the tail.
+		// Follow must have engaged despite the rename -- keyed by the ref, the
+		// arming would sit under "pi:virtual:1" while the transcript reads
+		// "pi:pi-77", and this would read 0 (jumped-and-stuck) instead of
+		// tracking to the tail.
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
@@ -2046,7 +2079,7 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async () => summary(piSession),
+			attach: async () => summary(piSession, null, { handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async (_ref, body) => {
 				prompts.push(body.text);
@@ -2074,7 +2107,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		// The composer only replaces the Attach button once the session is live,
 		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -2293,12 +2326,12 @@ describe("App", () => {
 	 * A session holding `messages`, selected and attached, as the composer's
 	 * edit path needs one.
 	 */
-	function attachedState(messages: AgentMessage[], ref: SessionRef = piSession, isStreaming = false) {
+	function attachedState(messages: AgentMessage[], ref: SessionRef = piSession, isStreaming = false, handle = sessionKey(ref)) {
 		return state({
 			selected: ref,
-			summaries: [summary(ref, "P")],
+			summaries: [summary(ref, "P", { handle })],
 			sessions: {
-				[sessionKey(ref)]: { ref, messages, isStreaming, seq: 1, error: null, requests: [] },
+				[handle]: { ref, messages, isStreaming, seq: 1, error: null, requests: [] },
 			},
 		});
 	}
@@ -2594,7 +2627,7 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async (ref) => summary(ref),
+			attach: async (ref) => summary(ref, null, { handle: ref.id === forkRef.id ? "h-fork" : "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
@@ -2625,7 +2658,7 @@ describe("App", () => {
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+			emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			await controller.select(piSession);
 			await tick();
 
@@ -2641,7 +2674,7 @@ describe("App", () => {
 
 			// The fork's own turn, start to finish, with the tab in the background.
 			const turn = (isStreaming: boolean) =>
-				emit({ type: "snapshot", session: forkRef, seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+				emit({ type: "snapshot", session: forkRef, handle: "h-fork", seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			turn(true);
 			await tick();
 			turn(false);
@@ -2654,21 +2687,19 @@ describe("App", () => {
 		}
 	});
 
-	it("a Pi-shaped fork ends on the renamed ref with the follow and scroll maps re-keyed (OW-hezidi)", async () => {
+	it("a Pi-shaped fork ends on the fork's own handle with the follow and scroll maps moved onto it (OW-hezidi)", async () => {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-77" };
 		const controller = new FakeController(view({
-			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], piSession, false, "h-parent"),
 		}));
-		// Pi's fork moves the live process onto a new file, and the server reports
-		// that as `renamed` -- which lands while the fork request is still in flight.
-		// The real `forkAndSubmit` then attaches that ref and publishes the
-		// selection *before* it resolves, so the fake does both: the shell's own
-		// re-key reads that selection, and a fake that renames without moving it
-		// hands the shell a selection one step behind the fork (OW-mifuki).
+		// Pi's fork moves the live process onto a new file, which is a new session
+		// under a new handle and sends no `renamed` (D24, OW-suhoto). The real
+		// `forkAndSubmit` attaches the fork's ref and publishes the selection
+		// *before* it resolves, so the fake does too; the shell moves what it
+		// armed on the parent's handle onto the fork's once it resolves.
 		controller.forkResult = forkRef;
 		controller.onForkAndSubmit = () => {
-			controller.fireRename(piSession, forkRef);
-			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef) }));
+			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef, false, "h-fork") }));
 		};
 		const { container } = render(App, { props: { controller } });
 		await tick();
@@ -2678,22 +2709,22 @@ describe("App", () => {
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		expect(controller.forked).toEqual([{ index: 0, images: [] }]);
 
-		// The fork's own transcript arrives under the new key: everything before the
+		// The fork's own transcript arrives under its handle: everything before the
 		// edited message, then the edited message itself.
 		const reworded = user("reworded");
 		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
-		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef) }));
+		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef, false, "h-fork") }));
 		await tick();
 		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
 		mockContentTop(anchorEl, el, 5000);
 
 		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
-		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef, true) }));
+		controller.publish(view({ draft: "", state: attachedState([reworded], forkRef, true, "h-fork") }));
 		await tick();
 		await nextFrame();
 
-		// Keyed under "pi:pi-1" still, this reads 0 -- the fork's turn would stream
-		// off the bottom of a transcript nothing was following.
+		// Left under "h-parent", this reads 0 -- the fork's turn would stream off
+		// the bottom of a transcript nothing was following.
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 		// And the edit mode is over: the original session reads normal afterwards.
 		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
@@ -2701,11 +2732,11 @@ describe("App", () => {
 	});
 
 	/**
-	 * The Pi test above proves the `renamed` path. This one is the other half, and
-	 * the only thing that covers `send()`'s own re-key: Codex renames nothing, so
-	 * the follow armed under the parent's key before the fork has to be moved once
-	 * `forkAndSubmit` resolves, or it is stranded there -- follow never engages on
-	 * the fork, and the parent keeps a stale entry pointing at an earlier index.
+	 * The Codex half of the test above: a fork that renames nothing lands on
+	 * another session just the same, so the follow armed under the parent's key
+	 * before the fork has to be moved once `forkAndSubmit` resolves, or it is
+	 * stranded there -- follow never engages on the fork, and the parent keeps a
+	 * stale entry pointing at an earlier index.
 	 */
 	it("a Codex-shaped fork, which renames nothing, still ends following the fork's own turn (OW-hezidi)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-2" };
@@ -2960,7 +2991,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async (ref) => summary(ref),
+			attach: async (ref) => summary(ref, null, { handle: sessionKey(ref) }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
@@ -2985,7 +3016,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 	}
 
 	function opening(held: Pick<Extract<ServerEvent, { type: "snapshot" }>, "error" | "requests" | "notices">): ServerEvent {
-		return { type: "snapshot", session: piSession, seq: 4, messages: [user("hi")], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, ...held };
+		return { type: "snapshot", session: piSession, handle: sessionKey(piSession), seq: 4, messages: [user("hi")], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, ...held };
 	}
 
 	it("shows the blocked banner for a request raised before it connected, with no gesture", async () => {

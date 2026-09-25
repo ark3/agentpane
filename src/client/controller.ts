@@ -12,11 +12,14 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
 import { nextPreviewDelay, PREVIEW_POLL_FAST_MS, PREVIEW_POLL_IDLE_MS } from "./preview-poll.ts";
 import {
 	clearSessionError,
+	handleOf,
 	initialClientState,
 	reduceServerEvent,
 	replaceSessionSummaries,
 	setSessionCompaction,
+	viewOf,
 	type ClientState,
+	type Recovery,
 } from "./session-state.ts";
 
 export interface ControllerView {
@@ -80,8 +83,6 @@ export interface ControllerView {
 export interface AgentpaneController {
 	getView(): ControllerView;
 	subscribe(listener: (view: ControllerView) => void): () => void;
-	/** Fires synchronously, ahead of the state publish, when a `renamed` event arrives (D9). */
-	onRename(listener: (from: SessionRef, to: SessionRef) => void): () => void;
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
@@ -218,6 +219,12 @@ export function createController(
 	let started = false;
 	let selectionIntent = 0;
 	let modelLoadStartedForSelection: number | null = null;
+	/**
+	 * This and every per-session set and map below are keyed by the session's
+	 * handle (D24, OW-kimaya), which a rename never moves, so none of them
+	 * tracks one: the ref a request was sent on may be renamed while it is in
+	 * flight, and the handle it was keyed by still names the same session.
+	 */
 	const pendingModelSets = new Set<string>();
 	const pendingEffortSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
@@ -229,11 +236,10 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const recoveries = new Map<string, Promise<void>>();
-	/** Keys whose `detach` is between `api.close` and the live view being dropped -- see `recover` (OW-sugome). */
+	/** Handles whose `detach` is between `api.close` and the live view being dropped -- see `recover` (OW-sugome). */
 	const detaching = new Set<string>();
 	const forkPointsInFlight = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
-	const renameListeners = new Set<(from: SessionRef, to: SessionRef) => void>();
 
 	function publish(next: Partial<ControllerView>): void {
 		if (disposed) return;
@@ -258,6 +264,9 @@ export function createController(
 	}
 
 	function applyAttached(summary: SessionSummary, select: boolean, requested: SessionRef): void {
+		// By ref, not by handle: the ref asked for may have none yet -- a fork's
+		// has none until this reply puts the summary carrying it in place
+		// (OW-kimaya). The two `select: false` callers say why each keeps it.
 		const takesSelection = select ||
 			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested));
 		const selected = takesSelection ? summary.ref : view.state.selected;
@@ -303,21 +312,14 @@ export function createController(
 	 * it is the one that decides anything.
 	 */
 	function refreshForkPoints(ref: SessionRef): void {
-		let key = sessionKey(ref);
-		if (forkPointsInFlight.has(key)) return;
-		forkPointsInFlight.add(key);
-		// Track the target through a rename in flight (D9), as `submit` and
-		// `forkAndSubmit` do: a Pi fork renames the session, so a refresh that
-		// started before it would otherwise fail the selection check below and
-		// publish nothing, leaving the transcript's Edit controls drawn from the
-		// pre-fork set until the next turn boundary re-asks (OW-lizohe).
-		const onRename = (from: SessionRef, to: SessionRef) => {
-			if (sessionKey(from) !== key) return;
-			forkPointsInFlight.delete(key);
-			key = sessionKey(to);
-			forkPointsInFlight.add(key);
-		};
-		renameListeners.add(onRename);
+		// Keyed by the handle, so a rename landing while the request is in
+		// flight leaves the check below true: the selection follows the ref and
+		// still names the same handle, where a check by the click-time ref failed
+		// and published nothing (OW-lizohe). A ref with no handle is a session
+		// nothing live holds, whose points nobody draws.
+		const handle = handleOf(view.state, ref);
+		if (handle === undefined || forkPointsInFlight.has(handle)) return;
+		forkPointsInFlight.add(handle);
 		void api
 			.forkPoints(ref)
 			.then((points) => {
@@ -325,14 +327,12 @@ export function createController(
 				// Only while it is still the session on screen: a reply that lands
 				// after the user clicked away describes a transcript nobody is
 				// looking at, and the session they went to has its own refresh.
-				const selected = view.state.selected;
-				if (!selected || sessionKey(selected) !== key) return;
+				if (handleOf(view.state, view.state.selected) !== handle) return;
 				publish({ forkIndices: points.map((point) => point.index) });
 			})
 			.catch(() => {})
 			.finally(() => {
-				renameListeners.delete(onRename);
-				forkPointsInFlight.delete(key);
+				forkPointsInFlight.delete(handle);
 			});
 	}
 
@@ -343,30 +343,35 @@ export function createController(
 	}
 
 	function modelSettingForSession(ref: SessionRef | null): boolean {
-		return ref !== null && pendingModelSets.has(sessionKey(ref));
+		const handle = handleOf(view.state, ref);
+		return handle !== undefined && pendingModelSets.has(handle);
 	}
 
 	function effortSettingForSession(ref: SessionRef | null): boolean {
-		return ref !== null && pendingEffortSets.has(sessionKey(ref));
+		const handle = handleOf(view.state, ref);
+		return handle !== undefined && pendingEffortSets.has(handle);
+	}
+
+	/** Whether the selection still names the live session `handle`. */
+	function selects(handle: string): boolean {
+		return handleOf(view.state, view.state.selected) === handle;
 	}
 
 	async function loadModelsForSelected(intent: number): Promise<void> {
 		const selected = view.state.selected;
 		if (!selected) return;
-		const key = sessionKey(selected);
-		if (view.state.sessions[key]?.messages.length !== 0) return;
+		const handle = handleOf(view.state, selected);
+		if (handle === undefined || view.state.sessions[handle]?.messages.length !== 0) return;
 		if (modelLoadStartedForSelection === intent) return;
 		modelLoadStartedForSelection = intent;
 		publish({ models: [], error: null });
 		try {
 			const models = await api.listModels(selected.backend);
-			const current = view.state.selected;
-			if (!disposed && selectionIntent === intent && current && sessionKey(current) === key && view.state.sessions[key]?.messages.length === 0) {
+			if (!disposed && selectionIntent === intent && selects(handle) && view.state.sessions[handle]?.messages.length === 0) {
 				publish({ models });
 			}
 		} catch (error: unknown) {
-			const current = view.state.selected;
-			if (!disposed && selectionIntent === intent && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+			if (!disposed && selectionIntent === intent && selects(handle)) publish({ error: errorMessage(error) });
 		}
 	}
 
@@ -552,22 +557,26 @@ export function createController(
 	 * dropped the view, so the reducer has no `seq` to compare against and asks
 	 * for no recovery at all.
 	 */
-	async function recover(ref: SessionRef): Promise<void> {
-		const key = sessionKey(ref);
-		if (detaching.has(key)) return;
-		const inFlight = recoveries.get(key);
+	async function recover({ ref, handle }: Recovery): Promise<void> {
+		if (detaching.has(handle)) return;
+		const inFlight = recoveries.get(handle);
 		if (inFlight) return inFlight;
 		const request = (async () => {
 			try {
 				const attached = await api.attach(ref);
+				// `false` still moves the selection where it named `ref`, onto the
+				// ref the attach answers (OW-yasewo). Kept under the handle
+				// (OW-kimaya): `ref` is the gapped event's own, which the selection
+				// already follows, so the move lands on the ref that attach reports
+				// as current -- the one every later event and REST call names.
 				if (!disposed) applyAttached(attached, false, ref);
 			} catch {
 				// Silent by design -- see the docblock above.
 			}
 		})();
-		recoveries.set(key, request);
+		recoveries.set(handle, request);
 		void request.finally(() => {
-			if (recoveries.get(key) === request) recoveries.delete(key);
+			if (recoveries.get(handle) === request) recoveries.delete(handle);
 		});
 		return request;
 	}
@@ -611,13 +620,10 @@ export function createController(
 			// transition, and only the pair of values shows one (OW-roveze).
 			const wasStreaming =
 				event.type !== "sessions-changed" &&
-				view.state.sessions[sessionKey(event.session)]?.isStreaming === true;
+				view.state.sessions[event.handle]?.isStreaming === true;
 			const result = reduceServerEvent(view.state, event);
-			if (event.type === "renamed") {
-				for (const listener of renameListeners) listener(event.from, event.session);
-			}
 			if (result.state !== view.state) publish({ state: result.state });
-			if (event.type === "snapshot" && result.state.selected && sessionKey(result.state.selected) === sessionKey(event.session)) {
+			if (event.type === "snapshot" && selects(event.handle)) {
 				void loadModelsForSelected(selectionIntent);
 			}
 			// The two moments the forkable set moves out from under the transcript
@@ -629,13 +635,11 @@ export function createController(
 			// index held from before means anything. Only for the selected
 			// session: it is the only transcript drawing Edit controls.
 			if (event.type !== "sessions-changed") {
-				const key = sessionKey(event.session);
-				const selected = result.state.selected;
-				const isStreaming = result.state.sessions[key]?.isStreaming === true;
+				const isStreaming = result.state.sessions[event.handle]?.isStreaming === true;
 				const moved = event.type === "snapshot" || isStreaming !== wasStreaming;
-				if (moved && selected && sessionKey(selected) === key) refreshForkPoints(event.session);
+				if (moved && selects(event.handle)) refreshForkPoints(event.session);
 			}
-			for (const ref of result.recover) void recover(ref);
+			for (const recovery of result.recover) void recover(recovery);
 			if (result.refreshSessions) void refreshSessions(false);
 		},
 		/**
@@ -703,10 +707,6 @@ export function createController(
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
-		onRename(listener) {
-			renameListeners.add(listener);
-			return () => renameListeners.delete(listener);
-		},
 		refreshSessions: () => refreshSessions(true),
 		refreshPreview,
 		async start() {
@@ -730,7 +730,7 @@ export function createController(
 			const intent = ++selectionIntent;
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
-			if (view.state.sessions[sessionKey(ref)]) {
+			if (viewOf(view.state, ref)) {
 				publish({
 					state: { ...view.state, selected: ref },
 					preview: null,
@@ -780,49 +780,31 @@ export function createController(
 		},
 		async setModel(model) {
 			const selected = view.state.selected;
-			if (!selected || modelSettingForSession(selected) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
-			let key = sessionKey(selected);
-			const onRename = (from: SessionRef, to: SessionRef) => {
-				if (sessionKey(from) !== key) return;
-				pendingModelSets.delete(key);
-				key = sessionKey(to);
-				pendingModelSets.add(key);
-			};
-			renameListeners.add(onRename);
-			pendingModelSets.add(key);
+			const handle = handleOf(view.state, selected);
+			if (!selected || handle === undefined || pendingModelSets.has(handle) || view.state.sessions[handle]?.messages.length !== 0) return;
+			pendingModelSets.add(handle);
 			publish({ modelSetting: true, error: null });
 			try {
 				await api.setModel(selected, model);
 			} catch (error: unknown) {
-				const current = view.state.selected;
-				if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
-				renameListeners.delete(onRename);
-				pendingModelSets.delete(key);
+				pendingModelSets.delete(handle);
 				if (!disposed) publish({ modelSetting: modelSettingForSession(view.state.selected) });
 			}
 		},
 		async setEffort(effort) {
 			const selected = view.state.selected;
-			if (!selected || effortSettingForSession(selected) || view.state.sessions[sessionKey(selected)]?.messages.length !== 0) return;
-			let key = sessionKey(selected);
-			const onRename = (from: SessionRef, to: SessionRef) => {
-				if (sessionKey(from) !== key) return;
-				pendingEffortSets.delete(key);
-				key = sessionKey(to);
-				pendingEffortSets.add(key);
-			};
-			renameListeners.add(onRename);
-			pendingEffortSets.add(key);
+			const handle = handleOf(view.state, selected);
+			if (!selected || handle === undefined || pendingEffortSets.has(handle) || view.state.sessions[handle]?.messages.length !== 0) return;
+			pendingEffortSets.add(handle);
 			publish({ effortSetting: true, error: null });
 			try {
 				await api.setEffort(selected, effort);
 			} catch (error: unknown) {
-				const current = view.state.selected;
-				if (!disposed && current && sessionKey(current) === key) publish({ error: errorMessage(error) });
+				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
 			} finally {
-				renameListeners.delete(onRename);
-				pendingEffortSets.delete(key);
+				pendingEffortSets.delete(handle);
 				if (!disposed) publish({ effortSetting: effortSettingForSession(view.state.selected) });
 			}
 		},
@@ -840,24 +822,20 @@ export function createController(
 			if (view.sending) return false;
 			if (!view.draft) return false;
 			const text = view.draft;
-			// Track the target session through a possible rename (D9) while the
-			// request is in flight, and remember its error so success only clears
+			// The session's handle, which a rename landing while the request is in
+			// flight (D9) leaves naming it, and its error, so success only clears
 			// it if nothing new landed via SSE in the meantime -- cross-event
 			// ordering relative to the POST response is not guaranteed (D2), so a
 			// same-turn error can otherwise race in and be wiped by this same
 			// submit's own success handler.
-			let ref = selected;
-			const priorError = view.state.sessions[sessionKey(selected)]?.error ?? null;
-			const onRename = (from: SessionRef, to: SessionRef) => {
-				if (sessionKey(from) === sessionKey(ref)) ref = to;
-			};
-			renameListeners.add(onRename);
+			const handle = handleOf(view.state, selected);
+			const priorError = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
 				await api.prompt(selected, { text });
 				if (!disposed) {
-					const currentError = view.state.sessions[sessionKey(ref)]?.error ?? null;
-					const state = currentError === priorError ? clearSessionError(view.state, ref) : view.state;
+					const currentError = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
+					const state = handle !== undefined && currentError === priorError ? clearSessionError(view.state, handle) : view.state;
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
 					// The draft clears only if it is still the text that was sent: the
@@ -870,7 +848,6 @@ export function createController(
 				if (!disposed) publish({ error: errorMessage(error) });
 				return false;
 			} finally {
-				renameListeners.delete(onRename);
 				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
 		},
@@ -903,15 +880,13 @@ export function createController(
 			if (view.sending) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
-			// Same rename hazard `submit` above carries (D9): the ref this reads fork
-			// points from, and forks, is tracked through any rename in flight. The
-			// fork itself is not a second source of that -- it moves Pi's live
-			// process onto a new file, but it broadcasts no `renamed` (OW-suhoto).
-			let ref = selected;
-			const onRename = (from: SessionRef, to: SessionRef) => {
-				if (sessionKey(from) === sessionKey(ref)) ref = to;
-			};
-			renameListeners.add(onRename);
+			// The requests below go out on the click-time ref even if a rename lands
+			// meanwhile (D9), since every name a session has had resolves on the
+			// server's routes (`ManagedSession.names`, D24); what this reads of the
+			// session locally it reads through the handle, which the rename leaves
+			// alone. The fork itself is not a rename: a Pi fork is a new session
+			// under a new handle (D24, OW-suhoto).
+			const handle = handleOf(view.state, selected);
 			// Captured first, the way `refetchPreview` captures it: every await
 			// below is a window in which the user can click another session, and
 			// a fork that reaches its attach after that click must not yank the
@@ -951,13 +926,13 @@ export function createController(
 				// turn is over, so a stop mid-turn destroys the entire reply rather
 				// than racing it (home server, 2026-09-11, `claude 2.1.268`;
 				// OW-japuzo).
-				if (ref.backend === "pi" && view.state.sessions[sessionKey(ref)]?.isStreaming) await api.abort(ref);
+				if (selected.backend === "pi" && handle !== undefined && view.state.sessions[handle]?.isStreaming) await api.abort(selected);
 				if (disposed) return null;
-				const points = await api.forkPoints(ref);
+				const points = await api.forkPoints(selected);
 				if (disposed) return null;
 				const point = points.find((candidate) => candidate.index === index);
 				if (!point) throw new Error("That message is no longer a fork point in this session.");
-				const forked = await api.fork(ref, { entryId: point.id });
+				const forked = await api.fork(selected, { entryId: point.id });
 				// From here the fork exists, and every exit below up to the prompt
 				// abandons it: this `disposed` return, the one after the attach, and
 				// the `catch` on a throw from `api.attach` or `api.prompt`. That orphan
@@ -992,7 +967,9 @@ export function createController(
 				// is deliberate.
 				if (disposed) return null;
 				// The attach is one more window for a click, and it gets the same
-				// answer: the attach still lands, it just does not move the user.
+				// answer: the attach still lands, it just does not move the user --
+				// unless that click landed on the fork's own row, whose selection
+				// `applyAttached` still moves onto the live session (OW-tatebi).
 				applyAttached(attached, forkIntent === selectionIntent, forked);
 				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
@@ -1021,7 +998,6 @@ export function createController(
 				if (!disposed) publish({ error: errorMessage(error) });
 				return null;
 			} finally {
-				renameListeners.delete(onRename);
 				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
 		},
@@ -1046,14 +1022,11 @@ export function createController(
 				publish({ error: "Select a session before compacting." });
 				return;
 			}
-			// Same rename hazard `submit` above carries (D9): the reducer moves the
-			// requesting mark to the re-keyed session, so the failure path below has
-			// to clear it there, not under the click-time key -- which is gone.
-			let ref = selected;
-			const onRename = (from: SessionRef, to: SessionRef) => {
-				if (sessionKey(from) === sessionKey(ref)) ref = to;
-			};
-			renameListeners.add(onRename);
+			// Marked and cleared under the handle, which a rename landing while the
+			// request is in flight (D9) leaves naming the session that holds the
+			// mark. None before the snapshot: `setSessionCompaction` says why that
+			// marks nothing.
+			const handle = handleOf(view.state, selected);
 			// The session reads "requesting" from the click itself rather than from
 			// the server: its own "requesting" status races the POST response (D2),
 			// and the composer needs the acknowledgment either way (OW-natiha).
@@ -1062,7 +1035,7 @@ export function createController(
 			publish({
 				busy: "compacting",
 				error: null,
-				state: setSessionCompaction(view.state, selected, "requesting"),
+				state: handle === undefined ? view.state : setSessionCompaction(view.state, handle, "requesting"),
 			});
 			try {
 				await api.compact(selected);
@@ -1080,14 +1053,13 @@ export function createController(
 					// Threshold compaction is why this is narrow rather than
 					// unconditional: it enters at "running", never "requesting", so
 					// only a click-shaped mark is in scope here.
-					const current = view.state.sessions[sessionKey(ref)]?.compaction;
-					const state = current === "requesting"
-						? setSessionCompaction(view.state, ref, null)
+					const current = handle === undefined ? undefined : view.state.sessions[handle]?.compaction;
+					const state = handle !== undefined && current === "requesting"
+						? setSessionCompaction(view.state, handle, null)
 						: view.state;
 					publish({ error: errorMessage(error), state });
 				}
 			} finally {
-				renameListeners.delete(onRename);
 				if (!disposed && view.busy === "compacting") publish({ busy: "idle" });
 			}
 		},
@@ -1104,19 +1076,23 @@ export function createController(
 			// server has already spawned. Bailing costs nothing: the re-list the
 			// close broadcasts drops the dead view on its own.
 			const intent = selectionIntent;
+			// The live view is found through its handle, and the summary below by
+			// ref: `list()` gives a summary a handle only while the server holds
+			// the session, so one re-listed after the close carries none.
 			const key = sessionKey(selected);
+			const handle = handleOf(view.state, selected);
 			publish({ error: null });
 			// Held across the close and released before the view is dropped, with
 			// nothing awaited in between: a gap arriving in that window must not
 			// re-attach what is being closed (`recover`, OW-sugome).
-			detaching.add(key);
+			if (handle !== undefined) detaching.add(handle);
 			try {
 				await api.close(selected);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 				return;
 			} finally {
-				detaching.delete(key);
+				if (handle !== undefined) detaching.delete(handle);
 			}
 			if (disposed || intent !== selectionIntent) return;
 			// Drop the live view here rather than waiting for the `sessions-changed`
@@ -1124,9 +1100,9 @@ export function createController(
 			// asynchronous, and `preview` below short-circuits on a session this
 			// client still has attached -- so letting the two race leaves the dead
 			// view on screen whenever the preview wins.
-			if (view.state.sessions[key] !== undefined) {
+			if (handle !== undefined && view.state.sessions[handle] !== undefined) {
 				const sessions = { ...view.state.sessions };
-				delete sessions[key];
+				delete sessions[handle];
 				publish({ state: { ...view.state, sessions } });
 			}
 			// A session with nothing on disk has nothing to preview and no row to go
@@ -1175,8 +1151,9 @@ export function createController(
 		},
 		clearError() {
 			const selected = view.state.selected;
-			const dismissed = selected ? (view.state.sessions[sessionKey(selected)]?.error ?? null) : null;
-			const state = selected ? clearSessionError(view.state, selected) : view.state;
+			const handle = handleOf(view.state, selected);
+			const dismissed = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
+			const state = handle === undefined ? view.state : clearSessionError(view.state, handle);
 			// The server holds the session's error for every later snapshot
 			// (OW-bipume), so it is told too, or the next one would put the banner
 			// back -- told which error, so one newer than what was on screen

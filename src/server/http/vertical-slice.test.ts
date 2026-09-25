@@ -14,7 +14,7 @@ import {
 	type SessionRef,
 	sessionKey,
 } from "../../shared/protocol.ts";
-import { initialClientState, reduceServerEvent, type ClientState } from "../../client/session-state.ts";
+import { initialClientState, reduceServerEvent, viewOf, type ClientState } from "../../client/session-state.ts";
 import { type App, createApp } from "./app.ts";
 import {
 	assistantMessage,
@@ -73,7 +73,7 @@ function reduceEvents(selected: SessionRef, events: readonly ServerEvent[]): Cli
 }
 
 function transcript(state: ClientState, ref: SessionRef) {
-	return state.sessions[sessionKey(ref)]?.messages;
+	return viewOf(state, ref)?.messages;
 }
 
 describe("offline vertical slice", () => {
@@ -110,7 +110,7 @@ describe("offline vertical slice", () => {
 
 		const state = reduceEvents(created.ref, events.events);
 		expect(transcript(state, created.ref)).toEqual([userMessage("hello"), assistantMessage("offline")]);
-		expect(state.sessions[sessionKey(created.ref)]?.isStreaming).toBe(false);
+		expect(viewOf(state, created.ref)?.isStreaming).toBe(false);
 		expect(codex.created).toHaveLength(1);
 		expect(codex.created[0]?.aborts).toBe(1);
 		await events.close();
@@ -147,12 +147,13 @@ describe("offline vertical slice", () => {
 
 		const state = reduceEvents(created.ref, events.events);
 		expect(state.selected).toEqual(materialised);
-		expect(state.sessions[sessionKey(created.ref)]).toBeUndefined();
+		expect(viewOf(state, created.ref)).toBeUndefined();
+		expect(Object.keys(state.sessions)).toEqual([events.typed("renamed")[0]!.handle]);
 		expect(transcript(state, materialised)).toEqual([
 			userMessage("materialise"),
 			assistantMessage("saved"),
 		]);
-		expect(state.sessions[sessionKey(materialised)]?.isStreaming).toBe(false);
+		expect(viewOf(state, materialised)?.isStreaming).toBe(false);
 		await events.close();
 	});
 
@@ -194,7 +195,7 @@ describe("offline vertical slice", () => {
 		const state = reduceEvents(parent, onlooker.events);
 		expect(state.selected).toEqual(parent);
 		expect(transcript(state, parent)).toEqual([userMessage("hello"), assistantMessage("parent reply")]);
-		expect(state.sessions[sessionKey(fork)]).toBeUndefined();
+		expect(viewOf(state, fork)).toBeUndefined();
 		// And the reason it holds: nothing was renamed, a second conversation was
 		// created, so no `renamed` reaches anyone.
 		expect(onlooker.typed("renamed")).toEqual([]);

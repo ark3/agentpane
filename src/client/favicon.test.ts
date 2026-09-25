@@ -17,7 +17,7 @@ import {
 	setFaviconBadge,
 	watchAbandon,
 	watchFocus,
-	watchRename,
+	watchMove,
 	watchSessions,
 	watchSubmit,
 	type TurnWatch,
@@ -87,14 +87,18 @@ describe("the turn-done watch", () => {
 		expect(watch.badged).toBe(false);
 	});
 
-	it("follows a session renamed mid-turn (D9)", () => {
-		let watch = watchSubmit(emptyTurnWatch(), "pi:draft");
-		watch = watchSessions(watch, streaming("pi:draft", true), UNFOCUSED);
-		watch = watchRename(watch, "pi:draft", "pi:named");
-		expect([...watch.waiting.keys()]).toEqual(["pi:named"]);
-		// The rename carries the "has streamed" bit with it, so the turn's own
-		// status:false under the new key still reads as done.
-		watch = watchSessions(watch, streaming("pi:named", false), UNFOCUSED);
+	// Keys are handles (D24), which a rename leaves alone, so a rename is
+	// nothing this watch sees. What still moves a key is a fork: another
+	// session under another handle, which the prompt `send()` armed on the
+	// parent lands on (OW-suhoto).
+	it("follows a submit from the fork's parent onto the fork it landed on (D24)", () => {
+		let watch = watchSubmit(emptyTurnWatch(), "h-parent");
+		watch = watchSessions(watch, new Map([["h-parent", true]]), UNFOCUSED);
+		watch = watchMove(watch, "h-parent", "h-fork");
+		expect([...watch.waiting.keys()]).toEqual(["h-fork"]);
+		// The move carries the "has streamed" bit with it, so the turn's own
+		// status:false under the fork's handle still reads as done.
+		watch = watchSessions(watch, new Map([["h-parent", false], ["h-fork", false]]), UNFOCUSED);
 		expect(watch.badged).toBe(true);
 	});
 
@@ -112,9 +116,9 @@ describe("the turn-done watch", () => {
 		expect(watchAbandon(watch, "pi:b")).toBe(watch);
 	});
 
-	it("leaves a rename of a session it is not watching alone", () => {
+	it("leaves a move of a session it is not watching alone", () => {
 		const watch = watchSubmit(emptyTurnWatch(), "pi:a");
-		expect(watchRename(watch, "pi:b", "pi:c")).toBe(watch);
+		expect(watchMove(watch, "pi:b", "pi:c")).toBe(watch);
 	});
 
 	it("keeps waiting while the client has no view of the session yet", () => {

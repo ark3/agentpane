@@ -57,6 +57,8 @@ let focused = true;
 document.hasFocus = () => focused;
 
 const REF: SessionRef = { backend: "pi", id: "/tmp/agentpane-harness/session.jsonl" };
+/** The handle the server would have minted for `REF`'s live session (D24): the client keys its view by it. */
+const HANDLE = "h1";
 const CWD = "/tmp/agentpane-harness";
 
 /** Deterministic filler. Real prose length and shape, no model wording. */
@@ -108,19 +110,19 @@ const BANNERS = {
 
 function snapshot(isStreaming: boolean, banners = false): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
+	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
 }
 
 function upsert(index: number, message: AgentMessage): void {
 	seq += 1;
 	if (index === messages.length) messages.push(message);
 	else messages[index] = message;
-	emit({ type: "upsert", session: REF, seq, index, message });
+	emit({ type: "upsert", session: REF, handle: HANDLE, seq, index, message });
 }
 
 function status(isStreaming: boolean): void {
 	seq += 1;
-	emit({ type: "status", session: REF, seq, isStreaming, compaction: null, model, effort, unrestoredModel: null });
+	emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming, compaction: null, model, effort, unrestoredModel: null });
 }
 
 function summary(): SessionSummary {
@@ -133,6 +135,7 @@ function summary(): SessionSummary {
 		status: "attached",
 		isStreaming: false,
 		onDisk: true,
+		handle: HANDLE,
 	};
 }
 
@@ -231,7 +234,7 @@ const api: AgentpaneApi = {
 		// acknowledgment in the action row, not its ending.
 		queueMicrotask(() => {
 			seq += 1;
-			emit({ type: "status", session: REF, seq, isStreaming: false, compaction: "running", model, effort, unrestoredModel: null });
+			emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming: false, compaction: "running", model, effort, unrestoredModel: null });
 		});
 	},
 	async close() {},

@@ -55,6 +55,11 @@ function refFor(id: string): SessionRef {
 	return { backend: "pi", id: `${CWD}/${id}.jsonl` };
 }
 
+/** The handle the server would have minted for session `id`'s live session (D24): the client keys its view by it. */
+function handleFor(id: string): string {
+	return `h-${id}`;
+}
+
 function summaryFor(id: string, index: number): SessionSummary {
 	return {
 		ref: refFor(id),
@@ -66,6 +71,7 @@ function summaryFor(id: string, index: number): SessionSummary {
 		status: "attached",
 		isStreaming: false,
 		onDisk: true,
+		handle: handleFor(id),
 	};
 }
 
@@ -118,6 +124,7 @@ function seedMessages(turns: number, seed: number): AgentMessage[] {
 
 interface Live {
 	ref: SessionRef;
+	handle: string;
 	messages: AgentMessage[];
 	seq: number;
 }
@@ -134,7 +141,7 @@ function emit(event: ServerEvent): void {
 function sessionOf(id: string): Live {
 	let entry = live.get(id);
 	if (!entry) {
-		entry = { ref: refFor(id), messages: [], seq: 0 };
+		entry = { ref: refFor(id), handle: handleFor(id), messages: [], seq: 0 };
 		live.set(id, entry);
 	}
 	return entry;
@@ -155,6 +162,7 @@ const api: AgentpaneApi = {
 			emit({
 				type: "snapshot",
 				session: entry.ref,
+				handle: entry.handle,
 				seq: entry.seq,
 				messages: [...entry.messages],
 				isStreaming: false,
@@ -316,6 +324,7 @@ const harness: PerfHarness = {
 		emit({
 			type: "snapshot",
 			session: b.ref,
+			handle: b.handle,
 			seq: b.seq,
 			messages: [...b.messages],
 			isStreaming: true,
@@ -344,11 +353,12 @@ const harness: PerfHarness = {
 		timed({
 			type: "upsert",
 			session: entry.ref,
+			handle: entry.handle,
 			seq: ++entry.seq,
 			index,
 			message: entry.messages[index]!,
 		});
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		timed({ type: "status", session: entry.ref, handle: entry.handle, seq: ++entry.seq, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 
 		const samples: number[] = [];
 		let body = "";
@@ -363,10 +373,10 @@ const harness: PerfHarness = {
 			const message = { ...base, content: [{ type: "text" as const, text: body }] };
 			entry.messages[index] = message;
 			samples.push(
-				timed({ type: "upsert", session: entry.ref, seq: ++entry.seq, index, message }),
+				timed({ type: "upsert", session: entry.ref, handle: entry.handle, seq: ++entry.seq, index, message }),
 			);
 		}
-		timed({ type: "status", session: entry.ref, seq: ++entry.seq, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		timed({ type: "status", session: entry.ref, handle: entry.handle, seq: ++entry.seq, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		// `MutationObserver` delivers its records in a microtask, which `flushSync`
 		// does not wait for, so the queue is drained by hand rather than trusted to
 		// have been delivered by the time this returns.

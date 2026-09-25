@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	emptySessionTurnMarks,
 	foldSessionTurns,
-	renameSessionTurnMarks,
+	moveSessionTurnMarks,
 } from "./session-turns.ts";
 
 function streaming(entries: Array<[string, boolean]>): Map<string, boolean> {
@@ -42,23 +42,26 @@ describe("session finished-turn marks", () => {
 		expect(marks.finished.has("pi:other")).toBe(false);
 	});
 
-	it("carries both an observed stream and a finished mark across D9 rename", () => {
+	// Keys are handles (D24), so a rename never moves one; a fork, which is
+	// another session under another handle, is what `App.svelte` still moves a
+	// key for.
+	it("carries both an observed stream and a finished mark from a fork's parent to the fork", () => {
 		let streamingMarks = emptySessionTurnMarks();
 		streamingMarks = foldSessionTurns(
 			streamingMarks,
-			streaming([["pi:draft", true]]),
-			"pi:selected",
+			streaming([["h-parent", true]]),
+			"h-selected",
 		);
-		streamingMarks = renameSessionTurnMarks(streamingMarks, "pi:draft", "pi:named");
+		streamingMarks = moveSessionTurnMarks(streamingMarks, "h-parent", "h-fork");
 		streamingMarks = foldSessionTurns(
 			streamingMarks,
-			streaming([["pi:named", false]]),
-			"pi:selected",
+			streaming([["h-fork", false]]),
+			"h-selected",
 		);
-		expect(streamingMarks.finished.has("pi:named")).toBe(true);
+		expect(streamingMarks.finished.has("h-fork")).toBe(true);
 
-		const renamedFinished = renameSessionTurnMarks(streamingMarks, "pi:named", "pi:again");
-		expect(renamedFinished.finished.has("pi:named")).toBe(false);
-		expect(renamedFinished.finished.has("pi:again")).toBe(true);
+		const movedFinished = moveSessionTurnMarks(streamingMarks, "h-fork", "h-again");
+		expect(movedFinished.finished.has("h-fork")).toBe(false);
+		expect(movedFinished.finished.has("h-again")).toBe(true);
 	});
 });

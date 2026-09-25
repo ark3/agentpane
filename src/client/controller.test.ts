@@ -12,7 +12,7 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
-import { createController } from "./controller.ts";
+import { createController, type AgentpaneController } from "./controller.ts";
 import { sessionKey } from "$shared/protocol.ts";
 
 const ref: SessionRef = { backend: "pi", id: "virtual-a" };
@@ -20,7 +20,12 @@ const attachedRef: SessionRef = { backend: "pi", id: "/sessions/a.jsonl" };
 /** A Codex-shaped fork: a brand-new thread this client is not driving yet. */
 const forkedRef: SessionRef = { backend: "codex", id: "thread-forked" };
 
-function summary(session: SessionRef, cwd = "/work"): SessionSummary {
+/** The handle the server minted for the session a ref names, opaque here (D24). */
+function h(session: SessionRef): string {
+	return `handle-${session.backend}-${session.id}`;
+}
+
+function summary(session: SessionRef, cwd = "/work", handle = h(session)): SessionSummary {
 	return {
 		ref: session,
 		cwd,
@@ -30,6 +35,7 @@ function summary(session: SessionRef, cwd = "/work"): SessionSummary {
 		status: "attached",
 		isStreaming: false,
 		onDisk: true,
+		handle,
 	};
 }
 
@@ -50,6 +56,14 @@ function previewAssistant(text: string): SessionPreviewTurn {
 		},
 		stopReason: "stop",
 	};
+}
+
+/**
+ * The live view carrying `session` as its ref, found by ref and not by key so
+ * that the rename tests below read the same whichever key the client uses.
+ */
+function viewAt(controller: AgentpaneController, session: SessionRef) {
+	return Object.values(controller.getView().state.sessions).find((view) => sessionKey(view.ref) === sessionKey(session));
 }
 
 /** Let every microtask and the timer-free tail of an in-flight refresh run out. */
@@ -120,7 +134,7 @@ describe("client controller", () => {
 
 		await controller.select(ref);
 		expect(api.listModels).not.toHaveBeenCalled();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await Promise.resolve();
 
 		expect(api.listModels).toHaveBeenCalledOnce();
@@ -134,8 +148,8 @@ describe("client controller", () => {
 		api.listModels.mockReturnValueOnce(oldA.promise).mockReturnValueOnce(newA.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		const first = controller.preview(ref);
 		await controller.preview(attachedRef);
@@ -155,8 +169,8 @@ describe("client controller", () => {
 		api.listModels.mockReturnValueOnce(oldA.promise).mockReturnValueOnce(newA.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [{ role: "user", content: "done", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		const first = controller.preview(ref);
 		await controller.preview(attachedRef);
@@ -176,8 +190,8 @@ describe("client controller", () => {
 		api.setModel.mockReturnValue(setting.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		const selecting = controller.setModel("opaque/next");
@@ -197,8 +211,8 @@ describe("client controller", () => {
 		api.setModel.mockReturnValue(setting.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/b", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		const first = controller.setModel("opaque/next");
@@ -215,18 +229,23 @@ describe("client controller", () => {
 		expect(controller.getView().modelSetting).toBe(false);
 	});
 
+	// The rename tests below stage the new ref on an ordinary event under the
+	// session's handle with no `renamed` before it -- the one a dropped stream
+	// (D21) or a late one never delivers -- since the handle is what makes the
+	// outcome hold without one, and nothing in the controller tracks a rename
+	// (D24, OW-kimaya).
 	it("carries a pending set through a virtual session rename", async () => {
 		const api = new FakeApi();
 		const setting = deferred<void>();
 		api.setModel.mockReturnValueOnce(setting.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		const first = controller.setModel("opaque/next");
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/real-a.jsonl" };
-		api.emit({ type: "renamed", from: ref, session: renamed, seq: 2 });
+		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null });
 		expect(controller.getView().state.selected).toEqual(renamed);
 		expect(controller.getView().modelSetting).toBe(true);
 
@@ -244,23 +263,23 @@ describe("client controller", () => {
 		api.listModels.mockResolvedValue([{ id: "opaque/next", label: "Next", efforts: [], defaultEffort: null }]);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		await controller.preview(ref);
 		expect(api.listModels).toHaveBeenCalledWith(ref.backend);
 		await controller.setModel("opaque/next");
 		expect(api.setModel).toHaveBeenCalledWith(ref, "opaque/next");
-		expect(controller.getView().state.sessions[sessionKey(ref)]?.model).toBe("opaque/current");
+		expect(controller.getView().state.sessions[h(ref)]?.model).toBe("opaque/current");
 
-		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: null, model: "opaque/next", effort: null, unrestoredModel: null });
-		expect(controller.getView().state.sessions[sessionKey(ref)]?.model).toBe("opaque/next");
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: "opaque/next", effort: null, unrestoredModel: null });
+		expect(controller.getView().state.sessions[h(ref)]?.model).toBe("opaque/next");
 	});
 
 	it("never lists models when selecting a conversation that already has messages", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		await controller.preview(ref);
 
@@ -271,7 +290,7 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		await controller.setModel("opaque/next");
@@ -286,7 +305,7 @@ describe("client controller", () => {
 		api.setModel.mockReturnValue(setting.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 		controller.setDraft("send while setting");
 
@@ -304,7 +323,7 @@ describe("client controller", () => {
 		api.setEffort.mockReturnValue(setting.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		const choosing = controller.setEffort("high");
@@ -316,14 +335,14 @@ describe("client controller", () => {
 		await choosing;
 
 		expect(controller.getView().effortSetting).toBe(false);
-		expect(controller.getView().state.sessions[sessionKey(ref)]?.effort).toBe("medium");
+		expect(controller.getView().state.sessions[h(ref)]?.effort).toBe("medium");
 	});
 
 	it("never sets an effort once the conversation has a message", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [{ role: "user", content: "already sent", timestamp: 1 }], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 
 		await controller.setEffort("high");
@@ -389,7 +408,7 @@ describe("client controller", () => {
 		await controller.start();
 		await controller.select(ref);
 		// The snapshot a real attach produces gives this client live state for it.
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		api.preview.mockClear();
 
@@ -638,18 +657,18 @@ describe("client controller", () => {
 		expect(api.abort).toHaveBeenCalledWith(attachedRef);
 	});
 
-	it("updates selection on renamed before a following snapshot", async () => {
+	it("updates selection from the snapshot that introduces a session under a ref its attach reply did not name", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
 
-		api.emit({ type: "renamed", from: ref, session: renamed, seq: 1 });
-		api.emit({ type: "snapshot", session: renamed, seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: renamed, handle: h(ref), seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		expect(controller.getView().state.selected).toEqual(renamed);
-		expect(controller.getView().state.sessions["pi:/sessions/renamed.jsonl"]?.seq).toBe(2);
+		expect(controller.getView().state.summaries.map((item) => item.ref)).toContainEqual(renamed);
+		expect(viewAt(controller, renamed)?.seq).toBe(2);
 	});
 
 	it("coalesces recovery attaches while a sequence-gap recovery is in flight", async () => {
@@ -659,10 +678,10 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 
 		expect(api.attach).toHaveBeenCalledTimes(2);
 		recovery.resolve(summary(ref));
@@ -676,8 +695,8 @@ describe("client controller", () => {
 		await controller.submit();
 		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
 
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
 		expect(api.attach).toHaveBeenCalledWith(ref);
@@ -697,8 +716,8 @@ describe("client controller", () => {
 		controller.setDraft("hello");
 		const submitted = controller.submit();
 
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "status", session: attachedRef, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "status", session: attachedRef, handle: h(attachedRef), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
 		expect(controller.getView().busy).toBe("submitting");
@@ -721,8 +740,8 @@ describe("client controller", () => {
 		controller.setDraft("hello");
 		const first = controller.submit();
 
-		api.emit({ type: "snapshot", session: attachedRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "status", session: attachedRef, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "snapshot", session: attachedRef, handle: h(attachedRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "status", session: attachedRef, handle: h(attachedRef), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 		const second = controller.submit();
 
@@ -737,8 +756,8 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await Promise.resolve();
 
 		expect(controller.getView().state.selected).toBeNull();
@@ -766,14 +785,14 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		api.listSessions.mockResolvedValueOnce([detached]);
 
 		api.emit({ type: "sessions-changed" });
 		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([detached]));
 
-		expect(controller.getView().state.sessions[sessionKey(ref)]).toBeUndefined();
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		expect(controller.getView().state.summaries[0]?.isStreaming).toBe(false);
 		api.preview.mockClear();
 		await controller.preview(ref);
@@ -791,7 +810,7 @@ describe("client controller", () => {
 			const controller = createController(api);
 			await controller.start();
 			await controller.select(ref);
-			api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+			api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
 			api.listSessions.mockResolvedValue([detachedSummary]);
 			const turns: SessionPreviewTurn[] = [{ role: "user", content: "done" }];
@@ -818,7 +837,7 @@ describe("client controller", () => {
 			}
 
 			const detachedView = controller.getView();
-			expect(detachedView.state.sessions[sessionKey(ref)]).toBeUndefined();
+			expect(detachedView.state.sessions[h(ref)]).toBeUndefined();
 			expect(detachedView.state.selected).toEqual(ref);
 			expect(detachedView.preview).toEqual({ ref, turns });
 			expect(detachedView.state.summaries).toEqual([detachedSummary]);
@@ -839,7 +858,7 @@ describe("client controller", () => {
 		await controller.start();
 		api.open();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		api.listSessions.mockResolvedValue([detachedSummary]);
 
@@ -1015,7 +1034,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.create("/work", "pi");
-		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
 		api.listSessions.mockResolvedValue([]);
 
@@ -1036,7 +1055,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.create("/work", "pi");
-		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(createdRef);
 
 		await controller.detach();
@@ -1047,7 +1066,7 @@ describe("client controller", () => {
 		expect(api.preview).not.toHaveBeenCalled();
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
-		expect(detachedView.state.sessions[sessionKey(createdRef)]).toBeUndefined();
+		expect(detachedView.state.sessions[h(createdRef)]).toBeUndefined();
 		// The re-list is on this exit, and only this one: the row it removes is
 		// not merely stale, it points at a session that exists nowhere (D21).
 		expect(api.listSessions).toHaveBeenCalledTimes(2);
@@ -1068,7 +1087,7 @@ describe("client controller", () => {
 		await controller.select(ref);
 		controller.setDraft("reworded");
 		expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
-		api.emit({ type: "snapshot", session: forkedRef, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: forkedRef, handle: h(forkedRef), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 
 		await controller.detach();
@@ -1092,7 +1111,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.create("/work", "pi");
-		api.emit({ type: "snapshot", session: createdRef, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		api.listSessions.mockResolvedValue([{ ...summary(createdRef), onDisk: true }]);
 		api.emit({ type: "sessions-changed" });
 		await settle();
@@ -1110,7 +1129,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		const closing = deferred<void>();
 		api.close.mockReturnValueOnce(closing.promise);
 
@@ -1135,14 +1154,14 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		const closing = deferred<void>();
 		api.close.mockReturnValueOnce(closing.promise);
 
 		const detaching = controller.detach();
 		await settle();
 		api.attach.mockClear();
-		api.emit({ type: "status", session: ref, seq: 7, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 7, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
 		closing.resolve();
@@ -1150,7 +1169,7 @@ describe("client controller", () => {
 		await settle();
 
 		expect(api.attach).not.toHaveBeenCalled();
-		expect(controller.getView().state.sessions[sessionKey(ref)]).toBeUndefined();
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		controller.dispose();
 	});
 
@@ -1160,20 +1179,20 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		api.listSessions.mockClear();
 		api.listSessions.mockReturnValueOnce(listed.promise);
 
 		api.emit({ type: "sessions-changed" });
 		api.emit({ type: "sessions-changed" });
-		api.emit({ type: "snapshot", session: ref, seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		listed.resolve([detached]);
 		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([summary(ref)]));
 
 		expect(api.listSessions).toHaveBeenCalledTimes(1);
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
-		expect(controller.getView().state.sessions[sessionKey(ref)]?.seq).toBe(2);
+		expect(controller.getView().state.sessions[h(ref)]?.seq).toBe(2);
 	});
 
 	it("rejects a relative workspace before creating a session", async () => {
@@ -1191,36 +1210,36 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("The turn ended in an error.");
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "The turn ended in an error." });
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("The turn ended in an error.");
 
 		controller.setDraft("try again");
 		await controller.submit();
 
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBeNull();
 	});
 
-	it("clears the persisted error on the session's new key when a rename lands mid-submit (D9)", async () => {
+	it("clears the persisted error of a session renamed while the prompt was in flight (D9)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "error", session: ref, seq: 2, message: "Stale error from a prior turn." });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "Stale error from a prior turn." });
 
 		controller.setDraft("try again");
 		const submitted = controller.submit();
 
 		// The session renames (virtual -> real) while the prompt is still in flight.
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
-		api.emit({ type: "renamed", from: ref, session: renamed, seq: 3 });
+		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		prompt.resolve();
 		await submitted;
 
-		expect(controller.getView().state.sessions["pi:/sessions/renamed.jsonl"]?.error).toBeNull();
+		expect(viewAt(controller, renamed)?.error).toBeNull();
 	});
 
 	it("does not clear a fresh same-turn error that races in via SSE before the prompt POST resolves (D2)", async () => {
@@ -1230,17 +1249,17 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		controller.setDraft("try again");
 		const submitted = controller.submit();
 
 		// A genuine error for *this* turn arrives before the POST's own response does.
-		api.emit({ type: "error", session: ref, seq: 2, message: "This turn just failed." });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "This turn just failed." });
 		prompt.resolve();
 		await submitted;
 
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBe("This turn just failed.");
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("This turn just failed.");
 	});
 
 	it("does not clear a model failure that lands before the prompt POST resolves", async () => {
@@ -1251,7 +1270,7 @@ describe("client controller", () => {
 		api.prompt.mockReturnValue(prompt.promise);
 		const controller = createController(api);
 		await controller.start();
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: "opaque/a", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		await controller.preview(ref);
 		controller.setDraft("start while setting");
 
@@ -1272,13 +1291,13 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "error", session: ref, seq: 2, message: "The turn ended in an error." });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "The turn ended in an error." });
 
 		controller.clearError();
 
 		expect(controller.getView().error).toBeNull();
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.error).toBeNull();
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBeNull();
 		// The server holds the error too, and would put it back on the next
 		// snapshot if it were not told (OW-bipume).
 		// It names the error it dismisses, so a newer one the server holds by
@@ -1291,7 +1310,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		controller.clearError();
 
@@ -1331,22 +1350,22 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		const compacted = controller.compact();
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
 
 		compacting.resolve();
 		await compacted;
 
 		// The request resolved with no backend lifecycle update yet: still compacting.
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
 
-		api.emit({ type: "status", session: ref, seq: 2, isStreaming: false, compaction: "running", model: null, effort: null, unrestoredModel: null });
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("running");
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 2, isStreaming: false, compaction: "running", model: null, effort: null, unrestoredModel: null });
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("running");
 
-		api.emit({ type: "status", session: ref, seq: 3, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBeNull();
 	});
 
 	it("clears its own requesting mark when the compaction request fails (OW-natiha)", async () => {
@@ -1356,16 +1375,16 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		const compacted = controller.compact();
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBe("requesting");
 
 		compacting.reject(new Error("compaction refused"));
 		await compacted;
 
 		expect(controller.getView().error).toBe("compaction refused");
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBeNull();
+		expect(controller.getView().state.sessions[h(ref)]?.compaction).toBeNull();
 	});
 
 	it("clears the requesting mark on failure through a mid-flight rename (OW-natiha)", async () => {
@@ -1375,20 +1394,20 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 
 		const compacted = controller.compact();
-		expect(controller.getView().state.sessions["pi:virtual-a"]?.compaction).toBe("requesting");
+		expect(viewAt(controller, ref)?.compaction).toBe("requesting");
 
-		// The server renames the session while the POST is in flight (D9): the
-		// reducer carries the requesting mark to the new key and drops the old.
-		api.emit({ type: "renamed", session: attachedRef, seq: 2, from: ref });
+		// The server renames the session while the POST is in flight (D9); the
+		// status that carries the new ref carries the mark too.
+		api.emit({ type: "status", session: attachedRef, handle: h(ref), seq: 2, isStreaming: false, compaction: "requesting", model: null, effort: null, unrestoredModel: null });
 
 		compacting.reject(new Error("compaction refused"));
 		await compacted;
 
 		expect(controller.getView().error).toBe("compaction refused");
-		expect(controller.getView().state.sessions["pi:/sessions/a.jsonl"]?.compaction).toBeNull();
+		expect(viewAt(controller, attachedRef)?.compaction).toBeNull();
 	});
 
 	/**
@@ -1504,7 +1523,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		controller.setDraft("reworded");
 
 		await controller.forkAndSubmit(0);
@@ -1528,7 +1547,7 @@ describe("client controller", () => {
 			const controller = createController(api);
 			await controller.start();
 			await controller.select(parent);
-			api.emit({ type: "snapshot", session: parent, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+			api.emit({ type: "snapshot", session: parent, handle: h(parent), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			controller.setDraft("reworded");
 
 			expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
@@ -1586,7 +1605,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
@@ -1631,12 +1650,12 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 	/**
-	 * OW-lizohe. Pi's fork renames the session mid-flight (D9), and the refresh
-	 * an attach started is keyed on the name the session had when it went out.
-	 * Untracked, its reply fails the still-selected check and publishes nothing,
-	 * so the transcript keeps drawing Edit controls from the pre-fork set --
-	 * exactly when the user has just reworded a message and may want another
-	 * edit -- until the next turn boundary re-asks.
+	 * OW-lizohe. A session renamed while the refresh an attach started is in
+	 * flight (D9) keeps its handle, which the refresh is keyed by, so the reply
+	 * still passes the still-selected check (D24). Keyed by the name the session
+	 * had when the request went out, the reply failed it and published nothing,
+	 * so the transcript kept drawing Edit controls from the old set until the
+	 * next turn boundary re-asked.
 	 */
 	it("publishes fork points for a session renamed while the refresh was in flight (OW-lizohe)", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
@@ -1648,7 +1667,8 @@ describe("client controller", () => {
 		await controller.select(ref);
 		expect(api.forkPoints).toHaveBeenCalledWith(ref);
 
-		api.emit({ type: "renamed", from: ref, session: renamed, seq: 1 });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
 		await settle();
 

@@ -174,14 +174,15 @@ export interface AgentRequestReply {
  *
  * Every arm but `sessions-changed` carries `handle` beside `session`: the
  * session's `SessionSummary.handle`, which a rename leaves alone while `session`
- * moves (D24, OW-suyinu). The counter `seq` counts is the handle's. Optional
- * only until a client reads it (OW-kimaya).
+ * moves (D24, OW-suyinu). The counter `seq` counts is the handle's. The
+ * browser's reducer keys every live view by it (OW-kimaya), so an event under
+ * a handle it holds updates that view's ref as an ordinary attribute.
  */
 export type ServerEvent =
 	| {
 			type: "snapshot";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			messages: PaneMessage[];
 			isStreaming: boolean;
@@ -220,13 +221,13 @@ export type ServerEvent =
 			 */
 			type: "upsert";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; handle?: string; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
-	| { type: "request"; session: SessionRef; handle?: string; seq: number; request: AgentRequest }
+	| { type: "status"; session: SessionRef; handle: string; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
+	| { type: "request"; session: SessionRef; handle: string; seq: number; request: AgentRequest }
 	| {
 			/**
 			 * The request `requestId` names is no longer pending, however it
@@ -236,7 +237,7 @@ export type ServerEvent =
 			 */
 			type: "request-resolved";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			requestId: string;
 	  }
@@ -244,7 +245,7 @@ export type ServerEvent =
 			/** A turn ended in an error the transcript alone would not convey. */
 			type: "error";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			message: string;
 	  }
@@ -261,14 +262,14 @@ export type ServerEvent =
 			 */
 			type: "notice";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			notice: AgentNotice;
 	  }
 	| {
 			/**
-			 * A session's id changed under the client. Re-key everything held under
-			 * `from` to `session`; a `snapshot` for the new ref follows immediately.
+			 * A session's id changed under the client, from `from` to `session`; a
+			 * `snapshot` carrying the new ref follows immediately.
 			 *
 			 * This is not an edge case, it is the normal life of a new session.
 			 * Every backend replaces a `virtual` session's minted id with its own
@@ -280,12 +281,14 @@ export type ServerEvent =
 			 * session into a transcript nothing updates.
 			 *
 			 * `handle` is the one the session held before the rename and holds
-			 * after it: a client keyed by it has nothing to re-key (D24). This
-			 * event stays until both clients are (OW-mofuho).
+			 * after it: a client keyed by it has nothing to re-key (D24). The
+			 * browser's reducer is, and ignores this event (OW-kimaya); the Emacs
+			 * helper still forwards it as `session/renamed`, which agentpane-mode
+			 * re-keys on until OW-danifa. It stays on the wire until OW-mofuho.
 			 */
 			type: "renamed";
 			session: SessionRef;
-			handle?: string;
+			handle: string;
 			seq: number;
 			from: SessionRef;
 	  }
