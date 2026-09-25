@@ -429,6 +429,23 @@ on is kept, and the redraw scheduled for it then draws nothing more."
       (agentpane-test--redraw buffer)
       (should (equal drawn '(1))))))
 
+(ert-deftest agentpane-test-notice-lands-after-the-recorded-node ()
+  "A `session/notice' arriving after a `session/node' not yet drawn, at an
+index no drawn node carries, draws that node first, so the notice is
+appended after it, in the order the two arrived."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/node (list :session ref :node (agentpane-test--assistant 3 "<p>Three.</p>")))
+      (agentpane--on-notification
+       nil 'session/notice
+       (list :session ref
+             :notice '(:kind "warning" :message "Fallback metadata" :details nil :path nil)))
+      (agentpane-test--redraw buffer)
+      (should (equal (agentpane-test--indices) '(0 1 3 nil)))
+      (should (< (agentpane-test--position "Three.")
+                 (agentpane-test--position "ℹ Fallback metadata"))))))
+
 (ert-deftest agentpane-test-snapshot-discards-the-recorded-node ()
   "A `session/snapshot' after a `session/node' not yet drawn supersedes it:
 the snapshot's nodes are drawn and the recorded one never is."
