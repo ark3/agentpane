@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A snapshot read while a Pi fork is in flight can still carry the fork's transcript under the parent's ref
@@ -21,3 +22,10 @@ Load-bearing: whatever closes it must not also hide the renames `#onUpdate`'s ch
 
 A `session-manager` test with an adapter that moves its ref and rewinds its state inside `fork()`, while the fork is held, reads the parent's snapshot through the path an opening stream or attach uses and sees no rewound transcript under the parent's ref, red before the fix.
 The `onRequest`/`onError` case is either covered by the same fix with a test, or a sentence in this card says why it cannot matter.
+
+## Close note
+
+Closed under OW-nikogo (2026-09-25), with the ownership change, not a second guard.
+A Pi fork now announces its move through the adapter's `onRefChanged` right after the fork's `get_state`, and `SessionManager` re-keys the container onto the fork's ref there, before the model re-send and `hydrateMessages()` emit.
+So a pull of the parent's ref in the window finds no container, and `onRequest` and `onError` go out under the fork's ref; OW-zovaye's `forking` count and `#onUpdate` guard are retired.
+Test: `src/server/http/session-manager.test.ts`, "answers a pull of the parent's ref with nothing of the fork, and what the fork raises goes out under its ref (OW-nuzepi)", holding the fork after the move and pulling through `broadcaster.sendSnapshot` and `sendOpeningSnapshots(liveRefs())`; red on the pre-change manager (snapshot, error and request under the parent's ref), green after.

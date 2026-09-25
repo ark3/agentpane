@@ -1,5 +1,6 @@
 ---
 labels: [change, d24]
+closed: done
 ---
 
 # An adapter announces its identity change as an event and the manager re-keys on it, in place of re-reading `ref` after start, submit and fork
@@ -101,3 +102,14 @@ Load-bearing:
 - A manager test that a rename announced during a held `start()` is applied only after the adapter is published, and one that a start failing after such a rename leaves no rename, no alias and no `renamed` behind.
 - `bun run check` green.
 - Cold read done 2026-09-25, a dry-run executor and an adversarial auditor, and this body amended with what they found; the deferral of a start-time rename and the retirement of `ManagedSession.torndown` came out of it.
+
+## Close note
+
+Landed on main 2026-09-25.
+Every `BackendAdapter` has `onRefChanged(ref, cause)`, fired synchronously through a per-adapter `moveTo` only when the id actually changes and before anything else it emits under the new id: Pi at `adoptSessionFile` ("rename") and right after the fork's `get_state` ("fork"), Codex at a fresh start's `thread/start` id, Claude at the minted id and at an `init` naming another; resumes, Codex's borrower paths and Codex and Claude forks are silent.
+`SessionManager` re-keys in the handler through `#adoptRef(session, next, cause)`; the polling in `submit()`'s and `fork()`'s `finally`, OW-zovaye's `forking` count and `#onUpdate` guard, and `ManagedSession.torndown` are gone.
+Two decisions came out of the cold read (a dry-run executor and an adversarial auditor): a rename announced inside `start()` is held in a `#start`-local `renamedInStart` and applied after `bound.adapter = adapter`, since `#attaching` holds a startup under the requested and canonical keys alone, and OW-suyinu now carries retiring that wait; and teardown's invariant is `close()`/`disposeAll()` unsubscribing in the same synchronous run that takes the container out, since a handler-side `torndown` check could never execute.
+Review found the OW-yavewa/OW-jimasu teardown tests vacuous under the change, because `FakeAdapter.dispose()` clears listeners; they now dispose as `PiAdapter` does and go red without the unsubscription.
+Verified: OW-nuzepi's and OW-hikefi's manager tests red before and green after; per-adapter ordering tests red when the fire site is moved late; start-time tests red against a handler that re-keys immediately; the finished-work adversarial read mutated each and saw red; `bun run check` green, 1383 tests.
+D24 and D9 in `docs/DESIGN.md` and `docs/WORKSTREAMS.md` record it as landed.
+Left alone: `CodexAdapter` and `PiAdapter` dispose without clearing `refListeners`, harmless since the manager unsubscribes.

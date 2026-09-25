@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # A Claude Code `init` that reports a session id other than the minted one swaps `currentRef` silently, and the manager never learns
@@ -18,3 +19,10 @@ OW-yoyine's close note is the nearest prior art on Claude identity at hydration.
 ## Done when
 
 Either a fixture shows the CLI diverging and the manager test proves the rename propagates, or the branch is replaced by a thrown error so the divergence can never be silent.
+
+## Close note
+
+Closed under OW-nikogo (2026-09-25), on the fix this card named: the adapter exposes the id change as an event the manager subscribes to.
+`ClaudeAdapter.handleLine`'s `init` branch now calls `moveTo`, which fires `onRefChanged` as "rename" before that line's update and the reducer's effects, and the manager re-keys, aliases the old id and broadcasts `renamed` at once rather than at the next `submit()`/`fork()` settle.
+No fixture shows the CLI diverging; the done-condition met is the manager test proving the rename propagates.
+Tests: `src/server/http/session-manager.test.ts` "re-keys when Claude Code's init names another session after submit() resolved (OW-hikefi)", on the real `ClaudeAdapter` over `FakeClaudeProcess`, red before (no `renamed`), green after; `src/server/adapters/claude/adapter.test.ts` "announces the init's session id before that line's update and the reducer's effects".
