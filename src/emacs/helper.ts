@@ -45,10 +45,13 @@
  * snapshot under the handle that follows a rename on the server is all it
  * needs (OW-mofuho). The one place that is not enough is an attach answered
  * under another ref than it asked for, whose snapshot under the new ref
- * reaches a buffer that holds only the asked-for ref and no handle yet;
- * `sessions/attach` below sends that snapshot after its reply, which names
- * the handle, rather than before it (`agentpane--notified-buffer` in
- * emacs/agentpane.el). The hand-rolled
+ * reaches Emacs while the buffer that asked holds only the asked-for ref
+ * and no handle; agentpane-mode keeps such a snapshot under its handle
+ * until an attach reply names it, since whatever order this loop writes a
+ * reply and a notification in, jsonrpc.el 1.0.29 on Emacs 31.1 can run the
+ * reply's callback after the notification, holding it back as an "anxious
+ * continuation" while a synchronous request is outstanding
+ * (`agentpane--unclaimed-snapshots` in emacs/agentpane.el). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
@@ -72,17 +75,7 @@ export interface HelperOptions {
 	reconnectDelayMs?: number;
 }
 
-/**
- * `afterReply` queues a write for straight after this request's reply, in the
- * same synchronous run, so nothing the stream delivers can land between the
- * two. Only `sessions/attach` uses it.
- */
-type Handlers = {
-	[M in keyof HelperRequests]: (
-		params: HelperRequests[M]["params"],
-		afterReply: (send: () => void) => void,
-	) => Promise<HelperRequests[M]["result"]>;
-};
+type Handlers = { [M in keyof HelperRequests]: (params: HelperRequests[M]["params"]) => Promise<HelperRequests[M]["result"]> };
 
 interface JsonRpcRequest {
 	jsonrpc?: string;
@@ -263,7 +256,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/create": (params) => api.createSession(params),
 		"models/list": ({ backend }) => api.listModels(backend),
-		"sessions/attach": async ({ session }, afterReply) => {
+		"sessions/attach": async ({ session }) => {
 			openStream();
 			const key = sessionKey(session);
 			pending.add(key);
@@ -275,25 +268,22 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// `virtual` id, and the snapshot either broadcasts carries only the
 				// new ref (`SessionManager`'s `attach` and `#rename`,
 				// src/server/http/session-manager.ts). Filtered by the asked-for key,
-				// that snapshot was dropped; and before the reply agentpane-mode's
-				// buffer holds only the asked-for ref and no handle, so it would
-				// drop it too. So the attach moves onto the summary's handle here,
-				// and the snapshot the reducer holds under it goes out after the
-				// reply, which is what gives the buffer that handle; one still on
-				// its way is forwarded when it arrives. Read when sent, so an event
-				// forwarded between here and the reply, which the buffer drops for
-				// the same reason, is in it. An attach no longer pending was moved
-				// already, by an event under the handle that carried the asked-for
-				// ref, which the buffer matched by that ref, or dropped by a
-				// `sessions/detach` sent while this attach was in flight, which a
-				// reply that lands after it must not undo.
+				// that snapshot was dropped, so the attach moves onto the summary's
+				// handle here and the snapshot the reducer holds under it goes out
+				// now, before the reply; one still on its way is forwarded when it
+				// arrives. No buffer holds that handle until agentpane-mode handles
+				// the reply, which it may do after the snapshot whatever the order
+				// here, so it keeps the snapshot under the handle until then
+				// (`agentpane--unclaimed-snapshots` in emacs/agentpane.el). An attach
+				// no longer pending was moved already, by an event under the handle
+				// that carried the asked-for ref, which the buffer matched by that
+				// ref, or dropped by a `sessions/detach` sent while this attach was in
+				// flight, which a reply that lands after it must not undo.
 				if (pending.delete(key)) {
 					attached.set(summary.handle, sessionKey(summary.ref));
 					if (sessionKey(summary.ref) !== key) {
-						afterReply(() => {
-							const view = state.sessions[summary.handle];
-							if (view && attached.has(summary.handle)) notifySnapshot(view, summary.handle);
-						});
+						const view = state.sessions[summary.handle];
+						if (view) notifySnapshot(view, summary.handle);
 					}
 				}
 				return summary;
@@ -352,16 +342,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const respond = async (request: JsonRpcRequest): Promise<void> => {
 		const { id, method } = request;
 		if (id === undefined || id === null) return; // A notification from Emacs: nothing to answer, and none is defined.
-		const handler = (handlers as Record<string, (params: unknown, afterReply: (send: () => void) => void) => Promise<unknown>>)[method ?? ""];
+		const handler = (handlers as Record<string, (params: unknown) => Promise<unknown>>)[method ?? ""];
 		if (!handler) {
 			write(encodeFrame({ jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${JSON.stringify(method)}` } }));
 			return;
 		}
-		const after: (() => void)[] = [];
 		try {
-			const result = await handler(request.params, (send) => after.push(send));
+			const result = await handler(request.params);
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));
-			for (const send of after) send();
 		} catch (error: unknown) {
 			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(error) }));
 		}

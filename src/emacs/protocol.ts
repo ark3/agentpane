@@ -7,9 +7,10 @@
  * present; the TypeScript below says the same thing to the compiler. Change
  * the two together, and raise it before changing either. D24 raised it twice:
  * the `handle` every per-session notification carries, and every request
- * accepts, below (OW-suyinu); and the retirement of `session/renamed`, with
- * the snapshot `sessions/attach` sends for a ref it did not ask for moved
- * after its reply (OW-mofuho).
+ * accepts, below (OW-suyinu); and the retirement of `session/renamed`, whose
+ * one use a rename-free `session/snapshot` cannot cover, an attach answered
+ * under another ref, the receiver covers by keeping that snapshot until the
+ * reply (OW-mofuho).
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -147,11 +148,17 @@
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, carrying the session's `handle`. Its `ref` is
  *   authoritative and may differ from the one asked for; when it does, the
- *   `session/snapshot` under the new ref and the summary's `handle` follows
- *   the reply, unless the stream already carried the asked-for ref under that
- *   handle, or a `sessions/detach` for it landed while the attach was in
- *   flight. Notifications under the new ref that went out before the reply
- *   named a handle no buffer yet held; that snapshot supersedes them.
+ *   `session/snapshot` under the new ref and the summary's `handle` goes out
+ *   before the reply if the helper holds one yet, and else when it arrives,
+ *   unless the stream already carried the asked-for ref under that handle,
+ *   or a `sessions/detach` for it landed while the attach was in flight.
+ *   Nothing says the asked-for ref and the new one are the same session
+ *   until the reply, and the reply may be handled after that snapshot in
+ *   either case: jsonrpc.el 1.0.29, on Emacs 31.1, runs the reply to an
+ *   asynchronous request that arrives while a synchronous one is outstanding
+ *   only once that one returns, and handles notifications meanwhile. So the
+ *   receiver keeps a snapshot under a handle it holds no buffer for until an
+ *   attach reply names that handle.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.

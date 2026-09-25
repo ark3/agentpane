@@ -387,11 +387,11 @@ describe("notifications", () => {
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
 	});
 
-	it("sends the snapshot it dropped for an attach answered under another ref after the reply, which names the handle", async () => {
+	it("sends the snapshot it dropped for an attach answered under another ref before the reply, with no rename beside it", async () => {
 		// An attach through an alias: the route answers the new ref, and its
 		// snapshot, under that ref, lands before the reply. Filtered by the
-		// asked-for ref it went nowhere, and before the reply no buffer holds the
-		// handle it carries.
+		// asked-for ref it went nowhere; agentpane-mode keeps it under its handle
+		// until the reply names that handle, in whichever order it handles them.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -402,9 +402,9 @@ describe("notifications", () => {
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
 		await io.until(2);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "session/snapshot"]);
-		expect(io.out[0]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
-		expect(io.out[1]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(io.out[1]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
 
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(3);
@@ -612,7 +612,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		for (const message of perSession) expect(message["params"]).toMatchObject({ handle });
 	});
 
-	it("rides the summary sessions/attach answers, and the snapshot it sends after the reply for a ref the stream never named", async () => {
+	it("rides the summary sessions/attach answers, and the snapshot it sends before the reply for a ref the stream never named", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -624,9 +624,9 @@ describe("the handle (D24, OW-suyinu)", () => {
 		await io.until(2);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "session/snapshot"]);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle } });
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { ...summary(pi), handle } });
-		expect(io.out[1]).toMatchObject({ params: { session: pi, handle } });
 	});
 
 	it("accepts the handle beside the session on a request, and forwards it into no HTTP body", async () => {
