@@ -4,6 +4,8 @@
 
 ;; This file is not part of GNU Emacs.
 
+;; Package-Requires: ((emacs "31.1"))
+
 ;;; Commentary:
 
 ;; The native agentpane mode (D22): a session picker (OW-wavone) and a
