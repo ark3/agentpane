@@ -650,6 +650,44 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(claude.created).toHaveLength(2);
 	});
 
+	it("discards the recipe parked under a name the fork's start renamed away from, when closed under the new one", async () => {
+		// OW-hojefo's Codex first-message fork parks its recipe under a
+		// `virtual:` ref and renames to its thread inside `start()`. A close
+		// under the thread id during that start must not leave the recipe parked
+		// under the old name, or the next attach of it starts the fork again.
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		const claude = new FakeAdapterFactory({ forkMode: "claude" });
+		const gate = deferred();
+		const renamedInside = deferred();
+		const create = claude.create.bind(claude);
+		claude.create = (ref) => {
+			const adapter = create(ref);
+			if (ref.id.includes("#fork-")) {
+				const start = adapter.start.bind(adapter);
+				adapter.start = async (opts) => {
+					await start(opts);
+					adapter.materialiseAs("fork-thread");
+					renamedInside.resolve();
+					await gate.promise;
+				};
+			}
+			return adapter;
+		};
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+		const forked = await sessions.fork(claudeRef, "e1");
+		const attaching = sessions.attach(forked);
+		await renamedInside.promise;
+
+		await sessions.close({ backend: "claude", id: "fork-thread" });
+		gate.resolve();
+		await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
+
+		await expect(sessions.attach(forked)).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(claude.created).toHaveLength(2);
+	});
+
 	// What a ref-changing fork leaves behind for the PARENT (OW-kekoji). The
 	// adapter genuinely moves -- the one live adapter is driving the fork now,
 	// from a container of the fork's own -- but the parent is a second

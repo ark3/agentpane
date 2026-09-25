@@ -1105,11 +1105,23 @@ export class SessionManager {
 		// `#pendingRequests` get further down, for the same reason. Disposing its
 		// adapter is what releases the share a live handle holds -- without it,
 		// closing both the parent and an abandoned fork still leaves the
-		// app-server running with nobody to speak for it.
-		const parkedFork = this.#pendingForks.get(sessionKey(ref));
-		this.#pendingForks.delete(sessionKey(ref));
-		if (parkedFork?.adapter) {
-			await Promise.resolve(parkedFork.adapter.dispose()).catch(() => {});
+		// app-server running with nobody to speak for it. Under every name of
+		// the container, not only the one called: a fork whose start renamed it
+		// -- OW-hojefo's Codex first-message fork, parked under a `virtual:` ref
+		// -- is closed under its new name while its entry sits under the old,
+		// and an entry left there would start the fork a second time.
+		const parkedKeys = new Set([sessionKey(ref), ...(session?.names ?? [])]);
+		const parkedAdapters: BackendAdapter[] = [];
+		for (const key of parkedKeys) {
+			const parked = this.#pendingForks.get(key);
+			if (!parked) continue;
+			this.#pendingForks.delete(key);
+			if (parked.adapter) parkedAdapters.push(parked.adapter);
+		}
+		// Awaited only when there is a handle to release, as before: with none,
+		// nothing here may yield before the container leaves the table below.
+		if (parkedAdapters.length > 0) {
+			await Promise.all(parkedAdapters.map((adapter) => Promise.resolve(adapter.dispose()).catch(() => {})));
 		}
 		// Flag the startup before anything else: an adapter that does not exist
 		// yet cannot be disposed, and this is what stops it being born at all.
