@@ -529,11 +529,11 @@ describe("notifications", () => {
 		expect(io.notifications()).toHaveLength(3);
 	});
 
-	// OW-gusaru: a rename and a re-attach elsewhere in one outage leave the
-	// session under a handle Emacs never heard, carrying a ref it never heard
-	// either. Only the server knows that ref and the one Emacs holds name one
+	// OW-gusaru: a re-attach elsewhere and then a rename of the re-attached
+	// container, in one outage, leave the session under a handle Emacs never
+	// heard, carrying a ref it never heard either. Only the server knows that ref and the one Emacs holds name one
 	// session, so the helper asks it rather than comparing refs.
-	it("moves an attachment onto the handle the server says its ref names now, when a rename and a re-attach elsewhere fell in one outage", async () => {
+	it("moves an attachment onto the handle the server says its ref names now, when a re-attach elsewhere and a rename fell in one outage", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
 		const { io, source, calls } = start({
 			...attachRoutes(pi),
@@ -588,6 +588,98 @@ describe("notifications", () => {
 		await io.until(3);
 		expect(io.notifications()[1]).toMatchObject({ method: "session/snapshot", params: { session: renamed, handle: "h2", movedFrom: h(pi) } });
 		expect(calls.filter((call) => call.url === ROUTES.session(pi))).toHaveLength(1);
+	});
+
+	it("asks again after a pass whose answer named a handle it held no view of, when that handle's snapshot arrived during the pass", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+		const other: SessionRef = { backend: "claude", id: "other" };
+		let releasePi!: () => void;
+		let releaseCodex!: () => void;
+		const piHeld = new Promise<void>((resolve) => (releasePi = resolve));
+		const codexHeld = new Promise<void>((resolve) => (releaseCodex = resolve));
+		const { io, source, calls } = start({
+			...attachRoutes(pi),
+			...attachRoutes(codex),
+			[`GET ${ROUTES.live(pi)}`]: async () => {
+				await piHeld;
+				return json({ session: summary(renamed, "h2") });
+			},
+			[`GET ${ROUTES.live(codex)}`]: async () => {
+				await codexHeld;
+				return json({ session: summary(codex) });
+			},
+		});
+		const lookups = () => calls.filter((call) => call.url.endsWith("/live")).length;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: codex } });
+		await io.until(2);
+		// A pass begins at a snapshot for a session Emacs never attached.
+		source.emit({ type: "snapshot", session: other, handle: h(other), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await vi.waitFor(() => expect(lookups()).toBe(2));
+		// Its answer for pi names h2 before any snapshot under h2, so nothing moves...
+		releasePi();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications()).toEqual([]);
+		// ...and h2's snapshot lands while the pass still waits on codex's answer.
+		source.emit({ type: "snapshot", session: renamed, handle: "h2", seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		releaseCodex();
+		await io.until(3);
+		expect(io.notifications()).toMatchObject([{ method: "session/snapshot", params: { session: renamed, handle: "h2", movedFrom: h(pi) } }]);
+		expect(lookups()).toBe(4);
+	});
+
+	it("carries an attach's askedFor onto the handle an attachment moves to, before that attach's snapshot went out", async () => {
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(virtual)}`]: () => json({ session: summary(pi, "h1") }),
+			[`GET ${ROUTES.live(pi)}`]: () => json({ session: summary(pi, "h2") }),
+		});
+		// Answered under another ref, with no snapshot under h1 yet to tag.
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await io.until(1);
+		expect(io.notifications()).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: "h2", seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(2);
+		expect(io.notifications()).toMatchObject([{ method: "session/snapshot", params: { session: pi, handle: "h2", askedFor: virtual, movedFrom: "h1" } }]);
+	});
+
+	it("asks about a moved attachment by the ref its move told Emacs", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+		const { io, source, calls } = start({
+			...attachRoutes(pi),
+			[`GET ${ROUTES.live(pi)}`]: () => json({ session: summary(renamed, "h2") }),
+			[`GET ${ROUTES.live(renamed)}`]: () => json({ session: summary(renamed, "h2") }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: renamed, handle: "h2", seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(2);
+		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await vi.waitFor(() => expect(calls.filter((call) => call.url.endsWith("/live"))).toHaveLength(2));
+		expect(calls.filter((call) => call.url.endsWith("/live")).map((call) => call.url)).toEqual([ROUTES.live(pi), ROUTES.live(renamed)]);
+	});
+
+	it("moves nothing on an answer that lands after the input ended", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const { io, source, done, calls } = start({
+			...attachRoutes(pi),
+			[`GET ${ROUTES.live(pi)}`]: async () => {
+				await held;
+				return json({ session: summary(renamed, "h2") });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: renamed, handle: "h2", seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await vi.waitFor(() => expect(calls.filter((call) => call.url === ROUTES.live(pi))).toHaveLength(1));
+		io.end();
+		await done;
+		stop = null;
+		release();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications()).toEqual([]);
 	});
 
 	it("moves nothing on an answer that lands after Emacs detached the attachment it was asked for", async () => {
