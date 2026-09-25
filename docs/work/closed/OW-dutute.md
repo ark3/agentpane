@@ -1,5 +1,6 @@
 ---
 labels: [change, d24]
+closed: done
 ---
 
 # A hydrate lays the stored history under what the live stream has already built, in Pi as in Codex, and a Codex delta for an item that started before the attach is kept
@@ -39,3 +40,21 @@ Incidental: where the Codex slot for a pre-attach item is opened, and whether Pi
   Red first if today's replace lets the event through; whether it does is the measurement above, and if the scripted order cannot go red the test still pins the merge and `docs/MANUAL_TESTING.md` says why it could not.
 - The `docs/MANUAL_TESTING.md` sections above, each naming the CLI version.
 - `bun run check` green.
+
+## Close note
+
+Landed on main 2026-09-25: 702167c, 0fc058b, 3d996fb from the implementer, 6c2d1a6 from review.
+
+Measured first, on the home server, with `resources/probes/hydrate_window_probe.py` (recorded in `docs/MANUAL_TESTING.md` under OW-dutute):
+- `codex-cli 0.156.0` on `gpt-5.6-luna`: a `thread/turns/list` at `itemsView: "full"` taken mid-stream after `thread/resume` listed the running turn `inProgress` with its completed items only, leaving the streaming `agentMessage` out; the resume replayed no `turn/started` or `item/started`.
+- `pi 0.87.1` on `openrouter/deepseek/deepseek-v4.1-flash:high`: every event of the abandoned turn, `agent_settled` among them, preceded the `fork` response, and nothing arrived between it and the `get_messages` answer, nor on a resume between `get_state` and `get_messages`; the 0.87.1 source drops the old session's subscription before writing the response.
+
+Codex: `CodexReducer.applyDelta` opens a slot for an item it has none for, from the delta's kind (agent message, plan, reasoning summary and text); command output opens nothing.
+OW-zudase's test in `adapter.test.ts`, "keeps the deltas of an item that started before the attach (OW-zudase)", was run red against main's reducer by the dispatching session and green after.
+The reducer test that pinned the old drop was replaced.
+
+Pi: `hydrateMessages` still replaces, deliberately. D24's Pi merge drops the parent's in-flight messages rather than unioning them, and with no window at 0.87.1 that merge is the replace; the docblock, `AGENTS.md`'s Pi fork bullet and D24 say so with the version.
+A `PiAdapter.fork` test scripts `message_update`s into the window and asserts the rewound branch alone; it passes against the replace by construction and was shown red against a union.
+
+The adversarial read found the Codex half is a guard at the site and named what it misses: the pre-attach turn's streaming state, `turnId` and compaction are never taken from the listing (UI shows idle, `abort()` sends nothing), and a delta-opened slot beats a listed copy that holds the item's head, which is worse than before for any kind the listing does include.
+Filed as the ownership sibling OW-dirazu; the three docs that overclaimed were narrowed in 6c2d1a6.

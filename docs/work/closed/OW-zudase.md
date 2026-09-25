@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Codex re-attach can drop deltas for an item that started before it attached
@@ -21,3 +22,9 @@ If it returns none of them, the item is absent until `item/completed`; if it ret
 
 Done when an adapter test in `src/server/adapters/codex/adapter.test.ts` shows a delta for an item listed as in progress on an earlier `thread/turns/list` page, emitted before the last page, surviving into `getState()`, red against today's adapter first.
 Or, if a live measurement on the home server (`codex -m gpt-5.6-luna`, per `AGENTS.md`) shows the window cannot lose anything, close this with that measurement recorded in `docs/MANUAL_TESTING.md` with the CLI version.
+
+## Close note
+
+Closed with OW-dutute on 2026-09-25, whose Codex half is this card's done-condition: `CodexReducer.applyDelta` now opens a slot for an item whose `item/started` preceded the attach, and the adapter test "keeps the deltas of an item that started before the attach (OW-zudase)" in the "re-attaching a thread whose turn is running (OW-vijuyi)" block went red against the old reducer and green after.
+The measurement this card asked for, as of `codex-cli 0.156.0`: the mid-stream listing leaves a streaming `agentMessage` out of the `inProgress` turn it lists, so its deltas are its only text until `item/completed`.
+What the fix does not reach (the running turn's state, and a listed partial item's head) is OW-dirazu.
