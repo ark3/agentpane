@@ -1192,11 +1192,13 @@
 			// (D24) -- on Pi, whose live process moved onto a new file, exactly as
 			// much as on Codex, which hands back a ref nothing was renamed to --
 			// so this is where the follow and badge armed above move onto the
-			// fork the prompt landed on (OW-suhoto). The *landed* ref, never
-			// `state.selected`: a click mid-fork moves the selection and the
-			// controller now honours it, so reading the selection back here would
-			// move this tab's arming onto a session it never submitted to.
-			if (armedKey) rekeySession(armedKey, keyOf(landed));
+			// fork the prompt landed on (OW-suhoto). Its handle, as the attach
+			// replied with it: not its ref, which its first prompt may already
+			// have renamed (OW-kimaya), and never `state.selected`, which a click
+			// mid-fork moves and the controller honours, so reading the selection
+			// back here would move this tab's arming onto a session it never
+			// submitted to.
+			if (armedKey) rekeySession(armedKey, landed.handle);
 			if (editing === edit) editing = null;
 		});
 	}

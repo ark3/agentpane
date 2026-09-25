@@ -23,7 +23,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController, type AgentpaneController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, LiveSessionSummary, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 const CWD = "/tmp/agentpane-perf";
 
@@ -60,7 +60,7 @@ function handleFor(id: string): string {
 	return `h-${id}`;
 }
 
-function summaryFor(id: string, index: number): SessionSummary {
+function summaryFor(id: string, index: number): LiveSessionSummary {
 	return {
 		ref: refFor(id),
 		cwd: CWD,
@@ -130,7 +130,7 @@ interface Live {
 }
 
 const live = new Map<string, Live>();
-let summaries: SessionSummary[] = [];
+let summaries: LiveSessionSummary[] = [];
 let handlers: EventHandlers | undefined;
 let controller: AgentpaneController | undefined;
 

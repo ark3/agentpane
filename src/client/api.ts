@@ -21,6 +21,7 @@ import {
 	type SetModelRequest,
 	type SessionPreviewResponse,
 	type SessionRef,
+	type LiveSessionSummary,
 	type SessionSummary,
 } from "$shared/protocol.ts";
 
@@ -62,7 +63,7 @@ export class ApiClientError extends Error {
 export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
 	createSession(body: CreateSessionRequest): Promise<SessionRef>;
-	attach(ref: SessionRef): Promise<SessionSummary>;
+	attach(ref: SessionRef): Promise<LiveSessionSummary>;
 	/** Read-only, non-attaching transcript preview (OW-38): spawns nothing. */
 	preview(ref: SessionRef): Promise<SessionPreviewResponse>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;

@@ -107,6 +107,9 @@ export interface SessionSummary {
 	handle?: string;
 }
 
+/** The summary of a session the server holds, which always carries its handle: what an attach answers. */
+export type LiveSessionSummary = SessionSummary & { handle: string };
+
 // ---------------------------------------------------------------------------
 // Server-initiated requests (D2a)
 // ---------------------------------------------------------------------------
@@ -325,7 +328,7 @@ export interface CreateSessionResponse {
  * `renamed` event.
  */
 export interface AttachSessionResponse {
-	session: SessionSummary;
+	session: LiveSessionSummary;
 }
 
 /**

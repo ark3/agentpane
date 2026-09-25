@@ -1,5 +1,6 @@
 import type {
 	BackendId,
+	LiveSessionSummary,
 	ModelInfo,
 	PromptRequest,
 	ServerEvent,
@@ -123,11 +124,15 @@ export interface AgentpaneController {
 	 * offers no Edit control on such a message at all, so reaching here means the
 	 * transcript moved under the affordance.
 	 *
-	 * Resolves to **the ref the prompt landed on**, or null if it never landed.
-	 * The ref rather than a boolean because the caller has per-tab state keyed on
-	 * the session it armed before the fork -- scroll, follow, the badge -- and has
-	 * to move it onto the fork; reading `state.selected` back instead would move
-	 * it onto whatever the user clicked mid-fork (OW-mifuki).
+	 * Resolves to **the attach reply of the session the prompt landed on**, or
+	 * null if it never landed. Not a boolean, because the caller has per-tab
+	 * state keyed on the session it armed before the fork -- scroll, follow, the
+	 * badge -- and has to move it onto the fork; reading `state.selected` back
+	 * instead would move it onto whatever the user clicked mid-fork (OW-mifuki).
+	 * And carrying the fork's handle, not only its ref, because the fork's first
+	 * prompt can rename it before this resolves -- Claude Code renames at `init`,
+	 * after `submit()` -- and by then no view or summary carries the ref the
+	 * attach replied with, so a lookup by it finds nothing (OW-kimaya).
 	 *
 	 * Null means a genuine failure -- nothing selected, an empty draft, a press
 	 * on top of one still in flight, no fork point at that index, or a rejected
@@ -142,7 +147,7 @@ export interface AgentpaneController {
 	 * the mark under it would leave a composer that says nothing about where it
 	 * is about to send.
 	 */
-	forkAndSubmit(index: number, images?: PromptRequest["images"]): Promise<SessionRef | null>;
+	forkAndSubmit(index: number, images?: PromptRequest["images"]): Promise<LiveSessionSummary | null>;
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
 	compact(): Promise<void>;
@@ -991,7 +996,7 @@ export function createController(
 					...(view.draft === text ? { draft: "" } : {}),
 					...(forkIntent === selectionIntent ? { error: null } : {}),
 				});
-				return attached.ref;
+				return attached;
 			} catch (error: unknown) {
 				// Reached past a successful `api.fork`, this abandons the fork too; the
 				// note at that call says why that is deliberate (OW-puduro).

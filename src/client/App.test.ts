@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	sessionKey,
 	type BackendId,
+	type LiveSessionSummary,
 	type ModelInfo,
 	type ServerEvent,
 	type SessionPreviewTurn,
@@ -200,11 +201,12 @@ class FakeController implements AgentpaneController {
 	/** Every fork the shell asked for, in order, with the images it carried. */
 	forked: Array<{ index: number; images: { mimeType: string; base64: string }[] | undefined }> = [];
 	/**
-	 * The ref `forkAndSubmit` resolves to -- the one the prompt landed on, or
-	 * null for "the fork never landed". The real one hands back the ref rather
-	 * than reading `state.selected` back, so the fake must too (OW-mifuki).
+	 * What `forkAndSubmit` resolves to -- the attach reply of the session the
+	 * prompt landed on, or null for "the fork never landed". The real one hands
+	 * that back rather than reading `state.selected` back, so the fake must too
+	 * (OW-mifuki).
 	 */
-	forkResult: SessionRef | null = null;
+	forkResult: LiveSessionSummary | null = null;
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's `renamed`. */
 	onForkAndSubmit: ((index: number) => void) | null = null;
 
@@ -2111,7 +2113,7 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async () => summary(piSession, null, { handle: "h-parent" }),
+			attach: async () => ({ ...summary(piSession), handle: "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async (_ref, body) => {
 				prompts.push(body.text);
@@ -2598,8 +2600,8 @@ describe("App", () => {
 	 * arming is laid down on the parent before the fork exists, so it has to move
 	 * onto the fork -- and onto the *fork*, not onto whatever `state.selected`
 	 * happens to be when the fork resolves. A click mid-fork moves the selection
-	 * and the controller now honours it, so the ref `forkAndSubmit` hands back is
-	 * the only thing that names the right session (OW-mifuki).
+	 * and the controller now honours it, so the session `forkAndSubmit` hands back
+	 * is the only thing that names the right one (OW-mifuki).
 	 */
 	it("badges the fork it landed on, not a session clicked mid-fork (OW-mifuki)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
@@ -2607,7 +2609,7 @@ describe("App", () => {
 		const parent = { ref: piSession, messages: [user("first draft")], isStreaming: false, seq: 1, error: null, requests: [] };
 		const fork = { ref: forkRef, messages: [user("reworded")], isStreaming: false, seq: 1, error: null, requests: [] };
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": parent } }) }));
-		controller.forkResult = forkRef;
+		controller.forkResult = { ...summary(forkRef), handle: "codex:thread-fork" };
 		// The click lands while the fork's prompt is in flight, so the selection
 		// the controller publishes is the other session and never the fork.
 		controller.onForkAndSubmit = () => {
@@ -2659,7 +2661,7 @@ describe("App", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async (ref) => summary(ref, null, { handle: ref.id === forkRef.id ? "h-fork" : "h-parent" }),
+			attach: async (ref) => ({ ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),
@@ -2729,7 +2731,7 @@ describe("App", () => {
 		// `forkAndSubmit` attaches the fork's ref and publishes the selection
 		// *before* it resolves, so the fake does too; the shell moves what it
 		// armed on the parent's handle onto the fork's once it resolves.
-		controller.forkResult = forkRef;
+		controller.forkResult = { ...summary(forkRef), handle: "h-fork" };
 		controller.onForkAndSubmit = () => {
 			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef, false, "h-fork") }));
 		};
@@ -2763,6 +2765,45 @@ describe("App", () => {
 		expect(container.querySelector("button[type='submit']")).toHaveTextContent("Send");
 	});
 
+	it("moves the arming onto the fork's handle even when the fork's first prompt renamed it before the fork resolved (OW-kimaya)", async () => {
+		// Claude Code renames at `init`, after `submit()`: the status carrying the
+		// fork's new ref can land under its handle before `forkAndSubmit`
+		// resolves, and the reducer has moved the view, summary and selection off
+		// the ref the attach replied with by the time `send()` reads it.
+		const forkRef: SessionRef = { backend: "claude", id: "fork-at-attach" };
+		const renamedFork: SessionRef = { backend: "claude", id: "fork-after-init" };
+		const controller = new FakeController(view({
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], piSession, false, "h-parent"),
+		}));
+		controller.forkResult = { ...summary(forkRef), handle: "h-fork" };
+		controller.onForkAndSubmit = () => {
+			controller.publish(view({ state: attachedState([user("first draft")], renamedFork, false, "h-fork") }));
+		};
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.forked).toEqual([{ index: 0, images: [] }]);
+
+		const reworded = user("reworded");
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ draft: "", state: attachedState([reworded], renamedFork, false, "h-fork") }));
+		await tick();
+		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		controller.publish(view({ draft: "", state: attachedState([reworded], renamedFork, true, "h-fork") }));
+		await tick();
+		await nextFrame();
+
+		// Moved onto a key named by the attach reply's ref, which nothing holds
+		// any more, follow never engages and this reads where the switch parked it.
+		expect(el.scrollTop).toBe(400);
+	});
+
 	/**
 	 * The Codex half of the test above: a fork that renames nothing lands on
 	 * another session just the same, so the follow armed under the parent's key
@@ -2781,7 +2822,7 @@ describe("App", () => {
 		const reworded = user("reworded");
 		// What the real `forkAndSubmit` does: it attaches the ref the fork returned
 		// and publishes that selection *before* it resolves. No `renamed` ever fires.
-		controller.forkResult = forkRef;
+		controller.forkResult = { ...summary(forkRef), handle: sessionKey(forkRef) };
 		controller.onForkAndSubmit = () => {
 			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
 			controller.publish(view({ draft: "", state: attachedState([reworded], forkRef) }));
@@ -3023,7 +3064,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 		const api: AgentpaneApi = {
 			listSessions: async () => [summary(piSession)],
 			createSession: async () => piSession,
-			attach: async (ref) => summary(ref, null, { handle: sessionKey(ref) }),
+			attach: async (ref) => ({ ...summary(ref), handle: sessionKey(ref) }),
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: async () => {},
 			editDraft: async (body) => ({ text: body.text }),

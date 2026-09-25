@@ -21,6 +21,7 @@ import type {
 	ListSessionsQuery,
 	SessionRef,
 	SessionStatus,
+	LiveSessionSummary,
 	SessionSummary,
 } from "../../shared/protocol.ts";
 import { sessionKey } from "../../shared/protocol.ts";
@@ -1256,7 +1257,7 @@ export class SessionManager {
 	 * question about a session we are already holding open, on the path a session
 	 * switch takes.
 	 */
-	summaryOf(ref: SessionRef): SessionSummary | null {
+	summaryOf(ref: SessionRef): LiveSessionSummary | null {
 		const session = this.#lookup(ref);
 		if (!session) return null;
 		const stored = session.stored;
@@ -1266,7 +1267,7 @@ export class SessionManager {
 	}
 
 	/** A session the index does not know about: everything we have is what we minted. */
-	#ownSummary(session: ManagedSession): SessionSummary {
+	#ownSummary(session: ManagedSession): LiveSessionSummary {
 		return {
 			ref: session.ref,
 			cwd: session.cwd,

@@ -4,6 +4,7 @@ import type {
 	BackendId,
 	ForkPoint,
 	ForkRequest,
+	LiveSessionSummary,
 	ModelInfo,
 	ServerEvent,
 	SessionPreviewResponse,
@@ -25,7 +26,7 @@ function h(session: SessionRef): string {
 	return `handle-${session.backend}-${session.id}`;
 }
 
-function summary(session: SessionRef, cwd = "/work", handle = h(session)): SessionSummary {
+function summary(session: SessionRef, cwd = "/work", handle = h(session)): LiveSessionSummary {
 	return {
 		ref: session,
 		cwd,
@@ -99,7 +100,7 @@ class FakeApi implements AgentpaneApi {
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly reply = vi.fn(async (_requestId: string, _body: AgentRequestReply) => {});
 	readonly dismissError = vi.fn(async (_session: SessionRef, _message: string) => {});
-	readonly listSessions = vi.fn(async (_cwd?: string) => [summary(ref)]);
+	readonly listSessions = vi.fn(async (_cwd?: string): Promise<SessionSummary[]> => [summary(ref)]);
 	readonly connection: EventConnection = { close: vi.fn() };
 	handlers: EventHandlers | undefined;
 	/** How many times the controller has built an event connection -- a reconnect is a second call. */
@@ -439,8 +440,8 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const firstRef: SessionRef = { backend: "pi", id: "/sessions/first.jsonl" };
 		const secondRef: SessionRef = { backend: "codex", id: "thread-second" };
-		const first = deferred<SessionSummary>();
-		const second = deferred<SessionSummary>();
+		const first = deferred<LiveSessionSummary>();
+		const second = deferred<LiveSessionSummary>();
 		api.attach.mockImplementation((session) => {
 			if (session.id === firstRef.id) return first.promise;
 			if (session.id === secondRef.id) return second.promise;
@@ -673,7 +674,7 @@ describe("client controller", () => {
 
 	it("coalesces recovery attaches while a sequence-gap recovery is in flight", async () => {
 		const api = new FakeApi();
-		const recovery = deferred<SessionSummary>();
+		const recovery = deferred<LiveSessionSummary>();
 		api.attach.mockImplementationOnce(async (session) => summary(session)).mockImplementationOnce(() => recovery.promise);
 		const controller = createController(api);
 		await controller.start();
@@ -1086,7 +1087,7 @@ describe("client controller", () => {
 		await controller.start();
 		await controller.select(ref);
 		controller.setDraft("reworded");
-		expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
+		expect((await controller.forkAndSubmit(0))?.ref).toEqual(forkedRef);
 		api.emit({ type: "snapshot", session: forkedRef, handle: h(forkedRef), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 
@@ -1459,7 +1460,7 @@ describe("client controller", () => {
 		await controller.select(ref);
 		controller.setDraft("reworded");
 
-		expect(await controller.forkAndSubmit(4)).toEqual(forkedRef);
+		expect((await controller.forkAndSubmit(4))?.ref).toEqual(forkedRef);
 
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
 	});
@@ -1550,7 +1551,7 @@ describe("client controller", () => {
 			api.emit({ type: "snapshot", session: parent, handle: h(parent), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 			controller.setDraft("reworded");
 
-			expect(await controller.forkAndSubmit(0)).toEqual(forkedRef);
+			expect((await controller.forkAndSubmit(0))?.ref).toEqual(forkedRef);
 
 			expect(api.abort).not.toHaveBeenCalled();
 			expect(api.fork).toHaveBeenCalledWith(parent, { entryId: "turn-1" });
@@ -1581,7 +1582,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		forking.resolve(forkedRef);
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
 		expect(controller.getView().state.selected).toEqual(other);
@@ -1614,7 +1615,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		aborting.resolve();
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
@@ -1642,7 +1643,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded" });
@@ -1699,12 +1700,12 @@ describe("client controller", () => {
 		await settle();
 		// The user's own attach is still in flight when the fork resolves and
 		// runs its attach, its prompt and its publishes underneath it.
-		const attachingOther = deferred<SessionSummary>();
+		const attachingOther = deferred<LiveSessionSummary>();
 		api.attach.mockReturnValueOnce(attachingOther.promise);
 		const selecting = controller.select(other);
 		await settle();
 		forking.resolve(forkedRef);
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		attachingOther.resolve(summary(other));
 		await selecting;
 
@@ -1739,7 +1740,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		prompt.resolve();
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("");
 		expect(controller.getView().state.selected).toEqual(other);
 	});
@@ -1762,7 +1763,7 @@ describe("client controller", () => {
 		await controller.select(ref);
 		controller.setDraft("reworded");
 
-		const attachingFork = deferred<SessionSummary>();
+		const attachingFork = deferred<LiveSessionSummary>();
 		api.attach.mockReturnValueOnce(attachingFork.promise);
 		const submitted = controller.forkAndSubmit(0);
 		await settle();
@@ -1772,7 +1773,7 @@ describe("client controller", () => {
 		expect(controller.getView().preview).not.toBeNull();
 		attachingFork.resolve(summary(forkedRef));
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 		expect(controller.getView().preview).toBeNull();
 		controller.dispose();
@@ -1805,7 +1806,7 @@ describe("client controller", () => {
 		expect(api.fork).toHaveBeenCalledOnce();
 		forking.resolve(forkedRef);
 		expect(await second).toBeNull();
-		expect(await first).toEqual(forkedRef);
+		expect((await first)?.ref).toEqual(forkedRef);
 		expect(api.prompt).toHaveBeenCalledOnce();
 		controller.dispose();
 	});
@@ -1834,7 +1835,7 @@ describe("client controller", () => {
 		controller.setDraft("and the next thing");
 		prompt.resolve();
 
-		expect(await submitted).toEqual(forkedRef);
+		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("and the next thing");
 		controller.dispose();
 	});

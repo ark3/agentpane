@@ -32,7 +32,7 @@ import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client
 import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
 import { assistant, toolResult, user } from "../src/client/render/samples.ts";
-import type { ForkPoint, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
+import type { ForkPoint, LiveSessionSummary, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 /**
  * Window focus, faked, for the turn-done badge (OW-diyuwu).
@@ -125,7 +125,7 @@ function status(isStreaming: boolean): void {
 	emit({ type: "status", session: REF, handle: HANDLE, seq, isStreaming, compaction: null, model, effort, unrestoredModel: null });
 }
 
-function summary(): SessionSummary {
+function summary(): LiveSessionSummary {
 	return {
 		ref: REF,
 		cwd: CWD,
