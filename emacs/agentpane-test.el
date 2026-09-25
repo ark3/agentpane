@@ -610,25 +610,48 @@ transcript and its composer as they were."
                   (and held (agentpane--same-ref-p (agentpane--ref held) ref))))
               (buffer-list)))
 
-(ert-deftest agentpane-test-renamed-onto-a-previewed-ref-merges-nothing ()
-  "A `session/renamed' under the handle a buffer holds, onto the ref another
-buffer only previews, re-keys nothing: both buffers stay, and what the
-session sends next under its handle reaches the one holding it."
+(ert-deftest agentpane-test-renamed-onto-a-previewed-ref-leaves-the-live-buffer-attached ()
+  "A buffer whose attach of an alias is renamed onto the ref another buffer
+only previews is left beside that preview, not merged: two buffers on one
+ref, deliberately, since only the live one holds the handle, and the
+preview, which never sent an attach, sends no `sessions/detach' when
+killed, which by that ref alone would stop the helper feeding the live
+one.  The live one stays attached, and hears the session under its
+handle."
+  (let ((alias '(:backend "claude" :id "pending-1"))
+        (canonical '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/attach)
+              attached (list :ref canonical :handle "h1"))
+        (let ((live (agentpane--transcript-buffer (list :ref alias)))
+              (preview (agentpane--transcript-buffer (list :ref canonical))))
+          (with-current-buffer live (agentpane--attach))
+          (agentpane--on-notification nil 'session/renamed
+                                      (list :from alias :to canonical :handle "h1"))
+          (agentpane--on-notification nil 'session/snapshot
+                                      (list :session canonical :handle "h1" :nodes []))
+          (funcall (cdr (pop held)) t)
+          (should (buffer-live-p preview))
+          (setq sent nil)
+          (kill-buffer preview)
+          (should-not sent)
+          (agentpane--on-notification
+           nil 'session/node (list :session canonical :handle "h1"
+                                   :node (agentpane-test--assistant 4 "<p>Live.</p>")))
+          (with-current-buffer live
+            (should (agentpane--attached-p))
+            (should (equal (agentpane-test--indices) '(4)))))))))
+
+(ert-deftest agentpane-test-renamed-under-the-handle-moves-the-ref ()
+  "A `session/renamed' under the handle a buffer holds moves the buffer's
+ref to `to', the ref the helper names the session by from then on."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
-    (agentpane-test--forking nil nil
-      (let ((live (agentpane--transcript-buffer (list :ref from)))
-            (preview (agentpane--transcript-buffer (list :ref to))))
-        (with-current-buffer live (setq agentpane--handle "h1"))
-        (agentpane--on-notification nil 'session/renamed
-                                    (list :from from :to to :handle "h1"))
-        (should (buffer-live-p preview))
-        (agentpane--on-notification
-         nil 'session/snapshot
-         (list :session to :handle "h1"
-               :nodes (vector (agentpane-test--assistant 4 "<p>Live.</p>"))))
-        (with-current-buffer live (should (equal (agentpane-test--indices) '(4))))
-        (with-current-buffer preview (should-not agentpane--ewoc))))))
+    (agentpane-test--with-session from
+      (setq agentpane--handle "h1")
+      (agentpane--on-notification nil 'session/renamed (list :from from :to to :handle "h1"))
+      (should (agentpane--same-ref-p (agentpane--ref agentpane--session) to)))))
 
 (ert-deftest agentpane-test-listed-handle-finds-its-buffer ()
   "A listing's summary carrying the handle a buffer holds finds that buffer,
@@ -741,6 +764,17 @@ other."
              :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
       (with-current-buffer previewing
         (should (equal (agentpane-test--indices) '(3)))))))
+
+(ert-deftest agentpane-test-attach-now-onto-a-held-handle-attaches-again ()
+  "A synchronous attach whose reply names the handle another buffer holds
+merges that one into this one, which then attaches again, as the
+asynchronous attach does, for a snapshot of its own."
+  (agentpane-test--merging
+    (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
+              ((symbol-function 'jsonrpc-request) (lambda (&rest _) attached)))
+      (with-current-buffer previewing (agentpane--attach-now))
+      (should-not (buffer-live-p holder))
+      (should (equal sent `((sessions/attach :session ,canonical)))))))
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-drafts ()
   "When an attach reply merges the buffer holding its handle into the one
@@ -1521,7 +1555,8 @@ since the compact route answers only for an attached session."
           [(:id "entry-0" :text "Fix the bug" :index 0)]
           forked
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (equal (mapcar #'car (reverse sent))
@@ -1554,11 +1589,9 @@ transcript under the fork's ref, never the parent's (OW-zovaye)."
             (should-not (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(0 1)))))))))
 
-(ert-deftest agentpane-test-pi-fork-parent-lets-go-of-its-handle ()
-  "A Pi fork's parent buffer lets go of its handle, whose container the
-server has let go, and the fork's buffer holds the one its own attach
-answered, so the fork's snapshot, which names a ref the parent never held,
-is drawn there alone."
+(ert-deftest agentpane-test-pi-fork-detaches-the-parent-by-its-handle ()
+  "A Pi fork detaches its parent from the helper by the handle the parent
+holds, and the fork's buffer holds the handle its own attach answered."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -1571,16 +1604,10 @@ is drawn there alone."
                 attached (list :ref forked :handle "h2"))
           (agentpane-test--goto-index 0)
           (agentpane-fork)
-          (should-not agentpane--handle)
-          (let ((fork-buffer (agentpane--buffer-for forked)))
-            (should (equal (buffer-local-value 'agentpane--handle fork-buffer) "h2"))
-            (agentpane--on-notification
-             nil 'session/snapshot
-             (list :session forked :handle "h2"
-                   :nodes (vector (agentpane-test--assistant 7 "<p>Forked.</p>"))))
-            (with-current-buffer fork-buffer
-              (should (equal (agentpane-test--indices) '(7)))))
-          (should (equal (agentpane-test--indices) '(0 1))))))))
+          (should (equal (assq 'sessions/detach sent)
+                         `(sessions/detach :session ,ref :handle "h1")))
+          (should (equal (buffer-local-value 'agentpane--handle (agentpane--buffer-for forked))
+                         "h2")))))))
 
 (ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
   "A second `agentpane-fork' while one is in flight says so and sends
@@ -1642,7 +1669,8 @@ reply is released, and those sent after, in order."
           [(:id "entry-0" :text "Fix the bug" :index 0)]
           (list :backend backend :id "fork")
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
           (setq hold '(sessions/abort))
           (agentpane--on-notification
            nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
@@ -1726,7 +1754,8 @@ parent detached."
           [(:id "entry-0" :text "Fix the bug" :index 0)]
           forked
         (agentpane-test--with-session ref
-          (setq agentpane--attached agentpane--connection)
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
           (setq hold '(sessions/fork sessions/attach))
           (agentpane-test--goto-index 0)
           (agentpane-fork)

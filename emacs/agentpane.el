@@ -308,8 +308,9 @@ The server's name for the session's container, which a rename never moves
 and a fork does not share (D24): the one its attach reply carried, or,
 before that reply, the one the first notification it was sent carried,
 or one a later snapshot moved it onto; see `agentpane--notified-buffer'.
-Nil in a buffer that has not attached, and in the parent of a Pi fork,
-whose container the server has let go.")
+Nil in a buffer that has not attached.  A buffer detached keeps the one
+it held, which the server never mints again: the parent of a Pi fork,
+whose container the server has let go, and whose detach names it.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for a request that may spawn the session's backend:
@@ -440,12 +441,13 @@ session no buffer asked to attach.  The attach's snapshot and its reply
 are unordered (D2), so its first notifications can arrive before the
 reply names the handle.  Where the reply names another ref than the one
 asked for, the helper says so first, with a `session/renamed' from the
-asked-for ref, then sends the snapshot under the new one, both before
-the reply (`sessions/attach' in src/emacs/helper.ts): the handle is taken
-from that `session/renamed', and the snapshot finds the buffer by it.
-That event is the only link from the asked-for ref to the handle before
-the reply, so whatever retires it from the wire (OW-mofuho) has to give
-that snapshot another route.
+asked-for ref sent before the reply, and with it the snapshot under the
+new one if it holds that snapshot already; one still on its way comes
+after (`sessions/attach' in src/emacs/helper.ts).  The handle is taken
+from that `session/renamed', and the snapshot, whenever it comes, finds
+the buffer by it.  That event is the only link from the asked-for ref to
+the handle before the reply, so whatever retires it from the wire
+\(OW-mofuho) has to give a snapshot sent before the reply another route.
 
 A `session/snapshot' also moves a buffer from one handle to another, and
 looks for such a buffer first: a snapshot is how a ref reaches the helper
@@ -1405,6 +1407,10 @@ mode line."
 Attached only while that is still the running connection: a fresh helper
 has attached nothing.")
 
+(defvar-local agentpane--attach-sent nil
+  "Non-nil once this buffer has sent a `sessions/attach', whatever became of
+it; see `agentpane--detach'.")
+
 (defvar-local agentpane--attaching nil
   "While a `sessions/attach' this buffer sent has not answered, the callers
 waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
@@ -1857,7 +1863,8 @@ stored transcript over the live one the other's snapshot drew (OW-yibimi)."
   (if agentpane--attaching
       (setq agentpane--attaching
             (append agentpane--attaching (list (cons then failed))))
-    (setq agentpane--attaching (list (cons then failed)))
+    (setq agentpane--attaching (list (cons then failed))
+          agentpane--attach-sent t)
     (agentpane--request 'sessions/attach
                         (list :session (agentpane--ref agentpane--session))
                         (lambda (summary)
@@ -1897,6 +1904,7 @@ prompt's attach out; asked again once that has answered, it finds the
 session attached and needs no attach at all."
   (when agentpane--attaching
     (user-error "This session is still attaching; try again once it has"))
+  (setq agentpane--attach-sent t)
   (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
                                    (list :session (agentpane--ref agentpane--session))
                                    :timeout agentpane--spawn-timeout)))
@@ -1925,19 +1933,34 @@ on the server and lets go of its agent (`SessionManager.close' in
 src/server/http/session-manager.ts): killing a buffer leaves the session
 running, as closing a browser tab does.
 
-Sent whenever a helper is running, whatever this buffer believes: an
-attach that failed here -- timed out, or quit in `agentpane-new-session'
--- may still have succeeded in the helper, which then holds the session,
-and a detach of a session it does not hold changes nothing.  Never sent
-without one, so a kill never starts a helper, as `agentpane--connection'
-would.  An error sending it, such as a pipe that has just broken, is
-reported and goes no further, since an error in `kill-buffer-hook' stops
-the kill; not through `with-demoted-errors', which lets it through under
-`debug-on-error'."
-  (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
+It carries the handle this buffer holds, and the helper stops what it
+sends under that handle, whatever ref the buffer last heard (OW-wedeli).
+One from a buffer holding no handle names only its ref, and the helper
+stops whatever it last named to Emacs by that ref, so it is sent only
+from a buffer that has sent an attach, whatever this buffer believes of
+that attach: one that failed here -- timed out, or quit in
+`agentpane-new-session' -- may still have succeeded in the helper, which
+then holds the session, and a detach of a session it does not hold
+changes nothing.  A buffer that never sent one holds nothing in the
+helper, and its ref may be a live buffer's too: a preview of the ref a
+live buffer's session was since renamed onto, left beside it rather than
+merged (D24).  Sent from there, the detach silenced the live one.
+One case stays: a buffer whose attach failed here but succeeded in the
+helper, under a handle another buffer holds, still silences that one when
+killed, which takes two buffers on one session and a timeout or a quit.
+
+Never sent without a running helper, so a kill never starts one, as
+`agentpane--connection' would.  An error sending it, such as a pipe that
+has just broken, is reported and goes no further, since an error in
+`kill-buffer-hook' stops the kill; not through `with-demoted-errors',
+which lets it through under `debug-on-error'."
+  (when (and agentpane--connection (jsonrpc-running-p agentpane--connection)
+             (or agentpane--handle agentpane--attach-sent))
     (condition-case err
         (agentpane--request 'sessions/detach
-                            (list :session (agentpane--ref agentpane--session))
+                            (append (list :session (agentpane--ref agentpane--session))
+                                    (and agentpane--handle
+                                         (list :handle agentpane--handle)))
                             #'ignore t)
       (error (message "agentpane: sessions/detach failed: %s" (error-message-string err))))))
 
@@ -2177,11 +2200,11 @@ aborted.  A Pi fork also moves the parent's live process onto the fork, a
 container of its own under a handle of its own, and takes the parent's
 container out of the server's table (D24, `SessionManager' in
 src/server/http/session-manager.ts), so the parent's handle hears nothing
-more.  This buffer then counts itself detached too, lets go of that
-handle, detaches the parent from the helper, and its next command that
-needs the session attaches it again, under whatever handle that attach
-answers.  The fork's buffer takes the fork's handle from its own attach.
-Codex and Claude Code leave the parent attached.
+more.  This buffer then counts itself detached too, detaches the parent
+from the helper by that handle, and its next command that needs the
+session attaches it again, under whatever handle that attach answers.
+The fork's buffer takes the fork's handle from its own attach.  Codex
+and Claude Code leave the parent attached.
 
 The parent buffer keeps the live transcript it was showing, unredrawn:
 what the server emits of the fork's shortened transcript goes out under
@@ -2266,8 +2289,7 @@ fork fails.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil
-             agentpane--handle nil))
+       (setq agentpane--attached nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
