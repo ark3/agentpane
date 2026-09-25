@@ -4,7 +4,9 @@
  * FROZEN INTERFACE (DESIGN D11). Both ends of the transport are ours and are
  * written by different people at different times, so this is the one place
  * DESIGN asks for concreteness rather than judgement. Changing anything here
- * breaks work in flight -- raise it before editing.
+ * breaks work in flight -- raise it before editing. D24 raised it once: the
+ * `handle` on `SessionSummary` and beside `session` on every per-session
+ * event (OW-suyinu).
  *
  * Shape follows DESIGN D2 (SSE for server->client, REST for client->server)
  * and D3 (the server is authoritative; it sends assembled state, never raw
@@ -94,6 +96,15 @@ export interface SessionSummary {
 	 * has listed it.
 	 */
 	onDisk: boolean;
+	/**
+	 * The name the server gave the live session holding this conversation (D24,
+	 * OW-suyinu): opaque, unique for the server's lifetime, and never changed by
+	 * a rename, which is what `ref` does. Present for a session the server
+	 * holds, virtual or attached; absent for one only the backend's store knows.
+	 * Every per-session `ServerEvent` carries the same string. A Pi fork is
+	 * another conversation and gets another handle; the parent's is gone.
+	 */
+	handle?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,11 +171,17 @@ export interface AgentRequestReply {
  * `seq` is monotonic *per session*. A gap means the client missed an update;
  * recovery is to re-subscribe and take a fresh snapshot, which is free on
  * loopback. Snapshots reset the sequence.
+ *
+ * Every arm but `sessions-changed` carries `handle` beside `session`: the
+ * session's `SessionSummary.handle`, which a rename leaves alone while `session`
+ * moves (D24, OW-suyinu). The counter `seq` counts is the handle's. Optional
+ * only until a client reads it (OW-kimaya).
  */
 export type ServerEvent =
 	| {
 			type: "snapshot";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			messages: PaneMessage[];
 			isStreaming: boolean;
@@ -203,12 +220,13 @@ export type ServerEvent =
 			 */
 			type: "upsert";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			index: number;
 			message: PaneMessage;
 	  }
-	| { type: "status"; session: SessionRef; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
-	| { type: "request"; session: SessionRef; seq: number; request: AgentRequest }
+	| { type: "status"; session: SessionRef; handle?: string; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
+	| { type: "request"; session: SessionRef; handle?: string; seq: number; request: AgentRequest }
 	| {
 			/**
 			 * The request `requestId` names is no longer pending, however it
@@ -218,6 +236,7 @@ export type ServerEvent =
 			 */
 			type: "request-resolved";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			requestId: string;
 	  }
@@ -225,6 +244,7 @@ export type ServerEvent =
 			/** A turn ended in an error the transcript alone would not convey. */
 			type: "error";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			message: string;
 	  }
@@ -241,6 +261,7 @@ export type ServerEvent =
 			 */
 			type: "notice";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			notice: AgentNotice;
 	  }
@@ -257,9 +278,14 @@ export type ServerEvent =
 			 * old id on REST routes indefinitely, but every event from here on
 			 * carries the new one, so a client that ignores this renders a live
 			 * session into a transcript nothing updates.
+			 *
+			 * `handle` is the one the session held before the rename and holds
+			 * after it: a client keyed by it has nothing to re-key (D24). This
+			 * event stays until both clients are (OW-mofuho).
 			 */
 			type: "renamed";
 			session: SessionRef;
+			handle?: string;
 			seq: number;
 			from: SessionRef;
 	  }

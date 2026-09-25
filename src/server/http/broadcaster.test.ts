@@ -4,11 +4,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import type { SessionRef } from "../../shared/protocol.ts";
+import type { ServerEvent, SessionRef } from "../../shared/protocol.ts";
 import { Broadcaster, formatSseFrame } from "./broadcaster.ts";
 import { userMessage } from "./testing/fakes.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/a.jsonl" };
+const HANDLE = "h1";
 
 describe("framing", () => {
 	it("puts every event on one line, terminated by a blank line", () => {
@@ -114,14 +115,94 @@ describe("keepalive", () => {
 	});
 });
 
+/** A broadcaster whose snapshot source holds one session, under `HANDLE`, at whatever `session.ref` says. */
+function oneSession() {
+	const broadcaster = new Broadcaster();
+	const session = { handle: HANDLE, ref: REF };
+	broadcaster.setSnapshotSource((handle) =>
+		handle === session.handle
+			? { ref: session.ref, messages: [], isStreaming: false, compaction: null, model: null, effort: null, error: null, requests: [], notices: [] }
+			: null,
+	);
+	const events: ServerEvent[] = [];
+	const client = broadcaster.addClient((chunk) => {
+		for (const line of chunk.split("\n")) {
+			if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+		}
+	});
+	return { broadcaster, session, events, client };
+}
+
 describe("sequence bookkeeping", () => {
 	it("forgets a closed session's counter rather than growing with uptime", () => {
-		const broadcaster = new Broadcaster();
-		broadcaster.setSnapshotSource(() => ({ messages: [], isStreaming: false, compaction: null, model: null, effort: null, error: null, requests: [], notices: [] }));
-		broadcaster.status(REF, true, null, null, null, null);
-		expect(broadcaster.seqOf(REF)).toBe(1);
+		const { broadcaster, session } = oneSession();
+		broadcaster.status(session, true, null, null, null, null);
+		expect(broadcaster.seqOf(HANDLE)).toBe(1);
 
-		broadcaster.forget(REF);
-		expect(broadcaster.seqOf(REF)).toBe(0);
+		broadcaster.forget(HANDLE);
+		expect(broadcaster.seqOf(HANDLE)).toBe(0);
+	});
+
+	it("keeps one counter across a rename, since the handle it is keyed by does not move (D24)", () => {
+		const { broadcaster, session, events } = oneSession();
+		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.upsert(session, 0, userMessage("hi"));
+		const renamed: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/b.jsonl" };
+
+		session.ref = renamed;
+		broadcaster.renamed(REF, session);
+		broadcaster.upsert(session, 0, userMessage("hi"));
+
+		// Nothing is copied from the old ref's counter to the new one's: there is
+		// only the handle's, and `renamed` continues it before the snapshot that
+		// follows it resets it.
+		expect(events.map((event) => [event.type, "seq" in event ? event.seq : null])).toEqual([
+			["status", 1],
+			["upsert", 2],
+			["renamed", 3],
+			["snapshot", 0],
+			["upsert", 1],
+		]);
+		expect(broadcaster.seqOf(HANDLE)).toBe(1);
+	});
+});
+
+describe("the handle (D24, OW-suyinu)", () => {
+	it("rides every per-session event beside its ref", () => {
+		const { broadcaster, session, events } = oneSession();
+		const request = { requestId: "r1", session: REF, kind: "approval", payload: {} };
+		const notice = { kind: "warning", message: "careful", details: null, path: null };
+
+		broadcaster.broadcastSnapshot(HANDLE);
+		broadcaster.upsert(session, 0, userMessage("hi"));
+		broadcaster.status(session, true, null, null, null, null);
+		broadcaster.request(session, request);
+		broadcaster.requestResolved(session, "r1");
+		broadcaster.error(session, "boom");
+		broadcaster.notice(session, notice);
+		broadcaster.renamed({ backend: "pi", id: "virtual:1" }, session);
+
+		expect(events.map((event) => event.type)).toEqual([
+			"snapshot",
+			"upsert",
+			"status",
+			"request",
+			"request-resolved",
+			"error",
+			"notice",
+			"renamed",
+			"snapshot",
+		]);
+		for (const event of events) expect(event).toMatchObject({ session: REF, handle: HANDLE });
+	});
+
+	it("rides a connecting client's opening snapshots, under the session's current ref", () => {
+		const { broadcaster, session, events, client } = oneSession();
+		const renamed: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/b.jsonl" };
+		session.ref = renamed;
+
+		broadcaster.sendOpeningSnapshots(client, [HANDLE, "a handle nobody holds"]);
+
+		expect(events).toEqual([expect.objectContaining({ type: "snapshot", session: renamed, handle: HANDLE, seq: 0 })]);
 	});
 });

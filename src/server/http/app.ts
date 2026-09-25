@@ -149,7 +149,7 @@ export function createApp(deps: AppDeps): App {
 				// Attach and reconnect are the same thing (D3): the client's first
 				// events are a full snapshot of everything currently live. There is
 				// no resume protocol and deliberately no Last-Event-ID handling.
-				broadcaster.sendOpeningSnapshots(client, sessions.liveRefs());
+				broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
 			},
 			cancel() {
 				// The browser went away. This is NOT a lifecycle event -- the
@@ -242,7 +242,8 @@ export function createApp(deps: AppDeps): App {
 			await sessions.attach(ref);
 			// `summary.ref` is authoritative and may differ from the URL: attaching
 			// is where a session first adopts its backend's own id (D9). Clients
-			// also hear about it as a `renamed` SSE event.
+			// also hear about it as a `renamed` SSE event. `summary.handle` does not
+			// move with it (D24).
 			const summary = sessions.summaryOf(ref);
 			if (!summary) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
 			const body: AttachSessionResponse = { session: summary };
@@ -340,9 +341,10 @@ export function createApp(deps: AppDeps): App {
 				//   * Pi's `fork` is copy-on-write. The same process's active
 				//     `sessionFile` MOVES to a new file (the old branch survives on
 				//     disk byte-identical), and the adapter announces the move, so
-				//     the manager re-keys the table through `#adoptRef` before the
-				//     fork hydrates. It broadcasts no `renamed`: the parent is a
-				//     second conversation, not an older name (OW-suhoto). The ref it
+				//     the manager moves the adapter onto a container of its own,
+				//     with a handle of its own, through `#forkOnto` before the fork
+				//     hydrates. It broadcasts no `renamed`: the parent is a second
+				//     conversation, not an older name (OW-suhoto). The ref it
 				//     returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread the parent's adapter is
 				//     not driving; Codex flushes that rollout to disk immediately,
@@ -351,7 +353,7 @@ export function createApp(deps: AppDeps): App {
 				//     holds its writer lock and a second one is refused, so the fork's
 				//     adapter borrows the parent's connection and `fork()` hands that
 				//     adapter over for `SessionManager` to start (OW-lajehi). The
-				//     parent adapter's own ref is unchanged, so nothing re-keys.
+				//     parent adapter's own ref is unchanged, so nothing moves.
 				//     A fork at the first user message is the exception: no
 				//     `thread/fork` keeps nothing, so it mints nothing and takes
 				//     Claude Code's path below, a `virtual:` ref renamed at attach to
@@ -360,11 +362,11 @@ export function createApp(deps: AppDeps): App {
 				//     arguments that spawn it (`--resume --resume-session-at
 				//     --fork-session --session-id`, truncation inclusive of the named
 				//     entry) but runs nothing, so like Codex the parent's ref is
-				//     unchanged and nothing re-keys. Nothing has written the fork's
+				//     unchanged and nothing moves. Nothing has written the fork's
 				//     store file yet, so the attach on the returned ref spawns it from
 				//     the recipe `SessionManager.fork` kept (OW-razoki).
-				// `#adoptRef` already emits `sessionsChanged` when it re-keys, so no
-				// explicit broadcast here.
+				// `#forkOnto` already emits `sessionsChanged` when a fork moves the
+				// adapter, so no explicit broadcast here.
 				const response: ForkResponse = { ref: forked };
 				return json(response, 201);
 			}

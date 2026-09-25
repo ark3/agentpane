@@ -172,9 +172,10 @@ export interface BackendAdapter {
 	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe;
 	/**
 	 * Fires the moment `ref` takes a different id, synchronously and before the
-	 * adapter emits anything else under it, so the manager re-keys the session
-	 * as the adapter moves rather than at some later point it looks (D24). An
-	 * assignment of the id already held fires nothing.
+	 * adapter emits anything else under it, so the manager names the session's
+	 * container by it -- or, on a fork, moves the adapter onto a container of
+	 * its own -- as the adapter moves rather than at some later point it looks
+	 * (D24). An assignment of the id already held fires nothing.
 	 *
 	 * `cause` is the split OW-kekoji settled: `"rename"` is one conversation
 	 * taking a new id -- every backend's at attach, Pi's at the first prompt,

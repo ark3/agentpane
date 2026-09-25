@@ -354,7 +354,7 @@ describe("SSE stream", () => {
 		expect(client.typed("snapshot")).toHaveLength(1);
 		// Contiguous seq from the snapshot onwards: nothing was missed.
 		expect(client.gaps).toEqual([]);
-		expect(client.seq(PI_SESSION)).toBe(app.broadcaster.seqOf(PI_SESSION));
+		expect(client.seq(PI_SESSION)).toBe(app.broadcaster.seqOf(app.sessions.summaryOf(PI_SESSION)?.handle ?? ""));
 
 		const tail = client.transcript(PI_SESSION)[1];
 		expect(tail?.role === "assistant" && tail.content[0]).toEqual({ type: "text", text: "Hello" });
@@ -438,7 +438,7 @@ describe("SSE stream", () => {
 		// resetting a sequence the first tab is still counting from.
 		const second = await openStream();
 		await second.waitForCount(1);
-		expect(second.seq(PI_SESSION)).toBe(app.broadcaster.seqOf(PI_SESSION));
+		expect(second.seq(PI_SESSION)).toBe(app.broadcaster.seqOf(app.sessions.summaryOf(PI_SESSION)?.handle ?? ""));
 
 		adapter?.streamToken(" the rest");
 		adapter?.setStreaming(false);

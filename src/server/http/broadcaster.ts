@@ -15,16 +15,15 @@
  *   - `sendSnapshot` goes to one client (a fresh connection catching up), so it
  *     carries the counter's *current* value and does not disturb it. That client
  *     resumes in step with everyone else.
+ *
+ * D24 -- "per session" means per handle: each counter is keyed by the handle
+ * the session manager minted for the session, and every per-session event
+ * carries that handle beside the session's current ref. A rename changes the
+ * ref and leaves the handle, so nothing here moves with it (OW-suyinu).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import {
-	type AgentNotice,
-	type AgentRequest,
-	type ServerEvent,
-	type SessionRef,
-	sessionKey,
-} from "../../shared/protocol.ts";
+import type { AgentNotice, AgentRequest, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 
 /** A connected browser. One per `EventSource`. */
 export interface SseClient {
@@ -42,12 +41,24 @@ export function formatSseFrame(event: ServerEvent): string {
 }
 
 /**
- * State the broadcaster needs to build a snapshot, supplied by the session
- * manager: the adapter's own, plus the error, requests and notices the manager
- * holds for the session (OW-bipume).
+ * A live session as the broadcaster addresses it: the handle its counter is
+ * keyed by, and the ref its events carry beside it, read as each one is sent
+ * (D24). The session manager's container is one.
+ */
+export interface Addressed {
+	readonly handle: string;
+	readonly ref: SessionRef;
+}
+
+/**
+ * State the broadcaster needs to build a snapshot of the session a handle
+ * names, supplied by the session manager: the session's current ref, the
+ * adapter's state, and the error, requests and notices the manager holds for
+ * it (OW-bipume). Null for a handle the manager holds no live session under.
  */
 export interface SnapshotSource {
-	(ref: SessionRef): {
+	(handle: string): {
+		ref: SessionRef;
 		messages: AgentMessage[];
 		isStreaming: boolean;
 		compaction: "requesting" | "running" | null;
@@ -92,18 +103,19 @@ export class Broadcaster {
 	}
 
 	/** Every session with live state, snapshotted to one client. Attach/reconnect (D3). */
-	sendOpeningSnapshots(client: SseClient, refs: SessionRef[]): void {
-		for (const ref of refs) this.sendSnapshot(client, ref);
+	sendOpeningSnapshots(client: SseClient, handles: string[]): void {
+		for (const handle of handles) this.sendSnapshot(client, handle);
 	}
 
 	/** Targeted snapshot. Does not touch the counter -- see the class comment. */
-	sendSnapshot(client: SseClient, ref: SessionRef): void {
-		const state = this.#snapshotSource(ref);
+	sendSnapshot(client: SseClient, handle: string): void {
+		const state = this.#snapshotSource(handle);
 		if (!state) return;
 		client.send({
 			type: "snapshot",
-			session: ref,
-			seq: this.#seq.get(sessionKey(ref)) ?? 0,
+			session: state.ref,
+			handle,
+			seq: this.#seq.get(handle) ?? 0,
 			messages: state.messages,
 			isStreaming: state.isStreaming,
 			compaction: state.compaction,
@@ -118,13 +130,14 @@ export class Broadcaster {
 
 	/** Snapshot to everyone. Resets the session's counter, which is safe precisely
 	 * because no client is left behind. */
-	broadcastSnapshot(ref: SessionRef): void {
-		const state = this.#snapshotSource(ref);
+	broadcastSnapshot(handle: string): void {
+		const state = this.#snapshotSource(handle);
 		if (!state) return;
-		this.#seq.set(sessionKey(ref), 0);
+		this.#seq.set(handle, 0);
 		this.#fanout({
 			type: "snapshot",
-			session: ref,
+			session: state.ref,
+			handle,
 			seq: 0,
 			messages: state.messages,
 			isStreaming: state.isStreaming,
@@ -138,35 +151,35 @@ export class Broadcaster {
 		});
 	}
 
-	upsert(ref: SessionRef, index: number, message: AgentMessage): void {
-		this.#fanout({ type: "upsert", session: ref, seq: this.#bump(ref), index, message });
+	upsert(session: Addressed, index: number, message: AgentMessage): void {
+		this.#fanout({ type: "upsert", ...this.#address(session), index, message });
 	}
 
 	status(
-		ref: SessionRef,
+		session: Addressed,
 		isStreaming: boolean,
 		compaction: "requesting" | "running" | null,
 		model: string | null,
 		effort: string | null,
 		unrestoredModel: string | null,
 	): void {
-		this.#fanout({ type: "status", session: ref, seq: this.#bump(ref), isStreaming, compaction, model, effort, unrestoredModel });
+		this.#fanout({ type: "status", ...this.#address(session), isStreaming, compaction, model, effort, unrestoredModel });
 	}
 
-	request(ref: SessionRef, request: AgentRequest): void {
-		this.#fanout({ type: "request", session: ref, seq: this.#bump(ref), request });
+	request(session: Addressed, request: AgentRequest): void {
+		this.#fanout({ type: "request", ...this.#address(session), request });
 	}
 
-	requestResolved(ref: SessionRef, requestId: string): void {
-		this.#fanout({ type: "request-resolved", session: ref, seq: this.#bump(ref), requestId });
+	requestResolved(session: Addressed, requestId: string): void {
+		this.#fanout({ type: "request-resolved", ...this.#address(session), requestId });
 	}
 
-	error(ref: SessionRef, message: string): void {
-		this.#fanout({ type: "error", session: ref, seq: this.#bump(ref), message });
+	error(session: Addressed, message: string): void {
+		this.#fanout({ type: "error", ...this.#address(session), message });
 	}
 
-	notice(ref: SessionRef, notice: AgentNotice): void {
-		this.#fanout({ type: "notice", session: ref, seq: this.#bump(ref), notice });
+	notice(session: Addressed, notice: AgentNotice): void {
+		this.#fanout({ type: "notice", ...this.#address(session), notice });
 	}
 
 	sessionsChanged(): void {
@@ -174,30 +187,26 @@ export class Broadcaster {
 	}
 
 	/**
-	 * A session adopted its real backend id (D9). Told to everyone, then followed
-	 * by a snapshot under the new ref -- so the counter for the new key is reset
-	 * by that snapshot and the old key's is dropped here.
+	 * A session adopted another backend id (D9), `session.ref` being the new one.
+	 * Told to everyone, then followed by a snapshot under the new ref. The
+	 * counter is the handle's and goes on counting across it, so a client that
+	 * has been counting this session's events and is about to re-key them sees
+	 * no gap, and the snapshot then resets both ends together, as it always
+	 * does. Stays until both clients key by the handle (OW-mofuho).
 	 */
-	renamed(from: SessionRef, to: SessionRef): void {
-		// Carry the counter across with the id. A client that has been counting
-		// this session's events is the same client that is about to re-key them,
-		// so restarting at 0 here would read to it as a dropped update. The
-		// snapshot below then resets both ends together, as it always does.
-		const fromKey = sessionKey(from);
-		this.#seq.set(sessionKey(to), this.#seq.get(fromKey) ?? 0);
-		this.#seq.delete(fromKey);
-		this.#fanout({ type: "renamed", session: to, seq: this.#bump(to), from });
-		this.broadcastSnapshot(to);
+	renamed(from: SessionRef, session: Addressed): void {
+		this.#fanout({ type: "renamed", ...this.#address(session), from });
+		this.broadcastSnapshot(session.handle);
 	}
 
 	/** Drop a closed session's counter, so the map does not grow with the uptime. */
-	forget(ref: SessionRef): void {
-		this.#seq.delete(sessionKey(ref));
+	forget(handle: string): void {
+		this.#seq.delete(handle);
 	}
 
 	/** Current sequence number for a session. Exposed for tests and diagnostics. */
-	seqOf(ref: SessionRef): number {
-		return this.#seq.get(sessionKey(ref)) ?? 0;
+	seqOf(handle: string): number {
+		return this.#seq.get(handle) ?? 0;
 	}
 
 	closeAll(): void {
@@ -205,11 +214,11 @@ export class Broadcaster {
 		this.#stopHeartbeat();
 	}
 
-	#bump(ref: SessionRef): number {
-		const key = sessionKey(ref);
-		const next = (this.#seq.get(key) ?? 0) + 1;
-		this.#seq.set(key, next);
-		return next;
+	/** What names the session on an event: its ref as of now, its handle, and the handle's next seq. */
+	#address(session: Addressed): { session: SessionRef; handle: string; seq: number } {
+		const seq = (this.#seq.get(session.handle) ?? 0) + 1;
+		this.#seq.set(session.handle, seq);
+		return { session: session.ref, handle: session.handle, seq };
 	}
 
 	#fanout(event: ServerEvent): void {
