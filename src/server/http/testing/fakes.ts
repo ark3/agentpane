@@ -93,9 +93,9 @@ export interface FakeAdapterOptions {
 	 */
 	materialiseOnStart?: string;
 	/**
-	 * Adopt this id when the first `submit()` resolves -- a `virtual` session
-	 * whose backend names nothing until the first prompt, the case D9 keeps
-	 * `PiAdapter`'s post-submit probe for.
+	 * Adopt this id at the end of the first `submit()`, before it resolves --
+	 * a `virtual` session whose backend names nothing until the first prompt,
+	 * the case D9 keeps `PiAdapter`'s post-submit probe for.
 	 */
 	materialiseOnSubmit?: string;
 	/** Emit this state change from inside `start()`, before it resolves. */
