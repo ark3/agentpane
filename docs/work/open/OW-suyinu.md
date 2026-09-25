@@ -41,7 +41,10 @@ Load-bearing:
 - A parked Codex fork holding a borrowed connection (OW-lajehi) and a parked Claude Code recipe (OW-razoki) each get their handle when parked, and `close()` on the fork's ref still reaches the parked entry through its name.
 - `attach` on any name a container has had, including one a rename left behind, still resolves to it, which is D9's promise that the old id keeps working on REST routes; the routes keep their `:backend/:id` shape.
 - A handle resolves to one fixed backend for its life; OW-bakosi relies on a rename never changing `backend`.
-- The teardown flags stop an event-driven re-key exactly as OW-nikogo left them.
+- Teardown stops an event-driven re-key exactly as OW-nikogo left it: `close()` and `disposeAll()` drop the container's `subscriptions` in the same synchronous run that takes it out of the table, and `ManagedSession.torndown` is gone (the docblock on `ManagedSession.subscriptions`).
+- OW-nikogo left one wait this card retires: a rename an adapter announces inside `start()` is held in `renamedInStart`, a variable local to `#start`, and applied only after `bound.adapter = adapter`, because `#attaching` holds a startup under the requested and canonical keys alone (the comment beginning "Publish the adapter *before* the rename below").
+  Until then the adapter's ref runs ahead of the container's key, and what it emits during start -- Claude's `attachProcess` and `readSettings` after `moveTo(minted)`, for one -- goes out under the `virtual:` key; harmless today, since nobody can name the new id and `renamed` and a snapshot follow at publish, and OW-nikogo's adversarial read named it as the case that wait misses.
+  Under a handle the rename is an attribute write, so the wait and `renamedInStart` go, and the tests under "a rename announced inside start()" in `session-manager.test.ts` are rewritten to what the handle makes true.
 - D12's bookkeeping constraint is rewritten in `docs/DESIGN.md` to say a side map keyed by handle is safe, and OW-33's copy is amended to match.
 - D21's reconnect gap narrows, and D24 says so: a `renamed` missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref.
 
