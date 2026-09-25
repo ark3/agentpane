@@ -4,6 +4,8 @@ labels: [deferral]
 
 # Two overlapping Pi setModel calls can still broadcast a model paired with a level it was never at
 
+OW-sewewe, filed 2026-09-24 under D24, closes this: its manager-level ordering test is the fix at the route this card's incidental line allows, and a second guard in the adapter is not to be written for it.
+
 Found by the adversarial read of OW-zasozo, reproduced over a fake child and not run against a live Pi.
 
 OW-zasozo made `PiAdapter` in `src/server/adapters/pi/process.ts` hold a `thinking_level_changed` while `set_model` is in flight, behind the boolean `settingModel`, so no status pairs the old model with the level `set_model` resets to.

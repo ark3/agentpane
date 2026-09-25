@@ -4,6 +4,8 @@ labels: [deferral]
 
 # A Claude Code `init` that reports a session id other than the minted one swaps `currentRef` silently, and the manager never learns
 
+OW-nikogo, filed 2026-09-24 under D24, closes this on the first of the two done-conditions below: the adapter's identity event is the fix this card already names.
+
 `src/server/adapters/claude/adapter.ts`, the `init` handling that reads `session_id`: when it differs from the id the adapter minted, `currentRef` is replaced.
 The docblock allows for this on purpose, "the CLI is authoritative".
 But `SessionManager.#adoptRef` (`src/server/http/session-manager.ts`) re-keys only after `start()`, `submit()`, or `fork()` settle, and `init` arrives with the first turn, after `submit()` has already resolved.

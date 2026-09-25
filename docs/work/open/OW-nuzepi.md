@@ -4,6 +4,8 @@ labels: [defect]
 
 # A snapshot read while a Pi fork is in flight can still carry the fork's transcript under the parent's ref
 
+OW-nikogo, filed 2026-09-24 under D24, closes this: the test below is its first done-condition, and the fix is the adapter's identity event rather than a second guard beside OW-zovaye's.
+
 Noticed 2026-09-22 by OW-zovaye's implementer, reasoned from `src/server/http/session-manager.ts`; not reproduced.
 In service of a Pi fork leaving its parent's view as it was, in every client — OW-zovaye closed the push path and left the pull path.
 

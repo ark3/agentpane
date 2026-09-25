@@ -4,6 +4,8 @@ labels: [defect]
 
 # A Codex re-attach can drop deltas for an item that started before it attached
 
+OW-dutute, filed 2026-09-24 under D24, closes this: the test below is its Codex half's done-condition, and the measurement it asks for is made there.
+
 Found while landing OW-vijuyi on 2026-09-24; read from the code, never run.
 
 This is the half of OW-vijuyi's problem its fix does not reach.
