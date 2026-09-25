@@ -16,6 +16,11 @@ with no agentpane in the picture, and records every line in wire order.
          listed `agentMessage` carries against the deltas on the wire when the
          request went out and when its response arrived.  The listing is
          asked again after the turn completes, as the control.
+         `--item` (OW-dirazu) catches another kind mid-stream instead --
+         `reasoning`, `commandExecution`, `fileChange`, `plan`, or a running
+         `contextCompaction` -- and records what `thread/resume`'s
+         `thread.status` read; `--item orphan` kills the app-server mid-turn
+         and resumes and lists the thread from a fresh one.
   pi     Two turns, then a third that streams; gated on forty `text_delta`s as
          OW-sededi's cell is (`fork_probe.py`), then `fork` at that third
          turn's own user message, then the `get_state` and `get_messages`
@@ -25,7 +30,7 @@ with no agentpane in the picture, and records every line in wire order.
          `get_state` then `get_messages`, and every line of that is recorded
          too.
 
-Usage:  python3 hydrate_window_probe.py --backend codex|pi [--json PATH]
+Usage:  python3 hydrate_window_probe.py --backend codex|pi [--item KIND] [--json PATH]
 Needs:  `codex` or `pi` on PATH with working credentials.  Each run makes
         real model calls on the pinned model (AGENTS.md, "Evidence"), in a
         throwaway state home and workspace.
@@ -98,12 +103,96 @@ class SequencedAppServer(AppServer):
         return None, -1
 
 
-def streamed_text(wire: list[dict[str, Any]], item_id: str) -> str:
-    return "".join(
-        e["params"]["delta"]
-        for e in wire
-        if e.get("method") == "item/agentMessage/delta" and e.get("params", {}).get("itemId") == item_id
-    )
+# What each `--item` scenario provokes, and how its item's streamed state is
+# read off the wire.  Every scenario sends what `CodexAdapter` sends: the pinned
+# model on `thread/start` and `turn/start`, and its default sandbox and approval
+# policy, so nothing blocks on an approval nobody answers.  `turn` is merged
+# into `turn/start`; `experimental` opts into `initialize`'s `experimentalApi`,
+# which agentpane never does.
+COMMAND = "for i in $(seq 1 60); do echo line-$i; sleep 0.25; done"
+SCENARIOS: dict[str, dict[str, Any]] = {
+    "agentMessage": {"prompt": LONG_PROMPT, "gate": MIN_DELTAS},
+    # Without `summary` the model's reasoning streamed nothing in every fixture
+    # capture; `detailed` asks for summary text, the thing a delta-opened slot holds.
+    "reasoning": {
+        "prompt": "Think it through carefully before answering: how many distinct ways can 12 identical coins be split "
+                  "into piles of at most 5 coins each, ignoring pile order? Answer with one number.",
+        "turn": {"effort": "high", "summary": "detailed"},
+        # Summary text arrived a whole part per delta, and the item completed a
+        # moment after its last part, so the listing goes out at the first one.
+        "gate": 1,
+    },
+    "commandExecution": {
+        "prompt": f"Run exactly this shell command, once, and then reply DONE:\n\n{COMMAND}",
+        "gate": 5,
+    },
+    "fileChange": {
+        "prompt": "Create a file named numbers.txt holding the numbers 1 through 300, one per line, by editing files "
+                  "directly (apply_patch), not with a shell command. Then reply DONE.",
+        # No `patchUpdated` arrived in the first run, so the listing goes out at `item/started`.
+        "gate": 0,
+    },
+    "plan": {
+        "prompt": "Plan, in detail and step by step, how to build a command-line todo application in Python with "
+                  "SQLite storage, tests and packaging. Propose the plan; do not ask me questions.",
+        "experimental": True,
+        "turn": {"collaborationMode": {"mode": "plan", "settings": {"model": CODEX_MODEL, "reasoning_effort": None,
+                                                                    "developer_instructions": None}}},
+        "gate": MIN_DELTAS,
+    },
+    # A compaction streams nothing; the gate is its `item/started` alone.
+    "contextCompaction": {"prompt": LONG_PROMPT, "compact": True, "gate": 0},
+}
+DELTA_METHODS = {
+    "agentMessage": ("item/agentMessage/delta",),
+    "reasoning": ("item/reasoning/summaryTextDelta", "item/reasoning/textDelta"),
+    "commandExecution": ("item/commandExecution/outputDelta",),
+    "fileChange": ("item/fileChange/patchUpdated",),
+    "plan": ("item/plan/delta",),
+    "contextCompaction": (),
+}
+
+
+def streamed(kind: str, wire: list[dict[str, Any]], item_id: str) -> dict[str, Any]:
+    """What the deltas on `wire` say the item holds, in the item's own field names."""
+    ours = [e for e in wire if e.get("method") in DELTA_METHODS[kind] and e.get("params", {}).get("itemId") == item_id]
+    if kind in ("agentMessage", "plan"):
+        return {"text": "".join(e["params"]["delta"] for e in ours)}
+    if kind == "commandExecution":
+        return {"aggregatedOutput": "".join(e["params"]["delta"] for e in ours)}
+    if kind == "reasoning":
+        summary: list[str] = []
+        content: list[str] = []
+        for e in ours:
+            parts, index = (
+                (summary, e["params"]["summaryIndex"])
+                if e["method"] == "item/reasoning/summaryTextDelta"
+                else (content, e["params"]["contentIndex"])
+            )
+            while len(parts) <= index:
+                parts.append("")
+            parts[index] += e["params"]["delta"]
+        return {"summary": summary, "content": content}
+    if kind == "fileChange":
+        return {"changes": ours[-1]["params"]["changes"] if ours else None}
+    return {}
+
+
+def listed(kind: str, item: dict[str, Any]) -> dict[str, Any]:
+    return {key: item.get(key) for key in streamed(kind, [], "")}
+
+
+def sizes(state: dict[str, Any]) -> dict[str, Any]:
+    """Lengths only: the probe records how much, never the model's words."""
+    out: dict[str, Any] = {}
+    for key, value in state.items():
+        if isinstance(value, str):
+            out[key] = len(value)
+        elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+            out[key] = [len(v) for v in value]
+        else:
+            out[key] = None if value is None else len(json.dumps(value))
+    return out
 
 
 def census(lines: list[dict[str, Any]]) -> dict[str, int]:
@@ -116,65 +205,99 @@ def census(lines: list[dict[str, Any]]) -> dict[str, int]:
 
 def item_summary(item: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"type": item.get("type"), "id": item.get("id")}
-    if item.get("type") == "agentMessage":
-        out["text_chars"] = len(item.get("text") or "")
+    for key in ("status",):
+        if key in item:
+            out[key] = item[key]
+    kind = item.get("type")
+    if kind in DELTA_METHODS and kind != "contextCompaction":
+        out["sizes"] = sizes(listed(kind, item))
     return out
 
 
-def run_codex() -> dict[str, Any]:
+def run_codex(kind: str = "agentMessage") -> dict[str, Any]:
+    scenario = SCENARIOS[kind]
     codex_home = make_state_home(Path.home() / ".codex", ("auth.json", "config.toml"), "agentpane-hydrate-codexhome-")
     workspace = make_workspace("agentpane-hydrate-codexwork-")
     env = dict(os.environ, CODEX_HOME=str(codex_home))
-    report: dict[str, Any] = {"codex_version": cli_version("codex"), "model": CODEX_MODEL}
+    report: dict[str, Any] = {"codex_version": cli_version("codex"), "model": CODEX_MODEL, "item": kind}
     server = SequencedAppServer(str(workspace), env, "codex")
+    policy = {"sandbox": "danger-full-access", "approvalPolicy": "never"}
     try:
-        server.call("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None})
-        started = server.call("thread/start", {"cwd": str(workspace)})
-        thread_id = started["result"]["thread"]["id"]
         server.call(
-            "turn/start",
-            {"threadId": thread_id, "model": CODEX_MODEL, "input": [{"type": "text", "text": LONG_PROMPT}]},
+            "initialize",
+            {"clientInfo": CLIENT_INFO, "capabilities": {"experimentalApi": True} if scenario.get("experimental") else None},
         )
+        started = server.call("thread/start", {"cwd": str(workspace), "model": CODEX_MODEL, **policy})
+        thread_id = started["result"]["thread"]["id"]
+        turn_started = server.call(
+            "turn/start",
+            {"threadId": thread_id, "model": CODEX_MODEL, "input": [{"type": "text", "text": scenario["prompt"]}],
+             **scenario.get("turn", {})},
+        )
+        report["turn_start_error"] = turn_started.get("error")
+        if scenario.get("compact"):
+            server.wait_for_turn_end(timeout=180)
+            with server.lock:
+                compact_from = len(server.wire)
+            report["compact_start"] = server.call("thread/compact/start", {"threadId": thread_id}).get("error") or "ok"
+        else:
+            compact_from = 0
+
         item_id = None
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             with server.lock:
-                wire = list(server.wire)
+                wire = list(server.wire[compact_from:])
             if item_id is None:
                 for e in wire:
-                    item = e.get("params", {}).get("item", {}) if e.get("method") == "item/started" else {}
-                    if item.get("type") == "agentMessage":
-                        item_id = item["id"]
-            if item_id and sum(
-                1 for e in wire
-                if e.get("method") == "item/agentMessage/delta" and e["params"].get("itemId") == item_id
-            ) >= MIN_DELTAS:
-                break
+                    params = e.get("params", {})
+                    if e.get("method") == "item/started" and params.get("item", {}).get("type") == kind:
+                        item_id = params["item"]["id"]
+                        break
+                    if e.get("method") in DELTA_METHODS[kind]:
+                        item_id = params.get("itemId")
+                        break
+            if item_id:
+                ours = sum(1 for e in wire if e.get("method") in DELTA_METHODS[kind] and e["params"].get("itemId") == item_id)
+                if ours >= scenario["gate"]:
+                    break
+                if any(e.get("method") == "item/completed" and e["params"]["item"].get("id") == item_id for e in wire):
+                    break
             if any(e.get("method") == "turn/completed" for e in wire):
                 break
-            time.sleep(0.05)
-        report["agent_message_item"] = item_id
+            time.sleep(0.02)
+        report["target_item"] = item_id
 
         def at(position: int) -> dict[str, Any]:
             with server.lock:
                 wire = server.wire[:position]
-            text = streamed_text(wire, item_id or "")
             return {
                 "wire_position": position,
-                "deltas": sum(1 for e in wire if e.get("method") == "item/agentMessage/delta"),
-                "streamed_chars": len(text),
-                "turn_completed": any(e.get("method") == "turn/completed" for e in wire),
+                "target_deltas": sum(
+                    1 for e in wire if e.get("method") in DELTA_METHODS[kind] and e["params"].get("itemId") == item_id
+                ),
+                "target_streamed": sizes(streamed(kind, wire, item_id or "")),
+                "target_completed": any(
+                    e.get("method") == "item/completed" and e["params"]["item"].get("id") == item_id for e in wire
+                ),
+                "turn_completed": any(e.get("method") == "turn/completed" for e in wire[compact_from:]),
             }
 
         with server.lock:
             resume_sent_at = len(server.wire)
-        resume_id = server.send("thread/resume", {"threadId": thread_id, "cwd": str(workspace), "excludeTurns": True})
+        resume_id = server.send(
+            "thread/resume",
+            {"threadId": thread_id, "cwd": str(workspace), "model": CODEX_MODEL, "excludeTurns": True, **policy},
+        )
         resume, resume_at = server.await_response(resume_id)
         with server.lock:
             drawn = [e for e in server.wire[resume_sent_at:resume_at] if "method" in e]
+        resumed_thread = ((resume or {}).get("result") or {}).get("thread") or {}
         report["resume"] = {
             "ok": resume is not None and "result" in resume,
             "error": (resume or {}).get("error"),
+            "thread_status": resumed_thread.get("status"),
+            "turns_in_response": len(resumed_thread.get("turns") or []),
             "sent": at(resume_sent_at),
             "answered": at(resume_at),
             "lines_between_census": census(drawn),
@@ -182,35 +305,35 @@ def run_codex() -> dict[str, Any]:
 
         with server.lock:
             list_sent_at = len(server.wire)
-        list_id = server.send(
-            "thread/turns/list", {"threadId": thread_id, "sortDirection": "asc", "itemsView": "full"}
-        )
+        list_id = server.send("thread/turns/list", {"threadId": thread_id, "sortDirection": "asc", "itemsView": "full"})
         listing, list_at = server.await_response(list_id)
         turns = ((listing or {}).get("result") or {}).get("data") or []
         with server.lock:
             wire_now = list(server.wire)
-        streamed_at_answer = streamed_text(wire_now[:list_at], item_id or "")
-        listed_item = next(
-            (i for t in turns for i in t.get("items") or [] if i.get("id") == item_id), None
-        )
-        listed_text = (listed_item or {}).get("text") if listed_item else None
+            after = [e for e in server.wire[list_at + 1 : list_at + 40] if "method" in e]
+        listed_item = next((i for t in turns for i in t.get("items") or [] if i.get("id") == item_id), None)
+        comparison: dict[str, Any] = {}
+        if listed_item is not None and kind != "contextCompaction":
+            mine = listed(kind, listed_item)
+            for name, position in (("resume_sent", resume_sent_at), ("list_sent", list_sent_at), ("list_answered", list_at)):
+                comparison[f"equals_streamed_at_{name}"] = mine == streamed(kind, wire_now[:position], item_id or "")
         report["mid_turn_listing"] = {
             "ok": listing is not None and "result" in listing,
             "error": (listing or {}).get("error"),
             "sent": at(list_sent_at),
             "answered": at(list_at),
+            "lines_between_census": census([e for e in wire_now[list_sent_at:list_at] if "method" in e]),
+            "next_lines_after_answer": [e.get("method") for e in after[:8]],
             "turns": [
                 {"id": t.get("id"), "status": t.get("status"), "items": [item_summary(i) for i in t.get("items") or []]}
                 for t in turns
             ],
-            "streaming_item_listed": listed_item is not None,
-            "listed_text_chars": len(listed_text) if listed_text is not None else None,
-            "listed_text_is_prefix_of_streamed": (
-                streamed_at_answer.startswith(listed_text) if listed_text is not None else None
-            ),
+            "target_item_listed": listed_item is not None,
+            "target_item_listed_as": item_summary(listed_item) if listed_item else None,
+            **comparison,
         }
 
-        completed = server.wait_for_turn_end(timeout=180)
+        completed = server.wait_for_turn_end(timeout=240)
         report["turn_status"] = (completed or {}).get("turn", {}).get("status")
         final = server.call("thread/turns/list", {"threadId": thread_id, "sortDirection": "asc", "itemsView": "full"})
         final_turns = (final.get("result") or {}).get("data") or []
@@ -219,7 +342,9 @@ def run_codex() -> dict[str, Any]:
             for t in final_turns
         ]
         with server.lock:
-            report["streamed_chars_total"] = len(streamed_text(server.wire, item_id or ""))
+            report["target_streamed_total"] = sizes(streamed(kind, server.wire, item_id or ""))
+            report["delta_census"] = census([e for e in server.wire if "delta" in (e.get("method") or "").lower()
+                                             or (e.get("method") or "").endswith("patchUpdated")])
     finally:
         server.close()
         shutil.rmtree(codex_home, ignore_errors=True)
@@ -370,12 +495,67 @@ def run_pi() -> dict[str, Any]:
     return report
 
 
+def run_codex_orphan() -> dict[str, Any]:
+    """A turn whose app-server died mid-stream, resumed and listed by a fresh one, as `CodexAdapter.start` does.
+
+    The control for trusting a listed `inProgress` turn only on a thread whose
+    resume says it is `active` (OW-dirazu).
+    """
+    codex_home = make_state_home(Path.home() / ".codex", ("auth.json", "config.toml"), "agentpane-hydrate-codexhome-")
+    workspace = make_workspace("agentpane-hydrate-codexwork-")
+    env = dict(os.environ, CODEX_HOME=str(codex_home))
+    report: dict[str, Any] = {"codex_version": cli_version("codex"), "model": CODEX_MODEL, "item": "orphan"}
+    policy = {"sandbox": "danger-full-access", "approvalPolicy": "never"}
+    server = SequencedAppServer(str(workspace), env, "codex")
+    fresh = None
+    try:
+        server.call("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None})
+        thread_id = server.call("thread/start", {"cwd": str(workspace), "model": CODEX_MODEL, **policy})["result"]["thread"]["id"]
+        server.call("turn/start", {"threadId": thread_id, "model": CODEX_MODEL, "input": [{"type": "text", "text": LONG_PROMPT}]})
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            with server.lock:
+                deltas = sum(1 for e in server.wire if e.get("method") == "item/agentMessage/delta")
+            if deltas >= MIN_DELTAS:
+                break
+            time.sleep(0.05)
+        report["deltas_at_kill"] = deltas
+        server.proc.kill()
+        server.proc.wait(timeout=30)
+        fresh = SequencedAppServer(str(workspace), env, "codex-fresh")
+        fresh.call("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None})
+        resume = fresh.call("thread/resume", {"threadId": thread_id, "cwd": str(workspace), "model": CODEX_MODEL,
+                                              "excludeTurns": True, **policy})
+        report["resume_error"] = resume.get("error")
+        report["resume_thread_status"] = ((resume.get("result") or {}).get("thread") or {}).get("status")
+        listing = fresh.call("thread/turns/list", {"threadId": thread_id, "sortDirection": "asc", "itemsView": "full"})
+        report["listing"] = [
+            {"id": t.get("id"), "status": t.get("status"), "items": [item_summary(i) for i in t.get("items") or []]}
+            for t in (listing.get("result") or {}).get("data") or []
+        ]
+        time.sleep(3)
+        with fresh.lock:
+            report["fresh_notifications"] = census([e for e in fresh.wire if "method" in e])
+    finally:
+        if fresh:
+            fresh.close()
+        server.close()
+        shutil.rmtree(codex_home, ignore_errors=True)
+        shutil.rmtree(workspace, ignore_errors=True)
+    return report
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=("codex", "pi"), required=True)
+    ap.add_argument("--item", choices=(*SCENARIOS, "orphan"), default="agentMessage",
+                    help="codex only: the item kind to catch mid-stream (OW-dirazu)")
     ap.add_argument("--json", type=Path, help="write the report here as well as to stdout")
     args = ap.parse_args()
-    report = run_codex() if args.backend == "codex" else run_pi()
+    if args.backend == "pi":
+        report = run_pi()
+    else:
+        report = run_codex_orphan() if args.item == "orphan" else run_codex(args.item)
     text = json.dumps(report, indent=2)
     print(text)
     if args.json:

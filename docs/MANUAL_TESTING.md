@@ -3427,9 +3427,8 @@ It named one turn, `status: "inProgress"`, with two items: the `userMessage` and
 The `agentMessage` those 43 deltas belonged to was not listed at all, so no partial text of it was either.
 After `turn/completed` (`status: "completed"`) the same listing named the same turn with that `agentMessage` as its third item, 1491 characters, equal to all the deltas the wire carried.
 So for an item that started before an attach, as of this version, nothing but its deltas carries its text until `item/completed`, and the listing held none of that item's deltas, so opening a slot at the first delta applied nothing twice here.
-That was one sample of one item kind, an `agentMessage`; whether a streaming `reasoning`, `plan`, `commandExecution` or `fileChange` is listed, and with what text, was not probed, and OW-dirazu carries it.
+That was one sample of one item kind, an `agentMessage`; OW-dirazu's section below took the other kinds.
 That is the fix `CodexReducer.applyDelta` now makes (OW-zudase); the head of the text streamed before the attach still shows only once `item/completed` replaces the slot.
-One turn and one item kind were listed mid-stream; whether a running `commandExecution` or a `plan` is left out the same way was not probed.
 
 **Pi: the abandoned turn ends before the `fork` response, and nothing follows it.**
 The probe ran two short turns, then a third asking for the numbers 1 through 400, gated on forty `text_delta`s as OW-sededi's cell in `fork_probe.py` is, and forked at that third turn's own user message with the turn still streaming: 75 text deltas on the wire at the instant the request went out, `agent_settled` not yet seen.
@@ -3441,3 +3440,40 @@ A second process then resumed the abandoned file with `--session`, and sent `get
 The Pi source read at 0.87.1 agrees: the RPC `fork` awaits `teardownCurrent`, which awaits `session.abort()` and its `waitForIdle`, and the rebind that follows drops the old session's event subscription before the response is written (`modes/rpc/rpc-mode.js` and `core/agent-session-runtime.js` in `@earendil-works/pi-coding-agent`).
 So on Pi the window a merge would have to reconcile is empty on both paths, and `hydrateMessages`'s replace is already the truncating merge D24 asks for.
 The test `process.test.ts` carries for it scripts `message_update`s into the window anyway and could not be shown red against the replace, since the replace drops them by construction; it was shown red instead against a union that kept the transcript's messages past Pi's answer, which let the parent's partial reply into the fork.
+
+## What a Codex listing holds of a running turn, by item kind (OW-dirazu)
+
+Run on the home server 2026-09-25 by `python3 resources/probes/hydrate_window_probe.py --backend codex --item <kind>`, one invocation per kind and a second for `reasoning` and `fileChange`, every one exiting 0: `codex-cli 0.156.0`, with `gpt-5.6-luna` named on `thread/start` and every `turn/start`, and the `sandbox: "danger-full-access"` and `approvalPolicy: "never"` `CodexAdapter` sends.
+As in OW-dutute's run, each gated on the item kind streaming, then sent on the same connection what `CodexAdapter.startBorrowed` sends on a re-attach, `thread/resume` with `excludeTurns: true` and then `thread/turns/list` at `itemsView: "full"`, and compared what the listing held of the item with what its deltas had carried.
+The JSON each run printed was kept only in `/tmp`, so what is below is the whole of the record.
+
+**Every item still streaming was left out of the listing.**
+
+- `agentMessage`, the OW-dutute sample again: listed at 42 deltas, 54 characters; the running turn was `inProgress` with its `userMessage` and a completed `reasoning`, and the `agentMessage` was not listed.
+  After `turn/completed` it was, at 1491 characters, all 312 deltas.
+- `reasoning`, on a `turn/start` carrying `effort: "high"` and `summary: "detailed"`, which agentpane does not send: its summary arrived one whole part per `item/reasoning/summaryTextDelta`, 44 and then 61 characters.
+  Listed at the first part, with the item not yet completed, the running turn held only its `userMessage` and the `reasoning` was not listed.
+  In the first run the item completed between the gate and the listing, and was listed with both its parts exactly as they had streamed.
+  In the runs that sent no `summary`, no reasoning delta arrived and every listed `reasoning` had empty `summary` and `content`, as in every fixture.
+- `commandExecution`, a shell loop echoing sixty lines a quarter-second apart: listed at 5 `item/commandExecution/outputDelta`s, 35 characters, it was not listed; the turn held its `userMessage`, a `reasoning` and an empty completed `agentMessage`.
+  After the turn it was listed `completed` with 464 characters of output, all 59 deltas.
+- `plan`, only on a connection that set `initialize`'s `capabilities.experimentalApi` and a `turn/start` naming `collaborationMode` `plan`, neither of which agentpane sends: listed at 42 `item/plan/delta`s, 177 characters, it was not listed, while two completed `commandExecution`s the same turn ran were.
+  After the turn it was listed at 13977 characters, all 3072 deltas.
+- `fileChange` could not be caught streaming.
+  In both runs, the second gated on `item/started` alone at a 20ms poll, the item's `item/completed` was already on the wire when the probe first looked, and neither run sent an `item/fileChange/patchUpdated`; the listing held it `completed`.
+- A compaction, started with `thread/compact/start` after a turn: gated on the `contextCompaction` `item/started`, the listing named the earlier turn `completed` and the compaction's turn `inProgress` with no items at all.
+  After it finished, that turn was listed with the `contextCompaction` item alone, and no `userMessage`.
+
+So, in these eight samples, an item was listed only once it was complete, and a listed item that had streamed held exactly what its deltas had carried.
+No listing held a partial item, so whether a page and the stream could both carry one delta was not observed either way.
+No line arrived between a listing's request and its answer in any run.
+Between the `thread/resume` request and its answer nothing arrived either, save once a `thread/tokenUsage/updated`, an `account/rateLimits/updated` and a `turn/diff/updated`, so the resume replayed no `turn/started` or `item/started`.
+Every user turn listed `inProgress` held its `userMessage`; only the compaction's turn held none.
+
+**`thread/resume` on the live app-server read the thread `active`.**
+In all eight, `thread.status` in the resume's answer was `{"type": "active", "activeFlags": []}`, compaction included.
+It named no turn; the listing's `inProgress` turn is the only place the running turn's id was given.
+
+**A turn whose app-server died is listed `interrupted`.**
+`--item orphan` killed the app-server at 41 deltas and had a fresh one, on the same `CODEX_HOME`, `initialize`, `thread/resume` and list the thread, as `CodexAdapter.start` does on a cold resume.
+The resume read `thread.status` `{"type": "idle"}`, and the listing named the turn `interrupted` with its `userMessage` and a `reasoning`; nothing named it `inProgress`.

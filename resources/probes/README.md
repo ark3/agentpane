@@ -363,15 +363,18 @@ Proves: **what each backend sends while an adapter reads a live session's histor
 `--backend codex` lists a thread's turns mid-stream the way a re-attach does and reports whether the streaming item is listed, and with how much of its text; `--backend pi` forks a streaming turn and resumes the abandoned file, recording every line from each request to the `get_messages` answer.
 It reuses `AppServer` from `codex_fork_same_process_probe.py` and `PiSession` from `fork_probe.py`, and spawns `pi` with the pinned `--model`.
 
+`--item` (OW-dirazu) catches a streaming `reasoning`, `commandExecution`, `fileChange` or `plan`, or a running compaction, instead of an `agentMessage`, and reports what `thread/resume`'s `thread.status` read; `--item orphan` kills the app-server mid-turn and has a fresh one resume and list the thread.
+
 ```bash
 python3 hydrate_window_probe.py --backend codex
+python3 hydrate_window_probe.py --backend codex --item commandExecution
 python3 hydrate_window_probe.py --backend pi
 ```
 
-Costs tokens: one long Codex turn on `gpt-5.6-luna`, or three Pi turns, one of them cut short by the fork.
+Costs tokens: one long Codex turn on `gpt-5.6-luna` per `--item`, two for `contextCompaction`, or three Pi turns, one of them cut short by the fork.
 
-Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24.
-What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back".
+Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25.
+What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", and "What a Codex listing holds of a running turn, by item kind".
 
 ## Why these live here
 
