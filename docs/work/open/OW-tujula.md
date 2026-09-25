@@ -44,6 +44,7 @@ Load-bearing:
 - The measure uses the transcript's face remapping, as the `(current-buffer)` argument to `string-pixel-width` does today, and wraps at no narrower width than the one it fits to.
 - Batch, where `vertical-motion` does not move, keeps a measure that works there, the current search or any other, and the existing header tests under ";;;; Fold headers: one screen line each" in `emacs/agentpane-test.el` stay green unchanged.
 The close note states how many layouts a cut header costs, and whether the new path was checked in a graphical frame or only a tty.
+The owner permits one-off probes in their running graphical Emacs on the home server over `emacsclient --eval` (2026-09-25), as the probe above did, but no test and no command in the Commentary may depend on it: the checked-in tests stay in tty and batch Emacs.
 
 Out of scope: `visual-wrap-prefix-function`, called by `agentpane--insert-html` over each text part, made the other 1,119 `string-pixel-width` calls in the larger draw.
 
