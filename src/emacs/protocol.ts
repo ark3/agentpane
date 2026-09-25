@@ -5,7 +5,9 @@
  * reads this as JSON with no type checker behind it, and this docblock is what
  * the elisp author reads. It names every field, its JSON type, and when it is
  * present; the TypeScript below says the same thing to the compiler. Change
- * the two together, and raise it before changing either.
+ * the two together, and raise it before changing either. D24 raised it once:
+ * the `handle` every per-session notification carries, and every request
+ * accepts, below (OW-suyinu).
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -108,7 +110,12 @@
  * framed over stdio as `jsonrpc-process-connection` expects. Emacs sends
  * requests; the helper answers each and pushes notifications on its own.
  * `session` in every payload is a ref, `{ backend, id }`, exactly as the HTTP
- * API's `SessionRef`; `compaction` is `"requesting"`, `"running"` or `null`;
+ * API's `SessionRef`; `handle` (string) is the session's
+ * `SessionSummary.handle`, the name the server gave the live session: opaque,
+ * never moved by a rename, and a different one for a fork (D24, OW-suyinu).
+ * Every per-session notification below carries it, absent only where the
+ * server sent none, and every request that takes a `session` accepts one
+ * beside it and sends it nowhere; `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
@@ -121,7 +128,8 @@
  *
  * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the HTTP
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
- *   `status`, `isStreaming`).
+ *   `status`, `isStreaming`, `onDisk`, and `handle` for a session the server
+ *   holds, virtual or attached).
  * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
  *   stored transcript; spawns nothing and opens no stream.
  * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
@@ -132,9 +140,9 @@
  *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
  *   at when none is chosen.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
- *   route answers, whose `ref` is authoritative and may differ from the one
- *   asked for; when it does, a `session/renamed` from the one asked for has
- *   gone out before the reply, from the stream or else from the helper,
+ *   route answers, carrying the session's `handle`. Its `ref` is
+ *   authoritative and may differ from the one asked for; when it does, a
+ *   `session/renamed` from the one asked for has gone out before the reply, from the stream or else from the helper,
  *   unless a `sessions/detach` for it landed while the attach was in flight.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
@@ -171,8 +179,8 @@
  * about, and none arrives for a session Emacs has not attached, except
  * `sessions/changed`:
  *
- * - `session/snapshot` -- `{ session, nodes, isStreaming, compaction, model,
- *   effort, unrestoredModel, error, requests, notices }`.
+ * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
+ *   model, effort, unrestoredModel, error, requests, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
  *   after `sessions/attach`, and how a missed event is healed. The last three
  *   are what the server holds for the session, and what `session/error`,
@@ -185,23 +193,24 @@
  *   every notice, oldest first, each the `notice` a `session/notice` carried.
  *   The buffer draws all three after `nodes`, since a snapshot arrives at
  *   every Codex turn's start and end and would otherwise wipe them.
- * - `session/node` -- `{ session, node }`. One node to replace by `index`.
- * - `session/status` -- `{ session, isStreaming, compaction, model, effort,
- *   unrestoredModel }`.
- * - `session/error` -- `{ session, message }`. A turn error. Every later
+ * - `session/node` -- `{ session, handle, node }`. One node to replace by
+ *   `index`.
+ * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
+ *   effort, unrestoredModel }`.
+ * - `session/error` -- `{ session, handle, message }`. A turn error. Every later
  *   `session/snapshot` carries it again, in `error`, until it is cleared.
- * - `session/request` -- `{ session, request }`. The agent is blocked on a
+ * - `session/request` -- `{ session, handle, request }`. The agent is blocked on a
  *   request nothing in Emacs answers yet: `request` is the HTTP API's
  *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
  *   backend's own method name) and `payload` -- and `issuerThreadId` where a
  *   Codex subagent issued it. Every later `session/snapshot` carries it
  *   again, in `requests`, until it stops being pending, which
  *   `session/requestResolved` says.
- * - `session/requestResolved` -- `{ session, requestId }`. The request a
+ * - `session/requestResolved` -- `{ session, handle, requestId }`. The request a
  *   `session/request` carried under `requestId` is no longer pending --
  *   answered, or resolved or declined without an answer (OW-gusifo). Drop
  *   its line; one Emacs never drew is nothing to drop.
- * - `session/notice` -- `{ session, notice }`. Something non-fatal the
+ * - `session/notice` -- `{ session, handle, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
  *   it), `message` (string, the line to show), `details` (string or `null`,
@@ -209,8 +218,9 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
- * - `session/renamed` -- `{ from, to }`. Re-key the buffer; a
- *   `session/snapshot` for `to` follows.
+ * - `session/renamed` -- `{ from, to, handle }`. Re-key the buffer; a
+ *   `session/snapshot` for `to` follows. `handle` is the one the session held
+ *   before and holds after, so a buffer keyed by it has nothing to re-key.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
  *   while it was down is gone.
@@ -231,27 +241,34 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 
+/** What a request names its session by: the ref, and the handle it may carry beside it. */
+export interface SessionParams {
+	session: SessionRef;
+	handle?: string;
+}
+
 export interface HelperRequests {
 	"sessions/list": { params: { cwd?: string }; result: SessionSummary[] };
-	"sessions/preview": { params: { session: SessionRef }; result: TranscriptNode[] };
+	"sessions/preview": { params: SessionParams; result: TranscriptNode[] };
 	"sessions/create": { params: CreateSessionRequest; result: SessionRef };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
-	"sessions/attach": { params: { session: SessionRef }; result: SessionSummary };
-	"sessions/prompt": { params: { session: SessionRef } & PromptRequest; result: null };
-	"sessions/abort": { params: { session: SessionRef }; result: null };
-	"sessions/compact": { params: { session: SessionRef }; result: null };
-	"sessions/close": { params: { session: SessionRef }; result: null };
-	"sessions/dismissError": { params: { session: SessionRef } & DismissErrorRequest; result: null };
-	"sessions/detach": { params: { session: SessionRef }; result: null };
-	"sessions/setModel": { params: { session: SessionRef; model: string }; result: null };
-	"sessions/setEffort": { params: { session: SessionRef; effort: string }; result: null };
-	"sessions/forkPoints": { params: { session: SessionRef }; result: ForkPoint[] };
-	"sessions/fork": { params: { session: SessionRef } & ForkRequest; result: SessionRef };
+	"sessions/attach": { params: SessionParams; result: SessionSummary };
+	"sessions/prompt": { params: SessionParams & PromptRequest; result: null };
+	"sessions/abort": { params: SessionParams; result: null };
+	"sessions/compact": { params: SessionParams; result: null };
+	"sessions/close": { params: SessionParams; result: null };
+	"sessions/dismissError": { params: SessionParams & DismissErrorRequest; result: null };
+	"sessions/detach": { params: SessionParams; result: null };
+	"sessions/setModel": { params: SessionParams & { model: string }; result: null };
+	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
+	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };
+	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
 	"requests/reply": { params: AgentRequestReply; result: null };
 }
 
 export interface SessionStatusParams {
 	session: SessionRef;
+	handle?: string;
 	isStreaming: boolean;
 	compaction: "requesting" | "running" | null;
 	model: string | null;
@@ -264,13 +281,13 @@ export type HelperNotification =
 			method: "session/snapshot";
 			params: SessionStatusParams & { nodes: TranscriptNode[]; error: string | null; requests: AgentRequest[]; notices: AgentNotice[] };
 	  }
-	| { method: "session/node"; params: { session: SessionRef; node: TranscriptNode } }
+	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
-	| { method: "session/error"; params: { session: SessionRef; message: string } }
-	| { method: "session/request"; params: { session: SessionRef; request: AgentRequest } }
-	| { method: "session/requestResolved"; params: { session: SessionRef; requestId: string } }
-	| { method: "session/notice"; params: { session: SessionRef; notice: AgentNotice } }
-	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef } }
+	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string } }
+	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
+	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
+	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
+	| { method: "session/renamed"; params: { from: SessionRef; to: SessionRef; handle?: string } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {

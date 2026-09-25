@@ -25,7 +25,14 @@
  * event to every client, so views Emacs never attached form in the reducer
  * too; notifications go out only for refs Emacs attached through this
  * helper and have not detached or closed since, a set kept here and
- * re-keyed on `renamed`. `sessions/changed` is unfiltered. The hand-rolled
+ * re-keyed on `renamed`. `sessions/changed` is unfiltered.
+ *
+ * Every per-session notification carries the session's `handle` (D24,
+ * OW-suyinu), which the reducer's views do not hold: it is taken from the
+ * raw event being answered, or from the attach reply's summary for what
+ * `sessions/attach` says itself. Requests accept one beside `session` and
+ * send it nowhere. The `attached` set and the reducer stay keyed by ref
+ * until the clients key by the handle (OW-kimaya, OW-danifa). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
@@ -86,8 +93,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		write(encodeFrame({ jsonrpc: "2.0", ...notification }));
 	};
 
-	const statusOf = (view: SessionView) => ({
+	const statusOf = (view: SessionView, handle: string | undefined) => ({
 		session: view.ref,
+		handle,
 		isStreaming: view.isStreaming,
 		compaction: view.compaction ?? null,
 		model: view.model,
@@ -95,11 +103,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
-	const notifySnapshot = (view: SessionView): void => {
+	const notifySnapshot = (view: SessionView, handle: string | undefined): void => {
 		notify({
 			method: "session/snapshot",
 			params: {
-				...statusOf(view),
+				...statusOf(view, handle),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				requests: view.requests,
@@ -121,37 +129,38 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			if (!attached.has(fromKey)) return;
 			attached.delete(fromKey);
 			attached.add(sessionKey(event.session));
-			notify({ method: "session/renamed", params: { from: event.from, to: event.session } });
+			notify({ method: "session/renamed", params: { from: event.from, to: event.session, handle: event.handle } });
 			return;
 		}
 
 		const key = sessionKey(event.session);
 		if (!attached.has(key)) return;
 		const view = state.sessions[key]!;
+		const { handle } = event;
 		switch (event.type) {
 			case "snapshot":
-				notifySnapshot(view);
+				notifySnapshot(view, handle);
 				return;
 			case "upsert": {
 				const previous = before.sessions[key]!;
 				const node = projectUpsert(previous.messages, event.index, event.message, view.isStreaming, render);
-				notify({ method: "session/node", params: { session: view.ref, node } });
+				notify({ method: "session/node", params: { session: view.ref, handle, node } });
 				return;
 			}
 			case "status":
-				notify({ method: "session/status", params: statusOf(view) });
+				notify({ method: "session/status", params: statusOf(view, handle) });
 				return;
 			case "error":
-				notify({ method: "session/error", params: { session: view.ref, message: event.message } });
+				notify({ method: "session/error", params: { session: view.ref, handle, message: event.message } });
 				return;
 			case "notice":
-				notify({ method: "session/notice", params: { session: view.ref, notice: event.notice } });
+				notify({ method: "session/notice", params: { session: view.ref, handle, notice: event.notice } });
 				return;
 			case "request":
-				notify({ method: "session/request", params: { session: view.ref, request: event.request } });
+				notify({ method: "session/request", params: { session: view.ref, handle, request: event.request } });
 				return;
 			case "request-resolved":
-				notify({ method: "session/requestResolved", params: { session: view.ref, requestId: event.requestId } });
+				notify({ method: "session/requestResolved", params: { session: view.ref, handle, requestId: event.requestId } });
 				return;
 		}
 	};
@@ -205,11 +214,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// broadcasts only its snapshot, and the `renamed` a first start
 				// broadcasts misses a stream the server has not yet registered, whose
 				// opening snapshot then carries the new ref alone (`SessionManager`'s
-				// `attach` and `#adoptRef`, src/server/http/session-manager.ts).
+				// `attach` and `#rename`, src/server/http/session-manager.ts).
 				// Filtered by the asked-for key, that snapshot was dropped, so the
 				// rename is said here, before the reply, with the snapshot the reducer
 				// holds for the new ref if one has arrived; one still on its way is
-				// forwarded when it does. A key already gone was re-keyed by a
+				// forwarded when it does. Both carry the summary's handle, which the
+				// reducer's view does not hold. A key already gone was re-keyed by a
 				// `renamed` that did arrive, or dropped by a `sessions/detach` sent
 				// while this attach was in flight, which a reply that lands after it
 				// must not undo.
@@ -217,9 +227,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				if (next !== key && attached.has(key)) {
 					attached.delete(key);
 					attached.add(next);
-					notify({ method: "session/renamed", params: { from: session, to: summary.ref } });
+					notify({ method: "session/renamed", params: { from: session, to: summary.ref, handle: summary.handle } });
 					const view = state.sessions[next];
-					if (view) notifySnapshot(view);
+					if (view) notifySnapshot(view, summary.handle);
 				}
 				return summary;
 			} catch (error: unknown) {
@@ -227,7 +237,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				throw error;
 			}
 		},
-		"sessions/prompt": async ({ session, ...body }) => {
+		// `handle` is dropped before the rest is spread into the HTTP body.
+		"sessions/prompt": async ({ session, handle: _handle, ...body }) => {
 			await api.prompt(session, body);
 			return null;
 		},
@@ -263,7 +274,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return null;
 		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),
-		"sessions/fork": ({ session, ...body }) => api.fork(session, body),
+		"sessions/fork": ({ session, handle: _handle, ...body }) => api.fork(session, body),
 		"requests/reply": async (params) => {
 			await api.reply(params.requestId, params);
 			return null;

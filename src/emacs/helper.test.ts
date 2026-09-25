@@ -481,6 +481,91 @@ describe("notifications", () => {
 	});
 });
 
+describe("the handle (D24, OW-suyinu)", () => {
+	const handle = "h1";
+	const snapshotOf = (session: SessionRef, seq: number): ServerEvent => ({
+		type: "snapshot",
+		session,
+		handle,
+		seq,
+		messages: [],
+		isStreaming: false,
+		compaction: null,
+		model: null,
+		effort: null,
+		unrestoredModel: null,
+		error: null,
+		requests: [],
+		notices: [],
+	});
+
+	it("rides every per-session notification, taken from the event it answers", async () => {
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({ [`GET ${ROUTES.session(virtual)}`]: () => json({ session: { ...summary(virtual), handle } }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await io.until(1);
+		const request = { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} };
+		source.emit(snapshotOf(virtual, 1));
+		source.emit({ type: "renamed", session: pi, handle, seq: 2, from: virtual });
+		source.emit(snapshotOf(pi, 0));
+		source.emit({ type: "upsert", session: pi, handle, seq: 1, index: 0, message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 } });
+		source.emit({ type: "status", session: pi, handle, seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "error", session: pi, handle, seq: 3, message: "boom" });
+		source.emit({ type: "notice", session: pi, handle, seq: 4, notice: { kind: "warning", message: "careful", details: null, path: null } });
+		source.emit({ type: "request", session: pi, handle, seq: 5, request });
+		source.emit({ type: "request-resolved", session: pi, handle, seq: 6, requestId: "r1" });
+		source.emit({ type: "sessions-changed" });
+		await io.until(11);
+
+		const perSession = io.notifications().filter((message) => message["method"] !== "sessions/changed");
+		expect(perSession.map((message) => message["method"])).toEqual([
+			"session/snapshot",
+			"session/renamed",
+			"session/snapshot",
+			"session/node",
+			"session/status",
+			"session/error",
+			"session/notice",
+			"session/request",
+			"session/requestResolved",
+		]);
+		for (const message of perSession) expect(message["params"]).toMatchObject({ handle });
+	});
+
+	it("rides the summary sessions/attach answers, and the rename and snapshot it says for a ref the stream never renamed", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(alias)}`]: () => {
+				source.emit(snapshotOf(pi, 1));
+				return json({ session: { ...summary(pi), handle } });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await io.until(3);
+
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/renamed", "session/snapshot", 1]);
+		expect(io.out[0]).toEqual({ jsonrpc: "2.0", method: "session/renamed", params: { from: alias, to: pi, handle } });
+		expect(io.out[1]).toMatchObject({ params: { session: pi, handle } });
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { ...summary(pi), handle } });
+	});
+
+	it("accepts the handle beside the session on a request, and forwards it into no HTTP body", async () => {
+		const { io, calls } = start({
+			[`POST ${ROUTES.prompt(pi)}`]: noContent,
+			[`POST ${ROUTES.fork(pi)}`]: () => json({ ref: codex }),
+			[`POST ${ROUTES.model(pi)}`]: noContent,
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, handle, text: "hello" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/fork", params: { session: pi, handle, entryId: "e1" } });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/setModel", params: { session: pi, handle, model: "m" } });
+		await io.until(3);
+
+		expect(calls.find((call) => call.url === ROUTES.prompt(pi))?.body).toEqual({ text: "hello" });
+		expect(calls.find((call) => call.url === ROUTES.fork(pi))?.body).toEqual({ entryId: "e1" });
+		expect(calls.find((call) => call.url === ROUTES.model(pi))?.body).toEqual({ model: "m" });
+	});
+});
+
 describe("shutdown", () => {
 	it("closes the stream and resolves when the input ends", async () => {
 		const { io, source, done } = start(attachRoutes(pi));
