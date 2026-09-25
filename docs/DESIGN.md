@@ -920,7 +920,8 @@ OW-sewewe landed it, and `abort` stays out: it must reach a running turn, which 
 `listForkPoints`, a read, and `attach`, which creates the adapter the queue sits on, stay out too; `#serially`'s docblock in `src/server/http/session-manager.ts` gives each reason.
 One cost the queue brings is filed rather than guarded: on Pi a verb queued behind a compaction waits for it, since `pi 0.84.2` answers `compact` after `compaction_end` (OW-jileku).
 A second was closed by ownership: a verb sent on a Pi parent's ref and queued behind its fork ran on the fork until OW-suyinu gave the fork its own container.
-Now `#serially` takes the container at the call and its adapter when the verb runs, the queue stays with the parent's container, which keeps no adapter, and the verb fails as a call on any detached session does; one sent after the fork's `onRefChanged` misses `#lookup` altogether.
+Now `#serially` takes the container at the call and its adapter when the verb runs; the parent's container keeps no adapter, so a verb it had queued fails when it runs, as a call on any detached session does, and one sent on the parent's ref after the fork's `onRefChanged` misses `#lookup` altogether.
+The queue follows the adapter onto the fork's container, since it orders the adapter: `PiAdapter.fork` announces the move and then re-sends the model and level and hydrates before it returns, all inside the fork verb, so a verb on the fork's ref waits for that tail, which is OW-woyifu's and OW-dutute's premise, and the parent's failed verbs go first on the shared chain.
 
 **Hydrate: replace, while the live stream keeps arriving.**
 `PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still dropped a delta for an item that started before the attach, because that item had no slot (OW-zudase), until OW-dutute below.

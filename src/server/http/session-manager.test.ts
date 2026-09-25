@@ -2389,6 +2389,43 @@ describe("a session's mutations run one at a time (D24, OW-sewewe)", () => {
 		},
 	);
 
+	it("runs a verb on a Pi fork's ref only once the fork that moved the adapter has settled", async () => {
+		// `PiAdapter.fork` announces the move, then re-sends the model and level
+		// and hydrates the fork before it returns, all inside the fork verb. The
+		// fork's ref resolves from the announcement on, so a verb on it must
+		// queue behind that tail: the queue follows the adapter (OW-woyifu,
+		// OW-dutute).
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		const log: string[] = [];
+		const moved = deferred();
+		const tail = deferred();
+		const fork = adapter.fork.bind(adapter);
+		adapter.fork = async (entryId) => {
+			const forked = await fork(entryId);
+			log.push("fork tail begin");
+			moved.resolve();
+			await tail.promise;
+			log.push("fork tail end");
+			return forked;
+		};
+		const setModel = adapter.setModel.bind(adapter);
+		adapter.setModel = async (model) => {
+			log.push("setModel");
+			await setModel(model);
+		};
+
+		const forking = sessions.fork(REF, "e1");
+		await moved.promise;
+		const setting = sessions.setModel({ backend: "pi", id: `${REF.id}#fork-e1` }, "m");
+		await flush();
+		tail.resolve();
+		await forking;
+		await setting;
+
+		expect(log).toEqual(["fork tail begin", "fork tail end", "setModel"]);
+	});
+
 	it("runs the next verb after one that rejects", async () => {
 		const { log, gates } = await attachHeld();
 

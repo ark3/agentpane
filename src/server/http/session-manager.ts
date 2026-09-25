@@ -158,9 +158,12 @@ interface ManagedSession {
 	subscriptions: Unsubscribe[];
 	/**
 	 * The tail of this session's mutations, which `#serially` runs one at a time
-	 * (D24). On the container, so a rename leaves it where it is; a fork's
-	 * container starts a queue of its own, and what was queued here stays here
-	 * (`#serially`). Always settles fulfilled: a verb's rejection is its
+	 * (D24). It orders the adapter, so it goes where the adapter goes: a rename
+	 * leaves it on the container, and a Pi fork's container shares it, so a
+	 * verb on the fork's ref waits out the fork verb still running on it, whose
+	 * tail re-sends the model and hydrates. What the parent's container had
+	 * queued stays ahead on that chain and fails when it runs, for want of an
+	 * adapter (`#serially`). Always settles fulfilled: a verb's rejection is its
 	 * caller's, not the next verb's.
 	 */
 	queue: Promise<void>;
@@ -508,9 +511,13 @@ export class SessionManager {
 	 * That split is what keeps a verb sent on a Pi parent's ref and queued
 	 * behind a fork of it off the fork, which the fork's split from a rename
 	 * (`#forkOnto`, OW-kekoji) says the parent's ref must never reach: the fork
-	 * takes the adapter onto a container of its own, the queue stays with the
-	 * parent's, which keeps none, and the verb fails as a call on any detached
-	 * session does (OW-suyinu). A verb sent after the fork misses `#lookup`.
+	 * takes the adapter onto a container of its own, the parent's container
+	 * keeps none, and the verb fails as a call on any detached session does
+	 * (OW-suyinu). The queue itself follows the adapter onto the fork's
+	 * container, so a verb sent on the fork's ref while the fork verb is still
+	 * running waits for it, and the parent's queued verbs, ahead of it on the
+	 * same chain, fail first. A verb sent on the parent's ref after the fork
+	 * misses `#lookup`.
 	 */
 	async #serially<T>(ref: SessionRef, verb: (session: ManagedSession, adapter: BackendAdapter) => Promise<T>): Promise<T> {
 		const session = this.#lookup(ref);
@@ -674,8 +681,9 @@ export class SessionManager {
 	 * It takes what belongs to the process: the adapter, the subscriptions that
 	 * reach it, the pending requests it is blocked on (`#pendingRequests`
 	 * agrees), the notices it raised, and the `last*` mirrors the next update is
-	 * measured against. It takes nothing that was about the parent's
-	 * conversation, and starts with no `error`, a queue of its own, and the
+	 * measured against, and the queue, which orders the adapter and on which the
+	 * fork verb that fired this is still running. It takes nothing that was
+	 * about the parent's conversation, and starts with no `error` and the
 	 * `stored`, `onDisk` and `createdAt` below.
 	 *
 	 * The parent's container leaves the table with every one of its names, as
@@ -720,6 +728,7 @@ export class SessionManager {
 			// prefix, so the next `list()` will show the fork's true preview.
 		});
 		fork.adapter = parent.adapter;
+		fork.queue = parent.queue;
 		fork.subscriptions = parent.subscriptions.splice(0);
 		fork.requests = parent.requests;
 		fork.notices = parent.notices;
