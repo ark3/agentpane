@@ -308,6 +308,92 @@ text, and the tool call before the text carries none on its header."
     (should (< (agentpane-test--position "Found it.")
                (agentpane-test--position "claude-opus-5")))))
 
+;;;; Fold headers in a frame that lays out text, run in a tty Emacs
+
+;; `vertical-motion' does not move in batch Emacs, so these tests are
+;; tagged `tty', skip in batch, and run in `emacs -nw' by
+;; `agentpane-test-run-tty'; the Commentary of agentpane.el gives the command.
+
+(defun agentpane-test-run-tty ()
+  "Run the tests tagged `tty' with ERT's batch report, and exit: 0 when all
+ran as expected, 1 when one did not, 2 when the run itself signalled.
+For `emacs -nw', where `message' reaches only the echo area: the report
+goes to standard error instead, which the command sends to the terminal."
+  (kill-emacs
+   (condition-case err
+       (cl-letf (((symbol-function 'message)
+                  (lambda (format &rest args)
+                    (when format
+                      (princ (concat (apply #'format-message format args) "\n")
+                             #'external-debugging-output)))))
+         (if (zerop (ert-stats-completed-unexpected (ert-run-tests-batch '(tag tty))))
+             0
+           1))
+     (error (princ (format "%S\n" err) #'external-debugging-output)
+            2))))
+
+(ert-deftest agentpane-test-cut-header-measures-at-most-three-times ()
+  "A tool whose summary is ten times the fitted width costs at most three
+layouts to cut, where a binary search over the summary's length costs one
+per step; and so does one whose summary is right-to-left text."
+  :tags '(tty)
+  (skip-unless (not noninteractive))
+  (let* ((width (agentpane--window-width))
+         (numbers (mapconcat #'number-to-string (number-sequence 1 (* 3 width)) " "))
+         (hebrew (apply #'concat (make-list (* 2 width) "שלום עולם "))))
+    (dolist (summary (list numbers hebrew))
+      (let* ((summary (substring summary 0 (* 10 width)))
+             (layouts 0)
+             (count (lambda (&rest _) (setq layouts (1+ layouts)))))
+        (with-temp-buffer
+          (agentpane-transcript-mode)
+          (advice-add 'string-pixel-width :before count)
+          (advice-add 'vertical-motion :before count)
+          (unwind-protect
+              (agentpane--draw
+               (vector (list :index 1 :role "assistant" :meta agentpane-test--step-meta
+                             :parts (vector (agentpane-test--tool summary "done")))))
+            (advice-remove 'string-pixel-width count)
+            (advice-remove 'vertical-motion count))
+          (let ((header (agentpane-test--line-at "Bash")))
+            (should (string-search "…" header))
+            (should (string-search "claude-opus-5" header)))
+          (should (<= layouts 3)))))))
+
+(ert-deftest agentpane-test-motion-cuts-where-the-search-does ()
+  "A header cut by `vertical-motion' is the one the binary search cuts, for
+summaries that fit, that just miss and that run to many lines, of words,
+of wide characters, of right-to-left text and holding a tab, with the
+meta beside them and without, at widths from a few columns to the window's."
+  :tags '(tty)
+  (skip-unless (not noninteractive))
+  (should (agentpane--motion-window))
+  (let* ((words (mapconcat #'number-to-string (number-sequence 1 400) " "))
+         (wide (apply #'concat (make-list 100 "中文字 ")))
+         (hebrew (apply #'concat (make-list 60 "שלום עולם ")))
+         (summaries (append (mapcar (lambda (length) (substring words 0 length))
+                                    '(1 10 30 60 70 75 76 77 78 79 80 200 1000))
+                            (list wide (concat "rg -n " wide) hebrew (concat "echo " hebrew)
+                                  (propertize (concat "Thinking about\t" words)
+                                              'face 'agentpane-thinking))))
+         (head (concat (propertize "✓" 'face 'agentpane-tool-ok) " "
+                       (propertize "Bash" 'face 'agentpane-tool) " "))
+         (tail (propertize " · claude-opus-5 · 49k tok" 'face 'agentpane-dim))
+         (full (window-body-width nil t))
+         mismatches)
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (dolist (width (list 12 30 (min 40 full) full))
+        (cl-letf (((symbol-function 'agentpane--window-width) (lambda () width)))
+          (dolist (summary summaries)
+            (dolist (tail (list nil tail))
+              (let ((motion (agentpane--fit-header head summary tail))
+                    (search (cl-letf (((symbol-function 'agentpane--motion-window) #'ignore))
+                              (agentpane--fit-header head summary tail))))
+                (unless (equal motion search)
+                  (push (list width summary tail motion search) mismatches))))))))
+    (should-not mismatches)))
+
 ;;;; Notifications driving an attached buffer, with no process
 
 (defmacro agentpane-test--with-session (ref &rest body)
