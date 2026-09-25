@@ -761,7 +761,7 @@ Since OW-kimaya that strands nothing in the browser: its views are keyed by the 
 Nor does a detach and re-attach by another client while the stream was down, which gives the session a new handle: the opening snapshot under it drops the view the old handle held for that ref, since a ref names one live session.
 Both rest on no restarted server minting a handle a client already holds, which D24 now guarantees.
 Since OW-danifa neither alone strands anything in agentpane-mode: a buffer holds the handle and takes its ref from every notification under it, and a snapshot under a new handle for the ref a buffer holding a handle holds moves that buffer onto it, as the helper moves its attachment.
-Both in one outage still strand a buffer: the helper moves an attachment by the ref it last told Emacs, so after a rename it never heard and a re-attach elsewhere, it drops the opening snapshot that carries the new ref under the new handle.
+Both in one outage still strand a buffer: the helper moves an attachment by the ref it last told Emacs, so after a rename it never heard and a re-attach elsewhere, it drops the opening snapshot that carries the new ref under the new handle (OW-gusaru).
 Of the eight `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
 `status` lights the sidebar's attached stripe and is the first conjunct of the composer Tools menu's `detachable`, which reads `"attached"` or `"virtual"`.
 `updatedAt` drives the whole sidebar ordering; it is the session file's mtime for a stored session, and `session.createdAt` for one the manager minted itself, which `#ownSummary` reports as both stamps.
