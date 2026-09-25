@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # The client hard-codes the `virtual:` id prefix, a server construct the protocol does not carry
@@ -18,3 +19,10 @@ One call site is not a pattern, which is why this is a deferral and not a defect
 
 Done when either a shared predicate exists -- an `isVirtualRef(ref)` in `src/shared/`, with the server's own `virtual:` tests and the client's `detach()` both going through it -- or a reader decides one call site does not earn a shared helper and records that here, closing this `--declined`.
 The trigger to revisit is a second client-side caller needing the same question answered.
+
+## Close note
+
+Moot: the call site this deferral was about no longer exists.
+OW-wedupe replaced the `virtual:` prefix test in `detach()` (`src/client/controller.ts`) with a read of `SessionSummary.onDisk`, the session index's own answer to "has this session anything on disk", and the comment there now says "Not the `virtual:` prefix" and why: every backend replaces that id at attach, and a fork is born with no file and no prefix at all.
+`rg 'virtual:' src/client --glob '!*.test.ts'` on 2026-09-25 finds only that comment, so no client code depends on the server's naming convention and no shared predicate is needed.
+Found by OW-kimaya's cold read, which that card asked to close or amend this one.
