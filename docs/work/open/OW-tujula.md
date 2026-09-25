@@ -14,7 +14,8 @@ Measured in batch Emacs 31.1 on 2026-09-25, byte-compiled, on the second full `a
 - 348 messages, 8,298 lines: 153 headers, 144 of them cut short, 1,279 `string-pixel-width` calls from inside `fit-header` (8.4 per header), 88 ms of a 262 ms draw.
 - 176 messages, 3,474 lines: 103 headers, 76 cut short, 687 calls (6.7 per header), 46 ms of a 78 ms draw.
 Batch has no fonts: the window was 80 pixels wide, one per column, and each call measured character cells.
-Neither the per-call cost in a graphical frame, where the prose is `variable-pitch` and shaping is real, nor how many headers a wider window cuts, was measurable on the home server, which has no X server.
+In the owner's graphical Emacs the per-call cost was about twice that, not an order of magnitude more; see "The one-pass measure".
+How many headers a wider window cuts, and so how often the search runs at all, was not measured.
 Every full redraw pays this: a snapshot, and the `agentpane--refit` that `agentpane--refit-on-resize` schedules on a width change.
 
 ## The one-pass measure
@@ -24,7 +25,15 @@ In a tty Emacs 31.1 on 2026-09-25, run with `script -qc "emacs -nw -Q …"` so i
 Two limits showed up in the same probe:
 - In `emacs --batch`, whose frame is on `initial_terminal`, `vertical-motion` did not move at all and returned 0; the ERT suite runs in batch, so it cannot exercise this path, and `fit-header` needs a measure batch can run as well.
 - At 150 columns, wider than the window, it stopped at 79: it moves within one screen line of the window whose parameters it uses, so the text wraps at that window's width, and the selected window is not necessarily the narrowest one showing the transcript, which is what `agentpane--window-width` fits to.
-Emacs's own `truncate-string-pixelwise` in `subr-x` is a second model: it lays the string out once in a work buffer shown in the selected window, then binary-searches with `window-text-pixel-size` over prefixes of that one buffer, so it still takes about log₂ n layouts but builds no new strings.
+The same day, with the owner's permission, the probe ran in the owner's running Emacs on the home server over `emacsclient --eval`: GNU Emacs 31.1, a GTK frame, `variable-pitch` set to IBM Plex Sans and `default` to IBM Plex Mono, `frame-char-width` 9.
+It drew nothing: a `with-temp-buffer` with `(buffer-face-set 'variable-pitch)`, as `agentpane-transcript-mode` sets `agentpane-prose`, which inherits `variable-pitch`, held the header, and `vertical-motion` was passed the selected window, a magit window 1,904 px wide showing another buffer.
+agentpane was not loaded there, so `shadow`, `success` and `bold` stood in for the marker, state and tool-name faces, and the ellipsis-and-tail step was left out.
+Three summaries -- a 183-character shell command, a 196-character prose sentence, and a 111-character path padded with runs of `W`, `i` and `m` -- were each fitted at 300, 700 and 1,200 px and at the window's width less one character:
+- In all 12 cases the `vertical-motion` cut equalled the binary search's, the prefix it chose fitted, and one character more did not; no overshoot occurred, which does not show that none can.
+- The binary search took 7–8 `string-pixel-width` calls and 0.40–0.99 ms a header, 1.79 ms on the first, cold call, which is 60–120 µs a call against batch's 45 µs.
+  That search ran in full even where the whole header fitted, where `fit-header` takes its one-call fast path, so the widest rows overstate today's cost.
+- One `vertical-motion` took 0.07–0.18 ms a header, growing with the target column.
+So a window showing another buffer serves as the measuring window, with the fonts taken from the current buffer's face remapping; it still wraps at that window's width.
 
 ## The change
 
@@ -33,14 +42,13 @@ Load-bearing:
 - The cut is the one the current search finds: the longest start of the summary that fits beside the ellipsis and the tail, which is left off when it would not fit beside an ellipsis alone, as `fit-header`'s docstring says.
   "Closest to that pixel coordinate" may land one character past the last one that fits, so the result is checked and stepped back where it overshoots.
 - The measure uses the transcript's face remapping, as the `(current-buffer)` argument to `string-pixel-width` does today, and wraps at no narrower width than the one it fits to.
-- Batch keeps working, by a fallback or however else the implementer chooses, and the existing header tests under ";;;; Fold headers: one screen line each" in `emacs/agentpane-test.el` stay green unchanged.
-Whether `vertical-motion` or a `truncate-string-pixelwise`-style prepared-buffer search is the measure is the implementer's call: if a graphical-frame check shows `vertical-motion` cannot be made to land the right cut, the prepared-buffer search is the fallback.
-Either way, the close note states which measure is used, how many layouts a cut header costs, and whether a graphical frame was used to check it or only a tty.
+- Batch, where `vertical-motion` does not move, keeps a measure that works there, the current search or any other, and the existing header tests under ";;;; Fold headers: one screen line each" in `emacs/agentpane-test.el` stay green unchanged.
+The close note states how many layouts a cut header costs, and whether the new path was checked in a graphical frame or only a tty.
 
 Out of scope: `visual-wrap-prefix-function`, called by `agentpane--insert-html` over each text part, made the other 1,119 `string-pixel-width` calls in the larger draw.
 
 ## Done
 
 Red first, then green, in `emacs/agentpane-test.el`: with `string-pixel-width` (and whatever the new measure calls) counted by advice, drawing a tool whose summary is ten times the fitted width costs at most three measurements, where the current search costs about eight.
-If the one-pass measure only runs on a real display, that test and one asserting the new cut equals the binary search's on a mix of summary lengths run in a tty Emacs, not batch, and the Commentary of `emacs/agentpane.el` gives the command that runs them.
+Since `vertical-motion` needs a real display, that test and one asserting the new cut equals the binary search's on a mix of summary lengths run in a tty Emacs, not batch, and the Commentary of `emacs/agentpane.el` gives the command that runs them.
 The batch suite passes as that Commentary gives it, with its pass count updated.
