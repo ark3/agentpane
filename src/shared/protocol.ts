@@ -315,6 +315,17 @@ export interface AttachSessionResponse {
 }
 
 /**
+ * GET /api/sessions/:backend/:id/live -- which live session this ref names
+ * now, by any name its container has (D24), or 404 when no live session
+ * carries it. A read of the process table: unlike the attach route above it
+ * starts nothing and broadcasts nothing, so a client may ask it about a
+ * session nobody asked to have running (OW-gusaru).
+ */
+export interface LiveSessionResponse {
+	session: LiveSessionSummary;
+}
+
+/**
  * GET /api/sessions/:backend/:id/preview -- a read-only, non-attaching
  * transcript preview (OW-38). Unlike the attach route above, this spawns
  * nothing: it reads exactly one stored session file by ref and maps that
@@ -463,6 +474,7 @@ export const ROUTES = {
 	session: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}`,
 	preview: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/preview`,
+	live: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/live`,
 	prompt: (ref: SessionRef) =>
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/prompt`,
 	abort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/abort`,

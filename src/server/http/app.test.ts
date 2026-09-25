@@ -16,6 +16,7 @@ import {
 	type ForkPointsResponse,
 	type ForkResponse,
 	type ListSessionsResponse,
+	type LiveSessionResponse,
 	type ModelsResponse,
 	ROUTES,
 	type SessionPreviewResponse,
@@ -296,6 +297,48 @@ describe("preview (OW-38, read-only, non-attaching)", () => {
 
 	it("405s a non-GET method", async () => {
 		const response = await post(ROUTES.preview(PI_SESSION));
+		expect(response.status).toBe(405);
+		expect(response.headers.get("allow")).toBe("GET");
+	});
+});
+
+describe("live (OW-gusaru, read-only, non-attaching)", () => {
+	it("answers the live session a ref names, and 404s one that is not running, spawning nothing", async () => {
+		const before = await get(ROUTES.live(PI_SESSION));
+		expect(before.status).toBe(404);
+		expect(((await before.json()) as ApiError).error).toBe("not_found");
+		expect(pi.created).toHaveLength(0);
+
+		const attached = ((await (await get(ROUTES.session(PI_SESSION))).json()) as AttachSessionResponse).session;
+		const live = await get(ROUTES.live(PI_SESSION));
+		expect(live.status).toBe(200);
+		expect(((await live.json()) as LiveSessionResponse).session).toEqual(attached);
+
+		await app.fetch(new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, { method: "DELETE" }));
+		expect((await get(ROUTES.live(PI_SESSION))).status).toBe(404);
+		expect(pi.created).toHaveLength(1);
+	});
+
+	it("answers by a name a rename left behind with the session's new ref under the same handle", async () => {
+		const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
+		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
+		app = createApp({ index, adapters: { pi: renaming }, newId: () => "n1" });
+		const { ref } = (await (
+			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })
+		).json()) as CreateSessionResponse;
+		expect((await get(ROUTES.live(ref))).status).toBe(404);
+		expect(renaming.created).toHaveLength(0);
+
+		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
+		const byNew = ((await (await get(ROUTES.live({ backend: "pi", id: REAL }))).json()) as LiveSessionResponse).session;
+		const byOld = ((await (await get(ROUTES.live(ref))).json()) as LiveSessionResponse).session;
+		expect(byOld.ref).toEqual({ backend: "pi", id: REAL });
+		expect(byOld.handle).toBe(byNew.handle);
+		expect(renaming.created).toHaveLength(1);
+	});
+
+	it("405s a non-GET method", async () => {
+		const response = await post(ROUTES.live(PI_SESSION));
 		expect(response.status).toBe(405);
 		expect(response.headers.get("allow")).toBe("GET");
 	});

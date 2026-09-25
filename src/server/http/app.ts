@@ -31,6 +31,7 @@ import {
 	type ForkResponse,
 	type ForkPointsResponse,
 	type ListSessionsResponse,
+	type LiveSessionResponse,
 	type ModelsResponse,
 	type PromptRequest,
 	type SessionPreviewResponse,
@@ -271,6 +272,16 @@ export function createApp(deps: AppDeps): App {
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
 				const turns = await deps.index.preview(ref);
 				const response: SessionPreviewResponse = { ref, turns };
+				return json(response);
+			}
+			case "live": {
+				// Read-only, like preview: which live session this name reaches now,
+				// if any. It must never attach, since a client asks it about a
+				// session it has not been asked to run (OW-gusaru).
+				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+				const session = sessions.liveSummaryOf(ref);
+				if (!session) return error(404, "not_found", `no live session: ${sessionKey(ref)}`);
+				const response: LiveSessionResponse = { session };
 				return json(response);
 			}
 			case "prompt": {

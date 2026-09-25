@@ -1272,6 +1272,16 @@ export class SessionManager {
 			: this.#ownSummary(session);
 	}
 
+	/**
+	 * The summary of the live session `ref` names, by any name its container
+	 * has, or null when no container holding an adapter answers to it. Reads
+	 * the table and nothing else, so it can neither start a session nor
+	 * resurrect one a client closed (OW-gusaru).
+	 */
+	liveSummaryOf(ref: SessionRef): LiveSessionSummary | null {
+		return this.#lookup(ref)?.adapter ? this.summaryOf(ref) : null;
+	}
+
 	/** A session the index does not know about: everything we have is what we minted. */
 	#ownSummary(session: ManagedSession): LiveSessionSummary {
 		return {
