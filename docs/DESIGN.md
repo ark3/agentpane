@@ -867,7 +867,7 @@ What each backend needs from agentpane under this decision:
   As of the same version a fork at the first user message of a session file holding no system message, which every file written before `pi 0.86.0` lacks, kept no message, so Pi had nothing to restore from: `get_state` answered `messageCount` 0 at the settings default model and level, and the forked branch recorded both (`docs/MANUAL_TESTING.md`, OW-riyeku).
   A resume spawn chooses nothing for the adapter to re-send, so after a fork whose `get_state` answers `messageCount` 0 it re-sends the model and level in force before the fork, chosen or not; a `0.87.1` file keeps its system message at that fork, and Pi restores both itself.
 
-### D24. A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate lays history under the live stream
+### D24. A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate merges history with the live stream
 
 The owner took this on 2026-09-24, after asking whether the race defects the deck keeps filing point at a flaw in the architecture.
 Decided and not yet built, in the sense D12 is: the prose reads as the design will once the seven cards named at the end land, and each amendment to an earlier decision says so where it stands.
