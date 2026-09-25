@@ -77,7 +77,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 114 tests, 111 results as expected, 0 unexpected, 3 skipped
+;;     Ran 115 tests, 112 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -105,6 +105,7 @@
 
 ;;; Code:
 
+(eval-when-compile (require 'cl-lib))
 (require 'diff-mode)
 (require 'dom)
 (require 'ewoc)
@@ -610,10 +611,23 @@ at weight regular).  In front, the emphasis face wins."
               (put-text-property pos next 'face lifted))))
         (setq pos next)))))
 
+(define-hash-table-test 'agentpane--same-text
+  #'equal-including-properties #'sxhash-equal-including-properties)
+
 (defun agentpane--insert-html (html)
   "Draw HTML, the browser's rendering of one text part, through shr at point.
 Filling is left to `visual-line-mode', and a visual-wrap pass gives wrapped
-list rows their hanging indent."
+list rows their hanging indent.
+
+That pass measures every list row twice with `string-pixel-width', its
+marker and an average-width space beside it, although the rows of a list
+hand it the same two strings, properties and all: on Emacs 31.1 (measured
+2026-09-25) a full draw of a 199-node Claude transcript measured 766 times
+for it (OW-johomo).  visual-wrap offers no way in to its measure, so the
+pass runs with `string-pixel-width' bound to one that measures a string
+once and hands a later string with the same text and properties the same
+width.  Within one pass in one buffer, text and properties are all the
+width depends on, so the indent drawn is the one measuring again gives."
   (let ((dom (with-temp-buffer
                (insert html)
                (libxml-parse-html-region (point-min) (point-max))))
@@ -641,10 +655,16 @@ list rows their hanging indent."
     ;; wraps at all.
     (setq truncate-lines nil)
     (unless (bolp) (insert "\n"))
-    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\|[-–*•‣⁃◦]\\)[ \t]+\\)?"))
+    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\|[-–*•‣⁃◦]\\)[ \t]+\\)?")
+          (widths (make-hash-table :test 'agentpane--same-text))
+          (measure (symbol-function 'string-pixel-width)))
       (save-restriction
         (narrow-to-region start (point))
-        (visual-wrap-prefix-function (point-min) (point-max))))))
+        (cl-letf (((symbol-function 'string-pixel-width)
+                   (lambda (string &optional buffer)
+                     (or (gethash string widths)
+                         (puthash string (funcall measure string buffer) widths)))))
+          (visual-wrap-prefix-function (point-min) (point-max)))))))
 
 ;;;; Drawing nodes
 

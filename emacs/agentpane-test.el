@@ -391,6 +391,36 @@ so the widths here are the marker's column counts."
         ("- dash" (space :align-to (2 . width)) ((0 2 (min-width ((2 . width))))))
         ("  indented" ((0 2 (face (agentpane-code agentpane-code-block)))) nil))))))
 
+(ert-deftest agentpane-test-list-rows-measure-once-per-text-part ()
+  "A text part of forty plain paragraphs and twelve bulleted rows, in four
+lists, measures the rows' marker and its average-width space once each,
+where visual-wrap alone measures both on every row, 24 in all.  The plain
+lines cost nothing either way: their adaptive prefix is empty, and
+visual-wrap measures only a prefix that is not.  The other two measures
+are shr's own, of its bullet and its table separator, once per document."
+  (let* ((html (mapconcat
+                (lambda (group)
+                  (concat (mapconcat (lambda (n) (format "<p>Line %d.%d</p>\n" group n))
+                                     (number-sequence 1 10) "")
+                          "<ul>\n"
+                          (mapconcat (lambda (n) (format "<li>item %d.%d</li>\n" group n))
+                                     (number-sequence 1 3) "")
+                          "</ul>\n"))
+                (number-sequence 1 4) ""))
+         (calls 0)
+         (count (lambda (&rest _) (setq calls (1+ calls)))))
+    (with-temp-buffer
+      (agentpane-transcript-mode)
+      (advice-add 'string-pixel-width :before count)
+      (unwind-protect
+          (agentpane--draw
+           (vector (list :index 1 :role "assistant"
+                         :parts (vector (list :type "text" :text "" :html html)))))
+        (advice-remove 'string-pixel-width count))
+      (should (equal (nth 1 (assoc "* item 4.3" (agentpane-test--wrap-layout)))
+                     '(space :align-to (2 . width))))
+      (should (<= calls 4)))))
+
 ;;;; Fold headers in a frame that lays out text, run in a tty Emacs
 
 ;; `vertical-motion' does not move in batch Emacs, as measured on Emacs 31.1
