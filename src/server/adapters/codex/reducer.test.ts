@@ -861,11 +861,24 @@ describe("defensive handling", () => {
 		expect(r.getState().messages).toEqual([]);
 	});
 
-	it("ignores a delta for an item it never saw start", () => {
+	it("opens an item it never saw start from its first text delta (OW-zudase)", () => {
 		const r = reducer();
 		expect(
 			r.handle({
 				method: "item/agentMessage/delta",
+				params: { threadId: "t", turnId: "u", itemId: "before-attach", delta: "hi" },
+			}),
+		).toEqual([{ type: "message", index: 0 }]);
+		expect(r.getState().messages).toMatchObject([
+			{ role: "assistant", content: [{ type: "text", text: "hi" }], stopReason: "pending" },
+		]);
+	});
+
+	it("ignores command output for an item it never saw start", () => {
+		const r = reducer();
+		expect(
+			r.handle({
+				method: "item/commandExecution/outputDelta",
 				params: { threadId: "t", turnId: "u", itemId: "ghost", delta: "hi" },
 			}),
 		).toEqual([]);

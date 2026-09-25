@@ -2638,6 +2638,57 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			expect(reattached.getState().messages).toHaveLength(3);
 			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "said early, then more" }] });
 		});
+
+		it("keeps the deltas of an item that started before the attach (OW-zudase)", async () => {
+			// As of `codex-cli 0.156.0` a turn listed mid-stream at `itemsView:
+			// "full"` was `inProgress` with its completed items only: the
+			// `agentMessage` still streaming was not listed at all, and
+			// `thread/resume` replayed no `item/started` for it
+			// (docs/MANUAL_TESTING.md, OW-dutute). So its deltas are the only copy
+			// of its text until `item/completed`.
+			const running = {
+				id: "turn-live",
+				items: [
+					{
+						type: "userMessage",
+						id: "user-live",
+						clientId: null,
+						content: [{ type: "text", text: "live prompt", text_elements: [] }],
+					},
+				],
+				itemsView: "full",
+				status: "inProgress",
+				error: null,
+				startedAt: 1_700_000_010,
+				completedAt: null,
+				durationMs: null,
+			};
+			const delta = (text: string) => ({
+				method: "item/agentMessage/delta",
+				params: { threadId: "thread-forked", itemId: "item-before", delta: text },
+			});
+			const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running], [delta("37\n38\n")]);
+
+			expect(reattached.getState().messages).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "first prompt" }] },
+				{ role: "user", content: [{ type: "text", text: "second prompt" }] },
+				{ role: "user", content: [{ type: "text", text: "live prompt" }] },
+				{ role: "assistant", content: [{ type: "text", text: "37\n38\n" }] },
+			]);
+			proc.emit(delta("39\n"));
+			expect(reattached.getState().messages).toHaveLength(4);
+			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "37\n38\n39\n" }] });
+			proc.emit({
+				method: "item/completed",
+				params: {
+					threadId: "thread-forked",
+					completedAtMs: 2,
+					item: { id: "item-before", type: "agentMessage", text: "1\n2\n...39\n", phase: null, memoryCitation: null },
+				},
+			});
+			expect(reattached.getState().messages).toHaveLength(4);
+			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "1\n2\n...39\n" }] });
+		});
 	});
 
 	it("publishes a blocking request once across both adapters, and answers it once", async () => {

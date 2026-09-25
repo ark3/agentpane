@@ -8,7 +8,8 @@
  *
  * Assembly rules, per DESIGN:
  *
- * - `item/started` creates the placeholder message(s) for an item
+ * - `item/started` creates the placeholder message(s) for an item -- or, for
+ *   an item that started before a re-attach, its first delta does
  * - deltas append to the right content block, correlated by **`itemId`**
  * - `item/completed` replaces with the authoritative content
  * - `turn/completed` ends the turn
@@ -179,11 +180,13 @@ export class CodexReducer {
 	 * Laid under what the live stream already built, never over it
 	 * (OW-vijuyi). A re-attach over an app-server that still holds the thread
 	 * hears it from `CodexAdapter.adoptConnection` on, so a turn still running
-	 * there streams while the history is paged in. An item that stream opened
-	 * or completed keeps its live slot, which has every delta since, in place
-	 * of the listed copy -- so its text shows once whether or not the listing
-	 * already held it -- and one the listing lacks follows the history. The
-	 * streaming and compaction state the stream set are kept with it.
+	 * there streams while the history is paged in. An item that stream opened,
+	 * streamed a delta for or completed keeps its live slot, which has every
+	 * delta since, in place of the listed copy -- so its text shows once
+	 * whether or not the listing already held it -- and one the listing lacks
+	 * follows the history, as a still-streaming item does (see `applyDelta`,
+	 * OW-zudase). The streaming and compaction state the stream set are kept
+	 * with it.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;
@@ -295,35 +298,35 @@ export class CodexReducer {
 			}
 
 			case "item/agentMessage/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, openAgentMessage, (item, delta) => {
 					if (item.type !== "agentMessage") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/plan/delta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, openPlan, (item, delta) => {
 					if (item.type !== "plan") return false;
 					item.text += delta;
 					return true;
 				});
 
 			case "item/reasoning/summaryTextDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, openReasoning, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.summary, message.params.summaryIndex, delta);
 					return true;
 				});
 
 			case "item/reasoning/textDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, openReasoning, (item, delta) => {
 					if (item.type !== "reasoning") return false;
 					appendAt(item.content, message.params.contentIndex, delta);
 					return true;
 				});
 
 			case "item/commandExecution/outputDelta":
-				return this.applyDelta(message.params.itemId, message.params.delta, (item, delta) => {
+				return this.applyDelta(message.params.itemId, message.params.delta, null, (item, delta) => {
 					if (item.type !== "commandExecution") return false;
 					item.aggregatedOutput = (item.aggregatedOutput ?? "") + delta;
 					return true;
@@ -465,12 +468,30 @@ export class CodexReducer {
 		return [...this.slots.values()].flatMap((slot) => slot.messages);
 	}
 
+	/**
+	 * A delta for an item this reducer has no slot for opens one, from the
+	 * empty item `open` builds, when the delta's kind says what the item is
+	 * (OW-zudase). That is an item whose `item/started` went out before
+	 * `CodexAdapter.adoptConnection` joined the stream on a re-attach, and as
+	 * of `codex-cli 0.156.0` nothing else carries its text until
+	 * `item/completed`: `thread/turns/list` left a streaming `agentMessage`
+	 * out of the running turn it listed, and `thread/resume` replayed no
+	 * `item/started` (docs/MANUAL_TESTING.md, OW-dutute). The slot holds what
+	 * streamed from the attach on, not the head before it, and
+	 * `item/completed` replaces it with the whole item where it stands. A
+	 * command's output has no `open`: alone it names no command to draw.
+	 */
 	private applyDelta(
 		itemId: string,
 		delta: string,
+		open: ((id: string) => ThreadItem) | null,
 		apply: (item: ThreadItem, delta: string) => boolean,
 	): CodexEffect[] {
-		const slot = this.slotFor(itemId);
+		let slot = this.slotFor(itemId);
+		if (!slot && open) {
+			slot = { item: open(itemId), messages: [], timestamp: this.now(), completed: false };
+			this.slots.set(itemId, slot);
+		}
 		if (!slot) return [];
 		if (!apply(slot.item, delta)) return [];
 		return this.remap(slot);
@@ -520,6 +541,19 @@ export class CodexReducer {
 }
 
 // ---------------------------------------------------------------------------
+
+/** The empty items a delta opens a slot with; see `CodexReducer.applyDelta`. */
+function openAgentMessage(id: string): ThreadItem {
+	return { type: "agentMessage", id, text: "", phase: null, memoryCitation: null, delivery: null, questions: null };
+}
+
+function openPlan(id: string): ThreadItem {
+	return { type: "plan", id, text: "" };
+}
+
+function openReasoning(id: string): ThreadItem {
+	return { type: "reasoning", id, summary: [], content: [] };
+}
 
 function appendAt(parts: string[], index: number, delta: string): void {
 	while (parts.length <= index) parts.push("");
