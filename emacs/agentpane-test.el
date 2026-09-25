@@ -325,9 +325,10 @@ cut short, and the step's meta on its header."
 
 ;;;; Fold headers in a frame that lays out text, run in a tty Emacs
 
-;; `vertical-motion' does not move in batch Emacs, so these tests are
-;; tagged `tty', skip in batch, and run in `emacs -nw' by
-;; `agentpane-test-run-tty'; the Commentary of agentpane.el gives the command.
+;; `vertical-motion' does not move in batch Emacs, as measured on Emacs 31.1
+;; on 2026-09-25, so these tests are tagged `tty', skip in batch, and run
+;; in `emacs -nw' by `agentpane-test-run-tty'; the Commentary of
+;; agentpane.el gives the command.
 
 (defun agentpane-test-run-tty ()
   "Run the tests tagged `tty' with ERT's batch report, and exit: 0 when all

@@ -77,16 +77,17 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 110 tests, 108 results as expected, 0 unexpected, 2 skipped
+;;     Ran 112 tests, 109 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
 ;;
-;; The two it skips are tagged `tty': they drive `vertical-motion', which
-;; cuts a long fold header in one layout and does not move in batch Emacs.
-;; They run in a tty Emacs that `script' gives a terminal, pinned to 80 by
-;; 24, with the terminal's drawing thrown away and ERT's report sent to
-;; standard error by `agentpane-test-run-tty':
+;; The three it skips are tagged `tty': they drive `vertical-motion', which
+;; cuts a long fold header in three layouts where a binary search takes one
+;; per step, and which on Emacs 31.1 (measured 2026-09-25) does not move in
+;; batch Emacs.  They run in a tty Emacs that `script' gives a terminal,
+;; pinned to 80 by 24, with the terminal's drawing thrown away and ERT's
+;; report sent to standard error by `agentpane-test-run-tty':
 ;;
 ;;     timeout 60 env TERM=xterm-256color script -qec 'stty cols 80 rows 24; \
 ;;       emacs -nw -Q -L emacs -l ert -l agentpane -l agentpane-test \
@@ -95,7 +96,7 @@
 ;; which on Emacs 31.1 and util-linux 2.42.3 (measured 2026-09-25) ends,
 ;; after one "passed" line per test, with a line beginning
 ;;
-;;     Ran 2 tests, 2 results as expected, 0 unexpected
+;;     Ran 3 tests, 3 results as expected, 0 unexpected
 ;;
 ;; and exits 0, 1 when a test fails, or 2 when the run itself signals.  The
 ;; `timeout' is what ends a run that cannot start: a file that signals as
@@ -791,10 +792,12 @@ scrolled horizontally moves that column right by the scroll, even in a
 buffer it does not show, so the start it finds is checked with FITS, and
 where it does not fit the search takes over below it.
 The work buffer takes this buffer's face remapping, as `string-pixel-width'
-does, and measures pure pixel columns: no `line-prefix' or line numbers
-ahead of the text, which the motion counts, no `word-wrap', which ends the
-screen line at an earlier space, and no bidi reordering, which would break
-the tie between a position and a column in right-to-left text.
+does, and measures pure pixel columns.  It turns off the buffer-local
+`line-prefix' and line numbers, which would sit ahead of the text for the
+motion to count; nothing inserted carries a `line-prefix' property of its
+own.  It turns off `word-wrap', which ends the screen line at an earlier
+space, and bidi reordering, which would break the tie between a position
+and a column in right-to-left text.
 A SUMMARY holding a tab or a newline is cut by the search instead.  A
 tab's width depends on its column, which SUFFIX laid out ahead shifts;
 and `string-pixel-width' measures the widest line of a string, where the
@@ -835,9 +838,12 @@ terminal keeps for its continuation glyph.  The fold marker is counted as
 `▸ ' whichever is drawn.  In batch Emacs both measures degrade to
 character cells, which is what the tests fit against.
 A header that fits costs that one measure.  One that does not is cut by
-`agentpane--cut-by-motion', a motion and a check, in the window
-`agentpane--motion-window' answers, or by `agentpane--cut-by-search', a
-measure per step of a binary search, where it answers none.
+`agentpane--cut-by-motion' in the window `agentpane--motion-window'
+answers, a motion and a check: three layouts with it.  When that motion
+finds TAIL will not fit, the summary alone is measured, and if it does
+not fit either a second motion and check cut it: five.  A check that
+fails adds the search below it.  Where no window is answered,
+`agentpane--cut-by-search' cuts, a measure per step of a binary search.
 Nothing refits a header when the window changes width except a redraw;
 see `agentpane--refit-on-resize'."
   (let* ((width (- (agentpane--window-width) (frame-char-width)))
