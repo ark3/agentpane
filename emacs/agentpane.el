@@ -302,6 +302,15 @@ docs/MANUAL_TESTING.md, OW-bonode and OW-kofuda)."
 (defvar-local agentpane--session nil
   "The summary plist of the session this transcript buffer shows.")
 
+(defvar-local agentpane--handle nil
+  "The handle of the live session this transcript buffer holds, or nil.
+The server's name for the session's container, which a rename never moves
+and a fork does not share (D24): the one its attach reply carried, or,
+before that reply, the one the first notification it was sent carried,
+or one a later snapshot moved it onto; see `agentpane--notified-buffer'.
+Nil in a buffer that has not attached, and in the parent of a Pi fork,
+whose container the server has let go.")
+
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for a request that may spawn the session's backend:
 `sessions/attach', and `sessions/prompt', `sessions/forkPoints' and
@@ -387,13 +396,21 @@ non-nil, on the way out."
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
 Every one but `sessions/changed' is about one session, and goes to the
-transcript buffer holding it, if there is one."
+transcript buffer `agentpane--notified-buffer' finds for it, if any.
+That buffer takes the notification's handle, and its `session' as the
+session's ref, `to' for a `session/renamed': the ref is an attribute any
+notification may move, and nothing is re-keyed, so a rename needs no
+handling of its own.  A buffer's name never carries the ref (OW-mikayi),
+and neither does its composer's."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
-    (let ((buffer (agentpane--buffer-for
-                   (plist-get params (if (eq method 'session/renamed) :from :session)))))
+    (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
         (with-current-buffer buffer
+          (when (plist-get params :handle)
+            (setq agentpane--handle (plist-get params :handle)))
+          (agentpane--hold-ref
+           (plist-get params (if (eq method 'session/renamed) :to :session)))
           (pcase method
             ('session/snapshot
              (agentpane--set-status params)
@@ -409,8 +426,41 @@ transcript buffer holding it, if there is one."
             ('session/error (agentpane--upsert (list :error (plist-get params :message))))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
-            ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
-            ('session/renamed (agentpane--rekey (plist-get params :to)))))))))
+            ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))))))))
+
+(defun agentpane--notified-buffer (method params)
+  "The transcript buffer the notification METHOD, with PARAMS, is about.
+The buffer holding the notification's handle; failing that, one holding
+its ref -- `from' for a `session/renamed', else `session' -- as below,
+which then takes the handle; else nil, and the notification is dropped.
+
+By the ref, a buffer holding no handle, which for a notification is one
+whose attach has not yet answered: the helper sends nothing for a
+session no buffer asked to attach.  The attach's snapshot and its reply
+are unordered (D2), so its first notifications can arrive before the
+reply names the handle.  Where the reply names another ref than the one
+asked for, the helper says so first, with a `session/renamed' from the
+asked-for ref, then sends the snapshot under the new one, both before
+the reply (`sessions/attach' in src/emacs/helper.ts): the handle is taken
+from that `session/renamed', and the snapshot finds the buffer by it.
+That event is the only link from the asked-for ref to the handle before
+the reply, so whatever retires it from the wire (OW-mofuho) has to give
+that snapshot another route.
+
+A `session/snapshot' also moves a buffer from one handle to another, and
+looks for such a buffer first: a snapshot is how a ref reaches the helper
+under a new handle -- a restarted server's, or the one another client's
+re-attach minted -- and the helper then moves the attachment it holds by
+that ref onto the new handle (`onEvent' in src/emacs/helper.ts).  First,
+because a buffer holding the ref and no handle may be one only
+previewing a stored session that an attached buffer was since renamed
+onto, which the helper never fed."
+  (let ((handle (plist-get params :handle))
+        (ref (plist-get params (if (eq method 'session/renamed) :from :session))))
+    (or (and handle (agentpane--buffer-holding handle))
+        (and (eq method 'session/snapshot)
+             (agentpane--buffer-for ref (lambda () agentpane--handle)))
+        (agentpane--buffer-for ref (lambda () (not agentpane--handle))))))
 
 ;;;; Rendering HTML through shr
 
@@ -1580,11 +1630,20 @@ the picker refetches its buffer, and an error would leave it unshown."
   (and (equal (plist-get a :backend) (plist-get b :backend))
        (equal (plist-get a :id) (plist-get b :id))))
 
-(defun agentpane--buffer-for (ref)
-  "The transcript buffer holding the session REF, or nil."
+(defun agentpane--buffer-for (ref &optional pred)
+  "The transcript buffer holding the session REF, or nil.
+With PRED, only one where PRED, called with no arguments in it, answers
+non-nil."
   (seq-find (lambda (buffer)
               (let ((held (buffer-local-value 'agentpane--session buffer)))
-                (and held (agentpane--same-ref-p (agentpane--ref held) ref))))
+                (and held (agentpane--same-ref-p (agentpane--ref held) ref)
+                     (or (null pred) (with-current-buffer buffer (funcall pred))))))
+            (buffer-list)))
+
+(defun agentpane--buffer-holding (handle)
+  "The transcript buffer holding the session handle HANDLE, or nil."
+  (seq-find (lambda (buffer)
+              (equal (buffer-local-value 'agentpane--handle buffer) handle))
             (buffer-list)))
 
 (defun agentpane--buffer-name (summary)
@@ -1603,10 +1662,15 @@ only by the `<2>', `<3>' that `generate-new-buffer' adds."
 
 (defun agentpane--transcript-buffer (summary)
   "The transcript buffer for SUMMARY's session, created if there is none.
-One buffer per session ref, named by `agentpane--buffer-name'.
+The buffer holding the summary's handle, which a listing carries for a
+session the server holds, so no second buffer opens on a live session;
+else the one holding its ref; else a new one, named by
+`agentpane--buffer-name'.
 A new buffer's `default-directory' is the session's cwd, where the summary
 gives one, rather than that of whichever buffer was current (OW-ruhotu)."
-  (or (agentpane--buffer-for (agentpane--ref summary))
+  (or (and (plist-get summary :handle)
+           (agentpane--buffer-holding (plist-get summary :handle)))
+      (agentpane--buffer-for (agentpane--ref summary))
       (let ((buffer (generate-new-buffer (agentpane--buffer-name summary)))
             (cwd (plist-get summary :cwd)))
         (with-current-buffer buffer
@@ -1618,42 +1682,58 @@ gives one, rather than that of whichever buffer was current (OW-ruhotu)."
 
 (defvar agentpane--composer)
 
-(defun agentpane--rekey (ref)
-  "Make this buffer hold the session REF, leaving its name, and its
-composer's, as they were: the backend and project they name do not change
-with the ref, and a name that fell back to the session id keeps the old one.
-For a `session/renamed', and for an attach whose reply names another ref.
+(defun agentpane--hold-ref (ref)
+  "Make REF, when non-nil, the ref of the session this buffer holds,
+leaving the buffer's name, and its composer's, as they were: the backend
+and project they name do not change with the ref, and a name that fell
+back to the session id keeps the old one."
+  (unless (or (null ref) (agentpane--same-ref-p ref (agentpane--ref agentpane--session)))
+    (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))))
 
-Should another buffer already hold REF, as one the picker opened on the
-canonical ref while this one previewed a virtual ref does, the two merge
-into this one, and the other is killed: two buffers for one session left
-notifications reaching only whichever came first in `buffer-list'
-\(OW-jafini).  This one survives because it is the one attached, and its
-own callbacks are running: the attach reply that rekeys it goes on to call
-its waiters, a prompt among them, in this buffer.  The other's
-prompt-region draft follows this one's own, and its composer, if any,
-sends here from then on, and is this buffer's composer if it has none.
-Should this buffer have a prompt in flight, its answer then leaves the
-sent text in place rather than clearing it, as it does whenever the
-region changed after the send.  Requests of the other's still in flight
-are dropped with it, as any killed buffer's are; a prompt of its own that
-went out leaves its text in this buffer's draft.  A window that showed
-the other shows this one, and the other's kill sends no
-`sessions/detach', which would silence the session this one now holds."
-  (unless (agentpane--same-ref-p ref (agentpane--ref agentpane--session))
-    (let ((other (agentpane--buffer-for ref)))
-      (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))
-      (when other (agentpane--absorb other)))))
+(defun agentpane--attached-as (summary)
+  "Hold what SUMMARY, the reply to this buffer's `sessions/attach', names:
+the session's handle, and its ref, which is authoritative and may differ
+from the one asked for.  Return non-nil when that merged another buffer
+into this one, which then wants a snapshot; see `agentpane--absorb'."
+  (setq agentpane--attached agentpane--connection)
+  (let* ((handle (plist-get summary :handle))
+         (other (and handle (agentpane--buffer-holding handle))))
+    (setq agentpane--handle handle)
+    (agentpane--hold-ref (agentpane--ref summary))
+    (when (and other (not (eq other (current-buffer))))
+      (agentpane--absorb other)
+      t)))
 
 (defvar agentpane--composer-transcript)
 
 (defun agentpane--absorb (other)
   "Take the transcript buffer OTHER's draft, composer and windows into this
-buffer, then kill OTHER without detaching.  See `agentpane--rekey'.
+buffer, then kill OTHER without detaching.
+For an attach whose reply names the handle OTHER already holds: a session
+has several names, and a buffer previewing one of them attaches to the
+session another buffer holds under another.  Two buffers holding one
+handle would leave notifications reaching only whichever came first in
+`buffer-list', as two holding one ref did when a rename brought them
+together before D24 (OW-jafini).
+
+This one survives because it is the one attached, and its own callbacks
+are running: the attach reply goes on to call its waiters, a prompt among
+them, in this buffer.  OTHER's prompt-region draft follows this one's
+own, and its composer, if any, sends here from then on, and is this
+buffer's composer if it has none.  Should this buffer have a prompt in
+flight, its answer then leaves the sent text in place rather than
+clearing it, as it does whenever the region changed after the send.
+Requests of OTHER's still in flight are dropped with it, as any killed
+buffer's are; a prompt of its own that went out leaves its text in this
+buffer's draft.  A window that showed OTHER shows this one, and OTHER's
+kill sends no `sessions/detach', which would silence the session this one
+now holds.  What OTHER drew goes with it: the snapshot of this buffer's
+attach may have been drawn there, since until the reply the handle was
+OTHER's, so the caller attaches again for one of its own.
 A composer taken as this buffer's own is renamed after this buffer; one
 that stays secondary to this buffer's own composer keeps its name.
 The detach is disarmed for this kill alone, rather than skipped whenever
-another buffer holds the ref, since only here is a second holder meant."
+another buffer holds the handle, since only here is a second holder meant."
   (let ((buffer (current-buffer))
         (draft (with-current-buffer other
                  (buffer-substring-no-properties agentpane--prompt-start (point-max))))
@@ -1781,10 +1861,9 @@ stored transcript over the live one the other's snapshot drew (OW-yibimi)."
     (agentpane--request 'sessions/attach
                         (list :session (agentpane--ref agentpane--session))
                         (lambda (summary)
-                          (setq agentpane--attached agentpane--connection)
-                          ;; The route's ref is authoritative and may differ.
-                          (agentpane--rekey (agentpane--ref summary))
-                          (agentpane--attach-answered t))
+                          (let ((merged (agentpane--attached-as summary)))
+                            (agentpane--attach-answered t)
+                            (when merged (agentpane--attach))))
                         t
                         (lambda () (agentpane--attach-answered nil))
                         agentpane--spawn-timeout)))
@@ -1821,10 +1900,9 @@ session attached and needs no attach at all."
   (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
                                    (list :session (agentpane--ref agentpane--session))
                                    :timeout agentpane--spawn-timeout)))
-    (setq agentpane--attached agentpane--connection)
-    ;; The route's ref is authoritative: attaching is where a new session
-    ;; takes its backend's own id.
-    (agentpane--rekey (agentpane--ref attached))))
+    ;; Attaching is where a new session takes its backend's own id.
+    (when (agentpane--attached-as attached)
+      (agentpane--attach))))
 
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
@@ -2095,23 +2173,25 @@ browser's `forkAndSubmit' does; that abort is the client's under D15, and
 the server's fork route aborts nothing.  It goes after the points are
 matched, so a message that is not forkable costs the turn nothing.  Codex
 and Claude Code keep a parent turn running through a fork, and are not
-aborted.  A Pi fork also moves the parent's live process onto the fork and
-leaves the parent detached, with no `session/renamed' (`SessionManager.fork'
-in src/server/http/session-manager.ts), so this buffer then counts itself
-detached too, detaches the parent from the helper, and its next command
-that needs the session attaches it again.  Codex and Claude Code leave
-the parent attached.
+aborted.  A Pi fork also moves the parent's live process onto the fork, a
+container of its own under a handle of its own, and takes the parent's
+container out of the server's table (D24, `SessionManager' in
+src/server/http/session-manager.ts), so the parent's handle hears nothing
+more.  This buffer then counts itself detached too, lets go of that
+handle, detaches the parent from the helper, and its next command that
+needs the session attaches it again, under whatever handle that attach
+answers.  The fork's buffer takes the fork's handle from its own attach.
+Codex and Claude Code leave the parent attached.
 
-The parent buffer keeps the live transcript it was showing, unredrawn: the
-server re-keys the session onto the fork the moment `PiAdapter.fork'
-moves, so what it emits of the fork's shortened transcript goes out under
-the fork's ref, never the parent's (OW-zovaye, OW-nikogo).  A detached
-buffer usually shows the store's projection instead, which for Pi can omit
-messages the live one keeps, but nothing here trusts an index from it: a
-fork attaches first, and a send attaches and redraws.  While the fork is
-in flight `agentpane-refetch' sends nothing: on the attached parent it
-would attach again, and a reply to that landing after the fork's would
-count the parent attached, the server having detached it.
+The parent buffer keeps the live transcript it was showing, unredrawn:
+what the server emits of the fork's shortened transcript goes out under
+the fork's handle and ref, never the parent's (OW-zovaye, OW-nikogo).
+A detached buffer usually shows the store's projection instead, which for
+Pi can omit messages the live one keeps, but nothing here trusts an index
+from it: a fork attaches first, and a send attaches and redraws.  While
+the fork is in flight `agentpane-refetch' sends nothing: on the attached
+parent it would attach again, and a reply to that landing after the
+fork's would count the parent attached, the server having detached it.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
@@ -2186,7 +2266,8 @@ fork fails.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil))
+       (setq agentpane--attached nil
+             agentpane--handle nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer

@@ -580,28 +580,25 @@ the facts `showsMeta' governs stay hidden."
     (should (string-search "— error · boom" (buffer-string)))
     (should-not (string-search "haiku" (buffer-string)))))
 
-(ert-deftest agentpane-test-renamed-rekeys-the-buffer ()
-  "A `session/renamed' moves the buffer to the new ref and leaves its name."
+(ert-deftest agentpane-test-snapshot-under-the-handle-moves-the-ref ()
+  "A `session/snapshot' under the handle a buffer holds, naming another ref,
+is drawn there and moves the buffer to that ref, leaving the names of the
+transcript and its composer as they were."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
     (agentpane-test--with-session from
-      (let ((name (buffer-name)))
-        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-        (should (eq (agentpane--buffer-for to) (current-buffer)))
-        (should-not (agentpane--buffer-for from))
-        (should (equal (buffer-name) name))))))
-
-(ert-deftest agentpane-test-renamed-keeps-the-composers-name ()
-  "A `session/renamed' leaves the names of the transcript and its composer."
-  (let ((from '(:backend "claude" :id "pending-1"))
-        (to '(:backend "claude" :id "real-2")))
-    (agentpane-test--with-session from
+      (setq agentpane--handle "h1")
       (save-current-buffer (save-window-excursion (agentpane-prompt)))
       (let ((composer agentpane--composer)
             (name (buffer-name)))
         (unwind-protect
             (let ((composer-name (buffer-name composer)))
-              (agentpane--on-notification nil 'session/renamed (list :from from :to to))
+              (agentpane--on-notification
+               nil 'session/snapshot
+               (list :session to :handle "h1"
+                     :nodes (vector (agentpane-test--assistant 4 "<p>Moved.</p>"))))
+              (should (equal (agentpane-test--indices) '(4)))
+              (should (agentpane--same-ref-p (agentpane--ref agentpane--session) to))
               (should (equal (buffer-name) name))
               (should (equal (buffer-name composer) composer-name)))
           (kill-buffer composer))))))
@@ -613,70 +610,175 @@ the facts `showsMeta' governs stay hidden."
                   (and held (agentpane--same-ref-p (agentpane--ref held) ref))))
               (buffer-list)))
 
-(ert-deftest agentpane-test-renamed-onto-a-held-ref-leaves-one-buffer ()
-  "A `session/renamed' onto the ref another transcript buffer already holds
-leaves exactly one buffer holding it: the renamed one, which hears the
-session.  The other is killed without detaching the session, and a window
-that showed it shows the survivor."
-  (let ((from '(:backend "claude" :id "pending-1"))
-        (to '(:backend "claude" :id "real-2")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking nil nil
-        (let ((renamed (agentpane--transcript-buffer (list :ref from)))
-              (other (agentpane--transcript-buffer (list :ref to))))
-          (delete-other-windows)
-          (switch-to-buffer other)
-          (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-          (should (equal (agentpane-test--holders to) (list renamed)))
-          (should-not sent)
-          (should (eq (window-buffer (selected-window)) renamed)))))))
-
-(ert-deftest agentpane-test-renamed-onto-a-held-ref-keeps-drafts ()
-  "When a `session/renamed' merges the buffer already holding the new ref
-into the renamed one, the other's prompt-region draft follows the renamed
-one's own, and the other's composer, text and all, sends to the survivor."
+(ert-deftest agentpane-test-renamed-onto-a-previewed-ref-merges-nothing ()
+  "A `session/renamed' under the handle a buffer holds, onto the ref another
+buffer only previews, re-keys nothing: both buffers stay, and what the
+session sends next under its handle reaches the one holding it."
   (let ((from '(:backend "claude" :id "pending-1"))
         (to '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
-      (let ((renamed (agentpane--transcript-buffer (list :ref from)))
-            (other (agentpane--transcript-buffer (list :ref to)))
-            composer)
-        (with-current-buffer renamed
-          (goto-char (point-max))
-          (insert "mine"))
-        (with-current-buffer other
-          (goto-char (point-max))
-          (insert "theirs")
-          (save-current-buffer (agentpane-prompt))
-          (setq composer agentpane--composer))
-        (with-current-buffer composer (insert "composed"))
-        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-        (with-current-buffer renamed
-          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                         "mine\ntheirs"))
-          (should (eq agentpane--composer composer)))
-        (with-current-buffer composer
-          (should (eq (agentpane--transcript) renamed))
-          (should (equal (buffer-string) "composed")))))))
+      (let ((live (agentpane--transcript-buffer (list :ref from)))
+            (preview (agentpane--transcript-buffer (list :ref to))))
+        (with-current-buffer live (setq agentpane--handle "h1"))
+        (agentpane--on-notification nil 'session/renamed
+                                    (list :from from :to to :handle "h1"))
+        (should (buffer-live-p preview))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session to :handle "h1"
+               :nodes (vector (agentpane-test--assistant 4 "<p>Live.</p>"))))
+        (with-current-buffer live (should (equal (agentpane-test--indices) '(4))))
+        (with-current-buffer preview (should-not agentpane--ewoc))))))
 
-(ert-deftest agentpane-test-renamed-onto-a-held-ref-names-the-adopted-composer ()
-  "When a `session/renamed' merge hands the renamed buffer, which has no
-composer, the other's, that composer is named after the survivor."
-  (let ((from '(:backend "claude" :id "pending-1"))
-        (to '(:backend "claude" :id "real-2")))
+(ert-deftest agentpane-test-listed-handle-finds-its-buffer ()
+  "A listing's summary carrying the handle a buffer holds finds that buffer,
+whatever ref the summary names, so no second buffer opens on the session."
+  (agentpane-test--forking nil nil
+    (let ((holder (agentpane--transcript-buffer
+                   (list :ref '(:backend "claude" :id "real-2")))))
+      (with-current-buffer holder (setq agentpane--handle "h1"))
+      (should (eq (agentpane--transcript-buffer
+                   (list :ref '(:backend "claude" :id "pending-1") :handle "h1"))
+                  holder)))))
+
+(ert-deftest agentpane-test-attach-renamed-before-its-reply-draws-the-snapshot ()
+  "An attach whose reply names another ref than the one asked for, which the
+helper precedes with a `session/renamed' from the asked-for ref and the
+snapshot under the new one (`sessions/attach' in src/emacs/helper.ts),
+leaves the buffer drawn from that snapshot, holding the reply's handle
+and ref."
+  (let ((asked '(:backend "claude" :id "pending-1"))
+        (ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
-      (let ((renamed (agentpane--transcript-buffer
-                      (list :ref from :cwd "/tmp/x/sandbox")))
-            (other (agentpane--transcript-buffer
-                    (list :ref to :cwd "/tmp/x/sandbox")))
-            composer)
-        (with-current-buffer other
-          (save-current-buffer (agentpane-prompt))
-          (setq composer agentpane--composer))
-        (should (equal (buffer-name composer) "*agentpane/claude: sandbox<2> prompt*"))
-        (agentpane--on-notification nil 'session/renamed (list :from from :to to))
-        (should (eq (buffer-local-value 'agentpane--composer renamed) composer))
-        (should (equal (buffer-name composer) "*agentpane/claude: sandbox prompt*"))))))
+      (setq hold '(sessions/attach)
+            attached (list :ref ref :handle "h1"))
+      (let ((buffer (agentpane--transcript-buffer (list :ref asked))))
+        (with-current-buffer buffer (agentpane--attach))
+        (agentpane--on-notification nil 'session/renamed
+                                    (list :from asked :to ref :handle "h1"))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1"
+               :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+        (funcall (cdr (pop held)) t)
+        (with-current-buffer buffer
+          (should (equal (agentpane-test--indices) '(3)))
+          (should (equal agentpane--handle "h1"))
+          (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref)))
+        (should (equal (agentpane-test--holders ref) (list buffer)))))))
+
+(ert-deftest agentpane-test-snapshot-under-a-new-handle-moves-the-attached-buffer ()
+  "A `session/snapshot' under a handle no buffer holds, for the ref an
+attached buffer holds under another -- a restarted server's, as the helper
+forwards it -- moves that buffer onto the new handle, not a buffer only
+previewing the same ref, and what follows under the new handle reaches it."
+  (let ((ref '(:backend "claude" :id "real-2")))
+    (agentpane-test--forking nil nil
+      (let ((live (agentpane--transcript-buffer
+                   (list :ref '(:backend "claude" :id "pending-1"))))
+            (preview (agentpane--transcript-buffer (list :ref ref))))
+        (with-current-buffer live (setq agentpane--handle "h1"))
+        ;; The live one renamed onto the ref the other previews.
+        (agentpane--on-notification nil 'session/snapshot
+                                    (list :session ref :handle "h1" :nodes []))
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h2"
+               :nodes (vector (agentpane-test--assistant 3 "<p>Restarted.</p>"))))
+        (agentpane--on-notification
+         nil 'session/node (list :session ref :handle "h2"
+                                 :node (agentpane-test--assistant 5 "<p>Next.</p>")))
+        (with-current-buffer live
+          (should (equal agentpane--handle "h2"))
+          (should (equal (agentpane-test--indices) '(3 5))))
+        (with-current-buffer preview
+          (should-not agentpane--handle)
+          (should-not agentpane--ewoc))))))
+
+(defmacro agentpane-test--merging (&rest body)
+  "Run BODY with a transcript buffer `holder' holding the session under the
+handle \"h1\" at a ref it has since left for `canonical', and a buffer
+`previewing' holding it at the ref `alias' and no handle, whose attach the
+helper answers with the session's summary, and every request answered as
+`agentpane-test--forking' answers it.  BODY sends the attach.
+The reply naming `canonical' has overtaken the `session/renamed' that
+would move `holder' there, which it may, the two being unordered (D2), so
+only the handle joins the two buffers."
+  (declare (indent 0))
+  `(let ((canonical '(:backend "claude" :id "real-2"))
+         (alias '(:backend "claude" :id "pending-1")))
+     (agentpane-test--forking nil nil
+       (setq attached (list :ref canonical :handle "h1"))
+       (let ((holder (agentpane--transcript-buffer
+                      (list :ref '(:backend "claude" :id "real-1") :cwd "/tmp/x/sandbox")))
+             (previewing (agentpane--transcript-buffer
+                          (list :ref alias :cwd "/tmp/x/sandbox"))))
+         (with-current-buffer holder (setq agentpane--handle "h1"))
+         ,@body))))
+
+(ert-deftest agentpane-test-attach-onto-a-held-handle-leaves-one-buffer ()
+  "An attach whose reply names the handle another transcript buffer holds
+leaves exactly one buffer holding it: the one that attached, which hears
+the session from then on.  The other is killed without detaching the
+session, a window that showed it shows the survivor, and the survivor
+attaches again, since the attach's snapshot may have been drawn in the
+other."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (delete-other-windows)
+      (switch-to-buffer holder)
+      (with-current-buffer previewing (agentpane--attach))
+      (should-not (buffer-live-p holder))
+      (should (equal (agentpane-test--holders canonical) (list previewing)))
+      (should (eq (agentpane--buffer-holding "h1") previewing))
+      (should (equal (reverse sent)
+                     `((sessions/attach :session ,alias)
+                       (sessions/attach :session ,canonical))))
+      (should (eq (window-buffer (selected-window)) previewing))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session canonical :handle "h1"
+             :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+      (with-current-buffer previewing
+        (should (equal (agentpane-test--indices) '(3)))))))
+
+(ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-drafts ()
+  "When an attach reply merges the buffer holding its handle into the one
+that attached, the other's prompt-region draft follows the survivor's own,
+and the other's composer, text and all, sends to the survivor."
+  (agentpane-test--merging
+    (let (composer)
+      (with-current-buffer previewing
+        (goto-char (point-max))
+        (insert "mine"))
+      (with-current-buffer holder
+        (goto-char (point-max))
+        (insert "theirs")
+        (save-current-buffer (agentpane-prompt))
+        (setq composer agentpane--composer))
+      (with-current-buffer composer (insert "composed"))
+      (with-current-buffer previewing (agentpane--attach))
+      (should-not (buffer-live-p holder))
+      (with-current-buffer previewing
+        (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                       "mine\ntheirs"))
+        (should (eq agentpane--composer composer)))
+      (with-current-buffer composer
+        (should (eq (agentpane--transcript) previewing))
+        (should (equal (buffer-string) "composed"))))))
+
+(ert-deftest agentpane-test-attach-onto-a-held-handle-names-the-adopted-composer ()
+  "When an attach reply's merge hands the buffer that attached, which has
+no composer, the other's, that composer is named after the survivor."
+  (agentpane-test--merging
+    (let (composer)
+      (with-current-buffer holder
+        (save-current-buffer (agentpane-prompt))
+        (setq composer agentpane--composer))
+      (should (equal (buffer-name composer) "*agentpane/claude: sandbox prompt*"))
+      (with-current-buffer previewing (agentpane--attach))
+      (should (eq (buffer-local-value 'agentpane--composer previewing) composer))
+      (should (equal (buffer-name composer) "*agentpane/claude: sandbox<2> prompt*")))))
 
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
@@ -1308,7 +1410,8 @@ shows.  A session with no nodes never shows it."
 (defmacro agentpane-test--forking (points forked &rest body)
   "Run BODY with every request answered as the helper would: POINTS for
 `sessions/forkPoints', FORKED for `sessions/fork', a summary of the ref
-asked for for `sessions/attach', and the fixed nodes for `sessions/preview'.
+asked for for `sessions/attach', unless BODY has put a summary of its own
+in `attached', and the fixed nodes for `sessions/preview'.
 Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
 onto `said'.  A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
@@ -1320,6 +1423,7 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
          (said nil)
          (hold nil)
          (held nil)
+         (attached nil)
          (buffers (buffer-list)))
      (cl-letf (((symbol-function 'agentpane--request)
                 (lambda (method params callback &optional _always failed &rest _)
@@ -1328,7 +1432,7 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
                          (reply (pcase method
                                   ('sessions/forkPoints ,points)
                                   ('sessions/fork ,forked)
-                                  ('sessions/attach (list :ref (plist-get params :session)))
+                                  ('sessions/attach (or attached (list :ref (plist-get params :session))))
                                   ('sessions/preview agentpane-test--nodes)))
                          (answer (lambda (ok)
                                    (with-current-buffer from
@@ -1449,6 +1553,34 @@ transcript under the fork's ref, never the parent's (OW-zovaye)."
           (with-current-buffer buffer
             (should-not (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(0 1)))))))))
+
+(ert-deftest agentpane-test-pi-fork-parent-lets-go-of-its-handle ()
+  "A Pi fork's parent buffer lets go of its handle, whose container the
+server has let go, and the fork's buffer holds the one its own attach
+answered, so the fork's snapshot, which names a ref the parent never held,
+is drawn there alone."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--handle "h1"
+                attached (list :ref forked :handle "h2"))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (should-not agentpane--handle)
+          (let ((fork-buffer (agentpane--buffer-for forked)))
+            (should (equal (buffer-local-value 'agentpane--handle fork-buffer) "h2"))
+            (agentpane--on-notification
+             nil 'session/snapshot
+             (list :session forked :handle "h2"
+                   :nodes (vector (agentpane-test--assistant 7 "<p>Forked.</p>"))))
+            (with-current-buffer fork-buffer
+              (should (equal (agentpane-test--indices) '(7)))))
+          (should (equal (agentpane-test--indices) '(0 1))))))))
 
 (ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
   "A second `agentpane-fork' while one is in flight says so and sends
@@ -2075,8 +2207,8 @@ whose attach reply signals while it is handled."
         (agentpane-send)
         (should (equal (reverse sent) '(sessions/preview sessions/attach)))
         (setq sent nil)
-        (cl-letf (((symbol-function 'agentpane--rekey)
-                   (lambda (_) (error "Rekey failed"))))
+        (cl-letf (((symbol-function 'agentpane--attached-as)
+                   (lambda (_) (error "Taking the reply failed"))))
           (should-error (funcall success (list :ref ref))))
         (agentpane-send)
         (should (equal sent '(sessions/attach)))))))
