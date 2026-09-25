@@ -26,21 +26,22 @@ Outstanding work lives only in the card deck.
 
 Two contracts the server has to honour, both documented at their definitions:
 
-- **Re-read `adapter.ref` after `start()` and after the first `submit()`.**
-  Pi's session id *is* its JSONL path (D9), which Pi names from `start()`'s `get_state` as of `pi 0.87.1`, though the file is not written until the first turn; the probe after the first `submit()` covers a Pi that has named nothing by then.
-  The adapter adopts the real `sessionFile` as soon as Pi reports one, so a session keyed by its minted `virtual:` id will never match a file on disk.
+- **Follow `adapter.ref` through `onRefChanged`.**
+  Pi's session id *is* its JSONL path (D9), which Pi names from `start()`'s `get_state` as of `pi 0.87.1`, though the file is not written until the first turn; the probe after the first `submit()` covers a Pi that has named nothing by then, and every fork moves it again.
+  The adapter adopts the real `sessionFile` as soon as Pi reports one and announces it then, so a session keyed by its minted `virtual:` id will never match a file on disk.
+  Until D24 (OW-nikogo) this contract read "re-read `adapter.ref` after `start()` and after the first `submit()`", and the manager polled at those points and after `fork()`.
 - **`start({ resumeId })` hydrates the transcript itself**, via `get_messages`.
   The caller does not need to re-query; a resumed adapter already holds the conversation by the time `start()` resolves.
 
-Both are now honoured, in `SessionManager.#adoptRef`.
+Both are now honoured, the first by the `onRefChanged` handler `SessionManager.#start` subscribes, which re-keys through `#adoptRef`.
 The first one was *not* honoured by the merged `wip/transport`, and it is the reason a new Pi session was unusable: the process table kept it keyed under its `virtual:` id forever, so it listed twice, was never findable on disk, and re-opening it spawned a second agent on the same session file.
-If you write another adapter, `ref` is not stable — say where it changes, and the server will follow.
+If you write another adapter, `ref` is not stable — fire `onRefChanged` where it changes, before anything else you emit under the new id, and the server will follow.
 
 ### What the transport expects of its callers
 
 - **Drive turns through `SessionManager.submit`, not `adapter.submit`.**
-  That is where the rename above is picked up.
-  Reaching past it re-introduces the bug.
+  That is where the prompt joins the session's queue (D24, OW-sewewe) and clears its error and its `virtual` flag.
+  The rename above no longer depends on it: the manager hears it through `onRefChanged` whoever drove the turn.
 - **`SessionSummary.ref` from `GET /api/sessions/:backend/:id` is authoritative** and may differ from the ref in the URL, for the same reason.
 - **A client must handle the `renamed` SSE event** by re-keying everything it holds under `from`.
   A snapshot under the new ref follows immediately.
