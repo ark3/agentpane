@@ -181,12 +181,15 @@ export class CodexReducer {
 	 * (OW-vijuyi). A re-attach over an app-server that still holds the thread
 	 * hears it from `CodexAdapter.adoptConnection` on, so a turn still running
 	 * there streams while the history is paged in. An item that stream opened,
-	 * streamed a delta for or completed keeps its live slot, which has every
-	 * delta since, in place of the listed copy -- so its text shows once
-	 * whether or not the listing already held it -- and one the listing lacks
-	 * follows the history, as a still-streaming item does (see `applyDelta`,
-	 * OW-zudase). The streaming and compaction state the stream set are kept
-	 * with it.
+	 * streamed a delta for or completed keeps its live slot in place of the
+	 * listed copy -- so its text shows once whether or not the listing already
+	 * held it -- and one the listing lacks follows the history, as a
+	 * still-streaming item does (see `applyDelta`, OW-zudase). A slot opened
+	 * by `item/started` has every delta since; one opened by a delta has only
+	 * those since the attach, and would lose the head a listed copy held --
+	 * as of `codex-cli 0.156.0` the listing left a streaming `agentMessage`
+	 * out, and OW-dirazu carries the kinds nobody measured. The streaming and
+	 * compaction state the stream set are kept with it.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;

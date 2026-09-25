@@ -914,7 +914,7 @@ OW-sewewe landed it, and `abort` stays out: it must reach a running turn, which 
 Two costs the queue brings are filed rather than guarded: on Pi a verb queued behind a compaction waits for it, since `pi 0.84.2` answers `compact` after `compaction_end` (OW-jileku), and a verb sent on a Pi parent's ref and queued behind its fork runs on the fork until OW-suyinu gives the fork its own container.
 
 **Hydrate: replace, while the live stream keeps arriving.**
-`PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still drops a delta for an item that started before the attach, because that item has no slot (OW-zudase).
+`PiAdapter.hydrateMessages` replaces the transcript wholesale, on a resume and inside `fork()`; `CodexReducer.hydrate` did until OW-vijuyi laid the paged-in turns under the live slots, and still dropped a delta for an item that started before the attach, because that item had no slot (OW-zudase), until OW-dutute below.
 Claude Code hydrates before it spawns and never rehydrates a live session, so it has no such window.
 The change, OW-dutute: a hydrate is a merge on every adapter that can hydrate a live session, under D20's rule that every index a client holds keeps meaning what it meant (OW-roveze), and under what a Pi fork is, a truncation that excludes the forked-at message and leaves the parent's streamed partial in the abandoned file (OW-yudoni, OW-sededi), so on Pi the merge shrinks the transcript and drops the parent's in-flight slots rather than unioning them.
 OW-dutute landed it, and measured each window before choosing the merge's shape (`docs/MANUAL_TESTING.md`, OW-dutute).

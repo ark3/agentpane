@@ -3426,7 +3426,8 @@ The listing went out and was answered with no line between, at 43 deltas and 56 
 It named one turn, `status: "inProgress"`, with two items: the `userMessage` and a completed `reasoning` item.
 The `agentMessage` those 43 deltas belonged to was not listed at all, so no partial text of it was either.
 After `turn/completed` (`status: "completed"`) the same listing named the same turn with that `agentMessage` as its third item, 1491 characters, equal to all the deltas the wire carried.
-So for an item that started before an attach, as of this version, nothing but its deltas carries its text until `item/completed`, and the listing can never hold a delta the stream also delivers, so opening a slot at the first delta applies nothing twice.
+So for an item that started before an attach, as of this version, nothing but its deltas carries its text until `item/completed`, and the listing held none of that item's deltas, so opening a slot at the first delta applied nothing twice here.
+That was one sample of one item kind, an `agentMessage`; whether a streaming `reasoning`, `plan`, `commandExecution` or `fileChange` is listed, and with what text, was not probed, and OW-dirazu carries it.
 That is the fix `CodexReducer.applyDelta` now makes (OW-zudase); the head of the text streamed before the attach still shows only once `item/completed` replaces the slot.
 One turn and one item kind were listed mid-stream; whether a running `commandExecution` or a `plan` is left out the same way was not probed.
 
