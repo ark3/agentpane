@@ -10,7 +10,8 @@
  * accepts, below (OW-suyinu); and the retirement of `session/renamed`, whose
  * one use no other notification covered -- joining the ref an attach asked
  * for to the handle it was answered under -- `session/snapshot`'s
- * `askedFor` took over (OW-mofuho).
+ * `askedFor` took over (OW-mofuho). OW-gusaru raised it a third time, for
+ * `session/snapshot`'s `movedFrom`.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -220,6 +221,14 @@
  *   is outstanding runs only once that one returns, while notifications are
  *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
  *   after later notifications").
+ *   `movedFrom` (a handle, only on the snapshot that moves an attachment) is
+ *   the handle the session was attached under until the helper learned from
+ *   the server that the ref it last named the session by now names `handle`:
+ *   the session was attached again under a new handle, by another client or
+ *   after a server restart, while Emacs held the old one; and where a rename
+ *   fell in the same outage of the helper's stream, `session` is a ref Emacs
+ *   never heard (OW-gusaru). The
+ *   buffer holding `movedFrom` takes `handle` and `session` from it.
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
  *   `index`.
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
@@ -309,6 +318,7 @@ export type HelperNotification =
 				requests: AgentRequest[];
 				notices: AgentNotice[];
 				askedFor?: SessionRef;
+				movedFrom?: string;
 			};
 	  }
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }

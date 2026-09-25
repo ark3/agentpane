@@ -30,7 +30,10 @@
  * it; an attach waits in it under the ref it asked for, since it is entered
  * before the REST call (D2) and nothing has named a handle yet, and moves to
  * the handle with the first event under one that carries that ref, or with
- * the attach reply. `sessions/changed` is unfiltered.
+ * the attach reply. An attachment whose session reaches the stream under a
+ * new handle moves there once the server says the ref Emacs holds names that
+ * handle now, and the snapshot that says so carries `movedFrom` (`reconcile`
+ * below, OW-gusaru). `sessions/changed` is unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
@@ -85,7 +88,7 @@
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
-import { sessionKey, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
+import { ROUTES, sessionKey, type LiveSessionResponse, type LiveSessionSummary, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
 import type { HelperNotification, HelperRequests } from "./protocol.ts";
@@ -136,8 +139,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const api = createAgentpaneApi({ fetch, openEvents: options.openEvents });
 
 	let state: ClientState = initialClientState();
-	/** Handle of each session Emacs has attached -> the `sessionKey` of the ref it last told Emacs, which is the one Emacs names it by. */
-	const attached = new Map<string, string>();
+	/** Handle of each session Emacs has attached -> the ref it last told Emacs, which is the one Emacs names it by. */
+	const attached = new Map<string, SessionRef>();
 	/** `sessionKey`s of attaches no event or reply has yet given a handle. */
 	const pending = new Set<string>();
 	/**
@@ -190,7 +193,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
-	const notifySnapshot = (view: SessionView, handle: string | undefined): void => {
+	/** `movedFrom` is the handle an attachment `reconcile` moved onto `handle` held before. */
+	const notifySnapshot = (view: SessionView, handle: string | undefined, movedFrom?: string): void => {
 		const asked = handle === undefined ? undefined : askedFor.get(handle);
 		if (handle !== undefined) askedFor.delete(handle);
 		notify({
@@ -198,6 +202,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			params: {
 				...statusOf(view, handle),
 				...(asked ? { askedFor: asked } : {}),
+				...(movedFrom ? { movedFrom } : {}),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				requests: view.requests,
@@ -213,8 +218,92 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 */
 	const isAttached = (handle: string, ref: SessionRef, told: SessionRef): boolean => {
 		if (!attached.has(handle) && !pending.delete(sessionKey(ref))) return false;
-		attached.set(handle, sessionKey(told));
+		attached.set(handle, told);
 		return true;
+	};
+
+	/** Stop telling Emacs anything under `held`. */
+	const drop = (held: string): void => {
+		attached.delete(held);
+		askedFor.delete(held);
+		for (const [key, node] of waiting) if (node.handle === held) waiting.delete(key);
+	};
+
+	/** The live session `ref` names now, by any of its names, or null; the route starts nothing. */
+	const liveSummary = async (ref: SessionRef): Promise<LiveSessionSummary | null> => {
+		const response = await fetch(ROUTES.live(ref), { method: "GET" });
+		if (response.status === 404) return null;
+		if (!response.ok) throw new Error(`${ROUTES.live(ref)} answered ${response.status}`);
+		return ((await response.json()) as LiveSessionResponse).session;
+	};
+
+	let reconciling = false;
+	let reconcileAgain = false;
+	/**
+	 * Move each attachment onto the handle its session lives under now, asking
+	 * the server, which alone knows every name a live session has (`#names`
+	 * in src/server/http/session-manager.ts). Run on every snapshot under a
+	 * handle no attachment holds, since that is how a session reaches this
+	 * helper under a new handle -- a restarted server's, or the one another
+	 * client's re-attach minted -- and the ref it carries may be one Emacs
+	 * never heard: a rename and a re-attach elsewhere in one outage of the
+	 * stream leave the session under a new handle and a new ref at once
+	 * (OW-gusaru). Matching the snapshot's ref against the one last told
+	 * Emacs, as this did until then, missed exactly that.
+	 *
+	 * The server is asked by the ref last told Emacs, which stays a name of
+	 * the session's container for as long as the container lives, and names no
+	 * other while it does. So an answer under another handle means the one
+	 * held is gone: the attachment moves there, and the snapshot the reducer
+	 * holds under it goes out carrying `movedFrom`, the handle the buffer
+	 * holds, by which agentpane-mode finds the buffer however new the ref is
+	 * to it (`agentpane--notified-buffer` in emacs/agentpane.el). Where the
+	 * reducer holds no view under that handle yet, nothing moves: its
+	 * snapshot, when it comes, runs this again. Where another attachment
+	 * already holds it, this one is dropped, since that one is fed already.
+	 * An answer that nothing live carries the ref moves nothing, and the next
+	 * such snapshot asks again, so an attachment still follows its session
+	 * when anyone attaches it again. Nothing here attaches: the route only
+	 * reads the server's table, so no session nobody asked to have running is
+	 * started or resurrected.
+	 *
+	 * One pass at a time, and a snapshot during one asks for another after
+	 * it, so no older answer lands after a newer one; each answer applies only
+	 * while the attachment it was asked for still stands as it was asked.
+	 */
+	const reconcile = async (): Promise<void> => {
+		if (reconciling) {
+			reconcileAgain = true;
+			return;
+		}
+		reconciling = true;
+		try {
+			do {
+				reconcileAgain = false;
+				await Promise.all(
+					[...attached].map(async ([held, told]) => {
+						const live = await liveSummary(told).catch(() => null);
+						const current = attached.get(held);
+						if (stopped || !live || live.handle === held) return;
+						if (current === undefined || sessionKey(current) !== sessionKey(told)) return;
+						if (attached.has(live.handle)) {
+							drop(held);
+							return;
+						}
+						const view = state.sessions[live.handle];
+						if (!view) return;
+						attached.delete(held);
+						attached.set(live.handle, view.ref);
+						const asked = askedFor.get(held);
+						askedFor.delete(held);
+						if (asked) askedFor.set(live.handle, asked);
+						notifySnapshot(view, live.handle, held);
+					}),
+				);
+			} while (reconcileAgain && !stopped);
+		} finally {
+			reconciling = false;
+		}
 	};
 
 	const onEvent = (event: ServerEvent): void => {
@@ -228,22 +317,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (state === before) return;
 
 		const { handle } = event;
-		// A ref names one live session, and a snapshot is what introduces one
-		// under a new handle -- a restarted server's, or the one another
-		// client's re-attach minted -- after which the reducer holds no other
-		// view of that ref. An attachment Emacs knows by that ref follows it,
-		// as it did when this set was keyed by ref.
-		if (event.type === "snapshot" && !attached.has(handle)) {
-			const key = sessionKey(event.session);
-			const held = [...attached].find(([, told]) => told === key);
-			if (held !== undefined) {
-				attached.delete(held[0]);
-				attached.set(handle, key);
-				const asked = askedFor.get(held[0]);
-				askedFor.delete(held[0]);
-				if (asked) askedFor.set(handle, asked);
-			}
-		}
+		if (event.type === "snapshot" && !attached.has(handle) && attached.size > 0) void reconcile();
 		if (!isAttached(handle, event.session, event.session)) return;
 		const view = state.sessions[handle]!;
 		switch (event.type) {
@@ -290,14 +364,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const forget = (session: SessionRef, handle: string | undefined): void => {
 		const key = sessionKey(session);
 		pending.delete(key);
-		const drop = (held: string): void => {
-			attached.delete(held);
-			askedFor.delete(held);
-			for (const [key, node] of waiting) if (node.handle === held) waiting.delete(key);
-		};
 		if (handle !== undefined) drop(handle);
 		else {
-			for (const [held, told] of attached) if (told === key) drop(held);
+			for (const [held, told] of attached) if (sessionKey(told) === key) drop(held);
 			for (const [held, asked] of askedFor) if (sessionKey(asked) === key) drop(held);
 		}
 	};
@@ -371,7 +440,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// flight, which a reply that lands after it must not undo.
 				if (pending.delete(key)) {
 					const first = !attached.has(summary.handle);
-					attached.set(summary.handle, sessionKey(summary.ref));
+					attached.set(summary.handle, summary.ref);
 					if (first && sessionKey(summary.ref) !== key) {
 						askedFor.set(summary.handle, session);
 						const view = state.sessions[summary.handle];
