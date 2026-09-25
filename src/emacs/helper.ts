@@ -299,14 +299,23 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// now, before the reply; one still on its way is forwarded when it
 				// arrives. Either names the ref asked for in `askedFor`, since until
 				// it does no buffer holds that handle, and agentpane-mode may handle
-				// the reply after it whatever the order here. An attach
+				// the reply after it whatever the order here. Only for the first
+				// attachment of the handle: where another already holds it, its
+				// snapshots were never dropped, the buffer that attached it takes
+				// what follows by that handle or by its own ref, and this attach's
+				// reply merges the asking buffer into that one
+				// (`agentpane--attached-as` and `agentpane--absorb` in
+				// emacs/agentpane.el), as it did before the tag; a tag here would
+				// also let a detach by this alias drop that buffer's attachment
+				// (`forget` above). An attach
 				// no longer pending was moved already, by an event under the handle
 				// that carried the asked-for ref, which the buffer matched by that
 				// ref, or dropped by a `sessions/detach` sent while this attach was in
 				// flight, which a reply that lands after it must not undo.
 				if (pending.delete(key)) {
+					const first = !attached.has(summary.handle);
 					attached.set(summary.handle, sessionKey(summary.ref));
-					if (sessionKey(summary.ref) !== key) {
+					if (first && sessionKey(summary.ref) !== key) {
 						askedFor.set(summary.handle, session);
 						const view = state.sessions[summary.handle];
 						if (view) notifySnapshot(view, summary.handle);

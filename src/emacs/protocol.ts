@@ -147,12 +147,15 @@
  *   at when none is chosen.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, carrying the session's `handle`. Its `ref` is
- *   authoritative and may differ from the one asked for; when it does, the
- *   first notification under the summary's `handle` is a `session/snapshot`
- *   carrying `askedFor`, sent before the reply if the helper holds one yet
- *   and else when it arrives, unless the stream already carried the
- *   asked-for ref under that handle, or a `sessions/detach` for it landed
- *   while the attach was in flight.
+ *   authoritative and may differ from the one asked for. When it does, and
+ *   this attach is the first attachment of the summary's `handle`, the first
+ *   `session/snapshot` under that handle from the reply on carries
+ *   `askedFor`: sent before the reply if the helper holds one yet, and else
+ *   when it arrives. Not when the stream already carried the asked-for ref
+ *   under that handle, nor when a `sessions/detach` for it landed while the
+ *   attach was in flight. Where another attachment already holds the handle,
+ *   no snapshot carries it: that one's buffer hears the session, and this
+ *   reply names the handle it holds.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.

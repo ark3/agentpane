@@ -440,6 +440,30 @@ describe("notifications", () => {
 		]);
 	});
 
+	it("tags nothing for an attach of an alias whose handle another attach already holds, so its detach by that alias leaves the other fed", async () => {
+		// B attaches the canonical ref and A an alias of the same session; both
+		// replies land before the session's snapshot, and A is killed before it.
+		// The buffer holding the canonical ref takes what follows, and A's reply,
+		// had it been handled, would have merged A into it.
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }),
+			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi) }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias } });
+		await io.until(2);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias } });
+		await io.until(3);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(5);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, 2, 3, "session/snapshot", "session/status"]);
+		expect(io.notifications().filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
+	});
+
 	it("stops on a sessions/detach by the ref asked for, from a buffer killed before the snapshot that would have named the handle", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
