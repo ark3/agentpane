@@ -3536,3 +3536,22 @@ time.sleep(1)
   (sit-for 0.5)
   (princ (format "%S\n" (reverse log))))
 ```
+
+## The Emacs helper sends at most one node per 250 ms while a turn streams (OW-jeruye)
+
+Measured on the home server 2026-09-25, `claude 2.1.280` with the session created at model `haiku`, `bun 1.4.0`, Python 3.14.7, the helper at cf064e1.
+A Python driver started the server from the worktree with `PORT=4291 bun run src/server/index.ts`, since the default port was taken, and `bun run src/emacs/main.ts http://127.0.0.1:4291` on pipes beside it, and timestamped every frame the helper wrote as it read it.
+Beside the helper it held its own `GET /api/events` open, to count the upserts the server broadcast for the same turn.
+It slept 2.5s for the helper's renderer to load, then sent `sessions/create` with `{ "backend": "claude", "model": "haiku" }` and a scratch directory under `/tmp` as `cwd`, `sessions/attach` for the ref that answered, and, a second later, `sessions/prompt` asking for about 400 words of plain prose.
+Once a `session/status` or `session/snapshot` under the handle had reported streaming and then not, it waited 1.5s, sent `sessions/close`, closed the helper's stdin and terminated the server by its pid; the helper exited with code 0 and the process table held none of the run's processes afterwards.
+The scratch directory held a `.sandbox-workspace` marker: without one, the Claude process the server spawns through `sbox` exited with `Could not detect workspace` and the attach failed with a 500.
+
+**The server broadcast 267 upserts for the turn; the helper sent 29 `session/node`s.**
+266 of those upserts were for the reply at index 1, over 7.75s, a median of 26.2ms apart.
+The helper sent that node 28 times, over 7.5s, about 3.7 a second, and the user turn at index 0 once.
+The reply's last node carried 440 words of text.
+
+**No two timer-driven sends of the node were closer than 250ms.**
+Between the 28 sends of index 1, measured where the driver read them, the smallest gap was 228.0ms, the median 263.9ms and the largest 554.1ms.
+The 228.0ms gap is the last send, forced out by the `session/snapshot` that ended streaming and read at the same millisecond as it; every other gap was at least 256.9ms.
+Nothing else the helper wrote came between the first and last of those sends.
