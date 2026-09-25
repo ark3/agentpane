@@ -241,8 +241,8 @@ export function createApp(deps: AppDeps): App {
 		if (request.method === "GET") {
 			await sessions.attach(ref);
 			// `summary.ref` is authoritative and may differ from the URL: attaching
-			// is one of the two points at which a session adopts its backend's own
-			// id (D9). Clients also hear about it as a `renamed` SSE event.
+			// is where a session first adopts its backend's own id (D9). Clients
+			// also hear about it as a `renamed` SSE event.
 			const summary = sessions.summaryOf(ref);
 			if (!summary) return error(404, "not_found", `no such session: ${sessionKey(ref)}`);
 			const body: AttachSessionResponse = { session: summary };
@@ -284,9 +284,8 @@ export function createApp(deps: AppDeps): App {
 				// must not clear it (OW-31, OW-bipume).
 				const priorError = sessions.errorOf(ref);
 				await sessions.attach(ref);
-				// Through the manager, not straight at the adapter: `submit()` is
-				// one of the two points at which a session's id changes under us
-				// (D9), and the manager is what re-keys the process table.
+				// Through the manager, not straight at the adapter: it queues the
+				// prompt behind the session's other verbs (D24).
 				//
 				// Both production adapters resolve submit() once the backend has
 				// admitted the turn, not when the turn completes. Await that boundary
@@ -330,9 +329,9 @@ export function createApp(deps: AppDeps): App {
 					return error(400, "bad_request", "entryId is required");
 				}
 				// Attach first so the session has a live adapter, then fork through
-				// the manager (not straight at the adapter): fork is the third point
-				// at which a session's id can change under us, and the manager is what
-				// re-keys the process table (see SessionManager.fork).
+				// the manager (not straight at the adapter): it queues the fork and
+				// keeps what the attach of the fork will need (see
+				// SessionManager.fork).
 				await sessions.attach(ref);
 				const forked = await sessions.fork(ref, body.value.entryId);
 				// The backends' forks are asymmetric, settled live (see
@@ -340,8 +339,9 @@ export function createApp(deps: AppDeps): App {
 				// and Codex, OW-yilabe/OW-mayuza for Claude Code):
 				//   * Pi's `fork` is copy-on-write. The same process's active
 				//     `sessionFile` MOVES to a new file (the old branch survives on
-				//     disk byte-identical), so `sessions.fork` re-keys the table
-				//     through `#adoptRef`. It broadcasts no `renamed`: the parent is a
+				//     disk byte-identical), and the adapter announces the move, so
+				//     the manager re-keys the table through `#adoptRef` before the
+				//     fork hydrates. It broadcasts no `renamed`: the parent is a
 				//     second conversation, not an older name (OW-suhoto). The ref it
 				//     returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread the parent's adapter is
@@ -351,7 +351,7 @@ export function createApp(deps: AppDeps): App {
 				//     holds its writer lock and a second one is refused, so the fork's
 				//     adapter borrows the parent's connection and `fork()` hands that
 				//     adapter over for `SessionManager` to start (OW-lajehi). The
-				//     parent adapter's own ref is unchanged, so `#adoptRef` no-ops.
+				//     parent adapter's own ref is unchanged, so nothing re-keys.
 				//     A fork at the first user message is the exception: no
 				//     `thread/fork` keeps nothing, so it mints nothing and takes
 				//     Claude Code's path below, a `virtual:` ref renamed at attach to
@@ -360,7 +360,7 @@ export function createApp(deps: AppDeps): App {
 				//     arguments that spawn it (`--resume --resume-session-at
 				//     --fork-session --session-id`, truncation inclusive of the named
 				//     entry) but runs nothing, so like Codex the parent's ref is
-				//     unchanged and `#adoptRef` no-ops. Nothing has written the fork's
+				//     unchanged and nothing re-keys. Nothing has written the fork's
 				//     store file yet, so the attach on the returned ref spawns it from
 				//     the recipe `SessionManager.fork` kept (OW-razoki).
 				// `#adoptRef` already emits `sessionsChanged` when it re-keys, so no

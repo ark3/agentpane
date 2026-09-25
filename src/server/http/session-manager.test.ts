@@ -272,8 +272,8 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 	// `PiAdapter.ref` is not stable at construction: Pi's session id IS its JSONL
 	// path (D9), which Pi names from start()'s get_state, and a backend that has
 	// named nothing by the end of attach names it at the first prompt instead. The
-	// adapter documents that its caller must re-read `adapter.ref` after start()
-	// and after the first submit(); these are that contract.
+	// adapter announces each move through `onRefChanged` and the manager re-keys
+	// on it (D24); these are that contract.
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 
 	it("adopts the id the adapter took during start()", async () => {
@@ -354,14 +354,122 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(sessions.canonicalRef(REF)).toEqual(REF);
 		expect(renaming.created[0]?.disposed).toBe(true);
 	});
+
+	it("re-keys when Claude Code's init names another session after submit() resolved (OW-hikefi)", async () => {
+		// `init` arrives with the turn, after `submit()` admitted it, so no point
+		// the manager could poll at follows it.
+		const proc = new FakeClaudeProcess();
+		const claude = new ClaudeAdapterFactory({
+			spawn: () => proc,
+			readStoreEntries: async () => [],
+			newSessionId: () => "minted",
+		});
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		const virtualRef = sessions.createVirtual(WORKSPACE, "claude");
+		const adapter = await sessions.attach(virtualRef);
+		const minted: SessionRef = { backend: "claude", id: "minted" };
+		expect(sessions.canonicalRef(virtualRef)).toEqual(minted);
+		const renamed: { from: SessionRef; to: SessionRef }[] = [];
+		const prevRenamed = broadcaster.renamed.bind(broadcaster);
+		broadcaster.renamed = (from, to) => {
+			renamed.push({ from, to });
+			prevRenamed(from, to);
+		};
+
+		await sessions.submit(minted, "hi");
+		proc.emit({ type: "system", subtype: "init", session_id: "cli-chosen" });
+
+		const chosen: SessionRef = { backend: "claude", id: "cli-chosen" };
+		expect(renamed).toEqual([{ from: minted, to: chosen }]);
+		expect(sessions.liveRefs()).toEqual([chosen]);
+		expect(sessions.adapterFor(chosen)).toBe(adapter);
+		expect(sessions.adapterFor(minted)).toBe(adapter);
+		expect(sessions.adapterFor(virtualRef)).toBe(adapter);
+	});
+
+	describe("a rename announced inside start()", () => {
+		// All three adapters rename there. Until `start()` resolves the container
+		// has no adapter and `#attaching` holds the startup under the requested
+		// and canonical keys only, so the rename waits for the adapter to be
+		// published, as it did when it was polled.
+		const real: SessionRef = { backend: "pi", id: REAL };
+
+		/** A factory whose adapters rename during `start()`, then do `after` before it settles. */
+		function renamingInsideStart(after: () => Promise<void>): FakeAdapterFactory {
+			const factory = new FakeAdapterFactory();
+			const create = factory.create.bind(factory);
+			factory.create = (ref) => {
+				const adapter = create(ref);
+				const start = adapter.start.bind(adapter);
+				adapter.start = async (opts) => {
+					await start(opts);
+					adapter.materialiseAs(REAL);
+					await after();
+				};
+				return adapter;
+			};
+			return factory;
+		}
+
+		function recordRenames(): { from: SessionRef; to: SessionRef; published: boolean }[] {
+			const renamed: { from: SessionRef; to: SessionRef; published: boolean }[] = [];
+			const prevRenamed = broadcaster.renamed.bind(broadcaster);
+			broadcaster.renamed = (from, to) => {
+				renamed.push({ from, to, published: sessions.adapterFor(to) !== undefined });
+				prevRenamed(from, to);
+			};
+			return renamed;
+		}
+
+		it("is applied only once the adapter is published", async () => {
+			const gate = deferred();
+			const renamedInside = deferred();
+			const factory = renamingInsideStart(async () => {
+				renamedInside.resolve();
+				await gate.promise;
+			});
+			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
+			const renamed = recordRenames();
+
+			const attaching = sessions.attach(REF);
+			await renamedInside.promise;
+
+			expect(renamed).toEqual([]);
+			expect(sessions.summaryOf(real)).toBeNull();
+			expect(sessions.canonicalRef(REF)).toEqual(REF);
+
+			gate.resolve();
+			await attaching;
+
+			expect(renamed).toEqual([{ from: REF, to: real, published: true }]);
+			expect(sessions.canonicalRef(REF)).toEqual(real);
+			expect(sessions.liveRefs()).toEqual([real]);
+		});
+
+		it("leaves no rename, no alias and no `renamed` behind when start() then fails", async () => {
+			const factory = renamingInsideStart(async () => {
+				throw new Error("get_messages failed");
+			});
+			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
+			const renamed = recordRenames();
+
+			await expect(sessions.attach(REF)).rejects.toThrow("get_messages failed");
+
+			expect(renamed).toEqual([]);
+			expect(sessions.canonicalRef(REF)).toEqual(REF);
+			expect(sessions.summaryOf(real)).toBeNull();
+			expect(sessions.liveRefs()).toEqual([]);
+			// An alias of REF would hide the stored session from the list.
+			expect((await sessions.list()).map((summary) => summary.ref)).toEqual([REF]);
+		});
+	});
 });
 
-describe("fork (the third #adoptRef point)", () => {
-	// Fork is the third point at which a session's id can change under us, and
-	// the backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
+describe("fork, which moves the live adapter's ref on Pi alone", () => {
+	// The backends are asymmetric (settled live, MANUAL_TESTING.md OW-pifowo
 	// / OW-22; Claude Code's fork leaves its own ref alone like Codex's,
-	// OW-razoki).
-	// SessionManager.fork must absorb every shape through #adoptRef.
+	// OW-razoki): only Pi's adapter announces a `"fork"`, and SessionManager.fork
+	// must handle every shape.
 	it("re-keys, without emitting `renamed`, when a Pi-style fork moves the active file", async () => {
 		await sessions.attach(REF);
 		const events: { from: SessionRef; to: SessionRef }[] = [];
@@ -510,10 +618,11 @@ describe("fork (the third #adoptRef point)", () => {
 
 	describe("what the adapter emits from inside a ref-changing fork (OW-zovaye)", () => {
 		// `PiAdapter.fork` moves its ref onto the fork, then re-reads the fork's
-		// rewound transcript and emits it -- all before `fork()` returns, so
-		// before the manager's `finally` re-keys the container. Keyed by the
-		// container, that went out as a snapshot under the PARENT's ref, and every
-		// client showing the parent redrew it shortened.
+		// rewound transcript and emits it -- all before `fork()` returns. When the
+		// manager re-keyed only once `fork()` settled, that went out under the
+		// PARENT's ref, and every client showing the parent redrew it shortened.
+		// The adapter now announces the move first (`onRefChanged`), so the
+		// container is under the fork's ref before anything is emitted.
 		const moved: SessionRef = { backend: "pi", id: `${REF.id}#fork-e1` };
 
 		function collectEvents(): ServerEvent[] {
@@ -567,14 +676,14 @@ describe("fork (the third #adoptRef point)", () => {
 
 			await expect(sessions.fork(REF, "e1")).rejects.toThrow("get_messages failed");
 			expect(under(REF, events)).toEqual([]);
-			// The `finally` still re-keys: the live adapter is on the fork.
+			// Re-keyed all the same: the live adapter is on the fork.
 			expect(sessions.liveRefs()).toEqual([moved]);
 		});
 
-		it("sends nothing under the first fork's ref while a second fork of it is in flight", async () => {
+		it("sends nothing the second fork emits under the first fork's ref, while it is in flight", async () => {
 			// Two clients can fork one session at once: both look the container up
-			// before either `fork()` settles. The first to finish re-keys it onto
-			// its fork, and the second then moves the adapter again.
+			// before either `fork()` settles. The first re-keys it onto its fork,
+			// and the second then moves the adapter again.
 			const firstGate = deferred();
 			const secondGate = deferred();
 			const gates = [firstGate.promise, secondGate.promise];
@@ -585,26 +694,74 @@ describe("fork (the third #adoptRef point)", () => {
 			const second = sessions.fork(REF, "e2");
 			firstGate.resolve();
 			expect(await first).toEqual(moved);
+			const fromSecond = events.length;
 			secondGate.resolve();
-			await second;
+			const again = await second;
 
-			expect(under(moved, events)).toEqual([]);
+			expect(under(moved, events.slice(fromSecond))).toEqual([]);
+			expect(under(again, events.slice(fromSecond)).map((event) => event.type)).toEqual(["snapshot"]);
 		});
 
-		it("still broadcasts under the container's ref when the adapter's ref runs ahead with no fork in flight", async () => {
+		it("answers a pull of the parent's ref with nothing of the fork, and what the fork raises goes out under its ref (OW-nuzepi)", async () => {
+			// The window OW-zovaye's guard missed: the adapter has moved onto the fork
+			// and rewound, and `fork()` has not returned. A snapshot is pulled, not
+			// pushed -- an attach of the parent from another client, a new stream's
+			// opening snapshots -- and `onRequest` and `onError` key by the container.
+			await sessions.attach(REF);
+			const adapter = pi.forRef(REF);
+			if (!adapter) throw new Error("no adapter");
+			adapter.messages = [userMessage("one"), userMessage("two")];
+			const rewound = deferred();
+			const hold = deferred();
+			const fork = adapter.fork.bind(adapter);
+			adapter.fork = async (entryId) => {
+				const forked = await fork(entryId);
+				adapter.messages = adapter.messages.slice(0, 1);
+				rewound.resolve();
+				await hold.promise;
+				return forked;
+			};
+			const events: ServerEvent[] = [];
+			const client = broadcaster.addClient((chunk) => {
+				for (const line of chunk.split("\n")) {
+					if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
+				}
+			});
+			const forking = sessions.fork(REF, "e1");
+			await rewound.promise;
+
+			broadcaster.sendSnapshot(client, REF);
+			broadcaster.sendOpeningSnapshots(client, sessions.liveRefs());
+			adapter.emitError("the fork's turn failed");
+			adapter.emitRequest("approval");
+
+			expect(under(REF, events)).toEqual([]);
+			expect(under(moved, events).map((event) => event.type)).toEqual(["snapshot", "error", "request"]);
+			expect(under(moved, events)[0]).toMatchObject({ messages: [userMessage("one")] });
+			hold.resolve();
+			expect(await forking).toEqual(moved);
+		});
+
+		it("says `renamed` before the first thing it broadcasts under a ref the adapter took with no fork in flight", async () => {
 			// A rename, not a fork: `ClaudeAdapter` adopts the id a `system init`
-			// reports whenever it arrives, mid-turn included, and the container
-			// follows only at the next `#adoptRef`. Every client holds the old ref
-			// until then, so that is where the turn has to go.
+			// reports whenever it arrives, mid-turn included (OW-hikefi). The
+			// container follows at once, and every client re-keys on `renamed`
+			// before the turn's first upsert under the new ref reaches it.
 			await sessions.attach(REF);
 			const adapter = pi.forRef(REF);
 			if (!adapter) throw new Error("no adapter");
 			const events = collectEvents();
+			const renamed: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/renamed.jsonl" };
 
-			adapter.materialiseAs("/home/u/.pi/agent/sessions/renamed.jsonl");
+			adapter.materialiseAs(renamed.id);
 			adapter.append(userMessage("hello"));
 
-			expect(under(REF, events)).toMatchObject([{ type: "upsert", index: 0 }]);
+			expect(under(REF, events)).toEqual([]);
+			expect(under(renamed, events)).toMatchObject([
+				{ type: "renamed", from: REF },
+				{ type: "snapshot", messages: [] },
+				{ type: "upsert", index: 0 },
+			]);
 		});
 	});
 
@@ -684,20 +841,20 @@ describe("fork (the third #adoptRef point)", () => {
 	it("does not re-key a session that was closed while its fork was in flight", async () => {
 		// DELETE and POST .../fork are plain concurrent handlers under
 		// `Bun.serve` (app.ts); nothing serializes them. `close()` empties the
-		// table before its first await, and `fork`'s `finally` reaches
-		// `#adoptRef` long afterwards -- here, while Pi's fork round trip is
-		// parked. Without the teardown flag that puts the closed container back
-		// into `#sessions` under the fork's id, with an adapter that is already
-		// disposed, and `#disposing` never catches it because `close()` computed
-		// its keys before the re-key.
+		// table before its first await, and the adapter announces its move long
+		// afterwards -- here, once Pi's parked fork round trip resumes. Were the
+		// container still subscribed, that would put it back into `#sessions`
+		// under the fork's id, with an adapter that is already disposed, and
+		// `#disposing` never catches it because `close()` computed its keys
+		// before the re-key.
 		await sessions.attach(REF);
 		const adapter = pi.created[0];
 		if (!adapter) throw new Error("no adapter");
 		const gate = deferred();
 		const fork = adapter.fork.bind(adapter);
 		// The fake's default "pi" mode is the one that actually moves the
-		// adapter's ref; on a mode that leaves it alone `#adoptRef` returns at
-		// `oldKey === newKey` and the test proves nothing.
+		// adapter's ref; on a mode that leaves it alone nothing is announced and
+		// the test proves nothing.
 		adapter.fork = async (entryId) => {
 			await gate.promise;
 			return fork(entryId);
@@ -716,9 +873,9 @@ describe("fork (the third #adoptRef point)", () => {
 	it("does not re-key a session that was disposed while its fork was in flight", async () => {
 		// Same window as the test above, with shutdown in place of DELETE.
 		// `disposeAll()` clears the table before its first await, and the parked
-		// `fork` reaches `#adoptRef` afterwards -- so without the teardown flag on
-		// each ManagedSession it re-inserts the disposed container under the
-		// fork's id, into the table shutdown just emptied. `liveRefs()` then hands
+		// `fork` announces its move afterwards -- so were each ManagedSession not
+		// unsubscribed in that same run, it would re-insert the disposed
+		// container under the fork's id, into the table shutdown just emptied. `liveRefs()` then hands
 		// that dead session to a browser reconnecting mid-shutdown (the event
 		// stream sends `retry: 500`), and `isAttached()`/`adapterFor()` hand out
 		// its disposed adapter to the abort and compact routes.
@@ -728,7 +885,7 @@ describe("fork (the third #adoptRef point)", () => {
 		const gate = deferred();
 		const fork = adapter.fork.bind(adapter);
 		// As above: only the fake's default "pi" mode moves the adapter's ref, and
-		// on any other mode `#adoptRef` returns at `oldKey === newKey`.
+		// on any other mode nothing is announced.
 		adapter.fork = async (entryId) => {
 			await gate.promise;
 			return fork(entryId);

@@ -83,7 +83,6 @@ interface ManagedSession {
 	 */
 	onDisk: boolean;
 	adapter?: BackendAdapter;
-	subscriptions: Unsubscribe[];
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
 	lastStreaming: boolean;
 	lastCompaction: "requesting" | "running" | null;
@@ -111,18 +110,13 @@ interface ManagedSession {
 	/** What the index told us about this session, kept so attach need not re-walk. */
 	stored?: SessionSummary;
 	/**
-	 * Set by `close()` before its first await. `submit()` and `fork()` both
-	 * re-key this container from a `finally` that can run long after teardown
-	 * emptied the table -- see `#adoptRef`. Mirrors `PendingStart.torndown`,
-	 * which does the same job one stage earlier.
+	 * What teardown does to stop an adapter re-keying this container after it
+	 * left the table: `close()` and `disposeAll()` drop these in the same
+	 * synchronous run that takes the container out, so no `onRefChanged` can
+	 * reach `#adoptRef` for it afterwards (OW-yavewa, OW-jimasu). No flag says
+	 * so; unsubscription is the invariant.
 	 */
-	torndown?: boolean;
-	/**
-	 * `fork()` calls in flight on this container -- see `#onUpdate`. A count was
-	 * chosen when two clients' forks could overlap; since `queue` runs them one
-	 * at a time it never exceeds one.
-	 */
-	forking: number;
+	subscriptions: Unsubscribe[];
 	/**
 	 * The tail of this session's mutations, which `#serially` runs one at a time
 	 * (D24). On the container and not in a map keyed by ref, so a re-key carries
@@ -310,7 +304,6 @@ export class SessionManager {
 			error: null,
 			requests: [],
 			notices: [],
-			forking: 0,
 			queue: Promise.resolve(),
 			createdAt: this.#now(),
 		});
@@ -400,17 +393,21 @@ export class SessionManager {
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
 	 *    already collapses concurrent attaches; each route attaches, then queues.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
-	 *    `torndown` and `#terminate`, and waits behind nothing. A verb still
-	 *    queued when it runs reaches the disposed adapter, as an overlapping one
-	 *    always did; most verbs fail there, but a Codex set-model with no effort
-	 *    chosen only records the model and answers success.
+	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
+	 *    verb still queued when it runs reaches the disposed adapter, as an
+	 *    overlapping one always did; most verbs fail there, but a Codex
+	 *    set-model with no effort chosen only records the model and answers
+	 *    success.
 	 *
 	 * The session and its adapter are taken at the call, not when the verb
 	 * runs. So a verb sent on a Pi parent's ref and queued behind a fork of it
 	 * runs on the fork, which the fork's split from a rename (`#adoptRef`,
 	 * OW-kekoji) says the parent's ref must never do; one overlapping the fork
-	 * could before, and the queue makes it certain. OW-suyinu owns that case:
-	 * there a Pi fork is a new container, and the parent's keeps no adapter.
+	 * could before, and the queue makes it certain. The window is narrower than
+	 * the fork: from the adapter's `onRefChanged` on, the container is under
+	 * the fork's ref and a verb on the parent's misses `#lookup`, as it would
+	 * on any detached session. OW-suyinu owns what is left: there a Pi fork is
+	 * a new container, and the parent's keeps no adapter.
 	 */
 	async #serially<T>(ref: SessionRef, verb: (session: ManagedSession, adapter: BackendAdapter) => Promise<T>): Promise<T> {
 		const session = this.#lookup(ref);
@@ -426,8 +423,9 @@ export class SessionManager {
 
 	/**
 	 * Drive a turn. This goes through the manager rather than straight at the
-	 * adapter because `submit()` is one of the two points at which a session's id
-	 * can change under us -- see `#adoptRef` -- and because it queues (`#serially`).
+	 * adapter because it queues (`#serially`) and because a prompt is what
+	 * clears the session's error and its `virtual` flag. An id the backend
+	 * names for it arrives through `onRefChanged`, like every other (`#adoptRef`).
 	 */
 	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
 		return this.#serially(ref, async (session, adapter) => {
@@ -438,29 +436,26 @@ export class SessionManager {
 			// `priorError` is what stood when the prompt was sent, so a caller that
 			// attaches first reads it before that attach: an error the start raised
 			// is newer than the prompt, and nobody had seen it to clear.
-			try {
-				await adapter.submit(text, images);
-				if (session.error === priorError) session.error = null;
-			} finally {
-				this.#adoptRef(session, "rename");
-			}
+			await adapter.submit(text, images);
+			if (session.error === priorError) session.error = null;
 		});
 	}
 
 	/**
 	 * Fork a session from a past entry. Like `submit`, this goes through the
-	 * manager rather than straight at the adapter because fork is the THIRD point
-	 * at which a session's id can change under us (after `start()` and the first
-	 * `submit()` -- see `#adoptRef`). The backends are asymmetric and
-	 * `#adoptRef` absorbs all of them:
+	 * manager rather than straight at the adapter because it queues
+	 * (`#serially`), and because two of the backends hand back something the
+	 * attach that follows needs (`#pendingForks`). The backends are asymmetric:
 	 *
 	 *  - Pi's `fork` is copy-on-write: the process's active `sessionFile` MOVES to
-	 *    a new file, so `adapter.ref` changes and `#adoptRef` re-keys the table.
-	 *    It emits no `renamed` -- see `#adoptRef`. The value the adapter returns
-	 *    IS its new ref. What the adapter emits between moving and returning is
-	 *    the fork's, not the parent's, and `#onUpdate` drops it (OW-zovaye).
+	 *    a new file, so the adapter announces a `"fork"` through `onRefChanged`
+	 *    and `#adoptRef` re-keys the table, before the adapter re-sends the model
+	 *    and level and hydrates the fork's transcript -- so what it emits from
+	 *    there goes out under the fork's ref, never the parent's (OW-zovaye,
+	 *    OW-nuzepi). It emits no `renamed` -- see `#adoptRef`. The value the
+	 *    adapter returns IS its new ref.
 	 *  - Codex's `thread/fork` mints a new thread the current adapter is NOT
-	 *    driving; its own `ref` is unchanged, so `#adoptRef` no-ops. The returned
+	 *    driving; its own `ref` is unchanged and it announces nothing. The returned
 	 *    ref points at the freshly-flushed forked thread, which differs from
 	 *    `adapter.ref` -- so we hand back what `adapter.fork` gave us, not
 	 *    `session.ref`. Only the app-server that minted that thread may open it
@@ -478,28 +473,22 @@ export class SessionManager {
 	 *    attach that follows.
 	 *
 	 * Where the ref DOES change, which is Pi alone, the live adapter is driving
-	 * the FORK from here on and the parent is left detached -- still on disk,
+	 * the FORK from there on and the parent is left detached -- still on disk,
 	 * still listed, still attachable, but no longer reachable through the
-	 * container that moved. That is why this passes `"fork"`: unlike a rename,
-	 * the parent's id must not become an alias for the fork (`#adoptRef`,
-	 * OW-kekoji). And like `submit`, it queues (`#serially`).
+	 * container that moved. That is why the adapter says `"fork"`: unlike a
+	 * rename, the parent's id must not become an alias for the fork
+	 * (`#adoptRef`, OW-kekoji).
 	 */
 	fork(ref: SessionRef, entryId: string): Promise<SessionRef> {
-		return this.#serially(ref, async (session, adapter) => {
-			session.forking += 1;
-			try {
-				const forked = await adapter.fork(entryId);
-				if (forked.start) {
-					this.#pendingForks.set(sessionKey(forked.ref), {
-						start: forked.start,
-						...(forked.adapter ? { adapter: forked.adapter } : {}),
-					});
-				}
-				return forked.ref;
-			} finally {
-				session.forking -= 1;
-				this.#adoptRef(session, "fork");
+		return this.#serially(ref, async (_session, adapter) => {
+			const forked = await adapter.fork(entryId);
+			if (forked.start) {
+				this.#pendingForks.set(sessionKey(forked.ref), {
+					start: forked.start,
+					...(forked.adapter ? { adapter: forked.adapter } : {}),
+				});
 			}
+			return forked.ref;
 		});
 	}
 
@@ -543,14 +532,14 @@ export class SessionManager {
 	}
 
 	/**
-	 * Honour the adapter contract that `ref` is not stable. Two different things
-	 * can move it and the caller is the only one that knows which, so it says:
+	 * Re-key a container onto the id its adapter announced through
+	 * `onRefChanged` (D24), which fires as the adapter moves and before it emits
+	 * anything under the new id. The adapter says which of two things moved it:
 	 *
 	 *  - `"rename"` -- one conversation took a new id. Every backend replaces a
-	 *    `virtual` session's minted id at attach, and some can move it again on
-	 *    the first prompt: `PiAdapter` documents that its id can change when
-	 *    `start()` resolves and when the first `submit()` resolves, because Pi's
-	 *    session id IS its JSONL path (D9). The old id is an
+	 *    `virtual` session's minted id at attach, Pi can move it again on the
+	 *    first prompt, because Pi's session id IS its JSONL path (D9), and Claude
+	 *    Code whenever a turn's `init` names another. The old id is an
 	 *    older name for this same conversation, so it stays alive as an alias for
 	 *    clients still holding it.
 	 *  - `"fork"` -- a SECOND conversation now exists. The container still moves,
@@ -571,20 +560,13 @@ export class SessionManager {
 	 * onto a conversation nobody there opened (OW-suhoto). The fork path emits
 	 * `sessionsChanged` alone; the browser that forked already has the fork's ref
 	 * from the response and attaches it, which is what snapshots it.
+	 *
+	 * A torn-down container is never re-keyed back into the table, because
+	 * teardown unsubscribes it before anything could announce -- see
+	 * `ManagedSession.subscriptions`. A rename announced inside `start()` waits
+	 * for `#start` to publish the adapter; its comment there says why.
 	 */
-	#adoptRef(session: ManagedSession, cause: "rename" | "fork"): void {
-		// `close()` ran while the `submit()`/`fork()` that called this was still
-		// in flight. It deleted this container before its first await, and
-		// re-keying now would put a session whose adapter is already disposed back
-		// into `#sessions` under the new id -- where `liveRefs()` hands it to
-		// every reconnecting client and `attach` returns the dead adapter instead
-		// of spawning a replacement, permanently. `#disposing` cannot catch it:
-		// close computed its keys before the re-key, so the new one is not among
-		// them. `disposeAll()` sets the same flag, for the same window. `#start`'s
-		// call site is guarded by `pending.torndown`; these two are guarded here.
-		if (session.torndown) return;
-		const next = session.adapter?.ref;
-		if (!next) return;
+	#adoptRef(session: ManagedSession, next: SessionRef, cause: "rename" | "fork"): void {
 		const oldKey = sessionKey(session.ref);
 		const newKey = sessionKey(next);
 		if (oldKey === newKey) return;
@@ -674,8 +656,7 @@ export class SessionManager {
 				error: null,
 				requests: [],
 				notices: [],
-				forking: 0,
-				queue: Promise.resolve(),
+					queue: Promise.resolve(),
 				createdAt: this.#now(),
 			};
 		}
@@ -745,8 +726,7 @@ export class SessionManager {
 				error: null,
 				requests: [],
 				notices: [],
-				forking: 0,
-				queue: Promise.resolve(),
+					queue: Promise.resolve(),
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			};
@@ -774,6 +754,10 @@ export class SessionManager {
 
 		const bound = session;
 		let adapter: BackendAdapter;
+		// A rename announced inside `start()`, held for the publish below. Here
+		// and not on the container, which outlives a failed start and would hand
+		// a retry a rename its own adapter never announced.
+		let renamedInStart: SessionRef | undefined;
 		try {
 			// A fork whose adapter came from its parent is started as-is: only that
 			// parent's process can drive it, and the factory's adapter would have
@@ -788,6 +772,10 @@ export class SessionManager {
 			// startup and we would otherwise miss it.
 			bound.subscriptions.push(
 				adapter.onUpdate((state, changedIndex) => this.#onUpdate(bound, state, changedIndex)),
+				adapter.onRefChanged((next, cause) => {
+					if (bound.adapter === adapter) this.#adoptRef(bound, next, cause);
+					else renamedInStart = next;
+				}),
 				// Held on `bound` as well as fanned out, and from before `start()`
 				// resolves: an event raised in that window goes out under a key no
 				// client holds a view of yet, and the attach's snapshot that follows
@@ -841,7 +829,7 @@ export class SessionManager {
 			);
 			// Teardown ran while we were starting. Publishing the adapter now
 			// would hand the table a live agent that shutdown has already walked
-			// past, and `#adoptRef` below would re-key a closed session back into
+			// past, and the rename below would re-key a closed session back into
 			// it. Fall through to the same reaping the failure path uses.
 			if (pending.torndown) throw new UnknownSessionError(ref);
 		} catch (err) {
@@ -869,7 +857,13 @@ export class SessionManager {
 		// there is a window where a `close()` can miss the `#attaching` entry; it
 		// only stays safe because by then the adapter is reachable as
 		// `session.adapter` and close's other branch disposes it. Moving this line
-		// after `#adoptRef` turns that key miss into a leaked subprocess.
+		// after `#adoptRef` turns that key miss into a leaked subprocess. That is
+		// also why the `onRefChanged` handler above holds a rename announced
+		// inside `start()` rather than re-keying there: `#attaching` holds this
+		// startup under the requested and canonical keys alone, so an attach of
+		// the new name would start a second adapter on this container, and the
+		// failure path could not clean up the aliases. OW-suyinu, which keys the
+		// container by a handle that never changes, is where that wait goes.
 		bound.adapter = adapter;
 		// Consumed: the fork has its own child and its own container, so nothing
 		// reaches it through the recipe again -- and must not, or a `close()`
@@ -883,8 +877,9 @@ export class SessionManager {
 		bound.lastModel = initialState.model;
 		bound.lastEffort = initialState.effort;
 		bound.lastUnrestoredModel = initialState.unrestoredModel ?? null;
-		// The first of the two points at which the id can change (D9).
-		this.#adoptRef(bound, "rename");
+		// The rename `start()` announced, if any -- a `virtual` id becoming the
+		// backend's own (D9) -- now that the adapter is published.
+		if (renamedInStart) this.#adoptRef(bound, renamedInStart, "rename");
 		return bound;
 	}
 
@@ -906,18 +901,6 @@ export class SessionManager {
 		session.lastModel = state.model;
 		session.lastEffort = state.effort;
 		session.lastUnrestoredModel = unrestoredModel;
-
-		// An update from inside a fork, after the adapter moved onto it but before
-		// `fork()`'s `finally` re-keys this container, describes the FORK while
-		// `session.ref` still names the parent. `PiAdapter.fork` emits the fork's
-		// rewound transcript exactly there, and broadcast under the parent's ref it
-		// redrew every client showing the parent shortened (OW-zovaye). Nobody
-		// holds a view of the fork yet: the client that forked attaches it once
-		// `fork()` answers, and that attach is what snapshots it -- so the update
-		// is dropped, not deferred. `forking` is what keeps this off the renames,
-		// where the adapter's ref also runs ahead of the container's and the old
-		// ref is the right one to broadcast under (`#adoptRef`).
-		if (session.forking > 0 && session.adapter && sessionKey(session.adapter.ref) !== sessionKey(session.ref)) return;
 
 		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
 		if (settingsChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
@@ -1043,9 +1026,6 @@ export class SessionManager {
 			if (pending) await this.#terminate(pending);
 			return;
 		}
-		// Before the first await below, so a `submit()`/`fork()` already in flight
-		// cannot re-key this container back into the table behind us (`#adoptRef`).
-		session.torndown = true;
 		const key = sessionKey(session.ref);
 		const disposalKeys = [key];
 		this.#sessions.delete(key);
@@ -1058,6 +1038,10 @@ export class SessionManager {
 		for (const [requestId, owner] of [...this.#pendingRequests]) {
 			if (owner === key) this.#pendingRequests.delete(requestId);
 		}
+		// Before the first await below, and in the same run that took the
+		// container out of the table, so an adapter still moving -- a `submit()`
+		// or `fork()` in flight -- cannot re-key it back in behind us
+		// (`ManagedSession.subscriptions`).
 		for (const off of session.subscriptions.splice(0)) off();
 		this.broadcaster.forget(session.ref);
 		// Swallowed deliberately. By this point the session is out of the table
@@ -1101,16 +1085,16 @@ export class SessionManager {
 		this.#pendingRequests.clear();
 		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
-		// finds this rather than spawning into a server that is already leaving,
-		// and a `submit()`/`fork()` already in flight cannot re-key its container
-		// back into the table just cleared (`#adoptRef`).
+		// finds this rather than spawning into a server that is already leaving.
 		for (const pending of starting) pending.torndown = true;
-		for (const session of sessions) session.torndown = true;
 		// In parallel and settled, not sequential and awaited: every session left
 		// undisposed is a sandboxed agent still holding its workspace, so one
 		// adapter that cannot die must not spare the rest.
 		await Promise.allSettled([
 			...sessions.map(async (session) => {
+				// Before this function's first await, so every container is
+				// unsubscribed in the run that cleared the table, and an adapter
+				// still moving cannot re-key one back in (`ManagedSession.subscriptions`).
 				for (const off of session.subscriptions.splice(0)) off();
 				this.broadcaster.forget(session.ref);
 				await session.adapter?.dispose();

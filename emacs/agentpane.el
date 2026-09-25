@@ -2103,15 +2103,15 @@ that needs the session attaches it again.  Codex and Claude Code leave
 the parent attached.
 
 The parent buffer keeps the live transcript it was showing, unredrawn: the
-server drops what `PiAdapter.fork' emits of the fork's shortened
-transcript before `SessionManager.fork' re-keys the session, rather than
-send it under the parent's ref (OW-zovaye).  A detached buffer usually
-shows the store's projection instead, which for Pi can omit messages the
-live one keeps, but nothing here trusts an index from it: a fork attaches
-first, and a send attaches and redraws.  While the fork is in flight
-`agentpane-refetch' sends nothing: on the attached parent it would attach
-again, and a reply to that landing after the fork's would count the
-parent attached, the server having detached it.
+server re-keys the session onto the fork the moment `PiAdapter.fork'
+moves, so what it emits of the fork's shortened transcript goes out under
+the fork's ref, never the parent's (OW-zovaye, OW-nikogo).  A detached
+buffer usually shows the store's projection instead, which for Pi can omit
+messages the live one keeps, but nothing here trusts an index from it: a
+fork attaches first, and a send attaches and redraws.  While the fork is
+in flight `agentpane-refetch' sends nothing: on the attached parent it
+would attach again, and a reply to that landing after the fork's would
+count the parent attached, the server having detached it.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
