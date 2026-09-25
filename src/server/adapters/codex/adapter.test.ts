@@ -2771,6 +2771,18 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				expect(methods(proc)).not.toContain("turn/interrupt");
 			});
 
+			it("still adopts the listed turn when the thread reads active while the history was paged in", async () => {
+				const active = {
+					method: "thread/status/changed",
+					params: { threadId: "thread-forked", status: { type: "active", activeFlags: [] } },
+				};
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [active]);
+
+				expect(reattached.getState().isStreaming).toBe(true);
+				await reattached.abort();
+				expect(request(proc, "turn/interrupt")["params"]).toEqual({ threadId: "thread-forked", turnId: "turn-live" });
+			});
+
 			it("shows a compaction the listing names by a turn with no items", async () => {
 				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([])], []);
 

@@ -99,9 +99,11 @@ export class CodexReducer {
 	/**
 	 * Non-null between the first `pageRequested` and `hydrate`, which is only
 	 * on a borrowed re-attach: the history is being paged in, so a headless
-	 * slot keeps its deltas for the merge. `turn` and `compaction` record that
-	 * the stream set that state since, which is newer than any page and so
-	 * wins over what the listing says of it (OW-dirazu).
+	 * slot keeps its deltas for the merge. `turn` records that the stream has
+	 * settled the running turn since -- a `turn/started`, a `turn/completed`,
+	 * or a `thread/status/changed` to anything but `active`, which names no
+	 * turn -- and `compaction` that it set compaction state; either is newer
+	 * than any page and so wins over what the listing says of it (OW-dirazu).
 	 */
 	private pageRead: { turn: boolean; compaction: boolean } | null = null;
 	private now: () => number;
@@ -220,16 +222,17 @@ export class CodexReducer {
 	 *   complete (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu) -- so a
 	 *   headless slot's head showed only when `item/completed` replaced it.
 	 *
-	 * The running turn is the listing's too, unless the stream has spoken of
-	 * it since the page was asked for. As of that version `thread/resume` read
+	 * The running turn is the listing's too, unless the stream has settled it
+	 * since the page was asked for. As of that version `thread/resume` read
 	 * the thread `active` but named no turn and replayed no `turn/started`,
 	 * and the listing named the turn `inProgress`: a user turn with its
 	 * `userMessage` first, a compaction's with no items at all. So a last turn
 	 * listed `inProgress` is streaming, and a compaction when it lists no items
 	 * at all, and its id goes to the shell as a `running-turn` effect -- save
-	 * that streaming or compaction state the stream set during the read wins
-	 * over the listing's. Only on a re-attach: a cold start's app-server is
-	 * fresh and can be running no turn, whatever its listing says.
+	 * that a turn the stream settled during the read, or compaction state it
+	 * set, wins over the listing's (see `pageRead`). Only on a re-attach: a
+	 * cold start's app-server is fresh and can be running no turn, whatever
+	 * its listing says.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;
@@ -329,9 +332,13 @@ export class CodexReducer {
 			}
 
 			case "thread/status/changed":
+				// `active` names no turn, so it leaves the listing to name the
+				// running one; any other status settles that none is running.
+				if (this.pageRead && message.params.status.type !== "active") this.pageRead.turn = true;
 				return this.setStreaming(message.params.status.type === "active");
 
 			case "turn/started": {
+				if (this.pageRead) this.pageRead.turn = true;
 				this.turnId = message.params.turn.id;
 				this.turnDiff = null;
 				return this.setStreaming(true);
@@ -339,6 +346,7 @@ export class CodexReducer {
 
 			case "turn/completed": {
 				const turn = message.params.turn;
+				if (this.pageRead) this.pageRead.turn = true;
 				const effects: CodexEffect[] = this.setCompaction(null);
 				// NOTE: `turn.items` here is a *summary* view (`itemsView:
 				// "summary"` in every fixture) -- only the final agent message.
@@ -586,7 +594,6 @@ export class CodexReducer {
 	// -- turn-level state ---------------------------------------------------
 
 	private setStreaming(isStreaming: boolean): CodexEffect[] {
-		if (this.pageRead) this.pageRead.turn = true;
 		if (this.streaming === isStreaming) return [];
 		this.streaming = isStreaming;
 		return [{ type: "streaming", isStreaming }];
