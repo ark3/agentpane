@@ -12,6 +12,7 @@ import { readFixture } from "$server/adapters/codex/test-support.ts";
 import { ROUTES, type PaneMessage, type ServerEvent, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { runHelper } from "./helper.ts";
+import type { Render } from "./nodes.ts";
 import type { TranscriptNode } from "./protocol.ts";
 
 const render = (markdown: string): string => `stub:${markdown}`;
@@ -105,15 +106,16 @@ const noContent = () => new Response(null, { status: 204 });
 
 let stop: (() => Promise<void>) | null = null;
 afterEach(async () => {
+	vi.useRealTimers();
 	await stop?.();
 	stop = null;
 });
 
-function start(routes: Record<string, Route>, reconnectDelayMs = 0) {
+function start(routes: Record<string, Route>, reconnectDelayMs = 0, renderMarkdown: Render = render) {
 	const io = stdio();
 	const source = eventSource();
 	const { fetch, calls } = fetchFor(routes);
-	const done = runHelper({ input: io.input, write: io.write, fetch, openEvents: source.openEvents, render, reconnectDelayMs });
+	const done = runHelper({ input: io.input, write: io.write, fetch, openEvents: source.openEvents, render: renderMarkdown, reconnectDelayMs });
 	stop = async () => {
 		io.end();
 		await done;
@@ -224,7 +226,7 @@ describe("requests", () => {
 const attachRoutes = (ref: SessionRef) => ({ [`GET ${ROUTES.session(ref)}`]: () => json({ session: summary(ref) }) });
 
 describe("notifications", () => {
-	it("opens the stream before the attach call, then yields one snapshot and one node per upsert, in order", async () => {
+	it("opens the stream before the attach call, then yields one snapshot and, when the interval ends, one node carrying the last upsert", async () => {
 		const messages = fixtureMessages();
 		const tail = messages.length - 1;
 		const final = messages[tail] as AssistantMessage;
@@ -242,20 +244,22 @@ describe("notifications", () => {
 		expect(calls).toHaveLength(1);
 
 		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: messages.slice(0, tail), isStreaming: true, compaction: null, model: "m", effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(2);
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		const partial = { ...final, content: [{ type: "text", text: "par" }], stopReason: "pending" } as PaneMessage;
 		source.emit({ type: "upsert", session: codex, handle: h(codex), seq: 2, index: tail, message: partial });
 		source.emit({ type: "upsert", session: codex, handle: h(codex), seq: 3, index: tail, message: final });
-		await io.until(4);
-		const [snapshot, first, second] = io.notifications();
+		expect(io.notifications()).toHaveLength(1);
+		vi.advanceTimersByTime(250);
+		const [snapshot, node] = io.notifications();
 		expect(snapshot).toMatchObject({ method: "session/snapshot", params: { session: codex, isStreaming: true, compaction: null, model: "m" } });
 		expect((snapshot!["params"] as { nodes: TranscriptNode[] }).nodes.map((node) => node.index)).toEqual(
 			messages.slice(0, tail).map((_, index) => index),
 		);
-		expect(first).toMatchObject({ method: "session/node", params: { session: codex, node: { index: tail, role: "assistant" } } });
-		expect(second).toMatchObject({ method: "session/node", params: { session: codex, node: { index: tail, role: "assistant" } } });
-		const firstText = (first!["params"] as { node: TranscriptNode }).node.parts[0];
-		expect(firstText).toEqual({ type: "text", text: "par", html: "stub:par" });
-		expect(io.notifications()).toHaveLength(3);
+		expect(node).toMatchObject({ method: "session/node", params: { session: codex, node: { index: tail, role: "assistant" } } });
+		const texts = (node!["params"] as { node: TranscriptNode }).node.parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
+		expect(texts).toEqual(final.content.flatMap((block) => (block.type === "text" ? [block.text] : [])));
+		expect(io.notifications()).toHaveLength(2);
 	});
 
 	it("heals a seq gap by attaching again, and the snapshot that follows is a fresh session/snapshot", async () => {
@@ -626,6 +630,129 @@ describe("notifications", () => {
 		await io.until(3);
 		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "sessions/changed" });
 		expect(source.closed).toEqual([0]);
+	});
+});
+
+describe("the node throttle (OW-jeruye)", () => {
+	const turn = fixtureMessages().at(-1) as AssistantMessage;
+	const user: PaneMessage = { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 0 };
+	const said = (text: string) => ({ ...turn, content: [{ type: "text", text }], stopReason: "pending" }) as PaneMessage;
+	const statusOf = (isStreaming: boolean) => ({ isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null });
+	const nodeOf = (message: Record<string, unknown>) => (message["params"] as { node: TranscriptNode }).node;
+	const textOf = (message: Record<string, unknown>) => nodeOf(message).parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
+
+	/** Attached to `pi`, streaming, a user turn drawn; the interval runs on fake timers from here on, and only what renders after this counts. */
+	async function streaming(routes: Record<string, Route> = {}) {
+		const rendered: string[] = [];
+		const started = start({ ...attachRoutes(pi), ...routes }, 0, (markdown) => {
+			rendered.push(markdown);
+			return `stub:${markdown}`;
+		});
+		const { io, source } = started;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [user], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(2);
+		rendered.length = 0;
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		let seq = 1;
+		const upsert = (index: number, message: PaneMessage) => source.emit({ type: "upsert", session: pi, handle: h(pi), seq: ++seq, index, message });
+		const status = (isStreaming: boolean) => source.emit({ type: "status", session: pi, handle: h(pi), seq: ++seq, ...statusOf(isStreaming) });
+		/** What went out after the attach reply and the snapshot. */
+		const since = () => io.out.slice(2).map((message) => message["method"] ?? message["id"]);
+		return { ...started, rendered, upsert, status, since };
+	}
+
+	/** Lets a request's handler settle without moving the faked clock. */
+	async function settle(): Promise<void> {
+		for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+	}
+
+	it("sends one node for many upserts to it inside an interval, carrying the last, and renders only that one", async () => {
+		const { io, rendered, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		upsert(1, said("ab"));
+		upsert(1, said("abc"));
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual(["session/node"]);
+		expect(textOf(io.out.at(-1)!)).toEqual(["abc"]);
+		expect(rendered).toEqual(["abc"]);
+	});
+
+	it("holds a tool result's upsert under the call's node it folds into, not its own index", async () => {
+		const { io, upsert, since } = await streaming();
+		const call = { ...turn, content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls" } }], stopReason: "pending" } as PaneMessage;
+		const result: PaneMessage = { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "out" }], isError: false, timestamp: 1 };
+		upsert(1, call);
+		upsert(2, result);
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual(["session/node"]);
+		const node = nodeOf(io.out.at(-1)!);
+		expect(node.index).toBe(1);
+		expect(node.parts).toMatchObject([{ type: "tool", name: "bash", result: "out" }]);
+	});
+
+	it("sends a held node before the status written after it", async () => {
+		const { io, upsert, status, since } = await streaming();
+		upsert(1, said("a"));
+		upsert(1, said("ab"));
+		status(false);
+		expect(since()).toEqual(["session/node", "session/status"]);
+		expect(textOf(io.out[2]!)).toEqual(["ab"]);
+		vi.advanceTimersByTime(250);
+		expect(since()).toHaveLength(2);
+	});
+
+	it("sends a held node before another node's, each where it was first held, so none is drawn ahead of one before it", async () => {
+		const { io, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		upsert(2, { role: "user", content: [{ type: "text", text: "next" }], timestamp: 2 });
+		upsert(1, said("ab"));
+		upsert(3, said("c"));
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual(["session/node", "session/node", "session/node"]);
+		expect(io.out.slice(2).map((message) => nodeOf(message).index)).toEqual([1, 2, 3]);
+		expect(textOf(io.out[2]!)).toEqual(["ab"]);
+	});
+
+	it("sends a held node before a reply written after it", async () => {
+		const { io, upsert, since } = await streaming({ [`POST ${ROUTES.prompt(pi)}`]: noContent });
+		upsert(1, said("a"));
+		upsert(1, said("ab"));
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "more" } });
+		await settle();
+		expect(since()).toEqual(["session/node", 2]);
+		expect(textOf(io.out[2]!)).toEqual(["ab"]);
+	});
+
+	it("sends a held node with nothing after it when the interval ends, and not before", async () => {
+		const { io, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		vi.advanceTimersByTime(249);
+		expect(since()).toEqual([]);
+		vi.advanceTimersByTime(1);
+		expect(since()).toEqual(["session/node"]);
+		expect(textOf(io.out[2]!)).toEqual(["a"]);
+	});
+
+	it("never sends a node held for a session detached before the interval ends", async () => {
+		const { io, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: h(pi) } });
+		await settle();
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual([2]);
+	});
+
+	it("drops a held node when the input ends, and resolves without waiting out the interval", async () => {
+		const { io, done, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		io.end();
+		await done;
+		stop = null;
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual([]);
+		expect(vi.getTimerCount()).toBe(0);
 	});
 });
 

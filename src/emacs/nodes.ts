@@ -14,7 +14,10 @@
  *   subtlety is that an upsert is not always its own node: a tool result folds
  *   into an earlier call's node, so the function takes the transcript so far,
  *   applies the upsert to a copy, and answers with the node that changed --
- *   the call's, for a folded result; its own otherwise.
+ *   the call's, for a folded result; its own otherwise. It is `locateUpsert`,
+ *   which finds that node without rendering it, then `projectTarget`, which
+ *   renders it: the helper holds the first while it throttles (OW-jeruye) and
+ *   runs the second only for what it sends.
  *
  * `streaming` for a tool call is the browser's rule, verbatim from
  * `Transcript.svelte`: the session's own `isStreaming` status, and the entry
@@ -63,6 +66,17 @@ export function projectUpsert(
 	isStreaming: boolean,
 	render: Render,
 ): TranscriptNode {
+	return projectTarget(locateUpsert(messages, index, message), isStreaming, render);
+}
+
+/** The transcript an `upsert` makes and the entry whose node it replaces; `entry.index` is that node's `index`. */
+export interface UpsertTarget {
+	view: TranscriptView;
+	entry: TranscriptEntry;
+}
+
+/** `projectUpsert`'s arguments and range, short of rendering the node. */
+export function locateUpsert(messages: PaneMessage[], index: number, message: PaneMessage): UpsertTarget {
 	if (!Number.isInteger(index) || index < 0 || index > messages.length) {
 		throw new RangeError(`upsert index ${index} is outside a transcript of ${messages.length} messages`);
 	}
@@ -83,6 +97,10 @@ export function projectUpsert(
 	// Always found: a non-result message is its own entry, and a result is
 	// either folded into its owner above or kept as an orphan entry.
 	const entry = owner ?? view.entries.find((candidate) => candidate.index === index)!;
+	return { view, entry };
+}
+
+export function projectTarget({ view, entry }: UpsertTarget, isStreaming: boolean, render: Render): TranscriptNode {
 	return nodeFor(view, entry, isStreaming, render);
 }
 

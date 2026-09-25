@@ -58,6 +58,28 @@
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
  * (D21).
+ *
+ * Nodes are throttled (OW-jeruye). The server sends every streamed token as
+ * an `upsert` carrying the whole message so far, about 34 a second on Haiku,
+ * and rendering each one's node and Emacs redrawing it made agentpane-mode
+ * lag. So an upsert is not rendered as it arrives but held, keyed by the
+ * node it replaces -- for a tool result, its call's (`locateUpsert`) -- and
+ * a later one for that node takes its place. What is held is rendered and
+ * sent `NODE_INTERVAL_MS` after the first of it was held, and before
+ * anything else the helper writes, any notification or reply for any
+ * session. Each held node goes out in its last state but in the place of its
+ * first upsert since the last send, so a new node is never drawn ahead of
+ * one that came before it, which Emacs appends in arrival order. Emacs
+ * relies on that order too: the status that ends streaming redraws the tail from
+ * the node it holds, and a newly appended node redraws the one before it.
+ * Every upsert waits, the first after a quiet spell too, which leaves one
+ * timer and no second state to keep; a node goes out sooner only when a
+ * write forces it. A held node is rendered from the transcript as it stood
+ * at its upsert, not from the current state, which a later snapshot may have
+ * rewound past it, so it is exactly the node the unthrottled stream would
+ * have sent. A detach or close drops what is held for its session, and the
+ * end of the input drops everything held, so no timer keeps the process up
+ * past it (OW-kofuda).
  */
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
@@ -65,7 +87,7 @@ import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
 import { sessionKey, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
-import { projectTranscript, projectUpsert, type Render } from "./nodes.ts";
+import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
 import type { HelperNotification, HelperRequests } from "./protocol.ts";
 
 export interface HelperOptions {
@@ -87,6 +109,16 @@ interface JsonRpcRequest {
 }
 
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
+/** The owner's first cut, 2026-09-25, to be judged by use (OW-jeruye). */
+const NODE_INTERVAL_MS = 250;
+
+/** An upsert not yet sent: what `session/node` will say, short of the rendering. */
+interface HeldNode {
+	session: SessionRef;
+	handle: string;
+	target: UpsertTarget;
+	isStreaming: boolean;
+}
 
 /**
  * Runs until `input` ends; then closes the stream, aborts every request still
@@ -96,7 +128,7 @@ const DEFAULT_RECONNECT_DELAY_MS = 1_000;
  * `input` (OW-kofuda). No api method passes a signal of its own.
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
-	const { render, write } = options;
+	const { render } = options;
 	const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
 	const inFlight = new AbortController();
 	const fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
@@ -120,6 +152,29 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	let opens = 0;
 	let reconnect: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
+	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
+	const waiting = new Map<string, HeldNode>();
+	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const flushNodes = (): void => {
+		clearTimeout(flushTimer);
+		flushTimer = undefined;
+		const nodes = [...waiting.values()];
+		waiting.clear();
+		for (const { session, handle, target, isStreaming } of nodes) {
+			const notification: HelperNotification = {
+				method: "session/node",
+				params: { session, handle, node: projectTarget(target, isStreaming, render) },
+			};
+			options.write(encodeFrame({ jsonrpc: "2.0", ...notification }));
+		}
+	};
+
+	/** Every write but a held node's goes after all of them. */
+	const write = (frame: Uint8Array): void => {
+		flushNodes();
+		options.write(frame);
+	};
 
 	const notify = (notification: HelperNotification): void => {
 		write(encodeFrame({ jsonrpc: "2.0", ...notification }));
@@ -196,9 +251,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				notifySnapshot(view, handle);
 				return;
 			case "upsert": {
-				const previous = before.sessions[handle]!;
-				const node = projectUpsert(previous.messages, event.index, event.message, view.isStreaming, render);
-				notify({ method: "session/node", params: { session: view.ref, handle, node } });
+				const target = locateUpsert(before.sessions[handle]!.messages, event.index, event.message);
+				const key = JSON.stringify([handle, target.entry.index]);
+				waiting.set(key, { session: view.ref, handle, target, isStreaming: view.isStreaming });
+				flushTimer ??= setTimeout(flushNodes, NODE_INTERVAL_MS);
 				return;
 			}
 			case "status":
@@ -237,6 +293,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		const drop = (held: string): void => {
 			attached.delete(held);
 			askedFor.delete(held);
+			for (const [key, node] of waiting) if (node.handle === held) waiting.delete(key);
 		};
 		if (handle !== undefined) drop(handle);
 		else {
@@ -400,6 +457,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 
 	stopped = true;
 	if (reconnect !== undefined) clearTimeout(reconnect);
+	clearTimeout(flushTimer);
+	waiting.clear();
 	closeStream();
 	inFlight.abort();
 }
