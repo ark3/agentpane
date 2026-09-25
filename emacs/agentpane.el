@@ -74,13 +74,33 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" line
-;; per test, with a line beginning
+;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
+;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 108 tests, 108 results as expected, 0 unexpected
+;;     Ran 110 tests, 108 results as expected, 0 unexpected, 2 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
+;;
+;; The two it skips are tagged `tty': they drive `vertical-motion', which
+;; cuts a long fold header in one layout and does not move in batch Emacs.
+;; They run in a tty Emacs that `script' gives a terminal, pinned to 80 by
+;; 24, with the terminal's drawing thrown away and ERT's report sent to
+;; standard error by `agentpane-test-run-tty':
+;;
+;;     timeout 60 env TERM=xterm-256color script -qec 'stty cols 80 rows 24; \
+;;       emacs -nw -Q -L emacs -l ert -l agentpane -l agentpane-test \
+;;       -f agentpane-test-run-tty 2>&3' /dev/null 3>&2 >/dev/null </dev/null
+;;
+;; which on Emacs 31.1 and util-linux 2.42.3 (measured 2026-09-25) ends,
+;; after one "passed" line per test, with a line beginning
+;;
+;;     Ran 2 tests, 2 results as expected, 0 unexpected
+;;
+;; and exits 0, 1 when a test fails, or 2 when the run itself signals.  The
+;; `timeout' is what ends a run that cannot start: a file that signals as
+;; it loads leaves `emacs -nw' waiting at its echo area, and the command
+;; exits 124 with nothing else to show for it.
 
 ;;; Code:
 
