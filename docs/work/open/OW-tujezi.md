@@ -21,7 +21,8 @@ That a timer this handler starts with `run-at-time 0` during that run fires afte
 
 A `session/node` records the latest node for its index in its buffer and schedules one redraw, and that redraw draws each recorded node once, however many arrived since the last one.
 Load-bearing:
-- Any other notification for the buffer draws what is recorded before it is handled itself -- `session/snapshot`, `session/status`, `session/error`, `session/request`, `session/requestResolved`, `session/notice`, `session/renamed` -- so the order `agentpane--set-status` and `agentpane--upsert` rely on is kept, as OW-jeruye keeps it on the helper's side.
+- Any other notification for the buffer draws what is recorded before it is handled itself -- `session/snapshot`, `session/status`, `session/error`, `session/request`, `session/requestResolved`, `session/notice` -- so the order `agentpane--set-status` and `agentpane--upsert` rely on is kept, as OW-jeruye keeps it on the helper's side.
+  (`session/renamed` was listed here when the card was filed; OW-mofuho retired it from both wires, so there is none to handle.)
 - A node at a new index is appended in arrival order relative to the others, since `agentpane--upsert` appends by arrival and redraws the one before it as no longer the pending turn.
 - Nothing recorded survives the buffer: a kill or a snapshot's full redraw discards it rather than drawing it afterwards.
 - Point, window start and the draft behave as they do now for a drawn node (`agentpane--above-prompt`).
