@@ -354,6 +354,41 @@ describe("notifications", () => {
 		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed"]);
 	});
 
+	// OW-wedeli: resolved by the ref alone, a detach naming the ref from
+	// before a rename matched nothing and the session went on being forwarded.
+	it("stops on a sessions/detach by the handle, whatever ref it names", async () => {
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start(attachRoutes(virtual));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "renamed", session: pi, handle: h(virtual), seq: 2, from: virtual });
+		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(4);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: virtual, handle: h(virtual) } });
+		await io.until(5);
+		source.emit({ type: "status", session: pi, handle: h(virtual), seq: 1, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/renamed", "session/snapshot"]);
+	});
+
+	it("keeps forwarding a session Emacs attached when a second attach of its ref fails", async () => {
+		let attaches = 0;
+		const { io, source } = start({
+			[`GET ${ROUTES.session(pi)}`]: () => (++attaches === 1 ? json({ session: summary(pi) }) : json({ error: "boom" }, 500)),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		await io.until(2);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await io.until(3);
+		expect(io.response(2)!["error"]).toBeDefined();
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(4);
+		expect(io.notifications().map((message) => message["method"])).toEqual(["session/snapshot", "session/status"]);
+	});
+
 	it("says the rename an attach reply reveals with no renamed event, with the snapshot it dropped, before the reply", async () => {
 		// An attach through an alias: the route answers the new ref and
 		// broadcasts only its snapshot, which lands before the reply.

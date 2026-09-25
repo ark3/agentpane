@@ -115,7 +115,8 @@
  * never moved by a rename, and a different one for a fork (D24, OW-suyinu).
  * Every per-session notification below carries it, absent only where the
  * server sent none, and every request that takes a `session` accepts one
- * beside it and sends it nowhere; `compaction` is `"requesting"`, `"running"` or `null`;
+ * beside it and sends it nowhere, `sessions/detach` and `sessions/close`
+ * resolving the session by it; `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
@@ -149,14 +150,18 @@
  * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
  * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
  *   -> `null`. `close` kills the subprocess and stops this session's
- *   notifications.
+ *   notifications, as `sessions/detach` below says which.
  * - `sessions/dismissError` -- `{ session, message }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
  *   but only while `message` is still the error the server holds: a newer
  *   one survives the dismissal of the one Emacs was showing (OW-desufa).
- * - `sessions/detach` -- `{ session }` -> `null`. Stops this session's
- *   notifications and does nothing else: no HTTP call, and the session goes
- *   on running on the server. Sent when Emacs stops showing a session.
+ * - `sessions/detach` -- `{ session, handle? }` -> `null`. Stops this
+ *   session's notifications and does nothing else: no HTTP call, and the
+ *   session goes on running on the server. Sent when Emacs stops showing a
+ *   session. With `handle`, the notifications under that handle stop,
+ *   whatever ref `session` is; without, those for the session last named
+ *   `session` to Emacs; and either way an attach of `session` still in
+ *   flight.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -221,8 +226,9 @@
  * - `session/renamed` -- `{ from, to, handle }`. The session's ref is now
  *   `to`; a `session/snapshot` for `to` follows. `handle` is the one the
  *   session held before and holds after, so a buffer keyed by it has nothing
- *   to re-key; agentpane-mode does key by it, and takes it from this for a
- *   buffer whose attach asked for `from` and has not been answered (OW-danifa).
+ *   to re-key; agentpane-mode does key by it, takes `to` as the buffer's ref,
+ *   and takes `handle` from this for a buffer whose attach asked for `from`
+ *   and has not been answered (OW-danifa).
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
  *   while it was down is gone.

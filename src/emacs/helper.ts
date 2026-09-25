@@ -35,14 +35,18 @@
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
  * reply's summary for what `sessions/attach` says itself. Requests accept one
- * beside `session` and send it nowhere; `emacs/agentpane.el` sends none, so
- * `sessions/detach` and `sessions/close` find the handle from the ref Emacs
- * was last told for it. `session/renamed` goes out for every `renamed`
- * under an attached handle until the event leaves the wire (OW-mofuho).
- * agentpane-mode keys its buffers by the handle and re-keys nothing on it
- * (OW-danifa), but takes the handle from one whose `from` is the ref an
- * attach of its asked for, before that attach's reply: the only route the
- * snapshot `sessions/attach` sends under the new ref has to that buffer
+ * beside `session`, and send it nowhere; `sessions/detach` and
+ * `sessions/close` stop the attachment under it, and without one the
+ * attachment Emacs was last told that ref for (`forget` below).
+ * agentpane-mode's detach carries its buffer's handle, and one without is
+ * sent only from a buffer that sent an attach. `session/renamed` goes out
+ * for every `renamed` under an attached handle until the event leaves the
+ * wire (OW-mofuho). agentpane-mode keys its buffers by the handle and
+ * re-keys nothing on it (OW-danifa): it takes `to` as the ref, as it takes
+ * `session` from any notification, and takes the handle from one whose
+ * `from` is the ref an attach of its asked for, before that attach's
+ * reply, which is the only route a snapshot `sessions/attach` sends under
+ * the new ref before the reply has to that buffer
  * (`agentpane--notified-buffer` in emacs/agentpane.el). The hand-rolled
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
@@ -150,9 +154,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (event.type === "sessions-changed") return;
 
 		// Before the `state === before` return below, which every `renamed`
-		// takes: the reducer's arm is a no-op, and agentpane-mode takes the
-		// handle from the notification for an attach of its not yet answered
-		// (OW-danifa). A pending attach on the old ref moves here, as it would
+		// takes: the reducer's arm is a no-op, and agentpane-mode takes `to`
+		// as the ref from the notification, and the handle for an attach of its
+		// not yet answered (OW-danifa). A pending attach on the old ref moves here, as it would
 		// have been re-keyed by ref.
 		if (event.type === "renamed") {
 			if (!isAttached(event.handle, event.from, event.session)) return;
@@ -206,15 +210,19 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	/**
-	 * Stop telling Emacs about the session `session` names. It sends a ref and
-	 * no handle, which resolves to the attached handle Emacs was last told that
-	 * ref for; an attach still waiting for a handle is dropped by the ref it
-	 * asked for.
+	 * Stop telling Emacs about the session `session` names. With a `handle`,
+	 * the attachment under that handle goes, whatever ref Emacs names it by,
+	 * which may be one from before a rename it has not heard (OW-wedeli).
+	 * Without one, it goes by the ref Emacs was last told, as it must for a
+	 * buffer whose attach never answered it: agentpane-mode sends that only
+	 * from a buffer that sent an attach (`agentpane--detach`). Either way an
+	 * attach still waiting for a handle is dropped by the ref it asked for.
 	 */
-	const forget = (session: SessionRef): void => {
+	const forget = (session: SessionRef, handle: string | undefined): void => {
 		const key = sessionKey(session);
 		pending.delete(key);
-		for (const [handle, told] of attached) if (told === key) attached.delete(handle);
+		if (handle !== undefined) attached.delete(handle);
+		else for (const [held, told] of attached) if (told === key) attached.delete(held);
 	};
 
 	const closeStream = (): void => {
@@ -286,7 +294,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				}
 				return summary;
 			} catch (error: unknown) {
-				forget(session);
+				// Only this attach's wait: an attachment already held under a
+				// handle for the same ref is another buffer's, or this one's from
+				// before, and a failed attach takes neither away.
+				pending.delete(key);
 				throw error;
 			}
 		},
@@ -303,9 +314,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			await api.compact(session);
 			return null;
 		},
-		"sessions/close": async ({ session }) => {
+		"sessions/close": async ({ session, handle }) => {
 			await api.close(session);
-			forget(session);
+			forget(session, handle);
 			return null;
 		},
 		"sessions/dismissError": async ({ session, message }) => {
@@ -314,8 +325,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
-		"sessions/detach": async ({ session }) => {
-			forget(session);
+		"sessions/detach": async ({ session, handle }) => {
+			forget(session, handle);
 			return null;
 		},
 		"sessions/setModel": async ({ session, model }) => {
