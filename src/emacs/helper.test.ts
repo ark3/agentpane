@@ -859,10 +859,14 @@ describe("the node throttle (OW-jeruye)", () => {
 	const nodeOf = (message: Record<string, unknown>) => (message["params"] as { node: TranscriptNode }).node;
 	const textOf = (message: Record<string, unknown>) => nodeOf(message).parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
 
+	/** Text whose rendering throws. */
+	const unrenderable = "unrenderable";
+
 	/** Attached to `pi`, streaming, a user turn drawn; the interval runs on fake timers from here on, and only what renders after this counts. */
 	async function streaming(routes: Record<string, Route> = {}) {
 		const rendered: string[] = [];
 		const started = start({ ...attachRoutes(pi), ...routes }, 0, (markdown) => {
+			if (markdown === unrenderable) throw new Error("render failed");
 			rendered.push(markdown);
 			return `stub:${markdown}`;
 		});
@@ -998,6 +1002,27 @@ describe("the node throttle (OW-jeruye)", () => {
 		await settle();
 		vi.advanceTimersByTime(250);
 		expect(since()).toEqual([2]);
+	});
+
+	it("skips a held node whose rendering throws when the interval ends, and sends the nodes held around it (OW-vejeka)", async () => {
+		const { io, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		upsert(2, { role: "user", content: [{ type: "text", text: unrenderable }], timestamp: 2 });
+		upsert(3, said("c"));
+		vi.advanceTimersByTime(250);
+		expect(since()).toEqual(["session/node", "session/node"]);
+		expect(io.out.slice(2).map((message) => nodeOf(message).index)).toEqual([1, 3]);
+	});
+
+	it("skips a held node whose rendering throws before a reply, which still answers its result (OW-vejeka)", async () => {
+		const { io, upsert, since } = await streaming({ [`POST ${ROUTES.prompt(pi)}`]: noContent });
+		upsert(1, said(unrenderable));
+		upsert(2, { role: "user", content: [{ type: "text", text: "next" }], timestamp: 2 });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "more" } });
+		await settle();
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+		expect(since()).toEqual(["session/node", 2]);
+		expect(nodeOf(io.out[2]!).index).toBe(2);
 	});
 
 	it("drops a held node when the input ends, and resolves without waiting out the interval", async () => {

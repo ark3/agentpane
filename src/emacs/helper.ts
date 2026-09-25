@@ -82,7 +82,12 @@
  * rewound past it, so it is exactly the node the unthrottled stream would
  * have sent. A detach or close drops what is held for its session, and the
  * end of the input drops everything held, so no timer keeps the process up
- * past it (OW-kofuda).
+ * past it (OW-kofuda). A held node whose rendering throws is skipped and the
+ * rest still go out (OW-vejeka): the send runs from the timer, where a throw
+ * ends the process (measured on Bun 1.4.0), and from every other write,
+ * where it would answer a request that succeeded with an error, drop the
+ * event stream from `onEvent`, or end the process from `reconcile`; and
+ * either way the nodes held behind it would be lost.
  */
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
@@ -91,7 +96,7 @@ import { initialClientState, reduceServerEvent, type ClientState, type SessionVi
 import { ROUTES, sessionKey, type LiveSessionResponse, type LiveSessionSummary, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
-import type { HelperNotification, HelperRequests } from "./protocol.ts";
+import type { HelperNotification, HelperRequests, TranscriptNode } from "./protocol.ts";
 
 export interface HelperOptions {
 	input: ReadableStream<Uint8Array>;
@@ -165,10 +170,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		const nodes = [...waiting.values()];
 		waiting.clear();
 		for (const { session, handle, target, isStreaming } of nodes) {
-			const notification: HelperNotification = {
-				method: "session/node",
-				params: { session, handle, node: projectTarget(target, isStreaming, render) },
-			};
+			let node: TranscriptNode;
+			try {
+				node = projectTarget(target, isStreaming, render);
+			} catch {
+				continue;
+			}
+			const notification: HelperNotification = { method: "session/node", params: { session, handle, node } };
 			options.write(encodeFrame({ jsonrpc: "2.0", ...notification }));
 		}
 	};
