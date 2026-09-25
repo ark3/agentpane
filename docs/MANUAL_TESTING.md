@@ -3563,8 +3563,13 @@ Measured on the home server 2026-09-25, Emacs 31.1 in `--batch` with its bundled
 
 **A `run-at-time 0` timer started from the handler of the first of six notifications written at once ran after all six had been handled.**
 That is what lets agentpane-mode record each `session/node` and draw the recorded nodes once, from a timer the first of a backlog starts, rather than drawing every node as it arrives (`agentpane--record` in `emacs/agentpane.el`).
-Read from source first: `jsonrpc--process-filter` parses every complete message in the chunk it is given and activates one timer per message, all set to the one `current-time` it took before activating the first; `timer--activate` in `timer.el` puts a timer ahead of the first one whose time is not less than its own, so those timers run in message order, and a `run-at-time 0` from inside one of them takes a later `current-time` and so lands after them all.
-The run confirmed it: a `sh -c` process wrote six framed notifications from one file with `cat`, and advice on `jsonrpc--process-filter` counted one call for the 432 bytes.
+Two things make that order, each confirmed by a batch run of its own beside the source.
+First, `jsonrpc--process-filter` pushes each message it parses onto `jsonrpc-mqueue`, newest first, then pops them in that order and activates one timer for each, all set to one `current-time`; `timer--activate` puts a timer ahead of the timers whose time equals its own, so the last activated, the oldest message's, runs first and the handlers run in message order.
+Four numbers pushed and popped that way activated as `(4 3 2 1)` and ran as `(1 2 3 4)`.
+Second, the draw timer runs after the chunk's handlers not because its time is later: a timer activated during a pass of ripe timers waits for the next pass, whatever its time, which the review of this change read as `timer_check` running each pass from a copy of `timer-list` (the C source is not on the home server).
+Of two ripe timers `a` and `b`, `a` activated one timer set 15s before `b`'s time and started one with `run-at-time 0`, and the log read `(a b c-earlier d-run-at-time-0)` (`/tmp/jsonrpc-timers/pass.el` below).
+Between the passes redisplay and a pending input event can run, so a command can find a chunk's trailing nodes not yet drawn, the state it would find had they arrived a moment later; that is read, not measured.
+The whole of it ran as one: a `sh -c` process wrote six framed notifications from one file with `cat`, and advice on `jsonrpc--process-filter` counted one call for the 432 bytes.
 The notification dispatcher pushed each one's number onto a log, and the first one's also started a `run-at-time 0` timer that pushed `flush`.
 The log read, in order:
 
@@ -3573,7 +3578,7 @@ The log read, in order:
 ```
 
 This run did not cover a backlog that reaches Emacs across several process-filter calls, as one larger than a read of the pipe does.
-From the source above, each call's timers take a time later than that of a timer started under an earlier call, so such a backlog is drawn once for each read that holds a node, not once for the whole backlog.
+From the source, a draw timer started under one read is ripe before the handlers of any later read, whose timers take a later time, so such a backlog is drawn once for each read that holds a node, not once for the whole backlog.
 
 To re-run, write the file below to `/tmp/jsonrpc-timers/drive.el` and run `emacs --batch -l /tmp/jsonrpc-timers/drive.el`.
 
@@ -3604,4 +3609,24 @@ To re-run, write the file below to `/tmp/jsonrpc-timers/drive.el` and run `emacs
   (message "order: %S" (reverse log))
   (message "filter calls: %d for %d bytes" filter-calls (length payload))
   (delete-process proc))
+```
+
+`/tmp/jsonrpc-timers/pass.el`, run with `emacs --batch -l /tmp/jsonrpc-timers/pass.el`:
+
+```elisp
+;;; -*- lexical-binding: t; -*-
+(defvar log nil)
+(let* ((past (time-subtract (current-time) 10))
+       (earlier (time-subtract past 5))
+       (mk (lambda (time fn) (let ((timer (timer-create)))
+                               (timer-set-time timer time)
+                               (timer-set-function timer fn)
+                               (timer-activate timer)))))
+  (funcall mk past (lambda ()
+                     (push 'a log)
+                     (funcall mk earlier (lambda () (push 'c-earlier log)))
+                     (run-at-time 0 nil (lambda () (push 'd-run-at-time-0 log)))))
+  (funcall mk (time-add past 1) (lambda () (push 'b log)))
+  (dotimes (_ 5) (accept-process-output nil 0.02))
+  (message "order: %S" (reverse log)))
 ```
