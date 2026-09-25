@@ -139,7 +139,12 @@ export class CodexAdapter implements BackendAdapter {
 	 */
 	private startCalled = false;
 	private threadId: string | null = null;
-	/** A known-safe lifecycle id that `abort()` may interrupt. */
+	/**
+	 * A known-safe lifecycle id that `abort()` may interrupt: from a
+	 * `turn/started`, a `turn/start` response, or -- for a turn whose
+	 * `turn/started` went out before a re-attach -- the history's running turn
+	 * (the reducer's `running-turn` effect, OW-dirazu).
+	 */
 	private turnId: string | null = null;
 	/**
 	 * The turn `abort()` asked app-server to interrupt, held until that turn's
@@ -322,7 +327,7 @@ export class CodexAdapter implements BackendAdapter {
 			// A reattach repaints from the thread's turns, paged in after the
 			// resume (D3's cold-start path; see `readTurns`).
 			if (opts.resumeId) {
-				const turns = await readTurns(client, started.thread.id);
+				const turns = await readTurns(client, started.thread.id, () => this.reducer.pageRequested());
 				assertOwned();
 				if (turns.length) {
 					this.applyEffects(this.reducer.hydrate({ id: started.thread.id, turns }));
@@ -409,7 +414,7 @@ export class CodexAdapter implements BackendAdapter {
 			modelProvider: resumed.modelProvider,
 			reasoningEffort: resumed.reasoningEffort,
 		});
-		const turns = await readTurns(holder, resumed.thread.id);
+		const turns = await readTurns(holder, resumed.thread.id, () => this.reducer.pageRequested());
 		assertOwned();
 		if (turns.length) {
 			this.applyEffects(this.reducer.hydrate({ id: resumed.thread.id, turns }));
@@ -536,8 +541,9 @@ export class CodexAdapter implements BackendAdapter {
 		//
 		// `expectedTurnId` is a precondition app-server enforces, so this needs
 		// a turn id it knows is live: `turnId` is exactly that, set only from an
-		// unambiguously correlated id -- a `turn/started` notification, or a
-		// `turn/start` response whose candidate nothing contradicts. A `turnBusy`
+		// unambiguously correlated id -- a `turn/started` notification, a
+		// `turn/start` response whose candidate nothing contradicts, or the turn
+		// a re-attach's history listed running (see `turnId`). A `turnBusy`
 		// with no id is a submission the adapter cannot name, so there is nothing
 		// to steer and the rejection stands.
 		//
@@ -980,6 +986,16 @@ export class CodexAdapter implements BackendAdapter {
 				case "message":
 					this.emitUpdate(effect.index);
 					break;
+				case "running-turn":
+					// What `turn/started` would have set, had it not gone out before
+					// the attach (OW-dirazu). A turn the stream already named is
+					// newer than the page, and keeps its place.
+					if (this.turnId) break;
+					this.turnId = effect.turnId;
+					if (!this.turnStartPending && !this.turnBusy) {
+						this.turnBusy = { source: "lifecycle", turnId: effect.turnId };
+					}
+					break;
 				case "reset":
 				case "streaming":
 				case "compaction":
@@ -1124,12 +1140,16 @@ export class CodexAdapter implements BackendAdapter {
  * a turn's items, and the reducer's replay needs every one.
  *
  * Every page is fetched: transcripts are small, and loading only the recent
- * end would be a change of its own.
+ * end would be a change of its own. `onPage` runs just before each page is
+ * asked for, which is where a hydrate's merge draws the line between what
+ * the page holds and what the stream brings after it
+ * (`CodexReducer.pageRequested`, OW-dirazu).
  */
-async function readTurns(client: CodexClientView, threadId: string): Promise<Turn[]> {
+async function readTurns(client: CodexClientView, threadId: string, onPage?: () => void): Promise<Turn[]> {
 	const turns: Turn[] = [];
 	let cursor: string | null = null;
 	do {
+		onPage?.();
 		const page: ThreadTurnsListResponse = await client.request<ThreadTurnsListResponse>("thread/turns/list", {
 			threadId,
 			sortDirection: "asc",

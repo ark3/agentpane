@@ -18,6 +18,7 @@ import {
 	isRecord,
 	type CodexNotification,
 	type CodexServerMessage,
+	type Thread,
 	type ThreadItem,
 	type UserInput,
 } from "./protocol.ts";
@@ -1345,6 +1346,75 @@ describe("hydrate (cold start)", () => {
 		const { messages } = r.getState();
 		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 		expect(messages[0]?.timestamp).toBe(1_700_000_000_000);
+	});
+});
+
+describe("hydrate over a live stream (OW-dirazu)", () => {
+	const runningTurn = (items: ThreadItem[]): Thread["turns"][number] => ({
+		id: "u",
+		items,
+		itemsView: "full",
+		status: "inProgress",
+		error: null,
+		startedAt: 1_700_000_000,
+		completedAt: null,
+		durationMs: null,
+	});
+	const user: ThreadItem = { type: "userMessage", id: "u1", clientId: null, content: [{ type: "text", text: "hi", text_elements: [] }] };
+	const summaryDelta = (delta: string): CodexServerMessage => ({
+		method: "item/reasoning/summaryTextDelta",
+		params: { threadId: "t", turnId: "u", itemId: "rs", delta, summaryIndex: 0 },
+	});
+
+	it("shows a listed item's head, then what streamed after the page, for an item a delta opened", () => {
+		// Never observed: as of `codex-cli 0.156.0` a listing left every item
+		// still streaming out (docs/MANUAL_TESTING.md, OW-dirazu). But a page
+		// that does list one holds the deltas that arrived before it was asked
+		// for, and a slot a delta opened lacks the head that page holds.
+		const r = new CodexReducer({ now: () => 1 });
+		r.setIdentity({ threadId: "t" });
+		r.handle(summaryDelta("MIDDLE-"));
+		r.pageRequested();
+		r.handle(summaryDelta("TAIL"));
+
+		r.hydrate({ id: "t", turns: [runningTurn([user, { type: "reasoning", id: "rs", summary: ["HEAD-MIDDLE-"], content: [] }])] });
+
+		const messages = r.getState().messages as AssistantMessage[];
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+		expect(messages[1]?.content).toEqual([{ type: "thinking", thinking: "HEAD-MIDDLE-TAIL" }]);
+		r.handle(summaryDelta("-MORE"));
+		expect((r.getState().messages[1] as AssistantMessage).content).toEqual([
+			{ type: "thinking", thinking: "HEAD-MIDDLE-TAIL-MORE" },
+		]);
+	});
+
+	it("keeps the whole of an item it saw start over the listed copy", () => {
+		const r = new CodexReducer({ now: () => 1 });
+		r.setIdentity({ threadId: "t" });
+		r.handle(startedItem({ type: "reasoning", id: "rs", summary: [], content: [] }, 10));
+		r.handle(summaryDelta("HEAD-"));
+		r.pageRequested();
+		r.handle(summaryDelta("TAIL"));
+
+		r.hydrate({ id: "t", turns: [runningTurn([user, { type: "reasoning", id: "rs", summary: ["HEAD-"], content: [] }])] });
+
+		expect((r.getState().messages[1] as AssistantMessage).content).toEqual([{ type: "thinking", thinking: "HEAD-TAIL" }]);
+	});
+
+	it("takes the running turn from the listing, unless the stream has ended it", () => {
+		const listed = { id: "t", turns: [runningTurn([user])] };
+		const running = new CodexReducer({ now: () => 1 });
+		running.setIdentity({ threadId: "t" });
+		running.pageRequested();
+		expect(running.hydrate(listed)).toEqual([{ type: "running-turn", turnId: "u" }, { type: "reset" }]);
+		expect(running.getState()).toMatchObject({ isStreaming: true, compaction: null });
+
+		const ended = new CodexReducer({ now: () => 1 });
+		ended.setIdentity({ threadId: "t" });
+		ended.pageRequested();
+		ended.handle({ method: "turn/completed", params: { threadId: "t", turn: { ...runningTurn([]), status: "completed" } } });
+		expect(ended.hydrate(listed)).toEqual([{ type: "reset" }]);
+		expect(ended.getState().isStreaming).toBe(false);
 	});
 });
 

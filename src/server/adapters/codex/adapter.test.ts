@@ -2391,6 +2391,12 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				case "turn/start":
 					proc.emit({ id, result: { turn: { id: "turn-x" } } });
 					break;
+				case "turn/steer":
+					proc.emit({ id, result: { turnId: params["expectedTurnId"] } });
+					break;
+				case "turn/interrupt":
+					proc.emit({ id, result: {} });
+					break;
 			}
 		});
 	}
@@ -2675,6 +2681,7 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 				{ role: "user", content: [{ type: "text", text: "live prompt" }] },
 				{ role: "assistant", content: [{ type: "text", text: "37\n38\n" }] },
 			]);
+			expect(reattached.getState().isStreaming).toBe(true);
 			proc.emit(delta("39\n"));
 			expect(reattached.getState().messages).toHaveLength(4);
 			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "37\n38\n39\n" }] });
@@ -2688,6 +2695,79 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			});
 			expect(reattached.getState().messages).toHaveLength(4);
 			expect(reattached.getState().messages.at(-1)).toMatchObject({ content: [{ type: "text", text: "1\n2\n...39\n" }] });
+		});
+
+		describe("a turn whose turn/started went out before the attach (OW-dirazu)", () => {
+			// As of `codex-cli 0.156.0` the listing named such a turn `inProgress`
+			// -- a user turn with its `userMessage`, a compaction's with no items
+			// at all -- and nothing else named it: `thread/resume` read the
+			// thread `active` but gave no turn id, and replayed no `turn/started`
+			// (docs/MANUAL_TESTING.md, OW-dirazu).
+			const userMessage = {
+				type: "userMessage",
+				id: "user-live",
+				clientId: null,
+				content: [{ type: "text", text: "live prompt", text_elements: [] }],
+			};
+			const running = (items: unknown[]) => ({
+				id: "turn-live",
+				items,
+				itemsView: "full",
+				status: "inProgress",
+				error: null,
+				startedAt: 1_700_000_010,
+				completedAt: null,
+				durationMs: null,
+			});
+			const completed = {
+				method: "turn/completed",
+				params: {
+					threadId: "thread-forked",
+					turn: { ...running([]), itemsView: "summary", status: "completed", completedAt: 1_700_000_020, durationMs: 1000 },
+				},
+			};
+
+			it("streams, and interrupts that turn on abort", async () => {
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
+
+				expect(reattached.getState().isStreaming).toBe(true);
+				await reattached.abort();
+				expect(request(proc, "turn/interrupt")["params"]).toEqual({ threadId: "thread-forked", turnId: "turn-live" });
+			});
+
+			it("steers a submit into that turn, and refuses to compact", async () => {
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
+
+				await reattached.submit("and also");
+				expect(request(proc, "turn/steer")["params"]).toMatchObject({ threadId: "thread-forked", expectedTurnId: "turn-live" });
+				expect(methods(proc)).not.toContain("turn/start");
+				await expect(reattached.compact()).rejects.toThrow("cannot submit while a turn is active");
+				expect(methods(proc)).not.toContain("thread/compact/start");
+			});
+
+			it("is idle once that turn completes", async () => {
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], []);
+
+				proc.emit(completed);
+				expect(reattached.getState().isStreaming).toBe(false);
+				await reattached.abort();
+				expect(methods(proc)).not.toContain("turn/interrupt");
+			});
+
+			it("stays idle when that turn completed while the history was paged in", async () => {
+				const { proc, reattached } = await reattachWithGap([...twoStoredTurns(), running([userMessage])], [completed]);
+
+				expect(reattached.getState().isStreaming).toBe(false);
+				await reattached.abort();
+				expect(methods(proc)).not.toContain("turn/interrupt");
+			});
+
+			it("shows a compaction the listing names by a turn with no user message", async () => {
+				const { reattached } = await reattachWithGap([...twoStoredTurns(), running([])], []);
+
+				expect(reattached.getState()).toMatchObject({ isStreaming: true, compaction: "running" });
+				await expect(reattached.submit("and also")).rejects.toThrow("cannot submit while a turn is active");
+			});
 		});
 	});
 

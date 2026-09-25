@@ -9,7 +9,8 @@
  * Assembly rules, per DESIGN:
  *
  * - `item/started` creates the placeholder message(s) for an item -- or, for
- *   an item that started before a re-attach, its first delta does
+ *   an item that started before a re-attach, its first delta does, and the
+ *   history paged in after supplies the head (see `hydrate`)
  * - deltas append to the right content block, correlated by **`itemId`**
  * - `item/completed` replaces with the authoritative content
  * - `turn/completed` ends the turn
@@ -46,6 +47,12 @@ export type CodexEffect =
 	/** The transcript changed wholesale; the server must re-snapshot. */
 	| { type: "reset" }
 	| { type: "streaming"; isStreaming: boolean }
+	/**
+	 * A turn the history listed running whose `turn/started` this reducer never
+	 * heard: it went out before a re-attach joined the stream (OW-dirazu). The
+	 * shell adopts it as though that notification had arrived.
+	 */
+	| { type: "running-turn"; turnId: string }
 	| { type: "compaction"; compaction: "requesting" | "running" | null }
 	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a, OW-futewo). */
 	| { type: "request"; requestId: RequestId; kind: string; payload: unknown; issuerThreadId?: string | null }
@@ -70,6 +77,14 @@ interface Slot {
 	messages: AgentMessage[];
 	timestamp: number;
 	completed: boolean;
+	/**
+	 * Non-null for a headless slot: one a delta opened, for an item whose
+	 * `item/started` this reducer never heard, so it lacks whatever streamed
+	 * before (see `applyDelta`). Holds the deltas that arrived since the last
+	 * history page was asked for, which a listed copy of the item cannot hold
+	 * (see `hydrate`). Null once `item/completed` makes the slot whole.
+	 */
+	sincePage: ((item: ThreadItem) => boolean)[] | null;
 }
 
 const DEFAULT_API = "codex-app-server";
@@ -81,6 +96,14 @@ export class CodexReducer {
 	private slots = new Map<string, Slot>();
 	private streaming = false;
 	private compaction: "requesting" | "running" | null = null;
+	/**
+	 * Between `pageRequested` and `hydrate`: the history is being paged in,
+	 * so a headless slot keeps its deltas for the merge, and a turn the stream
+	 * ends is remembered in `endedTurnIds` against a page that may still list
+	 * it running.
+	 */
+	private paging = false;
+	private endedTurnIds = new Set<string>();
 	private now: () => number;
 	private identity: { api: string; provider: string; model: string; effort: string | null };
 
@@ -177,19 +200,33 @@ export class CodexReducer {
 	 * `thread/turns/list` at `itemsView: "full"`, into a transcript. Items
 	 * arrive already completed, so this is the same path with no deltas.
 	 *
-	 * Laid under what the live stream already built, never over it
-	 * (OW-vijuyi). A re-attach over an app-server that still holds the thread
-	 * hears it from `CodexAdapter.adoptConnection` on, so a turn still running
-	 * there streams while the history is paged in. An item that stream opened,
-	 * streamed a delta for or completed keeps its live slot in place of the
-	 * listed copy -- so its text shows once whether or not the listing already
-	 * held it -- and one the listing lacks follows the history, as a
-	 * still-streaming item does (see `applyDelta`, OW-zudase). A slot opened
-	 * by `item/started` has every delta since; one opened by a delta has only
-	 * those since the attach, and would lose the head a listed copy held --
-	 * as of `codex-cli 0.156.0` the listing left a streaming `agentMessage`
-	 * out, and OW-dirazu carries the kinds nobody measured. The streaming and
-	 * compaction state the stream set are kept with it.
+	 * Merged with what the live stream already built (OW-vijuyi). A re-attach
+	 * over an app-server that still holds the thread hears it from
+	 * `CodexAdapter.adoptConnection` on, so a turn still running there streams
+	 * while the history is paged in. The listing owns what went before the
+	 * attach, and the stream what came after it:
+	 *
+	 * - An item the stream opened with `item/started`, or completed, keeps its
+	 *   live slot in place of the listed copy, since that slot holds the whole
+	 *   of it -- so its text shows once whether or not the listing held it.
+	 * - A headless slot, one a delta opened (`applyDelta`), yields to a listed
+	 *   copy, which holds the head the slot lacks, and only the deltas that
+	 *   arrived after the page was asked for (`pageRequested`) are laid on top
+	 *   of it: the ones before, the page already holds (OW-dirazu).
+	 * - A live slot the listing lacks follows the history. As of `codex-cli
+	 *   0.156.0` that was every item still streaming -- an `agentMessage`,
+	 *   `reasoning`, `plan` and `commandExecution` alike were listed only once
+	 *   complete (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu) -- so a
+	 *   headless slot's head showed only when `item/completed` replaced it.
+	 *
+	 * The running turn is the listing's too. As of that version `thread/
+	 * resume` read the thread `active` but named no turn and replayed no
+	 * `turn/started`, and the listing named the turn `inProgress`: a user turn
+	 * with its `userMessage` first, a compaction's with no items at all. So a
+	 * last turn listed `inProgress` that the stream has not ended since the
+	 * page was asked for is streaming, a compaction when it lists no user
+	 * message, and its id goes to the shell as a `running-turn` effect. A turn
+	 * the stream started keeps the streaming state it set.
 	 */
 	hydrate(thread: Pick<Thread, "id" | "turns">): CodexEffect[] {
 		const live = this.slots;
@@ -200,13 +237,48 @@ export class CodexReducer {
 			const timestamp = (turn.startedAt ?? 0) * 1000 || this.now();
 			for (const item of turn.items) {
 				const slot = live.get(item.id);
-				if (slot) this.slots.set(item.id, slot);
-				else this.applyItem(item, timestamp, true);
+				if (slot && !slot.sincePage) {
+					this.slots.set(item.id, slot);
+					continue;
+				}
+				this.applyItem(item, timestamp, !slot);
+				const merged = this.slots.get(item.id);
+				if (!merged || !slot?.sincePage) continue;
+				for (const apply of slot.sincePage) apply(merged.item);
+				this.remap(merged);
 			}
 		}
 		for (const [id, slot] of live) if (!this.slots.has(id)) this.slots.set(id, slot);
 		this.messages = this.flattenMessages();
-		return [{ type: "reset" }];
+
+		const effects: CodexEffect[] = [];
+		const last = thread.turns.at(-1);
+		if (last?.status === "inProgress" && !this.endedTurnIds.has(last.id)) {
+			this.streaming = true;
+			if (!this.compaction && !last.items.some((item) => item.type === "userMessage")) this.compaction = "running";
+			effects.push({ type: "running-turn", turnId: last.id });
+		}
+		this.paging = false;
+		this.endedTurnIds.clear();
+		effects.push({ type: "reset" });
+		return effects;
+	}
+
+	/**
+	 * A history page is about to be asked for, so it will hold every delta
+	 * this reducer has seen: from here on a headless slot keeps what arrives
+	 * for `hydrate` to lay on the listed copy. Called before each page, since
+	 * the running turn is on the last.
+	 *
+	 * As of `codex-cli 0.156.0` no line arrived between a listing's request
+	 * and its answer (docs/MANUAL_TESTING.md, OW-dirazu), so the request is
+	 * where the page's edge was measured to be. A delta Codex wrote in that
+	 * window and also listed would be laid on twice; none has been seen, and
+	 * no partial item was ever listed for one to belong to.
+	 */
+	pageRequested(): void {
+		this.paging = true;
+		for (const slot of this.slots.values()) if (slot.sincePage) slot.sincePage = [];
 	}
 
 	/** One parsed line from app-server's stdout. */
@@ -263,6 +335,7 @@ export class CodexReducer {
 
 			case "turn/completed": {
 				const turn = message.params.turn;
+				if (this.paging) this.endedTurnIds.add(turn.id);
 				const effects: CodexEffect[] = this.setCompaction(null);
 				// NOTE: `turn.items` here is a *summary* view (`itemsView:
 				// "summary"` in every fixture) -- only the final agent message.
@@ -400,8 +473,8 @@ export class CodexReducer {
 		// parsed payload (or a `Thread` we are hydrating from) is not ours.
 		const owned = structuredClone(item);
 		const slot: Slot = existing
-			? { ...existing, item: owned, completed }
-			: { item: owned, messages: [], timestamp, completed };
+			? { ...existing, item: owned, completed, sincePage: null }
+			: { item: owned, messages: [], timestamp, completed, sincePage: null };
 		this.slots.set(id, slot);
 		return this.remap(slot);
 	}
@@ -476,11 +549,12 @@ export class CodexReducer {
 	 * empty item `open` builds, when the delta's kind says what the item is
 	 * (OW-zudase). That is an item whose `item/started` went out before
 	 * `CodexAdapter.adoptConnection` joined the stream on a re-attach, and as
-	 * of `codex-cli 0.156.0` nothing else carries its text until
-	 * `item/completed`: `thread/turns/list` left a streaming `agentMessage`
+	 * of `codex-cli 0.156.0` nothing else carried its text until
+	 * `item/completed`: `thread/turns/list` left every item still streaming
 	 * out of the running turn it listed, and `thread/resume` replayed no
-	 * `item/started` (docs/MANUAL_TESTING.md, OW-dutute). The slot holds what
-	 * streamed from the attach on, not the head before it, and
+	 * `item/started` (docs/MANUAL_TESTING.md, OW-dutute and OW-dirazu). The
+	 * slot is headless -- it holds what streamed from the attach on, not the
+	 * head before it -- so a listed copy wins over it in `hydrate`, and
 	 * `item/completed` replaces it with the whole item where it stands. A
 	 * command's output has no `open`: alone it names no command to draw.
 	 */
@@ -492,11 +566,12 @@ export class CodexReducer {
 	): CodexEffect[] {
 		let slot = this.slotFor(itemId);
 		if (!slot && open) {
-			slot = { item: open(itemId), messages: [], timestamp: this.now(), completed: false };
+			slot = { item: open(itemId), messages: [], timestamp: this.now(), completed: false, sincePage: [] };
 			this.slots.set(itemId, slot);
 		}
 		if (!slot) return [];
 		if (!apply(slot.item, delta)) return [];
+		if (slot.sincePage && this.paging) slot.sincePage.push((item) => apply(item, delta));
 		return this.remap(slot);
 	}
 
