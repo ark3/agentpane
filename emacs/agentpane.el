@@ -715,12 +715,86 @@ headers fitted, at; see `agentpane--refit-on-resize'.")
 (defvar-local agentpane--refit-timer nil
   "The idle timer that refits this buffer's fold headers, while one is pending.")
 
+(defun agentpane--fit-window ()
+  "The window fold headers are fitted to: the narrowest of the windows
+showing this buffer, so that none of them wraps a header, or the selected
+window while none shows it."
+  (car (sort (or (get-buffer-window-list nil nil t) (list (selected-window)))
+             :key (lambda (window) (window-body-width window t)))))
+
 (defun agentpane--window-width ()
-  "The body width in pixels fold headers are fitted to: the narrowest of the
-windows showing this buffer, so that none of them wraps a header, or the
-selected window's while none shows it."
-  (seq-min (mapcar (lambda (window) (window-body-width window t))
-                   (or (get-buffer-window-list nil nil t) (list (selected-window))))))
+  "The body width in pixels of `agentpane--fit-window', which fold headers
+are fitted to."
+  (window-body-width (agentpane--fit-window) t))
+
+(defun agentpane--motion-window ()
+  "The window to cut fold headers by `vertical-motion' in, or nil to cut them
+by `agentpane--cut-by-search'.
+It is `agentpane--fit-window', which wraps at no narrower width than the one
+a header is fitted to, since the motion stops where that window would wrap
+the line.  It is nil in batch Emacs, where the motion does not move: on
+Emacs 31.1 on 2026-09-25 it returned 0 and left point where it was in
+`emacs --batch', though on a daemon's frame from before any client's it
+moved as far as asked.  And it is nil when the window is scrolled
+horizontally, which shifts the column the motion stops at by the scroll,
+even in a buffer the window does not show."
+  (let ((window (agentpane--fit-window)))
+    (and (not noninteractive)
+         (zerop (window-hscroll window))
+         window)))
+
+(defun agentpane--cut-by-search (fits summary suffix)
+  "The length of the longest start of SUMMARY, short of all of it, that FITS
+beside SUFFIX, or nil when not even SUFFIX alone does.
+A binary search over the length, a layout per step: about eight for a
+summary a few lines long.  It is the cut wherever the frame cannot lay out
+text, and the one `agentpane--cut-by-motion' is held to."
+  (let ((lo -1)
+        (hi (1- (length summary))))
+    (while (< lo hi)
+      (let ((mid (/ (+ lo hi 1) 2)))
+        (if (funcall fits (concat (substring summary 0 mid) suffix))
+            (setq lo mid)
+          (setq hi (1- mid)))))
+    (and (>= lo 0) lo)))
+
+(defun agentpane--cut-by-motion (window width fits prefix summary suffix)
+  "What `agentpane--cut-by-search' answers for FITS, SUMMARY and SUFFIX, from
+one `vertical-motion' in WINDOW and one check.
+SUFFIX is laid out ahead of PREFIX, the fold marker and the head, and then
+SUMMARY, so that one motion to WIDTH pixels stops where the summary must
+end with no measure of SUFFIX of its own.  The motion stops at the position
+closest to that pixel column, as its docstring puts it, so the start it
+finds is checked with FITS, and where it does not fit the search takes
+over below it.
+The work buffer takes this buffer's face remapping, as `string-pixel-width'
+does, and measures pure pixel columns: no `line-prefix' or line numbers
+ahead of the text, which the motion counts, no `word-wrap', which ends the
+screen line at an earlier space, and no bidi reordering, which would break
+the tie between a position and a column in right-to-left text.
+A tab's width depends on its column, which SUFFIX laid out ahead shifts,
+so a SUMMARY holding one is cut by the search instead."
+  (if (string-search "\t" summary)
+      (agentpane--cut-by-search fits summary suffix)
+    (let* ((buffer (current-buffer))
+           (cut (with-work-buffer
+                  (dolist (variable '(face-remapping-alist char-property-alias-alist
+                                      default-text-properties))
+                    (when (local-variable-p variable buffer)
+                      (set (make-local-variable variable) (buffer-local-value variable buffer))))
+                  (setq-local line-prefix nil display-line-numbers nil word-wrap nil
+                              bidi-display-reordering nil)
+                  ;; Inserting into another buffer would deactivate the mark.
+                  (let (deactivate-mark)
+                    (insert suffix prefix summary))
+                  (goto-char (point-min))
+                  (vertical-motion (cons (/ (float width) (frame-char-width (window-frame window))) 0)
+                                   window)
+                  (min (- (point) (point-min) (length suffix) (length prefix))
+                       (1- (length summary))))))
+      (cond ((< cut 0) nil)
+            ((funcall fits (concat (substring summary 0 cut) suffix)) cut)
+            (t (agentpane--cut-by-search fits (substring summary 0 cut) suffix))))))
 
 (defun agentpane--fit-header (head summary tail)
   "HEAD, SUMMARY and TAIL, in that order, fitted to one screen line.
@@ -735,6 +809,10 @@ width, against `agentpane--window-width' less one character, the column a
 terminal keeps for its continuation glyph.  The fold marker is counted as
 `▸ ' whichever is drawn.  In batch Emacs both measures degrade to
 character cells, which is what the tests fit against.
+A header that fits costs that one measure.  One that does not is cut by
+`agentpane--cut-by-motion', a motion and a check, in the window
+`agentpane--motion-window' answers, or by `agentpane--cut-by-search', a
+measure per step of a binary search, where it answers none.
 Nothing refits a header when the window changes width except a redraw;
 see `agentpane--refit-on-resize'."
   (let* ((width (- (agentpane--window-width) (frame-char-width)))
@@ -749,19 +827,25 @@ see `agentpane--refit-on-resize'."
       (list head nil nil))
      (t
       (let* ((ellipsis (propertize "…" 'face (get-text-property 0 'face summary)))
-             (tail (and tail (funcall fits (concat ellipsis tail)) tail)))
-        (if (and (not tail) (funcall fits summary))
-            (list (concat head summary) nil nil)
-          ;; The longest start of the summary that fits beside the ellipsis.
-          (let ((lo 0)
-                (hi (1- (length summary))))
-            (while (< lo hi)
-              (let ((mid (/ (+ lo hi 1) 2)))
-                (if (funcall fits (concat (substring summary 0 mid) ellipsis tail))
-                    (setq lo mid)
-                  (setq hi (1- mid)))))
-            (list (concat head (string-trim-right (substring summary 0 lo)) ellipsis tail)
-                  t (and tail t)))))))))
+             (window (agentpane--motion-window))
+             ;; The longest start of the summary that fits beside SUFFIX,
+             ;; or nil when not even SUFFIX does.
+             (cut (lambda (suffix)
+                    (if window
+                        (agentpane--cut-by-motion
+                         window width fits (concat marker head) summary suffix)
+                      (agentpane--cut-by-search fits summary suffix))))
+             (kept (and tail (funcall cut (concat ellipsis tail)))))
+        (cond
+         (kept
+          (list (concat head (string-trim-right (substring summary 0 kept)) ellipsis tail)
+                t t))
+         ((and tail (funcall fits summary))
+          (list (concat head summary) nil nil))
+         (t
+          (list (concat head (string-trim-right (substring summary 0 (or (funcall cut ellipsis) 0)))
+                        ellipsis)
+                t nil))))))))
 
 (defun agentpane--refit-on-resize (_window)
   "Refit this buffer's fold headers once its windows settle at a new width.
