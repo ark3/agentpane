@@ -1,5 +1,6 @@
 ---
 labels: [change, d24]
+closed: done
 ---
 
 # A session's mutating verbs run one at a time through the manager, so no set-model, set-effort, compaction, fork or reply overlaps another on one adapter
@@ -53,3 +54,29 @@ Incidental, for the executor to settle and record in the queue's docblock:
 - OW-woyifu closes under this card: its done-condition names an adapter-level test, and its incidental line allows the fix at the route or in the adapter, which this is; its close note says the adapter-level overlap is unreachable from any route and cites the tests above.
 - The browser's and Emacs's guards are left in place, and the close note says why: dedupe and feedback, not order.
 - `bun run check` green.
+
+## Close note
+
+Landed in 3a131e1 ("feat: run a session's mutating verbs one at a time through the manager").
+Each `ManagedSession` in `src/server/http/session-manager.ts` carries `queue`, a promise chain that always settles fulfilled.
+`#serially` runs `submit`, `fork`, `setModel`, `setEffort`, `compact` and `reply` through it, and the model, effort, compact and reply routes in `src/server/http/app.ts` now call the manager instead of the adapter.
+`#serially`'s docblock records what stays out and why: `abort` (it must reach a running turn, must not wait out a Pi compaction, and keeps OW-relehi's second abort harmless), `listForkPoints` (a read), `attach` (`#attaching` guards it and it creates the adapter the queue sits on), and `close`/`disposeAll` (teardown waits behind nothing).
+D24 in `docs/DESIGN.md` now records the same answer where it had left the abort question open.
+
+Beyond the card's text: the OW-tewofe effort check moved from the effort route into the manager's `setEffort`, inside the queue, as `EffortNotOfferedError`, still a 400 `bad_request` with the same detail.
+Left in the route, an effort sent during a set-model is checked against the old model, which is OW-zayefe; every adapter updates its model only once its set-model settles.
+A route test covers it.
+
+Verified: five cases in session-manager.test.ts under "a session's mutations run one at a time (D24, OW-sewewe)": setModel/setEffort in both orders, fork/setModel in both orders on the fake's Pi-shaped fork, and a rejected first call not holding the second.
+Two cases in app.test.ts: "hands two overlapping model requests to the adapter one at a time" and "checks an effort against the model a set-model sent just before it chose".
+All seven went red with `#serially` dispatching without the chain, which the dispatching session reproduced; the rejection case went red alone with a chain that did not swallow rejections.
+`bun run check` green: 1359 tests.
+
+The client guards stay: the browser's `pendingModelSets`, `pendingEffortSets` and `sending` and Emacs's `agentpane--sending` and `agentpane--attaching` are dedupe and feedback, one prompt per press and a disabled control while a change is in flight, not order, and the queue dedupes nothing.
+
+The adversarial read found the fix an ownership change, with the container now owning the order of its mutations, and named one case it misses.
+`#serially` takes the container and its adapter when the verb is called, so a verb sent on a Pi parent's ref and queued behind that parent's fork runs on the fork.
+An overlapping call could do that before, and the queue makes it certain.
+Per the sibling rule, no second guard was added: OW-suyinu, which makes a Pi fork a new container, was amended to own the case with a test, and the docblock says so.
+Also filed OW-jileku: Pi answers `compact` only after `compaction_end` (pi 0.84.2 fixture), so a Pi compaction holds the queue, and nobody has measured whether a Pi compact sent mid-turn waits for the turn.
+OW-bijera was amended: `reply` in the queue deadlocks once a human can answer a dialog that a queued verb waits on.

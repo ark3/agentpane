@@ -34,6 +34,9 @@ Both frozen-interface notes, D11's in `src/shared/protocol.ts` and OW-mutufa's i
 Load-bearing:
 
 - The fork and rename split of OW-kekoji, OW-suhoto and OW-sehaja is unchanged in effect: a Pi parent's names never reach the fork's container.
+- A verb queued on a Pi parent behind a fork of it does not run on the fork.
+  OW-sewewe's `#serially` in `src/server/http/session-manager.ts` takes the container and its adapter when the verb is called, so as of OW-sewewe such a verb runs on the fork, which is what the fork's split from a rename forbids; its docblock names this card as the owner.
+  Under a handle the queue stays with the parent's container, which keeps no adapter, so the verb takes the adapter when it runs and fails as a call on a detached session does.
 - `#pendingRequests` keyed by handle still follows the container on a fork (the paragraph on the container in `ManagedSession`'s docblock, OW-bipume).
 - A parked Codex fork holding a borrowed connection (OW-lajehi) and a parked Claude Code recipe (OW-razoki) each get their handle when parked, and `close()` on the fork's ref still reaches the parked entry through its name.
 - `attach` on any name a container has had, including one a rename left behind, still resolves to it, which is D9's promise that the old id keeps working on REST routes; the routes keep their `:backend/:id` shape.
@@ -46,7 +49,7 @@ Incidental: the handle's format; whether `handle` on `SessionSummary` is optiona
 
 ## Done when
 
-- Tests in `src/server/http/session-manager.test.ts`, red first: a container renamed twice is reachable by all three names and holds one handle throughout; a Pi-style fork leaves the parent's handle without an adapter and gives the fork a new handle with none of the parent's names; a spelling alias from `#start` becomes a name on the container; a closed container is reachable by no name.
+- Tests in `src/server/http/session-manager.test.ts`, red first: a container renamed twice is reachable by all three names and holds one handle throughout; a Pi-style fork leaves the parent's handle without an adapter and gives the fork a new handle with none of the parent's names; a spelling alias from `#start` becomes a name on the container; a closed container is reachable by no name; a `setModel` or `submit` on a Pi parent's ref, queued behind that parent's fork, never reaches the fork's adapter.
 - A test in `src/server/http/broadcaster.test.ts` that `snapshot`, `upsert`, `status`, `request`, `request-resolved`, `error` and `notice` each carry the handle, that `sendOpeningSnapshots` carries it, and that the seq is continuous across a rename with `renamed()` copying nothing.
 - A test in `src/emacs/helper.test.ts` that every notification carries `handle` and that `sessions/attach` answers a summary carrying it.
 - The rename and fork suites named in OW-nikogo stay green, and `src/server/http/vertical-slice.test.ts` "leaves a browser that did not fork on the parent it was reading (OW-suhoto)" stays green.

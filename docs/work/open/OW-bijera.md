@@ -89,3 +89,10 @@ What this leaves.
 This card's premise is not refuted — an unanswered `ServerRequest` still hangs the turn behind one line of text, and the server half is still built and the client half still absent.
 What changed is that no known request kind can currently reach it, so nobody can stage the live run this card's done-condition requires.
 `OW-zogogo` carries that: it asks whether any `ServerRequest` kind can arrive under agentpane's own configuration at all, and its answer is what decides whether this card is moot, real, or merely unstageable.
+
+## A constraint from OW-sewewe (2026-09-24)
+
+OW-sewewe put `reply` in the per-session queue in `src/server/http/session-manager.ts` (`#serially`), behind `submit`, `fork`, `setModel`, `setEffort` and `compact`.
+That is safe only while no queued verb waits on a request being answered, which held on 2026-09-24 because every adapter disposes of a request as it arrives: Pi cancels its dialogs (OW-yosuzo), Codex declines on publish, and Claude Code's `reply` does nothing.
+Once a human can answer, a verb whose backend response waits on a dialog — a Pi `fork` or `compact` whose extension hook opens one — deadlocks with the reply queued behind it, until a close.
+So whatever makes a request answerable also takes `reply` out of the queue, or shows by a test that no queued verb can wait on a request, and `#serially`'s docblock is amended to say which.

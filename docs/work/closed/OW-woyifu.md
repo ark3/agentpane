@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # Two overlapping Pi setModel calls can still broadcast a model paired with a level it was never at
@@ -29,3 +30,10 @@ Incidental: whether the fix serialises `setModel` in the adapter, at the route, 
 ## Done when
 
 - A test in `src/server/adapters/pi/process.test.ts` overlaps two `setModel` calls whose reset events interleave with the responses, records every update, and asserts that none pairs a model with a level other than the one it was at, shown red first.
+
+## Close note
+
+Closed under OW-sewewe (3a131e1), the fix at the route this card's incidental line allowed; no second guard was written in `PiAdapter`, as this card's own amendment said.
+Every server path to `adapter.setModel` now runs through `SessionManager`'s per-session queue (`#serially` in `src/server/http/session-manager.ts`): the model route calls `sessions.setModel`, and the only other caller, `PiAdapter.fork`'s restore of the chosen model, runs inside the fork's own queue slot.
+So two `setModel` calls cannot overlap on one `PiAdapter` from any route, whichever clients send them, and with one at a time the `settingModel` boolean is exactly sufficient.
+The adapter-level overlap this card's done-condition describes is therefore unreachable, and the evidence is at the manager and the route instead: session-manager.test.ts "a session's mutations run one at a time (D24, OW-sewewe)" and app.test.ts "hands two overlapping model requests to the adapter one at a time (OW-sewewe)", each red against direct dispatch.
