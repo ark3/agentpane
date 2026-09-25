@@ -1232,15 +1232,16 @@ by `agentpane--draw-recorded' from a zero-delay timer.
 A node carries its whole message, and drawing it draws all of it again,
 text through shr and every fold header fitted: 2-6ms in batch Emacs for
 nodes of 2,600-8,300 characters, and about twice that in a graphical
-frame (measured 2026-09-25).  So a node superseded before it is drawn is
-not drawn at all, and a backlog costs one redraw per index however many
-nodes it holds.  jsonrpc.el parses every message in a chunk of output at
-once and runs each one's handler, in message order, from a ripe timer of
-its own, and a timer activated during a pass of ripe timers waits for the
-next pass whatever its time, so the one started here runs after the rest
-of the chunk: on Emacs 31.1 with jsonrpc.el 1.0.29, six notifications
-written at once reached one process-filter call, and the timer the first
-one's handler started ran after all six (measured 2026-09-25;
+frame (measured 2026-09-25; OW-tujula).  So a node superseded before it
+is drawn is not drawn at all, and a backlog costs one redraw per index
+however many nodes it holds.
+jsonrpc.el parses every message in a chunk of output at once and runs
+each one's handler, in message order, from a ripe timer of its own, and a
+timer activated during a pass of ripe timers waits for the next pass
+whatever its time, so the one started here runs after the rest of the
+chunk: on Emacs 31.1 with jsonrpc.el 1.0.29, six notifications written at
+once reached one process-filter call, and the timer the first one's
+handler started ran after all six (measured 2026-09-25;
 docs/MANUAL_TESTING.md, OW-tujezi).  Redisplay and a pending input event
 can run between the passes, so a command can find a chunk's trailing
 nodes not yet drawn, as it would had they arrived a moment later.
