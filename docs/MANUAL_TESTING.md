@@ -3494,7 +3494,7 @@ The log read, in order:
 ```
 
 So the snapshot was handled before the attach's reply though the helper wrote it after, and agentpane-mode cannot take a handle from an attach reply in time for the notifications that follow it whenever one of its synchronous requests (`agentpane--read-model`'s `models/list`, `agentpane-new-session`'s `sessions/create`, `agentpane--attach-now`) is outstanding.
-That is why the first snapshot of an attach answered under another ref carries `askedFor`, the ref the attach asked for, and `agentpane--notified-buffer` binds the buffer that asked by it (`sessions/attach` in `src/emacs/helper.ts`); the ert tests `agentpane-test-attach-answered-under-a-new-ref-*` and `agentpane-test-attach-under-a-new-ref-*` cover both orders and a reply that never succeeds.
+That is why the first snapshot of an attach answered under another ref carries `askedFor`, the ref the attach asked for, when that attach is the first attachment of the session's handle, and `agentpane--notified-buffer` binds the buffer that asked by it (`sessions/attach` in `src/emacs/helper.ts`); the ert tests `agentpane-test-attach-answered-under-a-new-ref-*` and `agentpane-test-attach-under-a-new-ref-*` cover both orders and a reply that never succeeds.
 
 To re-run, write the two files below to `/tmp/jsonrpc-order/` and run `emacs --batch -l /tmp/jsonrpc-order/drive.el`.
 
