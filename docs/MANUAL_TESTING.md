@@ -3556,3 +3556,52 @@ Between the 28 sends of index 1, measured where the driver read them, the smalle
 Any other write the helper makes sends what it holds first, so a node can go out less than 250ms after its last send.
 The 228.0ms gap is the last send, forced out by the `session/snapshot` that ended streaming and read at the same millisecond as it; every other gap was at least 256.9ms.
 Nothing else the helper wrote came between the first and last of those sends.
+
+## A timer a jsonrpc.el notification handler starts runs after the rest of its chunk (OW-tujezi)
+
+Measured on the home server 2026-09-25, Emacs 31.1 in `--batch` with its bundled `jsonrpc.el` 1.0.29.
+
+**A `run-at-time 0` timer started from the handler of the first of six notifications written at once ran after all six had been handled.**
+That is what lets agentpane-mode record each `session/node` and draw the recorded nodes once, from a timer the first of a backlog starts, rather than drawing every node as it arrives (`agentpane--record` in `emacs/agentpane.el`).
+Read from source first: `jsonrpc--process-filter` parses every complete message in the chunk it is given and activates one timer per message, all set to the one `current-time` it took before activating the first; `timer--activate` in `timer.el` puts a timer ahead of the first one whose time is not less than its own, so those timers run in message order, and a `run-at-time 0` from inside one of them takes a later `current-time` and so lands after them all.
+The run confirmed it: a `sh -c` process wrote six framed notifications from one file with `cat`, and advice on `jsonrpc--process-filter` counted one call for the 432 bytes.
+The notification dispatcher pushed each one's number onto a log, and the first one's also started a `run-at-time 0` timer that pushed `flush`.
+The log read, in order:
+
+```
+(1 2 3 4 5 6 flush)
+```
+
+This run did not cover a backlog that reaches Emacs across several process-filter calls, as one larger than a read of the pipe does.
+From the source above, each call's timers take a time later than that of a timer started under an earlier call, so such a backlog is drawn once for each read that holds a node, not once for the whole backlog.
+
+To re-run, write the file below to `/tmp/jsonrpc-timers/drive.el` and run `emacs --batch -l /tmp/jsonrpc-timers/drive.el`.
+
+```elisp
+(require 'jsonrpc)
+(defvar filter-calls 0)
+(advice-add 'jsonrpc--process-filter :before (lambda (&rest _) (setq filter-calls (1+ filter-calls))))
+(defvar log nil)
+(defvar scheduled nil)
+(defun frame (n)
+  (let ((body (format "{\"jsonrpc\":\"2.0\",\"method\":\"note\",\"params\":{\"n\":%d}}" n)))
+    (format "Content-Length: %d\r\n\r\n%s" (length body) body)))
+(let* ((payload (mapconcat #'frame (number-sequence 1 6) ""))
+       (file (make-temp-file "burst" nil nil payload))
+       (proc (make-process :name "burst" :command (list "sh" "-c" (format "cat %s; sleep 3" file))
+                           :connection-type 'pipe :noquery t))
+       (conn (make-instance 'jsonrpc-process-connection :name "burst" :process proc
+                            :notification-dispatcher
+                            (lambda (_c _m params)
+                              (push (plist-get params :n) log)
+                              (unless scheduled
+                                (setq scheduled t)
+                                (run-at-time 0 nil (lambda () (push 'flush log))))))))
+  (ignore conn)
+  (let ((deadline (+ (float-time) 2)))
+    (while (and (< (length log) 7) (< (float-time) deadline))
+      (accept-process-output nil 0.05)))
+  (message "order: %S" (reverse log))
+  (message "filter calls: %d for %d bytes" filter-calls (length payload))
+  (delete-process proc))
+```
