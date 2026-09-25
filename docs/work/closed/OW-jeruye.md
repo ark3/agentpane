@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # The Emacs helper converts and sends every streamed token of the tail message, about 34 session/node notifications a second on Haiku, where sending at most one per node every 250 ms would do
@@ -43,3 +44,16 @@ Red first, then green, in `src/emacs/helper.test.ts`, with the interval driven b
 The existing test "opens the stream before the attach call, then yields one snapshot and one node per upsert, in order" is updated to the new contract rather than deleted.
 `bun run check` passes.
 A live run on the home server, a streamed Haiku reply of several hundred words through the helper, counts the `session/node` notifications it writes and finds them at no more than the rate 250 ms allows; that run goes into `docs/MANUAL_TESTING.md` with its version.
+
+## Close note
+
+Built: while a session streams, the Emacs helper (`src/emacs/helper.ts`) holds each `upsert` keyed by the node it projects to (a tool result under its call's node, via the new `locateUpsert` in `src/emacs/nodes.ts`) and sends what it holds from one 250 ms timer (`NODE_INTERVAL_MS`), rendering markdown (`projectTarget`) only for what it sends.
+Every other write -- any notification for any session, any JSON-RPC reply -- goes through a `write` wrapper that flushes held nodes first, so Emacs's ordering assumptions hold.
+Decisions the card left to the implementer: the first upsert after a quiet spell waits out the interval too (one timer, no second state); a held node is rendered from the transcript as it stood at its upsert, not the current state, which a snapshot moving the ref to a new handle would otherwise crash; held nodes go out in first-held order so a new node is never drawn ahead of an earlier one; detach, close and end of input drop held nodes.
+`buildTranscript` still runs per upsert inside `locateUpsert`; only the rendering is deferred, which is what the done condition asked for.
+
+Verified: 12 new or updated tests in `src/emacs/helper.test.ts` under the "the node throttle (OW-jeruye)" describe and the updated "opens the stream before the attach call..." test; all 9 original ones failed against the unchanged helper, and the three added after the adversarial read (cross-session order, captured transcript across a handle move, close by ref) each failed under a targeted mutation.
+`bun run check` passes on main (1427 tests).
+Live run on the home server, `claude 2.1.280` `--model haiku`, `bun 1.4.0`: 266 server upserts for the reply over 7.75 s became 28 `session/node`s, about 3.7 a second, every timer-driven gap at least 256.9 ms; recorded in `docs/MANUAL_TESTING.md`, "The Emacs helper's timer sends a streaming node at most once per 250 ms (OW-jeruye)".
+Not observed: agentpane-mode itself; the live run drove the helper directly.
+Filed from the review: OW-vejeka, a render that throws at flush now crashes the helper from the timer or fails a successful reply.
