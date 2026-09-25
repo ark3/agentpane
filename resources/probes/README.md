@@ -357,6 +357,22 @@ Costs tokens: two real model turns on `gpt-5.6-luna` without `--thread`, none wi
 Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
 What it showed is the same `docs/MANUAL_TESTING.md` section.
 
+## `hydrate_window_probe.py`
+
+Proves: **what each backend sends while an adapter reads a live session's history back** (OW-dutute), the window D24's merge-on-hydrate has to reconcile.
+`--backend codex` lists a thread's turns mid-stream the way a re-attach does and reports whether the streaming item is listed, and with how much of its text; `--backend pi` forks a streaming turn and resumes the abandoned file, recording every line from each request to the `get_messages` answer.
+It reuses `AppServer` from `codex_fork_same_process_probe.py` and `PiSession` from `fork_probe.py`, and spawns `pi` with the pinned `--model`.
+
+```bash
+python3 hydrate_window_probe.py --backend codex
+python3 hydrate_window_probe.py --backend pi
+```
+
+Costs tokens: one long Codex turn on `gpt-5.6-luna`, or three Pi turns, one of them cut short by the fork.
+
+Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24.
+What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back".
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's

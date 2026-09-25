@@ -3410,3 +3410,33 @@ The rollout stored each as a `response_item` of `type: "function_call_output"` c
 Nothing here went through agentpane's server, the browser or Emacs, and agentpane itself never sends `toolOutput`, so the item reaches a session only from a thread another client drove.
 Whether Codex emits the item any other way -- for a function call the model makes, say -- was not probed; the turns that ran here made none.
 Read from the code, not run: the session preview's reader in `src/server/sessions/codex.ts` returns nothing for a `function_call_output` without a `call_id`, so the preview drops this record.
+
+## What each backend says while a live session's history is read back (OW-dutute)
+
+Run on the home server 2026-09-24 by `python3 resources/probes/hydrate_window_probe.py --backend codex` and `--backend pi`, one invocation each, both exiting 0: `codex-cli 0.156.0` on `gpt-5.6-luna`, and `pi 0.87.1` spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, whose `get_state` named provider `openrouter`, model `deepseek/deepseek-v4.1-flash`, at `thinkingLevel: "high"`.
+Neither went through agentpane: each drives its CLI directly, in a throwaway state home and workspace, and records every line in wire order.
+D24's "Hydrate" paragraph makes every hydrate of a live session a merge, and what the backend sends between the request for the history and its answer decides that merge's shape, so the window was measured before either merge was written.
+The JSON each run printed was kept only in `/tmp`, so what is below is the whole of the record.
+
+**Codex: a turn listed mid-stream leaves out the item still streaming.**
+The probe started a turn asking for the numbers 1 through 400 and waited for its `agentMessage`'s `item/started` and forty `item/agentMessage/delta`s.
+It then sent, on the same connection, what `CodexAdapter.startBorrowed` sends on a re-attach: `thread/resume` with `excludeTurns: true`, then `thread/turns/list` at `itemsView: "full"`, `sortDirection: "asc"`.
+The resume went out at 41 deltas and was answered at 43; the only lines between request and answer were those two deltas, so the resume replayed no `turn/started` and no `item/started`.
+The listing went out and was answered with no line between, at 43 deltas and 56 streamed characters.
+It named one turn, `status: "inProgress"`, with two items: the `userMessage` and a completed `reasoning` item.
+The `agentMessage` those 43 deltas belonged to was not listed at all, so no partial text of it was either.
+After `turn/completed` (`status: "completed"`) the same listing named the same turn with that `agentMessage` as its third item, 1491 characters, equal to all the deltas the wire carried.
+So for an item that started before an attach, as of this version, nothing but its deltas carries its text until `item/completed`, and the listing can never hold a delta the stream also delivers, so opening a slot at the first delta applies nothing twice.
+That is the fix `CodexReducer.applyDelta` now makes (OW-zudase); the head of the text streamed before the attach still shows only once `item/completed` replaces the slot.
+One turn and one item kind were listed mid-stream; whether a running `commandExecution` or a `plan` is left out the same way was not probed.
+
+**Pi: the abandoned turn ends before the `fork` response, and nothing follows it.**
+The probe ran two short turns, then a third asking for the numbers 1 through 400, gated on forty `text_delta`s as OW-sededi's cell in `fork_probe.py` is, and forked at that third turn's own user message with the turn still streaming: 75 text deltas on the wire at the instant the request went out, `agent_settled` not yet seen.
+It then sent `get_state` and `get_messages`, as `PiAdapter.fork` does.
+Every line from the `fork` request to its response, in order: `message_update` `thinking_end`, `message_update` `text_end`, `message_end` for the assistant, `turn_end`, `agent_end`, `agent_settled`, then the `fork` response.
+Between the `fork` response and the `get_messages` answer there was nothing but the `get_state` response, and nothing arrived in the three seconds after.
+`get_messages` answered the rewound branch, a `system` message and the two short turns, with nothing of the third.
+A second process then resumed the abandoned file with `--session`, and sent `get_state` then `get_messages`, as `PiAdapter.start` does on a resume: no line arrived before, between or in the three seconds after their responses, and `get_messages` answered 7 messages, the third turn's partial reply among them.
+The Pi source read at 0.87.1 agrees: the RPC `fork` awaits `teardownCurrent`, which awaits `session.abort()` and its `waitForIdle`, and the rebind that follows drops the old session's event subscription before the response is written (`modes/rpc/rpc-mode.js` and `core/agent-session-runtime.js` in `@earendil-works/pi-coding-agent`).
+So on Pi the window a merge would have to reconcile is empty on both paths, and `hydrateMessages`'s replace is already the truncating merge D24 asks for.
+The test `process.test.ts` carries for it scripts `message_update`s into the window anyway and could not be shown red against the replace, since the replace drops them by construction; it was shown red instead against a union that kept the transcript's messages past Pi's answer, which let the parent's partial reply into the fork.

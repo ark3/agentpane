@@ -67,6 +67,7 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   So what the fork costs is the rest of the reply and the branch it was on, not the bytes already written.
   The empty assistant entry the first 0.85.1 run read in that file was a fork that landed about 2.2s in, before any text existed; that run gated on `agent_start` alone and could not tell the two apart, and the 0.84.2 run earned even less — it forked at the first user message, where exclusivity empties the new branch whatever became of the turn, and never opened the streamed-into file.
   The 0.85.1 runs also read the fork's moved-to session file as already on disk when `fork` returned, carrying the rewound prefix — samples at the instrument that had once read `false`.
+  As of `pi 0.87.1` the abandoned turn's last events, `agent_settled` among them, all arrived before the `fork` response, and nothing arrived between it and the `get_messages` answer that followed (OW-dutute), which is why `hydrateMessages` may replace the transcript.
   See `docs/MANUAL_TESTING.md` OW-sededi and OW-gajesu, and OW-yudoni for what the earliest run did and did not show.
 - Claude Code mid-turn handling settled live on the home server (2026-09-10, `claude 2.1.267`, explicit `--model haiku`): a stream-json user message written during a turn is acknowledged only after the first `result` and runs as a second turn, while a `steer` control request errors as unsupported.
   The adapter therefore rejects `submit()` and `/compact` while a turn is active; see `docs/MANUAL_TESTING.md` OW-jihete.
