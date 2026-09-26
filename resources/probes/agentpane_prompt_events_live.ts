@@ -99,7 +99,7 @@ function describe(event: Event): string {
 
 for (let attempt = 0; ; attempt++) {
 	try {
-		// A read-only route that answers 404 quietly: nothing is live yet.
+		// A path no route serves, which answers 404 and starts nothing.
 		if ((await fetch(`${base}/api/sessions/claude/probe/live`)).status > 0) break;
 	} catch {
 		if (attempt > 100) throw new Error("server did not come up");

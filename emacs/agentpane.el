@@ -83,7 +83,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 123 tests, 120 results as expected, 0 unexpected, 3 skipped
+;;     Ran 124 tests, 121 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -338,7 +338,9 @@ before that reply, the one the first notification it was sent carried,
 or one a later snapshot moved it onto; see `agentpane--notified-buffer'.
 Nil in a buffer that has not attached.  A buffer detached keeps the one
 it held, which the server never mints again: the parent of a Pi fork,
-whose container the server has let go, and whose detach names it.")
+whose container the server has let go, and whose detach names it.  One
+the helper told its handle is gone, by a `session/detached', lets go of
+it instead; see `agentpane--dropped'.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for a request that may spawn the session's backend:
@@ -422,6 +424,9 @@ non-nil, on the way out."
     (with-current-buffer buffer
       (funcall failed))))
 
+(defvar agentpane--attached)
+(defvar agentpane--dropped)
+
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
 Every one but `sessions/changed' is about one session, and goes to the
@@ -435,7 +440,9 @@ is found for is dropped.
 A `session/node' is recorded rather than drawn; see `agentpane--record'.
 Every other notification but a snapshot, whose redraw discards what is
 recorded, draws what is recorded first, so it finds the buffer as it
-would have had each node been drawn on arrival."
+would have had each node been drawn on arrival.
+A `session/detached' says the server let go of the handle the buffer
+holds, and the buffer lets go of it too; see `agentpane--dropped'."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
     (let ((buffer (agentpane--notified-buffer method params)))
@@ -462,14 +469,20 @@ would have had each node been drawn on arrival."
             ('session/errorCleared (agentpane--hold-error nil))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
-            ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))))))))
+            ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
+            ('session/detached
+             (setq agentpane--handle nil
+                   agentpane--attached nil
+                   agentpane--dropped t))))))))
 
 (defvar agentpane--attach-sent)
 
 (defun agentpane--notified-buffer (method params)
   "The transcript buffer the notification METHOD, with PARAMS, is about.
 The buffer holding the notification's handle; failing that, one found by
-a ref as below, which then takes the handle; else nil.
+a ref as below, which then takes the handle; else nil.  A
+`session/detached' is only ever about the buffer holding its handle: the
+handle is gone, and no buffer holding the ref alone ever held it.
 
 By the ref, a buffer holding no handle, which for a notification is one
 whose attach has not yet answered: the helper sends nothing for a
@@ -489,15 +502,6 @@ only in a buffer that sent an attach and holds no handle, and ahead of
 the match by `session', which a buffer only previewing the new ref, an
 attached buffer's session having been renamed onto it, would win.
 
-A `session/snapshot' carrying `movedFrom' goes to the buffer holding that
-handle, whatever ref it names: the helper moved that buffer's attachment
-onto the snapshot's handle, having asked the server which live handle the
-ref it last named the session by names now -- another client's re-attach,
-or one after a server restart, minted it -- and where the re-attached
-container was renamed in the same outage of the helper's stream, the
-snapshot's ref is one the buffer never heard (`reconcile' in
-src/emacs/helper.ts, OW-gusaru).
-
 A `session/snapshot' also moves a buffer from one handle to another by
 the ref, where the buffer holds a handle: the snapshot that answers the
 buffer's own attach, sent from a handle the server no longer has, under
@@ -507,16 +511,16 @@ stored session that an attached buffer was since renamed onto, which the
 helper never fed."
   (let ((handle (plist-get params :handle))
         (ref (plist-get params :session))
-        (asked (plist-get params :askedFor))
-        (moved (plist-get params :movedFrom)))
-    (or (and handle (agentpane--buffer-holding handle))
-        (and moved (agentpane--buffer-holding moved))
-        (and asked
-             (agentpane--buffer-for asked (lambda () (and agentpane--attach-sent
-                                                          (not agentpane--handle)))))
-        (and (eq method 'session/snapshot)
-             (agentpane--buffer-for ref (lambda () agentpane--handle)))
-        (agentpane--buffer-for ref (lambda () (not agentpane--handle))))))
+        (asked (plist-get params :askedFor)))
+    (if (eq method 'session/detached)
+        (and handle (agentpane--buffer-holding handle))
+      (or (and handle (agentpane--buffer-holding handle))
+          (and asked
+               (agentpane--buffer-for asked (lambda () (and agentpane--attach-sent
+                                                            (not agentpane--handle)))))
+          (and (eq method 'session/snapshot)
+               (agentpane--buffer-for ref (lambda () agentpane--handle)))
+          (agentpane--buffer-for ref (lambda () (not agentpane--handle)))))))
 
 ;;;; Rendering HTML through shr
 
@@ -1694,6 +1698,19 @@ has attached nothing.")
 it; see `agentpane--detach', and `agentpane--notified-buffer', which binds
 a snapshot's `askedFor' only to such a buffer.")
 
+(defvar-local agentpane--dropped nil
+  "Non-nil once the helper said the handle this buffer held is gone, by a
+`session/detached', until an attach of this buffer's answers: its
+reopened event stream's listing lacked the handle, a server restart or a
+close elsewhere having let go of it (OW-yibijo).  The buffer then holds no
+handle and is not attached, and keeps its ref and what it drew, so
+`agentpane-refetch' attaches again rather than drawing the stored
+transcript over the live one.  That attach, or a prompt's, is a first
+attach of whatever handle answers: `agentpane--notified-buffer' binds a
+snapshot under a new handle and ref to this buffer by its `askedFor', and
+`agentpane--attached-as' merges it into a buffer already holding that
+handle.  It stays set when that attach fails, so a `g' attaches again.")
+
 (defvar-local agentpane--attaching nil
   "While a `sessions/attach' this buffer sent has not answered, the callers
 waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
@@ -1906,7 +1923,7 @@ the picker refetches its buffer, and an error would leave it unshown."
     (message "agentpane: still attaching; the attach's snapshot redraws the transcript"))
    (agentpane--forking
     (message "agentpane: a fork of this session is in flight; refetch once it lands"))
-   ((agentpane--attached-p)
+   ((or (agentpane--attached-p) agentpane--dropped)
     (agentpane--attach))
    (t
     (agentpane--request 'sessions/preview
@@ -1984,7 +2001,8 @@ back to the session id keeps the old one."
 the session's handle, and its ref, which is authoritative and may differ
 from the one asked for.  Return non-nil when that merged another buffer
 into this one, which then wants a snapshot; see `agentpane--absorb'."
-  (setq agentpane--attached agentpane--connection)
+  (setq agentpane--attached agentpane--connection
+        agentpane--dropped nil)
   (let* ((handle (plist-get summary :handle))
          (other (and handle (agentpane--buffer-holding handle))))
     (setq agentpane--handle handle)

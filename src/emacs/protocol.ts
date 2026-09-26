@@ -11,7 +11,8 @@
  * one use no other notification covered -- joining the ref an attach asked
  * for to the handle it was answered under -- `session/snapshot`'s
  * `askedFor` took over (OW-mofuho). OW-gusaru raised it a third time, for
- * `session/snapshot`'s `movedFrom`.
+ * `session/snapshot`'s `movedFrom`, and OW-yibijo a fourth, retiring
+ * `movedFrom` for `session/detached`.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -221,14 +222,6 @@
  *   is outstanding runs only once that one returns, while notifications are
  *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
  *   after later notifications").
- *   `movedFrom` (a handle, only on the snapshot that moves an attachment) is
- *   the handle the session was attached under until the helper learned from
- *   the server that the ref it last named the session by now names `handle`:
- *   the session was attached again under a new handle, by another client or
- *   after a server restart, while Emacs held the old one; and where a rename
- *   of the re-attached container fell in the same outage of the helper's
- *   stream, `session` is a ref Emacs never heard (OW-gusaru). The
- *   buffer holding `movedFrom` takes `handle` and `session` from it.
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
  *   `index`.
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
@@ -261,9 +254,19 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
+ * - `session/detached` -- `{ session, handle }`. The server no longer holds
+ *   `handle`, and nothing more comes under it: the helper's listing after
+ *   it reopened its event stream lacked it -- a server restart, or a close
+ *   by another client while the stream was down -- and the helper has
+ *   dropped the attachment (OW-yibijo). `session` is the ref it last named
+ *   the session by. The buffer holding `handle` lets go of it and counts
+ *   itself detached, keeping its ref and what it drew; its next
+ *   `sessions/attach`, by that ref, is answered under whatever handle and
+ *   ref the session has now, if any, as a first attach is.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
- *   while it was down is gone.
+ *   while it was down is gone, and before any `session/detached` that
+ *   reopen's listing brings.
  */
 
 import type {
@@ -325,7 +328,6 @@ export type HelperNotification =
 				requests: AgentRequest[];
 				notices: AgentNotice[];
 				askedFor?: SessionRef;
-				movedFrom?: string;
 			};
 	  }
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
@@ -335,6 +337,7 @@ export type HelperNotification =
 	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
+	| { method: "session/detached"; params: { session: SessionRef; handle: string } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {
