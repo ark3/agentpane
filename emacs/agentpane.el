@@ -79,7 +79,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 115 tests, 112 results as expected, 0 unexpected, 3 skipped
+;;     Ran 118 tests, 115 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -593,6 +593,27 @@ with the face on top."
     (shr-generic dom)
     (add-face-text-property start (point) 'agentpane-th)))
 
+(defun agentpane--shr-li (dom)
+  "Draw DOM, a list item, as shr does, but number an ordered one `1.'.
+`shr-tag-li' draws the counter as a bare number (Emacs 31.1, 2026-09-25),
+where the browser draws `1.'.  This is its ordered arm with the period, so
+the indent of whatever the item nests is measured past the whole marker."
+  (if (not (numberp shr-list-mode))
+      (shr-tag-li dom)
+    (shr-ensure-newline)
+    (let ((start (point))
+          (bullet (format "%d. " shr-list-mode)))
+      (setq shr-list-mode (1+ shr-list-mode))
+      (insert bullet)
+      (shr-mark-fill start)
+      (let ((shr-indentation (+ shr-indentation (shr-string-pixel-width bullet))))
+        (put-text-property start (1+ start)
+                           'shr-continuation-indentation shr-indentation)
+        (put-text-property start (1+ start) 'shr-prefix-length (length bullet))
+        (shr-generic dom)))
+    (unless (bolp)
+      (insert "\n"))))
+
 (defun agentpane--lift-emphasis (beg end)
   "Move `bold' and `italic' to the front of every face list between BEG and END.
 shr prepends `shr-text' to a run after the emphasis face is already on it,
@@ -651,7 +672,8 @@ one pass in one buffer, the indent drawn is the one measuring again gives."
            (h5 . agentpane--shr-h3)
            (h6 . agentpane--shr-h3)
            (table . agentpane--shr-table)
-           (th . agentpane--shr-th)))
+           (th . agentpane--shr-th)
+           (li . agentpane--shr-li)))
         (start (point)))
     (shr-insert-document dom)
     (agentpane--lift-emphasis start (point))
@@ -662,7 +684,7 @@ one pass in one buffer, the indent drawn is the one measuring again gives."
     ;; wraps at all.
     (setq truncate-lines nil)
     (unless (bolp) (insert "\n"))
-    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\|[-–*•‣⁃◦]\\)[ \t]+\\)?")
+    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\.?\\|[-–*•‣⁃◦]\\)[ \t]+\\)?")
           (widths (make-hash-table :test 'agentpane--same-text))
           (measure (symbol-function 'string-pixel-width)))
       (save-restriction

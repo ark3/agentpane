@@ -379,10 +379,10 @@ so the widths here are the marker's column counts."
           (1 2 (min-width ((6 . width)))) (2 3 (min-width ((6 . width))))))
         ("* three" (space :align-to (2 . width))
          ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
-        ("1 first" (space :align-to (2 . width))
-         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
-        ("2 second" (space :align-to (2 . width))
-         ((0 1 (min-width ((2 . width)))) (1 2 (min-width ((2 . width))))))
+        ("1. first" (space :align-to (3 . width))
+         ((0 1 (min-width ((3 . width)))) (1 3 (min-width ((3 . width))))))
+        ("2. second" (space :align-to (3 . width))
+         ((0 1 (min-width ((3 . width)))) (1 3 (min-width ((3 . width))))))
         (" quoted"
          ((0 1 (face nil shr-prefix-length 1 display (space :width (4.0 . width)))))
          ((0 1 (space :width (4.0 . width)))))
@@ -390,6 +390,20 @@ so the widths here are the marker's column counts."
          ((0 1 (min-width ((5 . width)))) (1 5 (min-width ((5 . width))))))
         ("- dash" (space :align-to (2 . width)) ((0 2 (min-width ((2 . width))))))
         ("  indented" ((0 2 (face (agentpane-code agentpane-code-block)))) nil))))))
+
+(ert-deftest agentpane-test-ordered-list-markers-read-like-the-browser ()
+  "An ordered list's markers read `1.' and `2.', as the browser draws them,
+where shr's own are bare numbers; a list given a start counts from it, and
+a wrapped row hangs past the whole `1. ' marker."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     (vector (list :index 1 :role "assistant"
+                   :parts (vector (list :type "text" :text ""
+                                        :html "<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n<ol start=\"7\">\n<li>seventh</li>\n</ol>\n")))))
+    (let ((layout (agentpane-test--wrap-layout)))
+      (should (equal (mapcar #'car layout) '("1. first" "2. second" "7. seventh")))
+      (should (equal (nth 1 (assoc "1. first" layout)) '(space :align-to (3 . width)))))))
 
 (ert-deftest agentpane-test-list-rows-measure-once-per-text-part ()
   "A text part of forty plain paragraphs and twelve bulleted rows, in four
