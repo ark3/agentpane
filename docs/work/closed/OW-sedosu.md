@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # Emacs holds one turn error, the server's, where it now draws one line per session/error
@@ -32,3 +33,13 @@ Done when ERT tests in `emacs/agentpane-test.el` show the following, the first t
 - `C-c C-d` after two `session/error`s names the second to `sessions/dismissError` and leaves no `⚠` line (the existing `agentpane-test-dismiss-error-names-it-to-the-server` rewritten to that, if its shape no longer holds);
 - a snapshot handled after the prompt's reply and still holding the cleared error draws its `⚠` line, and the clearing snapshot handled after it leaves none, as the recorded decision says;
 and the existing OW-vulusi tests `agentpane-test-admitted-prompt-drops-the-drawn-error` and `agentpane-test-admitted-prompt-keeps-a-newer-error` still pass, with the full ERT suite run as the Commentary of `emacs/agentpane.el` gives it.
+
+## Close note
+
+Built: one buffer-local slot, `agentpane--error` in `emacs/agentpane.el`, owns the session's turn error as `session.error` does on the server. A snapshot sets it (`agentpane--draw`), `session/error` replaces it and its one line (`agentpane--hold-error`), `C-c C-d` names it to `sessions/dismissError` and clears it, and the prompt's answer clears it only while it still holds the message held at send (OW-31's rule). Retired: the send-time message list in `agentpane--send-prompt` and the "drawn last" choice in `agentpane-dismiss-error`.
+
+Amended at execution: OW-yirosu (ab6b1ef) had made Claude's `beginTurn` a status event, which removed the card's example of a stale snapshot, and had made `submit` snapshot whenever it clears the error. Decision, recorded in the slot's docstring: a snapshot always sets the slot, because the clearing snapshot follows a stale one on the same ordered stream.
+
+Verified: new ERT tests `agentpane-test-error-replaces-the-held-one` and `agentpane-test-error-resent-in-flight-survives-the-answer` (the reader's case) fail against the pre-change agentpane.el and pass after. `agentpane-test-dismiss-error-names-it-to-the-server` (rewritten to two session/errors) and `agentpane-test-stale-snapshot-redraws-the-cleared-error` pin behaviour the old code already had. The adversarial read found an `equal`→`eq` mutant that survived, so the snapshots in `agentpane-test-admitted-prompt-drops-the-drawn-error` now carry fresh strings, and that mutant now fails it. The batch run gives 121 tests, 118 as expected, 3 skipped, and the tty run passes 3.
+
+The read also found two gaps outside this card, filed as new cards. OW-vumuki: the server's `clearError` announces nothing, so a stale snapshot can redraw a dismissed error in both clients. OW-lokima: Emacs attaches before a first prompt, so the server reads the prior error after the start.
