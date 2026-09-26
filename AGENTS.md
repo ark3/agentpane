@@ -115,6 +115,9 @@ Do not take formatting from the cards already in the deck.
 `card author` sets the body's shape — one sentence per line — and the existing cards are hard-wrapped instead, so a card read for prior art teaches the wrong house style while looking authoritative.
 Read those cards for their content and the payload for their form.
 
+`card author` sweeps the closed pile before writing, and here the sweep takes in the open pile too, with the same `card cmd -- rg -l '<term>' open`.
+A finding a review names is often one an earlier review already filed: OW-lokima duplicated OW-bomolu on 2026-09-25, filed from two adversarial reads one run apart, and closed moot the next day.
+
 ### Labels
 
 Card treats labels as opaque strings and cannot know this repo's set.
