@@ -684,7 +684,19 @@ one pass in one buffer, the indent drawn is the one measuring again gives."
     ;; wraps at all.
     (setq truncate-lines nil)
     (unless (bolp) (insert "\n"))
-    (let ((adaptive-fill-regexp "[ \t]*\\(\\([0-9]+\\.?\\|[-–*•‣⁃◦]\\)[ \t]+\\)?")
+    ;; A list row is known by the `shr-continuation-indentation' that
+    ;; `shr-tag-li' and `agentpane--shr-li' leave on its marker's first
+    ;; character, past any indent (Emacs 31.1, 2026-09-25), not by its text:
+    ;; a paragraph opening `2024 ' or a code line opening `- ' would
+    ;; otherwise hang past a marker that is not one, which the browser
+    ;; does not do.  Any other line's prefix is its leading whitespace.
+    (let ((adaptive-fill-regexp "[ \t]*")
+          (adaptive-fill-function
+           (lambda ()
+             (and (looking-at "[ \t]*\\([0-9]+\\.?\\|[-–*•‣⁃◦]\\)[ \t]+")
+                  (get-text-property (match-beginning 1)
+                                     'shr-continuation-indentation)
+                  (match-string 0))))
           (widths (make-hash-table :test 'agentpane--same-text))
           (measure (symbol-function 'string-pixel-width)))
       (save-restriction

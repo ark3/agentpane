@@ -353,11 +353,11 @@ DISPLAY) from the line's start."
     (nreverse lines)))
 
 (ert-deftest agentpane-test-text-part-hanging-indents ()
-  "A drawn text part's list rows, and any line opening with a number or a dash,
-carry visual-wrap's hanging indent, a `wrap-prefix' aligned past the marker
-and a `min-width' on the marker; an indented line's prefix is its own
-indentation, and a plain line has none.  Batch Emacs measures in columns,
-so the widths here are the marker's column counts."
+  "A drawn text part's list rows carry visual-wrap's hanging indent, a
+`wrap-prefix' aligned past the marker and a `min-width' on the marker; an
+indented line's prefix is its own indentation, and a plain line has none,
+even one that opens with a number or a dash as a marker would.  Batch Emacs
+measures in columns, so the widths here are the marker's column counts."
   (with-temp-buffer
     (agentpane-transcript-mode)
     (agentpane--draw
@@ -386,9 +386,8 @@ so the widths here are the marker's column counts."
         (" quoted"
          ((0 1 (face nil shr-prefix-length 1 display (space :width (4.0 . width)))))
          ((0 1 (space :width (4.0 . width)))))
-        ("2024 was a year." (space :align-to (5 . width))
-         ((0 1 (min-width ((5 . width)))) (1 5 (min-width ((5 . width))))))
-        ("- dash" (space :align-to (2 . width)) ((0 2 (min-width ((2 . width))))))
+        ("2024 was a year." nil nil)
+        ("- dash" nil nil)
         ("  indented" ((0 2 (face (agentpane-code agentpane-code-block)))) nil))))))
 
 (ert-deftest agentpane-test-ordered-list-markers-read-like-the-browser ()
