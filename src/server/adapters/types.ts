@@ -37,6 +37,19 @@ export interface AdapterState {
 	unrestoredModel?: string | null;
 }
 
+/**
+ * What an `onUpdate` says moved, which decides what the server sends (D3):
+ *
+ *  - a number: the index of the one message that was added or changed, sent
+ *    as an upsert. The status fields may have moved with it.
+ *  - `"status"`: no message changed; only `isStreaming`, `compaction`,
+ *    `model`, `effort` or `unrestoredModel` may have, sent as a `status`
+ *    event. A turn's start and end are this (OW-yirosu).
+ *  - `"transcript"`: the messages were replaced wholesale -- a hydrate, a
+ *    reset, a fork's rewind -- which only a snapshot can report.
+ */
+export type StateChange = number | "status" | "transcript";
+
 export type Unsubscribe = () => void;
 
 export interface ImageInput {
@@ -164,12 +177,13 @@ export interface BackendAdapter {
 	 * Fires on every state change. The server translates these into snapshot /
 	 * upsert events; adapters do not know about `seq` or the wire at all.
 	 *
-	 * `changedIndex` is the index of the single message that changed, when the
-	 * adapter knows it -- that is what makes the tail-upsert path O(1). Omit it
-	 * and the server falls back to a full snapshot, which is correct but
-	 * quadratic over a long turn.
+	 * `change` says what moved (`StateChange`), and every emitter names it:
+	 * the index of the one message that changed is what makes the tail-upsert
+	 * path O(1), a status-only change costs one small event, and only a
+	 * replaced transcript costs a snapshot, which over a long session is
+	 * the whole transcript for every client to re-render.
 	 */
-	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe;
+	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe;
 	/**
 	 * Fires the moment `ref` takes a different id, synchronously and before the
 	 * adapter emits anything else under it, so the manager names the session's

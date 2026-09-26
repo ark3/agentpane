@@ -2261,9 +2261,9 @@ once; a send whose attach or prompt failed frees the buffer for another."
 
 (ert-deftest agentpane-test-admitted-prompt-drops-the-drawn-error ()
   "A prompt's answer drops the turn error drawn when it was sent, as the
-browser's banner goes once the prompt is admitted (OW-vulusi), though the
-attach's snapshot and the turn's first redrew it meanwhile, as Claude
-Code's do, each as a fresh node carrying the same message."
+browser's banner goes once the prompt is admitted (OW-vulusi), though
+snapshots redrew it meanwhile, as the attach's does, each as a fresh node
+carrying the same message."
   (let ((ref '(:backend "claude" :id "c1"))
         (snapshot (lambda (ref)
                     (agentpane--on-notification

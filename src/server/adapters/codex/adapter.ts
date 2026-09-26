@@ -18,6 +18,7 @@ import type {
 	ForkResult,
 	ImageInput,
 	StartOptions,
+	StateChange,
 	Unsubscribe,
 } from "../types.ts";
 import { CodexConnection, CodexConnectionRegistry, type CodexConnectionHolder } from "./connection.ts";
@@ -214,7 +215,7 @@ export class CodexAdapter implements BackendAdapter {
 	/** Turn ids in transcript order; `fork` needs the *previous* turn (see `fork`). */
 	private turnOrder: string[] = [];
 
-	private updateListeners = new Set<(state: AdapterState, changedIndex?: number) => void>();
+	private updateListeners = new Set<(state: AdapterState, change: StateChange) => void>();
 	private requestListeners = new Set<(request: AgentRequest) => void>();
 	private resolvedListeners = new Set<(requestId: string) => void>();
 	private errorListeners = new Set<(message: string) => void>();
@@ -806,7 +807,7 @@ export class CodexAdapter implements BackendAdapter {
 		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort };
 	}
 
-	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
+	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
 		this.updateListeners.add(cb);
 		return () => this.updateListeners.delete(cb);
 	}
@@ -913,13 +914,13 @@ export class CodexAdapter implements BackendAdapter {
 			if (info && !info.efforts.some((option) => option.id === this.effort)) this.effort = info.defaultEffort;
 		}
 		this.model = model;
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	/** Takes effect on the next `turn/start`, like `setModel`. */
 	async setEffort(effort: string): Promise<void> {
 		this.effort = effort;
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
@@ -1011,9 +1012,11 @@ export class CodexAdapter implements BackendAdapter {
 					this.turnBusy = { source: "lifecycle", turnId: effect.turnId };
 					break;
 				case "reset":
+					this.emitUpdate("transcript");
+					break;
 				case "streaming":
 				case "compaction":
-					this.emitUpdate(undefined);
+					this.emitUpdate("status");
 					break;
 				case "request": {
 					// A kind with no entry in `DECLINE_RESPONSES` is one nothing here
@@ -1087,9 +1090,9 @@ export class CodexAdapter implements BackendAdapter {
 		}
 	}
 
-	private emitUpdate(changedIndex?: number): void {
+	private emitUpdate(change: StateChange): void {
 		const state = this.getState();
-		for (const listener of [...this.updateListeners]) listener(state, changedIndex);
+		for (const listener of [...this.updateListeners]) listener(state, change);
 	}
 
 	private emitError(message: string): void {

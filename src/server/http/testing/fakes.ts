@@ -31,6 +31,7 @@ import type {
 	ForkResult,
 	ImageInput,
 	StartOptions,
+	StateChange,
 	Unsubscribe,
 } from "../../adapters/types.ts";
 import type { SessionIndex } from "../deps.ts";
@@ -189,7 +190,7 @@ export class FakeAdapter implements BackendAdapter {
 	isStreaming = false;
 	compaction: "requesting" | "running" | null = null;
 
-	#updates = new Set<(state: AdapterState, changedIndex?: number) => void>();
+	#updates = new Set<(state: AdapterState, change: StateChange) => void>();
 	#requests = new Set<(request: AgentRequest) => void>();
 	#resolved = new Set<(requestId: string) => void>();
 	#errors = new Set<(message: string) => void>();
@@ -294,7 +295,7 @@ export class FakeAdapter implements BackendAdapter {
 		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null, unrestoredModel: this.unrestoredModel ?? null };
 	}
 
-	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
+	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
 		this.#updates.add(cb);
 		return () => this.#updates.delete(cb);
 	}
@@ -327,12 +328,12 @@ export class FakeAdapter implements BackendAdapter {
 	async setModel(model: string): Promise<void> {
 		await this.options.onSetModel?.(model);
 		this.model = model;
-		this.#emit(undefined);
+		this.#emit("status");
 	}
 
 	async setEffort(effort: string): Promise<void> {
 		this.effort = effort;
-		this.#emit(undefined);
+		this.#emit("status");
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
@@ -368,19 +369,25 @@ export class FakeAdapter implements BackendAdapter {
 		return this.replaceTail(assistantMessage(text + token));
 	}
 
-	/** A state change the adapter cannot localise -- the server must fall back to a snapshot. */
-	emitUnlocalisedChange(): void {
-		this.#emit(undefined);
+	/** The transcript was replaced wholesale, as a hydrate or a fork's rewind replaces it -- only a snapshot says so. */
+	emitTranscriptReplaced(): void {
+		this.#emit("transcript");
 	}
 
-	setStreaming(isStreaming: boolean, changedIndex?: number): void {
+	/** Report the status fields as they stand, with no message changed. */
+	emitStatus(): void {
+		this.#emit("status");
+	}
+
+	/** A turn boundary, which every real adapter reports as status-only (OW-yirosu). */
+	setStreaming(isStreaming: boolean, change: StateChange = "status"): void {
 		this.isStreaming = isStreaming;
-		this.#emit(changedIndex ?? this.messages.length - 1);
+		this.#emit(change);
 	}
 
-	setCompaction(compaction: "requesting" | "running" | null, changedIndex?: number): void {
+	setCompaction(compaction: "requesting" | "running" | null, change: StateChange = "status"): void {
 		this.compaction = compaction;
-		this.#emit(changedIndex);
+		this.#emit(change);
 	}
 
 	/** The agent blocks until this is answered (D2a). */
@@ -412,9 +419,9 @@ export class FakeAdapter implements BackendAdapter {
 		this.replies.push({ requestId, response });
 	}
 
-	#emit(changedIndex?: number): void {
+	#emit(change: StateChange): void {
 		const state = this.getState();
-		for (const cb of [...this.#updates]) cb(state, changedIndex);
+		for (const cb of [...this.#updates]) cb(state, change);
 	}
 
 	#moveTo(ref: SessionRef, cause: "rename" | "fork"): void {

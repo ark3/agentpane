@@ -368,7 +368,7 @@ describe("CodexAdapter lifecycle", () => {
 			model: "gpt-started",
 			provider: "openai",
 		});
-		expect(updates).toHaveBeenCalledWith(adapter.getState(), undefined);
+		expect(updates).toHaveBeenCalledWith(adapter.getState(), "transcript");
 	});
 
 	it("carries both policies onto the forked thread", async () => {
@@ -1582,7 +1582,7 @@ describe("CodexAdapter turns", () => {
 		adapter.onUpdate(updates);
 
 		await adapter.setEffort("low");
-		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), undefined);
+		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), "status");
 		await adapter.submit("use it");
 
 		expect(request(proc, "turn/start")["params"]).toMatchObject({ effort: "low" });
@@ -2013,7 +2013,8 @@ describe("CodexAdapter reducer effects", () => {
 			},
 		});
 
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null }, undefined);
+		// The turn's start moved the status alone (OW-yirosu).
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null }, "status");
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

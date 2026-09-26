@@ -295,7 +295,11 @@ export function createApp(deps: AppDeps): App {
 				// start raises is not one the sender saw, so admitting this prompt
 				// must not clear it (OW-31, OW-bipume).
 				const priorError = sessions.errorOf(ref);
-				await sessions.attach(ref);
+				// Only a session not yet running is attached here. An attach
+				// re-snapshots one already attached, which a prompt has no use for
+				// and every client pays for with a whole-transcript redraw
+				// (OW-yirosu); the GET above is the attach that wants it.
+				if (!sessions.isAttached(ref)) await sessions.attach(ref);
 				// Through the manager, not straight at the adapter: it queues the
 				// prompt behind the session's other verbs (D24).
 				//

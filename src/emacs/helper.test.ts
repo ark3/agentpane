@@ -790,7 +790,7 @@ describe("notifications", () => {
 		const notice = { kind: "warning", message: "fallback metadata", details: null, path: null };
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
 		source.emit({ type: "notice", session: pi, handle: h(pi), seq: 2, notice });
-		// A Codex turn's start or end re-snapshots the session (`#onUpdate` with no index).
+		// A later snapshot of the session, such as a GET attach re-sends.
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [notice] });
 		await io.until(4);
 		const [first, , second] = io.notifications();

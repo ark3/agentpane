@@ -160,6 +160,7 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 
 - snapshot on attach, reconnect, and session switch
 - `{seq, index, message}` upsert during a turn — O(1) per token
+- a `status` event for a change to the status fields alone, a turn's start and end among them; beyond the three above, a snapshot goes out only where nothing smaller can say what changed — a transcript replaced wholesale, or a held turn error a prompt's admission cleared (OW-yirosu)
 - a monotonic `seq` detects a dropped update; recovery is "re-snapshot"
 
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.

@@ -19,6 +19,7 @@ import {
 	type ForkResult,
 	type ImageInput,
 	type StartOptions,
+	type StateChange,
 	type Unsubscribe,
 } from "../types.ts";
 import type { AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
@@ -42,7 +43,7 @@ import {
 	thinkingLevels,
 } from "./protocol.ts";
 
-type UpdateListener = (state: AdapterState, changedIndex?: number) => void;
+type UpdateListener = (state: AdapterState, change: StateChange) => void;
 type RequestListener = (request: AgentRequest) => void;
 type ErrorListener = (message: string) => void;
 type RefListener = (ref: SessionRef, cause: "rename" | "fork") => void;
@@ -391,7 +392,7 @@ export class PiAdapter implements BackendAdapter {
 			catalogue.data.models,
 		);
 		this.state = { ...this.state, messages: labelled };
-		this.emitUpdate(undefined);
+		this.emitUpdate("transcript");
 	}
 
 	/**
@@ -497,12 +498,12 @@ export class PiAdapter implements BackendAdapter {
 	 */
 	async compact(): Promise<void> {
 		this.state = { ...this.state, compaction: "requesting" };
-		this.emitUpdate();
+		this.emitUpdate("status");
 		try {
 			await this.sendCommand<PiResponseFor<"compact">>({ type: "compact" });
 		} catch (error) {
 			this.state = { ...this.state, compaction: null };
-			this.emitUpdate();
+			this.emitUpdate("status");
 			throw error;
 		}
 	}
@@ -676,7 +677,7 @@ export class PiAdapter implements BackendAdapter {
 		this.settingModel = true;
 		const response = await this.sendCommand<PiResponseFor<"set_model">>({ type: "set_model", provider, modelId })
 			.catch((error: unknown) => {
-				if (this.syncEffort()) this.emitUpdate();
+				if (this.syncEffort()) this.emitUpdate("status");
 				throw error instanceof PiCommandError ? new BackendRefusedError(modelRefusal(model, error.message)) : error;
 			})
 			.finally(() => {
@@ -693,7 +694,7 @@ export class PiAdapter implements BackendAdapter {
 			this.chosenEffort = null;
 		}
 		this.syncEffort();
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	/** Sent now, not held for the next prompt: Pi has a standalone command, and records it in the session file. */
@@ -745,14 +746,16 @@ export class PiAdapter implements BackendAdapter {
 		}
 		if (parsed.type === "thinking_level_changed") {
 			this.thinkingLevel = parsed.level;
-			if (!this.settingModel && this.syncEffort()) this.emitUpdate();
+			if (!this.settingModel && this.syncEffort()) this.emitUpdate("status");
 			return;
 		}
 
 		const result = reducePiNotification(this.state, parsed);
 		const changed = result.state !== this.state;
 		this.state = result.state;
-		if (changed) this.emitUpdate(result.changedIndex);
+		// Nothing the reducer does replaces the transcript, so an update that
+		// names no message moved only the status fields (OW-yirosu).
+		if (changed) this.emitUpdate(result.changedIndex ?? "status");
 		if (result.request) {
 			const { requestId, kind } = result.request;
 			this.emitRequest({ session: this.ref, ...result.request });
@@ -802,7 +805,7 @@ export class PiAdapter implements BackendAdapter {
 
 		if (this.state.isStreaming) {
 			this.state = { ...this.state, isStreaming: false };
-			this.emitUpdate(undefined);
+			this.emitUpdate("status");
 		}
 		// A disposed adapter closing is the expected end of its life, not news.
 		if (!this.disposed) this.emitError(message);
@@ -832,9 +835,9 @@ export class PiAdapter implements BackendAdapter {
 		this.child.stdin.write(`${JSON.stringify(obj)}\n`);
 	}
 
-	private emitUpdate(changedIndex?: number): void {
+	private emitUpdate(change: StateChange): void {
 		const snapshot = this.getState();
-		for (const cb of this.updateListeners) cb(snapshot, changedIndex);
+		for (const cb of this.updateListeners) cb(snapshot, change);
 	}
 
 	private emitRequest(request: AgentRequest): void {

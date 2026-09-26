@@ -2214,8 +2214,8 @@ The answer drops every turn error drawn when TEXT was sent, as the
 browser's banner goes once the prompt is admitted (OW-vulusi); one that
 arrived since stays, as `submit' in src/client/controller.ts keeps it
 \(OW-31), unless its message is one of those.  The match is by message,
-since a snapshot landing meanwhile, such as the attach's or the turn's
-first on Claude Code, draws the same error again as a fresh node."
+since a snapshot landing meanwhile, such as the attach's, draws the same
+error again as a fresh node."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)

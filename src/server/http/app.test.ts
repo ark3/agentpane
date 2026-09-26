@@ -392,7 +392,7 @@ describe("SSE stream", () => {
 
 		// Only ever the tail moves, and it moves by index -- never by resending
 		// the transcript. That is what makes a turn O(1) per token.
-		expect(client.typed("upsert").map((u) => u.index)).toEqual([0, 0, 1, 1, 1]);
+		expect(client.typed("upsert").map((u) => u.index)).toEqual([0, 1, 1]);
 		expect(client.typed("status").map((s) => s.isStreaming)).toEqual([true, false]);
 		expect(client.typed("snapshot")).toHaveLength(1);
 		// Contiguous seq from the snapshot onwards: nothing was missed.
@@ -412,7 +412,7 @@ describe("SSE stream", () => {
 
 		adapter?.append(userMessage("one"));
 		adapter?.messages.push(assistantMessage("compacted"));
-		adapter?.emitUnlocalisedChange();
+		adapter?.emitTranscriptReplaced();
 
 		await client.until(() => client.typed("snapshot").length === 2);
 		expect(client.transcript(PI_SESSION)).toHaveLength(2);
@@ -586,6 +586,20 @@ describe("prompting", () => {
 		await client.close();
 	});
 
+	it("sends no snapshot for a prompt to a session already attached (OW-yirosu)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const client = await openStream();
+		await client.waitForCount(1);
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello" })).status).toBe(202);
+		// An event after the prompt, so everything the prompt sent has arrived ahead of it.
+		pi.forRef(PI_SESSION)?.append(userMessage("hello"));
+		await client.until(() => client.typed("upsert").length === 1, "the upsert after the prompt");
+
+		expect(client.typed("snapshot")).toHaveLength(1);
+		await client.close();
+	});
+
 	it("tolerates SSE events that beat the POST response (D2)", async () => {
 		// An adapter that emits its whole turn synchronously inside submit() is
 		// the worst case for cross-channel ordering: every event is on the wire
@@ -716,8 +730,8 @@ describe("prompting", () => {
 		const client = await openStream();
 		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.compactions).toBe(1);
-		await client.until(() => client.typed("snapshot").some((event) => event.compaction === "requesting"));
-		expect(client.typed("snapshot").at(-1)).toMatchObject({ isStreaming: false, compaction: "requesting" });
+		await client.until(() => client.typed("status").some((event) => event.compaction === "requesting"));
+		expect(client.typed("status").at(-1)).toMatchObject({ isStreaming: false, compaction: "requesting" });
 		const reconnect = await openStream();
 		await reconnect.until(() => reconnect.typed("snapshot").length > 0);
 		expect(reconnect.typed("snapshot").at(-1)).toMatchObject({ session: PI_SESSION, compaction: "requesting" });

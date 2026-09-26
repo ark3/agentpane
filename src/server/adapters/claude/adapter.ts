@@ -150,6 +150,7 @@ import {
 	type ForkResult,
 	type ImageInput,
 	type StartOptions,
+	type StateChange,
 	type Unsubscribe,
 } from "../types.ts";
 import { spawnClaude, type ClaudeProcess, type ClaudeSpawner } from "./process.ts";
@@ -234,7 +235,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	private readonly controlNamespace = randomUUID();
 	private readonly pendingControls = new Map<string, PendingControl>();
 
-	private updateListeners = new Set<(state: AdapterState, changedIndex?: number) => void>();
+	private updateListeners = new Set<(state: AdapterState, change: StateChange) => void>();
 	private requestListeners = new Set<(request: AgentRequest) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
@@ -293,7 +294,7 @@ export class ClaudeAdapter implements BackendAdapter {
 				if (stored) {
 					this.model = stored.model;
 					this.modelFromStore = true;
-					this.emitUpdate();
+					this.emitUpdate("status");
 				}
 				await this.attachProcess({
 					cwd: opts.cwd,
@@ -499,7 +500,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		return { ...this.reducer.getState(), model: this.model, effort: this.effort };
 	}
 
-	onUpdate(cb: (state: AdapterState, changedIndex?: number) => void): Unsubscribe {
+	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
 		this.updateListeners.add(cb);
 		return () => this.updateListeners.delete(cb);
 	}
@@ -535,14 +536,14 @@ export class ClaudeAdapter implements BackendAdapter {
 		// A chosen effort outlives the switch, applied only while the model has
 		// effort at all (module doc), so what is in force is read, not kept.
 		await this.readSettings();
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	/** Sent now over the control channel; the effort in force is then read back (module doc). */
 	async setEffort(effort: string): Promise<void> {
 		await this.sendControl({ subtype: "apply_flag_settings", settings: { effortLevel: effort } });
 		await this.readSettings();
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	/**
@@ -593,14 +594,14 @@ export class ClaudeAdapter implements BackendAdapter {
 			if (!this.modelFromStore) return;
 			this.modelFromStore = false;
 			this.model = listed ?? inForce;
-			this.emitUpdate();
+			this.emitUpdate("status");
 			return;
 		}
 		if (this.model !== null) return;
 		const listed = listedModelFor(inForce, await this.sendControl({ subtype: "initialize" }), true);
 		if (listed === null || this.model !== null) return;
 		this.model = listed;
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	private mintSessionId(): string {
@@ -633,7 +634,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		if (!last) return;
 		this.model = last.model;
 		this.modelFromStore = true;
-		this.emitUpdate();
+		this.emitUpdate("status");
 	}
 
 	/** The model known so far, as a spawn option for a session whose store restores none. */
@@ -725,7 +726,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			const model = (event as { model?: unknown }).model;
 			if (typeof model === "string" && model && model !== this.model) {
 				this.model = model;
-				this.emitUpdate();
+				this.emitUpdate("status");
 			}
 		}
 		if (event.type === "result") this.turnActive = false;
@@ -773,9 +774,11 @@ export class ClaudeAdapter implements BackendAdapter {
 					this.emitUpdate(effect.index);
 					break;
 				case "reset":
+					this.emitUpdate("transcript");
+					break;
 				case "streaming":
 				case "compaction":
-					this.emitUpdate(undefined);
+					this.emitUpdate("status");
 					break;
 				case "error":
 					this.emitError(effect.message);
@@ -784,9 +787,9 @@ export class ClaudeAdapter implements BackendAdapter {
 		}
 	}
 
-	private emitUpdate(changedIndex?: number): void {
+	private emitUpdate(change: StateChange): void {
 		const state = this.getState();
-		for (const listener of [...this.updateListeners]) listener(state, changedIndex);
+		for (const listener of [...this.updateListeners]) listener(state, change);
 	}
 
 	private emitError(message: string): void {

@@ -30,6 +30,7 @@ import type {
 	BackendAdapter,
 	ImageInput,
 	StartOptions,
+	StateChange,
 	Unsubscribe,
 } from "../adapters/types.ts";
 import type { Broadcaster } from "./broadcaster.ts";
@@ -560,7 +561,13 @@ export class SessionManager {
 			// attaches first reads it before that attach: an error the start raised
 			// is newer than the prompt, and nobody had seen it to clear.
 			await adapter.submit(text, images);
-			if (session.error === priorError) session.error = null;
+			if (priorError !== null && session.error === priorError) {
+				session.error = null;
+				// No event but a snapshot says an error went, and the prompt's own
+				// client has already dropped it; this one tells the others, which
+				// no turn-boundary snapshot does any longer (OW-yirosu).
+				this.broadcaster.broadcastSnapshot(session.handle);
+			}
 		});
 	}
 
@@ -885,7 +892,7 @@ export class SessionManager {
 			// Subscribe *before* start(): a backend can emit its first state during
 			// startup and we would otherwise miss it.
 			bound.subscriptions.push(
-				adapter.onUpdate((state, changedIndex) => this.#onUpdate(owner, state, changedIndex)),
+				adapter.onUpdate((state, change) => this.#onUpdate(owner, state, change)),
 				adapter.onRefChanged((next, cause) => {
 					if (cause === "fork") owner = this.#forkOnto(owner, next);
 					else this.#rename(owner, next, owner.adapter === adapter);
@@ -995,11 +1002,16 @@ export class SessionManager {
 	}
 
 	/**
-	 * D3's tail upsert. `changedIndex` is what makes it O(1) per token; without
-	 * it we cannot know what moved and fall back to a full snapshot, which is
-	 * correct but quadratic over a long turn.
+	 * D3's tail upsert. The adapter's `change` says what moved, and each kind
+	 * goes out as the smallest event that reports it: a changed message as an
+	 * upsert, O(1) per token; a status-only change, a turn's start and end
+	 * among them, as a `status`, and as nothing when nothing moved; and only a
+	 * replaced transcript as a snapshot. A snapshot sends every message to
+	 * every client, and the Emacs helper re-projects and redraws all of them,
+	 * which on a 348-message session held each prompt 1-2s before its draft
+	 * cleared, when both turn boundaries still snapshotted (OW-yirosu).
 	 */
-	#onUpdate(session: ManagedSession, state: AdapterState, changedIndex?: number): void {
+	#onUpdate(session: ManagedSession, state: AdapterState, change: StateChange): void {
 		const streamingChanged = state.isStreaming !== session.lastStreaming;
 		const compactionChanged = state.compaction !== session.lastCompaction;
 		// The effort rides with the model: a model change can move it (OW-kokalo).
@@ -1013,20 +1025,20 @@ export class SessionManager {
 		session.lastEffort = state.effort;
 		session.lastUnrestoredModel = unrestoredModel;
 
-		const hasChangedMessage = changedIndex !== undefined && changedIndex >= 0 && changedIndex < state.messages.length;
-		if (settingsChanged && !streamingChanged && !compactionChanged && changedIndex === undefined) {
-			this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
-		} else if (hasChangedMessage && compactionChanged) {
-			// Compaction completion changes the transcript marker and operation state
-			// together. Keep that reducer-level atomicity on the wire rather than let
-			// an upsert expose the marker while the client still holds `running`.
-			this.broadcaster.broadcastSnapshot(session.handle);
-		} else if (hasChangedMessage) {
-			const message = state.messages[changedIndex];
-			if (message) this.broadcaster.upsert(session, changedIndex, message);
-			if (streamingChanged || settingsChanged) this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
+		const statusChanged = streamingChanged || compactionChanged || settingsChanged;
+		const message = typeof change === "number" ? state.messages[change] : undefined;
+		if (change === "status") {
+			if (statusChanged) this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
+		} else if (typeof change === "number" && message && !compactionChanged) {
+			this.broadcaster.upsert(session, change, message);
+			if (statusChanged) this.broadcaster.status(session, state.isStreaming, state.compaction, state.model, state.effort, unrestoredModel);
 		} else {
-			// A snapshot carries isStreaming and compaction, so no separate status event.
+			// A replaced transcript, and an index naming no message, which no upsert
+			// can express. And a changed message whose compaction moved with it:
+			// compaction completion changes the transcript marker and operation
+			// state together. Keep that reducer-level atomicity on the wire rather
+			// than let an upsert expose the marker while the client still holds
+			// `running`. A snapshot carries every status field, so no status event.
 			this.broadcaster.broadcastSnapshot(session.handle);
 		}
 

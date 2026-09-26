@@ -16,7 +16,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
-import { BackendRefusedError } from "../types.ts";
+import { BackendRefusedError, type StateChange } from "../types.ts";
 import { type PiChild, PiAdapter } from "./process.ts";
 
 const REF: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/s.jsonl" };
@@ -500,8 +500,8 @@ describe("PiAdapter stdout framing", () => {
 	it("reassembles a JSON line split across chunk boundaries", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
-		const updates: number[] = [];
-		h.adapter.onUpdate((_s, i) => updates.push(i ?? -1));
+		const updates: StateChange[] = [];
+		h.adapter.onUpdate((_s, change) => updates.push(change));
 
 		const line = JSON.stringify({ type: "message_start", message: assistantMessage("hi") });
 		h.child.emitStdout(line.slice(0, 20));
@@ -552,8 +552,8 @@ describe("PiAdapter notification fan-out", () => {
 	it("emits streaming status and tail indices as a turn progresses", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
-		const seen: { streaming: boolean; index?: number }[] = [];
-		h.adapter.onUpdate((s, i) => seen.push({ streaming: s.isStreaming, index: i }));
+		const seen: { streaming: boolean; change: StateChange }[] = [];
+		h.adapter.onUpdate((s, change) => seen.push({ streaming: s.isStreaming, change }));
 
 		h.child.emitLine({ type: "agent_start" });
 		h.child.emitLine({ type: "message_start", message: assistantMessage("") });
@@ -564,7 +564,8 @@ describe("PiAdapter notification fan-out", () => {
 		h.child.emitLine({ type: "agent_settled" });
 
 		expect(seen.map((s) => s.streaming)).toEqual([true, true, true, false]);
-		expect(seen.map((s) => s.index)).toEqual([undefined, 0, 0, undefined]);
+		// A turn's start and end move the status alone (OW-yirosu).
+		expect(seen.map((s) => s.change)).toEqual(["status", 0, 0, "status"]);
 		expect(h.adapter.getState().isStreaming).toBe(false);
 	});
 
@@ -725,8 +726,8 @@ describe("PiAdapter.fork", () => {
 	it("re-adopts the moved active file and refetches the whole transcript as a snapshot", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { model: { provider: "anthropic", id: "claude-haiku", name: "Haiku" } });
-		const seen: (number | undefined)[] = [];
-		h.adapter.onUpdate((_s, i) => seen.push(i));
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_s, change) => seen.push(change));
 
 		// Pi's fork is copy-on-write: the process's active sessionFile moves to a
 		// new file at the fork call (settled live on 0.84.2, MANUAL_TESTING.md
@@ -746,8 +747,8 @@ describe("PiAdapter.fork", () => {
 		expect(h.adapter.ref).toEqual({ backend: "pi", id: MOVED });
 		expect(h.adapter.getState().messages).toHaveLength(1);
 		expect(h.adapter.getState().model).toBe("anthropic/claude-haiku");
-		// changedIndex omitted: a fork touches the whole transcript (D3).
-		expect(seen).toEqual([undefined]);
+		// A fork replaces the whole transcript, which only a snapshot reports (D3).
+		expect(seen).toEqual(["transcript"]);
 	});
 
 	it("holds the rewound branch alone when the abandoned turn streams in the window before get_messages answers (OW-dutute)", async () => {

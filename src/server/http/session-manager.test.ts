@@ -736,7 +736,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 				// The fake's default "pi" mode moves the ref.
 				const forked = await fork(entryId);
 				adapter.messages = adapter.messages.slice(0, 1);
-				adapter.emitUnlocalisedChange();
+				adapter.emitTranscriptReplaced();
 				if (options.fail) throw options.fail;
 				return forked;
 			};
@@ -1859,6 +1859,78 @@ describe("turn boundaries", () => {
 		expect(events.filter((event) => event.type === "sessions-changed")).toHaveLength(2);
 	});
 
+	it("reports a streaming flip with no message changed as status, not a snapshot, at both ends of a turn (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		adapter.messages = [userMessage("hello")];
+		const events = collectEvents();
+
+		adapter.setStreaming(true);
+		expect(events).toEqual([expect.objectContaining({ type: "status", isStreaming: true }), { type: "sessions-changed" }]);
+
+		events.length = 0;
+		adapter.setStreaming(false);
+		expect(events).toEqual([expect.objectContaining({ type: "status", isStreaming: false }), { type: "sessions-changed" }]);
+	});
+
+	it("sends nothing for a status-only update that moved nothing (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		const events = collectEvents();
+
+		adapter.emitStatus();
+
+		expect(events).toEqual([]);
+	});
+
+	it("still snapshots an update that replaced the transcript (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		const events = collectEvents();
+
+		adapter.messages = [userMessage("rewound")];
+		adapter.emitTranscriptReplaced();
+
+		expect(events).toEqual([
+			expect.objectContaining({ type: "snapshot", messages: [expect.objectContaining({ role: "user" })] }),
+		]);
+	});
+
+	it("reports a compaction flip with no message changed as status (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		const events = collectEvents();
+
+		adapter.setCompaction("running");
+
+		expect(events).toEqual([expect.objectContaining({ type: "status", compaction: "running" })]);
+	});
+
+	it("snapshots a prompt's admission when it cleared a held error, so every client drops it (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		adapter.emitError("turn failed");
+		const events = collectEvents();
+
+		await sessions.submit(REF, "again");
+
+		expect(events).toEqual([expect.objectContaining({ type: "snapshot", error: null })]);
+	});
+
+	it("sends no snapshot for a prompt's admission when no error was held (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const events = collectEvents();
+
+		await sessions.submit(REF, "hello");
+
+		expect(events.filter((event) => event.type === "snapshot")).toEqual([]);
+	});
+
 	it("broadcasts an atomic compaction marker and terminal state as one snapshot", async () => {
 		await sessions.attach(REF);
 		const events = collectEvents();
@@ -1914,11 +1986,11 @@ describe("turn boundaries", () => {
 
 		adapter.model = "openrouter/fallback";
 		adapter.unrestoredModel = "openrouter/recorded";
-		adapter.emitUnlocalisedChange();
+		adapter.emitStatus();
 		adapter.messages = [userMessage("hello")];
-		adapter.emitUnlocalisedChange();
+		adapter.emitTranscriptReplaced();
 		adapter.unrestoredModel = undefined;
-		adapter.emitUnlocalisedChange();
+		adapter.emitStatus();
 
 		expect(events).toEqual([
 			expect.objectContaining({ type: "status", model: "openrouter/fallback", unrestoredModel: "openrouter/recorded" }),

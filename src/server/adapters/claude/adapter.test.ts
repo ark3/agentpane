@@ -128,10 +128,10 @@ describe("ClaudeAdapter lifecycle", () => {
 			"user",
 			"assistant",
 		]);
-		expect(updates).toHaveBeenLastCalledWith(
-			expect.objectContaining({ model: "last-model" }),
-			undefined,
-		);
+		// The hydrate replaced the transcript, and only a snapshot says so; the
+		// model it named then moved the status alone (OW-yirosu).
+		expect(updates.mock.calls.map(([, change]) => change)).toEqual(["transcript", "status"]);
+		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ model: "last-model" }), "status");
 	});
 
 	it("exposes the last stored assistant model immediately when resuming", async () => {
@@ -304,6 +304,22 @@ describe("ClaudeAdapter turns", () => {
 		const state = h.adapter.getState();
 		expect(state.isStreaming).toBe(true);
 		expect(state.messages[0]?.role).toBe("user");
+	});
+
+	it("reports a turn's start and end as status-only, the prompt by its index (OW-yirosu)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const updates = vi.fn();
+		h.adapter.onUpdate(updates);
+
+		await h.adapter.submit("hi");
+		h.proc().emit({ type: "result", subtype: "success", is_error: false });
+
+		expect(updates.mock.calls.map(([state, change]) => [state.isStreaming, change])).toEqual([
+			[true, 0],
+			[true, "status"],
+			[false, "status"],
+		]);
 	});
 
 	it("rejects a submit while a turn is active, then admits one after its result", async () => {
@@ -549,7 +565,7 @@ describe("ClaudeAdapter session controls", () => {
 			await h.adapter.start({ cwd: "/workspace" });
 
 			expect(h.adapter.getState().model).toBe("default");
-			expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ model: "default" }), undefined);
+			expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ model: "default" }), "status");
 			const listed = (await h.adapter.listModels()).find((model) => model.id === h.adapter.getState().model);
 			expect(listed?.efforts.map((effort) => effort.id)).toEqual(EFFORTS);
 			// Nothing was chosen, so the spawn carried no `--model`.
@@ -604,7 +620,7 @@ describe("ClaudeAdapter session controls", () => {
 		await setting;
 
 		expect(h.adapter.getState().effort).toBe("low");
-		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), undefined);
+		expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "low" }), "status");
 	});
 
 	it("reports the effort the CLI applies, not the one requested", async () => {
@@ -701,8 +717,8 @@ describe("ClaudeAdapter session controls", () => {
 		await h.adapter.start({ cwd: "/workspace", resumeId: "stored-id" });
 		const before = structuredClone(h.adapter.getState().messages);
 		const changed = vi.fn();
-		h.adapter.onUpdate((_state, index) => {
-			if (index !== undefined) changed(index);
+		h.adapter.onUpdate((_state, change) => {
+			if (typeof change === "number") changed(change);
 		});
 
 		const lines = readFixture("set-model");

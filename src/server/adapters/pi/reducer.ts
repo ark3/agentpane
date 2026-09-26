@@ -53,13 +53,13 @@ export interface PiReducerState {
 export interface PiReduceResult {
 	state: PiReducerState;
 	/**
-	 * Index of the single message that was added or changed, when known --
-	 * mirrors `BackendAdapter.onUpdate`'s `changedIndex` (D3 tail-upsert).
-	 * Undefined when `state` didn't change, OR when it changed in a way that
-	 * isn't about one message (e.g. `isStreaming` flipping), in which case a
-	 * caller should treat it as "state changed, no single index" rather than
-	 * "nothing changed" -- compare `state` by reference, not this field, to
-	 * decide whether to notify.
+	 * Index of the single message that was added or changed -- the number
+	 * `BackendAdapter.onUpdate`'s `change` carries (D3 tail-upsert). Every
+	 * result that changes `messages` names one. Undefined when `state` didn't
+	 * change, OR when it changed in a way that isn't about a message (e.g.
+	 * `isStreaming` flipping), which `process.ts` reports as `"status"` rather
+	 * than "nothing changed" -- compare `state` by reference, not this field,
+	 * to decide whether to notify.
 	 */
 	changedIndex?: number;
 	/** Present when this notification is a request the human must answer (D2a). */

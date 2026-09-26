@@ -209,8 +209,8 @@
  *   request still pending, oldest first, each the `request` a
  *   `session/request` carried; and `notices` (array, always, possibly empty)
  *   every notice, oldest first, each the `notice` a `session/notice` carried.
- *   The buffer draws all three after `nodes`, since a snapshot arrives at
- *   every Codex turn's start and end and would otherwise wipe them.
+ *   The buffer draws all three after `nodes`, since a snapshot replaces
+ *   everything the buffer holds and would otherwise wipe them.
  *   `askedFor` (a ref, only on the one snapshot `sessions/attach` above
  *   says carries it) is the ref that attach asked for, where its reply
  *   named another. It is request correlation, not identity: it says which
