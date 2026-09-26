@@ -40,7 +40,7 @@ import {
 
 /**
  * What the reducer asks the shell to do. `index` is a message index, which is
- * exactly the `changedIndex` the adapter contract wants for an O(1) upsert.
+ * exactly the number a `StateChange` carries for an O(1) upsert.
  */
 export type CodexEffect =
 	| { type: "message"; index: number }

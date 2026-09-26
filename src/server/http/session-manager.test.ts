@@ -1874,6 +1874,23 @@ describe("turn boundaries", () => {
 		expect(events).toEqual([expect.objectContaining({ type: "status", isStreaming: false }), { type: "sessions-changed" }]);
 	});
 
+	it("sends a message index that flipped isStreaming as an upsert then a status, as Claude's turn start is (OW-yirosu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF);
+		if (!adapter) throw new Error("no adapter");
+		const events = collectEvents();
+
+		// `beginTurn`: the prompt's index, with isStreaming already true.
+		adapter.messages = [userMessage("hello")];
+		adapter.setStreaming(true, 0);
+
+		expect(events).toEqual([
+			expect.objectContaining({ type: "upsert", index: 0 }),
+			expect.objectContaining({ type: "status", isStreaming: true }),
+			{ type: "sessions-changed" },
+		]);
+	});
+
 	it("sends nothing for a status-only update that moved nothing (OW-yirosu)", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF);
