@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-jopifu]
+closed: done
 ---
 
 # Both clients still clear a held error at a prompt's reply by matching its text, so a newer error with the same text is dropped while the server holds it
@@ -35,3 +36,19 @@ Red first, then green:
 - in `emacs/agentpane-test.el`, the same sequence (`session/errorCleared`, then `session/error` with the held text, then the prompt's reply) ends with the `⚠` line still drawn;
 - the existing tests that pin the reply-time clear (among them OW-vulusi's `agentpane-test-admitted-prompt-drops-the-drawn-error` and `agentpane-test-admitted-prompt-keeps-a-newer-error`, and the browser's OW-31 tests in `controller.test.ts`) are rewritten to drop the error on `error-cleared` instead, or retired where they only pinned the retired clear.
 `bun run check` and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, pass.
+
+## Close note
+
+Done 2026-09-26 in 090e372 ("fix: leave a held turn error to error-cleared, not the prompt's reply, in both clients (OW-lohubo)").
+Neither client clears its held turn error at its prompt's reply any more: the browser's `submit` in `src/client/controller.ts` lost its `priorError`/`currentError` comparison and Emacs's `agentpane--send-prompt` lost its `prior` check, so `error-cleared` (`session/errorCleared` in Emacs), which `SessionManager.submit` broadcasts to every client at admission since OW-jopifu, is the only thing that drops it.
+When the reply arrives before the event, the error stays up until the event; that is recorded in the controller comment and the `agentpane--send-prompt` docstring as the server's truth.
+The docblocks describing the retired clear changed with it: the Commentary paragraph and `agentpane--error` docstring in `emacs/agentpane.el`, the two comments in `SessionManager.submit` and the container docblock in `session-manager.ts`, and `clearSessionError`'s docblock in `src/client/session-state.ts`.
+
+Verified red then green: the card's probe and a reply-alone-keeps-the-error test in `src/client/controller.test.ts` both failed against the old source with `expected null to be 'The turn ended in an error.'`; `agentpane-test-prompt-answer-keeps-an-error-with-the-held-text`, `agentpane-test-prompt-answer-keeps-the-drawn-error` (OW-vulusi's drops-the-drawn-error, rewritten) and `agentpane-test-stale-snapshot-redraws-the-cleared-error` (rewritten) failed against the old `emacs/agentpane.el`.
+All pass after; `bun run check` passed (1448 tests) and the ERT batch suite ran 125 tests with 0 unexpected.
+The browser's D9 test "clears the persisted error of a session renamed while the prompt was in flight" was retired: it only pinned the reply-time clear finding a renamed session by handle, and `error-cleared` is keyed by handle like every other event.
+
+The adversarial read found no path where the server clears the error without the prompting client receiving `error-cleared`, and confirmed this is an ownership change adding no guard.
+It named the same text-match miss in the server's own admission clear, which this card left alone by design; filed as OW-lameke.
+It also noted, not as defects: in Emacs, a send racing a close-by-another-client before `session/detached` arrives now leaves a stale line until the next attach's snapshot, where the old reply-time clear happened to remove it (the server holds no error there); `agentpane-test-error-resent-in-flight-survives-the-answer` and the browser's "does not clear a fresh same-turn error that races in via SSE… (D2)" now pass whichever way the code goes; and no browser reducer test sends `error-cleared` under a known handle with a new ref, though `status` covers that code path and `helper.test.ts` covers it for the helper.
+Its claim that the browser attaches before prompting, contradicting OW-bomolu's amendment, went onto OW-bomolu.
