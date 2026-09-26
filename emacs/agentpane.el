@@ -51,10 +51,12 @@
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
 ;; A buffer holds one turn error, the one the server holds: a newer one
-;; replaces it, and it goes once the next prompt is admitted, unless a
-;; different one replaced it while that prompt was being sent, or once a
-;; snapshot arrives without it, and `C-c C-d' in the transcript buffer
-;; dismisses it at once.
+;; replaces it, and it goes when the server says it cleared it, at the
+;; admission of a prompt sent over it or at any client's dismissal, or when
+;; a snapshot arrives without it.  The buffer drops it without waiting when
+;; its own prompt is admitted, unless a different one replaced it while
+;; that prompt was being sent, and when `C-c C-d' in the transcript buffer
+;; dismisses it.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -81,7 +83,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 121 tests, 118 results as expected, 0 unexpected, 3 skipped
+;;     Ran 123 tests, 120 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -457,6 +459,7 @@ would have had each node been drawn on arrival."
             ('session/node (agentpane--record (plist-get params :node)))
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--hold-error (plist-get params :message)))
+            ('session/errorCleared (agentpane--hold-error nil))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))))))))
@@ -729,18 +732,20 @@ index to the latest node at it, the index that first arrived last; see
 The buffer's one owner of the error, as `session.error' is the server's
 \(src/server/http/session-manager.ts) and the session's `error' is the
 browser's: a snapshot sets it from its `error', a `session/error' replaces
-it, `agentpane-dismiss-error' clears it, and so does a prompt's answer
-while it still holds the message it held when the prompt was sent (OW-31;
-see `agentpane--send-prompt').  It is drawn as the one `(:error MESSAGE)'
-node; see `agentpane--hold-error'.
+it, a `session/errorCleared' clears it, `agentpane-dismiss-error' clears
+it, and so does a prompt's answer while it still holds the message it
+held when the prompt was sent (OW-31; see `agentpane--send-prompt').  It
+is drawn as the one `(:error MESSAGE)' node; see `agentpane--hold-error'.
 A snapshot sets it even from a stale error: a snapshot the server
-broadcast before `submit' in session-manager.ts cleared the error may be
-handled after the prompt's answer, since the event stream and the reply
-are unordered (D2).  Since OW-yirosu, `submit' broadcasts a snapshot
-whenever it clears the error, and the event stream is one ordered stream,
-so that clearing snapshot always follows the stale one and the line the
-stale one draws is transient; the buffer keeps no send-time state to
-second-guess a snapshot (OW-sedosu).")
+broadcast before it cleared the error, at `submit' or `clearError' in
+session-manager.ts, may be handled after the prompt's answer, since the
+event stream and the reply are unordered (D2), or after
+`agentpane-dismiss-error', which clears it before the server has heard.
+The server announces every clear with a `session/errorCleared'
+\(OW-jopifu), and the event stream is one ordered stream, so that clear
+always follows the stale snapshot and the line the stale one draws is
+transient; the buffer keeps no send-time state to second-guess a snapshot
+\(OW-sedosu).")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")

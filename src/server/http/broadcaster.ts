@@ -178,6 +178,10 @@ export class Broadcaster {
 		this.#fanout({ type: "error", ...this.#address(session), message });
 	}
 
+	errorCleared(session: Addressed): void {
+		this.#fanout({ type: "error-cleared", ...this.#address(session) });
+	}
+
 	notice(session: Addressed, notice: AgentNotice): void {
 		this.#fanout({ type: "notice", ...this.#address(session), notice });
 	}

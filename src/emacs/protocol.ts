@@ -204,8 +204,8 @@
  *   are what the server holds for the session, and what `session/error`,
  *   `session/request` and `session/notice` below have said, whether or not
  *   Emacs was attached to hear them (OW-bipume): `error` (string or `null`)
- *   the last turn error, `null` again once a later prompt is admitted or a
- *   client dismisses it; `requests` (array, always, possibly empty) every
+ *   the last turn error, `null` again once the server clears it, which
+ *   `session/errorCleared` says; `requests` (array, always, possibly empty) every
  *   request still pending, oldest first, each the `request` a
  *   `session/request` carried; and `notices` (array, always, possibly empty)
  *   every notice, oldest first, each the `notice` a `session/notice` carried.
@@ -234,7 +234,14 @@
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
  *   effort, unrestoredModel }`.
  * - `session/error` -- `{ session, handle, message }`. A turn error. Every later
- *   `session/snapshot` carries it again, in `error`, until it is cleared.
+ *   `session/snapshot` carries it again, in `error`, until it is cleared,
+ *   which `session/errorCleared` says.
+ * - `session/errorCleared` -- `{ session, handle }`. The server no longer
+ *   holds the session's turn error: a prompt was admitted over it, it being
+ *   still the one that stood when the prompt was sent, or a client dismissed
+ *   it by name (OW-jopifu). Drop its line. It follows every snapshot sent
+ *   before the clear on the one ordered stream, so a line such a snapshot
+ *   drew again goes with it; one Emacs never drew is nothing to drop.
  * - `session/request` -- `{ session, handle, request }`. The agent is blocked on a
  *   request nothing in Emacs answers yet: `request` is the HTTP API's
  *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
@@ -324,6 +331,7 @@ export type HelperNotification =
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string } }
+	| { method: "session/errorCleared"; params: { session: SessionRef; handle?: string } }
 	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }

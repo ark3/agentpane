@@ -307,7 +307,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// on both branches of `attach` (`session-manager.ts`) -- so the `snapshot` arm
 	// above is the one that must create, and does.
 	//
-	// These six arms are not, however, unreachable before that introduction, and what
+	// The six arms the adapter drives are not, however, unreachable before that introduction, and what
 	// they drop there is worth naming. `#start` subscribes `onUpdate`, `onRequest`,
 	// `onError`, `onNotice` and `onRequestResolved` before it awaits
 	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces moves it onto a
@@ -355,6 +355,9 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			break;
 		case "error":
 			view.error = event.message;
+			break;
+		case "error-cleared":
+			view.error = null;
 			break;
 		case "request":
 			view.requests = [...view.requests, event.request];

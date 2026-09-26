@@ -1164,9 +1164,12 @@ export function createController(
 			// The server holds the session's error for every later snapshot
 			// (OW-bipume), so it is told too, or the next one would put the banner
 			// back -- told which error, so one newer than what was on screen
-			// survives. Not awaited: the banner goes now. A failed dismissal leaves
-			// the server's copy standing, and the next snapshot shows it again,
-			// which is the truth about where it stands.
+			// survives. Not awaited: the banner goes now. A snapshot the server sent
+			// before the dismissal reached it shows it again, until the
+			// `error-cleared` the dismissal broadcasts, which follows that snapshot
+			// on the one ordered stream, takes it down (OW-jopifu). A failed
+			// dismissal leaves the server's copy standing, and the next snapshot
+			// shows it again, which is the truth about where it stands.
 			if (selected && dismissed !== null) void api.dismissError(selected, dismissed).catch(() => {});
 			publish({ error: null, state });
 		},

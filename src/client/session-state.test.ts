@@ -453,6 +453,15 @@ describe("client session state", () => {
 		expect(result.recover).toEqual([]);
 	});
 
+	it("drops the error the server says it no longer holds (OW-jopifu)", () => {
+		const failed = reduceServerEvent(stateAtSequence(ref, 1), { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed" }).state;
+
+		const result = reduceServerEvent(failed, { type: "error-cleared", session: ref, handle: h(ref), seq: 3 });
+
+		expect(result.state.sessions[h(ref)]?.error).toBeNull();
+		expect(result.recover).toEqual([]);
+	});
+
 	it("clears a session's persisted error and leaves an unaffected session's state untouched (OW-31)", () => {
 		const withError = reduceServerEvent(stateAtSequence(ref, 1), {
 			type: "error",

@@ -348,6 +348,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			case "error":
 				notify({ method: "session/error", params: { session: view.ref, handle, message: event.message } });
 				return;
+			case "error-cleared":
+				notify({ method: "session/errorCleared", params: { session: view.ref, handle } });
+				return;
 			case "notice":
 				notify({ method: "session/notice", params: { session: view.ref, handle, notice: event.notice } });
 				return;

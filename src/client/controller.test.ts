@@ -1305,6 +1305,23 @@ describe("client controller", () => {
 		expect(api.dismissError).toHaveBeenCalledExactlyOnceWith(ref, "The turn ended in an error.");
 	});
 
+	it("drops an error a snapshot redrew after its dismissal once the server says it cleared it (OW-jopifu)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "The turn ended in an error." });
+
+		controller.clearError();
+		// A snapshot the server broadcast before the dismissal reached it.
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: "The turn ended in an error.", requests: [], notices: [] });
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("The turn ended in an error.");
+		api.emit({ type: "error-cleared", session: ref, handle: h(ref), seq: 1 });
+
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBeNull();
+	});
+
 	it("tells the server nothing when the selected session holds no error to dismiss (OW-bipume)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);

@@ -771,6 +771,18 @@ describe("notifications", () => {
 		expect(resolved).toEqual({ jsonrpc: "2.0", method: "session/requestResolved", params: { session: pi, handle: h(pi), requestId: "r1" } });
 	});
 
+	it("passes the server's clear of the turn error through as session/errorCleared (OW-jopifu)", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		source.emit({ type: "error", session: pi, handle: h(pi), seq: 2, message: "boom" });
+		source.emit({ type: "error-cleared", session: pi, handle: h(pi), seq: 3 });
+		await io.until(4);
+		const [, , cleared] = io.notifications();
+		expect(cleared).toEqual({ jsonrpc: "2.0", method: "session/errorCleared", params: { session: pi, handle: h(pi) } });
+	});
+
 	it("passes a notice through as session/notice, not session/error (OW-tujiya)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
@@ -1069,8 +1081,9 @@ describe("the handle (D24, OW-suyinu)", () => {
 		source.emit({ type: "notice", session: pi, handle, seq: 4, notice: { kind: "warning", message: "careful", details: null, path: null } });
 		source.emit({ type: "request", session: pi, handle, seq: 5, request });
 		source.emit({ type: "request-resolved", session: pi, handle, seq: 6, requestId: "r1" });
+		source.emit({ type: "error-cleared", session: pi, handle, seq: 7 });
 		source.emit({ type: "sessions-changed" });
-		await io.until(10);
+		await io.until(11);
 
 		const perSession = io.notifications().filter((message) => message["method"] !== "sessions/changed");
 		expect(perSession.map((message) => message["method"])).toEqual([
@@ -1082,6 +1095,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 			"session/notice",
 			"session/request",
 			"session/requestResolved",
+			"session/errorCleared",
 		]);
 		for (const message of perSession) expect(message["params"]).toMatchObject({ handle });
 	});

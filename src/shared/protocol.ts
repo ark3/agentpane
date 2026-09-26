@@ -263,6 +263,22 @@ export type ServerEvent =
 	  }
 	| {
 			/**
+			 * The server no longer holds the session's turn error: a prompt was
+			 * admitted over it, or a client dismissed it (`ROUTES.error`)
+			 * (OW-jopifu). Drop it. What `request-resolved` is to a request, and
+			 * what lets a client learn an error went without a snapshot, which
+			 * no longer arrives at every prompt (OW-yirosu). Carries no message:
+			 * the stream is ordered, so the error a client holds from it when
+			 * this arrives is the one the server cleared, and a newer one comes
+			 * after it.
+			 */
+			type: "error-cleared";
+			session: SessionRef;
+			handle: string;
+			seq: number;
+	  }
+	| {
+			/**
 			 * A non-fatal notice from the backend (OW-tujiya). Not an `error`: it
 			 * says nothing about whether a turn failed, and a client neither
 			 * clears nor sets its error from it. Like `error`, every later snapshot

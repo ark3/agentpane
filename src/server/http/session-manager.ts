@@ -133,13 +133,13 @@ interface ManagedSession {
 	 * one the startup window or a fork left without one -- has no other
 	 * way to learn of it. Each follows the lifecycle the client applies to its
 	 * own copy, or a snapshot would resurrect what the client had cleared:
-	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`),
-	 * a request leaves when it stops being pending (`clearRequest`, which
-	 * retracts it on the wire), and notices only accumulate -- save that one
-	 * identical to a notice already held is neither held nor fanned out again
-	 * (OW-piloni). They live on the container, so a rename leaves them where they
-	 * are and a close drops them; a fork's container takes all but `error`
-	 * (`#forkOnto`).
+	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`,
+	 * each retracting it on the wire, OW-jopifu), a request leaves when it
+	 * stops being pending (`clearRequest`, which retracts it on the wire),
+	 * and notices only accumulate -- save that one identical to a notice
+	 * already held is neither held nor fanned out again (OW-piloni). They live
+	 * on the container, so a rename leaves them where they are and a close
+	 * drops them; a fork's container takes all but `error` (`#forkOnto`).
 	 */
 	error: string | null;
 	requests: AgentRequest[];
@@ -563,10 +563,10 @@ export class SessionManager {
 			await adapter.submit(text, images);
 			if (priorError !== null && session.error === priorError) {
 				session.error = null;
-				// No event but a snapshot says an error went, and the prompt's own
-				// client has already dropped it; this one tells the others, which
-				// no turn-boundary snapshot does any longer (OW-yirosu).
-				this.broadcaster.broadcastSnapshot(session.handle);
+				// The prompt's own client has already dropped it; this tells the
+				// others, which no turn-boundary snapshot does any longer
+				// (OW-yirosu), and without the snapshot this once took (OW-jopifu).
+				this.broadcaster.errorCleared(session);
 			}
 		});
 	}
@@ -1093,12 +1093,16 @@ export class SessionManager {
 	/**
 	 * A client dismissed the session's error, `message` being the one it showed.
 	 * A different one is newer -- another client's turn failed while the
-	 * dismissal was on its way -- and stays. Only the next snapshot says so: the
-	 * other clients showing it keep it until then (OW-bipume).
+	 * dismissal was on its way -- and stays (OW-bipume), and nothing changed, so
+	 * nothing is said. A clear is announced, so the other clients showing the
+	 * error drop it now, not at a snapshot that may be any number of turns away
+	 * (OW-jopifu).
 	 */
 	clearError(ref: SessionRef, message: string): void {
 		const session = this.#lookup(ref);
-		if (session?.error === message) session.error = null;
+		if (session?.error !== message) return;
+		session.error = null;
+		this.broadcaster.errorCleared(session);
 	}
 
 	/**

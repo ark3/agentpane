@@ -1927,7 +1927,7 @@ describe("turn boundaries", () => {
 		expect(events).toEqual([expect.objectContaining({ type: "status", compaction: "running" })]);
 	});
 
-	it("snapshots a prompt's admission when it cleared a held error, so every client drops it (OW-yirosu)", async () => {
+	it("announces the error a prompt's admission cleared, with no snapshot, so every client drops it (OW-jopifu)", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF);
 		if (!adapter) throw new Error("no adapter");
@@ -1936,16 +1936,16 @@ describe("turn boundaries", () => {
 
 		await sessions.submit(REF, "again");
 
-		expect(events).toEqual([expect.objectContaining({ type: "snapshot", error: null })]);
+		expect(events).toEqual([expect.objectContaining({ type: "error-cleared", session: REF })]);
 	});
 
-	it("sends no snapshot for a prompt's admission when no error was held (OW-yirosu)", async () => {
+	it("sends neither a snapshot nor a clear for a prompt's admission when no error was held (OW-yirosu, OW-jopifu)", async () => {
 		await sessions.attach(REF);
 		const events = collectEvents();
 
 		await sessions.submit(REF, "hello");
 
-		expect(events.filter((event) => event.type === "snapshot")).toEqual([]);
+		expect(events.filter((event) => event.type === "snapshot" || event.type === "error-cleared")).toEqual([]);
 	});
 
 	it("broadcasts an atomic compaction marker and terminal state as one snapshot", async () => {
@@ -2418,6 +2418,28 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		sessions.clearError(REF, "first turn failed");
 
 		expect(snapshots(connect())[0]?.error).toBe("second turn failed");
+	});
+
+	it("announces a dismissal it honoured to every client, with no snapshot (OW-jopifu)", async () => {
+		await sessions.attach(REF);
+		pi.forRef(REF)!.emitError("turn failed");
+		const events = connect();
+
+		sessions.clearError(REF, "turn failed");
+
+		expect(events.slice(1)).toEqual([expect.objectContaining({ type: "error-cleared", session: REF })]);
+	});
+
+	it("announces nothing for a dismissal naming an error it no longer holds (OW-jopifu)", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.forRef(REF)!;
+		adapter.emitError("first turn failed");
+		adapter.emitError("second turn failed");
+		const events = connect();
+
+		sessions.clearError(REF, "first turn failed");
+
+		expect(events.slice(1)).toEqual([]);
 	});
 
 	it("carries all three across a rename", async () => {

@@ -896,6 +896,26 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.close();
 	});
 
+	it("tells every other client a dismissed error went, with no snapshot (OW-jopifu)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		pi.forRef(PI_SESSION)?.emitError("turn failed");
+		const dismissing = await openStream();
+		const watching = await openStream();
+		await dismissing.waitForCount(1);
+		await watching.waitForCount(1);
+
+		expect((await dismiss(PI_SESSION, { message: "turn failed" })).status).toBe(204);
+
+		await watching.until(() => watching.events.length === 2, "the clear");
+		expect(watching.events).toEqual([
+			expect.objectContaining({ type: "snapshot", error: "turn failed" }),
+			expect.objectContaining({ type: "error-cleared", session: PI_SESSION }),
+		]);
+		expect(watching.gaps).toEqual([]);
+		await dismissing.close();
+		await watching.close();
+	});
+
 	it("refuses a dismissal that does not name the error it dismisses", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		pi.forRef(PI_SESSION)?.emitError("turn failed");
