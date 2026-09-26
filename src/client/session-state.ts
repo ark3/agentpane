@@ -213,7 +213,7 @@ function withoutOtherViewsOf(state: ClientState, ref: SessionRef, handle: string
 	return sessions === undefined ? state : { ...state, sessions };
 }
 
-/** Clear a session's persisted turn error, e.g. after the next prompt succeeds (OW-31). */
+/** Clear a session's persisted turn error, as a dismissal does (`clearError` in `controller.ts`). */
 export function clearSessionError(state: ClientState, handle: string): ClientState {
 	const view = state.sessions[handle];
 	if (!view || view.error === null) return state;

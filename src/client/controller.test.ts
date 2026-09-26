@@ -1205,7 +1205,7 @@ describe("client controller", () => {
 		expect(controller.getView().error).toBe("Workspace must be an absolute path.");
 	});
 
-	it("clears a session's persisted turn error on the next successful submit", async () => {
+	it("keeps a session's turn error through its prompt's reply until the server says it cleared it (OW-lohubo)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -1217,10 +1217,13 @@ describe("client controller", () => {
 		controller.setDraft("try again");
 		await controller.submit();
 
+		// The reply alone drops nothing: the server owns the error.
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("The turn ended in an error.");
+		api.emit({ type: "error-cleared", session: ref, handle: h(ref), seq: 3 });
 		expect(controller.getView().state.sessions[h(ref)]?.error).toBeNull();
 	});
 
-	it("clears the persisted error of a session renamed while the prompt was in flight (D9)", async () => {
+	it("keeps an error with the held text that the new turn raised before its prompt's reply (OW-lohubo)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -1228,18 +1231,19 @@ describe("client controller", () => {
 		await controller.start();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
-		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "Stale error from a prior turn." });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 2, message: "The turn ended in an error." });
 
 		controller.setDraft("try again");
 		const submitted = controller.submit();
 
-		// The session renames (virtual -> real) while the prompt is still in flight.
-		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
-		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		// The server admits the prompt and clears the error, then the new turn
+		// fails at once with the same text, all before the reply (D2).
+		api.emit({ type: "error-cleared", session: ref, handle: h(ref), seq: 3 });
+		api.emit({ type: "error", session: ref, handle: h(ref), seq: 4, message: "The turn ended in an error." });
 		prompt.resolve();
 		await submitted;
 
-		expect(viewAt(controller, renamed)?.error).toBeNull();
+		expect(controller.getView().state.sessions[h(ref)]?.error).toBe("The turn ended in an error.");
 	});
 
 	it("does not clear a fresh same-turn error that races in via SSE before the prompt POST resolves (D2)", async () => {

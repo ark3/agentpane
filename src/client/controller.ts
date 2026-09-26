@@ -829,26 +829,26 @@ export function createController(
 			if (view.sending) return false;
 			if (!view.draft) return false;
 			const text = view.draft;
-			// The session's handle, which a rename landing while the request is in
-			// flight (D9) leaves naming it, and its error, so success only clears
-			// it if nothing new landed via SSE in the meantime -- cross-event
-			// ordering relative to the POST response is not guaranteed (D2), so a
-			// same-turn error can otherwise race in and be wiped by this same
-			// submit's own success handler.
-			const handle = handleOf(view.state, selected);
-			const priorError = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
 				await api.prompt(selected, { text });
 				if (!disposed) {
-					const currentError = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
-					const state = handle !== undefined && currentError === priorError ? clearSessionError(view.state, handle) : view.state;
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
 					// The draft clears only if it is still the text that was sent: the
 					// textarea stays live through the round trip, so anything typed
 					// while waiting is the next prompt, not this one (OW-nasofa).
-					publish({ ...(view.draft === text ? { draft: "" } : {}), state });
+					//
+					// The session's turn error is not this reply's to clear: the server
+					// owns it, and the `error-cleared` it broadcasts when it admits the
+					// prompt drops it here as at every other client (OW-lohubo). A
+					// clear at the reply had to guess from the error's text whether it
+					// was still the one held at the send, and a new turn failing at once
+					// with the same text -- its `error-cleared` and `error` both handled
+					// before the reply, which D2 allows -- lost the error the server
+					// still held. When the reply comes first instead, the error stays
+					// up until the event, which is the server's truth all along.
+					if (view.draft === text) publish({ draft: "" });
 				}
 				return true;
 			} catch (error: unknown) {

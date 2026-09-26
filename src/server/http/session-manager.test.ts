@@ -2394,7 +2394,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		]);
 	});
 
-	it("clears the error when the next prompt is admitted, as the client does (OW-31)", async () => {
+	it("clears the error when the next prompt is admitted (OW-31)", async () => {
 		await sessions.attach(REF);
 		pi.forRef(REF)!.emitError("turn failed");
 

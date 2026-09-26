@@ -419,7 +419,7 @@ describe("client session state", () => {
 		// A clean session's error stays null: a notice is not an error.
 		const clean = reduceServerEvent(stateAtSequence(ref, 1), { type: "notice", session: ref, handle: h(ref), seq: 2, notice }).state;
 		expect(clean.sessions[h(ref)]?.error).toBeNull();
-		// Nor does clearing the error, as the next prompt does (OW-31), clear the notice.
+		// Nor does clearing the error, as a dismissal does, clear the notice.
 		expect(clearSessionError(both, h(ref)).sessions[h(ref)]?.notices).toEqual([notice, second]);
 	});
 

@@ -133,9 +133,10 @@ interface ManagedSession {
 	 * one the startup window or a fork left without one -- has no other
 	 * way to learn of it. Each follows the lifecycle the client applies to its
 	 * own copy, or a snapshot would resurrect what the client had cleared:
-	 * `error` is cleared where `clearSessionError` is (`submit`, `clearError`,
-	 * each retracting it on the wire, OW-jopifu), a request leaves when it
-	 * stops being pending (`clearRequest`, which retracts it on the wire),
+	 * `error` is cleared at `submit` and `clearError`, each retracting it on
+	 * the wire, which is what drops a client's copy (OW-jopifu, OW-lohubo), a
+	 * request leaves when it stops being pending (`clearRequest`, which
+	 * retracts it on the wire),
 	 * and notices only accumulate -- save that one identical to a notice
 	 * already held is neither held nor fanned out again (OW-piloni). They live
 	 * on the container, so a rename leaves them where they are and a close
@@ -554,9 +555,10 @@ export class SessionManager {
 	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
 		return this.#serially(ref, async (session, adapter) => {
 			this.markPrompted(session.ref);
-			// The client clears a session's error once the next prompt is admitted,
-			// unless a newer one landed meanwhile (OW-31, `submit` in
-			// `controller.ts`); this is the same rule, so the next snapshot agrees.
+			// The session's error goes once the next prompt is admitted, unless a
+			// newer one landed meanwhile (OW-31). This is the one place that rule
+			// runs: no client clears the error at its prompt's reply, each drops it
+			// at the `error-cleared` below (OW-lohubo).
 			// `priorError` is what stood when the prompt was sent, so a caller that
 			// attaches first reads it before that attach: an error the start raised
 			// is newer than the prompt, and nobody had seen it to clear.
@@ -569,9 +571,9 @@ export class SessionManager {
 			if (this.#sessions.get(session.handle) !== session) return;
 			if (priorError !== null && session.error === priorError) {
 				session.error = null;
-				// The prompt's own client has already dropped it; this tells the
-				// others, which no turn-boundary snapshot does any longer
-				// (OW-yirosu), and without the snapshot this once took (OW-jopifu).
+				// This tells every client, the prompt's own included (OW-lohubo),
+				// which no turn-boundary snapshot does any longer (OW-yirosu), and
+				// without the snapshot this once took (OW-jopifu).
 				this.broadcaster.errorCleared(session);
 			}
 		});

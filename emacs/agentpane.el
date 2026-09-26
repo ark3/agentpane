@@ -52,11 +52,10 @@
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
 ;; A buffer holds one turn error, the one the server holds: a newer one
 ;; replaces it, and it goes when the server says it cleared it, at the
-;; admission of a prompt sent over it or at any client's dismissal, or when
-;; a snapshot arrives without it.  The buffer drops it without waiting when
-;; its own prompt is admitted, unless a different one replaced it while
-;; that prompt was being sent, and when `C-c C-d' in the transcript buffer
-;; dismisses it.
+;; admission of a prompt sent over it, this buffer's own included, or at
+;; any client's dismissal, or when a snapshot arrives without it.  The
+;; buffer drops it without waiting only when `C-c C-d' in the transcript
+;; buffer dismisses it.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -743,10 +742,11 @@ index to the latest node at it, the index that first arrived last; see
 The buffer's one owner of the error, as `session.error' is the server's
 \(src/server/http/session-manager.ts) and the session's `error' is the
 browser's: a snapshot sets it from its `error', a `session/error' replaces
-it, a `session/errorCleared' clears it, `agentpane-dismiss-error' clears
-it, and so does a prompt's answer while it still holds the message it
-held when the prompt was sent (OW-31; see `agentpane--send-prompt').  It
-is drawn as the one `(:error MESSAGE)' node; see `agentpane--hold-error'.
+it, a `session/errorCleared' clears it, and `agentpane-dismiss-error'
+clears it; a prompt's answer does not, since the server's
+`session/errorCleared' says when admitting the prompt cleared it
+\(OW-lohubo; see `agentpane--send-prompt').  It is drawn as the one
+`(:error MESSAGE)' node; see `agentpane--hold-error'.
 A snapshot sets it even from a stale error: a snapshot the server
 broadcast before it cleared the error, at `submit' or `clearError' in
 session-manager.ts, may be handled after the prompt's answer, since the
@@ -2309,28 +2309,29 @@ so pressing again while a backend spawns is the natural move, and without
 this each press attached and prompted with the same text, which the Codex
 adapter makes a steer of the turn the first began (D16).
 
-The answer clears the turn error the buffer held when TEXT was sent, as
-the browser's banner goes once the prompt is admitted (OW-vulusi), if the
-buffer still holds it: one that replaced it since stays, as `submit' in
-src/client/controller.ts keeps it (OW-31).  The match is by message, as
-the server's is, so the same error redrawn meanwhile by a snapshot, such
-as the attach's, still goes."
+The answer leaves the turn error alone.  The server owns it, and the
+`session/errorCleared' it broadcasts when it admits the prompt drops it
+here as in every other client (OW-lohubo), as `submit' in
+src/client/controller.ts leaves it to `error-cleared'.  A clear at the
+answer could only guess from the message whether the error was still the
+one held at the send, and a new turn failing at once with the same text,
+its `session/errorCleared' and `session/error' both handled before the
+held-back answer, lost the error the server still held.  When the answer
+comes first instead, the line stays up until the notification, which is
+the server's truth all along."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
     (when agentpane--sending
       (user-error "A prompt to this session is already being sent"))
     (setq agentpane--sending t)
-    (let ((failed (lambda () (setq agentpane--sending nil)))
-          (prior agentpane--error))
+    (let ((failed (lambda () (setq agentpane--sending nil))))
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/prompt
                              (list :session (agentpane--ref agentpane--session) :text text)
                              (lambda (_)
                                (setq agentpane--sending nil)
-                               (when (and prior (equal agentpane--error prior))
-                                 (agentpane--hold-error nil))
                                (funcall sent))
                              t failed agentpane--spawn-timeout))
        failed))))

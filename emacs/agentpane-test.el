@@ -2392,11 +2392,11 @@ once; a send whose attach or prompt failed frees the buffer for another."
             (funcall release)
             (should (equal (funcall methods) '(sessions/prompt sessions/prompt)))))))))
 
-(ert-deftest agentpane-test-admitted-prompt-drops-the-drawn-error ()
-  "A prompt's answer drops the turn error drawn when it was sent, as the
-browser's banner goes once the prompt is admitted (OW-vulusi), though
-snapshots redrew it meanwhile, as the attach's does, each carrying the
-same message as a fresh string, as each JSON parse makes one."
+(ert-deftest agentpane-test-prompt-answer-keeps-the-drawn-error ()
+  "A prompt's answer leaves the turn error drawn when it was sent, through
+the attach and the snapshots that redraw it meanwhile, and the
+`session/errorCleared' the server broadcasts at the prompt's admission is
+what drops it: the server owns the error (OW-lohubo)."
   (let ((ref '(:backend "claude" :id "c1"))
         (snapshot (lambda (ref)
                     (agentpane--on-notification
@@ -2415,17 +2415,18 @@ same message as a fresh string, as each JSON parse makes one."
           (funcall snapshot ref)
           (funcall (cdr (pop held)) t)
           (funcall snapshot ref)
-          (should (string-search "⚠ Turn failed upstream" (buffer-string)))
           (funcall (cdr (pop held)) t)
           (should (equal (mapcar #'car (reverse sent)) '(sessions/attach sessions/prompt)))
+          (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
+          (agentpane--on-notification nil 'session/errorCleared (list :session ref))
           (should (equal (agentpane-test--indices) '(0 1)))
-          (should-not (string-search "⚠" (buffer-string))))))))
+          (should-not (agentpane-test--warnings)))))))
 
-(ert-deftest agentpane-test-admitted-prompt-keeps-a-newer-error ()
-  "A turn error that arrives while the prompt is in flight is newer than
-the prompt and survives its answer, which clears only the one held when
-the prompt was sent (OW-vulusi; OW-31's rule, `submit' in
-src/client/controller.ts)."
+(ert-deftest agentpane-test-prompt-answer-keeps-an-error-with-the-held-text ()
+  "A turn error the new turn raised before its prompt's answer survives
+that answer though its text is the one held when the prompt was sent: the
+server cleared the old one and holds the new one, so every other client
+shows it, and so does this buffer (OW-lohubo)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -2440,12 +2441,12 @@ src/client/controller.ts)."
           (goto-char (point-max))
           (insert "hello")
           (agentpane-send)
+          (agentpane--on-notification nil 'session/errorCleared (list :session ref))
           (agentpane--on-notification
-           nil 'session/error (list :session ref :message "Turn failed again"))
+           nil 'session/error (list :session ref :message "Turn failed upstream"))
           (funcall (cdr (pop held)) t)
           (should (equal (agentpane-test--indices) '(0 1 nil)))
-          (should-not (string-search "Turn failed upstream" (buffer-string)))
-          (should (string-search "⚠ Turn failed again" (buffer-string))))))))
+          (should (equal (agentpane-test--warnings) '("Turn failed upstream"))))))))
 
 (ert-deftest agentpane-test-error-resent-in-flight-survives-the-answer ()
   "An error held when the prompt was sent, and replaced before it, that
@@ -2474,10 +2475,10 @@ and here it is not (OW-sedosu)."
 
 (ert-deftest agentpane-test-stale-snapshot-redraws-the-cleared-error ()
   "A snapshot handled after the prompt's answer, broadcast before the
-server cleared the error, draws that error again, and the
-`session/errorCleared' the clearing broadcast, handled after it, takes it
-down: the buffer keeps no send-time state to second-guess a snapshot
-\(OW-sedosu, OW-jopifu)."
+server cleared the error, draws that error, which the answer left standing
+\(OW-lohubo), and the `session/errorCleared' the clearing broadcast,
+handled after it, takes it down: the buffer keeps no send-time state to
+second-guess a snapshot (OW-sedosu, OW-jopifu)."
   (let ((ref '(:backend "codex" :id "t1"))
         (snapshot (lambda (ref error)
                     (agentpane--on-notification
@@ -2495,7 +2496,7 @@ down: the buffer keeps no send-time state to second-guess a snapshot
           (insert "hello")
           (agentpane-send)
           (funcall (cdr (pop held)) t)
-          (should-not (agentpane-test--warnings))
+          (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
           (funcall snapshot ref "Turn failed upstream")
           (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
           (agentpane--on-notification nil 'session/errorCleared (list :session ref))
