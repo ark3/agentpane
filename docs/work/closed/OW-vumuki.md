@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # The server clears a dismissed turn error without telling any client, so a stale snapshot redraws it
@@ -27,3 +28,7 @@ Done when:
 - a test in `src/server/http/session-manager.test.ts` (beside the existing `clearError` tests, "turn failed" and "first turn failed") shows a matching dismissal announces the clear and a non-matching one does not, red before the change;
 - an ERT test in `emacs/agentpane-test.el` walks case 1 above — a snapshot carrying "A" handled after `C-c C-d`, then the announcement — and ends with no `⚠` line;
 - `bun run check` and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, pass.
+
+## Close note
+
+Duplicate of OW-jopifu, which was amended at execution on 2026-09-25 to carry this card's cases and done conditions: the dismissal is now announced as `error-cleared` on both wires, the stale-snapshot-after-dismissal case is walked by an ERT test and a browser controller test, and the prose this card named (the `agentpane--error` docstring, the Commentary paragraph, the `session/snapshot` docblock line in `src/emacs/protocol.ts`, the `clearError` docblock) is corrected there.

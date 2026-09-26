@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-yirosu]
+closed: done
 ---
 
 # A cleared turn error has no event of its own, so a dismissal never reaches the other clients and a prompt's admission clears one only by a full snapshot
@@ -46,3 +47,15 @@ Red first, then green:
 - each client's suite shows a drawn error removed on that event — `src/client/` for the browser, `src/emacs/helper.test.ts` and `emacs/agentpane-test.el` for Emacs;
 - an ERT test in `emacs/agentpane-test.el` walks the stale-snapshot case above — `C-c C-d`, then a snapshot carrying "A", then the announcement — and ends with no `⚠` line.
 `bun run check` and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, pass, and the `clearError` docblock, the `submit` comment and the prose named above are corrected in the same change.
+
+## Close note
+
+Built: a new per-session server event, `error-cleared` (`ServerEvent` in `src/shared/protocol.ts`, `Broadcaster.errorCleared`), carrying only session, handle and seq, on the model of `request-resolved`. `SessionManager.submit` sends it when a prompt's admission clears the error that stood at send, replacing the full snapshot OW-yirosu had it send, and `SessionManager.clearError` sends it when a dismissal names the held error (OW-bipume's rule kept: a non-matching dismissal changes and sends nothing). It carries no message because the stream is ordered and each client sets its held error only from that stream. The browser reducer (`reduceServerEvent`) drops the view's error on it; the Emacs helper forwards it as `session/errorCleared` (`src/emacs/protocol.ts`), and `emacs/agentpane.el` clears `agentpane--error` and its line. The prose premised on the admission snapshot is corrected (the `clearError` docblock, the `submit` comment, `ManagedSession.error`, the `agentpane--error` docstring and Commentary, both protocol docblocks, D3 in `docs/DESIGN.md`).
+
+Amended at execution to fold in OW-vumuki's stale-snapshot-after-dismissal case, which the event covers since it follows the stale snapshot on the one stream.
+
+Review found and fixed: `submit` now announces nothing, and clears nothing, for a container `close` removed while the prompt was being admitted, which would otherwise re-create a forgotten handle's seq and trip a client's gap recovery into re-attaching the closed session; and a test now pins that an error replaced during admission gets no `error-cleared`.
+
+Verified: each new test was red before its change and green after — the two-client dismissal in `app.test.ts`; admission, matching and non-matching dismissal, replaced-during-admission (against a mutant) and close-during-admission in `session-manager.test.ts`; `session-state.test.ts` and a stale-snapshot walk in `controller.test.ts`; the helper forwarding in `helper.test.ts`; and in ERT `agentpane-test-error-cleared-drops-its-line` and `agentpane-test-dismissed-error-redrawn-by-a-stale-snapshot-goes-at-the-clear`. On main: `bun run check` 1456 tests pass; ERT batch 123 run, 120 as expected, 3 skipped; tty run 3 of 3.
+
+The adversarial read also found that both clients still clear the error at their own prompt's reply by matching its text, which drops a newer same-text error the server holds; filed as OW-lohubo, the ownership change that retires that clear.
