@@ -20,12 +20,15 @@ Load-bearing: one buffer-local slot owns the session's error; a snapshot sets it
 The send-time message list in `agentpane--send-prompt` and the "drawn last" choice in `agentpane-dismiss-error` are the guards this retires.
 Incidental: whether the slot's line is still an ewoc node or is drawn elsewhere above the prompt region, and where in the transcript it sits.
 
-A further case the same reader named against the guard, shared with the browser and following from D2's unordered SSE and HTTP responses: on Claude Code, `ClaudeAdapter.submit` (`src/server/adapters/claude/adapter.ts`) applies `reducer.beginTurn`, whose streaming effect reaches `broadcastSnapshot` before `SessionManager.submit` clears the error, so a snapshot still holding the error can reach Emacs after the prompt's reply and redraw it while the server holds null.
-The slot does not settle that on its own, since a snapshot sets the slot; this card decides whether Emacs ignores such a snapshot's error, and records the decision in the slot's docstring either way.
+A further case the same reader named against the guard, shared with the browser and following from D2's unordered SSE and HTTP responses: a snapshot the server broadcast before `SessionManager.submit` cleared the error can reach Emacs after the prompt's reply and redraw it while the server holds null.
+The reader's example was Claude Code's `beginTurn` streaming effect, which snapshotted; since OW-yirosu (ab6b1ef) that effect is a `status` event and an upsert, so the example is gone, but the case stands for any snapshot sent before the clear — the attach's on a first prompt among them.
+Amended 2026-09-25 at execution: OW-yirosu also made `SessionManager.submit` broadcast a snapshot whenever it clears the held error ("No event but a snapshot says an error went"), and SSE is one ordered stream, so every stale snapshot is followed by that clearing one.
+Decision: a snapshot sets the slot from its `:error`, stale or not, because the redraw it causes is transient and the next snapshot on the same stream settles it; Emacs keeps no send-time state to second-guess a snapshot, which would be a guard of the kind this card retires.
+The slot's docstring records that decision.
 
-Done when ERT tests in `emacs/agentpane-test.el`, each red against the code before the change, show:
+Done when ERT tests in `emacs/agentpane-test.el` show the following, the first two red against the code before the change and the last two pinning behaviour it already had and must keep (amended at execution: the current dismissal already names the last drawn error and drops them all, and the snapshot decision above keeps today's drawing):
 - the reader's case above: after two `session/error`s, a send, the first message arriving again in flight, and the answer, one `⚠` line is drawn, carrying `"A"`;
 - two `session/error`s in a row leave one `⚠` line, the second;
 - `C-c C-d` after two `session/error`s names the second to `sessions/dismissError` and leaves no `⚠` line (the existing `agentpane-test-dismiss-error-names-it-to-the-server` rewritten to that, if its shape no longer holds);
-- a snapshot handled after the prompt's reply and still holding the cleared error draws whatever the recorded decision says;
+- a snapshot handled after the prompt's reply and still holding the cleared error draws its `⚠` line, and the clearing snapshot handled after it leaves none, as the recorded decision says;
 and the existing OW-vulusi tests `agentpane-test-admitted-prompt-drops-the-drawn-error` and `agentpane-test-admitted-prompt-keeps-a-newer-error` still pass, with the full ERT suite run as the Commentary of `emacs/agentpane.el` gives it.
