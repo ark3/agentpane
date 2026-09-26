@@ -213,8 +213,8 @@ export type ServerEvent =
 			/**
 			 * What the `error`, `request` and `notice` events below have told the
 			 * session's clients so far, as the server still holds it (OW-bipume):
-			 * the last turn error, null once the next prompt is admitted or a
-			 * client dismisses it (`ROUTES.error`); every request still pending,
+			 * the last turn error, null once the server clears it, which
+			 * `error-cleared` says; every request still pending,
 			 * oldest first; and every notice, oldest first. Here because
 			 * a snapshot is the only thing that introduces a session to a client,
 			 * so one that connects, reconnects or first attaches after the event

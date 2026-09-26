@@ -1939,6 +1939,34 @@ describe("turn boundaries", () => {
 		expect(events).toEqual([expect.objectContaining({ type: "error-cleared", session: REF })]);
 	});
 
+	it("announces nothing for a session closed while the prompt was being admitted (OW-jopifu)", async () => {
+		let entered!: () => void;
+		const admitting = new Promise<void>((resolve) => (entered = resolve));
+		let admit!: () => void;
+		const admitted = new Promise<void>((resolve) => (admit = resolve));
+		const gated = new FakeAdapterFactory({
+			onSubmit: () => {
+				entered();
+				return admitted;
+			},
+		});
+		sessions = new SessionManager({ index, adapters: { pi: gated } }, broadcaster);
+		await sessions.attach(REF);
+		const handle = sessions.summaryOf(REF)?.handle ?? "";
+		gated.forRef(REF)!.emitError("turn failed");
+		const submitted = sessions.submit(REF, "again").catch(() => {});
+		await admitting;
+		await sessions.close(REF);
+		const events = collectEvents();
+
+		admit();
+		await submitted;
+
+		expect(events).toEqual([]);
+		// Nor does anything re-create the counter the close forgot.
+		expect(broadcaster.seqOf(handle)).toBe(0);
+	});
+
 	it("sends neither a snapshot nor a clear for a prompt's admission when no error was held (OW-yirosu, OW-jopifu)", async () => {
 		await sessions.attach(REF);
 		const events = collectEvents();
@@ -2380,10 +2408,13 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		sessions = new SessionManager({ index, adapters: { pi: raising } }, broadcaster);
 		await sessions.attach(REF);
 		raising.forRef(REF)!.emitError("turn failed");
+		const events = connect();
 
 		await sessions.submit(REF, "again");
 
 		expect(snapshots(connect())[0]?.error).toBe("refused at admission");
+		// Nor tells any client to drop an error the server still holds (OW-jopifu).
+		expect(events.filter((event) => event.type === "error-cleared")).toEqual([]);
 	});
 
 	it("keeps the error when the prompt is refused", async () => {

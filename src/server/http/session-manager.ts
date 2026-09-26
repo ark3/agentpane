@@ -561,6 +561,12 @@ export class SessionManager {
 			// attaches first reads it before that attach: an error the start raised
 			// is newer than the prompt, and nobody had seen it to clear.
 			await adapter.submit(text, images);
+			// A container `close` took out of the table while the prompt was being
+			// admitted is past announcing: its handle is forgotten, and an event
+			// under it would re-create the counter and read as a gap to a client
+			// still holding it (OW-jopifu). Its error goes nowhere either, since
+			// no snapshot is built from a container out of the table.
+			if (this.#sessions.get(session.handle) !== session) return;
 			if (priorError !== null && session.error === priorError) {
 				session.error = null;
 				// The prompt's own client has already dropped it; this tells the
