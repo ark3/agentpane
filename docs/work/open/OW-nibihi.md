@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+blocked-by: [OW-yibijo]
 ---
 
 # A buffer whose session was renamed, closed elsewhere and re-attached by its new ref in one stream outage stays frozen, since no name links the handle it holds to the new one

@@ -24,6 +24,10 @@ The listing is authoritative about which handles are live: `list()` puts a `hand
 A view whose handle no summary in a fresh listing carries names a session the server let go, and could be evicted by `replaceSessionSummaries` under the same OW-fihuma rule as today (a view an event has touched since the listing was asked for is newer and stays).
 Whether that is the right owner, and whether it also moves the unselected per-tab state, is for the executor to decide against `replaceSessionSummaries`'s docblock.
 
+Amended 2026-09-25: this is the same rule OW-yibijo gives the Emacs helper, and both clients take it.
+The listing after a reopen owns which handles are live; a view or an attachment under a handle it lacks is dropped, and the session is found again by its ref through `attach`, the one verb that resolves a name the container outgrew.
+OW-yibijo says why the alternative, asking the server per ref which handle it names now, is the guard whose misses OW-gusaru's review filed as four cards, and retires it; whichever of the two lands first states the rule in `docs/DESIGN.md` D21 for both.
+
 ## Done when
 
 A reducer test in `src/client/session-state.test.ts`, red first against the reducer as OW-kimaya left it: a view of R under H1, an opening snapshot under H2 carrying R2, a re-list listing R2 attached under H2 and not R, and then `viewOf(state, R)` is undefined and `state.sessions` holds H2 alone.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+blocked-by: [OW-yibijo]
 ---
 
 # The helper's live lookup treats a failed request as 'not live' and never retries, so one error strands a buffer the old synchronous ref-match would have moved

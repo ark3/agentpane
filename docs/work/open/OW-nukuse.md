@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+blocked-by: [OW-yibijo]
 ---
 
 # A detach Emacs sends for a handle the helper has just moved leaves the attachment on the new handle, feeding no buffer

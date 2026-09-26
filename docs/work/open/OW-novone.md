@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+blocked-by: [OW-yibijo]
 ---
 
 # When another buffer attached a session's new ref before the helper's live lookup answered, the helper drops the stale buffer's attachment silently and that buffer stays frozen
