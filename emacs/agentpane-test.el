@@ -2294,14 +2294,15 @@ once; a send whose attach or prompt failed frees the buffer for another."
 (ert-deftest agentpane-test-admitted-prompt-drops-the-drawn-error ()
   "A prompt's answer drops the turn error drawn when it was sent, as the
 browser's banner goes once the prompt is admitted (OW-vulusi), though
-snapshots redrew it meanwhile, as the attach's does, each as a fresh node
-carrying the same message."
+snapshots redrew it meanwhile, as the attach's does, each carrying the
+same message as a fresh string, as each JSON parse makes one."
   (let ((ref '(:backend "claude" :id "c1"))
         (snapshot (lambda (ref)
                     (agentpane--on-notification
                      nil 'session/snapshot
                      (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
-                           :error "Turn failed upstream" :requests [] :notices [])))))
+                           :error (copy-sequence "Turn failed upstream")
+                           :requests [] :notices [])))))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
