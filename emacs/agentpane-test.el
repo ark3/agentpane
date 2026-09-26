@@ -2259,6 +2259,60 @@ once; a send whose attach or prompt failed frees the buffer for another."
             (funcall release)
             (should (equal (funcall methods) '(sessions/prompt sessions/prompt)))))))))
 
+(ert-deftest agentpane-test-admitted-prompt-drops-the-drawn-error ()
+  "A prompt's answer drops the turn error drawn when it was sent, as the
+browser's banner goes once the prompt is admitted (OW-vulusi), though the
+attach's snapshot and the turn's first redrew it meanwhile, as Claude
+Code's do, each as a fresh node carrying the same message."
+  (let ((ref '(:backend "claude" :id "c1"))
+        (snapshot (lambda (ref)
+                    (agentpane--on-notification
+                     nil 'session/snapshot
+                     (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                           :error "Turn failed upstream" :requests [] :notices [])))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (funcall snapshot ref)
+          (setq hold '(sessions/attach sessions/prompt))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (funcall snapshot ref)
+          (funcall (cdr (pop held)) t)
+          (funcall snapshot ref)
+          (should (string-search "⚠ Turn failed upstream" (buffer-string)))
+          (funcall (cdr (pop held)) t)
+          (should (equal (mapcar #'car (reverse sent)) '(sessions/attach sessions/prompt)))
+          (should (equal (agentpane-test--indices) '(0 1)))
+          (should-not (string-search "⚠" (buffer-string))))))))
+
+(ert-deftest agentpane-test-admitted-prompt-keeps-a-newer-error ()
+  "A turn error that arrives while the prompt is in flight is newer than
+the prompt and survives its answer, which drops only the one drawn when
+the prompt was sent (OW-vulusi; OW-31's rule, `submit' in
+src/client/controller.ts)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
+          (agentpane--on-notification
+           nil 'session/snapshot
+           (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                 :error "Turn failed upstream" :requests [] :notices []))
+          (setq hold '(sessions/prompt))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (agentpane--on-notification
+           nil 'session/error (list :session ref :message "Turn failed again"))
+          (funcall (cdr (pop held)) t)
+          (should (equal (agentpane-test--indices) '(0 1 nil)))
+          (should-not (string-search "Turn failed upstream" (buffer-string)))
+          (should (string-search "⚠ Turn failed again" (buffer-string))))))))
+
 (ert-deftest agentpane-test-refetch-while-attaching-keeps-the-live-transcript ()
   "A refetch while the first prompt's attach is in flight does not draw the
 stored transcript over the live one the attach's snapshot drew, when the

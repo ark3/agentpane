@@ -50,9 +50,9 @@
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
-;; A turn error stays drawn until a snapshot arrives without it -- the
-;; server clears it once the next prompt is admitted -- and `C-c C-d' in
-;; the transcript buffer dismisses it at once.
+;; A turn error goes once the next prompt is admitted, unless it arrived
+;; while that prompt was being sent, or once a snapshot arrives without
+;; it, and `C-c C-d' in the transcript buffer dismisses it at once.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -2208,20 +2208,39 @@ the prompt has answered, which it does once the turn is accepted, a second
 send says so and sends nothing.  The draft stays visible until that answer,
 so pressing again while a backend spawns is the natural move, and without
 this each press attached and prompted with the same text, which the Codex
-adapter makes a steer of the turn the first began (D16)."
+adapter makes a steer of the turn the first began (D16).
+
+The answer drops every turn error drawn when TEXT was sent, as the
+browser's banner goes once the prompt is admitted (OW-vulusi); one that
+arrived since stays, as `submit' in src/client/controller.ts keeps it
+\(OW-31), unless its message is one of those.  The match is by message,
+since a snapshot landing meanwhile, such as the attach's or the turn's
+first on Claude Code, draws the same error again as a fresh node."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
     (when agentpane--sending
       (user-error "A prompt to this session is already being sent"))
     (setq agentpane--sending t)
-    (let ((failed (lambda () (setq agentpane--sending nil))))
+    (let ((failed (lambda () (setq agentpane--sending nil)))
+          (errors (and agentpane--ewoc
+                       (mapcar (lambda (data) (plist-get data :error))
+                               (ewoc-collect agentpane--ewoc
+                                             (lambda (data) (plist-member data :error)))))))
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/prompt
                              (list :session (agentpane--ref agentpane--session) :text text)
                              (lambda (_)
                                (setq agentpane--sending nil)
+                               (when errors
+                                 (agentpane--above-prompt
+                                  (lambda ()
+                                    (ewoc-filter agentpane--ewoc
+                                                 (lambda (data)
+                                                   (not (and (plist-member data :error)
+                                                             (member (plist-get data :error)
+                                                                     errors))))))))
                                (funcall sent))
                              t failed agentpane--spawn-timeout))
        failed))))
