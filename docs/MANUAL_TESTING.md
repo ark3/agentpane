@@ -3630,3 +3630,47 @@ To re-run, write the file below to `/tmp/jsonrpc-timers/drive.el` and run `emacs
   (dotimes (_ 5) (accept-process-output nil 0.02))
   (message "order: %S" (reverse log)))
 ```
+
+## A prompt to an attached Claude Code session draws no snapshot (OW-yirosu)
+
+Measured on the home server 2026-09-25, `claude --version` answering `2.1.280 (Claude Code)`, with the session created at model `haiku`, `bun 1.4.0`.
+`resources/probes/agentpane_prompt_events_live.ts` ran twice: once with `--root` at a `git archive` of `1d964cf`, the base the change was cut from, and once at the `card/OW-yirosu` worktree holding 1c9f41b.
+Each run started that checkout's server with `PORT=<free port> bun run src/server/index.ts`, read `/api/events` as raw SSE, created a Claude session in a `git init`ed scratch directory under `/var/tmp`, attached it with `GET`, waited for the attach's snapshot, and sent two one-word prompts 20s apart, each once the turn before had ended.
+It then closed the session with `DELETE` and sent the server `SIGTERM` by its pid; no process of either run was left afterwards.
+
+**Before, each prompt drew three snapshots.**
+The second prompt, seconds from the probe's start, one line per event, the reply's eight upserts collapsed:
+
+```
+ 21.47  prompt sent: "Reply with exactly one word: two"
+ 21.47  prompt answered 202
+ 21.47  snapshot  messages=2 isStreaming=false error=null
+ 21.47  upsert    index=2 role=user
+ 21.47  status    isStreaming=true compaction=null
+ 21.47  sessions-changed
+ 21.47  snapshot  messages=3 isStreaming=true error=null
+ 22.65  upsert    index=3 role=assistant  (x8)
+ 23.09  snapshot  messages=4 isStreaming=false error=null
+ 23.09  sessions-changed
+```
+
+The first snapshot is the prompt route's attach of a session already attached, the second the Claude adapter's streaming flip after the user message's upsert, and the third the streaming flip at the turn's `result`.
+The first prompt drew the same three, with `messages` 0, 1 and 2.
+The `prompt answered 202` line lands anywhere among the events before the turn's reply, since the POST's answer and the stream are unordered (D2).
+
+**After, none.**
+
+```
+ 21.40  prompt sent: "Reply with exactly one word: two"
+ 21.40  upsert    index=2 role=user
+ 21.40  status    isStreaming=true compaction=null
+ 21.40  sessions-changed
+ 21.40  prompt answered 202
+ 21.99  upsert    index=3 role=assistant  (x8)
+ 22.41  status    isStreaming=false compaction=null
+ 22.41  sessions-changed
+```
+
+The first prompt read the same, with one more `sessions-changed` ahead of its upsert, the virtual session's first prompt (D9), and a second `status isStreaming=true` 0.26s after its first, the model the CLI's `init` named; the before run had both too.
+The `sessions-changed` at each turn boundary, which keeps the list's `updatedAt` order moving (OW-furinu), fired at both ends in both runs.
+The only snapshot either run of the change sent was the attach's.

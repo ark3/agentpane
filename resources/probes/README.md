@@ -357,6 +357,21 @@ Costs tokens: two real model turns on `gpt-5.6-luna` without `--thread`, none wi
 Verified with: `codex-cli` 0.156.0 on the home server, 2026-09-24.
 What it showed is the same `docs/MANUAL_TESTING.md` section.
 
+## `agentpane_prompt_events_live.ts`
+
+Proves: **what agentpane's event stream carries for a prompt to an attached Claude Code session**, event by event, and how many snapshots each prompt drew between its send and its turn's end (OW-yirosu).
+It starts the server of the checkout `--root` names on a free loopback port, so pointing it at a checkout before a change and after it shows both.
+Without `--workspace` it makes a `git init`ed scratch directory, since the home server's `claude` wrapper refuses a directory with no workspace marker.
+
+```bash
+bun agentpane_prompt_events_live.ts --root <checkout> [--workspace <git dir>]
+```
+
+Costs tokens: two one-word Haiku turns.
+
+Verified with: `claude 2.1.280` on the home server, 2026-09-25.
+What it showed is in `docs/MANUAL_TESTING.md`, OW-yirosu.
+
 ## `hydrate_window_probe.py`
 
 Proves: **what each backend sends while an adapter reads a live session's history back** (OW-dutute), the window D24's merge-on-hydrate has to reconcile.
