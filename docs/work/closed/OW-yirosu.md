@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-vulusi]
+closed: done
 ---
 
 # Every prompt broadcasts two full-transcript snapshots before it is acknowledged and a third at turn end, where D3 asks for none, and Emacs redraws the whole buffer for each
@@ -64,3 +65,19 @@ Each adapter's own suite asserts that its streaming flip reports itself as statu
 `bun run check` passes.
 The live probe above, rerun against the change, shows each prompt producing no snapshot between the prompt and the turn end, and that run goes into `docs/MANUAL_TESTING.md` with its version.
 The sentence in the `#onUpdate` docblock and anything else that says a streaming flip snapshots is corrected in the same change.
+
+## Close note
+
+Landed on main as three commits: the fix, the live evidence with its probe, and a test review asked for.
+The adapter contract's `onUpdate` now takes a required `StateChange = number | "status" | "transcript"` (`src/server/adapters/types.ts`), and every emitter in the Claude, Codex and Pi adapters names one: streaming, compaction and settings flips are `"status"`, the Claude and Codex `reset` effects and Pi's `hydrateMessages` are `"transcript"`, and Pi's reducer results with no index are `"status"` (verified: every Pi reducer path that changes `messages` names an index).
+`SessionManager.#onUpdate` sends `"status"` as a `status` event, or nothing if no status field moved; an index as an upsert plus a status if one moved; and snapshots only a replaced transcript, an index naming no message, or a message changing together with compaction (OW-jelovu's atomicity, kept).
+Compaction decision: a compaction flip that changes no message now goes out as `status`, since that event already carries `compaction`, both clients apply it, and there is nothing to keep atomic.
+The prompt route in `src/server/http/app.ts` attaches only when `!sessions.isAttached(ref)`; that holds through a start in flight (a container gets its adapter only when start completes) and a dispose (the container leaves the table first).
+`GET` attach still re-snapshots.
+One snapshot beyond the card: `submit` broadcasts a snapshot at admission when it cleared a held turn error, because the turn-end snapshot had been the only way other clients learned it went.
+The adversarial read found this is a guard at one clearing site that misses the other, a dismissal via `clearError`, which now never reaches other clients; OW-jopifu carries both cases as the wire event that retires that snapshot.
+Clients: the reader and implementer both checked the browser (`reduceServerEvent`, the fork-point refresh on the `isStreaming` transition in `controller.ts`) and Emacs (`agentpane--set-status` redraws the tail at turn end); nothing else relied on the turn-boundary snapshots.
+Tests red then green in `src/server/http/session-manager.test.ts` and `app.test.ts` (status and no snapshot at both turn boundaries, no snapshot for a prompt to an attached session, a replaced transcript still snapshots, the upsert-then-status arm Claude's `beginTurn` uses), and in the three adapter suites (streaming flips are status-only, reset/hydrate/fork are transcript); `bun run check` passes, 1449 tests.
+Live, `claude 2.1.280` on `--model haiku`, via `resources/probes/agentpane_prompt_events_live.ts`: snapshots per prompt went from [3,3] to [0,0], with `sessions-changed` still at both turn boundaries; recorded in `docs/MANUAL_TESTING.md`.
+D3 in `docs/DESIGN.md` now lists every occasion a snapshot still goes out.
+Left as noticed: the fork route still attaches unconditionally, so a fork of an attached session re-snapshots its parent.
