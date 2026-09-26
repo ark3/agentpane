@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane-mode draws an ordered list's markers as bare numbers, where the browser and the markdown read 1.
@@ -12,3 +13,13 @@ The markdown is rendered in `emacs/agentpane.el` by the function that binds `shr
 Keep visual-wrap's hanging indent for wrapped list rows, which that function's docstring promises.
 
 Done when an ert test in `emacs/agentpane-test.el` renders a two-item ordered list and finds `1.` and `2.` as the markers, red before the change, and a wrapped item still hangs under its text.
+
+## Close note
+
+Built: `agentpane--shr-li` in `emacs/agentpane.el`, registered as the `li` entry in `agentpane--insert-html`'s `shr-external-rendering-functions`, draws an ordered item's marker as `1.` — a copy of `shr-tag-li`'s numbered arm (Emacs 31.1) with the period, so nested blocks indent past the whole marker; unordered items still go to `shr-tag-li`, and `<ol start>` still counts from its start because `shr-tag-ol` seeds the counter.
+The visual-wrap pass's `adaptive-fill-regexp` now takes an optional period after the number, without which a wrapped ordered row lost its hanging indent; `2024 was a year.` in the fixture still matches as before.
+Verified on GNU Emacs 31.1: new ert test `agentpane-test-ordered-list-markers-read-like-the-browser` failed against the old `agentpane.el` (markers `1 first`/`2 second`/`7 seventh`), and with only the regexp reverted its wrap-prefix check failed (nil where `(space :align-to (3 . width))` was expected); `agentpane-test-text-part-hanging-indents` now expects `1. first`/`2. second` at width 3.
+Batch suite: "Ran 118 tests, 115 results as expected, 0 unexpected, 3 skipped" (the tty-tagged three).
+Emacs-only change, so `bun run check` was not run.
+The dated OW-gunuke "Smaller things" paragraph in `docs/MANUAL_TESTING.md` still records the bare-number markers as that run saw them; it was left as a record of that run.
+Commit 4ce3d70 on main.
