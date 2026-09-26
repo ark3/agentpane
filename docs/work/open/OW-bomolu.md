@@ -22,7 +22,7 @@ The browser joins this path once OW-35 lands transparent attach-then-submit for 
 
 In service of `AGENTS.md`, "Both clients": a start error raised inside an attach a client made on the user's behalf, as part of sending, survives that prompt's admission the way it does for a prompt whose own attach raised it, and the server agrees with what each client draws.
 Load-bearing: the error the server compares against at admission is the one that stood before the attach the send made, not after it.
-Incidental: how that reaches the server — the prompt carrying the error its client held at send, the helper reading `errorOf` before its own attach, the helper sending one request that attaches and prompts, or some other route — weighed against why `agentpane--attached-then` attaches first (its docstring, and OW-nasofa's single-send rule in `agentpane--send-prompt`).
+Incidental: how that reaches the server — the prompt carrying the error its client held at send (since OW-lameke the server compares the error's id, not its text, so that means the id — see OW-jokoto), the helper reading `errorIdOf` before its own attach, the helper sending one request that attaches and prompts, or some other route — weighed against why `agentpane--attached-then` attaches first (its docstring, and OW-nasofa's single-send rule in `agentpane--send-prompt`).
 
 ## Done when
 
