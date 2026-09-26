@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The server clears a held turn error at a prompt's admission by matching its text, so a new error with the same text raised before admission completes is cleared while live
@@ -22,3 +23,11 @@ Incidental: the identity's shape, and whether the route still passes something c
 The OW-31 and OW-bipume behaviour — an error that stood at send is cleared at admission, and one the session's start raised after the read is not — must still hold, as must OW-bomolu's concern if that card has landed by then.
 
 Done: a test in `src/server/http/session-manager.test.ts`, beside "clears the error when the next prompt is admitted (OW-31)", holds an error, submits with that error as prior, has the fake adapter raise an error with the identical text before its `submit` resolves, and finds `session.error` still set and no `error-cleared` broadcast — red first, green after; the existing OW-31 and OW-bipume tests there and in `src/server/http/app.test.ts` still pass under `bun run check`.
+
+## Close note
+
+The prompt's admission clear now compares the held error's identity, not its text (d1f5655).
+Each error the adapter raises takes an id from a manager-wide counter (`ManagedSession.errorId`, `#errorsRaised` in `src/server/http/session-manager.ts`); the prompt route in `src/server/http/app.ts` reads `errorIdOf(ref)` before its attach, and `SessionManager.submit` clears only when the held error still carries that id. `errorOf` is gone.
+Reachability, settled by reading the adapters, not a live run: Pi (`PiAdapter.submit` awaits the `prompt` reply and, for an unresolved id, `get_state`) and Codex (`CodexAdapter.submit` awaits `turn/start` or a D16 `turn/steer`) process backend events inside the await, so the window is real; Claude Code's admission is a synchronous stdin write.
+Verified: the new test "keeps an error raised while that prompt was being admitted even when its text matches the one held (OW-lameke)" in `src/server/http/session-manager.test.ts` fails against the unfixed code (`expected null to be 'turn failed'`, re-run by the dispatching session) and passes after; `bun run check` passes, 1449 tests, the OW-31 and OW-bipume tests among them.
+The adversarial read found no defect and confirmed the fix is an identity change, not a site guard; it named the text-matched `clearError` dismissal and the route's server-side read of the prior as the remaining cases, both needing the id on the wire, filed as OW-jokoto.
