@@ -843,7 +843,7 @@ D14 gained its sentence scoping the pointer rule to the browser client in the sa
 
 The owner took this on 2026-09-23, after OW-kokalo, OW-ruzuhu and OW-hokaye landed a chosen effort for all three backends and each measured what a resume keeps of it.
 
-A conversation's model and effort are chosen before its first prompt and fixed after it, by a gate in each client (`setModel` in `src/client/controller.ts`, `agentpane--check-model-gate` in `emacs/agentpane.el`).
+A conversation's model and effort are chosen before its first prompt and fixed after it, by a gate in each client (`setModel` in `src/client/controller.ts`, `agentpane--check-gate` in `emacs/agentpane.el`).
 Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses agentpane's copy; OW-jamoyi's run saw a Pi resume spawn carry no model after a close, and OW-pubulu found that Pi restores it itself.
 
 Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries.

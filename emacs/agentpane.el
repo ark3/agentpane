@@ -24,7 +24,7 @@
 ;; for the picker: one row per stored session, `RET' opens its transcript,
 ;; `g' refetches, and a `sessions/changed' notification refetches too.  The
 ;; list is filtered to the project of the buffer the command was called
-;; from, as the browser's `?cwd=' query is; a prefix argument lifts the
+;; from, through the server's `?cwd=' query; a prefix argument lifts the
 ;; filter.  The notification only flows once a buffer in this Emacs has
 ;; attached a session: the helper opens its event stream from
 ;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
