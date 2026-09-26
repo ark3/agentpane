@@ -77,6 +77,7 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   For a fix, break it again and watch it go red first.
 - A race fix that adds a guard at the site, and whose adversarial read then names a case the guard misses, has found that the state has the wrong owner, not that it needs a second guard.
   The sibling is authored as the ownership change for that state and names the guard it retires; a second guard is not filed.
+  Every further case the reader names against the same guard goes into that sibling's done condition, not into a card of its own: OW-gusaru's review filed four on 2026-09-25, OW-nibihi as the sibling and OW-ruzazi, OW-nukuse and OW-novone beside it, where one card carrying all four cases would have cost a quarter of the authoring and left nothing out.
   Three of the eight race fixes closed between 2026-09-22 and 2026-09-24 produced exactly such a sibling -- OW-zovaye filed OW-nuzepi, OW-zasozo filed OW-woyifu, OW-vijuyi filed OW-zudase -- and D24 is what those three cost.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.
   Grep the flag name or the phrase; the copies are not all in docs.
