@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # Emacs attaches before its first prompt, so the server reads the prompt's prior error after the start and clears one the start raised
@@ -19,3 +20,9 @@ Load-bearing: for a prompt that starts a session, the prior error the server com
 Incidental: whether that is fixed by the helper not attaching separately before a first prompt, by carrying the client's prior on the prompt request, or otherwise — weigh against why `agentpane--attached-then` attaches first (its docstring, and OW-nasofa's single-send rule in `agentpane--send-prompt`).
 
 Done when a test drives a first prompt through the Emacs path — a helper test in `src/emacs/helper.test.ts` against the fake server, or a server test in `src/server/http/app.test.ts` that attaches then prompts as the helper does — whose start raises an error, and shows the server still holds that error after the prompt is admitted, red before the change; and `bun run check` and the ERT suite pass.
+
+## Close note
+
+Duplicate of OW-bomolu, filed one run earlier on 2026-09-25 by OW-vulusi's adversarial read; this card came from OW-sedosu's read of the same code the next card over, and neither filing swept the open pile.
+Same sequence, same cause, same load-bearing line: the prior error the server compares against at a first prompt is the one standing before the start, whichever client sent it.
+What this card added over OW-bomolu, the browser contrast and the post-OW-jopifu wire, is noted on OW-bomolu.

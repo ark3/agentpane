@@ -15,4 +15,8 @@ In service of `AGENTS.md`, "Both clients": a start error survives the admission 
 Load-bearing: the error the server compares against at admission is the one that stood before this client's attach, not after it.
 Incidental: how that reaches the server — the prompt carrying the error its client saw at send, the helper reading it before its own attach, or some other route.
 
+Amended 2026-09-26: OW-lokima, filed by OW-sedosu's adversarial read on 2026-09-25, found this defect independently and closed moot under this card.
+Its trace adds two things: the browser POSTs a first prompt without attaching first, so the server keeps the start error for it and the two clients get different server outcomes for one gesture; and since OW-jopifu the clear reaches Emacs as `error-cleared`, not as a snapshot, so the Emacs-side sentence above about dropping drawn errors describes the code before OW-sedosu and OW-jopifu.
+Confirm the trace with a test before changing anything, as that card asked.
+
 Done when a test in `src/server/http/` or `src/emacs/` (whichever the fix lands in) drives an attach whose start raises an error, then a prompt as the Emacs helper sends it, and finds the session's error still set after admission — red first — and the existing prompt-route tests of OW-31 and OW-bipume still pass under `bun run check`.
