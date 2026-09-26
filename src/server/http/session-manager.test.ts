@@ -2417,6 +2417,22 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(events.filter((event) => event.type === "error-cleared")).toEqual([]);
 	});
 
+	it("keeps an error raised while that prompt was being admitted even when its text matches the one held (OW-lameke)", async () => {
+		// A steer's round trip, say, inside which the running turn fails the same
+		// way the last one did: Pi and Codex both handle backend events while
+		// `submit()` awaits its reply.
+		const raising = new FakeAdapterFactory({ onSubmit: (adapter) => adapter.emitError("turn failed") });
+		sessions = new SessionManager({ index, adapters: { pi: raising } }, broadcaster);
+		await sessions.attach(REF);
+		raising.forRef(REF)!.emitError("turn failed");
+		const events = connect();
+
+		await sessions.submit(REF, "again");
+
+		expect(snapshots(connect())[0]?.error).toBe("turn failed");
+		expect(events.filter((event) => event.type === "error-cleared")).toEqual([]);
+	});
+
 	it("keeps the error when the prompt is refused", async () => {
 		const refusing = new FakeAdapterFactory({
 			onSubmit: () => {

@@ -280,10 +280,12 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.text !== "string") {
 					return error(400, "bad_request", "text is required");
 				}
-				// Read before the attach, which may start the session: an error its
-				// start raises is not one the sender saw, so admitting this prompt
-				// must not clear it (OW-31, OW-bipume).
-				const priorError = sessions.errorOf(ref);
+				// Which error stood, by id, read before the attach, which may start
+				// the session: an error its start raises is not one the sender saw,
+				// so admitting this prompt must not clear it (OW-31, OW-bipume), and
+				// nor must it clear one raised during admission that repeats this
+				// one's text (OW-lameke) -- see `SessionManager.submit`.
+				const priorError = sessions.errorIdOf(ref);
 				// Only a session not yet running is attached here. An attach
 				// re-snapshots one already attached, which a prompt has no use for
 				// and every client pays for with a whole-transcript redraw

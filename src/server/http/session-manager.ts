@@ -143,6 +143,13 @@ interface ManagedSession {
 	 * drops them; a fork's container takes all but `error` (`#forkOnto`).
 	 */
 	error: string | null;
+	/**
+	 * Which raise `error` holds: taken from `#errorsRaised` as each is set, so
+	 * two errors with the same text are still two errors (OW-lameke). Left
+	 * as it was when `error` is cleared, so it names nothing unless `error` is
+	 * set.
+	 */
+	errorId: number;
 	requests: AgentRequest[];
 	notices: AgentNotice[];
 	createdAt: string;
@@ -272,6 +279,8 @@ export class SessionManager {
 	readonly #now: () => string;
 	/** The last handle minted; see `#container`. */
 	#minted = 0;
+	/** The last error id taken; see `ManagedSession.errorId`. */
+	#errorsRaised = 0;
 	/** What makes this manager's handles its own; see `#container`. */
 	readonly #handlePrefix = crypto.randomUUID();
 	/**
@@ -359,6 +368,7 @@ export class SessionManager {
 			lastEffort: null,
 			lastUnrestoredModel: null,
 			error: null,
+			errorId: 0,
 			requests: [],
 			notices: [],
 			queue: Promise.resolve(),
@@ -552,16 +562,25 @@ export class SessionManager {
 	 * clears the session's error and its `virtual` flag. An id the backend
 	 * names for it arrives through `onRefChanged`, like every other (`#rename`).
 	 */
-	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorOf(ref)): Promise<void> {
+	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorIdOf(ref)): Promise<void> {
 		return this.#serially(ref, async (session, adapter) => {
 			this.markPrompted(session.ref);
 			// The session's error goes once the next prompt is admitted, unless a
 			// newer one landed meanwhile (OW-31). This is the one place that rule
 			// runs: no client clears the error at its prompt's reply, each drops it
 			// at the `error-cleared` below (OW-lohubo).
-			// `priorError` is what stood when the prompt was sent, so a caller that
-			// attaches first reads it before that attach: an error the start raised
-			// is newer than the prompt, and nobody had seen it to clear.
+			// `priorError` is the id of what stood when the prompt was sent, so a
+			// caller that attaches first reads it before that attach: an error the
+			// start raised is newer than the prompt, and nobody had seen it to
+			// clear. It is compared by id, not text, because a newer error can
+			// repeat the held one word for word, and one can land before
+			// `adapter.submit` resolves (OW-lameke): Pi's and Codex's adapters both
+			// handle backend events while awaiting a reply -- the `prompt`
+			// command's, and for a Pi id not yet resolved a `get_state` after it
+			// (`PiAdapter.submit`); `turn/start`'s or, steering a live turn (D16),
+			// `turn/steer`'s (`CodexAdapter.submit`) -- so a steered turn that
+			// fails the way the last one did is raised inside it. Claude Code's
+			// admission is a synchronous stdin write, so its adapter cannot.
 			await adapter.submit(text, images);
 			// A container `close` took out of the table while the prompt was being
 			// admitted is past announcing: its handle is forgotten, and an event
@@ -569,7 +588,7 @@ export class SessionManager {
 			// still holding it (OW-jopifu). Its error goes nowhere either, since
 			// no snapshot is built from a container out of the table.
 			if (this.#sessions.get(session.handle) !== session) return;
-			if (priorError !== null && session.error === priorError) {
+			if (priorError !== null && session.error !== null && session.errorId === priorError) {
 				session.error = null;
 				// This tells every client, the prompt's own included (OW-lohubo),
 				// which no turn-boundary snapshot does any longer (OW-yirosu), and
@@ -916,6 +935,7 @@ export class SessionManager {
 				}),
 				adapter.onError((message) => {
 					owner.error = message;
+					owner.errorId = ++this.#errorsRaised;
 					this.broadcaster.error(owner, message);
 				}),
 			);
@@ -1079,9 +1099,13 @@ export class SessionManager {
 		return this.#sessions.get(handle)?.ref;
 	}
 
-	/** The session's held turn error, or null -- including for a session not in the table. */
-	errorOf(ref: SessionRef): string | null {
-		return this.#lookup(ref)?.error ?? null;
+	/**
+	 * Which turn error the session holds, as its `errorId`, or null when it
+	 * holds none -- including for a session not in the table.
+	 */
+	errorIdOf(ref: SessionRef): number | null {
+		const session = this.#lookup(ref);
+		return session?.error == null ? null : session.errorId;
 	}
 
 	/**
