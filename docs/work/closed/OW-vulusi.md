@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # Emacs keeps a turn error drawn after the next prompt is admitted, through the whole turn on Claude Code, where the browser drops it at admission
@@ -20,3 +21,13 @@ Load-bearing: Emacs clears only the error it had drawn when the prompt was sent,
 Incidental: whether the clear hangs off the prompt's reply callback or elsewhere in the send path.
 
 Done when an ERT test in `emacs/agentpane-test.el` drives a buffer that has an error drawn, sends a prompt through the recorded-request harness used by `agentpane-test-dismiss-error-names-it-to-the-server`, answers the prompt, and finds no `⚠` line drawn — red first — and a second case in which a newer `session/error` arrives before the answer keeps that newer line; the full ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, passes, and that Commentary's sentence "A turn error stays drawn until a snapshot arrives without it" is reworded to match.
+
+## Close note
+
+Landed in c5a85fa: `agentpane--send-prompt` in `emacs/agentpane.el` records the messages of the error lines drawn at send, and the `sessions/prompt` reply drops the drawn lines carrying those messages, so the `⚠` line goes at admission as the browser's banner does, while an error arriving in flight survives.
+The match is by message because the attach snapshot and the turn-start snapshot on Claude Code redraw the same error as a fresh node.
+Verified by `agentpane-test-admitted-prompt-drops-the-drawn-error` and `agentpane-test-admitted-prompt-keeps-a-newer-error` in `emacs/agentpane-test.el`: both failed on the old code (indices `(0 1 nil)` and `(0 1 nil nil)`), and they pass now with the full ERT suite (117 run, 0 unexpected, 3 skipped).
+The Commentary sentence and the docstring now describe this.
+The adversarial read found that this is a guard at the site and named the case it misses: Emacs draws one line per `session/error` where the server holds one error.
+The ownership change is OW-sedosu, which also carries the shared-with-browser case of a stale snapshot arriving after the reply.
+A pre-existing server-side divergence on the Emacs path, where a start error is cleared because the attach runs before the prompt route reads `priorError`, is OW-bomolu.
