@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane--insert-html gives a prose line opening with a number and a space, or a code line opening with "- ", a hanging indent, because its list-marker adaptive-fill-regexp cannot tell them from list rows
@@ -18,3 +19,15 @@ One route is to recognise list rows by what shr puts on them rather than by thei
 ## Done
 
 `agentpane-test-text-part-hanging-indents` changed so the `2024` paragraph and the `- dash` code line carry no `wrap-prefix`, red against today's code, and green after with every list row's entry unchanged.
+
+## Close note
+
+Done 2026-09-25 (6e30c5d on main).
+`agentpane--insert-html` no longer lets `adaptive-fill-regexp` decide what a list row is by its text.
+The regexp is now whitespace only, and an `adaptive-fill-function` returns the marker only when the marker's first character carries `shr-continuation-indentation`, which `shr-tag-li` and `agentpane--shr-li` leave there (Emacs 31.1).
+So a paragraph `2024 was a year.` and a code line `- dash` no longer hang, and list rows at every depth keep the indent they had.
+
+Verified: `agentpane-test-text-part-hanging-indents` now expects `("2024 was a year." nil nil)` and `("- dash" nil nil)`.
+Against the unchanged `agentpane.el` it failed (118 run, 1 unexpected), and with the fix all 118 ran with 0 unexpected, re-run by the dispatching session in both directions.
+An adversarial reader drew nested, mixed, blockquoted, table-celled and code-led lists against main and the fix: every list row's hang was unchanged, and every difference was a non-list line losing a hang it should not have had.
+The one regression it found needs a user `shr-bullet` opening with whitespace; filed as OW-dulime together with the pre-existing case of a bullet outside the marker set.
