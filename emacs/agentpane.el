@@ -83,7 +83,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 124 tests, 121 results as expected, 0 unexpected, 3 skipped
+;;     Ran 125 tests, 122 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -426,6 +426,7 @@ non-nil, on the way out."
 
 (defvar agentpane--attached)
 (defvar agentpane--dropped)
+(defvar agentpane--status)
 
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
@@ -442,7 +443,9 @@ Every other notification but a snapshot, whose redraw discards what is
 recorded, draws what is recorded first, so it finds the buffer as it
 would have had each node been drawn on arrival.
 A `session/detached' says the server let go of the handle the buffer
-holds, and the buffer lets go of it too; see `agentpane--dropped'."
+holds, and the buffer lets go of it too, and reads as the status that
+ends a turn leaves it, nothing streaming or compacting, since nothing
+will say so under that handle; see `agentpane--dropped'."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
     (let ((buffer (agentpane--notified-buffer method params)))
@@ -473,7 +476,11 @@ holds, and the buffer lets go of it too; see `agentpane--dropped'."
             ('session/detached
              (setq agentpane--handle nil
                    agentpane--attached nil
-                   agentpane--dropped t))))))))
+                   agentpane--dropped t)
+             (agentpane--set-status
+              (plist-put (plist-put (copy-sequence agentpane--status)
+                                    :isStreaming :json-false)
+                         :compaction nil)))))))))
 
 (defvar agentpane--attach-sent)
 
@@ -1700,9 +1707,10 @@ a snapshot's `askedFor' only to such a buffer.")
 
 (defvar-local agentpane--dropped nil
   "Non-nil once the helper said the handle this buffer held is gone, by a
-`session/detached', until an attach of this buffer's answers: its
-reopened event stream's listing lacked the handle, a server restart or a
-close elsewhere having let go of it (OW-yibijo).  The buffer then holds no
+`session/detached', until an attach of this buffer's answers: the
+helper's listing, asked at a `sessions-changed' or a reopen of its event
+stream, lacked the handle, a server restart or a close elsewhere having
+let go of it (OW-yibijo).  The buffer then holds no
 handle and is not attached, and keeps its ref and what it drew, so
 `agentpane-refetch' attaches again rather than drawing the stored
 transcript over the live one.  That attach, or a prompt's, is a first

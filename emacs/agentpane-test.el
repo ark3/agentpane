@@ -1165,8 +1165,9 @@ of it."
 (ert-deftest agentpane-test-snapshot-under-a-new-handle-moves-the-attached-buffer ()
   "A `session/snapshot' under a handle no buffer holds, for the ref an
 attached buffer holds under another -- the one answering that buffer's
-own attach, sent from a handle the server no longer has -- moves that buffer onto the new handle, not a buffer only
-previewing the same ref, and what follows under the new handle reaches it."
+own attach, sent from a handle the server no longer has -- moves that
+buffer onto the new handle, not a buffer only previewing the same ref,
+and what follows under the new handle reaches it."
   (let ((ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
       (let ((live (agentpane--transcript-buffer
@@ -1194,37 +1195,45 @@ previewing the same ref, and what follows under the new handle reaches it."
 (defmacro agentpane-test--detached (&rest body)
   "Run BODY in a transcript buffer `buffer' attached to the session `ref'
 under the handle \"h1\" through a helper that counts as running, its
-transcript drawn by a snapshot under that handle as the node at index 3,
+transcript drawn by a snapshot under that handle, streaming on the model
+\"luna\", as the node at index 3, a tool call running \"sleep 60\",
 after the helper has said `session/detached' for that handle: its
 reopened stream's listing lacked it (OW-yibijo).  Every request is
-answered as `agentpane-test--forking' answers it."
+answered as `agentpane-test--forking' answers it, and the model's
+`models/list' is never answered."
   (declare (indent 0))
   `(let ((ref '(:backend "claude" :id "real-1")))
      (agentpane-test--with-helper
        (agentpane-test--forking nil nil
-         (setq attached (list :ref ref :handle "h1"))
-         (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
-           (with-current-buffer buffer (agentpane--attach))
-           (agentpane--on-notification
-            nil 'session/snapshot
-            (list :session ref :handle "h1"
-                  :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
-           (agentpane--on-notification nil 'session/detached
-                                       (list :session ref :handle "h1"))
-           (setq sent nil)
-           ,@body)))))
+         (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
+           (setq attached (list :ref ref :handle "h1"))
+           (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+             (with-current-buffer buffer (agentpane--attach))
+             (agentpane--on-notification
+              nil 'session/snapshot
+              (list :session ref :handle "h1" :isStreaming t :model "luna"
+                    :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
+             (agentpane--on-notification nil 'session/detached
+                                         (list :session ref :handle "h1"))
+             (setq sent nil)
+             ,@body))))))
 
 (ert-deftest agentpane-test-detached-lets-go-of-the-handle-and-g-attaches-again ()
   "A `session/detached' for the handle a buffer holds leaves it holding no
-handle and not attached, with its ref and the transcript it drew, and a
-`g' then attaches its ref again rather than previewing the stored
-transcript over the live one it drew."
+handle and not attached, with its ref and the transcript it drew, and
+reading as not streaming, as the status that ends a turn leaves it: the
+mode line names the model and no streaming, and the tail's running tool
+call is drawn `ok'.  A `g' then attaches its ref again rather than
+previewing the stored transcript over the live one it drew."
   (agentpane-test--detached
     (with-current-buffer buffer
       (should-not agentpane--handle)
       (should-not (agentpane--attached-p))
       (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref))
       (should (equal (agentpane-test--indices) '(3)))
+      (should-not agentpane--streaming)
+      (should (equal mode-line-process " [luna]"))
+      (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60")))
       (agentpane-refetch)
       (should (equal sent `((sessions/attach :session ,ref)))))))
 
@@ -1250,6 +1259,32 @@ the snapshot redraws it, before the reply lands and after."
       (with-current-buffer buffer
         (should (equal agentpane--handle "h2"))
         (should (agentpane--attached-p))))))
+
+(ert-deftest agentpane-test-detached-for-a-handle-no-buffer-holds-touches-no-buffer ()
+  "A `session/detached' goes only to the buffer holding its handle: one
+for a handle no buffer holds leaves a buffer only previewing its ref, and
+one awaiting an attach of its ref, as they were, so the preview's `g'
+still previews."
+  (let ((previewed '(:backend "claude" :id "real-1"))
+        (awaited '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/attach))
+        (let ((preview (agentpane--transcript-buffer (list :ref previewed)))
+              (attaching (agentpane--transcript-buffer (list :ref awaited))))
+          (with-current-buffer attaching (agentpane--attach))
+          (agentpane--on-notification nil 'session/detached
+                                      (list :session previewed :handle "h8"))
+          (agentpane--on-notification nil 'session/detached
+                                      (list :session awaited :handle "h9"))
+          (with-current-buffer attaching
+            (should-not agentpane--dropped)
+            (should agentpane--attaching))
+          (with-current-buffer preview
+            (should-not agentpane--dropped)
+            (setq sent nil)
+            (agentpane-refetch)
+            (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
 
 (defmacro agentpane-test--merging (&rest body)
   "Run BODY with a transcript buffer `holder' holding the session under the

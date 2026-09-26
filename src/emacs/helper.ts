@@ -31,9 +31,9 @@
  * before the REST call (D2) and nothing has named a handle yet, and moves to
  * the handle with the first event under one that carries that ref, or with
  * the attach reply. An attachment never moves to another handle: one whose
- * handle the server let go of is dropped at the next reopen of the stream,
- * and Emacs told (`dropDead` below, OW-yibijo). `sessions/changed` is
- * unfiltered.
+ * handle the server let go of is dropped at the next `sessions-changed` or
+ * reopen of the stream, and Emacs told (`dropDead` below, OW-yibijo).
+ * `sessions/changed` is unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
@@ -237,9 +237,15 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 
 	/**
 	 * Drop each attachment whose handle the server no longer holds, and tell
-	 * Emacs so. Run at every reopen of the stream, since nothing says a handle
-	 * died: a server restart, or a close by another client while the stream
-	 * was down, leaves one that no event will ever come under again. The
+	 * Emacs so. Run at every reopen of the stream and on every
+	 * `sessions-changed`, which the server sends once a close has taken the
+	 * session out of its table, as well as at each attach and each turn's
+	 * start and end, since nothing says a handle died: a server restart, or a
+	 * close by another client, leaves one that no event will ever come under
+	 * again. With the stream up that matters as much as across an outage: the
+	 * buffer still counts itself attached, so a prompt from it sends no
+	 * attach, and the prompt route's own attach mints a handle whose snapshot
+	 * this helper drops, so the turn would run unseen. The
 	 * unfiltered listing puts `handle` on every session the server holds
 	 * (`SessionManager.list` in src/server/http/session-manager.ts), and a
 	 * handle is never minted twice (D24), so one it lacks is gone for good.
@@ -253,8 +259,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 *
 	 * Only a handle held when the listing was asked for can be dropped by its
 	 * answer: one an attach answered meanwhile the listing may predate. And
-	 * only while still held: a detach meanwhile has already told Emacs. A
-	 * failed listing drops nothing, and the next reopen asks again.
+	 * only while still held: a detach meanwhile has already told Emacs. Every
+	 * event asks a listing of its own, none coalesced, since one in flight may
+	 * predate the close that sent a later event; passes that overlap are
+	 * safe, since a handle once gone is never minted again (D24) and each
+	 * drops only what it held when it asked. A failed listing drops nothing,
+	 * and the next `sessions-changed` or reopen asks again.
 	 */
 	const dropDead = async (): Promise<void> => {
 		const held = [...attached.keys()];
@@ -279,7 +289,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		state = result.state;
 		if (result.refreshSessions) notify({ method: "sessions/changed" });
 		for (const { ref } of result.recover) api.attach(ref).catch(() => undefined);
-		if (event.type === "sessions-changed") return;
+		if (event.type === "sessions-changed") {
+			void dropDead();
+			return;
+		}
 
 		if (state === before) return;
 

@@ -255,18 +255,18 @@
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
  * - `session/detached` -- `{ session, handle }`. The server no longer holds
- *   `handle`, and nothing more comes under it: the helper's listing after
- *   it reopened its event stream lacked it -- a server restart, or a close
- *   by another client while the stream was down -- and the helper has
- *   dropped the attachment (OW-yibijo). `session` is the ref it last named
- *   the session by. The buffer holding `handle` lets go of it and counts
- *   itself detached, keeping its ref and what it drew; its next
- *   `sessions/attach`, by that ref, is answered under whatever handle and
- *   ref the session has now, if any, as a first attach is.
+ *   `handle`, and nothing more comes under it: the helper's own listing,
+ *   asked at each `sessions/changed` it sends, lacked it -- a server
+ *   restart, or a close by another client -- and the helper has dropped
+ *   the attachment (OW-yibijo). `session` is the ref it last named the
+ *   session by. The buffer holding `handle` lets go of it and counts
+ *   itself detached and not streaming, keeping its ref and what it drew;
+ *   its next `sessions/attach`, by that ref, is answered under whatever
+ *   handle and ref the session has now, if any, as a first attach is.
  * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
  *   time the helper reopens a dropped event stream, since a listing change
- *   while it was down is gone, and before any `session/detached` that
- *   reopen's listing brings.
+ *   while it was down is gone. Any `session/detached` the helper's own
+ *   listing brings follows it.
  */
 
 import type {
