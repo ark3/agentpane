@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-yibijo]
+closed: moot
 ---
 
 # A buffer whose session was renamed, closed elsewhere and re-attached by its new ref in one stream outage stays frozen, since no name links the handle it holds to the new one
@@ -40,3 +41,8 @@ Then Emacs receives a snapshot under H3 that agentpane-mode routes to the buffer
 A server test shows the route, whatever shape it takes, starting and broadcasting nothing.
 The residual sentence in `docs/DESIGN.md` D21, "What the helper still cannot follow is a rename before a close elsewhere", is corrected in the same change.
 `bun run check` green.
+
+## Close note
+
+Moot under OW-yibijo, landed 2026-09-25 (76ab6c0, 1bbaf70). OW-yibijo retired the helper's per-ref `live` lookup (`reconcile`, `movedFrom`) that this card's case was a miss of. The helper now drops each attachment whose handle its listing lacks, at every reopen and on every `sessions-changed`, and tells the buffer by `session/detached`. The buffer's next attach then finds the session by its ref.
+The buffer no longer stays frozen, but after a rename, then a close, its attach by the old ref still reaches nothing; that remainder is OW-tujami.

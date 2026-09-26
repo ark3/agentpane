@@ -1,6 +1,7 @@
 ---
 labels: [deferral, emacs]
 blocked-by: [OW-yibijo]
+closed: moot
 ---
 
 # The helper's live lookup treats a failed request as 'not live' and never retries, so one error strands a buffer the old synchronous ref-match would have moved
@@ -21,3 +22,7 @@ Whatever the fix, keep 404 meaning "not live" distinct from a failed request, an
 Done when a test in `src/emacs/helper.test.ts` makes the live route fail once and then succeed, and the attachment moves.
 It must go red first against the helper as OW-gusaru left it.
 `bun run check` green.
+
+## Close note
+
+Moot under OW-yibijo, landed 2026-09-25 (76ab6c0, 1bbaf70). OW-yibijo retired the helper's per-ref `live` lookup (`reconcile`, `movedFrom`) that this card's case was a miss of. The helper now drops each attachment whose handle its listing lacks, at every reopen and on every `sessions-changed`, and tells the buffer by `session/detached`. The buffer's next attach then finds the session by its ref.

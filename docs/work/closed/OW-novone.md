@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-yibijo]
+closed: moot
 ---
 
 # When another buffer attached a session's new ref before the helper's live lookup answered, the helper drops the stale buffer's attachment silently and that buffer stays frozen
@@ -23,3 +24,7 @@ The tradeoff to weigh is that `agentpane--absorb` today follows the user's own a
 Done when a test in `src/emacs/helper.test.ts` and an ert test in `emacs/agentpane-test.el` each go red first and green after.
 In the helper test, B's attach reply lands before A's lookup answers, and A's handle then no longer stands frozen: either Emacs receives a notification the ert test routes to A, or A is absorbed into B.
 `bun run check` green, and the ert run passes as the header of `emacs/agentpane.el` describes.
+
+## Close note
+
+Moot under OW-yibijo, landed 2026-09-25 (76ab6c0, 1bbaf70). OW-yibijo retired the helper's per-ref `live` lookup (`reconcile`, `movedFrom`) that this card's case was a miss of. The helper now drops each attachment whose handle its listing lacks, at every reopen and on every `sessions-changed`, and tells the buffer by `session/detached`. The buffer's next attach then finds the session by its ref.

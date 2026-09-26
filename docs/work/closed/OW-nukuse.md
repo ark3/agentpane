@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-yibijo]
+closed: moot
 ---
 
 # A detach Emacs sends for a handle the helper has just moved leaves the attachment on the new handle, feeding no buffer
@@ -19,3 +20,7 @@ Whether to keep that link, and for how long, is the executor's call against `for
 Done when a test in `src/emacs/helper.test.ts` goes red first and green after.
 The test moves an attachment from H1 to H2 and then sends `sessions/detach` naming H1. After that, an event under H2 reaches Emacs as nothing.
 `bun run check` green.
+
+## Close note
+
+Moot under OW-yibijo, landed 2026-09-25 (76ab6c0, 1bbaf70). OW-yibijo retired the helper's per-ref `live` lookup (`reconcile`, `movedFrom`) that this card's case was a miss of. The helper now drops each attachment whose handle its listing lacks, at every reopen and on every `sessions-changed`, and tells the buffer by `session/detached`. The buffer's next attach then finds the session by its ref.

@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # After a stream reopen the Emacs helper drops each attachment whose handle the listing lacks and tells its buffer, retiring the per-ref lookup that reconciles today
@@ -51,3 +52,23 @@ Declined: re-attaching every buffer from the helper on reopen, which would respa
 - The D21 paragraph in `docs/DESIGN.md` from "A snapshot under a handle no attachment holds sends the helper to the server's read-only `live` route" through "Still open is the other order", and the D24 sentence ending "(D21, OW-nibihi)", say the new rule and name what remains open, if anything does.
 - `bun run check` green, and the ert suite run as the Commentary of `emacs/agentpane.el` gives it.
 - On landing, OW-nibihi, OW-novone, OW-ruzazi and OW-nukuse close `--moot` naming this card; each is blocked by it until then so none runs first.
+
+## Close note
+
+Landed on main as 76ab6c0 and 1bbaf70.
+The Emacs helper (`dropDead` in `src/emacs/helper.ts`) now asks for the unfiltered listing at every reopen of its stream and on every `sessions-changed`. It drops each attachment it held when it asked whose handle the answer lacks, and tells Emacs with `session/detached` `{ session, handle }` (documented in `src/emacs/protocol.ts`).
+The buffer holding that handle in `emacs/agentpane.el` lets go of it, keeps its ref and transcript, reads as not streaming, and sets `agentpane--dropped`, so `g` or a prompt re-attaches by the ref.
+Retired: `reconcile`, `liveSummary`, `movedFrom`, `GET .../live` (`ROUTES.live`, `LiveSessionResponse`), and `SessionManager.liveSummaryOf`, with their tests and doc copies.
+The incidental choices:
+- The helper lists for itself, unfiltered.
+- It lists on every `sessions-changed`, not only at reopens, because the adversarial read found a regression otherwise. With the stream up, a close elsewhere followed by a prompt from the buffer would run the turn unseen: the prompt route attaches under a new handle whose snapshot the helper drops. `reconcile` on main had followed it.
+- Each event asks its own listing, never coalesced. `SessionManager.close` sends `sessionsChanged` only after the session has left the table (checked).
+Behaviour change: a re-attach elsewhere no longer carries a buffer along. The buffer is told it is detached and comes back on `g` or a prompt. D21 says so.
+Verified:
+- Helper tests: five new, in "the listing after a reopen (OW-yibijo)" plus the sessions-changed test, each red first. The in-flight guards were red when broken on purpose.
+- ert tests: three new or extended, red first.
+- `bun run check` passed (1448 tests) and ert gave 125 ran, 122 expected, 3 tty-skipped, on main after the cherry-pick.
+`docs/DESIGN.md` D21 and D24 state the rule and name what is still open:
+- OW-tujami, a rename then a close, which leaves the buffer's ref naming nothing.
+- A prompt racing a close.
+Edge cases of `agentpane--dropped` went to OW-wabiju.
