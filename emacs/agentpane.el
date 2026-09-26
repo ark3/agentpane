@@ -50,9 +50,11 @@
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
-;; A turn error goes once the next prompt is admitted, unless it arrived
-;; while that prompt was being sent, or once a snapshot arrives without
-;; it, and `C-c C-d' in the transcript buffer dismisses it at once.
+;; A buffer holds one turn error, the one the server holds: a newer one
+;; replaces it, and it goes once the next prompt is admitted, unless a
+;; different one replaced it while that prompt was being sent, or once a
+;; snapshot arrives without it, and `C-c C-d' in the transcript buffer
+;; dismisses it at once.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
@@ -79,7 +81,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 118 tests, 115 results as expected, 0 unexpected, 3 skipped
+;;     Ran 121 tests, 118 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -454,7 +456,7 @@ would have had each node been drawn on arrival."
                                  (plist-get params :requests)))))
             ('session/node (agentpane--record (plist-get params :node)))
             ('session/status (agentpane--set-status params))
-            ('session/error (agentpane--upsert (list :error (plist-get params :message))))
+            ('session/error (agentpane--hold-error (plist-get params :message)))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))))))))
@@ -721,6 +723,24 @@ and each would otherwise be the last while it is drawn.")
   "The nodes `session/node' brought that are not yet drawn, as an alist from
 index to the latest node at it, the index that first arrived last; see
 `agentpane--record'.")
+
+(defvar-local agentpane--error nil
+  "The message of the turn error this buffer holds, or nil.
+The buffer's one owner of the error, as `session.error' is the server's
+\(src/server/http/session-manager.ts) and the session's `error' is the
+browser's: a snapshot sets it from its `error', a `session/error' replaces
+it, `agentpane-dismiss-error' clears it, and so does a prompt's answer
+while it still holds the message it held when the prompt was sent (OW-31;
+see `agentpane--send-prompt').  It is drawn as the one `(:error MESSAGE)'
+node; see `agentpane--hold-error'.
+A snapshot sets it even from a stale error: a snapshot the server
+broadcast before `submit' in session-manager.ts cleared the error may be
+handled after the prompt's answer, since the event stream and the reply
+are unordered (D2).  Since OW-yirosu, `submit' broadcasts a snapshot
+whenever it clears the error, and the event stream is one ordered stream,
+so that clearing snapshot always follows the stale one and the line the
+stale one draws is transient; the buffer keeps no send-time state to
+second-guess a snapshot (OW-sedosu).")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
@@ -1239,8 +1259,8 @@ text on the page, closed by its small meta line and nothing else, so
 consecutive assistant turns run together the way they do there; a user turn
 is the one raised surface, a tinted box with an accent bar down its left
 edge, with a blank line on either side.  Neither carries a role label.
-NODE may instead be `(:error MESSAGE)', a `session/error' drawn as a
-warning line where it arrived, `(:request REQUEST)', a `session/request'
+NODE may instead be `(:error MESSAGE)', the turn error `agentpane--error'
+holds, drawn as a warning line, `(:request REQUEST)', a `session/request'
 drawn as a warning line naming its kind and id, or `(:notice NOTICE)', a
 `session/notice' drawn there too, as its message with its details and
 path, if any, on the lines below, in `agentpane-notice' so it does not read
@@ -1345,10 +1365,12 @@ REQUESTS, the turn error, notices and pending requests a `session/snapshot'
 carries, are drawn after NODES in that order, as an `(:error MESSAGE)'
 node, `(:notice NOTICE)' nodes and `(:request REQUEST)' nodes, so a
 snapshot keeps what the server still holds for the session, including what
-arrived before this buffer was attached (OW-bipume).  Nodes recorded and
+arrived before this buffer was attached (OW-bipume).  ERROR, nil or not,
+becomes the error the buffer holds, `agentpane--error'.  Nodes recorded and
 not yet drawn are discarded, since NODES supersede them.  Point goes to
 the first node."
-  (setq agentpane--recorded nil)
+  (setq agentpane--recorded nil
+        agentpane--error error)
   (agentpane--above-prompt
    (lambda ()
      (delete-region (point-min) agentpane--prompt-separator)
@@ -1387,9 +1409,9 @@ the first node."
 (defun agentpane--upsert (node)
   "Redraw the drawn node whose index is NODE's in place, or append NODE.
 A node's `index' is its place in the session's flat message array, so the
-match is by that and never by position; an `(:error MESSAGE)', a
-`(:request REQUEST)' or a `(:notice NOTICE)' has no index and always
-appends.  Text after the
+match is by that and never by position; a `(:request REQUEST)' or a
+`(:notice NOTICE)' has no index and always appends.  The turn error is
+never upserted; see `agentpane--hold-error'.  Text after the
 redrawn node, the prompt region included, moves with it, and so does a
 point there: at the end of the buffer before, at the end after.
 A node appended with an index becomes the last, and while the session
@@ -1446,6 +1468,18 @@ forget them; see `agentpane--record'."
         (setq agentpane--recorded nil)
         (pcase-dolist (`(,_ . ,node) recorded)
           (agentpane--upsert node))))))
+
+(defun agentpane--hold-error (message)
+  "Hold MESSAGE, or nil for none, as this buffer's turn error, and draw it.
+The line drawn for the one held before goes, and MESSAGE's is appended,
+where it arrived, so the buffer draws at most one; see `agentpane--error'."
+  (setq agentpane--error message)
+  (agentpane--above-prompt
+   (lambda ()
+     (ewoc-filter agentpane--ewoc (lambda (data) (not (plist-member data :error))))
+     (when message
+       (ewoc-enter-last agentpane--ewoc (list :error message)))))
+  (agentpane--show-reading-tail))
 
 (defun agentpane--drop-request (request-id)
   "Drop the `(:request REQUEST)' node drawn for REQUEST-ID, if there is one.
@@ -2244,12 +2278,12 @@ so pressing again while a backend spawns is the natural move, and without
 this each press attached and prompted with the same text, which the Codex
 adapter makes a steer of the turn the first began (D16).
 
-The answer drops every turn error drawn when TEXT was sent, as the
-browser's banner goes once the prompt is admitted (OW-vulusi); one that
-arrived since stays, as `submit' in src/client/controller.ts keeps it
-\(OW-31), unless its message is one of those.  The match is by message,
-since a snapshot landing meanwhile, such as the attach's, draws the same
-error again as a fresh node."
+The answer clears the turn error the buffer held when TEXT was sent, as
+the browser's banner goes once the prompt is admitted (OW-vulusi), if the
+buffer still holds it: one that replaced it since stays, as `submit' in
+src/client/controller.ts keeps it (OW-31).  The match is by message, as
+the server's is, so the same error redrawn meanwhile by a snapshot, such
+as the attach's, still goes."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
@@ -2257,24 +2291,15 @@ error again as a fresh node."
       (user-error "A prompt to this session is already being sent"))
     (setq agentpane--sending t)
     (let ((failed (lambda () (setq agentpane--sending nil)))
-          (errors (and agentpane--ewoc
-                       (mapcar (lambda (data) (plist-get data :error))
-                               (ewoc-collect agentpane--ewoc
-                                             (lambda (data) (plist-member data :error)))))))
+          (prior agentpane--error))
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/prompt
                              (list :session (agentpane--ref agentpane--session) :text text)
                              (lambda (_)
                                (setq agentpane--sending nil)
-                               (when errors
-                                 (agentpane--above-prompt
-                                  (lambda ()
-                                    (ewoc-filter agentpane--ewoc
-                                                 (lambda (data)
-                                                   (not (and (plist-member data :error)
-                                                             (member (plist-get data :error)
-                                                                     errors))))))))
+                               (when (and prior (equal agentpane--error prior))
+                                 (agentpane--hold-error nil))
                                (funcall sent))
                              t failed agentpane--spawn-timeout))
        failed))))
@@ -2318,21 +2343,18 @@ The first prompt on a previewed session attaches it."
 (defun agentpane-dismiss-error ()
   "Dismiss this buffer's turn error through `sessions/dismissError'.
 The server holds the error for every later snapshot (OW-bipume), so it is
-told, naming the error drawn last, the one it holds, so that a newer one
-survives; the buffer drops every drawn error at once, as the browser's
-banner goes before its dismissal has answered (OW-desufa)."
+told, naming the one the buffer holds, `agentpane--error', so that a newer
+one survives; the buffer clears it at once, as the browser's banner goes
+before its dismissal has answered (OW-desufa)."
   (interactive)
   (with-current-buffer (agentpane--transcript)
-    (let ((errors (ewoc-collect agentpane--ewoc (lambda (data) (plist-member data :error)))))
-      (unless errors
-        (user-error "No turn error to dismiss"))
-      (agentpane--request 'sessions/dismissError
-                          (list :session (agentpane--ref agentpane--session)
-                                :message (plist-get (car (last errors)) :error))
-                          #'ignore t)
-      (agentpane--above-prompt
-       (lambda ()
-         (ewoc-filter agentpane--ewoc (lambda (data) (not (plist-member data :error)))))))))
+    (unless agentpane--error
+      (user-error "No turn error to dismiss"))
+    (agentpane--request 'sessions/dismissError
+                        (list :session (agentpane--ref agentpane--session)
+                              :message agentpane--error)
+                        #'ignore t)
+    (agentpane--hold-error nil)))
 
 (defun agentpane--read-model (backend)
   "Read a model id for BACKEND from its `models/list', with completion.

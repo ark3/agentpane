@@ -779,18 +779,37 @@ naming what it is (OW-bipume)."
       (should (equal (agentpane-test--indices) '(0 1)))
       (should-not (string-search "⚠" (buffer-string))))))
 
+(defun agentpane-test--warnings ()
+  "The warning lines drawn in the current buffer, each without its `⚠ '."
+  (let (lines)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^⚠ \\(.*\\)$" nil t)
+        (push (match-string-no-properties 1) lines)))
+    (nreverse lines)))
+
+(ert-deftest agentpane-test-error-replaces-the-held-one ()
+  "A `session/error' replaces the turn error the buffer holds rather than
+drawing a second line beside it, as the server and the browser each hold
+one per session (OW-sedosu)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/error (list :session ref :message "Turn failed upstream"))
+      (agentpane--on-notification
+       nil 'session/error (list :session ref :message "Turn failed again"))
+      (should (equal (agentpane-test--warnings) '("Turn failed again"))))))
+
 (ert-deftest agentpane-test-dismiss-error-names-it-to-the-server ()
-  "`C-c C-d', pressed in the prompt region, dismisses the drawn turn error
-through `sessions/dismissError', naming the one drawn last, which is the one
-the server holds, so the server clears it and no newer one; the buffer
-drops every drawn error at once, as the browser's banner goes (OW-desufa)."
+  "`C-c C-d', pressed in the prompt region, dismisses the held turn error
+through `sessions/dismissError', naming it, which is the one the server
+holds after two `session/error's, the second; the buffer draws no error
+once it is pressed, as the browser's banner goes (OW-desufa)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
         (agentpane--on-notification
-         nil 'session/snapshot
-         (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
-               :error "Turn failed upstream" :requests [] :notices []))
+         nil 'session/error (list :session ref :message "Turn failed upstream"))
         (agentpane--on-notification
          nil 'session/error (list :session ref :message "Turn failed again"))
         (goto-char (point-max))
@@ -798,7 +817,7 @@ drops every drawn error at once, as the browser's banner goes (OW-desufa)."
         (should (equal sent `((sessions/dismissError :session ,ref
                                                      :message "Turn failed again"))))
         (should (equal (agentpane-test--indices) '(0 1)))
-        (should-not (string-search "⚠" (buffer-string)))))))
+        (should-not (agentpane-test--warnings))))))
 
 (ert-deftest agentpane-test-request-is-drawn-where-it-arrives ()
   "A `session/request' appends the same warning line a snapshot draws for it."
@@ -2302,7 +2321,7 @@ carrying the same message."
 
 (ert-deftest agentpane-test-admitted-prompt-keeps-a-newer-error ()
   "A turn error that arrives while the prompt is in flight is newer than
-the prompt and survives its answer, which drops only the one drawn when
+the prompt and survives its answer, which clears only the one held when
 the prompt was sent (OW-vulusi; OW-31's rule, `submit' in
 src/client/controller.ts)."
   (let ((ref '(:backend "codex" :id "t1")))
@@ -2325,6 +2344,59 @@ src/client/controller.ts)."
           (should (equal (agentpane-test--indices) '(0 1 nil)))
           (should-not (string-search "Turn failed upstream" (buffer-string)))
           (should (string-search "⚠ Turn failed again" (buffer-string))))))))
+
+(ert-deftest agentpane-test-error-resent-in-flight-survives-the-answer ()
+  "An error held when the prompt was sent, and replaced before it, that
+arrives again while the prompt is in flight is the one the server holds,
+and survives the answer: `submit' in src/server/http/session-manager.ts
+clears the held error only if it is still the one that stood at the send,
+and here it is not (OW-sedosu)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
+          (agentpane--on-notification
+           nil 'session/error (list :session ref :message "Turn failed upstream"))
+          (agentpane--on-notification
+           nil 'session/error (list :session ref :message "Turn failed again"))
+          (setq hold '(sessions/prompt))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (agentpane--on-notification
+           nil 'session/error (list :session ref :message "Turn failed upstream"))
+          (funcall (cdr (pop held)) t)
+          (should (equal (agentpane-test--warnings) '("Turn failed upstream"))))))))
+
+(ert-deftest agentpane-test-stale-snapshot-redraws-the-cleared-error ()
+  "A snapshot handled after the prompt's answer, broadcast before the
+server cleared the error, draws that error again, and the snapshot the
+clearing broadcast, handled after it, draws none: the buffer keeps no
+send-time state to second-guess a snapshot (OW-sedosu, OW-yirosu)."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (snapshot (lambda (ref error)
+                    (agentpane--on-notification
+                     nil 'session/snapshot
+                     (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                           :error error :requests [] :notices [])))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
+          (funcall snapshot ref "Turn failed upstream")
+          (setq hold '(sessions/prompt))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (funcall (cdr (pop held)) t)
+          (should-not (agentpane-test--warnings))
+          (funcall snapshot ref "Turn failed upstream")
+          (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
+          (funcall snapshot ref nil)
+          (should-not (agentpane-test--warnings)))))))
 
 (ert-deftest agentpane-test-refetch-while-attaching-keeps-the-live-transcript ()
   "A refetch while the first prompt's attach is in flight does not draw the
