@@ -930,6 +930,33 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.close();
 	});
 
+	it("keeps an error the start of an attach raised before a first prompt whose sender held none (OW-bomolu)", async () => {
+		// Emacs's first prompt from a previewed buffer, as `agentpane--attached-then`
+		// sends it: the helper's stream is already open, `sessions/attach` is the GET,
+		// and `sessions/prompt` follows with the `priorErrorId` read before that attach.
+		const raising = new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("extension failed to load") });
+		app = createApp({ index, adapters: { pi: raising } });
+		const watching = await openStream();
+
+		expect((await get(ROUTES.session(PI_SESSION))).status).toBe(200);
+		await watching.until(() => watching.typed("snapshot").length === 1, "the attach's snapshot");
+		const raised = watching.typed("snapshot")[0]?.errorId;
+		expect(raised).toEqual(expect.any(String));
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello", priorErrorId: null })).status).toBe(202);
+
+		// Anything the admission broadcast is ahead of this on the stream.
+		raising.forRef(PI_SESSION)?.emitNotice({ kind: "configWarning", message: "fence", details: null, path: null });
+		await watching.until(() => watching.typed("notice").length === 1, "the fence");
+		expect(watching.typed("error-cleared")).toEqual([]);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]).toMatchObject({ error: "extension failed to load", errorId: raised });
+		await client.close();
+		await watching.close();
+	});
+
 	it("keeps an error raised after the send of a prompt naming an older one, even with the same text (OW-jokoto)", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		const shown = await raise("turn failed");
