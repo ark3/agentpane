@@ -2822,6 +2822,76 @@ opened, listing every session, from a buffer elsewhere."
                                              (get-buffer "*agentpane sessions*"))
                          (file-name-as-directory root))))))))
 
+;;;; The picker's finished-turn mark, against a stub connection
+
+(defun agentpane-test--summary (id streaming)
+  "A listed Pi session, ID its id and `h-ID' its handle, STREAMING or not."
+  (list :ref (list :backend "pi" :id id) :handle (concat "h-" id) :cwd "/tmp"
+        :status "attached" :isStreaming (if streaming t :json-false)
+        :updatedAt nil :preview id))
+
+(defun agentpane-test--finished-p (picker handle)
+  "Non-nil when PICKER's row for the session holding HANDLE carries the
+finished-turn mark."
+  (with-current-buffer picker
+    (save-excursion
+      (goto-char (point-min))
+      (let (found)
+        (while (and (not found) (not (eobp)))
+          (when (equal (plist-get (tabulated-list-get-id) :handle) handle)
+            (setq found (or (text-property-any (line-beginning-position) (line-end-position)
+                                               'face 'agentpane-turn-finished)
+                            'unmarked)))
+          (forward-line 1))
+        (should found)
+        (not (eq found 'unmarked))))))
+
+(ert-deftest agentpane-test-picker-marks-a-turn-that-finished-unseen ()
+  "A session whose turn ends while no window shows its transcript keeps a
+finished-turn mark through later listings, until a window shows it; one
+whose transcript is shown when its turn ends, and one never seen
+streaming, are not marked."
+  (let* ((listing nil)
+         (buffers (buffer-list))
+         (relist (lambda (&rest summaries)
+                   (setq listing (vconcat summaries))
+                   (agentpane--on-notification nil 'sessions/changed nil))))
+    (cl-letf (((symbol-function 'agentpane--request)
+               (lambda (method _params callback &rest _)
+                 (when (eq method 'sessions/list)
+                   (funcall callback listing)))))
+      (unwind-protect
+          (save-window-excursion
+            (let ((unseen (agentpane--transcript-buffer (agentpane-test--summary "a" nil)))
+                  (seen (agentpane--transcript-buffer (agentpane-test--summary "b" nil)))
+                  (picker (save-window-excursion
+                            (agentpane-sessions t)
+                            (current-buffer))))
+              (with-current-buffer unseen (setq agentpane--handle "h-a"))
+              (with-current-buffer seen (setq agentpane--handle "h-b"))
+              (set-window-buffer (selected-window) seen)
+              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+                       (agentpane-test--summary "c" nil))
+              (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t)
+                       (agentpane-test--summary "c" nil))
+              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+                       (agentpane-test--summary "c" nil))
+              (should (agentpane-test--finished-p picker "h-a"))
+              (should-not (agentpane-test--finished-p picker "h-b"))
+              (should-not (agentpane-test--finished-p picker "h-c"))
+              ;; Rows are rebuilt from each listing, and the mark with them.
+              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+                       (agentpane-test--summary "c" nil))
+              (should (agentpane-test--finished-p picker "h-a"))
+              ;; Batch Emacs never redisplays, so the hook redisplay runs for a
+              ;; window newly showing a buffer is run here as it would run it.
+              (set-window-buffer (selected-window) unseen)
+              (with-current-buffer unseen
+                (run-hook-with-args 'window-buffer-change-functions (selected-window)))
+              (should-not (agentpane-test--finished-p picker "h-a"))))
+        (dolist (buffer (buffer-list))
+          (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
 ;;;; A new session whose attach fails, against a stub jsonrpc
 
 (ert-deftest agentpane-test-new-session-shown-when-its-attach-fails ()
