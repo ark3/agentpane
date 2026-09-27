@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # A start error raised inside the attach Emacs makes on its own before a first prompt is cleared at that prompt's admission, before anyone could read it
@@ -34,3 +35,12 @@ So what remains here is that test, and a card that finds it green on first write
 
 A test drives a first prompt as Emacs sends it — a helper test in `src/emacs/helper.test.ts` against the fake server, or a server test in `src/server/http/app.test.ts` that attaches then prompts as the helper does — whose start raises an error, and shows the session's error still held and no `error-cleared` broadcast after admission, red before the change.
 The existing prompt-route tests of OW-31 and OW-bipume still pass under `bun run check`, and the ERT suite, run as the Commentary of `emacs/agentpane.el` gives it, passes if that file changes.
+
+## Close note
+
+The fix landed with OW-jokoto (1e005f6): a previewed Emacs buffer's first prompt carries `priorErrorId: null`, and `SessionManager.submit` clears nothing at admission for a null prior.
+This card added the missing test, d86a244: "keeps an error the start of an attach raised before a first prompt whose sender held none (OW-bomolu)" in `src/server/http/app.test.ts`.
+It drives the sequence `agentpane--attached-then` sends through the helper -- stream open, `GET` session (the helper's `sessions/attach` -> `api.attach`) whose `FakeAdapterFactory({ onStart })` start raises an error, then `POST` prompt with `priorErrorId: null` -- and shows no `error-cleared` on the watching stream (fenced by a notice) and the error still held, same id, in a fresh snapshot.
+Red first: making a null `priorError` in `submit` fall back to `this.errorIdOf(session.ref)` fails it at the `error-cleared` assertion (and fails the OW-31 and OW-jokoto null-path neighbours too); reverted, green.
+A server test rather than `src/emacs/helper.test.ts` because the helper tests run against a canned fetch and cannot see server state or the broadcast; the elisp half (reading `prior` before the attach) is already covered by the ERT test `agentpane-test-prompt-names-no-error-its-own-attach-drew`.
+`bun run check`: svelte-check 0 errors, 1460 tests passed. `emacs/agentpane.el` unchanged, so the ERT suite was not rerun.
