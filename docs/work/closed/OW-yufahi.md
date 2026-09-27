@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane-mode's finished-turn marks belong to one picker's filtered listing, so a filter change leaves a mark the user already cleared or adds one for a turn they watched end
@@ -45,3 +46,16 @@ Cases 3 to 5 are about when "seen" is re-checked; name in the docstring which of
 
 An ERT test in `emacs/agentpane-test.el` for each of cases 1, 2 and 3 fails against 0929e34 and passes after the change, and `agentpane-test-picker-marks-a-turn-that-finished-unseen` still passes.
 Cases 4 and 5, the fork mark and the composer each either have a test of their own or are named as declined, with the reason, in the owning docstring.
+
+## Close note
+
+Landed in deb733a and c61a024 on main.
+The picker's finished-turn marks and streaming levels are now one global table each in `emacs/agentpane.el`, keyed by handle, with each mark holding its session's latest summary so `agentpane--seen-p` can match by ref too.
+Case 2's levels come from an unfiltered `sessions/list`: the picker filters rows itself by exact cwd, as the browser's sidebar does (`filteredSummaries` in `src/client/App.svelte`); nothing changed on the wire.
+`agentpane--clear-seen-turns` walks every mark (case 1) and also runs from `agentpane--on-notification` and `agentpane--attached-as` (case 3).
+`agentpane--seen-p` counts a tty window only on its terminal's top frame (case 4, measured under `emacs -nw` in a pty, Emacs 31.1).
+A new picker clears the levels, not the marks.
+Declined in docstrings with reasons: case 5 (`agentpane--clear-seen-turns`), the fork mark (`agentpane--note-turns`, which also says the fork takes the parent's window so a still-running parent turn ends unseen and marks the parent), and the composer (`agentpane--seen-p`).
+Verified: tests for cases 1, 2, 3 and 4 fail against 72506b5's `agentpane.el` and pass; `agentpane-test-picker-lists-only-its-projects-sessions` fails with the client-side filter made a no-op; `agentpane-test-picker-marks-a-turn-that-finished-unseen` still passes; the full ERT suite has 135 tests with 0 unexpected and 3 skipped.
+The adversarial read found that case 3's fix is a guard at each site that misses a frame brought forward and tty child frames; per the sibling rule, OW-piweyi carries the ownership change.
+Its remaining nits (tables never pruned, the `clrhash` against a second picker, the unfiltered reply's size) are OW-wazipa.
