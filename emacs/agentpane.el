@@ -3256,7 +3256,7 @@ updated session's first, as the browser's Workspace select offers them
   (let ((recency (lambda (summary)
                    (let ((iso (or (plist-get summary :updatedAt)
                                   (plist-get summary :createdAt))))
-                     (if iso (float-time (encode-time (iso8601-parse iso))) 0))))
+                     (if iso (float-time (encode-time (iso8601-parse iso t))) 0))))
         (cwds nil))
     (dolist (summary (sort agentpane--listing :key recency :reverse t))
       (let ((cwd (plist-get summary :cwd)))

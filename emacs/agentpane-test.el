@@ -2953,9 +2953,10 @@ though its listing, asked for every session, carries one (OW-yufahi)."
 
 (ert-deftest agentpane-test-picker-chooses-another-workspace ()
   "A picker filtered to the calling buffer's project offers every workspace
-its listing carries, most recently updated first, and choosing another
-narrows its rows to that one's sessions, as the browser's Workspace select
-does, while `sessions/list' is still asked for every session (OW-fenina)."
+its listing carries, most recently updated first to the millisecond as
+`Date.parse' orders them, and choosing another narrows its rows to that
+one's sessions, as the browser's Workspace select does, while
+`sessions/list' is still asked for every session (OW-fenina)."
   (agentpane-test--with-directories (one two)
     (agentpane-test--listing
       (let ((stub (symbol-function 'agentpane--request))
@@ -2966,11 +2967,11 @@ does, while `sessions/list' is still asked for every session (OW-fenina)."
                        (push params asked))
                      (apply stub method params rest))))
           (setq listing (list (plist-put (agentpane-test--summary "a" nil one)
-                                         :updatedAt "2026-09-01T00:00:00Z")
-                              (plist-put (agentpane-test--summary "b" nil two)
-                                         :updatedAt "2026-09-02T00:00:00Z")
+                                         :updatedAt "2026-08-01T00:00:00.000Z")
+                              (plist-put (agentpane-test--summary "b" nil one)
+                                         :updatedAt "2026-09-02T00:00:00.100Z")
                               (plist-put (agentpane-test--summary "c" nil two)
-                                         :updatedAt "2026-08-01T00:00:00Z")))
+                                         :updatedAt "2026-09-02T00:00:00.900Z")))
           (let ((picker (agentpane-test--pick one)))
             (with-current-buffer picker
               (should (equal (agentpane--workspaces) (list two one)))
@@ -2978,7 +2979,7 @@ does, while `sessions/list' is still asked for every session (OW-fenina)."
             (should (equal (sort (mapcar (lambda (entry) (plist-get (car entry) :handle))
                                          (buffer-local-value 'tabulated-list-entries picker))
                                  #'string<)
-                           '("h-b" "h-c")))
+                           '("h-c")))
             (should (equal (buffer-local-value 'default-directory picker)
                            (file-name-as-directory two)))
             (should (= (length asked) 2))
