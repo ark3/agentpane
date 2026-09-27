@@ -3017,18 +3017,37 @@ binding itself sets the flag that makes redisplay run the hook."
       (should-not (agentpane-test--finished-p picker "h-c")))))
 
 (ert-deftest agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker ()
-  "A session listed streaming by a picker since killed, whose turn ended
-while there was none, is not marked by a new picker's listing: nothing
-observed the end, watched or not (OW-yufahi)."
+  "A session listed streaming by a picker since killed, or since turned to
+another major mode, whose turn ended while there was none, is not marked by
+a new picker's listing: nothing observed the end, watched or not
+\(OW-yufahi, OW-wazipa)."
+  (dolist (gone (list #'kill-buffer
+                      (lambda (buffer) (with-current-buffer buffer (fundamental-mode)))))
+    (agentpane-test--listing
+      (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil))))
+        (save-window-excursion (agentpane-sessions t))
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall gone (get-buffer "*agentpane sessions*"))
+        (setq listing (list (agentpane-test--summary "a" nil)))
+        (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
+          (should-not (eq (window-buffer (selected-window)) a))
+          (should-not (agentpane-test--finished-p picker "h-a")))))))
+
+(ert-deftest agentpane-test-new-picker-keeps-the-levels-a-live-picker-reads ()
+  "A second picker, made while the first still lists, does not wipe the
+streaming level the first read: a turn that ends before the second's
+first listing is marked (OW-wazipa)."
   (agentpane-test--listing
-    (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil))))
-      (save-window-excursion (agentpane-sessions t))
+    (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
+      (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
+      (funcall relist (agentpane-test--summary "a" nil))
       (funcall relist (agentpane-test--summary "a" t))
-      (kill-buffer "*agentpane sessions*")
       (setq listing (list (agentpane-test--summary "a" nil)))
-      (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
-        (should-not (eq (window-buffer (selected-window)) a))
-        (should-not (agentpane-test--finished-p picker "h-a"))))))
+      (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
+        (should-not (eq second first))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should (agentpane-test--finished-p first "h-a"))
+        (should (agentpane-test--finished-p second "h-a"))))))
 
 (ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
   "A handle the listing no longer carries, which the server never mints

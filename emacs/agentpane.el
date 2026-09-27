@@ -2786,7 +2786,9 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
 
 (defvar agentpane--listed-streaming (make-hash-table :test #'equal)
   "The streaming level the last listing read for each session the server
-holds: a hash table from the session's handle to t or nil.")
+holds: a hash table from the session's handle to t or nil.
+Read only while some picker is fed listings, and emptied when the last one
+goes (`agentpane--picker-gone').")
 
 (defvar agentpane--finished-turns (make-hash-table :test #'equal)
   "The sessions marked as having finished a turn unseen: a hash table from
@@ -3038,15 +3040,31 @@ neither client now asks it for."
          ("Updated" 17 t)
          ("Preview" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
-  ;; Nothing lists while there is no picker, so a level left from before
-  ;; this one would read a turn that ended meanwhile, watched or not, as
-  ;; ended unseen.  The marks stay: each is a turn that did.
-  (clrhash agentpane--listed-streaming)
+  (add-hook 'kill-buffer-hook #'agentpane--picker-gone nil t)
+  (add-hook 'change-major-mode-hook #'agentpane--picker-gone nil t)
   (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
   (add-variable-watcher 'agentpane--handle #'agentpane--binding-changed)
   (add-variable-watcher 'agentpane--session #'agentpane--binding-changed)
   (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
+
+(defun agentpane--picker-gone ()
+  "Forget every streaming level when the last picker goes: this buffer, a
+picker being killed or changing major mode, is the only one left.
+Nothing lists while there is no picker, so a level kept past the last one
+would read a turn that ended meanwhile, watched or not, as ended unseen at
+the next picker's first listing.  The marks stay: each is a turn that did.
+The levels go here, where they stop being fed, and not when a picker is
+made: a clear there wiped the levels a second picker still read, and a
+turn that ended before the new picker's first listing lost its mark
+\(OW-wazipa).  Re-running the mode in the one picker, by
+`M-x agentpane-sessions-mode' there, still forgets them, as its own
+`change-major-mode-hook' runs first; `agentpane-sessions' never re-runs it."
+  (unless (seq-some (lambda (buffer)
+                      (and (not (eq buffer (current-buffer)))
+                           (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)))
+                    (buffer-list))
+    (clrhash agentpane--listed-streaming)))
 
 (defun agentpane--revert-pickers ()
   "Refetch every picker buffer's listing."
