@@ -37,3 +37,4 @@ The frame test in `agentpane--seen-p` should read a tty child frame as seen when
 ERT tests in `emacs/agentpane-test.el` for cases 1 and 3 fail against c61a024 and pass after the change; batch Emacs has no text terminal, so a test may fake `tty-top-frame` and run the chosen hook, as `agentpane-test-picker-marks-a-turn-shown-only-in-a-background-tty-frame` fakes the first.
 `agentpane-test-picker-mark-cleared-when-a-shown-buffer-becomes-its-session` and the rest of the picker tests still pass.
 The `agentpane--clear-seen-turns` docstring no longer declines case 1, and names what the new owner still leaves, case 2 included, with the reason.
+Nothing outside the new owner calls `agentpane--clear-seen-turns`; the calls in `agentpane--on-notification` and `agentpane--attached-as`, and the buffer-local hook, are gone, so case 4 is closed by construction rather than by a call each future site must remember.
