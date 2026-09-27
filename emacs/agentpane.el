@@ -52,6 +52,8 @@
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
+;; A turn sent from this Emacs that ends while no window shows its buffer
+;; puts a red `●agentpane' in every mode line, until a window shows it.
 ;; A buffer holds one turn error, the one the server holds: a newer one
 ;; replaces it, and it goes when the server says it cleared it, at the
 ;; admission of a prompt sent over it, this buffer's own included, or at
@@ -81,10 +83,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-26) ends, after one "passed" or
+;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 129 tests, 126 results as expected, 0 unexpected, 3 skipped
+;;     Ran 147 tests, 144 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -170,9 +172,10 @@ thinking share.")
 (defface agentpane-turn-finished
   '((((background dark)) :foreground "#ff6b75")
     (((background light)) :foreground "#d63b45"))
-  "Face for the picker's mark on a session whose turn finished unseen: the
-browser's `--ap-turn-finished' for each theme (`src/client/app.css'), a
-first cut to judge from use there as here.")
+  "Face for the picker's mark on a session whose turn finished unseen, and
+for the mode line's turn-done indicator: the browser's
+`--ap-turn-finished' for each theme (`src/client/app.css'), a first cut
+to judge from use there as here.")
 
 (defface agentpane-prose
   '((t :inherit variable-pitch))
@@ -778,6 +781,11 @@ It names nothing while `agentpane--error' is nil.")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
+
+(defvar-local agentpane--turn-watch nil
+  "Whether this buffer waits on a turn it submitted, for the turn-done
+indicator: nil, `sent' until a status says the session is streaming, then
+`streamed' until one says it is not.  See `agentpane--watch-turn'.")
 
 (defvar-local agentpane--reading nil
   "Non-nil while this buffer shows reading view; see `agentpane-toggle-reading'.
@@ -1807,6 +1815,7 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   (agentpane--insert-prompt-region)
   (setq-local agentpane--folds (make-hash-table :test #'equal))
   (add-hook 'kill-buffer-hook #'agentpane--detach nil t)
+  (add-hook 'kill-buffer-hook #'agentpane--forget-turn-done nil t)
   ;; No ellipsis: a folded header's marker already says there is more, and
   ;; the one-line header needs the room (OW-gageru).
   (add-to-invisibility-spec 'agentpane)
@@ -2110,12 +2119,15 @@ OW-firaja); it follows the field, which the server clears, and has no
 dismissal of its own.
 When streaming ends, the last node is redrawn, since it was drawn as the
 pending turn, a tool call with no result on it as running, and the helper
-re-sends no node for the change; and reading view's tail status goes."
+re-sends no node for the change; and reading view's tail status goes.
+The streaming field also drives the turn-done watch; see
+`agentpane--watch-turn'."
   (setq agentpane--status params)
   (unless (equal (plist-get params :model) agentpane--listed-model)
     (agentpane--list-default-effort (plist-get params :model)))
   (let ((was agentpane--streaming))
     (setq agentpane--streaming (eq (plist-get params :isStreaming) t))
+    (agentpane--watch-turn agentpane--streaming)
     (when (and was (not agentpane--streaming) agentpane--ewoc)
       (let ((tail (agentpane--drawn agentpane--tail-index)))
         (when tail
@@ -2346,7 +2358,16 @@ The prompt names the error the buffer held when it was sent, by
 `agentpane--error-id', or none, and the server clears only that one at
 admission (OW-jokoto).  Read here, before the attach a previewed buffer
 sends first: an error that attach's start raises, drawn from its
-snapshot, is newer than the prompt, and admitting it must not clear it."
+snapshot, is newer than the prompt, and admitting it must not clear it.
+
+The prompt arms the turn-done watch as it goes out, after any attach, so
+the status of a turn already running when a previewed buffer attaches is
+not read as this prompt's; see `agentpane--watch-turn'.  A watch already
+armed is left as it is, since a prompt the server takes mid-turn, a Codex
+steer, joins the turn that watch waits on, whose end no fresh `streaming'
+precedes.  A prompt that fails disarms only the watch it armed, as the
+browser's `watchAbandon' does: the next turn on the session is not one
+this Emacs asked for."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
@@ -2357,13 +2378,21 @@ snapshot, is newer than the prompt, and admitting it must not clear it."
           (prior (and agentpane--error agentpane--error-id)))
       (agentpane--attached-then
        (lambda ()
-         (agentpane--request 'sessions/prompt
-                             (list :session (agentpane--ref agentpane--session) :text text
-                                   :priorErrorId prior)
-                             (lambda (_)
-                               (setq agentpane--sending nil)
-                               (funcall sent))
-                             t failed agentpane--spawn-timeout))
+         (let ((armed (not agentpane--turn-watch)))
+           (when armed
+             (setq agentpane--turn-watch 'sent))
+           (agentpane--request 'sessions/prompt
+                               (list :session (agentpane--ref agentpane--session) :text text
+                                     :priorErrorId prior)
+                               (lambda (_)
+                                 (setq agentpane--sending nil)
+                                 (funcall sent))
+                               t
+                               (lambda ()
+                                 (when armed
+                                   (setq agentpane--turn-watch nil))
+                                 (funcall failed))
+                               agentpane--spawn-timeout)))
        failed))))
 
 (defun agentpane--clear-sent (buffer beg text)
@@ -2767,6 +2796,67 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
       (agentpane-refetch))
     (pop-to-buffer buffer '(display-buffer-same-window))))
 
+;;;; The turn-done indicator
+
+(defvar agentpane--turns-done nil
+  "The transcript buffers where a turn this Emacs submitted ended while no
+window showed them, until a window does; see `agentpane--watch-turn'.")
+
+(defun agentpane--watch-turn (streaming)
+  "Fold STREAMING, whether this buffer's latest status says its session
+streams, into its turn-done watch, and raise the turn-done indicator when
+a turn this buffer submitted ends while no window shows the buffer.
+The favicon badge's counterpart (`watchSessions' in
+src/client/favicon.ts), with the same semantics.  Only a turn this Emacs
+submitted arms it (`agentpane--send-prompt'), never one it only watched:
+one running when the buffer attached, or prompted from elsewhere.  Done
+is a transition, not a level: a session still reads not streaming for a
+beat after the prompt goes out, so only a status that is not streaming
+after one that is ends the watch.  An aborted or errored turn ends it as
+a finished one does, and so does a `session/detached', which leaves the
+buffer reading not streaming.  Once ended, the watch is gone whether the
+turn ended in view or not.
+Elsewhere, the favicon's unfocused window, is here a buffer that no
+window shows (`agentpane--shown-p'): Emacs's own focus says nothing about
+where the user is looking within it, and a buffer shown is where the
+turn's end is read, its mode line's `streaming' going.  The indicator
+clears when a window shows the buffer (`agentpane--clear-seen-turns') or
+the buffer is killed, one buffer at a time, where the favicon's one badge
+clears at once on focus: here each buffer is its own place to look.
+The indicator is a red dot and the word agentpane in `global-mode-string',
+which every window's mode line draws by default, so it is in view
+wherever the user is working, as a tab's favicon is; its help echo names
+the buffers.  A `message' would be gone at the next keystroke, and a
+desktop notification needs a GUI, which the home server has not.
+Nothing moves a watch to a fork: the browser's `watchMove' follows the
+prompt it sends onto the fork, and here a fork sends nothing and opens in
+a buffer of its own (`agentpane-fork'), so a turn running on the parent
+stays the parent's, and ends there."
+  (pcase agentpane--turn-watch
+    ('sent (when streaming (setq agentpane--turn-watch 'streamed)))
+    ('streamed
+     (unless streaming
+       (setq agentpane--turn-watch nil)
+       (unless (agentpane--shown-p (current-buffer))
+         (cl-pushnew (current-buffer) agentpane--turns-done)
+         (or global-mode-string (setq global-mode-string '("")))
+         (add-to-list 'global-mode-string '(:eval (agentpane--turn-done-lighter)) t)
+         (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
+         (force-mode-line-update t))))))
+
+(defun agentpane--turn-done-lighter ()
+  "The turn-done indicator, while `agentpane--turns-done' names a buffer."
+  (when agentpane--turns-done
+    (propertize " ●agentpane" 'face 'agentpane-turn-finished
+                'help-echo (concat "Turn finished in "
+                                   (mapconcat #'buffer-name agentpane--turns-done ", ")))))
+
+(defun agentpane--forget-turn-done ()
+  "Drop this buffer, being killed, from the turn-done indicator."
+  (when (memq (current-buffer) agentpane--turns-done)
+    (setq agentpane--turns-done (delq (current-buffer) agentpane--turns-done))
+    (force-mode-line-update t)))
+
 ;;;; The session picker
 
 (defvar-local agentpane--cwd nil
@@ -2821,8 +2911,8 @@ unseen, as the browser's row draws `.session-finished'."
                   (or (plist-get summary :preview) "")))))
 
 (defun agentpane--seen-p (summary)
-  "Non-nil when a window on a visible frame shows a transcript buffer holding
-SUMMARY's session, by its handle or by its ref.
+  "Non-nil when a window shows a transcript buffer holding SUMMARY's
+session, by its handle or by its ref, as `agentpane--shown-p' reads shown.
 This is agentpane-mode's counterpart of the browser's selected session,
 for the finished-turn mark: shown in any window, not only the selected
 one, since the picker and a transcript side by side is the ordinary
@@ -2832,7 +2922,15 @@ line's `streaming' going, whichever window has focus.
 The browser marks nothing while no session is selected, which it is only
 until its auto-select picks one; no transcript shown anywhere is instead
 the ordinary state of working in other buffers, exactly when a turn ends
-unseen, so it has no counterpart here.
+unseen, so it has no counterpart here."
+  (let* ((handle (plist-get summary :handle))
+         (held (and handle (agentpane--buffer-holding handle))))
+    (or (and held (agentpane--shown-p held))
+        (agentpane--buffer-for (agentpane--ref summary)
+                               (lambda () (agentpane--shown-p (current-buffer)))))))
+
+(defun agentpane--shown-p (buffer)
+  "Non-nil when a window on a visible frame shows BUFFER, a transcript.
 A text terminal shows only its top frame, but `frame-visible-p' answers t
 for every frame on it, so a window in any other counts for nothing: a
 transcript in a `C-x 5 2' frame not on top is not being looked at (Emacs
@@ -2848,17 +2946,11 @@ child still answered t, the parent no longer on top).
 A composer's window counts for nothing either: the composer shows the
 draft, not the transcript, and its mode line carries no `streaming', so
 the turn's end cannot be read there."
-  (let* ((handle (plist-get summary :handle))
-         (held (and handle (agentpane--buffer-holding handle)))
-         (shown (lambda (buffer)
-                  (seq-some (lambda (window)
-                              (let* ((frame (window-frame window))
-                                     (top (tty-top-frame frame)))
-                                (or (null top) (eq top (frame-root-frame frame)))))
-                            (get-buffer-window-list buffer nil 'visible)))))
-    (or (and held (funcall shown held))
-        (agentpane--buffer-for (agentpane--ref summary)
-                               (lambda () (funcall shown (current-buffer)))))))
+  (seq-some (lambda (window)
+              (let* ((frame (window-frame window))
+                     (top (tty-top-frame frame)))
+                (or (null top) (eq top (frame-root-frame frame)))))
+            (get-buffer-window-list buffer nil 'visible)))
 
 (defun agentpane--note-turns (summaries)
   "Fold SUMMARIES, a fresh listing of every session, into the finished-turn
@@ -2924,7 +3016,8 @@ about 2.4 milliseconds (Emacs 31.1, byte-compiled, batch, measured
 
 (defun agentpane--clear-seen-turns (&rest _)
   "Drop the finished-turn mark of each session a window now shows, and
-redraw every picker if one was dropped.
+redraw every picker if one was dropped; and drop from the turn-done
+indicator each buffer a window now shows (`agentpane--watch-turn').
 Every mark is checked, whether or not a picker lists its session, and
 this runs wherever a marked session may have come into view, so the mark
 goes at the redisplay that shows its session rather than lingering until
@@ -2945,7 +3038,10 @@ watching both variables, sets the flag for each frame showing the buffer,
 whatever code wrote them.
 The hook and the watchers are added by `agentpane-sessions-mode', as only
 a picker's listing makes a mark, and never removed, as the marks outlive
-the pickers.  With no marks a call of the hook costs about half a
+the pickers; the hook is added too when the turn-done indicator is first
+raised, which needs no picker.  The indicator needs no watcher, as it
+names buffers, which a handle or a ref changing does not move.
+With no marks a call of the hook costs about half a
 microsecond, and a write to either variable costs about 0.2 microseconds
 more than with no watcher (Emacs 31.1, byte-compiled, measured
 2026-09-27).
@@ -2963,6 +3059,11 @@ was on top nor what `frame-visible-p' answered, and ran nothing.  Such a
 mark stays until the next listing, which the next start or end of any
 turn asks for, as does a `g' in the picker.  It is late in going, not
 wrong: the turn did end unseen."
+  (let ((seen (and agentpane--turns-done
+                   (seq-filter #'agentpane--shown-p agentpane--turns-done))))
+    (when seen
+      (setq agentpane--turns-done (seq-difference agentpane--turns-done seen))
+      (force-mode-line-update t)))
   (let ((dropped nil))
     (maphash (lambda (handle summary)
                (when (agentpane--seen-p summary)

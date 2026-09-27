@@ -3152,6 +3152,123 @@ Batch Emacs has no text terminal and makes no child frame, so
         (funcall relist (agentpane-test--summary "a" nil))
         (should (agentpane-test--finished-p picker "h-a"))))))
 
+;;;; The turn-done indicator, against a stub connection
+
+(defmacro agentpane-test--submitting (&rest body)
+  "Run BODY in an attached transcript buffer, not shown in any window, with
+every request answered as `agentpane-test--forking' answers it and no turn
+marked done.  `status' is bound to a function that delivers a
+`session/status' reading streaming when its argument is non-nil, and
+`submit' to one that types a prompt and sends it."
+  (declare (indent 0))
+  `(let ((ref '(:backend "codex" :id "t1"))
+         (agentpane--turns-done nil))
+     (agentpane-test--with-helper
+       (agentpane-test--forking nil nil
+         (agentpane-test--with-session ref
+           (setq agentpane--attached agentpane--connection)
+           (let ((status (lambda (streaming)
+                           (agentpane--on-notification
+                            nil 'session/status
+                            (list :session ref :isStreaming (if streaming t :json-false)))))
+                 (submit (lambda ()
+                           (goto-char (point-max))
+                           (insert "hello")
+                           (agentpane-send))))
+             (ignore status submit)
+             ,@body))))))
+
+(defun agentpane-test--turn-done-p ()
+  "Non-nil when an `:eval' entry of `global-mode-string', which every mode
+line draws by default, draws the turn-done indicator.
+The entries are evaluated here rather than through `format-mode-line',
+which in batch Emacs answers \"\" for every format, a plain string
+included (Emacs 31.1, measured 2026-09-27)."
+  (seq-some (lambda (entry)
+              (let ((drawn (and (eq (car-safe entry) :eval) (eval (cadr entry) t))))
+                (and (stringp drawn)
+                     (text-property-any 0 (length drawn) 'face 'agentpane-turn-finished drawn))))
+            (and (listp global-mode-string) global-mode-string)))
+
+(ert-deftest agentpane-test-turn-done-raised-unseen-and-cleared-on-show ()
+  "A turn this Emacs submitted that ends while no window shows its buffer
+raises the indicator, and showing the buffer clears it (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status t)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))
+    (agentpane-test--show buffer)
+    (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-not-submitted-here ()
+  "A turn this Emacs did not submit -- one started elsewhere, or running
+when the buffer attached -- raises nothing when it ends unseen (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall status t)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-by-the-idle-status-after-submit ()
+  "The not-streaming status that still stands just after a submit raises
+nothing, and the watch stays armed for the turn's real end (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status nil)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))
+    (funcall status t)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-that-ended-in-view ()
+  "A submitted turn that ends while a window shows its buffer raises
+nothing, and ends the watch, so a later turn from elsewhere that ends
+unseen raises nothing either (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status t)
+    (agentpane-test--show buffer)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))
+    (agentpane-test--show (get-buffer-create "*scratch*"))
+    (funcall status t)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-after-a-refused-prompt ()
+  "A prompt the server refused arms nothing, so a turn from elsewhere that
+then ends unseen raises nothing (OW-lohavi)."
+  (agentpane-test--submitting
+    (setq hold '(sessions/prompt))
+    (funcall submit)
+    (funcall (cdr (pop held)) nil)
+    (funcall status t)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-taken-mid-turn ()
+  "A prompt the server takes mid-turn, as a Codex steer, leaves the watch
+the turn's own prompt armed, so the turn's end, which no fresh streaming
+status precedes, still raises the indicator (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status t)
+    (funcall submit)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-cleared-when-its-buffer-is-killed ()
+  "Killing a buffer whose turn ended unseen drops it from the indicator
+(OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status t)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))
+    (kill-buffer buffer)
+    (should-not (agentpane-test--turn-done-p))))
+
 ;;;; A new session whose attach fails, against a stub jsonrpc
 
 (ert-deftest agentpane-test-new-session-shown-when-its-attach-fails ()
