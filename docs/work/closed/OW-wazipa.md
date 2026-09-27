@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: done
 ---
 
 # agentpane-mode's global finished-turn tables keep every handle the server ever listed, and a new picker wipes the streaming levels a second live picker still reads
@@ -19,3 +20,12 @@ Before OW-yufahi (commits deb733a and c61a024) the tables were buffer-local to t
 3. The picker's listing is now unfiltered and is re-requested at every `sessions/changed`, so the reply carries every stored session on the machine; its size and Emacs's parse time were not measured (`agentpane--refetch-sessions`).
 
 Done when any of these is either fixed with an ERT test in `emacs/agentpane-test.el` that fails first, or measured and declined in the owning docstring.
+
+## Close note
+
+All three findings in the card are resolved in emacs/agentpane.el: the first two are fixed and the third is measured and declined.
+1. `agentpane--note-turns` now drops from both tables every handle its listing doesn't carry. The listing is always unfiltered (`agentpane--refetch-sessions` is the only caller and sends no params), and `SessionManager.list` lists every held container under its handle, so an absent handle is one the server let go. ERT test `agentpane-test-picker-forgets-a-handle-the-server-let-go` fails against the previous code and passes now.
+2. The `clrhash` at picker creation is gone. `agentpane--picker-gone` runs from each picker's buffer-local `kill-buffer-hook` and `change-major-mode-hook` and empties the levels only when no other picker remains, so the clear happens when the levels stop being fed rather than when a picker is made. ERT tests: `agentpane-test-new-picker-keeps-the-levels-a-live-picker-reads` fails against the old creation-time clear. `agentpane-test-picker-gone-keeps-the-levels-another-picker-reads` was added after the adversarial read showed a plain unguarded clrhash still passed the suite; it fails against that substitute. `agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker` was extended to cover a mode change, and it fails with either hook removed.
+3. Measured on the home server on 2026-09-27 with Emacs 31.1 and jsonrpc.el 1.0.29. There were 369 stored sessions, and the reply was 116 KB. The helper round trip took 207–277 ms, with the server alone at 205–222 ms and a filtered request at 194–229 ms. Emacs parsed the reply in about 0.8 ms. Filtering was declined in the `agentpane--refetch-sessions` docstring, and the section "What the picker's unfiltered listing costs (OW-wazipa)" in docs/MANUAL_TESTING.md carries the numbers and the reproduction script.
+The full ERT suite passes (140 tests, 3 skipped as before), and byte-compiling produces no warnings.
+The adversarial read named one case the item-2 guard misses, which the old code also missed: a picker stays open while its listings fail, so the levels go stale. It is filed as the ownership-change sibling OW-vehuji. The browser's counterpart of item 1 is filed as OW-nodade.
