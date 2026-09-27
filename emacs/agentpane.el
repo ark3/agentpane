@@ -462,6 +462,7 @@ will say so under that handle; see `agentpane--dropped'."
           (when (plist-get params :handle)
             (setq agentpane--handle (plist-get params :handle)))
           (agentpane--hold-ref (plist-get params :session))
+          (agentpane--clear-seen-turns)
           (unless (memq method '(session/node session/snapshot))
             (agentpane--draw-recorded buffer))
           (pcase method
@@ -2038,6 +2039,7 @@ into this one, which then wants a snapshot; see `agentpane--absorb'."
          (other (and handle (agentpane--buffer-holding handle))))
     (setq agentpane--handle handle)
     (agentpane--hold-ref (agentpane--ref summary))
+    (agentpane--clear-seen-turns)
     (when (and other (not (eq other (current-buffer))))
       (agentpane--absorb other)
       t)))
@@ -2785,19 +2787,27 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
       (format-time-string "%Y-%m-%d %H:%M" (encode-time (iso8601-parse iso)))
     ""))
 
-(defvar-local agentpane--listed-streaming nil
-  "The streaming level this picker last listed for each session the server
+(defvar agentpane--listed-streaming (make-hash-table :test #'equal)
+  "The streaming level the last listing read for each session the server
 holds: a hash table from the session's handle to t or nil.")
 
-(defvar-local agentpane--finished-turns nil
-  "The sessions this picker marks as having finished a turn unseen: a hash
-table from the session's handle to t.  See `agentpane--note-turns'.")
+(defvar agentpane--finished-turns (make-hash-table :test #'equal)
+  "The sessions marked as having finished a turn unseen: a hash table from
+the session's handle to its summary in the last listing, whose ref
+`agentpane--seen-p' also looks for.  See `agentpane--note-turns'.
+One table for every session the helper lists, and not one per picker, as
+the browser's marks cover every live session whatever its sidebar's
+filter: a mark is about the session, and a picker only draws it.  One
+kept per picker, fed by that picker's filtered listing and cleared
+against its rows, left a mark the user had cleared by viewing a session
+while the picker listed another project, and marked a turn the user
+watched end while it was filtered out (OW-yufahi).")
 
 (defun agentpane--session-entry (summary)
   "The `tabulated-list-entries' row for SUMMARY.
 Its unnamed column is a dot while the session streams, and a dot in
-`agentpane-turn-finished' while this picker marks it as having finished a
-turn unseen, as the browser's row draws `.session-finished'."
+`agentpane-turn-finished' while it is marked as having finished a turn
+unseen, as the browser's row draws `.session-finished'."
   (let ((ref (agentpane--ref summary))
         (handle (plist-get summary :handle)))
     (list summary
@@ -2823,16 +2833,31 @@ line's `streaming' going, whichever window has focus.
 The browser marks nothing while no session is selected, which it is only
 until its auto-select picks one; no transcript shown anywhere is instead
 the ordinary state of working in other buffers, exactly when a turn ends
-unseen, so it has no counterpart here."
+unseen, so it has no counterpart here.
+A text terminal shows only its top frame, but `frame-visible-p' answers t
+for every frame on it, so a window in any other counts for nothing: a
+transcript in a `C-x 5 2' frame not on top is not being looked at (Emacs
+31.1, `emacs -nw' in a pty, measured 2026-09-26: two frames both answered
+t, `tty-top-frame' named the one raised, and this read a transcript shown
+only in the other as unseen, and as seen once that one was raised).
+A composer's window counts for nothing either: the composer shows the
+draft, not the transcript, and its mode line carries no `streaming', so
+the turn's end cannot be read there."
   (let* ((handle (plist-get summary :handle))
-         (held (and handle (agentpane--buffer-holding handle))))
-    (or (and held (get-buffer-window held 'visible))
+         (held (and handle (agentpane--buffer-holding handle)))
+         (shown (lambda (buffer)
+                  (seq-some (lambda (window)
+                              (let ((top (tty-top-frame (window-frame window))))
+                                (or (null top) (eq top (window-frame window)))))
+                            (get-buffer-window-list buffer nil 'visible)))))
+    (or (and held (funcall shown held))
         (agentpane--buffer-for (agentpane--ref summary)
-                               (lambda () (get-buffer-window (current-buffer) 'visible))))))
+                               (lambda () (funcall shown (current-buffer)))))))
 
 (defun agentpane--note-turns (summaries)
-  "Fold SUMMARIES, this picker's fresh listing, into its finished-turn marks,
-as `foldSessionTurns' in src/client/session-turns.ts folds the browser's.
+  "Fold SUMMARIES, a fresh listing of every session, into the finished-turn
+marks, as `foldSessionTurns' in src/client/session-turns.ts folds the
+browser's.
 A session is marked when a listing reads it not streaming after one that
 read it streaming, and no window shows it (`agentpane--seen-p'); the
 level alone marks nothing, so no idle session is marked by the first
@@ -2849,49 +2874,86 @@ is superseded by the one its end asks for (`agentpane--request'), where
 the browser, reading the live status, marks it.  Such a turn is shorter
 than one `sessions/list' round trip: one that failed or was aborted as it
 began, not one a user switched away to wait on, so the miss is left, and
-an attached buffer's live `session/status' is not read to close it."
+an attached buffer's live `session/status' is not read to close it.
+Nothing moves a mark or a level from a fork's parent to the fork, as the
+browser's `moveSessionTurnMarks' does.  The browser moves them because its
+fork takes the parent's place in its one selected view, and the prompt
+it sends there follows onto the fork.  Here a fork opens in a buffer of
+its own and sends nothing (`agentpane-fork'), and the parent is forked
+from its own buffer, on screen, so it carries no mark to move; a turn
+running on it stays with it, on Codex and Claude Code, or is aborted,
+and its handle let go, on Pi."
   (dolist (summary summaries)
     (let ((handle (plist-get summary :handle))
           (streaming (eq (plist-get summary :isStreaming) t)))
       (when handle
-        (when (and (gethash handle agentpane--listed-streaming) (not streaming))
-          (puthash handle t agentpane--finished-turns))
+        (when (or (gethash handle agentpane--finished-turns)
+                  (and (gethash handle agentpane--listed-streaming) (not streaming)))
+          (puthash handle summary agentpane--finished-turns))
         (puthash handle streaming agentpane--listed-streaming)
         (when (agentpane--seen-p summary)
           (remhash handle agentpane--finished-turns))))))
 
 (defun agentpane--clear-seen-turns (&rest _)
-  "Drop, in every picker, the finished-turn mark of each session a window
-now shows, and redraw a picker that dropped one.
-On `window-buffer-change-functions' in a transcript buffer, which redisplay
-runs when a window starts showing it, so the mark goes the moment its
-session is shown rather than lingering until the next listing."
-  (dolist (buffer (buffer-list))
-    (when (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)
-      (with-current-buffer buffer
-        (let ((dropped nil))
-          (dolist (entry tabulated-list-entries)
-            (let ((handle (plist-get (car entry) :handle)))
-              (when (and handle (gethash handle agentpane--finished-turns)
-                         (agentpane--seen-p (car entry)))
-                (remhash handle agentpane--finished-turns)
-                (setq dropped t))))
-          (when dropped
+  "Drop the finished-turn mark of each session a window now shows, and
+redraw every picker if one was dropped.
+Every mark is checked, whether or not a picker lists its session, and
+this runs wherever a marked session may have come into view, so the mark
+goes the moment its session is shown rather than lingering until the next
+listing: on `window-buffer-change-functions' in a transcript buffer,
+which redisplay runs when a window starts showing it; and wherever a
+transcript buffer takes a handle or a ref, from a notification or its
+attach's reply (`agentpane--on-notification', `agentpane--attached-as'),
+which can make a buffer already on screen the marked session with no
+window changing buffer.
+A frame coming into view -- an iconified one restored, or a text
+terminal's raised by `C-x 5 o' -- changes no window's buffer, and nothing
+here runs for it, so a mark for a session only that frame shows stays
+until the next listing, which the next start or end of any turn asks
+for, as does a `g' in the picker.  That mark is late in going, not wrong:
+the turn did end unseen.  The raised text terminal frame was measured
+\(Emacs 31.1, `emacs -nw' in a pty, 2026-09-26: raising it ran the hook
+no more times and left the mark); the restored frame is inferred, the
+home server having no GUI."
+  (let ((dropped nil))
+    (maphash (lambda (handle summary)
+               (when (agentpane--seen-p summary)
+                 (push handle dropped)))
+             agentpane--finished-turns)
+    (when dropped
+      (dolist (handle dropped)
+        (remhash handle agentpane--finished-turns))
+      (dolist (buffer (buffer-list))
+        (when (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)
+          (with-current-buffer buffer
             (setq tabulated-list-entries
                   (mapcar (lambda (entry) (agentpane--session-entry (car entry)))
                           tabulated-list-entries))
             (tabulated-list-print t)))))))
 
 (defun agentpane--refetch-sessions (&rest _)
-  "Refetch the listing through `sessions/list' under this buffer's filter,
-and redraw it when the reply lands.  The picker's `revert-buffer-function'."
-  (agentpane--request 'sessions/list
-                      (and agentpane--cwd (list :cwd agentpane--cwd))
+  "Refetch the listing through `sessions/list', and redraw it under this
+buffer's filter when the reply lands.  The picker's `revert-buffer-function'.
+Every session is asked for, and those outside the filter are dropped here,
+by the exact match on cwd the server's own filter makes (`listSessions' in
+src/server/sessions/index.ts), so that `agentpane--note-turns' reads the
+streaming level of a session the picker does not show: one listed
+streaming, then filtered out while its turn ended in plain sight, would
+otherwise read as ended unseen when listed again.  The server walks every
+session's file whatever the filter, and filters after, so what that costs
+is the size of the reply."
+  (agentpane--request 'sessions/list nil
                       (lambda (summaries)
                         (let ((summaries (append summaries nil)))
                           (agentpane--note-turns summaries)
                           (setq tabulated-list-entries
-                                (mapcar #'agentpane--session-entry summaries)))
+                                (mapcar #'agentpane--session-entry
+                                        (if agentpane--cwd
+                                            (seq-filter (lambda (summary)
+                                                          (equal (plist-get summary :cwd)
+                                                                 agentpane--cwd))
+                                                        summaries)
+                                          summaries))))
                         (tabulated-list-print t))))
 
 (define-derived-mode agentpane-sessions-mode tabulated-list-mode "agentpane-sessions"
@@ -2904,8 +2966,10 @@ and redraw it when the reply lands.  The picker's `revert-buffer-function'."
          ("Updated" 17 t)
          ("Preview" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
-  (setq agentpane--listed-streaming (make-hash-table :test #'equal)
-        agentpane--finished-turns (make-hash-table :test #'equal))
+  ;; Nothing lists while there is no picker, so a level left from before
+  ;; this one would read a turn that ended meanwhile, watched or not, as
+  ;; ended unseen.  The marks stay: each is a turn that did.
+  (clrhash agentpane--listed-streaming)
   (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
 

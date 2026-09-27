@@ -2817,18 +2817,70 @@ opened, listing every session, from a buffer elsewhere."
           (with-temp-buffer
             (setq default-directory below)
             (agentpane-sessions))
-          (should (equal (assq 'sessions/list sent) `(sessions/list :cwd ,root)))
+          (should (equal (buffer-local-value 'agentpane--cwd (get-buffer "*agentpane sessions*"))
+                         root))
           (should (equal (buffer-local-value 'default-directory
                                              (get-buffer "*agentpane sessions*"))
                          (file-name-as-directory root))))))))
 
 ;;;; The picker's finished-turn mark, against a stub connection
 
-(defun agentpane-test--summary (id streaming)
-  "A listed Pi session, ID its id and `h-ID' its handle, STREAMING or not."
-  (list :ref (list :backend "pi" :id id) :handle (concat "h-" id) :cwd "/tmp"
+(defun agentpane-test--summary (id streaming &optional cwd)
+  "A listed Pi session, ID its id and `h-ID' its handle, STREAMING or not,
+in CWD, else in /tmp."
+  (list :ref (list :backend "pi" :id id) :handle (concat "h-" id) :cwd (or cwd "/tmp")
         :status "attached" :isStreaming (if streaming t :json-false)
         :updatedAt nil :preview id))
+
+(defmacro agentpane-test--listing (&rest body)
+  "Run BODY with `sessions/list' answered from `listing', a list of
+summaries, filtered by the request's `cwd' as the server filters it, and
+`relist' bound to a function that makes its arguments the listing and
+delivers a `sessions/changed'.  The finished-turn marks start empty, and
+every buffer BODY made is killed afterwards."
+  (declare (indent 0))
+  `(let* ((listing nil)
+          (buffers (buffer-list))
+          (agentpane--listed-streaming (make-hash-table :test #'equal))
+          (agentpane--finished-turns (make-hash-table :test #'equal))
+          (relist (lambda (&rest summaries)
+                    (setq listing summaries)
+                    (agentpane--on-notification nil 'sessions/changed nil))))
+     (cl-letf (((symbol-function 'agentpane--request)
+                (lambda (method params callback &rest _)
+                  (when (eq method 'sessions/list)
+                    (let ((cwd (plist-get params :cwd)))
+                      (funcall callback
+                               (vconcat (seq-filter (lambda (summary)
+                                                      (or (null cwd)
+                                                          (equal (plist-get summary :cwd) cwd)))
+                                                    listing))))))))
+       (unwind-protect
+           (save-window-excursion ,@body)
+         (dolist (buffer (buffer-list))
+           (unless (memq buffer buffers) (kill-buffer buffer)))))))
+
+(defun agentpane-test--show (buffer)
+  "Show BUFFER in the selected window, and run the hook redisplay runs for a
+window newly showing a buffer, as batch Emacs, which never redisplays, does
+not."
+  (set-window-buffer (selected-window) buffer)
+  (with-current-buffer buffer
+    (run-hook-with-args 'window-buffer-change-functions (selected-window))))
+
+(defun agentpane-test--pick (cwd)
+  "Run `agentpane-sessions' from a buffer in CWD, and return the picker."
+  (with-temp-buffer
+    (setq default-directory (file-name-as-directory cwd))
+    (agentpane-sessions))
+  (get-buffer "*agentpane sessions*"))
+
+(defun agentpane-test--holding (summary)
+  "SUMMARY's transcript buffer, holding its handle as an attached one does."
+  (let ((buffer (agentpane--transcript-buffer summary)))
+    (with-current-buffer buffer
+      (setq agentpane--handle (plist-get summary :handle)))
+    buffer))
 
 (defun agentpane-test--finished-p (picker handle)
   "Non-nil when PICKER's row for the session holding HANDLE carries the
@@ -2851,46 +2903,127 @@ finished-turn mark."
 finished-turn mark through later listings, until a window shows it; one
 whose transcript is shown when its turn ends, and one never seen
 streaming, are not marked."
-  (let* ((listing nil)
-         (buffers (buffer-list))
-         (relist (lambda (&rest summaries)
-                   (setq listing (vconcat summaries))
-                   (agentpane--on-notification nil 'sessions/changed nil))))
-    (cl-letf (((symbol-function 'agentpane--request)
-               (lambda (method _params callback &rest _)
-                 (when (eq method 'sessions/list)
-                   (funcall callback listing)))))
-      (unwind-protect
-          (save-window-excursion
-            (let ((unseen (agentpane--transcript-buffer (agentpane-test--summary "a" nil)))
-                  (seen (agentpane--transcript-buffer (agentpane-test--summary "b" nil)))
-                  (picker (save-window-excursion
-                            (agentpane-sessions t)
-                            (current-buffer))))
-              (with-current-buffer unseen (setq agentpane--handle "h-a"))
-              (with-current-buffer seen (setq agentpane--handle "h-b"))
-              (set-window-buffer (selected-window) seen)
-              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
-                       (agentpane-test--summary "c" nil))
-              (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t)
-                       (agentpane-test--summary "c" nil))
-              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
-                       (agentpane-test--summary "c" nil))
-              (should (agentpane-test--finished-p picker "h-a"))
-              (should-not (agentpane-test--finished-p picker "h-b"))
-              (should-not (agentpane-test--finished-p picker "h-c"))
-              ;; Rows are rebuilt from each listing, and the mark with them.
-              (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
-                       (agentpane-test--summary "c" nil))
-              (should (agentpane-test--finished-p picker "h-a"))
-              ;; Batch Emacs never redisplays, so the hook redisplay runs for a
-              ;; window newly showing a buffer is run here as it would run it.
-              (set-window-buffer (selected-window) unseen)
-              (with-current-buffer unseen
-                (run-hook-with-args 'window-buffer-change-functions (selected-window)))
-              (should-not (agentpane-test--finished-p picker "h-a"))))
-        (dolist (buffer (buffer-list))
-          (unless (memq buffer buffers) (kill-buffer buffer)))))))
+  (agentpane-test--listing
+    (let ((unseen (agentpane--transcript-buffer (agentpane-test--summary "a" nil)))
+          (seen (agentpane--transcript-buffer (agentpane-test--summary "b" nil)))
+          (picker (save-window-excursion
+                    (agentpane-sessions t)
+                    (current-buffer))))
+      (with-current-buffer unseen (setq agentpane--handle "h-a"))
+      (with-current-buffer seen (setq agentpane--handle "h-b"))
+      (set-window-buffer (selected-window) seen)
+      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+               (agentpane-test--summary "c" nil))
+      (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t)
+               (agentpane-test--summary "c" nil))
+      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+               (agentpane-test--summary "c" nil))
+      (should (agentpane-test--finished-p picker "h-a"))
+      (should-not (agentpane-test--finished-p picker "h-b"))
+      (should-not (agentpane-test--finished-p picker "h-c"))
+      ;; Rows are rebuilt from each listing, and the mark with them.
+      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil)
+               (agentpane-test--summary "c" nil))
+      (should (agentpane-test--finished-p picker "h-a"))
+      (agentpane-test--show unseen)
+      (should-not (agentpane-test--finished-p picker "h-a")))))
+
+(ert-deftest agentpane-test-picker-mark-cleared-while-its-session-is-filtered-out ()
+  "A marked session whose transcript is viewed while the picker lists
+another project has no mark when its own project is listed again (OW-yufahi)."
+  (agentpane-test--with-directories (one two)
+    (agentpane-test--listing
+      (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil one)))
+            (picker (agentpane-test--pick one)))
+        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
+        (funcall relist (agentpane-test--summary "a" t one) (agentpane-test--summary "b" nil two))
+        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
+        (should (agentpane-test--finished-p picker "h-a"))
+        (agentpane-test--pick two)
+        (agentpane-test--show a)
+        (agentpane-test--show picker)
+        (agentpane-test--pick one)
+        (should-not (agentpane-test--finished-p picker "h-a"))))))
+
+(ert-deftest agentpane-test-picker-does-not-mark-a-turn-watched-while-filtered-out ()
+  "A session listed streaming whose turn ends, while the picker lists another
+project, with its transcript on screen is not marked when its own project is
+listed again after the user looked away (OW-yufahi)."
+  (agentpane-test--with-directories (one two)
+    (agentpane-test--listing
+      (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil one)))
+            (picker (agentpane-test--pick one)))
+        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
+        (funcall relist (agentpane-test--summary "a" t one) (agentpane-test--summary "b" nil two))
+        (agentpane-test--pick two)
+        (agentpane-test--show a)
+        (funcall relist (agentpane-test--summary "a" nil one) (agentpane-test--summary "b" nil two))
+        (agentpane-test--show picker)
+        (agentpane-test--pick one)
+        (should-not (agentpane-test--finished-p picker "h-a"))))))
+
+(ert-deftest agentpane-test-picker-mark-cleared-when-a-shown-buffer-becomes-its-session ()
+  "A transcript already on screen that becomes a marked session, by its
+attach's reply or by a snapshot's `askedFor', drops the mark at once, with
+no window changing buffer (OW-yufahi)."
+  (agentpane-test--listing
+    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
+          (x (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "x"))))
+          (y (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "y")))))
+      (agentpane-test--show x)
+      (funcall relist (agentpane-test--summary "a" nil))
+      (funcall relist (agentpane-test--summary "a" t))
+      (funcall relist (agentpane-test--summary "a" nil))
+      (should (agentpane-test--finished-p picker "h-a"))
+      (with-current-buffer x
+        (agentpane--attached-as (agentpane-test--summary "a" nil)))
+      (should-not (agentpane-test--finished-p picker "h-a"))
+      (agentpane-test--show y)
+      (with-current-buffer y (setq agentpane--attach-sent t))
+      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "c" t))
+      (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "c" nil))
+      (should (agentpane-test--finished-p picker "h-c"))
+      (agentpane--on-notification
+       nil 'session/snapshot
+       (list :session '(:backend "pi" :id "c") :handle "h-c" :askedFor '(:backend "pi" :id "y")
+             :nodes [] :isStreaming :json-false))
+      (should (equal (buffer-local-value 'agentpane--handle y) "h-c"))
+      (should-not (agentpane-test--finished-p picker "h-c")))))
+
+(ert-deftest agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker ()
+  "A session listed streaming by a picker since killed, whose turn ended
+while there was none, is not marked by a new picker's listing: nothing
+observed the end, watched or not (OW-yufahi)."
+  (agentpane-test--listing
+    (let ((a (agentpane-test--holding (agentpane-test--summary "a" nil))))
+      (save-window-excursion (agentpane-sessions t))
+      (funcall relist (agentpane-test--summary "a" t))
+      (kill-buffer "*agentpane sessions*")
+      (setq listing (list (agentpane-test--summary "a" nil)))
+      (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
+        (should-not (eq (window-buffer (selected-window)) a))
+        (should-not (agentpane-test--finished-p picker "h-a"))))))
+
+(ert-deftest agentpane-test-picker-marks-a-turn-shown-only-in-a-background-tty-frame ()
+  "A transcript shown only in a text terminal's frame that is not the one
+on top is not seen, though `frame-visible-p' answers t for it, and its
+turn's end is marked; shown in the top frame, it is seen (OW-yufahi).
+Batch Emacs has no text terminal, so `tty-top-frame' answers as one would."
+  (agentpane-test--listing
+    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
+          (a (agentpane-test--holding (agentpane-test--summary "a" nil)))
+          (top nil))
+      (cl-letf (((symbol-function 'tty-top-frame) (lambda (&optional _) top)))
+        (agentpane-test--show a)
+        (setq top 'another-frame)
+        (funcall relist (agentpane-test--summary "a" nil))
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should (agentpane-test--finished-p picker "h-a"))
+        (setq top (selected-frame))
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should-not (agentpane-test--finished-p picker "h-a"))))))
 
 ;;;; A new session whose attach fails, against a stub jsonrpc
 
