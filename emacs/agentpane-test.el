@@ -2951,6 +2951,46 @@ though its listing, asked for every session, carries one (OW-yufahi)."
                                (buffer-local-value 'tabulated-list-entries picker))
                        '("h-a")))))))
 
+(ert-deftest agentpane-test-picker-shows-each-sessions-workspace ()
+  "The picker listing every session draws each row with its workspace's
+basename, the full path as its help echo, and nothing for a session with
+no cwd, as the browser's `.session-cwd' does (OW-bisadi)."
+  (agentpane-test--listing
+    (setq listing (list (agentpane-test--summary "a" nil "/tmp/one/alpha")
+                        (agentpane-test--summary "b" nil "/tmp/two/beta")
+                        (plist-put (agentpane-test--summary "c" nil) :cwd nil)))
+    (let ((picker (save-window-excursion
+                    (agentpane-sessions t)
+                    (current-buffer)))
+          (rows nil))
+      (with-current-buffer picker
+        (goto-char (point-min))
+        (while (not (eobp))
+          (when-let* ((summary (tabulated-list-get-id)))
+            (push (cons (plist-get summary :handle)
+                        (buffer-substring (line-beginning-position) (line-end-position)))
+                  rows))
+          (forward-line 1)))
+      (let ((a (cdr (assoc "h-a" rows)))
+            (b (cdr (assoc "h-b" rows)))
+            (c (cdr (assoc "h-c" rows))))
+        (should (string-match-p "\\_<alpha\\_>" a))
+        (should-not (string-match-p "beta\\|/tmp" a))
+        (should (equal (get-text-property (string-match "alpha" a) 'help-echo a)
+                       "/tmp/one/alpha"))
+        (should (string-match-p "\\_<beta\\_>" b))
+        (should-not (string-match-p "alpha\\|/tmp" b))
+        (should (equal (get-text-property (string-match "beta" b) 'help-echo b)
+                       "/tmp/two/beta"))
+        (with-current-buffer picker
+          (let ((column (seq-position (mapcar #'car tabulated-list-format) "Workspace")))
+            (should column)
+            (should (equal (aref (cadr (seq-find (lambda (entry)
+                                                   (equal (plist-get (car entry) :handle) "h-c"))
+                                                 tabulated-list-entries))
+                                 column)
+                           ""))))))))
+
 (ert-deftest agentpane-test-picker-mark-cleared-while-its-session-is-filtered-out ()
   "A marked session whose transcript is viewed while the picker lists
 another project has no mark when its own project is listed again (OW-yufahi)."

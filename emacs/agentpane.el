@@ -2910,9 +2910,13 @@ watched end while it was filtered out (OW-yufahi).")
   "The `tabulated-list-entries' row for SUMMARY.
 Its unnamed column is a dot while the session streams, and a dot in
 `agentpane-turn-finished' while it is marked as having finished a turn
-unseen, as the browser's row draws `.session-finished'."
+unseen, as the browser's row draws `.session-finished'.
+Its Workspace column is the last segment of the session's cwd, the full
+path as its help echo, and empty with no cwd, as the browser's
+`.session-cwd' draws it."
   (let ((ref (agentpane--ref summary))
-        (handle (plist-get summary :handle)))
+        (handle (plist-get summary :handle))
+        (cwd (plist-get summary :cwd)))
     (list summary
           (vector (plist-get ref :backend)
                   (plist-get summary :status)
@@ -2922,6 +2926,7 @@ unseen, as the browser's row draws `.session-finished'."
                                      'help-echo "Turn finished"))
                         (t ""))
                   (agentpane--format-time (plist-get summary :updatedAt))
+                  (if cwd (propertize (file-name-nondirectory cwd) 'help-echo cwd) "")
                   (or (plist-get summary :preview) "")))))
 
 (defun agentpane--seen-p (summary)
@@ -3160,6 +3165,7 @@ neither client now asks it for."
          ("Status" 9 t)
          ("" 2 nil)
          ("Updated" 17 t)
+         ("Workspace" 16 t)
          ("Preview" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
   (add-hook 'kill-buffer-hook #'agentpane--picker-gone nil t)
