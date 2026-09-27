@@ -25,7 +25,8 @@
 ;; `g' refetches, and a `sessions/changed' notification refetches too.  The
 ;; list is filtered to the project of the buffer the command was called
 ;; from, over a listing of every session, as the browser's sidebar filters;
-;; a prefix argument lifts the filter.  The notification flows from the picker's first listing on,
+;; a prefix argument lifts the filter, and `w' in the picker chooses another
+;; workspace the listing carries, or every session.  The notification flows from the picker's first listing on,
 ;; whether or not any buffer has attached a session: the helper opens its
 ;; event stream from `sessions/list' (src/emacs/helper.ts).  A row's dot
 ;; says its session is streaming; a red one, that a turn ended while no
@@ -2876,9 +2877,15 @@ stays the parent's, and ends there."
 (defvar-local agentpane--cwd nil
   "The workspace this picker is filtered to, or nil for every session.")
 
+(defvar-local agentpane--listing nil
+  "This picker's last listing, every session in it, whose workspaces
+`agentpane-sessions-workspace' offers: `tabulated-list-entries' holds only
+the rows the filter keeps.")
+
 (defvar agentpane-sessions-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'agentpane-sessions-open)
+    (define-key map (kbd "w") #'agentpane-sessions-workspace)
     map)
   "Keymap for `agentpane-sessions-mode'.")
 
@@ -3147,6 +3154,7 @@ neither client now asks it for."
                       (lambda (summaries)
                         (let ((summaries (append summaries nil)))
                           (agentpane--note-turns summaries)
+                          (setq agentpane--listing summaries)
                           (setq tabulated-list-entries
                                 (mapcar #'agentpane--session-entry
                                         (if agentpane--cwd
@@ -3228,12 +3236,52 @@ picker's directory as it was."
     (with-current-buffer buffer
       (unless (eq major-mode 'agentpane-sessions-mode)
         (agentpane-sessions-mode))
-      (setq agentpane--cwd cwd)
-      (when cwd
-        (setq default-directory (file-name-as-directory cwd)))
-      (setq mode-line-process (and cwd (format " [%s]" (file-name-nondirectory cwd))))
-      (revert-buffer))
+      (agentpane--filter-picker cwd))
     (pop-to-buffer buffer '(display-buffer-same-window))))
+
+(defun agentpane--filter-picker (cwd)
+  "Filter this picker to CWD, a workspace, and make it the picker's
+`default-directory', or with CWD nil list every session and leave the
+directory as it was; then refetch."
+  (setq agentpane--cwd cwd)
+  (when cwd
+    (setq default-directory (file-name-as-directory cwd)))
+  (setq mode-line-process (and cwd (format " [%s]" (file-name-nondirectory cwd))))
+  (revert-buffer))
+
+(defun agentpane--workspaces ()
+  "The distinct cwds of this picker's last listing, the most recently
+updated session's first, as the browser's Workspace select offers them
+\(`workspaceOptions' in src/client/App.svelte)."
+  (let ((recency (lambda (summary)
+                   (let ((iso (or (plist-get summary :updatedAt)
+                                  (plist-get summary :createdAt))))
+                     (if iso (float-time (encode-time (iso8601-parse iso))) 0))))
+        (cwds nil))
+    (dolist (summary (sort agentpane--listing :key recency :reverse t))
+      (let ((cwd (plist-get summary :cwd)))
+        (when (and cwd (not (member cwd cwds)))
+          (push cwd cwds))))
+    (nreverse cwds)))
+
+(defun agentpane-sessions-workspace (cwd)
+  "Filter this picker to the sessions in CWD, a workspace, and make it the
+picker's `default-directory', or with CWD nil list every session, as the
+browser's Workspace select narrows its sidebar.
+Interactively, read CWD with completion over `agentpane--workspaces', the
+most recent first, after \"All workspaces\", which lists every session,
+as an empty answer does."
+  (interactive
+   (let* ((all "All workspaces")
+          (choices (cons all (agentpane--workspaces)))
+          (choice (completing-read
+                   "Workspace: "
+                   (completion-table-with-metadata
+                    choices '((display-sort-function . identity)
+                              (cycle-sort-function . identity)))
+                   nil t nil nil all)))
+     (list (and (not (equal choice all)) choice))))
+  (agentpane--filter-picker cwd))
 
 (provide 'agentpane)
 

@@ -2951,6 +2951,39 @@ though its listing, asked for every session, carries one (OW-yufahi)."
                                (buffer-local-value 'tabulated-list-entries picker))
                        '("h-a")))))))
 
+(ert-deftest agentpane-test-picker-chooses-another-workspace ()
+  "A picker filtered to the calling buffer's project offers every workspace
+its listing carries, most recently updated first, and choosing another
+narrows its rows to that one's sessions, as the browser's Workspace select
+does, while `sessions/list' is still asked for every session (OW-fenina)."
+  (agentpane-test--with-directories (one two)
+    (agentpane-test--listing
+      (let ((stub (symbol-function 'agentpane--request))
+            (asked nil))
+        (cl-letf (((symbol-function 'agentpane--request)
+                   (lambda (method params &rest rest)
+                     (when (eq method 'sessions/list)
+                       (push params asked))
+                     (apply stub method params rest))))
+          (setq listing (list (plist-put (agentpane-test--summary "a" nil one)
+                                         :updatedAt "2026-09-01T00:00:00Z")
+                              (plist-put (agentpane-test--summary "b" nil two)
+                                         :updatedAt "2026-09-02T00:00:00Z")
+                              (plist-put (agentpane-test--summary "c" nil two)
+                                         :updatedAt "2026-08-01T00:00:00Z")))
+          (let ((picker (agentpane-test--pick one)))
+            (with-current-buffer picker
+              (should (equal (agentpane--workspaces) (list two one)))
+              (agentpane-sessions-workspace two))
+            (should (equal (sort (mapcar (lambda (entry) (plist-get (car entry) :handle))
+                                         (buffer-local-value 'tabulated-list-entries picker))
+                                 #'string<)
+                           '("h-b" "h-c")))
+            (should (equal (buffer-local-value 'default-directory picker)
+                           (file-name-as-directory two)))
+            (should (= (length asked) 2))
+            (should (seq-every-p #'null asked))))))))
+
 (ert-deftest agentpane-test-picker-shows-each-sessions-workspace ()
   "The picker listing every session draws each row with its workspace's
 basename, the full path as its help echo, and nothing for a session with
