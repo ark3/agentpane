@@ -66,6 +66,7 @@ export interface SnapshotSource {
 		effort: string | null;
 		unrestoredModel?: string | null;
 		error: string | null;
+		errorId: string | null;
 		requests: AgentRequest[];
 		notices: AgentNotice[];
 	} | null;
@@ -123,6 +124,7 @@ export class Broadcaster {
 			effort: state.effort,
 			unrestoredModel: state.unrestoredModel ?? null,
 			error: state.error,
+			errorId: state.errorId,
 			requests: state.requests,
 			notices: state.notices,
 		});
@@ -146,6 +148,7 @@ export class Broadcaster {
 			effort: state.effort,
 			unrestoredModel: state.unrestoredModel ?? null,
 			error: state.error,
+			errorId: state.errorId,
 			requests: state.requests,
 			notices: state.notices,
 		});
@@ -174,8 +177,8 @@ export class Broadcaster {
 		this.#fanout({ type: "request-resolved", ...this.#address(session), requestId });
 	}
 
-	error(session: Addressed, message: string): void {
-		this.#fanout({ type: "error", ...this.#address(session), message });
+	error(session: Addressed, message: string, errorId: string): void {
+		this.#fanout({ type: "error", ...this.#address(session), message, errorId });
 	}
 
 	errorCleared(session: Addressed): void {

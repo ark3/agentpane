@@ -135,6 +135,7 @@ function state(selectedTurns: number): ClientState {
 		effort: null,
 		seq: 1,
 		error: null,
+		errorId: null,
 		requests: [],
 		notices: [],
 	});

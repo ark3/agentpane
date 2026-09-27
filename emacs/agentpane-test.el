@@ -802,22 +802,36 @@ one per session (OW-sedosu)."
 
 (ert-deftest agentpane-test-dismiss-error-names-it-to-the-server ()
   "`C-c C-d', pressed in the prompt region, dismisses the held turn error
-through `sessions/dismissError', naming it, which is the one the server
-holds after two `session/error's, the second; the buffer draws no error
-once it is pressed, as the browser's banner goes (OW-desufa)."
+through `sessions/dismissError', naming it by its `errorId', which is the
+one the server holds after two `session/error's, the second, though both
+have the same text (OW-jokoto); the buffer draws no error once it is
+pressed, as the browser's banner goes (OW-desufa)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--forking nil nil
       (agentpane-test--with-session ref
         (agentpane--on-notification
-         nil 'session/error (list :session ref :message "Turn failed upstream"))
+         nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e3"))
         (agentpane--on-notification
-         nil 'session/error (list :session ref :message "Turn failed again"))
+         nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e4"))
         (goto-char (point-max))
         (call-interactively (key-binding (kbd "C-c C-d")))
-        (should (equal sent `((sessions/dismissError :session ,ref
-                                                     :message "Turn failed again"))))
+        (should (equal sent `((sessions/dismissError :session ,ref :errorId "e4"))))
         (should (equal (agentpane-test--indices) '(0 1)))
         (should-not (agentpane-test--warnings))))))
+
+(ert-deftest agentpane-test-dismiss-error-names-the-one-a-snapshot-drew ()
+  "`C-c C-d' names an error a snapshot drew by the `errorId' the snapshot
+carried beside it (OW-jokoto)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--forking nil nil
+      (agentpane-test--with-session ref
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+               :error "Turn failed upstream" :errorId "e6" :requests [] :notices []))
+        (goto-char (point-max))
+        (call-interactively (key-binding (kbd "C-c C-d")))
+        (should (equal sent `((sessions/dismissError :session ,ref :errorId "e6"))))))))
 
 (ert-deftest agentpane-test-error-cleared-drops-its-line ()
   "A `session/errorCleared' drops the turn error's line, as the server says
@@ -2421,6 +2435,45 @@ what drops it: the server owns the error (OW-lohubo)."
           (agentpane--on-notification nil 'session/errorCleared (list :session ref))
           (should (equal (agentpane-test--indices) '(0 1)))
           (should-not (agentpane-test--warnings)))))))
+
+(ert-deftest agentpane-test-prompt-names-the-error-held-at-the-send ()
+  "A prompt carries the `errorId' of the turn error the buffer held when it
+was sent, so admitting it clears that one and no newer one (OW-jokoto)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
+          (agentpane--on-notification
+           nil 'session/error (list :session ref :message "Turn failed upstream" :errorId "e5"))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (should (equal sent `((sessions/prompt :session ,ref :text "hello"
+                                                 :priorErrorId "e5")))))))))
+
+(ert-deftest agentpane-test-prompt-names-no-error-its-own-attach-drew ()
+  "The first prompt on a previewed transcript names the error the buffer
+held at the send, none, and not one the attach it sends first drew from
+its snapshot: an error the session's start raised is newer than the
+prompt, so admitting it must not clear it (OW-jokoto, OW-bomolu)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (setq hold '(sessions/attach))
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (agentpane--on-notification
+           nil 'session/snapshot
+           (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                 :error "extension failed to load" :errorId "e9" :requests [] :notices []))
+          (funcall (cdr (pop held)) t)
+          (should (equal (car sent) `(sessions/prompt :session ,ref :text "hello"
+                                                      :priorErrorId nil)))
+          (should (equal (agentpane-test--warnings) '("extension failed to load"))))))))
 
 (ert-deftest agentpane-test-prompt-answer-keeps-an-error-with-the-held-text ()
   "A turn error the new turn raised before its prompt's answer survives

@@ -104,10 +104,10 @@ export interface AgentpaneApi {
 	reply(requestId: string, body: AgentRequestReply): Promise<void>;
 	/**
 	 * Dismiss the session's turn error on the server, so no later snapshot
-	 * brings it back (OW-bipume). `message` is the error dismissed; the server
-	 * keeps a newer one.
+	 * brings it back (OW-bipume). `errorId` names the error dismissed, as the
+	 * wire named the one shown; the server keeps a newer one (OW-jokoto).
 	 */
-	dismissError(ref: SessionRef, message: string): Promise<void>;
+	dismissError(ref: SessionRef, errorId: string): Promise<void>;
 	connect(handlers: EventHandlers): EventConnection;
 }
 
@@ -187,8 +187,8 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		reply(requestId, body) {
 			return requestNoContent(ROUTES.reply(requestId), jsonRequest(body));
 		},
-		dismissError(ref, message) {
-			const body: DismissErrorRequest = { message };
+		dismissError(ref, errorId) {
+			const body: DismissErrorRequest = { errorId };
 			return requestNoContent(ROUTES.error(ref), { ...jsonRequest(body), method: "DELETE" });
 		},
 		connect(handlers) {

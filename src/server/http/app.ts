@@ -280,12 +280,18 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.text !== "string") {
 					return error(400, "bad_request", "text is required");
 				}
-				// Which error stood, by id, read before the attach, which may start
-				// the session: an error its start raises is not one the sender saw,
-				// so admitting this prompt must not clear it (OW-31, OW-bipume), and
-				// nor must it clear one raised during admission that repeats this
-				// one's text (OW-lameke) -- see `SessionManager.submit`.
-				const priorError = sessions.errorIdOf(ref);
+				const { priorErrorId } = body.value;
+				if (priorErrorId !== undefined && priorErrorId !== null && typeof priorErrorId !== "string") {
+					return error(400, "bad_request", "priorErrorId must be a string or null");
+				}
+				// Which error the sender held when the user sent, by id: only that one
+				// may go at admission. One raised after -- by the start of the attach
+				// below, while this request was on its way, or during admission with
+				// this one's text -- is not one the sender saw (OW-31, OW-bipume,
+				// OW-lameke, OW-jokoto); see `SessionManager.submit`. A sender that
+				// names none gets the error held now, read before the attach, which
+				// may start the session and raise one.
+				const priorError = priorErrorId === undefined ? sessions.errorIdOf(ref) : priorErrorId;
 				// Only a session not yet running is attached here. An attach
 				// re-snapshots one already attached, which a prompt has no use for
 				// and every client pays for with a whole-transcript redraw
@@ -322,10 +328,10 @@ export function createApp(deps: AppDeps): App {
 				if (request.method !== "DELETE") return methodNotAllowed(request.method, "DELETE");
 				const body = await readJson<DismissErrorRequest>(request);
 				if (!body.ok) return body.response;
-				if (typeof body.value.message !== "string") {
-					return error(400, "bad_request", "message is required");
+				if (typeof body.value.errorId !== "string") {
+					return error(400, "bad_request", "errorId is required");
 				}
-				sessions.clearError(ref, body.value.message);
+				sessions.clearError(ref, body.value.errorId);
 				return noContent();
 			}
 			case "fork": {

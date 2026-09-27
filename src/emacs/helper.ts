@@ -211,6 +211,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				...(asked ? { askedFor: asked } : {}),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
+				errorId: view.errorId,
 				requests: view.requests,
 				notices: view.notices,
 			},
@@ -314,7 +315,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				notify({ method: "session/status", params: statusOf(view, handle) });
 				return;
 			case "error":
-				notify({ method: "session/error", params: { session: view.ref, handle, message: event.message } });
+				notify({ method: "session/error", params: { session: view.ref, handle, message: event.message, errorId: event.errorId } });
 				return;
 			case "error-cleared":
 				notify({ method: "session/errorCleared", params: { session: view.ref, handle } });
@@ -458,8 +459,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			forget(session, handle);
 			return null;
 		},
-		"sessions/dismissError": async ({ session, message }) => {
-			await api.dismissError(session, message);
+		"sessions/dismissError": async ({ session, errorId }) => {
+			await api.dismissError(session, errorId);
 			return null;
 		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,

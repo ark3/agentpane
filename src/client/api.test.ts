@@ -195,11 +195,11 @@ describe("agentpane API", () => {
 		const api = createAgentpaneApi({ fetch });
 		const ref = { backend: "pi", id: "/a b.jsonl" } as const;
 
-		await expect(api.dismissError(ref, "turn failed")).resolves.toBeUndefined();
+		await expect(api.dismissError(ref, "e3")).resolves.toBeUndefined();
 		expect(fetch).toHaveBeenCalledWith(ROUTES.error(ref), {
 			method: "DELETE",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ message: "turn failed" }),
+			body: JSON.stringify({ errorId: "e3" }),
 		});
 	});
 

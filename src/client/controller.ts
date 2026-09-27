@@ -829,9 +829,14 @@ export function createController(
 			if (view.sending) return false;
 			if (!view.draft) return false;
 			const text = view.draft;
+			// The error on screen as the user sends, which is the only one
+			// admitting this prompt may clear: one raised while it is on its way
+			// is not one they saw (OW-jokoto).
+			const handle = handleOf(view.state, selected);
+			const priorErrorId = handle === undefined ? null : (view.state.sessions[handle]?.errorId ?? null);
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				await api.prompt(selected, { text });
+				await api.prompt(selected, { text, priorErrorId });
 				if (!disposed) {
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
@@ -978,7 +983,9 @@ export function createController(
 				// unless that click landed on the fork's own row, whose selection
 				// `applyAttached` still moves onto the live session (OW-tatebi).
 				applyAttached(attached, forkIntent === selectionIntent, forked);
-				await api.prompt(attached.ref, { text, ...(images && images.length > 0 ? { images } : {}) });
+				// The fork is a conversation the user has seen no error on, so admitting
+				// this clears none: one its attach's start raised stays up (OW-jokoto).
+				await api.prompt(attached.ref, { text, priorErrorId: null, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
 				// The prompt landed, so the composer must stop offering text that has
 				// already been sent -- but only if it is still that text. The
@@ -1159,12 +1166,13 @@ export function createController(
 		clearError() {
 			const selected = view.state.selected;
 			const handle = handleOf(view.state, selected);
-			const dismissed = handle === undefined ? null : (view.state.sessions[handle]?.error ?? null);
+			const dismissed = handle === undefined ? null : (view.state.sessions[handle]?.errorId ?? null);
 			const state = handle === undefined ? view.state : clearSessionError(view.state, handle);
 			// The server holds the session's error for every later snapshot
 			// (OW-bipume), so it is told too, or the next one would put the banner
-			// back -- told which error, so one newer than what was on screen
-			// survives. Not awaited: the banner goes now. A snapshot the server sent
+			// back -- told which error, by the id the wire named it by, so one newer
+			// than what was on screen survives even when its text is the same
+			// (OW-jokoto). Not awaited: the banner goes now. A snapshot the server sent
 			// before the dismissal reached it shows it again, until the
 			// `error-cleared` the dismissal broadcasts, which follows that snapshot
 			// on the one ordered stream, takes it down (OW-jopifu). A failed

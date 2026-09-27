@@ -148,6 +148,7 @@ function state(): ClientState {
 		effort: null,
 		seq: 1,
 		error: null,
+		errorId: null,
 		requests: [],
 		notices: [],
 	});

@@ -63,6 +63,7 @@ function stateAtSequence(session: SessionRef, seq: number): ClientState {
 		effort: null,
 		unrestoredModel: null,
 		error: null,
+		errorId: null,
 		requests: [],
 		notices: [],
 	}).state;
@@ -82,6 +83,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -98,6 +100,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		});
@@ -122,6 +125,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		});
@@ -133,6 +137,7 @@ describe("client session state", () => {
 			compaction: null,
 			model: null,
 			error: null,
+			errorId: null,
 			requests: [],
 		});
 		expect(result.recover).toEqual([]);
@@ -197,6 +202,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		});
@@ -226,6 +232,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -271,6 +278,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -302,6 +310,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -382,6 +391,7 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -391,6 +401,7 @@ describe("client session state", () => {
 			handle: h(ref),
 			seq: 2,
 			message: "turn failed",
+			errorId: "e1",
 		});
 
 		expect(result.state.sessions[h(ref)]?.error).toBe("turn failed");
@@ -405,6 +416,7 @@ describe("client session state", () => {
 			handle: h(ref),
 			seq: 2,
 			message: "turn failed",
+			errorId: "e1",
 		}).state;
 
 		const noticed = reduceServerEvent(failed, { type: "notice", session: ref, handle: h(ref), seq: 3, notice }).state;
@@ -454,7 +466,7 @@ describe("client session state", () => {
 	});
 
 	it("drops the error the server says it no longer holds (OW-jopifu)", () => {
-		const failed = reduceServerEvent(stateAtSequence(ref, 1), { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed" }).state;
+		const failed = reduceServerEvent(stateAtSequence(ref, 1), { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed", errorId: "e1" }).state;
 
 		const result = reduceServerEvent(failed, { type: "error-cleared", session: ref, handle: h(ref), seq: 3 });
 
@@ -469,6 +481,7 @@ describe("client session state", () => {
 			handle: h(ref),
 			seq: 2,
 			message: "turn failed",
+			errorId: "e1",
 		}).state;
 
 		const cleared = clearSessionError(withError, h(ref));
@@ -481,7 +494,7 @@ describe("client session state", () => {
 		const request: AgentRequest = { requestId: "request-1", session: ref, kind: "approval", payload: {} };
 		const held = { kind: "warning", message: "fallback metadata", details: null, path: null };
 		let state = stateAtSequence(ref, 1);
-		state = reduceServerEvent(state, { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed" }).state;
+		state = reduceServerEvent(state, { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed", errorId: "e1" }).state;
 		state = reduceServerEvent(state, { type: "request", session: ref, handle: h(ref), seq: 3, request }).state;
 		state = reduceServerEvent(state, { type: "notice", session: ref, handle: h(ref), seq: 4, notice: held }).state;
 
@@ -498,11 +511,12 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [held, later],
 		}).state;
 
-		expect(snapshot.sessions[h(ref)]).toMatchObject({ error: null, requests: [], notices: [held, later] });
+		expect(snapshot.sessions[h(ref)]).toMatchObject({ error: null, errorId: null, requests: [], notices: [held, later] });
 
 		// And a view the snapshot creates starts from what the server holds.
 		const fresh = reduceServerEvent(stateWithSelected(ref), {
@@ -517,10 +531,11 @@ describe("client session state", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: "turn failed",
+			errorId: "e1",
 			requests: [request],
 			notices: [held],
 		}).state;
-		expect(fresh.sessions[h(ref)]).toMatchObject({ error: "turn failed", requests: [request], notices: [held] });
+		expect(fresh.sessions[h(ref)]).toMatchObject({ error: "turn failed", errorId: "e1", requests: [request], notices: [held] });
 	});
 
 	it("requests a session summary refresh when sessions change", () => {

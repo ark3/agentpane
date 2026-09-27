@@ -177,7 +177,7 @@ class FakeController implements AgentpaneController {
 				selected: ref,
 				sessions: {
 					...this.current.state.sessions,
-					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, requests: [], notices: [] },
+					[sessionKey(ref)]: { ref, messages: [], isStreaming: false, model: null, effort: null, seq: 1, error: null, errorId: null, requests: [], notices: [] },
 				},
 			},
 		});
@@ -361,7 +361,7 @@ beforeEach(() => {
 
 describe("App", () => {
 	it("shows the server-reported model in the selected empty conversation's picker", () => {
-		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			models: [{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null }],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
@@ -375,7 +375,7 @@ describe("App", () => {
 	});
 
 	it("offers the backend default for an empty conversation with no reported model", () => {
-		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		})) } });
@@ -384,7 +384,7 @@ describe("App", () => {
 	});
 
 	it("disables only the picker while its model request is in flight", () => {
-		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			draft: "still sendable",
 			modelSetting: true,
@@ -398,7 +398,7 @@ describe("App", () => {
 	});
 
 	it("requests an exact model id and waits for server status before changing the picker value", async () => {
-		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			models: [
 				{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null },
@@ -422,7 +422,7 @@ describe("App", () => {
 	});
 
 	it("locks a messaged conversation to a plain model label", () => {
-		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			models: [{ id: "opaque/current", label: "Current Model", efforts: [], defaultEffort: null }],
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
@@ -435,7 +435,7 @@ describe("App", () => {
 	});
 
 	it("shows the backend default as a plain label for a messaged conversation with no model", () => {
-		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [user("sent")], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
 		})) } });
@@ -457,6 +457,7 @@ describe("App", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -480,6 +481,7 @@ describe("App", () => {
 			effort: null,
 			unrestoredModel,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -508,7 +510,7 @@ describe("App", () => {
 	}
 
 	it("offers the selected model's efforts in an empty conversation, on the one in force", () => {
-		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			models: effortModels,
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
@@ -519,7 +521,7 @@ describe("App", () => {
 	});
 
 	it("shows the model's default effort when the session reports none", () => {
-		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			models: effortModels,
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
@@ -529,7 +531,7 @@ describe("App", () => {
 	});
 
 	it("follows a model change to the new model's efforts", async () => {
-		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			models: effortModels,
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
@@ -547,7 +549,7 @@ describe("App", () => {
 	});
 
 	it("requests an exact effort and waits for server status before changing the select", async () => {
-		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			models: effortModels,
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
@@ -562,7 +564,7 @@ describe("App", () => {
 	});
 
 	it("disables only the effort select while its request is in flight", () => {
-		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: "opaque/current", effort: "medium", seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			effortSetting: true,
 			models: effortModels,
@@ -574,7 +576,7 @@ describe("App", () => {
 	});
 
 	it("drops the effort select once the conversation has a turn, with no label in its place", () => {
-		const session = { ref: codexSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, requests: [] };
+		const session = { ref: codexSession, messages: [user("sent")], isStreaming: false, compaction: null, model: "opaque/current", effort: "high", seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			models: effortModels,
 			state: state({ selected: codexSession, sessions: { [sessionKey(codexSession)]: session } }),
@@ -589,7 +591,7 @@ describe("App", () => {
 		["a model the list does not name", "opaque/unlisted"],
 		["no reported model", null],
 	])("shows no effort select for %s", (_name, model) => {
-		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model, seq: 1, error: null, requests: [] };
+		const session = { ref: piSession, messages: [], isStreaming: false, compaction: null, model, seq: 1, error: null, errorId: null, requests: [] };
 		render(App, { props: { controller: new FakeController(view({
 			models: effortModels,
 			state: state({ selected: piSession, sessions: { [sessionKey(piSession)]: session } }),
@@ -723,7 +725,7 @@ describe("App", () => {
 
 	it("disables the composer's Detach for every case outside its enablement predicate (OW-tewave)", async () => {
 		const detachItem = () => screen.getByRole("menuitem", { name: "Detach", hidden: true });
-		const live = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		const live = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] };
 		/** One render per case, torn down before the next, so `screen` sees one menu. */
 		function refusedWhen(overrides: Partial<ControllerView>): void {
 			const controller = new FakeController(view(overrides));
@@ -789,7 +791,7 @@ describe("App", () => {
 	});
 
 	it("the composer's Detach tool detaches an attached selection, and is offered for a virtual one too (OW-tewave)", async () => {
-		const idle = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, requests: [] };
+		const idle = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({
 			state: state({
 				selected: piSession,
@@ -866,6 +868,7 @@ describe("App", () => {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		}).state;
@@ -906,6 +909,7 @@ describe("App", () => {
 			model: null,
 			seq: 1,
 			error: null,
+			errorId: null,
 			requests: [],
 		};
 		const controller = new FakeController(view({
@@ -1020,6 +1024,7 @@ describe("App", () => {
 								isStreaming: false,
 								seq: 1,
 								error: null,
+								errorId: null,
 								requests: [],
 							},
 						},
@@ -1174,6 +1179,7 @@ describe("App", () => {
 							isStreaming: true,
 							seq: 1,
 							error: null,
+							errorId: null,
 							requests: [],
 						},
 					},
@@ -1199,6 +1205,7 @@ describe("App", () => {
 							isStreaming: false,
 							seq: 1,
 							error: null,
+							errorId: null,
 							requests: [],
 						},
 					},
@@ -1220,6 +1227,7 @@ describe("App", () => {
 				isStreaming: false,
 				seq: 1,
 				error: null,
+				errorId: null,
 				requests: [],
 			},
 			[sessionKey(codexSession)]: {
@@ -1228,6 +1236,7 @@ describe("App", () => {
 				isStreaming: true,
 				seq: 1,
 				error: null,
+				errorId: null,
 				requests: [],
 			},
 		};
@@ -1292,6 +1301,7 @@ describe("App", () => {
 				isStreaming: false,
 				seq: 1,
 				error: null,
+				errorId: null,
 				requests: [],
 			},
 			[sessionKey(codexSession)]: {
@@ -1300,6 +1310,7 @@ describe("App", () => {
 				isStreaming: false,
 				seq: 1,
 				error: null,
+				errorId: null,
 				requests: [],
 			},
 		};
@@ -1382,6 +1393,7 @@ describe("App", () => {
 						isStreaming: false,
 						seq: 1,
 						error: null,
+						errorId: null,
 						requests: [],
 					},
 				},
@@ -1398,7 +1410,7 @@ describe("App", () => {
 			state: state({
 				selected: piSession,
 				sessions: {
-					"pi:pi-1": { ref: piSession, messages: toolRead, isStreaming: false, seq: 1, error: null, requests: [] },
+					"pi:pi-1": { ref: piSession, messages: toolRead, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 				},
 			}),
 		}));
@@ -1463,8 +1475,8 @@ describe("App", () => {
 
 	it("restores each session's own scroll position when switching, and scrolls a fresh one to the tail", async () => {
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
-			"codex:codex-1": { ref: codexSession, messages: [], isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages: [], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
+			"codex:codex-1": { ref: codexSession, messages: [], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
 		const { container } = render(App, { props: { controller } });
@@ -1508,7 +1520,7 @@ describe("App", () => {
 		const attached = state({
 			selected: piSession,
 			summaries: [summary(piSession, "P", { handle: "h-attached" })],
-			sessions: { "h-attached": { ref: piSession, messages: stored, isStreaming: false, seq: 1, error: null, requests: [] } },
+			sessions: { "h-attached": { ref: piSession, messages: stored, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] } },
 		});
 		controller.publish(view({ state: attached }));
 		await tick();
@@ -1538,7 +1550,7 @@ describe("App", () => {
 		const under = (handle: string) => state({
 			selected: piSession,
 			summaries: [summary(piSession, "P", { handle })],
-			sessions: { [handle]: { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] } },
+			sessions: { [handle]: { ref: piSession, messages, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] } },
 		});
 		const controller = new FakeController(view({ state: under("h1") }));
 		const { container } = render(App, { props: { controller } });
@@ -1565,7 +1577,7 @@ describe("App", () => {
 	it("keeps following through a submit whose echoed message and assistant placeholder both arrive before their status:true (D2: cross-event ordering is not guaranteed)", async () => {
 		const old = user("old message");
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({
 			draft: "New prompt",
@@ -1626,7 +1638,7 @@ describe("App", () => {
 		const realSession: SessionRef = { backend: "pi", id: "pi-77" };
 		// One session under one handle, before the rename and after it (D24).
 		const sessions = {
-			"h-1": { ref: virtualSession, messages: [], isStreaming: false, seq: null, error: null, requests: [] },
+			"h-1": { ref: virtualSession, messages: [], isStreaming: false, seq: null, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({
 			draft: "First prompt",
@@ -1648,7 +1660,7 @@ describe("App", () => {
 			state: state({
 				selected: realSession,
 				sessions: {
-					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: false, seq: 1, error: null, requests: [] },
+					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 				},
 			}),
 		}));
@@ -1662,7 +1674,7 @@ describe("App", () => {
 			state: state({
 				selected: realSession,
 				sessions: {
-					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: true, seq: 2, error: null, requests: [] },
+					"h-1": { ref: realSession, messages: [submittedMessage], isStreaming: true, seq: 2, error: null, errorId: null, requests: [] },
 				},
 			}),
 		}));
@@ -1686,7 +1698,7 @@ describe("App", () => {
 	it("disarms follow and the badge when the prompt fails, so a later stream from elsewhere collects neither (OW-mifuki)", async () => {
 		const old = user("old message");
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(
 			view({ draft: "New prompt", state: state({ selected: piSession, sessions }) }),
@@ -1739,7 +1751,7 @@ describe("App", () => {
 	it("re-arms follow on submit even after the reader had scrolled away, tracks growth, and locks once the submitted message would be pushed off the top", async () => {
 		const old = user("old message");
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({
 			draft: "New prompt",
@@ -1843,7 +1855,7 @@ describe("App", () => {
 		const old = user("old message");
 		const submittedMessage = user("New prompt");
 		const initial = {
-			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({
 			draft: "New prompt",
@@ -1911,7 +1923,7 @@ describe("App", () => {
 			user("third"),
 		];
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
 		const { container } = render(App, { props: { controller } });
@@ -1946,7 +1958,7 @@ describe("App", () => {
 	it("keeps the rail present at all times and disables only the directions the reader cannot go", async () => {
 		const messages = [user("first"), assistant([{ type: "text", text: "a" }], "stop"), user("second")];
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
 		const { container } = render(App, { props: { controller } });
@@ -2002,7 +2014,7 @@ describe("App", () => {
 		// already is -- a live control that moves nothing.
 		const messages = [user("first"), assistant([{ type: "text", text: "a" }], "stop"), user("second"), user("third")];
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
 		const { container } = render(App, { props: { controller } });
@@ -2025,7 +2037,7 @@ describe("App", () => {
 	it("treats a rail jump as a manual reading action: it disengages follow and never re-arms it", async () => {
 		const messages = [user("first")];
 		const sessions = {
-			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, requests: [] },
+			"pi:pi-1": { ref: piSession, messages, isStreaming: false, seq: 1, error: null, errorId: null, requests: [] },
 		};
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions }) }));
 		const { container } = render(App, { props: { controller } });
@@ -2141,7 +2153,7 @@ describe("App", () => {
 		render(App, { props: { controller } });
 		// The composer only replaces the Attach button once the session is live,
 		// which is a snapshot's job, not the attach response's.
-		emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+		emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await controller.select(piSession);
 		await tick();
 		const textarea = screen.getByLabelText("Prompt");
@@ -2230,6 +2242,7 @@ describe("App", () => {
 						isStreaming: false,
 						seq: 1,
 						error: null,
+						errorId: null,
 						requests: [],
 						notices: [
 							{ kind: "warning", message: "Model metadata not found", details: null, path: null },
@@ -2261,6 +2274,7 @@ describe("App", () => {
 						isStreaming: true,
 						seq: 1,
 						error: null,
+						errorId: null,
 						requests: [],
 					},
 				},
@@ -2291,6 +2305,7 @@ describe("App", () => {
 					compaction,
 					seq: 1,
 					error: null,
+					errorId: null,
 					requests: [],
 				},
 			},
@@ -2365,7 +2380,7 @@ describe("App", () => {
 			selected: ref,
 			summaries: [summary(ref, "P", { handle })],
 			sessions: {
-				[handle]: { ref, messages, isStreaming, seq: 1, error: null, requests: [] },
+				[handle]: { ref, messages, isStreaming, seq: 1, error: null, errorId: null, requests: [] },
 			},
 		});
 	}
@@ -2606,8 +2621,8 @@ describe("App", () => {
 	it("badges the fork it landed on, not a session clicked mid-fork (OW-mifuki)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
 		const other: SessionRef = { backend: "pi", id: "pi-2" };
-		const parent = { ref: piSession, messages: [user("first draft")], isStreaming: false, seq: 1, error: null, requests: [] };
-		const fork = { ref: forkRef, messages: [user("reworded")], isStreaming: false, seq: 1, error: null, requests: [] };
+		const parent = { ref: piSession, messages: [user("first draft")], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] };
+		const fork = { ref: forkRef, messages: [user("reworded")], isStreaming: false, seq: 1, error: null, errorId: null, requests: [] };
 		const controller = new FakeController(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": parent } }) }));
 		controller.forkResult = { ...summary(forkRef), handle: "codex:thread-fork" };
 		// The click lands while the fork's prompt is in flight, so the selection
@@ -2692,7 +2707,7 @@ describe("App", () => {
 		document.hasFocus = () => false;
 		try {
 			render(App, { props: { controller } });
-			emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+			emit({ type: "snapshot", session: piSession, handle: "h-parent", seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 			await controller.select(piSession);
 			await tick();
 
@@ -2708,7 +2723,7 @@ describe("App", () => {
 
 			// The fork's own turn, start to finish, with the tab in the background.
 			const turn = (isStreaming: boolean) =>
-				emit({ type: "snapshot", session: forkRef, handle: "h-fork", seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, requests: [], notices: [] });
+				emit({ type: "snapshot", session: forkRef, handle: "h-fork", seq: isStreaming ? 1 : 2, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 			turn(true);
 			await tick();
 			turn(false);
@@ -2993,6 +3008,7 @@ describe("App", () => {
 						isStreaming: false,
 						seq: 1,
 						error: null,
+						errorId: null,
 						requests: [{ requestId: "request-1", session: piSession, kind: "approval", payload: {} }],
 					},
 				},
@@ -3088,13 +3104,13 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 		return { controller, emit: (event) => emit(event) };
 	}
 
-	function opening(held: Pick<Extract<ServerEvent, { type: "snapshot" }>, "error" | "requests" | "notices">): ServerEvent {
+	function opening(held: Pick<Extract<ServerEvent, { type: "snapshot" }>, "error" | "errorId" | "requests" | "notices">): ServerEvent {
 		return { type: "snapshot", session: piSession, handle: sessionKey(piSession), seq: 4, messages: [user("hi")], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, ...held };
 	}
 
 	it("shows the blocked banner for a request raised before it connected, with no gesture", async () => {
 		const { controller, emit } = connectLate();
-		emit(opening({ error: null, requests: [{ requestId: "r-1", session: piSession, kind: "approval", payload: {} }], notices: [] }));
+		emit(opening({ error: null, errorId: null, requests: [{ requestId: "r-1", session: piSession, kind: "approval", payload: {} }], notices: [] }));
 		await controller.select(piSession);
 		await tick();
 
@@ -3104,7 +3120,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 	it("shows a notice raised before it connected", async () => {
 		const { controller, emit } = connectLate();
 		const notice = { kind: "configWarning", message: "Unknown key", details: null, path: "/c.toml:3:5" };
-		emit(opening({ error: null, requests: [], notices: [notice] }));
+		emit(opening({ error: null, errorId: null, requests: [], notices: [notice] }));
 		await controller.select(piSession);
 		await tick();
 
@@ -3115,7 +3131,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 
 	it("shows a turn error recorded before it connected", async () => {
 		const { controller, emit } = connectLate();
-		emit(opening({ error: "turn failed upstream", requests: [], notices: [] }));
+		emit(opening({ error: "turn failed upstream", errorId: "e1", requests: [], notices: [] }));
 		await controller.select(piSession);
 		await tick();
 

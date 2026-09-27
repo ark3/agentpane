@@ -79,10 +79,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-25) ends, after one "passed" or
+;; which on Emacs 31.1 (measured 2026-09-26) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 125 tests, 122 results as expected, 0 unexpected, 3 skipped
+;;     Ran 128 tests, 125 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -464,10 +464,12 @@ will say so under that handle; see `agentpane--dropped'."
                                  (agentpane--transcript-header agentpane--session)
                                  (plist-get params :notices)
                                  (plist-get params :error)
-                                 (plist-get params :requests)))))
+                                 (plist-get params :requests)
+                                 (plist-get params :errorId)))))
             ('session/node (agentpane--record (plist-get params :node)))
             ('session/status (agentpane--set-status params))
-            ('session/error (agentpane--hold-error (plist-get params :message)))
+            ('session/error (agentpane--hold-error (plist-get params :message)
+                                                   (plist-get params :errorId)))
             ('session/errorCleared (agentpane--hold-error nil))
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
@@ -757,6 +759,13 @@ The server announces every clear with a `session/errorCleared'
 always follows the stale snapshot and the line the stale one draws is
 transient; the buffer keeps no send-time state to second-guess a snapshot
 \(OW-sedosu).")
+
+(defvar-local agentpane--error-id nil
+  "The `errorId' the server named `agentpane--error' by, set with it.
+Two errors with the same text are two errors, and this is how the buffer
+names the one it shows to `sessions/dismissError', and to
+`sessions/prompt' as the one held when the prompt was sent (OW-jokoto).
+It names nothing while `agentpane--error' is nil.")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
@@ -1372,7 +1381,7 @@ label between two rules, naming the context size it folded when above 0."
           (add-face-text-property body-start (point) 'agentpane-user-box t))))
     (when userp (insert "\n"))))
 
-(defun agentpane--draw (nodes &optional header notices error requests)
+(defun agentpane--draw (nodes &optional header notices error requests error-id)
   "Draw NODES, a sequence of node plists, as this buffer's ewoc under HEADER.
 Replaces every node the buffer held and leaves the prompt region below them
 as it was; expanded folds survive the redraw, since they are keyed by node
@@ -1382,11 +1391,13 @@ carries, are drawn after NODES in that order, as an `(:error MESSAGE)'
 node, `(:notice NOTICE)' nodes and `(:request REQUEST)' nodes, so a
 snapshot keeps what the server still holds for the session, including what
 arrived before this buffer was attached (OW-bipume).  ERROR, nil or not,
-becomes the error the buffer holds, `agentpane--error'.  Nodes recorded and
-not yet drawn are discarded, since NODES supersede them.  Point goes to
-the first node."
+becomes the error the buffer holds, `agentpane--error', and ERROR-ID, the
+snapshot's `errorId', what it names that error by, `agentpane--error-id'.
+Nodes recorded and not yet drawn are discarded, since NODES supersede
+them.  Point goes to the first node."
   (setq agentpane--recorded nil
-        agentpane--error error)
+        agentpane--error error
+        agentpane--error-id error-id)
   (agentpane--above-prompt
    (lambda ()
      (delete-region (point-min) agentpane--prompt-separator)
@@ -1485,11 +1496,13 @@ forget them; see `agentpane--record'."
         (pcase-dolist (`(,_ . ,node) recorded)
           (agentpane--upsert node))))))
 
-(defun agentpane--hold-error (message)
+(defun agentpane--hold-error (message &optional id)
   "Hold MESSAGE, or nil for none, as this buffer's turn error, and draw it.
+ID is the `errorId' the server named it by; see `agentpane--error-id'.
 The line drawn for the one held before goes, and MESSAGE's is appended,
 where it arrived, so the buffer draws at most one; see `agentpane--error'."
-  (setq agentpane--error message)
+  (setq agentpane--error message
+        agentpane--error-id id)
   (agentpane--above-prompt
    (lambda ()
      (ewoc-filter agentpane--ewoc (lambda (data) (not (plist-member data :error))))
@@ -2318,18 +2331,26 @@ one held at the send, and a new turn failing at once with the same text,
 its `session/errorCleared' and `session/error' both handled before the
 held-back answer, lost the error the server still held.  When the answer
 comes first instead, the line stays up until the notification, which is
-the server's truth all along."
+the server's truth all along.
+
+The prompt names the error the buffer held when it was sent, by
+`agentpane--error-id', or none, and the server clears only that one at
+admission (OW-jokoto).  Read here, before the attach a previewed buffer
+sends first: an error that attach's start raises, drawn from its
+snapshot, is newer than the prompt, and admitting it must not clear it."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
     (when agentpane--sending
       (user-error "A prompt to this session is already being sent"))
     (setq agentpane--sending t)
-    (let ((failed (lambda () (setq agentpane--sending nil))))
+    (let ((failed (lambda () (setq agentpane--sending nil)))
+          (prior (and agentpane--error agentpane--error-id)))
       (agentpane--attached-then
        (lambda ()
          (agentpane--request 'sessions/prompt
-                             (list :session (agentpane--ref agentpane--session) :text text)
+                             (list :session (agentpane--ref agentpane--session) :text text
+                                   :priorErrorId prior)
                              (lambda (_)
                                (setq agentpane--sending nil)
                                (funcall sent))
@@ -2375,16 +2396,17 @@ The first prompt on a previewed session attaches it."
 (defun agentpane-dismiss-error ()
   "Dismiss this buffer's turn error through `sessions/dismissError'.
 The server holds the error for every later snapshot (OW-bipume), so it is
-told, naming the one the buffer holds, `agentpane--error', so that a newer
-one survives; the buffer clears it at once, as the browser's banner goes
-before its dismissal has answered (OW-desufa)."
+told, naming the one the buffer holds by `agentpane--error-id', so that a
+newer one survives, even one with the same text (OW-jokoto); the buffer
+clears it at once, as the browser's banner goes before its dismissal has
+answered (OW-desufa)."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (unless agentpane--error
       (user-error "No turn error to dismiss"))
     (agentpane--request 'sessions/dismissError
                         (list :session (agentpane--ref agentpane--session)
-                              :message agentpane--error)
+                              :errorId agentpane--error-id)
                         #'ignore t)
     (agentpane--hold-error nil)))
 

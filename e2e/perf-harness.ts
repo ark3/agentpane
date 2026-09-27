@@ -171,6 +171,7 @@ const api: AgentpaneApi = {
 				effort: null,
 				unrestoredModel: null,
 				error: null,
+				errorId: null,
 				requests: [],
 				notices: [],
 			});
@@ -333,6 +334,7 @@ const harness: PerfHarness = {
 			effort: null,
 			unrestoredModel: null,
 			error: null,
+			errorId: null,
 			requests: [],
 			notices: [],
 		});

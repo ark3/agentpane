@@ -222,6 +222,12 @@ export type ServerEvent =
 			 * here, replacing what it held.
 			 */
 			error: string | null;
+			/**
+			 * Which raise `error` is, as the `error` event that announced it
+			 * named it; null exactly when `error` is. What a client names the
+			 * error by when it dismisses it or prompts over it (OW-jokoto).
+			 */
+			errorId: string | null;
 			requests: AgentRequest[];
 			notices: AgentNotice[];
 	  }
@@ -254,12 +260,21 @@ export type ServerEvent =
 			requestId: string;
 	  }
 	| {
-			/** A turn ended in an error the transcript alone would not convey. */
+			/**
+			 * A turn ended in an error the transcript alone would not convey.
+			 * `errorId` names this raise: two errors with the same `message` are
+			 * still two errors, and a client names the one it showed by this when
+			 * it dismisses it (`DismissErrorRequest`) or prompts over it
+			 * (`PromptRequest.priorErrorId`) (OW-lameke, OW-jokoto). Opaque, and
+			 * never minted twice, not even by a restarted server: a client holds
+			 * it across a restart, as it does a handle (OW-kimaya).
+			 */
 			type: "error";
 			session: SessionRef;
 			handle: string;
 			seq: number;
 			message: string;
+			errorId: string;
 	  }
 	| {
 			/**
@@ -358,6 +373,16 @@ export interface SessionPreviewResponse {
 export interface PromptRequest {
 	text: string;
 	images?: { mimeType: string; base64: string }[];
+	/**
+	 * The `errorId` of the turn error the sender showed when the user sent,
+	 * or null when it showed none. Admitting the prompt clears the session's
+	 * error only if it is still that one: an error raised after the send, or
+	 * before the sender drew it, stays (OW-31, OW-jokoto). Read at the
+	 * send gesture, before any attach the send itself makes, so an error that
+	 * attach's start raised is not one the sender held. Absent, the server
+	 * takes whatever error it holds when the request arrives.
+	 */
+	priorErrorId?: string | null;
 }
 
 /** POST /api/edit-draft */
@@ -417,13 +442,15 @@ export interface SetEffortRequest {
 }
 
 /**
- * DELETE /api/sessions/:backend/:id/error -- `message` is the error being
- * dismissed, as the client showed it. It is named because another client's
- * turn can fail while the dismissal is on its way, and that newer error must
- * survive it (OW-bipume). A body without one answers 400 `bad_request`.
+ * DELETE /api/sessions/:backend/:id/error -- `errorId` is the error being
+ * dismissed, the one the client showed, as its `error` event or snapshot
+ * named it. It is named because another client's turn can fail while the
+ * dismissal is on its way, and that newer error must survive it (OW-bipume)
+ * -- by id, not text, since the newer one can repeat it word for word
+ * (OW-jokoto). A body without one answers 400 `bad_request`.
  */
 export interface DismissErrorRequest {
-	message: string;
+	errorId: string;
 }
 
 /** GET /api/models?backend=pi|codex */

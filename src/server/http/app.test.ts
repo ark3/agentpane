@@ -816,6 +816,17 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.close();
 	});
 
+	/** Raise a turn error on the attached Pi session, and the id its `error` event named it by. */
+	async function raise(message: string): Promise<string> {
+		const client = await openStream();
+		await client.waitForCount(1);
+		pi.forRef(PI_SESSION)?.emitError(message);
+		await client.until(() => client.typed("error").length === 1, "the error");
+		const [raised] = client.typed("error");
+		await client.close();
+		return raised!.errorId;
+	}
+
 	function dismiss(ref: SessionRef, body: unknown): Promise<Response> {
 		return app.fetch(
 			new Request(`http://127.0.0.1${ROUTES.error(ref)}`, {
@@ -828,9 +839,9 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 
 	it("forgets a dismissed error, so no later snapshot shows it again", async () => {
 		await get(ROUTES.session(PI_SESSION));
-		pi.forRef(PI_SESSION)?.emitError("turn failed");
+		const shown = await raise("turn failed");
 
-		expect((await dismiss(PI_SESSION, { message: "turn failed" })).status).toBe(204);
+		expect((await dismiss(PI_SESSION, { errorId: shown })).status).toBe(204);
 
 		const client = await openStream();
 		await client.waitForCount(1);
@@ -840,12 +851,11 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 
 	it("keeps a newer error than the one a client dismissed", async () => {
 		await get(ROUTES.session(PI_SESSION));
-		const adapter = pi.forRef(PI_SESSION);
-		adapter?.emitError("first turn failed");
+		const shown = await raise("first turn failed");
 		// Another client's turn fails while this one's Dismiss is on its way.
-		adapter?.emitError("second turn failed");
+		await raise("second turn failed");
 
-		expect((await dismiss(PI_SESSION, { message: "first turn failed" })).status).toBe(204);
+		expect((await dismiss(PI_SESSION, { errorId: shown })).status).toBe(204);
 
 		const client = await openStream();
 		await client.waitForCount(1);
@@ -855,13 +865,13 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 
 	it("tells every other client a dismissed error went, with no snapshot (OW-jopifu)", async () => {
 		await get(ROUTES.session(PI_SESSION));
-		pi.forRef(PI_SESSION)?.emitError("turn failed");
+		const shown = await raise("turn failed");
 		const dismissing = await openStream();
 		const watching = await openStream();
 		await dismissing.waitForCount(1);
 		await watching.waitForCount(1);
 
-		expect((await dismiss(PI_SESSION, { message: "turn failed" })).status).toBe(204);
+		expect((await dismiss(PI_SESSION, { errorId: shown })).status).toBe(204);
 
 		await watching.until(() => watching.events.length === 2, "the clear");
 		expect(watching.events).toEqual([
@@ -893,6 +903,48 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.waitForCount(1);
 		expect(client.typed("snapshot")[0]?.error).toBe("extension failed to load");
 		await client.close();
+	});
+
+	it("clears at admission the error the prompt names as the one its sender held (OW-jokoto)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const held = await raise("turn failed");
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "again", priorErrorId: held })).status).toBe(202);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]).toMatchObject({ error: null, errorId: null });
+		await client.close();
+	});
+
+	it("keeps an error raised after the send of a prompt whose sender held none (OW-jokoto)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		// Raised while the prompt was on its way, so its sender never showed it.
+		await raise("turn failed");
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "again", priorErrorId: null })).status).toBe(202);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]?.error).toBe("turn failed");
+		await client.close();
+	});
+
+	it("keeps an error raised after the send of a prompt naming an older one, even with the same text (OW-jokoto)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const shown = await raise("turn failed");
+		const newer = await raise("turn failed");
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "again", priorErrorId: shown })).status).toBe(202);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]).toMatchObject({ error: "turn failed", errorId: newer });
+		await client.close();
+	});
+
+	it("refuses a prompt whose priorErrorId is neither a string nor null", async () => {
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "again", priorErrorId: 1 })).status).toBe(400);
 	});
 });
 

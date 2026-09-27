@@ -12,7 +12,10 @@
  * for to the handle it was answered under -- `session/snapshot`'s
  * `askedFor` took over (OW-mofuho). OW-gusaru raised it a third time, for
  * `session/snapshot`'s `movedFrom`, and OW-yibijo a fourth, retiring
- * `movedFrom` for `session/detached`.
+ * `movedFrom` for `session/detached`. OW-jokoto raised it a fifth, for the
+ * `errorId` that names a turn error on `session/error` and
+ * `session/snapshot`, and that `sessions/dismissError` and `sessions/prompt`
+ * send back.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -160,14 +163,22 @@
  *   reply names the handle it holds.
  *   Opens the event stream if it is not open yet, and from here on the
  *   notifications below flow for this session.
- * - `sessions/prompt` -- `{ session, text, images? }` -> `null`.
+ * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
+ *   `null`. `priorErrorId` (string or `null`) is the `errorId` of the turn
+ *   error the buffer held when the user sent, `null` when it held none, read
+ *   before any `sessions/attach` the send itself makes: admitting the prompt
+ *   clears the session's error only while it is still that one, so an error
+ *   raised after the send, that attach's start among them, stays
+ *   (OW-jokoto). Absent, the server takes whatever error it holds when the
+ *   prompt arrives.
  * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
  *   -> `null`. `close` kills the subprocess and stops this session's
  *   notifications, as `sessions/detach` below says which.
- * - `sessions/dismissError` -- `{ session, message }` -> `null`. Clears the
+ * - `sessions/dismissError` -- `{ session, errorId }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
- *   but only while `message` is still the error the server holds: a newer
- *   one survives the dismissal of the one Emacs was showing (OW-desufa).
+ *   but only while `errorId` (string) still names the error the server
+ *   holds: a newer one survives the dismissal of the one Emacs was showing
+ *   (OW-desufa), even one with the same text (OW-jokoto).
  * - `sessions/detach` -- `{ session, handle? }` -> `null`. Stops this
  *   session's notifications and does nothing else: no HTTP call, and the
  *   session goes on running on the server. Sent when Emacs stops showing a
@@ -199,17 +210,20 @@
  * `sessions/changed`:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
- *   model, effort, unrestoredModel, error, requests, notices }`.
+ *   model, effort, unrestoredModel, error, errorId, requests, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
- *   after `sessions/attach`, and how a missed event is healed. The last three
- *   are what the server holds for the session, and what `session/error`,
- *   `session/request` and `session/notice` below have said, whether or not
- *   Emacs was attached to hear them (OW-bipume): `error` (string or `null`)
- *   the last turn error, `null` again once the server clears it, which
- *   `session/errorCleared` says; `requests` (array, always, possibly empty) every
- *   request still pending, oldest first, each the `request` a
- *   `session/request` carried; and `notices` (array, always, possibly empty)
- *   every notice, oldest first, each the `notice` a `session/notice` carried.
+ *   after `sessions/attach`, and how a missed event is healed. `error`,
+ *   `requests` and `notices` are what the server holds for the session, and
+ *   what `session/error`, `session/request` and `session/notice` below have
+ *   said, whether or not Emacs was attached to hear them (OW-bipume): `error`
+ *   (string or `null`) the last turn error, `null` again once the server
+ *   clears it, which
+ *   `session/errorCleared` says, with `errorId` (string, or `null` exactly
+ *   when `error` is) naming it as `session/error` does; `requests` (array,
+ *   always, possibly empty) every request still pending, oldest first, each
+ *   the `request` a `session/request` carried; and `notices` (array, always,
+ *   possibly empty) every notice, oldest first, each the `notice` a
+ *   `session/notice` carried.
  *   The buffer draws all three after `nodes`, since a snapshot replaces
  *   everything the buffer holds and would otherwise wipe them.
  *   `askedFor` (a ref, only on the one snapshot `sessions/attach` above
@@ -226,15 +240,21 @@
  *   `index`.
  * - `session/status` -- `{ session, handle, isStreaming, compaction, model,
  *   effort, unrestoredModel }`.
- * - `session/error` -- `{ session, handle, message }`. A turn error. Every later
- *   `session/snapshot` carries it again, in `error`, until it is cleared,
- *   which `session/errorCleared` says.
+ * - `session/error` -- `{ session, handle, message, errorId }`. A turn error.
+ *   `errorId` (string, opaque) names this raise: two with the same
+ *   `message` are two errors, and `sessions/dismissError` and
+ *   `sessions/prompt` name the one the buffer showed by it (OW-jokoto). No
+ *   server mints one twice, a restarted one included, so one a buffer kept
+ *   across a restart names nothing the new process raised. Every later
+ *   `session/snapshot` carries it again, in `error` and `errorId`, until it
+ *   is cleared, which `session/errorCleared` says.
  * - `session/errorCleared` -- `{ session, handle }`. The server no longer
  *   holds the session's turn error: a prompt was admitted over it, it being
- *   still the one that stood when the prompt was sent, or a client dismissed
- *   it by name (OW-jopifu). Drop its line. It follows every snapshot sent
- *   before the clear on the one ordered stream, so a line such a snapshot
- *   drew again goes with it; one Emacs never drew is nothing to drop.
+ *   still the one its sender held, or a client dismissed it by its
+ *   `errorId` (OW-jopifu, OW-jokoto). Drop its line. It follows every
+ *   snapshot sent before the clear on the one ordered stream, so a line such
+ *   a snapshot drew again goes with it; one Emacs never drew is nothing to
+ *   drop.
  * - `session/request` -- `{ session, handle, request }`. The agent is blocked on a
  *   request nothing in Emacs answers yet: `request` is the HTTP API's
  *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
@@ -325,6 +345,7 @@ export type HelperNotification =
 			params: SessionStatusParams & {
 				nodes: TranscriptNode[];
 				error: string | null;
+				errorId: string | null;
 				requests: AgentRequest[];
 				notices: AgentNotice[];
 				askedFor?: SessionRef;
@@ -332,7 +353,7 @@ export type HelperNotification =
 	  }
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
 	| { method: "session/status"; params: SessionStatusParams }
-	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string } }
+	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string; errorId: string } }
 	| { method: "session/errorCleared"; params: { session: SessionRef; handle?: string } }
 	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }

@@ -19,6 +19,11 @@ export interface SessionView {
 	unrestoredModel?: string | null;
 	seq: number | null;
 	error: string | null;
+	/**
+	 * The wire's `errorId` for `error`, null exactly when `error` is: what a
+	 * dismissal and a prompt name the error by (OW-jokoto).
+	 */
+	errorId: string | null;
 	requests: AgentRequest[];
 	/**
 	 * The backend's non-fatal notices, oldest first (OW-tujiya). Kept apart
@@ -146,6 +151,7 @@ function emptySession(ref: SessionRef): SessionView {
 		effort: null,
 		seq: null,
 		error: null,
+		errorId: null,
 		requests: [],
 		notices: [],
 	};
@@ -217,7 +223,7 @@ function withoutOtherViewsOf(state: ClientState, ref: SessionRef, handle: string
 export function clearSessionError(state: ClientState, handle: string): ClientState {
 	const view = state.sessions[handle];
 	if (!view || view.error === null) return state;
-	return updateSession(state, handle, { ...view, error: null });
+	return updateSession(state, handle, { ...view, error: null, errorId: null });
 }
 
 /**
@@ -286,6 +292,7 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			unrestoredModel: event.unrestoredModel,
 			seq: event.seq,
 			error: event.error,
+			errorId: event.errorId,
 			requests: [...event.requests],
 			notices: [...event.notices],
 		};
@@ -355,9 +362,11 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			break;
 		case "error":
 			view.error = event.message;
+			view.errorId = event.errorId;
 			break;
 		case "error-cleared":
 			view.error = null;
+			view.errorId = null;
 			break;
 		case "request":
 			view.requests = [...view.requests, event.request];

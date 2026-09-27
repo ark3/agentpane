@@ -104,13 +104,14 @@ function emit(event: ServerEvent): void {
 const BANNERS = {
 	unrestoredModel: "harness/retired",
 	error: "The turn ended in an error.",
+	errorId: "e1",
 	requests: [{ requestId: "harness-request", session: REF, kind: "harness/unknownRequest", payload: {} }],
 	notices: [{ kind: "warning", message: "A backend notice.", details: "Its details.", path: "/tmp/agentpane-harness/config.toml" }],
 };
 
 function snapshot(isStreaming: boolean, banners = false): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
+	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
 }
 
 function upsert(index: number, message: AgentMessage): void {

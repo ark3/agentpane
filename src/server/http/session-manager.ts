@@ -144,12 +144,14 @@ interface ManagedSession {
 	 */
 	error: string | null;
 	/**
-	 * Which raise `error` holds: taken from `#errorsRaised` as each is set, so
-	 * two errors with the same text are still two errors (OW-lameke). Left
-	 * as it was when `error` is cleared, so it names nothing unless `error` is
-	 * set.
+	 * Which raise `error` holds: minted by `#errorsRaised` as each is set, so
+	 * two errors with the same text are still two errors (OW-lameke). Clients
+	 * hold it and send it back, and outlive a restart, so it carries
+	 * `#handlePrefix` as a handle does: a restarted server's first error must
+	 * not answer to the id of the old process's first (OW-jokoto). Left as it
+	 * was when `error` is cleared, so it names nothing unless `error` is set.
 	 */
-	errorId: number;
+	errorId: string;
 	requests: AgentRequest[];
 	notices: AgentNotice[];
 	createdAt: string;
@@ -279,9 +281,9 @@ export class SessionManager {
 	readonly #now: () => string;
 	/** The last handle minted; see `#container`. */
 	#minted = 0;
-	/** The last error id taken; see `ManagedSession.errorId`. */
+	/** How many error ids have been minted; see `ManagedSession.errorId`. */
 	#errorsRaised = 0;
-	/** What makes this manager's handles its own; see `#container`. */
+	/** What makes this manager's handles and error ids its own; see `#container`. */
 	readonly #handlePrefix = crypto.randomUUID();
 	/**
 	 * Every startup in flight, under the key its attach asked for, from that
@@ -327,6 +329,7 @@ export class SessionManager {
 				ref: session.ref,
 				...session.adapter.getState(),
 				error: session.error,
+				errorId: session.error === null ? null : session.errorId,
 				requests: session.requests,
 				notices: session.notices,
 			};
@@ -368,7 +371,7 @@ export class SessionManager {
 			lastEffort: null,
 			lastUnrestoredModel: null,
 			error: null,
-			errorId: 0,
+			errorId: "",
 			requests: [],
 			notices: [],
 			queue: Promise.resolve(),
@@ -569,10 +572,13 @@ export class SessionManager {
 			// newer one landed meanwhile (OW-31). This is the one place that rule
 			// runs: no client clears the error at its prompt's reply, each drops it
 			// at the `error-cleared` below (OW-lohubo).
-			// `priorError` is the id of what stood when the prompt was sent, so a
-			// caller that attaches first reads it before that attach: an error the
-			// start raised is newer than the prompt, and nobody had seen it to
-			// clear. It is compared by id, not text, because a newer error can
+			// `priorError` is the id of the error the sender held when the user
+			// sent, null for none (`PromptRequest.priorErrorId`, OW-jokoto): an
+			// error raised after that, by the start of an attach the send made or
+			// while the request was on its way, is newer than the prompt, and
+			// nobody had seen it to clear. A caller that names none gets what the
+			// server holds now, which a caller that attaches first must read before
+			// that attach. It is compared by id, not text, because a newer error can
 			// repeat the held one word for word, and one can land before
 			// `adapter.submit` resolves (OW-lameke): Pi's and Codex's adapters both
 			// handle backend events while awaiting a reply -- the `prompt`
@@ -935,8 +941,8 @@ export class SessionManager {
 				}),
 				adapter.onError((message) => {
 					owner.error = message;
-					owner.errorId = ++this.#errorsRaised;
-					this.broadcaster.error(owner, message);
+					owner.errorId = `${this.#handlePrefix}:${++this.#errorsRaised}`;
+					this.broadcaster.error(owner, message, owner.errorId);
 				}),
 			);
 			const offNotice = adapter.onNotice?.((notice) => {
@@ -1103,7 +1109,7 @@ export class SessionManager {
 	 * Which turn error the session holds, as its `errorId`, or null when it
 	 * holds none -- including for a session not in the table.
 	 */
-	errorIdOf(ref: SessionRef): number | null {
+	errorIdOf(ref: SessionRef): string | null {
 		const session = this.#lookup(ref);
 		return session?.error == null ? null : session.errorId;
 	}
@@ -1123,16 +1129,17 @@ export class SessionManager {
 	}
 
 	/**
-	 * A client dismissed the session's error, `message` being the one it showed.
-	 * A different one is newer -- another client's turn failed while the
-	 * dismissal was on its way -- and stays (OW-bipume), and nothing changed, so
-	 * nothing is said. A clear is announced, so the other clients showing the
-	 * error drop it now, not at a snapshot that may be any number of turns away
-	 * (OW-jopifu).
+	 * A client dismissed the session's error, `errorId` naming the one it
+	 * showed. A different one is newer -- another client's turn failed while
+	 * the dismissal was on its way -- and stays (OW-bipume), and nothing
+	 * changed, so nothing is said. Compared by id, not text, because the
+	 * newer one can repeat the shown one word for word (OW-jokoto). A clear
+	 * is announced, so the other clients showing the error drop it now, not at
+	 * a snapshot that may be any number of turns away (OW-jopifu).
 	 */
-	clearError(ref: SessionRef, message: string): void {
+	clearError(ref: SessionRef, errorId: string): void {
 		const session = this.#lookup(ref);
-		if (session?.error !== message) return;
+		if (session?.error == null || session.errorId !== errorId) return;
 		session.error = null;
 		this.broadcaster.errorCleared(session);
 	}

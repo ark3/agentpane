@@ -2451,7 +2451,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		await sessions.attach(REF);
 		pi.forRef(REF)!.emitError("turn failed");
 
-		sessions.clearError(REF, "turn failed");
+		sessions.clearError(REF, sessions.errorIdOf(REF)!);
 
 		expect(snapshots(connect())[0]?.error).toBeNull();
 	});
@@ -2460,11 +2460,49 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
 		adapter.emitError("first turn failed");
+		const first = sessions.errorIdOf(REF)!;
 		adapter.emitError("second turn failed");
 
-		sessions.clearError(REF, "first turn failed");
+		sessions.clearError(REF, first);
 
 		expect(snapshots(connect())[0]?.error).toBe("second turn failed");
+	});
+
+	it("keeps a newer error than the one a client dismissed even when its text matches (OW-jokoto)", async () => {
+		await sessions.attach(REF);
+		const events = connect();
+		const adapter = pi.forRef(REF)!;
+		adapter.emitError("The turn ended in an error.");
+		// The client showed this one, as its event named it, and its dismissal is
+		// on its way when the next turn fails word for word the same.
+		const shown = events.find((event): event is Extract<ServerEvent, { type: "error" }> => event.type === "error")!;
+		adapter.emitError("The turn ended in an error.");
+
+		sessions.clearError(REF, shown.errorId);
+
+		const [held] = snapshots(connect());
+		expect(held?.error).toBe("The turn ended in an error.");
+		expect(held?.errorId).not.toBe(shown.errorId);
+		expect(events.filter((event) => event.type === "error-cleared")).toEqual([]);
+	});
+
+	it("clears no error a restarted server raised for the id of one the first server raised (OW-jokoto)", async () => {
+		// A buffer or a tab outlives the restart holding the first process's id,
+		// and the second process's first error must not answer to it.
+		await sessions.attach(REF);
+		pi.forRef(REF)!.emitError("extension failed to load");
+		const held = sessions.errorIdOf(REF)!;
+		const restartedPi = new FakeAdapterFactory();
+		const restarted = new SessionManager({ index, adapters: { pi: restartedPi } }, new Broadcaster());
+		await restarted.attach(REF);
+		restartedPi.forRef(REF)!.emitError("extension failed to load");
+		const raised = restarted.errorIdOf(REF);
+
+		await restarted.submit(REF, "again", undefined, held);
+		expect(restarted.errorIdOf(REF)).toBe(raised);
+		restarted.clearError(REF, held);
+		expect(restarted.errorIdOf(REF)).toBe(raised);
+		expect(raised).not.toBeNull();
 	});
 
 	it("announces a dismissal it honoured to every client, with no snapshot (OW-jopifu)", async () => {
@@ -2472,7 +2510,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		pi.forRef(REF)!.emitError("turn failed");
 		const events = connect();
 
-		sessions.clearError(REF, "turn failed");
+		sessions.clearError(REF, sessions.errorIdOf(REF)!);
 
 		expect(events.slice(1)).toEqual([expect.objectContaining({ type: "error-cleared", session: REF })]);
 	});
@@ -2481,10 +2519,11 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
 		adapter.emitError("first turn failed");
+		const first = sessions.errorIdOf(REF)!;
 		adapter.emitError("second turn failed");
 		const events = connect();
 
-		sessions.clearError(REF, "first turn failed");
+		sessions.clearError(REF, first);
 
 		expect(events.slice(1)).toEqual([]);
 	});
