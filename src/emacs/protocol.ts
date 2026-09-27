@@ -15,7 +15,9 @@
  * `movedFrom` for `session/detached`. OW-jokoto raised it a fifth, for the
  * `errorId` that names a turn error on `session/error` and
  * `session/snapshot`, and that `sessions/dismissError` and `sessions/prompt`
- * send back.
+ * send back. OW-nufafi raised it a sixth, opening the event stream at the
+ * first `sessions/list` as well as at the first `sessions/attach`, so
+ * `sessions/changed` flows to a picker before anything is attached.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -140,7 +142,9 @@
  * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the HTTP
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
  *   `status`, `isStreaming`, `onDisk`, and `handle` for a session the server
- *   holds, virtual or attached).
+ *   holds, virtual or attached). Opens the event stream if it is not open
+ *   yet, before the listing is asked, and from here on `sessions/changed`
+ *   flows, whether or not anything is attached.
  * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
  *   stored transcript; spawns nothing and opens no stream.
  * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
@@ -161,8 +165,9 @@
  *   attach was in flight. Where another attachment already holds the handle,
  *   no snapshot carries it: that one's buffer hears the session, and this
  *   reply names the handle it holds.
- *   Opens the event stream if it is not open yet, and from here on the
- *   notifications below flow for this session.
+ *   Opens the event stream if it is not open yet, as `sessions/list` does,
+ *   and from here on the per-session notifications below flow for this
+ *   session.
  * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
  *   `null`. `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read

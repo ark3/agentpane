@@ -125,12 +125,11 @@ function start(routes: Record<string, Route>, reconnectDelayMs = 0, renderMarkdo
 
 describe("requests", () => {
 	it("lists sessions through the listing route and answers the summaries", async () => {
-		const { io, source, calls } = start({ [`GET ${ROUTES.sessions}?cwd=%2Fwork`]: () => json({ sessions: [summary(pi)] }) });
+		const { io, calls } = start({ [`GET ${ROUTES.sessions}?cwd=%2Fwork`]: () => json({ sessions: [summary(pi)] }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list", params: { cwd: "/work" } });
 		await io.until(1);
 		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: [summary(pi)] });
 		expect(calls).toHaveLength(1);
-		expect(source.opens).toHaveLength(0);
 	});
 
 	it("previews a stored session as nodes, each text part carrying html, and opens no stream", async () => {
@@ -620,6 +619,22 @@ describe("notifications", () => {
 		await io.until(3);
 		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "sessions/changed" });
 		expect(source.closed).toEqual([0]);
+	});
+
+	it("opens the stream before the listing call, so a picker hears sessions/changed with nothing attached (OW-nufafi)", async () => {
+		let streamsOpenAtList = -1;
+		const { io, source } = start({
+			[`GET ${ROUTES.sessions}?cwd=%2Fwork`]: () => {
+				streamsOpenAtList = source.opens.length;
+				return json({ sessions: [summary(pi)] });
+			},
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list", params: { cwd: "/work" } });
+		await io.until(1);
+		expect(streamsOpenAtList).toBe(1);
+		source.emit({ type: "sessions-changed" });
+		await io.until(2);
+		expect(io.notifications()).toEqual([{ jsonrpc: "2.0", method: "sessions/changed" }]);
 	});
 });
 

@@ -19,9 +19,13 @@
  * `api.attach`, after which the server broadcasts a fresh snapshot over the
  * stream, and that snapshot is what reaches Emacs.
  *
- * One stream, filtered. It opens lazily at the first `sessions/attach`,
- * before that attach's REST call, since the snapshot the attach broadcasts
- * and the REST response are unordered (D2), and it stays open. The server
+ * One stream, filtered. It opens lazily at the first `sessions/list` or
+ * `sessions/attach`, before that request's REST call, and it stays open. At
+ * the listing so the picker hears `sessions/changed` before anything is
+ * attached, and a listing change after the stream is up is not lost between
+ * the list and the open (OW-nufafi); at the attach, since a buffer may
+ * attach with no listing before it, and the snapshot the attach broadcasts
+ * and the REST response are unordered (D2). The server
  * sends an opening snapshot for every live session and broadcasts every
  * event to every client, so views Emacs never attached form in the reducer
  * too; notifications go out only for sessions Emacs attached through this
@@ -385,7 +389,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	const handlers: Handlers = {
-		"sessions/list": (params) => api.listSessions(params?.cwd),
+		"sessions/list": (params) => {
+			openStream();
+			return api.listSessions(params?.cwd);
+		},
 		"sessions/preview": async ({ session }) => {
 			const preview = await api.preview(session);
 			// A preview is a stored session, never live, so nothing in it is running.

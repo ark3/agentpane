@@ -25,19 +25,19 @@
 ;; `g' refetches, and a `sessions/changed' notification refetches too.  The
 ;; list is filtered to the project of the buffer the command was called
 ;; from, through the server's `?cwd=' query; a prefix argument lifts the
-;; filter.  The notification only flows once a buffer in this Emacs has
-;; attached a session: the helper opens its event stream from
-;; `sessions/attach' (src/emacs/helper.ts).  In a transcript buffer `n'
-;; and `p' step between nodes, `TAB' toggles the fold at point, `g'
-;; refetches, `f' forks at the user message at point into a buffer of its
-;; own -- on a previewed transcript it attaches first, and forks at the
-;; next press -- `r' toggles reading view, and `q' buries.  Reading view is
-;; the browser's (`condense' in src/client/render/transcript.ts): tool
-;; calls, tool results and thinking are elided, and while a turn streams
-;; the line above the prompt names the tool or thinking it is running.  It
-;; is per buffer and not kept, and the mode line says when it is on.
-;; Killing a transcript buffer stops its session's notifications and
-;; leaves the session running on the server.
+;; filter.  The notification flows from the picker's first listing on,
+;; whether or not any buffer has attached a session: the helper opens its
+;; event stream from `sessions/list' (src/emacs/helper.ts).  In a
+;; transcript buffer `n' and `p' step between nodes, `TAB' toggles the fold
+;; at point, `g' refetches, `f' forks at the user message at point into a
+;; buffer of its own -- on a previewed transcript it attaches first, and
+;; forks at the next press -- `r' toggles reading view, and `q' buries.
+;; Reading view is the browser's (`condense' in
+;; src/client/render/transcript.ts): tool calls, tool results and thinking
+;; are elided, and while a turn streams the line above the prompt names the
+;; tool or thinking it is running.  It is per buffer and not kept, and the
+;; mode line says when it is on.  Killing a transcript buffer stops its
+;; session's notifications and leaves the session running on the server.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
