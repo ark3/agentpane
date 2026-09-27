@@ -3025,12 +3025,23 @@ no cwd, as the browser's `.session-cwd' does (OW-bisadi)."
                                  column)
                            ""))))))))
 
+(defun agentpane-test--preview (picker handle)
+  "The Preview cell of PICKER's row for the session holding HANDLE."
+  (with-current-buffer picker
+    (let ((column (seq-position (mapcar #'car tabulated-list-format) "Preview"))
+          (entry (seq-find (lambda (entry) (equal (plist-get (car entry) :handle) handle))
+                           tabulated-list-entries)))
+      (should column)
+      (should entry)
+      (aref (cadr entry) column))))
+
 (ert-deftest agentpane-test-picker-previews-a-just-prompted-session-by-its-transcript ()
   "A listed session whose stored preview is still null shows, as its Preview,
 the first user node with text in the transcript buffer holding it, its text
-parts joined and trimmed, as the browser's `firstUserText' labels its row;
-a stored preview wins over it, and a session with no buffer shows nothing
-(OW-sowume)."
+parts joined, each run of whitespace one space, and trimmed, as the
+server's `trimPreview' makes the stored one and the browser's
+`firstUserText' labels its row, on one line; a stored preview wins over
+it, and a session with no buffer shows nothing (OW-sowume)."
   (agentpane-test--listing
     (let ((prompted (plist-put (agentpane-test--summary "a" nil) :preview nil))
           (stored (plist-put (agentpane-test--summary "b" nil) :preview "Stored one"))
@@ -3038,25 +3049,63 @@ a stored preview wins over it, and a session with no buffer shows nothing
       (with-current-buffer (agentpane-test--holding prompted)
         (agentpane--draw [(:index 0 :role "user" :parts [(:type "text" :text "  ")])
                           (:index 1 :role "user"
-                           :parts [(:type "text" :text " Fix the")
-                                   (:type "text" :text "bug ")])]))
+                           :parts [(:type "text" :text " Fix the\n")
+                                   (:type "text" :text "  bug\n\tnow ")])]))
       (with-current-buffer (agentpane-test--holding stored)
         (agentpane--draw agentpane-test--nodes))
       (setq listing (list prompted stored unheld))
       (let ((picker (save-window-excursion
                       (agentpane-sessions t)
                       (current-buffer))))
-        (with-current-buffer picker
-          (let ((column (seq-position (mapcar #'car tabulated-list-format) "Preview")))
-            (should column)
-            (should (equal (mapcar (lambda (handle)
-                                     (aref (cadr (seq-find (lambda (entry)
-                                                             (equal (plist-get (car entry) :handle)
-                                                                    handle))
-                                                           tabulated-list-entries))
-                                           column))
-                                   '("h-a" "h-b" "h-c"))
-                           '("Fix the bug" "Stored one" "")))))))))
+        (should (equal (mapcar (lambda (handle) (agentpane-test--preview picker handle))
+                               '("h-a" "h-b" "h-c"))
+                       '("Fix the bug now" "Stored one" "")))))))
+
+(ert-deftest agentpane-test-picker-previews-a-user-node-drawn-after-its-listing ()
+  "A picker already listing a session whose stored preview is null, while
+its transcript buffer holds no node, shows the text of the user node that
+buffer then draws from a `session/node', with no new listing; later nodes
+redraw no picker (OW-sowume)."
+  (agentpane-test--listing
+    (let* ((summary (plist-put (agentpane-test--summary "a" nil) :preview nil))
+           (ref (plist-get summary :ref))
+           (buffer (agentpane-test--holding summary))
+           (prints 0))
+      (with-current-buffer buffer
+        (agentpane--draw []))
+      (setq listing (list summary))
+      (let ((picker (save-window-excursion
+                      (agentpane-sessions t)
+                      (current-buffer))))
+        (should (equal (agentpane-test--preview picker "h-a") ""))
+        ;; A listing from here on would list nothing, and the row would go.
+        (setq listing nil)
+        (let ((print (symbol-function 'tabulated-list-print)))
+          (cl-letf (((symbol-function 'tabulated-list-print)
+                     (lambda (&rest args)
+                       (setq prints (1+ prints))
+                       (apply print args))))
+            (agentpane--on-notification
+             nil 'session/node
+             (list :handle "h-a" :session ref
+                   :node '(:index 0 :role "user"
+                           :parts [(:type "text" :text "Fix the bug")])))
+            (agentpane-test--redraw buffer)
+            (should (equal (agentpane-test--preview picker "h-a") "Fix the bug"))
+            (should (string-search "Fix the bug"
+                                   (with-current-buffer picker (buffer-string))))
+            (should (= prints 1))
+            (agentpane--on-notification
+             nil 'session/node
+             (list :handle "h-a" :session ref :node (agentpane-test--assistant 1 "<p>Sure.</p>")))
+            (agentpane--on-notification
+             nil 'session/node
+             (list :handle "h-a" :session ref
+                   :node '(:index 2 :role "user"
+                           :parts [(:type "text" :text "And the other")])))
+            (agentpane-test--redraw buffer)
+            (should (= prints 1))
+            (should (equal (agentpane-test--preview picker "h-a") "Fix the bug"))))))))
 
 (ert-deftest agentpane-test-picker-mark-cleared-while-its-session-is-filtered-out ()
   "A marked session whose transcript is viewed while the picker lists

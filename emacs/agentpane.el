@@ -1441,7 +1441,8 @@ them.  Point goes to the first node."
      (goto-char (point-min))
      (when (ewoc-nth agentpane--ewoc 0)
        (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))
-  (agentpane--show-reading-tail))
+  (agentpane--show-reading-tail)
+  (agentpane--preview-pickers))
 
 (defun agentpane--drawn (index)
   "The ewoc node drawing the node at INDEX, or nil."
@@ -1477,7 +1478,9 @@ turn and no longer is."
          (ewoc-enter-last agentpane--ewoc node))
        (when previous
          (ewoc-invalidate agentpane--ewoc previous))))
-    (agentpane--show-reading-tail)))
+    (agentpane--show-reading-tail)
+    (when (and index (not drawn) (equal (plist-get node :role) "user"))
+      (agentpane--preview-pickers))))
 
 (defun agentpane--record (node)
   "Record NODE, a `session/node''s, as the latest at its index, to be drawn
@@ -2924,9 +2927,11 @@ path as its help echo, and empty with no cwd, as the browser's
 Its Preview column is the stored preview, and while that is null, as it
 is for a session just prompted until the turn's end re-lists it, the text
 of the first user node with any in the transcript buffer holding the
-session (`agentpane--first-user-text'), as the browser's `sessionLabel'
-falls back to its `firstUserText'.  With neither it is empty: the browser's
-last resort, the backend and id, would repeat the Backend column."
+session, on one line (`agentpane--first-user-text'), as the browser's
+`sessionLabel' falls back to its `firstUserText'; that buffer drawing the
+node redraws the row (`agentpane--preview-pickers').  With neither it is
+empty: the browser's last resort, the backend and id, would repeat the
+Backend column."
   (let ((ref (agentpane--ref summary))
         (handle (plist-get summary :handle))
         (cwd (plist-get summary :cwd)))
@@ -2945,10 +2950,15 @@ last resort, the backend and id, would repeat the Backend column."
                       "")))))
 
 (defun agentpane--first-user-text (summary)
-  "The text of the first user node whose text parts, joined by a space and
-trimmed, are not empty, in the transcript buffer holding SUMMARY's session
-by its handle or else by its ref, as `agentpane--transcript-buffer' finds
-it; or nil.  The browser's `firstUserText'."
+  "The text of the first user node whose text parts, joined by a space, are
+not blank, in the transcript buffer holding SUMMARY's session by its handle
+or else by its ref, as `agentpane--transcript-buffer' finds it; or nil.
+The browser's `firstUserText', with each run of whitespace one space, as
+the server's `trimPreview' (src/server/sessions/text.ts) makes the stored
+preview and the browser's `.session-preview' draws either on one line:
+a newline would split the picker's row.  Whitespace is read by the
+standard syntax table, since a mode's own can give a newline another
+class, as `emacs-lisp-mode' does."
   (let* ((handle (plist-get summary :handle))
          (buffer (or (and handle (agentpane--buffer-holding handle))
                      (agentpane--buffer-for (agentpane--ref summary))))
@@ -2958,12 +2968,15 @@ it; or nil.  The browser's `firstUserText'."
     (while (and at (not found))
       (let ((node (ewoc-data at)))
         (when (equal (plist-get node :role) "user")
-          (let ((text (string-trim
-                       (mapconcat (lambda (part) (or (plist-get part :text) ""))
-                                  (seq-filter (lambda (part)
-                                                (equal (plist-get part :type) "text"))
-                                              (plist-get node :parts))
-                                  " "))))
+          (let ((text (with-syntax-table (standard-syntax-table)
+                        (string-trim
+                         (replace-regexp-in-string
+                          "[[:space:]]+" " "
+                          (mapconcat (lambda (part) (or (plist-get part :text) ""))
+                                     (seq-filter (lambda (part)
+                                                   (equal (plist-get part :type) "text"))
+                                                 (plist-get node :parts))
+                                     " "))))))
             (unless (string-empty-p text)
               (setq found text)))))
       (setq at (ewoc-next ewoc at)))
@@ -3134,10 +3147,47 @@ wrong: the turn did end unseen."
       (dolist (buffer (buffer-list))
         (when (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)
           (with-current-buffer buffer
-            (setq tabulated-list-entries
-                  (mapcar (lambda (entry) (agentpane--session-entry (car entry)))
-                          tabulated-list-entries))
-            (tabulated-list-print t)))))))
+            (agentpane--redraw-rows)))))))
+
+(defun agentpane--redraw-rows ()
+  "Rebuild this picker's rows from the summaries they hold, and print them:
+what a row draws besides its summary has moved, and no listing is needed."
+  (setq tabulated-list-entries
+        (mapcar (lambda (entry) (agentpane--session-entry (car entry)))
+                tabulated-list-entries))
+  (tabulated-list-print t))
+
+(defun agentpane--preview-pickers ()
+  "Redraw the rows of each picker listing this transcript buffer's session,
+by its handle or its ref, with no stored preview and an empty Preview, so
+that the row takes the text of the user node just drawn at once rather
+than at the next listing (`agentpane--first-user-text').
+That listing can be a whole turn away: the server asks for one at a
+turn's start, which can come before the user node reaches the buffer, and
+not again until the turn ends.  On Codex the `userMessage' item followed
+`turn/started' by 1.1 to 2.5 seconds in the captures under
+resources/fixtures/codex/ (codex-cli 0.147.0 and 0.153.4), where a
+listing answers in about a quarter of a second.  The browser's label
+reads its transcript reactively, and needs no such call.
+The listing still reads the transcript, for a picker opened after the
+node was drawn.  An empty Preview is what makes this the first user node
+with text: once one is drawn, later nodes redraw no picker."
+  (let ((handle agentpane--handle)
+        (ref (and agentpane--session (agentpane--ref agentpane--session))))
+    (when (or handle ref)
+      (dolist (buffer (buffer-list))
+        (when (and (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)
+                   (seq-some (lambda (entry)
+                               (let ((summary (car entry))
+                                     (row (cadr entry)))
+                                 (and (null (plist-get summary :preview))
+                                      (string-empty-p (aref row (1- (length row))))
+                                      (or (and handle (equal (plist-get summary :handle) handle))
+                                          (and ref (agentpane--same-ref-p
+                                                    (agentpane--ref summary) ref))))))
+                             (buffer-local-value 'tabulated-list-entries buffer)))
+          (with-current-buffer buffer
+            (agentpane--redraw-rows)))))))
 
 (defun agentpane--binding-changed (_symbol _newval _operation where)
   "Have the next redisplay run `agentpane--clear-seen-turns' for each frame
