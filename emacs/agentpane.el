@@ -86,7 +86,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 147 tests, 144 results as expected, 0 unexpected, 3 skipped
+;;     Ran 149 tests, 146 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2360,14 +2360,24 @@ admission (OW-jokoto).  Read here, before the attach a previewed buffer
 sends first: an error that attach's start raises, drawn from its
 snapshot, is newer than the prompt, and admitting it must not clear it.
 
-The prompt arms the turn-done watch as it goes out, after any attach, so
-the status of a turn already running when a previewed buffer attaches is
-not read as this prompt's; see `agentpane--watch-turn'.  A watch already
-armed is left as it is, since a prompt the server takes mid-turn, a Codex
-steer, joins the turn that watch waits on, whose end no fresh `streaming'
-precedes.  A prompt that fails disarms only the watch it armed, as the
-browser's `watchAbandon' does: the next turn on the session is not one
-this Emacs asked for."
+The prompt arms the turn-done watch as it goes out, after any attach, and
+folds the streaming level the buffer holds into it at once, as the
+browser's `watchSessions' reads the level at the publish that follows its
+submit; see `agentpane--watch-turn'.  A session streaming then is running
+a turn the server takes this prompt into, as a Codex steer, and no fresh
+`streaming' follows, so that turn becomes this prompt's and its end
+raises the indicator.  So too a turn a previewed buffer's attach finds
+running, whichever of the attach's snapshot and its reply is handled
+first (D2): either the level is folded here, or the snapshot's status
+folds it after.  A watch already armed is left as it is, so that a
+prompt refused mid-turn cannot disarm the turn an earlier one armed.
+A prompt that fails disarms only the watch it armed.  Refused, the
+prompt started nothing, and the next turn on the session is not one this
+Emacs asked for, as the browser's `watchAbandon' has it.  The same
+callback runs when the reply outlasts `agentpane--spawn-timeout' and when
+sending or handling the reply exits non-locally (`agentpane--request'),
+where the prompt may have been admitted and its turn run; that turn's
+end then raises nothing."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
@@ -2381,6 +2391,7 @@ this Emacs asked for."
          (let ((armed (not agentpane--turn-watch)))
            (when armed
              (setq agentpane--turn-watch 'sent))
+           (agentpane--watch-turn agentpane--streaming)
            (agentpane--request 'sessions/prompt
                                (list :session (agentpane--ref agentpane--session) :text text
                                      :priorErrorId prior)
@@ -2809,13 +2820,16 @@ a turn this buffer submitted ends while no window shows the buffer.
 The favicon badge's counterpart (`watchSessions' in
 src/client/favicon.ts), with the same semantics.  Only a turn this Emacs
 submitted arms it (`agentpane--send-prompt'), never one it only watched:
-one running when the buffer attached, or prompted from elsewhere.  Done
-is a transition, not a level: a session still reads not streaming for a
-beat after the prompt goes out, so only a status that is not streaming
-after one that is ends the watch.  An aborted or errored turn ends it as
-a finished one does, and so does a `session/detached', which leaves the
-buffer reading not streaming.  Once ended, the watch is gone whether the
-turn ended in view or not.
+one running when the buffer attached, or prompted from elsewhere, unless
+a prompt from here joins it.  Done is a transition, not a level: a
+session still reads not streaming for a beat after the prompt goes out,
+so only a status that is not streaming after one that is ends the watch.
+An aborted or errored turn ends it as a finished one does, and so does a
+`session/detached' once the turn has been seen streaming, as it leaves
+the buffer reading not streaming.  A detach that arrives while the watch
+is still `sent' leaves it armed, a known limitation: a later turn from
+elsewhere may then raise the indicator.  Once ended, the watch is gone
+whether the turn ended in view or not.
 Elsewhere, the favicon's unfocused window, is here a buffer that no
 window shows (`agentpane--shown-p'): Emacs's own focus says nothing about
 where the user is looking within it, and a buffer shown is where the

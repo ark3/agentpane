@@ -3202,8 +3202,8 @@ raises the indicator, and showing the buffer clears it (OW-lohavi)."
     (should-not (agentpane-test--turn-done-p))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-not-submitted-here ()
-  "A turn this Emacs did not submit -- one started elsewhere, or running
-when the buffer attached -- raises nothing when it ends unseen (OW-lohavi)."
+  "A turn this Emacs did not submit, one prompted from elsewhere, raises
+nothing when it ends unseen (OW-lohavi)."
   (agentpane-test--submitting
     (funcall status t)
     (funcall status nil)
@@ -3247,16 +3247,61 @@ then ends unseen raises nothing (OW-lohavi)."
     (funcall status nil)
     (should-not (agentpane-test--turn-done-p))))
 
-(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-taken-mid-turn ()
-  "A prompt the server takes mid-turn, as a Codex steer, leaves the watch
-the turn's own prompt armed, so the turn's end, which no fresh streaming
-status precedes, still raises the indicator (OW-lohavi)."
+(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-refused-mid-turn ()
+  "A prompt the server refuses mid-turn leaves the watch the turn's own
+prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
   (agentpane-test--submitting
     (funcall submit)
     (funcall status t)
+    (setq hold '(sessions/prompt))
     (funcall submit)
+    (funcall (cdr (pop held)) nil)
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-a-prompt-joins ()
+  "A prompt sent while a turn from elsewhere streams, which the server takes
+into that turn with no fresh streaming status, makes that turn this Emacs's:
+its end raises the indicator, and the watch ends with it, so a later turn
+from elsewhere raises nothing (OW-lohavi)."
+  (agentpane-test--submitting
+    (funcall status t)
+    (funcall submit)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))
+    (agentpane-test--show buffer)
+    (agentpane-test--show (get-buffer-create "*scratch*"))
+    (should-not (agentpane-test--turn-done-p))
+    (funcall status t)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))))
+
+(defun agentpane-test--attach-to-a-running-turn (snapshot-first)
+  "Send from a previewed buffer whose attach finds a turn from elsewhere
+streaming, its snapshot handled before the attach's reply when
+SNAPSHOT-FIRST and after it otherwise (D2), then end that turn unseen, and
+return whether the indicator is raised."
+  (agentpane-test--submitting
+    (setq agentpane--attached nil
+          hold '(sessions/attach))
+    (let ((snapshot (lambda ()
+                      (agentpane--on-notification
+                       nil 'session/snapshot
+                       (list :session ref :nodes agentpane-test--nodes :isStreaming t)))))
+      (funcall submit)
+      (when snapshot-first (funcall snapshot))
+      (funcall (cdr (pop held)) t)
+      (unless snapshot-first (funcall snapshot))
+      (should (equal (mapcar #'car sent) '(sessions/prompt sessions/attach)))
+      (funcall status nil)
+      (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-found-by-the-attach ()
+  "A send from a previewed buffer whose attach finds a turn streaming joins
+it, and that turn's end raises the indicator, whichever of the attach's
+snapshot and its reply is handled first (OW-lohavi)."
+  (should (agentpane-test--attach-to-a-running-turn t))
+  (should (agentpane-test--attach-to-a-running-turn nil)))
 
 (ert-deftest agentpane-test-turn-done-cleared-when-its-buffer-is-killed ()
   "Killing a buffer whose turn ended unseen drops it from the indicator
