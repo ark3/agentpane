@@ -978,10 +978,12 @@
 	/**
 	 * The sidebar row's label. `summary.preview` is server-supplied, parsed from
 	 * the *first user message* of the stored JSONL -- which does not exist yet
-	 * for a session whose first prompt has only just been sent, and nothing
-	 * re-lists that session afterwards (only create/attach/rename/close emit
-	 * `sessions-changed`), so it stays null until the next reload and the row
-	 * shows the raw ref. Fall back to the same first-user-message text from the
+	 * for a session whose first prompt has only just been sent. The backend
+	 * writes its own file, so the re-list at the turn's start may read it before
+	 * the prompt is there, and the stored preview can stay null until the first
+	 * turn ends and the `sessions-changed` that end broadcasts (OW-furinu)
+	 * re-lists the session and brings it in; until then the row would show the
+	 * raw ref. Fall back to the same first-user-message text from the
 	 * live view we already hold: this client *sent* that text, so it is certain
 	 * whatever the file has, and it is the server's own preview semantics, so
 	 * the eventual server value agrees rather than flickering to another string.
