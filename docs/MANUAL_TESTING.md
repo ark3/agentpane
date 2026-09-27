@@ -3674,3 +3674,47 @@ The `prompt answered 202` line lands anywhere among the events before the turn's
 The first prompt read the same, with one more `sessions-changed` ahead of its upsert, the virtual session's first prompt (D9), and a second `status isStreaming=true` 0.26s after its first, the model the CLI's `init` named; the before run had both too.
 The `sessions-changed` at each turn boundary, which keeps the list's `updatedAt` order moving (OW-furinu), fired at both ends in both runs.
 The only snapshot either run of the change sent was the attach's.
+
+## What the picker's unfiltered listing costs (OW-wazipa)
+
+Measured on the home server 2026-09-27, Emacs 31.1 with its bundled `jsonrpc.el` 1.0.29, `bun 1.4.0`, the server and helper at 12ca32f, against the machine's real session stores with `claude 2.1.283`, `codex-cli 0.157.1` and `pi 0.87.1` installed.
+The server was started from the worktree with `PORT=4999 bun run src/server/index.ts`, since nothing was listening there, and stopped afterwards with `SIGTERM` to its pid; nothing was attached, prompted or created, so the listing only read the stores.
+
+**`GET /api/sessions` with no `cwd` answered 369 sessions in 115,948 bytes: 241 Claude Code, 119 Codex, 9 Pi, across 21 working directories.**
+`curl` timed it at 0.336s cold and 0.205s to 0.222s over the next five.
+Filtered with `?cwd=` to the main checkout, which held 300 of the 369, it answered 93,016 bytes in 0.194s to 0.229s: the server walks every session's file whatever the filter, so filtering saves the bytes and not the walk.
+
+**Through the helper, Emacs spent about 0.8ms parsing the reply.**
+A batch Emacs started the helper as `bun run src/emacs/main.ts http://127.0.0.1:4999` on a `jsonrpc-process-connection` and sent `sessions/list` with no params six times, with `:around` advice on `json-parse-buffer`, which `jsonrpc--json-read` calls with `:object-type 'plist :null-object nil :false-object :json-false`.
+Over two such runs the first round trip, which started the helper, took 1450ms and 1545ms, of which parsing took 21.7ms in one and 0.76ms in the other; the next five of each took 207ms to 277ms, 0.78ms to 0.94ms of it parsing the 115,969-character message.
+What `agentpane--refetch-sessions` does with the reply after, folding it into the finished-turn marks and filtering it to a picker's one row, took 0.24ms more, byte-compiled, with no session held.
+So an unfiltered listing costs Emacs about a millisecond per picker per `sessions/changed`, two of which each turn sends, and the picker keeps asking for every session.
+
+To re-run, start a server as above, then from the checkout root run `emacs --batch -l /tmp/listing-size/e2e.el` on the file below, and `curl -s -o /dev/null -w '%{size_download} %{time_total}\n' http://127.0.0.1:4999/api/sessions` for the server alone.
+
+```elisp
+;;; -*- lexical-binding: t; -*-
+(require 'jsonrpc)
+(defvar parse-time 0.0)
+(advice-add 'json-parse-buffer :around
+            (lambda (f &rest args)
+              (let ((start (float-time)))
+                (prog1 (apply f args)
+                  (setq parse-time (+ parse-time (- (float-time) start)))))))
+(let ((conn (make-instance 'jsonrpc-process-connection
+                           :name "listing"
+                           :process (lambda ()
+                                      (make-process :name "listing helper"
+                                                    :command '("bun" "run" "src/emacs/main.ts" "http://127.0.0.1:4999")
+                                                    :connection-type 'pipe :noquery t
+                                                    :stderr (get-buffer-create "*listing stderr*")))
+                           :notification-dispatcher #'ignore)))
+  (dotimes (i 6)
+    (setq parse-time 0.0)
+    (let* ((start (float-time))
+           (result (jsonrpc-request conn 'sessions/list :jsonrpc-omit :timeout 30)))
+      (message "round trip %d: %d sessions, %.0f ms, parsing %.2f ms"
+               i (length result) (* 1e3 (- (float-time) start)) (* 1e3 parse-time))))
+  (process-send-eof (jsonrpc--process conn))
+  (jsonrpc-shutdown conn))
+```
