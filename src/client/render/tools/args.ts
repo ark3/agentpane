@@ -61,6 +61,18 @@ export function editHunks(args: Record<string, unknown> | undefined): EditHunk[]
 	return flat ? [flat] : [];
 }
 
+/**
+ * The arguments a bespoke card does not draw itself, for it to show as-is.
+ * The Emacs client prints every argument of every call, so a card that reads
+ * only the ones it knows would hide what the other client shows (OW-hokika).
+ */
+export function otherArgs(
+	args: Record<string, unknown> | undefined,
+	...shown: string[]
+): Record<string, unknown> {
+	return Object.fromEntries(Object.entries(args ?? {}).filter(([key]) => !shown.includes(key)));
+}
+
 export function prettyArgs(args: Record<string, unknown> | undefined): string {
 	if (!args || Object.keys(args).length === 0) return "";
 	try {

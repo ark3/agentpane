@@ -2,11 +2,12 @@
 	/**
 	 * A shell command. The command itself is the summary -- it is what a reader
 	 * scans a transcript for -- and the body is the command echoed above its
-	 * output, the way a terminal would show it.
+	 * output, the way a terminal would show it. Any other argument -- Claude
+	 * Code's `description`, Codex's `cwd` -- follows the command as JSON.
 	 */
 	import type { ToolRenderProps } from "../types.ts";
 	import { toolState } from "../types.ts";
-	import { argString } from "./args.ts";
+	import { argString, otherArgs, prettyArgs } from "./args.ts";
 	import Output from "./Output.svelte";
 	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
@@ -15,12 +16,16 @@
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
 	const command = $derived(argString(call.arguments, "command", "cmd", "script"));
+	const extra = $derived(prettyArgs(otherArgs(call.arguments, "command", "cmd", "script")));
 	const state = $derived(toolState({ call, result, streaming }));
 </script>
 
 <ToolCard name={call.name} summary={toolSummary(call)} {state} timestamp={result?.timestamp}>
 	{#if command}
 		<Output text={command} language="bash" />
+	{/if}
+	{#if extra}
+		<Output text={extra} language="json" />
 	{/if}
 	{#if result}
 		<ResultBody {result} />

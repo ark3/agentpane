@@ -110,6 +110,21 @@ describe("tool cards", () => {
 		expect(container.querySelector("pre.output.error")?.textContent).toContain("boom");
 	});
 
+	it("show every argument a shell call carried, not just the command", () => {
+		// Claude Code's Bash sends a `description` beside the command
+		// (resources/fixtures/claude/tool-use.jsonl); the Emacs client draws the
+		// whole arguments object, so the browser must not drop it (OW-hokika).
+		const { container } = render(ToolCallBlock, {
+			props: {
+				call: call("Bash", { command: "date", description: "Show current date" }),
+				result: result("Sat Sep 26"),
+			},
+		});
+		openToolCards(container);
+		const body = card(container).querySelector(".body");
+		expect(body?.textContent).toContain("Show current date");
+	});
+
 	it("render an unknown tool through the default card, with its arguments", () => {
 		const { container } = render(ToolCallBlock, {
 			props: {
