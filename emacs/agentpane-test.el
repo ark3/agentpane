@@ -3025,6 +3025,39 @@ no cwd, as the browser's `.session-cwd' does (OW-bisadi)."
                                  column)
                            ""))))))))
 
+(ert-deftest agentpane-test-picker-previews-a-just-prompted-session-by-its-transcript ()
+  "A listed session whose stored preview is still null shows, as its Preview,
+the first user node with text in the transcript buffer holding it, its text
+parts joined and trimmed, as the browser's `firstUserText' labels its row;
+a stored preview wins over it, and a session with no buffer shows nothing
+(OW-sowume)."
+  (agentpane-test--listing
+    (let ((prompted (plist-put (agentpane-test--summary "a" nil) :preview nil))
+          (stored (plist-put (agentpane-test--summary "b" nil) :preview "Stored one"))
+          (unheld (plist-put (agentpane-test--summary "c" nil) :preview nil)))
+      (with-current-buffer (agentpane-test--holding prompted)
+        (agentpane--draw [(:index 0 :role "user" :parts [(:type "text" :text "  ")])
+                          (:index 1 :role "user"
+                           :parts [(:type "text" :text " Fix the")
+                                   (:type "text" :text "bug ")])]))
+      (with-current-buffer (agentpane-test--holding stored)
+        (agentpane--draw agentpane-test--nodes))
+      (setq listing (list prompted stored unheld))
+      (let ((picker (save-window-excursion
+                      (agentpane-sessions t)
+                      (current-buffer))))
+        (with-current-buffer picker
+          (let ((column (seq-position (mapcar #'car tabulated-list-format) "Preview")))
+            (should column)
+            (should (equal (mapcar (lambda (handle)
+                                     (aref (cadr (seq-find (lambda (entry)
+                                                             (equal (plist-get (car entry) :handle)
+                                                                    handle))
+                                                           tabulated-list-entries))
+                                           column))
+                                   '("h-a" "h-b" "h-c"))
+                           '("Fix the bug" "Stored one" "")))))))))
+
 (ert-deftest agentpane-test-picker-mark-cleared-while-its-session-is-filtered-out ()
   "A marked session whose transcript is viewed while the picker lists
 another project has no mark when its own project is listed again (OW-yufahi)."

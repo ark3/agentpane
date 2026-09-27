@@ -2920,7 +2920,13 @@ Its unnamed column is a dot while the session streams, and a dot in
 unseen, as the browser's row draws `.session-finished'.
 Its Workspace column is the last segment of the session's cwd, the full
 path as its help echo, and empty with no cwd, as the browser's
-`.session-cwd' draws it."
+`.session-cwd' draws it.
+Its Preview column is the stored preview, and while that is null, as it
+is for a session just prompted until the turn's end re-lists it, the text
+of the first user node with any in the transcript buffer holding the
+session (`agentpane--first-user-text'), as the browser's `sessionLabel'
+falls back to its `firstUserText'.  With neither it is empty: the browser's
+last resort, the backend and id, would repeat the Backend column."
   (let ((ref (agentpane--ref summary))
         (handle (plist-get summary :handle))
         (cwd (plist-get summary :cwd)))
@@ -2934,7 +2940,34 @@ path as its help echo, and empty with no cwd, as the browser's
                         (t ""))
                   (agentpane--format-time (plist-get summary :updatedAt))
                   (if cwd (propertize (file-name-nondirectory cwd) 'help-echo cwd) "")
-                  (or (plist-get summary :preview) "")))))
+                  (or (plist-get summary :preview)
+                      (agentpane--first-user-text summary)
+                      "")))))
+
+(defun agentpane--first-user-text (summary)
+  "The text of the first user node whose text parts, joined by a space and
+trimmed, are not empty, in the transcript buffer holding SUMMARY's session
+by its handle or else by its ref, as `agentpane--transcript-buffer' finds
+it; or nil.  The browser's `firstUserText'."
+  (let* ((handle (plist-get summary :handle))
+         (buffer (or (and handle (agentpane--buffer-holding handle))
+                     (agentpane--buffer-for (agentpane--ref summary))))
+         (ewoc (and buffer (buffer-local-value 'agentpane--ewoc buffer)))
+         (at (and ewoc (ewoc-nth ewoc 0)))
+         (found nil))
+    (while (and at (not found))
+      (let ((node (ewoc-data at)))
+        (when (equal (plist-get node :role) "user")
+          (let ((text (string-trim
+                       (mapconcat (lambda (part) (or (plist-get part :text) ""))
+                                  (seq-filter (lambda (part)
+                                                (equal (plist-get part :type) "text"))
+                                              (plist-get node :parts))
+                                  " "))))
+            (unless (string-empty-p text)
+              (setq found text)))))
+      (setq at (ewoc-next ewoc at)))
+    found))
 
 (defun agentpane--seen-p (summary)
   "Non-nil when a window shows a transcript buffer holding SUMMARY's
