@@ -3049,6 +3049,22 @@ first listing is marked (OW-wazipa)."
         (should (agentpane-test--finished-p first "h-a"))
         (should (agentpane-test--finished-p second "h-a"))))))
 
+(ert-deftest agentpane-test-picker-gone-keeps-the-levels-another-picker-reads ()
+  "A picker killed, or turned to another major mode, while a second still
+lists, does not wipe the streaming level the second read: a turn that ends
+after is marked (OW-wazipa)."
+  (dolist (gone (list #'kill-buffer
+                      (lambda (buffer) (with-current-buffer buffer (fundamental-mode)))))
+    (agentpane-test--listing
+      (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
+        (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
+        (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
+          (funcall relist (agentpane-test--summary "a" nil))
+          (funcall relist (agentpane-test--summary "a" t))
+          (funcall gone first)
+          (funcall relist (agentpane-test--summary "a" nil))
+          (should (agentpane-test--finished-p second "h-a")))))))
+
 (ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
   "A handle the listing no longer carries, which the server never mints
 again, leaves both the streaming levels and the marks (OW-wazipa)."

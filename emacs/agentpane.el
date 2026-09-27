@@ -3015,9 +3015,10 @@ filter, and filters after, so what that costs is the size of the reply.
 That was measured and left (Emacs 31.1 with jsonrpc.el 1.0.29, bun 1.4.0,
 measured 2026-09-27; docs/MANUAL_TESTING.md, OW-wazipa): on the home
 server's 369 stored sessions the reply was 116 KB, which the helper
-relayed in about 210 ms, nearly all the server's walk, as long as a
-filtered one took; Emacs parsed it in about 0.8 ms, and folding it and
-dropping all but one row took 0.24 ms more.
+relayed in 207 to 277 ms, where the server alone answered it in 205 to
+222 ms, and a filtered one in 194 to 229 ms; Emacs parsed it in about
+0.8 ms, and folding it and dropping all but one row, with no session
+held, took 0.24 ms more.
 The server's own `cwd' filter differs in one row: it also lists a live
 session under the cwd it was created with when the file its CLI wrote
 records another (`list' in src/server/http/session-manager.ts), which
