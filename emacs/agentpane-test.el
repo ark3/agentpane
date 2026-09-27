@@ -3030,6 +3030,20 @@ observed the end, watched or not (OW-yufahi)."
         (should-not (eq (window-buffer (selected-window)) a))
         (should-not (agentpane-test--finished-p picker "h-a"))))))
 
+(ert-deftest agentpane-test-picker-forgets-a-handle-the-server-let-go ()
+  "A handle the listing no longer carries, which the server never mints
+again, leaves both the streaming levels and the marks (OW-wazipa)."
+  (agentpane-test--listing
+    (save-window-excursion (agentpane-sessions t))
+    (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
+    (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
+    (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" t))
+    (should (gethash "h-a" agentpane--finished-turns))
+    (funcall relist (agentpane-test--summary "c" nil))
+    (should (equal (list (hash-table-keys agentpane--listed-streaming)
+                         (hash-table-keys agentpane--finished-turns))
+                   '(("h-c") nil)))))
+
 (ert-deftest agentpane-test-picker-marks-a-turn-shown-only-in-a-background-tty-frame ()
   "A transcript shown only in a text terminal's frame that is not the one
 on top is not seen, though `frame-visible-p' answers t for it, and its

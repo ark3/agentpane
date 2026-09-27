@@ -2890,17 +2890,35 @@ and its handle let go, on Pi.  The fork takes the parent's window
 \(`agentpane--fork-at'), so a Codex or Claude Code turn still running on
 the parent ends off screen and marks the parent, where the browser would
 have moved its level to the fork and marked nothing; that turn did end
-unseen, in a buffer the user can still open."
-  (dolist (summary summaries)
-    (let ((handle (plist-get summary :handle))
-          (streaming (eq (plist-get summary :isStreaming) t)))
-      (when handle
-        (when (or (gethash handle agentpane--finished-turns)
-                  (and (gethash handle agentpane--listed-streaming) (not streaming)))
-          (puthash handle summary agentpane--finished-turns))
-        (puthash handle streaming agentpane--listed-streaming)
-        (when (agentpane--seen-p summary)
-          (remhash handle agentpane--finished-turns))))))
+unseen, in a buffer the user can still open.
+A handle SUMMARIES does not carry is dropped from both tables.  The
+listing is never filtered, as `agentpane--refetch-sessions', the one
+caller, asks for every session, and the server lists every session it
+holds under its handle (`list' in src/server/http/session-manager.ts),
+so such a handle is one the server has let go, and it never mints one
+again (`#handlePrefix' there).  Its mark is drawn on no row, and kept,
+would be re-checked by `agentpane--clear-seen-turns' at every window
+change for the life of Emacs, never to be seen: at 5 such marks among
+124 buffers a call cost about 310 microseconds, and at 10 among 504
+about 2.4 milliseconds (Emacs 31.1, byte-compiled, batch, measured
+2026-09-27)."
+  (let ((listed (make-hash-table :test #'equal)))
+    (dolist (summary summaries)
+      (let ((handle (plist-get summary :handle))
+            (streaming (eq (plist-get summary :isStreaming) t)))
+        (when handle
+          (puthash handle t listed)
+          (when (or (gethash handle agentpane--finished-turns)
+                    (and (gethash handle agentpane--listed-streaming) (not streaming)))
+            (puthash handle summary agentpane--finished-turns))
+          (puthash handle streaming agentpane--listed-streaming)
+          (when (agentpane--seen-p summary)
+            (remhash handle agentpane--finished-turns)))))
+    (dolist (table (list agentpane--listed-streaming agentpane--finished-turns))
+      (maphash (lambda (handle _)
+                 (unless (gethash handle listed)
+                   (remhash handle table)))
+               table))))
 
 (defun agentpane--clear-seen-turns (&rest _)
   "Drop the finished-turn mark of each session a window now shows, and
