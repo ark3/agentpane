@@ -459,10 +459,8 @@ will say so under that handle; see `agentpane--dropped'."
     (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
         (with-current-buffer buffer
-          (when (plist-get params :handle)
-            (setq agentpane--handle (plist-get params :handle)))
-          (agentpane--hold-ref (plist-get params :session))
-          (agentpane--clear-seen-turns)
+          (agentpane--hold (or (plist-get params :handle) agentpane--handle)
+                           (plist-get params :session))
           (unless (memq method '(session/node session/snapshot))
             (agentpane--draw-recorded buffer))
           (pcase method
@@ -1812,7 +1810,6 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   ;; the one-line header needs the room (OW-gageru).
   (add-to-invisibility-spec 'agentpane)
   (add-hook 'window-size-change-functions #'agentpane--refit-on-resize nil t)
-  (add-hook 'window-buffer-change-functions #'agentpane--clear-seen-turns nil t)
   ;; Proportional prose and word wrap at the window edge; code, tables and
   ;; tool bodies inherit `fixed-pitch', so they stay monospace under the
   ;; remapped default.
@@ -2028,6 +2025,23 @@ back to the session id keeps the old one."
   (unless (or (null ref) (agentpane--same-ref-p ref (agentpane--ref agentpane--session)))
     (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))))
 
+(defun agentpane--hold (handle ref)
+  "Make HANDLE the handle this transcript buffer holds, and REF, when
+non-nil, its session's ref (`agentpane--hold-ref'), then drop the
+finished-turn mark of each session a window now shows
+\(`agentpane--clear-seen-turns').
+The one way a notification or an attach's reply binds a buffer to a
+session, so that no binding can make a buffer already on screen the
+marked session, with no window changing buffer, and leave its mark.
+Nothing else here gives a buffer a handle, or a ref it did not already
+hold: a new buffer takes its summary in `agentpane--transcript-buffer',
+before any window shows it; `agentpane-show-transcript' re-reads the
+summary of the session the buffer was found holding; and a
+`session/detached' only lets a handle go."
+  (setq agentpane--handle handle)
+  (agentpane--hold-ref ref)
+  (agentpane--clear-seen-turns))
+
 (defun agentpane--attached-as (summary)
   "Hold what SUMMARY, the reply to this buffer's `sessions/attach', names:
 the session's handle, and its ref, which is authoritative and may differ
@@ -2037,9 +2051,7 @@ into this one, which then wants a snapshot; see `agentpane--absorb'."
         agentpane--dropped nil)
   (let* ((handle (plist-get summary :handle))
          (other (and handle (agentpane--buffer-holding handle))))
-    (setq agentpane--handle handle)
-    (agentpane--hold-ref (agentpane--ref summary))
-    (agentpane--clear-seen-turns)
+    (agentpane--hold handle (agentpane--ref summary))
     (when (and other (not (eq other (current-buffer))))
       (agentpane--absorb other)
       t)))
@@ -2840,6 +2852,12 @@ transcript in a `C-x 5 2' frame not on top is not being looked at (Emacs
 31.1, `emacs -nw' in a pty, measured 2026-09-26: two frames both answered
 t, `tty-top-frame' named the one raised, and this read a transcript shown
 only in the other as unseen, and as seen once that one was raised).
+A child frame counts when its root frame is on top, since `tty-top-frame'
+names the root: a transcript in a child frame of the top frame is in view
+\(Emacs 31.1, `emacs -nw' in a pty, measured 2026-09-27: a child frame of
+the top frame answered t to `frame-visible-p', and both `tty-top-frame'
+and `frame-root-frame' named its parent; with another frame raised, the
+child still answered t, the parent no longer on top).
 A composer's window counts for nothing either: the composer shows the
 draft, not the transcript, and its mode line carries no `streaming', so
 the turn's end cannot be read there."
@@ -2847,8 +2865,9 @@ the turn's end cannot be read there."
          (held (and handle (agentpane--buffer-holding handle)))
          (shown (lambda (buffer)
                   (seq-some (lambda (window)
-                              (let ((top (tty-top-frame (window-frame window))))
-                                (or (null top) (eq top (window-frame window)))))
+                              (let* ((frame (window-frame window))
+                                     (top (tty-top-frame frame)))
+                                (or (null top) (eq top (frame-root-frame frame)))))
                             (get-buffer-window-list buffer nil 'visible)))))
     (or (and held (funcall shown held))
         (agentpane--buffer-for (agentpane--ref summary)
@@ -2904,21 +2923,31 @@ redraw every picker if one was dropped.
 Every mark is checked, whether or not a picker lists its session, and
 this runs wherever a marked session may have come into view, so the mark
 goes the moment its session is shown rather than lingering until the next
-listing: on `window-buffer-change-functions' in a transcript buffer,
-which redisplay runs when a window starts showing it; and wherever a
-transcript buffer takes a handle or a ref, from a notification or its
-attach's reply (`agentpane--on-notification', `agentpane--attached-as'),
-which can make a buffer already on screen the marked session with no
-window changing buffer.
-A frame coming into view -- an iconified one restored, or a text
-terminal's raised by `C-x 5 o' -- changes no window's buffer, and nothing
-here runs for it, so a mark for a session only that frame shows stays
-until the next listing, which the next start or end of any turn asks
-for, as does a `g' in the picker.  That mark is late in going, not wrong:
-the turn did end unseen.  The raised text terminal frame was measured
-\(Emacs 31.1, `emacs -nw' in a pty, 2026-09-26: raising it ran the hook
-no more times and left the mark); the restored frame is inferred, the
-home server having no GUI."
+listing.  It runs from two places and no others.
+One is the default value of `window-state-change-functions', which
+redisplay runs for each frame where, among other changes, a window changed
+buffer, or the frame was selected or deselected: a window starting to
+show a transcript, and a text terminal's frame raised by `C-x 5 o' or
+`select-frame-set-input-focus', which changes no window's buffer (Emacs
+31.1, `emacs -nw' in a pty, measured 2026-09-27: the raise ran the default
+values of `window-selection-change-functions' and this hook for both
+frames, and not `window-buffer-change-functions'; a `raise-frame' that did
+not select the frame left it under the top one, and ran nothing).
+It is added there by `agentpane-sessions-mode', as only a picker's
+listing makes a mark, and never removed, as the marks outlive the
+pickers.  With no marks a call costs about half a microsecond (Emacs
+31.1, byte-compiled, measured 2026-09-27), so it has no early exit.
+The other is `agentpane--hold', where a transcript buffer takes a handle
+or a ref, from a notification or its attach's reply, which can make a
+buffer already on screen the marked session with no window changing
+buffer, and so runs no hook.
+An iconified GUI frame restored is left: restoring makes a frame visible,
+which is none of what the hook's doc string lists, so unless the restore
+also selects the frame, nothing here runs, and a mark for a session only
+that frame shows stays until the next listing, which the next start or
+end of any turn asks for, as does a `g' in the picker.  That mark is late
+in going, not wrong: the turn did end unseen.  This is inferred, not
+measured, the home server having no GUI."
   (let ((dropped nil))
     (maphash (lambda (handle summary)
                (when (agentpane--seen-p summary)
@@ -2978,6 +3007,7 @@ neither client now asks it for."
   ;; this one would read a turn that ended meanwhile, watched or not, as
   ;; ended unseen.  The marks stay: each is a turn that did.
   (clrhash agentpane--listed-streaming)
+  (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
   (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
 

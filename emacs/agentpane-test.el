@@ -2862,11 +2862,11 @@ every buffer BODY made is killed afterwards."
 
 (defun agentpane-test--show (buffer)
   "Show BUFFER in the selected window, and run the hook redisplay runs for a
-window newly showing a buffer, as batch Emacs, which never redisplays, does
-not."
+frame where a window newly shows a buffer, as batch Emacs, which never
+redisplays, does not."
   (set-window-buffer (selected-window) buffer)
-  (with-current-buffer buffer
-    (run-hook-with-args 'window-buffer-change-functions (selected-window))))
+  (with-temp-buffer
+    (run-hook-with-args 'window-state-change-functions (selected-frame))))
 
 (defun agentpane-test--pick (cwd)
   "Run `agentpane-sessions' from a buffer in CWD, and return the picker."
@@ -3036,6 +3036,58 @@ Batch Emacs has no text terminal, so `tty-top-frame' answers as one would."
         (funcall relist (agentpane-test--summary "a" t))
         (funcall relist (agentpane-test--summary "a" nil))
         (should-not (agentpane-test--finished-p picker "h-a"))))))
+
+(ert-deftest agentpane-test-picker-mark-cleared-when-its-tty-frame-is-raised ()
+  "A transcript shown only in a text terminal's frame that is not on top
+drops its session's mark as soon as that frame is raised, though the raise
+changes no window's buffer (OW-piweyi).
+The raise runs what one ran in `emacs -nw' (Emacs 31.1, measured
+2026-09-27): the default values of `window-selection-change-functions' and
+`window-state-change-functions', for the frame it selected and the one it
+deselected, and not `window-buffer-change-functions'.  Batch Emacs has no
+text terminal, so `tty-top-frame' answers as one would."
+  (agentpane-test--listing
+    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
+          (a (agentpane-test--holding (agentpane-test--summary "a" nil)))
+          (top nil))
+      (cl-letf (((symbol-function 'tty-top-frame) (lambda (&optional _) top)))
+        (agentpane-test--show a)
+        (setq top 'another-frame)
+        (funcall relist (agentpane-test--summary "a" nil))
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should (agentpane-test--finished-p picker "h-a"))
+        (setq top (selected-frame))
+        (with-temp-buffer
+          (run-hook-with-args 'window-selection-change-functions (selected-frame))
+          (run-hook-with-args 'window-state-change-functions (selected-frame)))
+        (should-not (agentpane-test--finished-p picker "h-a"))))))
+
+(ert-deftest agentpane-test-picker-does-not-mark-a-turn-shown-in-a-tty-child-frame ()
+  "A transcript shown in a child frame of a text terminal's top frame is
+seen, though `tty-top-frame' names the root frame and not the child, and
+its turn's end is not marked; shown in a child of a frame not on top, it
+is not seen (OW-piweyi).
+Batch Emacs has no text terminal and makes no child frame, so
+`tty-top-frame' and `frame-root-frame' answer as they did in `emacs -nw'
+\(Emacs 31.1, measured 2026-09-27) for a child of the top frame."
+  (agentpane-test--listing
+    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
+          (a (agentpane-test--holding (agentpane-test--summary "a" nil)))
+          (top 'root-frame))
+      (cl-letf (((symbol-function 'tty-top-frame) (lambda (&optional _) top))
+                ((symbol-function 'frame-root-frame)
+                 (lambda (&optional frame)
+                   (if (eq (or frame (selected-frame)) (selected-frame)) 'root-frame frame))))
+        (agentpane-test--show a)
+        (funcall relist (agentpane-test--summary "a" nil))
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should-not (agentpane-test--finished-p picker "h-a"))
+        (setq top 'another-frame)
+        (funcall relist (agentpane-test--summary "a" t))
+        (funcall relist (agentpane-test--summary "a" nil))
+        (should (agentpane-test--finished-p picker "h-a"))))))
 
 ;;;; A new session whose attach fails, against a stub jsonrpc
 
