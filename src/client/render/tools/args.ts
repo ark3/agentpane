@@ -7,6 +7,9 @@
  * any shape at all. Nothing in this file may throw.
  */
 
+/** The keys a file-shaped call names its file by, across backends. */
+export const PATH_KEYS = ["path", "file", "filePath", "file_path"];
+
 export function argString(args: Record<string, unknown> | undefined, ...keys: string[]): string {
 	if (!args) return "";
 	for (const key of keys) {
@@ -28,8 +31,12 @@ export interface EditHunk {
 	newText: string;
 }
 
+const NESTED_KEYS = ["edits", "replacements", "changes"];
 const OLD_KEYS = ["oldText", "old_string", "old_str", "search", "old"];
 const NEW_KEYS = ["newText", "new_string", "new_str", "replace", "new"];
+
+/** Every top-level key `editHunks` reads, for a card to leave out of `otherArgs`. */
+export const EDIT_HUNK_KEYS = [...NESTED_KEYS, ...OLD_KEYS, ...NEW_KEYS];
 
 function hunkFrom(value: unknown): EditHunk | undefined {
 	if (!value || typeof value !== "object") return undefined;
@@ -53,7 +60,7 @@ function hunkFrom(value: unknown): EditHunk | undefined {
  */
 export function editHunks(args: Record<string, unknown> | undefined): EditHunk[] {
 	if (!args) return [];
-	const nested = args.edits ?? args.replacements ?? args.changes;
+	const nested = NESTED_KEYS.map((key) => args[key]).find((value) => value != null);
 	if (Array.isArray(nested)) {
 		return nested.map(hunkFrom).filter((h): h is EditHunk => h !== undefined);
 	}

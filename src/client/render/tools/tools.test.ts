@@ -248,6 +248,8 @@ describe("the edit card", () => {
 		const removed = [...container.querySelectorAll(".line.del .text")].map((e) => e.textContent);
 		expect(removed).toEqual(['return "hello";', "greet();"]);
 		expect(added).toEqual(["return `hello ${name}`;", 'greet("world");']);
+		// The nested hunks are the diff; they must not come back as JSON too.
+		expect(card(container).querySelector(".body")?.textContent).not.toContain("oldText");
 	});
 
 	it("counts every hunk in the summary", () => {
@@ -269,6 +271,28 @@ describe("the edit card", () => {
 		openToolCards(container);
 		expect(container.querySelector(".line.add .text")?.textContent).toBe("goodbye");
 		expect(container.querySelector(".line.del .text")?.textContent).toBe("hello");
+	});
+
+	it("shows every argument it does not draw as the diff, and not the hunks twice", () => {
+		// Claude Code's Edit carries `replace_all`
+		// (resources/fixtures/claude/tool-use.jsonl), which changes what the
+		// diff means; the Emacs client draws the whole arguments object, so the
+		// browser must not drop it (OW-goreyu).
+		const { container } = render(ToolCallBlock, {
+			props: {
+				call: call("Edit", {
+					file_path: "src/greet.ts",
+					old_string: "hello",
+					new_string: "goodbye",
+					replace_all: true,
+				}),
+			},
+		});
+		openToolCards(container);
+		const body = card(container).querySelector(".body");
+		expect(body?.textContent).toContain('"replace_all": true');
+		expect(body?.textContent).not.toContain("old_string");
+		expect(body?.textContent).not.toContain("file_path");
 	});
 
 	it("still names the file when the arguments are a shape it cannot read", () => {

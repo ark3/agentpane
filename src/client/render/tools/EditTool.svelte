@@ -1,19 +1,23 @@
 <script lang="ts">
 	/**
 	 * A targeted file edit, shown as a diff. The summary carries +/- counts so
-	 * the size of a change is legible without expanding it.
+	 * the size of a change is legible without expanding it. Any other argument
+	 * -- Claude Code's `replace_all`, which changes what the diff means --
+	 * follows the diff as JSON (OW-goreyu).
 	 */
 	import type { ToolRenderProps } from "../types.ts";
 	import { toolState } from "../types.ts";
-	import { argString, editHunks } from "./args.ts";
+	import { argString, EDIT_HUNK_KEYS, editHunks, otherArgs, PATH_KEYS, prettyArgs } from "./args.ts";
 	import { buildDiff } from "./diff.ts";
+	import Output from "./Output.svelte";
 	import ResultBody from "./ResultBody.svelte";
 	import ToolCard from "./ToolCard.svelte";
 	import { toolSummary } from "./summary.ts";
 
 	let { call, result, streaming = false }: ToolRenderProps = $props();
 
-	const path = $derived(argString(call.arguments, "path", "file", "filePath", "file_path"));
+	const path = $derived(argString(call.arguments, ...PATH_KEYS));
+	const extra = $derived(prettyArgs(otherArgs(call.arguments, ...PATH_KEYS, ...EDIT_HUNK_KEYS)));
 	const state = $derived(toolState({ call, result, streaming }));
 
 	/** One diff per replacement -- Pi's `edit` carries an array of them. */
@@ -37,6 +41,10 @@
 			{/each}
 		</div>
 	{/each}
+
+	{#if extra}
+		<Output text={extra} language="json" />
+	{/if}
 
 	<ResultBody {result} />
 </ToolCard>
