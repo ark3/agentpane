@@ -2862,11 +2862,22 @@ every buffer BODY made is killed afterwards."
 
 (defun agentpane-test--show (buffer)
   "Show BUFFER in the selected window, and run the hook redisplay runs for a
-frame where a window newly shows a buffer, as batch Emacs, which never
-redisplays, does not."
+frame where a window newly shows a buffer, and reset the frame's window
+state change flag, as batch Emacs, which never redisplays, does not."
   (set-window-buffer (selected-window) buffer)
+  (set-frame-window-state-change nil nil)
   (with-temp-buffer
     (run-hook-with-args 'window-state-change-functions (selected-frame))))
+
+(defun agentpane-test--redisplay ()
+  "Run the hook redisplay runs for each frame whose window state change
+flag is set, and reset the flag, as batch Emacs, which never redisplays,
+does not.  A frame whose flag nothing set runs nothing."
+  (dolist (frame (frame-list))
+    (when (frame-window-state-change frame)
+      (set-frame-window-state-change frame nil)
+      (with-temp-buffer
+        (run-hook-with-args 'window-state-change-functions frame)))))
 
 (defun agentpane-test--pick (cwd)
   "Run `agentpane-sessions' from a buffer in CWD, and return the picker."
@@ -2976,8 +2987,9 @@ listed again after the user looked away (OW-yufahi)."
 
 (ert-deftest agentpane-test-picker-mark-cleared-when-a-shown-buffer-becomes-its-session ()
   "A transcript already on screen that becomes a marked session, by its
-attach's reply or by a snapshot's `askedFor', drops the mark at once, with
-no window changing buffer (OW-yufahi)."
+attach's reply or by a snapshot's `askedFor', drops the mark at the next
+redisplay, with no window changing buffer (OW-yufahi, OW-piweyi): the
+binding itself sets the flag that makes redisplay run the hook."
   (agentpane-test--listing
     (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
           (x (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "x"))))
@@ -2989,6 +3001,7 @@ no window changing buffer (OW-yufahi)."
       (should (agentpane-test--finished-p picker "h-a"))
       (with-current-buffer x
         (agentpane--attached-as (agentpane-test--summary "a" nil)))
+      (agentpane-test--redisplay)
       (should-not (agentpane-test--finished-p picker "h-a"))
       (agentpane-test--show y)
       (with-current-buffer y (setq agentpane--attach-sent t))
@@ -3000,6 +3013,7 @@ no window changing buffer (OW-yufahi)."
        (list :session '(:backend "pi" :id "c") :handle "h-c" :askedFor '(:backend "pi" :id "y")
              :nodes [] :isStreaming :json-false))
       (should (equal (buffer-local-value 'agentpane--handle y) "h-c"))
+      (agentpane-test--redisplay)
       (should-not (agentpane-test--finished-p picker "h-c")))))
 
 (ert-deftest agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker ()

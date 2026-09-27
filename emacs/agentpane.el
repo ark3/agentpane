@@ -459,8 +459,9 @@ will say so under that handle; see `agentpane--dropped'."
     (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
         (with-current-buffer buffer
-          (agentpane--hold (or (plist-get params :handle) agentpane--handle)
-                           (plist-get params :session))
+          (when (plist-get params :handle)
+            (setq agentpane--handle (plist-get params :handle)))
+          (agentpane--hold-ref (plist-get params :session))
           (unless (memq method '(session/node session/snapshot))
             (agentpane--draw-recorded buffer))
           (pcase method
@@ -2025,23 +2026,6 @@ back to the session id keeps the old one."
   (unless (or (null ref) (agentpane--same-ref-p ref (agentpane--ref agentpane--session)))
     (setq agentpane--session (plist-put (copy-sequence agentpane--session) :ref ref))))
 
-(defun agentpane--hold (handle ref)
-  "Make HANDLE the handle this transcript buffer holds, and REF, when
-non-nil, its session's ref (`agentpane--hold-ref'), then drop the
-finished-turn mark of each session a window now shows
-\(`agentpane--clear-seen-turns').
-The one way a notification or an attach's reply binds a buffer to a
-session, so that no binding can make a buffer already on screen the
-marked session, with no window changing buffer, and leave its mark.
-Nothing else here gives a buffer a handle, or a ref it did not already
-hold: a new buffer takes its summary in `agentpane--transcript-buffer',
-before any window shows it; `agentpane-show-transcript' re-reads the
-summary of the session the buffer was found holding; and a
-`session/detached' only lets a handle go."
-  (setq agentpane--handle handle)
-  (agentpane--hold-ref ref)
-  (agentpane--clear-seen-turns))
-
 (defun agentpane--attached-as (summary)
   "Hold what SUMMARY, the reply to this buffer's `sessions/attach', names:
 the session's handle, and its ref, which is authoritative and may differ
@@ -2051,7 +2035,8 @@ into this one, which then wants a snapshot; see `agentpane--absorb'."
         agentpane--dropped nil)
   (let* ((handle (plist-get summary :handle))
          (other (and handle (agentpane--buffer-holding handle))))
-    (agentpane--hold handle (agentpane--ref summary))
+    (setq agentpane--handle handle)
+    (agentpane--hold-ref (agentpane--ref summary))
     (when (and other (not (eq other (current-buffer))))
       (agentpane--absorb other)
       t)))
@@ -2881,11 +2866,11 @@ A session is marked when a listing reads it not streaming after one that
 read it streaming, and no window shows it (`agentpane--seen-p'); the
 level alone marks nothing, so no idle session is marked by the first
 listing.  A mark is dropped once a window shows the session, here at a
-listing and at once by `agentpane--clear-seen-turns'.  Both are kept by
-handle, which a rename never moves (D24): a Pi session can take a new id
-at its first prompt, between the listing that read it streaming and the
-one that read it done.  Only a session the server holds has a handle or
-ever streams.
+listing and at the next redisplay by `agentpane--clear-seen-turns'.  Both
+are kept by handle, which a rename never moves (D24): a Pi session can take
+a new id at its first prompt, between the listing that read it streaming
+and the one that read it done.  Only a session the server holds has a
+handle or ever streams.
 Each listing is asked for by a `sessions/changed', which a turn's start
 and its end each send, so a turn that ends before the listing its start
 asked for has answered is never marked: that listing reads it done, or
@@ -2922,32 +2907,42 @@ unseen, in a buffer the user can still open."
 redraw every picker if one was dropped.
 Every mark is checked, whether or not a picker lists its session, and
 this runs wherever a marked session may have come into view, so the mark
-goes the moment its session is shown rather than lingering until the next
-listing.  It runs from two places and no others.
-One is the default value of `window-state-change-functions', which
-redisplay runs for each frame where, among other changes, a window changed
-buffer, or the frame was selected or deselected: a window starting to
-show a transcript, and a text terminal's frame raised by `C-x 5 o' or
-`select-frame-set-input-focus', which changes no window's buffer (Emacs
-31.1, `emacs -nw' in a pty, measured 2026-09-27: the raise ran the default
-values of `window-selection-change-functions' and this hook for both
-frames, and not `window-buffer-change-functions'; a `raise-frame' that did
-not select the frame left it under the top one, and ran nothing).
-It is added there by `agentpane-sessions-mode', as only a picker's
-listing makes a mark, and never removed, as the marks outlive the
-pickers.  With no marks a call costs about half a microsecond (Emacs
-31.1, byte-compiled, measured 2026-09-27), so it has no early exit.
-The other is `agentpane--hold', where a transcript buffer takes a handle
-or a ref, from a notification or its attach's reply, which can make a
-buffer already on screen the marked session with no window changing
-buffer, and so runs no hook.
-An iconified GUI frame restored is left: restoring makes a frame visible,
-which is none of what the hook's doc string lists, so unless the restore
-also selects the frame, nothing here runs, and a mark for a session only
-that frame shows stays until the next listing, which the next start or
-end of any turn asks for, as does a `g' in the picker.  That mark is late
-in going, not wrong: the turn did end unseen.  This is inferred, not
-measured, the home server having no GUI."
+goes at the redisplay that shows its session rather than lingering until
+the next listing.  It runs from one place: the default value of
+`window-state-change-functions', which redisplay runs for each frame
+where, among other changes, a window changed buffer, the frame was
+selected or deselected, or the frame's window state change flag was set.
+A window starting to show a transcript is the first.  A text terminal's
+frame raised by `C-x 5 o' or `select-frame-set-input-focus', which
+changes no window's buffer, is the second (Emacs 31.1, `emacs -nw' in a
+pty, measured 2026-09-27: the raise ran the default values of
+`window-selection-change-functions' and this hook for both frames, and not
+`window-buffer-change-functions'; a `raise-frame' that did not select the
+frame left it under the top one, and ran nothing).  A buffer on screen
+taking a handle or a ref, which can make it the marked session with no
+window changing buffer, is the third: `agentpane--binding-changed',
+watching both variables, sets the flag for each frame showing the buffer,
+whatever code wrote them.
+The hook and the watchers are added by `agentpane-sessions-mode', as only
+a picker's listing makes a mark, and never removed, as the marks outlive
+the pickers.  With no marks a call of the hook costs about half a
+microsecond, and a write to either variable costs about 0.2 microseconds
+more than with no watcher (Emacs 31.1, byte-compiled, measured
+2026-09-27).
+A frame that only comes into view is left, as nothing runs for it: a
+text terminal's child frame shown again by `make-frame-visible' after
+`make-frame-invisible', and an iconified GUI frame restored, unless the
+restore also selects it.  For the child frame this was measured (Emacs
+31.1, `emacs -nw' in a pty, 2026-09-27: made visible, it ran none of the
+window change hooks for any frame, `agentpane--seen-p' then read the
+transcript it shows as seen, and the mark stayed).  For the GUI frame it
+is inferred from that, visibility alone running nothing, the home server
+having no GUI; on a text terminal, `iconify-frame' on the top frame and
+`make-frame-visible' on a root frame under it changed neither which frame
+was on top nor what `frame-visible-p' answered, and ran nothing.  Such a
+mark stays until the next listing, which the next start or end of any
+turn asks for, as does a `g' in the picker.  It is late in going, not
+wrong: the turn did end unseen."
   (let ((dropped nil))
     (maphash (lambda (handle summary)
                (when (agentpane--seen-p summary)
@@ -2963,6 +2958,28 @@ measured, the home server having no GUI."
                   (mapcar (lambda (entry) (agentpane--session-entry (car entry)))
                           tabulated-list-entries))
             (tabulated-list-print t)))))))
+
+(defun agentpane--binding-changed (_symbol _newval _operation where)
+  "Have the next redisplay run `agentpane--clear-seen-turns' for each frame
+that shows WHERE, a buffer whose `agentpane--handle' or `agentpane--session'
+is about to change, while any mark is outstanding.
+The variable watcher of both, so that every write to either -- a
+notification's, an attach reply's, or any other -- reaches the one owner
+of the re-check, with no call its site must remember: a buffer already on
+screen can become a marked session with no window changing buffer.  It
+only sets each frame's window state change flag, which makes redisplay
+run the default value of `window-state-change-functions' for that frame,
+since a watcher runs before the write, when a re-check would still read
+the old value (Emacs 31.1, measured 2026-09-27: a flag set from a timer,
+and one set from a process filter as jsonrpc.el's notifications are
+handled, each ran that hook for the frame at the next redisplay, in
+`emacs -nw' in a pty with no explicit `redisplay').
+WHERE is nil for a `setq-default', which binds no buffer; a buffer-local
+write, `let' and its unwinding, and the `makunbound' of a mode change
+each name the buffer (Emacs 31.1, batch, measured 2026-09-27)."
+  (when (and (bufferp where) (> (hash-table-count agentpane--finished-turns) 0))
+    (dolist (window (get-buffer-window-list where nil 'visible))
+      (set-frame-window-state-change (window-frame window) t))))
 
 (defun agentpane--refetch-sessions (&rest _)
   "Refetch the listing through `sessions/list', and redraw it under this
@@ -3008,6 +3025,8 @@ neither client now asks it for."
   ;; ended unseen.  The marks stay: each is a turn that did.
   (clrhash agentpane--listed-streaming)
   (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
+  (add-variable-watcher 'agentpane--handle #'agentpane--binding-changed)
+  (add-variable-watcher 'agentpane--session #'agentpane--binding-changed)
   (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
 
