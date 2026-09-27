@@ -2928,6 +2928,18 @@ streaming, are not marked."
       (agentpane-test--show unseen)
       (should-not (agentpane-test--finished-p picker "h-a")))))
 
+(ert-deftest agentpane-test-picker-lists-only-its-projects-sessions ()
+  "A picker filtered to a project draws no row for a session in another,
+though its listing, asked for every session, carries one (OW-yufahi)."
+  (agentpane-test--with-directories (one two)
+    (agentpane-test--listing
+      (setq listing (list (agentpane-test--summary "a" nil one)
+                          (agentpane-test--summary "b" nil two)))
+      (let ((picker (agentpane-test--pick one)))
+        (should (equal (mapcar (lambda (entry) (plist-get (car entry) :handle))
+                               (buffer-local-value 'tabulated-list-entries picker))
+                       '("h-a")))))))
+
 (ert-deftest agentpane-test-picker-mark-cleared-while-its-session-is-filtered-out ()
   "A marked session whose transcript is viewed while the picker lists
 another project has no mark when its own project is listed again (OW-yufahi)."

@@ -24,8 +24,8 @@
 ;; for the picker: one row per stored session, `RET' opens its transcript,
 ;; `g' refetches, and a `sessions/changed' notification refetches too.  The
 ;; list is filtered to the project of the buffer the command was called
-;; from, through the server's `?cwd=' query; a prefix argument lifts the
-;; filter.  The notification flows from the picker's first listing on,
+;; from, over a listing of every session, as the browser's sidebar filters;
+;; a prefix argument lifts the filter.  The notification flows from the picker's first listing on,
 ;; whether or not any buffer has attached a session: the helper opens its
 ;; event stream from `sessions/list' (src/emacs/helper.ts).  A row's dot
 ;; says its session is streaming; a red one, that a turn ended while no
@@ -2882,7 +2882,11 @@ it sends there follows onto the fork.  Here a fork opens in a buffer of
 its own and sends nothing (`agentpane-fork'), and the parent is forked
 from its own buffer, on screen, so it carries no mark to move; a turn
 running on it stays with it, on Codex and Claude Code, or is aborted,
-and its handle let go, on Pi."
+and its handle let go, on Pi.  The fork takes the parent's window
+\(`agentpane--fork-at'), so a Codex or Claude Code turn still running on
+the parent ends off screen and marks the parent, where the browser would
+have moved its level to the fork and marked nothing; that turn did end
+unseen, in a buffer the user can still open."
   (dolist (summary summaries)
     (let ((handle (plist-get summary :handle))
           (streaming (eq (plist-get summary :isStreaming) t)))
@@ -2935,13 +2939,17 @@ home server having no GUI."
   "Refetch the listing through `sessions/list', and redraw it under this
 buffer's filter when the reply lands.  The picker's `revert-buffer-function'.
 Every session is asked for, and those outside the filter are dropped here,
-by the exact match on cwd the server's own filter makes (`listSessions' in
-src/server/sessions/index.ts), so that `agentpane--note-turns' reads the
-streaming level of a session the picker does not show: one listed
-streaming, then filtered out while its turn ended in plain sight, would
-otherwise read as ended unseen when listed again.  The server walks every
-session's file whatever the filter, and filters after, so what that costs
-is the size of the reply."
+by the exact match on each summary's cwd the browser's sidebar makes over
+its own unfiltered listing (`filteredSummaries' in src/client/App.svelte),
+so that `agentpane--note-turns' reads the streaming level of a session the
+picker does not show: one listed streaming, then filtered out while its
+turn ended in plain sight, would otherwise read as ended unseen when
+listed again.  The server walks every session's file whatever the
+filter, and filters after, so what that costs is the size of the reply.
+The server's own `cwd' filter differs in one row: it also lists a live
+session under the cwd it was created with when the file its CLI wrote
+records another (`list' in src/server/http/session-manager.ts), which
+neither client now asks it for."
   (agentpane--request 'sessions/list nil
                       (lambda (summaries)
                         (let ((summaries (append summaries nil)))
