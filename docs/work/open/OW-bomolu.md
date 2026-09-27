@@ -24,6 +24,12 @@ In service of `AGENTS.md`, "Both clients": a start error raised inside an attach
 Load-bearing: the error the server compares against at admission is the one that stood before the attach the send made, not after it.
 Incidental: how that reaches the server — the prompt carrying the error its client held at send (since OW-lameke the server compares the error's id, not its text, so that means the id — see OW-jokoto), the helper reading `errorIdOf` before its own attach, the helper sending one request that attaches and prompts, or some other route — weighed against why `agentpane--attached-then` attaches first (its docstring, and OW-nasofa's single-send rule in `agentpane--send-prompt`).
 
+## What OW-jokoto landed, noted 2026-09-26
+
+OW-jokoto (1e005f6) put the error id on both wires and made a prompt carry `priorErrorId`, the id of the error its sender held at the send gesture, or `null` for none; a previewed Emacs buffer holds none, so its first prompt sends `null` and `SessionManager.submit` clears nothing at admission, whatever the attach raised.
+Its ERT test `agentpane-test-prompt-names-no-error-its-own-attach-drew` shows the Emacs half, and the route test in `src/server/http/app.test.ts` for a `null` `priorErrorId` shows the server half; neither drives a start error through `FakeAdapterFactory({ onStart })`, which is what this card's done condition asks for.
+So what remains here is that test, and a card that finds it green on first write should break OW-jokoto's `null` path in `submit` to see it red, since a test that has never failed has not been shown to test anything (`AGENTS.md`, "Evidence").
+
 ## Done when
 
 A test drives a first prompt as Emacs sends it — a helper test in `src/emacs/helper.test.ts` against the fake server, or a server test in `src/server/http/app.test.ts` that attaches then prompts as the helper does — whose start raises an error, and shows the session's error still held and no `error-cleared` broadcast after admission, red before the change.
