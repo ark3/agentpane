@@ -4656,12 +4656,11 @@ drives."
 
 (defun agentpane-test--heard-out (connection)
   "Let Emacs handle what CONNECTION's dead process left: wait until its
-sentinel has run, no request sent on it awaits a reply, and it has been
-torn down."
+sentinel has run and it has been torn down, which is after the messages
+it wrote last (`agentpane--helper-exited')."
   (should (agentpane-test--wait-for
            (lambda ()
              (and (process-get (jsonrpc--process connection) 'jsonrpc-sentinel-cleanup-started)
-                  (zerop (jsonrpc-continuation-count connection))
                   (not (eq connection agentpane--connection))))
            (+ (float-time) 10))))
 
@@ -4972,6 +4971,38 @@ and going out through a replacement for a buffer holding no handle
             (should-not agentpane--turn-watches)
             (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                            "hello"))))))))
+
+(defun agentpane-test--snapshot-then-death (reply)
+  "Attach a buffer through a helper that writes the attach's snapshot,
+under the handle \"h1\" and streaming, then the attach reply when REPLY,
+and exits while Emacs is busy, and let Emacs handle what it left.  The
+buffer must end let go of, holding no handle, idle and dropped, so a `g'
+attaches it again (OW-bukupu)."
+  (agentpane-test--watching
+    (agentpane-test--outliving
+        (append
+         (list (list :jsonrpc "2.0" :method "session/snapshot"
+                     :params (list :session ref :handle "h1" :isStreaming t :model "luna"
+                                   :nodes (vector))))
+         (and reply
+              (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))))
+      (agentpane--attach)
+      (let* ((dead agentpane--connection)
+             (process (jsonrpc--process dead)))
+        (agentpane-test--dead-unheard process)
+        (agentpane-test--heard-out dead)
+        (should-not agentpane--handle)
+        (should-not agentpane--attached)
+        (should agentpane--dropped)
+        (should-not agentpane--streaming)))))
+
+(ert-deftest agentpane-test-snapshot-before-a-death-is-let-go ()
+  "A buffer the dying helper gave a handle, by the snapshot of an attach
+it answered or never answered, is let go of by that helper's teardown as
+one attached through it is: a snapshot can reach a buffer before its
+attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
+  (agentpane-test--snapshot-then-death t)
+  (agentpane-test--snapshot-then-death nil))
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it

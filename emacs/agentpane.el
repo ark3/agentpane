@@ -371,8 +371,9 @@ handle to it again."
 
 (defun agentpane--helper-gone (connection)
   "Tear down CONNECTION, the helper's, which has exited: forget it, and
-leave each transcript buffer attached through it as a `session/detached'
-for its handle would, through `agentpane--let-go': any helper's death is
+leave each transcript buffer attached through it, or given its handle by
+it (`agentpane--served-by'), as a `session/detached' for its handle
+would, through `agentpane--let-go': any helper's death is
 taken to mean every buffer it served is detached, whatever the cause, a
 helper that crashed over a live server being rare and costing a `g'
 \(D25).
@@ -385,7 +386,8 @@ The helper exits when its event stream drops or its first open fails, so
 this is also how a server that went away reaches the buffers (D25)."
   (setq agentpane--connection nil)
   (dolist (buffer (buffer-list))
-    (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
+    (when (or (eq (buffer-local-value 'agentpane--attached buffer) connection)
+              (eq (buffer-local-value 'agentpane--served-by buffer) connection))
       (with-current-buffer buffer
         (agentpane--let-go)))))
 
@@ -521,14 +523,16 @@ non-nil, on the way out."
       (funcall failed))))
 
 (defvar agentpane--attached)
+(defvar agentpane--served-by)
 (defvar agentpane--dropped)
 (defvar agentpane--status)
 
-(defun agentpane--on-notification (_conn method params)
-  "Handle notification METHOD, with PARAMS, from the helper.
+(defun agentpane--on-notification (conn method params)
+  "Handle notification METHOD, with PARAMS, from the helper on CONN.
 Every one but `sessions/changed' is about one session, and goes to the
 transcript buffer `agentpane--notified-buffer' finds for it, if any.
-That buffer takes the notification's handle, and its `session' as the
+That buffer takes the notification's handle, as served by CONN (see
+`agentpane--served-by'), and its `session' as the
 session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
 helper sends none (OW-mofuho).  A buffer's name never carries the ref
@@ -549,7 +553,8 @@ gapped, and the buffer lets go of it too; see `agentpane--let-go'."
       (when buffer
         (with-current-buffer buffer
           (when (plist-get params :handle)
-            (setq agentpane--handle (plist-get params :handle)))
+            (setq agentpane--handle (plist-get params :handle)
+                  agentpane--served-by conn))
           (agentpane--hold-ref (plist-get params :session))
           (unless (memq method '(session/node session/snapshot))
             (agentpane--draw-recorded buffer))
@@ -588,6 +593,7 @@ handle is folded that status, then ends with the handle; see
   (agentpane--watch-forget agentpane--handle)
   (setq agentpane--handle nil
         agentpane--attached nil
+        agentpane--served-by nil
         agentpane--dropped t))
 
 (defun agentpane--read-idle ()
@@ -1832,6 +1838,18 @@ Attached only while that is still the running connection: a fresh helper
 has attached nothing.  One that has exited is cleared, as a
 `session/detached' clears it (D25); see `agentpane--let-go'.")
 
+(defvar-local agentpane--served-by nil
+  "The helper connection a notification carrying this buffer's handle came
+through, while that helper still sends under it, or nil.
+Its teardown lets go of such a buffer as of one attached through it
+\(`agentpane--helper-gone'), attached or not: the snapshot of an attach
+can give the buffer its handle before the attach's reply (D2), and a
+helper that exits then may never send the reply, or have it fail.  Left
+out, the buffer kept the dead helper's handle and read as streaming,
+neither attached nor dropped, so a `g' previewed it (OW-bukupu).
+Cleared wherever the helper stops sending under the handle, as
+`agentpane--attached' is.")
+
 (defvar-local agentpane--attach-sent nil
   "Non-nil once this buffer has sent a `sessions/attach', whatever became of
 it; see `agentpane--detach', and `agentpane--notified-buffer', which binds
@@ -2780,6 +2798,7 @@ it was."
          (agentpane--watch-forget agentpane--handle)
          (setq agentpane--handle nil
                agentpane--attached nil
+               agentpane--served-by nil
                agentpane--attach-sent nil
                agentpane--dropped nil)
          (agentpane--request
@@ -3072,7 +3091,8 @@ gone out.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil))
+       (setq agentpane--attached nil
+             agentpane--served-by nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
