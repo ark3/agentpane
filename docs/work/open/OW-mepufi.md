@@ -22,6 +22,7 @@ What goes, with its docblocks and tests: the reopen and `reconnectDelayMs`, the 
 What stays: `dropDead`'s run on every `sessions-changed`, since another client's close while the stream is up is still a real case (D25).
 A picker open when the helper exits goes stale until `g`, which the owner accepted on 2026-09-28; it shows no disconnection of its own.
 The helper's module docblock and D21's paragraphs on agentpane-mode's reopen are brought in line; D25 already says D21's reopen paragraphs are superseded for this client.
+`stream/changed` is also on the wire in `src/emacs/protocol.ts`: its entry in the notification list, its member of the notification union, and the FROZEN INTERFACE docblock's line that OW-mareju raised the contract a seventh time for it; retiring it raises the contract a ninth time, recorded in that docblock the way OW-filuge's eighth was.
 
 ## Done when
 
