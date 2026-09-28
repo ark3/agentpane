@@ -55,9 +55,9 @@ export interface ClientState {
 
 /**
  * A session whose `seq` gapped, under `handle` and at the gapped event's
- * `ref`. Each consumer answers it its own way: the browser detaches it
- * (`detachGapped` in `controller.ts`, D25 point 5), and the Emacs helper still
- * re-attaches it by `ref` until OW-filuge.
+ * `ref`. Each consumer detaches it, attaching nothing (D25 point 5):
+ * `detachGapped` in `controller.ts` for the browser, and in
+ * `src/emacs/helper.ts` for the Emacs helper.
  */
 export interface Recovery {
 	ref: SessionRef;
@@ -336,15 +336,14 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// more than it buys -- a resurrecting `error` lights the alert banner over a
 	// session the user just detached, where the `status` above only lit a dot.
 	//
-	// Ignoring is silent on purpose: no gap is reported either. There is no view
-	// to detach, and the helper would answer a report with `api.attach`, spawning
-	// the subprocess again behind the user (OW-sugome).
+	// Ignoring is silent on purpose: no gap is reported either, since there is
+	// no view to detach.
 	const previous = state.sessions[event.handle];
 	if (previous === undefined) return result(state);
 	// A gap applies nothing and is reported for the consumer to answer: the
-	// browser detaches that one session, and the helper re-attaches it (see
-	// `Recovery`). A snapshot never gaps -- it restarts the count, which is why
-	// its arm above makes no check.
+	// browser and the helper each detach that one session (see `Recovery`). A
+	// snapshot never gaps -- it restarts the count, which is why its arm above
+	// makes no check.
 	if (!acceptsSequence(previous, event.seq)) return result(state, [{ ref: event.session, handle: event.handle }]);
 
 	const view: SessionView = {

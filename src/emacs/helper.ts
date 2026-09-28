@@ -11,12 +11,13 @@
  *
  * What the reducer decides and what this loop decides. `reduceServerEvent`
  * applies every rule the browser learned -- key a live view by its handle and
- * take a new ref from any event under it (D24), ask for recovery on a `seq`
- * gap, ignore an event for a view it does not hold (D2) -- and answers
+ * take a new ref from any event under it (D24), report a `seq` gap, ignore an
+ * event for a view it does not hold (D2) -- and answers
  * `{ state, recover, refreshSessions }` and nothing more, so
  * the loop dispatches on the raw event's `type` beside that result. A `seq`
- * gap is healed by an `api.attach`, after which the server broadcasts a fresh
- * snapshot over the stream, and that snapshot is what reaches Emacs.
+ * gap detaches that one session, as the browser's does (D25 point 5): its
+ * view goes, and Emacs is told `session/detached` under its handle where it
+ * attached it, and nothing is attached on its behalf (`detachGapped` below).
  *
  * One stream, filtered. It opens lazily at the first `sessions/list` or
  * `sessions/attach`, before that request's REST call, and it stays open. At
@@ -295,12 +296,40 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		}
 	};
 
+	/**
+	 * Detach the session whose `seq` gapped under `handle` (D25 point 5): its
+	 * view goes, so no later event under the handle is applied to it, or gaps
+	 * against it again, until a snapshot forms it afresh; and where Emacs
+	 * attached it, the attachment goes and Emacs is told, as for a handle the
+	 * server let go (`dropDead`). Nothing is attached on Emacs's behalf: an
+	 * attach is what spawns, and one here would spawn again a session whose
+	 * `sessions/close` is out. The buffer comes back on `g`. An attach whose
+	 * snapshot is still on its way when the gap lands needs nothing here:
+	 * that snapshot forms the view again and goes out as its first
+	 * notification. One whose snapshot arrived before the gap and whose reply
+	 * lands after it is not reconciled, and leaves the buffer counting itself
+	 * attached to a handle the helper says nothing under (OW-tifiva).
+	 */
+	const detachGapped = (handle: string): void => {
+		const sessions = { ...state.sessions };
+		delete sessions[handle];
+		state = { ...state, sessions };
+		const session = attached.get(handle);
+		if (session === undefined) return;
+		drop(handle);
+		notify({ method: "session/detached", params: { session, handle } });
+	};
+
 	const onEvent = (event: ServerEvent): void => {
 		const before = state;
 		const result = reduceServerEvent(before, event);
 		state = result.state;
 		if (result.refreshSessions) notify({ method: "sessions/changed" });
-		for (const { ref } of result.recover) api.attach(ref).catch(() => undefined);
+		// A gapped event applied nothing, and there is nothing more to say of it.
+		if (result.recover.length > 0) {
+			for (const { handle } of result.recover) detachGapped(handle);
+			return;
+		}
 		if (event.type === "sessions-changed") {
 			void dropDead();
 			return;
@@ -398,7 +427,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			},
 			// The server frames its own JSON; a frame that fails to parse has no
 			// session to report against, and dropping it costs at most a seq gap,
-			// which the next event heals.
+			// which the next event detaches that one session for.
 			onMalformed() {},
 		});
 	};

@@ -7,9 +7,8 @@
  *
  * D3 -- `seq` is monotonic *per session*. A gap tells the client it missed an
  * update, and since D25 the client detaches the session rather than taking a
- * fresh snapshot (the Emacs helper still re-attaches until OW-filuge). Two
- * kinds of snapshot exist here and the distinction is the whole trick to
- * keeping one counter honest across several clients:
+ * fresh snapshot. Two kinds of snapshot exist here and the distinction is the
+ * whole trick to keeping one counter honest across several clients:
  *
  *   - `broadcastSnapshot` goes to *every* client, so it may reset the counter
  *     to 0 -- nobody is left holding a stale expectation.

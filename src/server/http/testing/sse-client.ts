@@ -7,9 +7,9 @@
  * the `data: ` prefix".
  *
  * It also implements the client half of D3 that the server's contract only
- * implies: track `seq` per session, and treat a gap as "I missed something,
- * re-snapshot". Encoding that here is what lets a server test assert the
- * recovery actually recovers.
+ * implies: track `seq` per session, and record a gap as "I missed
+ * something". What a client does about one is its own (D25 point 5); a
+ * server test asserts that a fresh stream's opening snapshot fills the hole.
  *
  * Like the browser's reducer, it keys what it holds by the session's handle
  * and takes the ref from each event under it, so a rename moves the ref and
@@ -21,7 +21,7 @@ import { type ServerEvent, type SessionRef, sessionKey } from "../../../shared/p
 
 export class SseTestClient {
 	readonly events: ServerEvent[] = [];
-	/** Sessions where a `seq` gap was observed. Per D3 the cure is a fresh snapshot. */
+	/** Sessions where a `seq` gap was observed. */
 	readonly gaps: string[] = [];
 
 	/** By handle, as are the three below: the `sessionKey` of the ref it last carried, most recent event last. */

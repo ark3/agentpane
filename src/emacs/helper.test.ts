@@ -271,22 +271,51 @@ describe("notifications", () => {
 		expect(io.notifications()).toHaveLength(2);
 	});
 
-	it("heals a seq gap by attaching again, and the snapshot that follows is a fresh session/snapshot", async () => {
+	it("detaches a session whose seq gaps, attaching nothing, and says nothing more under it until Emacs attaches it again (OW-filuge)", async () => {
 		const { io, source, calls } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
 		await io.until(1);
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
-		expect(calls).toHaveLength(1);
 
-		source.emit({ type: "status", session: pi, handle: h(pi), seq: 5, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
-		await vi.waitFor(() => expect(calls).toHaveLength(2));
-		expect(calls[1]).toMatchObject({ url: ROUTES.session(pi), method: "GET" });
-		expect(io.notifications()).toHaveLength(1);
-
-		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(3);
-		expect(io.notifications()[1]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: h(pi) } });
+		// A later event under the handle finds no view to gap against again.
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		// A gap in a view Emacs never attached is told nothing.
+		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: codex, handle: h(codex), seq: 5, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(calls).toHaveLength(1);
+		expect(io.notifications()).toHaveLength(2);
+
+		// `g`: the attach broadcasts a snapshot, which forms the view again.
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await io.until(4);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(5);
+		expect(io.notifications()[2]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`, `GET ${ROUTES.session(pi)}`]);
+	});
+
+	it("sends nothing from the gapped view when the attach after it is answered under the rename the gap swallowed (OW-filuge)", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+		let attaches = 0;
+		const { io, source } = start({ [`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(attaches++ === 0 ? pi : renamed, h(pi)) }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		source.emit({ type: "status", session: renamed, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await io.until(3);
+
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await io.until(4);
+		source.emit({ type: "snapshot", session: renamed, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(5);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.slice(2).map((message) => message["method"] ?? message["id"])).toEqual(["session/detached", 2, "session/snapshot"]);
+		expect(io.out[4]).toMatchObject({ params: { session: renamed, handle: h(pi), isStreaming: true, askedFor: pi } });
 	});
 
 	it("says nothing for a session Emacs never attached, and nothing more after sessions/close", async () => {

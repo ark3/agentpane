@@ -20,6 +20,8 @@
  * `sessions/changed` flows to a picker before anything is attached.
  * OW-mareju raised it a seventh, for `stream/changed`, which says the event
  * stream dropped and came back, where the helper had reopened it silently.
+ * OW-filuge raised it an eighth, sending `session/detached` for a session
+ * whose `seq` gapped, where the helper had attached it again.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -281,11 +283,13 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
- * - `session/detached` -- `{ session, handle }`. The server no longer holds
- *   `handle`, and nothing more comes under it: the helper's own listing,
- *   asked at each `sessions/changed` it sends, lacked it -- a server
- *   restart, or a close by another client -- and the helper has dropped
- *   the attachment (OW-yibijo). `session` is the ref it last named the
+ * - `session/detached` -- `{ session, handle }`. Nothing more comes under
+ *   `handle`, and the helper has dropped the attachment: either the server
+ *   no longer holds it, the helper's own listing, asked at each
+ *   `sessions/changed` it sends, having lacked it -- a server restart, or a
+ *   close by another client (OW-yibijo) -- or the session's `seq` gapped,
+ *   and the helper detaches that one session rather than attach it again
+ *   (D25 point 5, OW-filuge). `session` is the ref it last named the
  *   session by. The buffer holding `handle` lets go of it and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever

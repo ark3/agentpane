@@ -409,9 +409,9 @@ or one a later snapshot moved it onto; see `agentpane--notified-buffer'.
 Nil in a buffer that has not attached.  A buffer detached keeps the one
 it held, which the server never mints again: the parent of a Pi fork,
 whose container the server has let go, and whose detach names it.  One
-the helper told its handle is gone, by a `session/detached', lets go of
-it instead, as does one attached through a helper that has exited (D25);
-see `agentpane--let-go'.")
+the helper detached, by a `session/detached', lets go of it instead, as
+does one attached through a helper that has exited (D25); see
+`agentpane--let-go'.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for `sessions/attach', which may spawn the session's
@@ -528,8 +528,9 @@ A `session/node' is recorded rather than drawn; see `agentpane--record'.
 Every other notification but a snapshot, whose redraw discards what is
 recorded, draws what is recorded first, so it finds the buffer as it
 would have had each node been drawn on arrival.
-A `session/detached' says the server let go of the handle the buffer
-holds, and the buffer lets go of it too; see `agentpane--let-go'."
+A `session/detached' says the helper sends nothing more under the handle
+the buffer holds, the server having let go of it or its `seq' having
+gapped, and the buffer lets go of it too; see `agentpane--let-go'."
   (cond
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
@@ -567,13 +568,14 @@ holds, and the buffer lets go of it too; see `agentpane--let-go'."
 
 (defun agentpane--let-go ()
   "Let go of the handle this buffer holds, which will say nothing more to
-it: the server let go of it (`session/detached'), or the helper it was
-attached through is gone (`agentpane--helper-gone'), which D25 takes to
-mean the same.  The buffer holds no handle and is not attached, and is
-dropped; see `agentpane--dropped'.  It reads as the status that ends a
-turn leaves it, nothing streaming or compacting, since nothing will say
-so under that handle.  The turn-done watch on that handle is folded that
-status, then ends with the handle; see `agentpane--watch-turn'."
+it: the server let go of it, or its `seq' gapped (`session/detached'), or
+the helper it was attached through is gone (`agentpane--helper-gone'),
+which D25 takes to mean the same.  The buffer holds no handle and is not
+attached, and is dropped; see `agentpane--dropped'.  It reads as the
+status that ends a turn leaves it, nothing streaming or compacting, since
+nothing will say so under that handle.  The turn-done watch on that
+handle is folded that status, then ends with the handle; see
+`agentpane--watch-turn'."
   (agentpane--read-idle)
   (agentpane--watch-forget agentpane--handle)
   (setq agentpane--handle nil
@@ -594,8 +596,8 @@ another status; see `agentpane--let-go'."
   "The transcript buffer the notification METHOD, with PARAMS, is about.
 The buffer holding the notification's handle; failing that, one found by
 a ref as below, which then takes the handle; else nil.  A
-`session/detached' is only ever about the buffer holding its handle: the
-handle is gone, and no buffer holding the ref alone ever held it.
+`session/detached' is only ever about the buffer holding its handle: no
+buffer holding the ref alone ever held it.
 
 By the ref, a buffer holding no handle, which for a notification is one
 whose attach has not yet answered: the helper sends nothing for a
@@ -1843,19 +1845,20 @@ it; see `agentpane--detach', and `agentpane--notified-buffer', which binds
 a snapshot's `askedFor' only to such a buffer.")
 
 (defvar-local agentpane--dropped nil
-  "Non-nil once the helper said the handle this buffer held is gone, by a
+  "Non-nil once the helper detached the handle this buffer held, by a
 `session/detached', until an attach of this buffer's answers: the
 helper's listing, asked at a `sessions-changed' or a reopen of its event
 stream, lacked the handle, a server restart or a close elsewhere having
-let go of it (OW-yibijo).  A helper that exits leaves each buffer it
-served so too (D25); see `agentpane--let-go'.  The buffer then holds no
-handle and is not attached, and keeps its ref and what it drew, so
-`agentpane-refetch' attaches again rather than drawing the stored
-transcript over the live one.  That attach, or a prompt's, is a first
-attach of whatever handle answers: `agentpane--notified-buffer' binds a
-snapshot under a new handle and ref to this buffer by its `askedFor', and
-`agentpane--attached-as' merges it into a buffer already holding that
-handle.  It stays set when that attach fails, so a `g' attaches again.")
+let go of it (OW-yibijo), or the session's `seq' gapped (D25, OW-filuge).
+A helper that exits leaves each buffer it served so too (D25); see
+`agentpane--let-go'.  The buffer then holds no handle and is not
+attached, and keeps its ref and what it drew, so `agentpane-refetch'
+attaches again rather than drawing the stored transcript over the live
+one.  That attach, or a prompt's, is a first attach of whatever handle
+answers: `agentpane--notified-buffer' binds a snapshot under a new handle
+and ref to this buffer by its `askedFor', and `agentpane--attached-as'
+merges it into a buffer already holding that handle.  It stays set when
+that attach fails, so a `g' attaches again.")
 
 (defvar-local agentpane--attaching nil
   "While a `sessions/attach' this buffer sent has not answered, the callers

@@ -163,7 +163,7 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 - a `status` event for a change to the status fields alone, a turn's start and end among them (OW-yirosu)
 - beyond attach, reconnect and session switch, a snapshot goes out only where no upsert or `status` can say what changed; as of OW-yirosu those are a rename of the session's id, a transcript replaced wholesale, an update naming an index that holds no message, and a changed message landing with a compaction change (OW-jelovu)
 - an `error-cleared` event when the server stops holding a session's turn error, at a prompt's admission or a client's dismissal, which until OW-jopifu only a snapshot could say
-- a monotonic `seq` detects a dropped update; recovery was "re-snapshot" until D25 point 5 amended it: the browser now detaches the one session, and the Emacs helper re-attaches it until OW-filuge
+- a monotonic `seq` detects a dropped update; recovery was "re-snapshot" until D25 point 5 amended it: the browser (OW-lunihe) and the Emacs helper (OW-filuge) now each detach the one session
 
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.
 
