@@ -1497,29 +1497,35 @@ and the other's composer, text and all, sends to the survivor."
   "When an attach reply merges a buffer holding an edit into the one that
 attached, the draft that edit displaced follows the survivor's own, and
 the message's text loaded to fork with does not: sent from the survivor,
-which holds no edit, it would prompt the session itself (OW-bifevo)."
-  (agentpane-test--with-helper
-    (agentpane-test--merging
-      (with-current-buffer previewing
-        (goto-char (point-max))
-        (insert "mine"))
-      (with-current-buffer holder
-        (setq agentpane--attached agentpane--connection)
-        (agentpane--draw agentpane-test--image-nodes)
-        (goto-char (point-max))
-        (insert "theirs")
-        (agentpane--start-edit (aref agentpane-test--image-nodes 0))
-        (should (equal (agentpane-test--draft) "Fix the bug")))
-      (with-current-buffer previewing
-        (agentpane--attach)
-        (should-not (buffer-live-p holder))
-        (should-not agentpane--editing)
-        (should (equal (agentpane-test--draft) "mine\ntheirs"))
-        (agentpane-send))
-      (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
-        (should (= (length prompts) 1))
-        (should (equal (plist-get (cdar prompts) :session) canonical))
-        (should (equal (plist-get (cdar prompts) :text) "mine\ntheirs"))))))
+which holds no edit, it would prompt the session itself (OW-bifevo).  The
+edit's text, the user's changes and all, goes on the kill ring."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--with-helper
+      (agentpane-test--merging
+        (with-current-buffer previewing
+          (goto-char (point-max))
+          (insert "mine"))
+        (with-current-buffer holder
+          (setq agentpane--attached agentpane--connection)
+          (agentpane--draw agentpane-test--image-nodes)
+          (goto-char (point-max))
+          (insert "theirs")
+          (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+          (insert " properly"))
+        (with-current-buffer previewing
+          (agentpane--attach)
+          (should-not (buffer-live-p holder))
+          (should-not agentpane--editing)
+          (should (equal (agentpane-test--draft) "mine\ntheirs"))
+          (should (equal (current-kill 0) "Fix the bug properly"))
+          (agentpane-send))
+        (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
+          (should (= (length prompts) 1))
+          (should (equal (plist-get (cdar prompts) :session) canonical))
+          (should (equal (plist-get (cdar prompts) :text) "mine\ntheirs")))))))
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-the-survivors-edit ()
   "When an attach reply merges the buffer holding its handle into one that

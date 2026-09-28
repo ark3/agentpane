@@ -2187,28 +2187,33 @@ This one survives because it is the one attached, and its own callbacks
 are running: the attach reply goes on to call its waiters, a prompt among
 them, in this buffer.  OTHER's prompt-region draft follows this one's
 own, and its composer, if any, sends here from then on, and is this
-buffer's composer if it has none.  While this buffer holds an edit of its
-own (`agentpane-edit'), that draft follows instead the draft the edit
-displaced, and the prompt region, holding the edit's text, is left as it
-was: an edit sent here meanwhile, whose attach made the merge, would
-otherwise end leaving the draft behind the text it sent, for the next
-send to prompt this buffer's session with.  Cancelling the edit puts
-both back; a fork drops both, as the browser's edit drops the draft it
-displaced unless cancelled.  Should this buffer have a prompt in
+buffer's composer if it has none.  Should this buffer have a prompt in
 flight, its answer then leaves the sent text in place rather than
 clearing it, as it does whenever the region changed after the send.
-An edit OTHER holds (`agentpane-edit') is dropped, as `agentpane-cancel-edit'
-drops it, and what follows is the draft it displaced: moved here as a
-plain draft, the message's text loaded to fork with would prompt this
-buffer's session itself (OW-bifevo).  The message is still in the
-transcript, to edit again here.
+An edit OTHER holds (`agentpane-edit') is dropped, and its prompt region,
+the message's text with whatever the user changed in it, goes on the
+kill ring, the echo area saying so: moved here as a plain draft, that
+text loaded to fork with would prompt this buffer's session itself
+(OW-bifevo).  What follows this one's draft is then the draft the edit
+displaced, which `agentpane-cancel-edit' would have put back in OTHER.
+The message itself is still in the transcript, to edit again here, and
+the kill ring keeps the user's changes to it.
+While this buffer holds an edit of its own, OTHER's draft follows instead
+the draft that edit displaced, and the prompt region, holding the edit's
+text, is left as it was: an edit sent here meanwhile, whose attach made
+the merge, would otherwise end leaving the draft behind the text it
+sent, for the next send to prompt this buffer's session with.
+Cancelling the edit puts both back; a fork drops both, as the browser's
+edit drops the draft it displaced unless cancelled.
 Requests of OTHER's still in flight are dropped with it, as any killed
 buffer's are; a prompt of its own that went out leaves its text in this
-buffer's draft.  A window that showed OTHER shows this one, and OTHER's
-kill sends no `sessions/detach', which would silence the session this one
-now holds.  What OTHER drew goes with it: the snapshot of this buffer's
-attach may have been drawn there, since until the reply the handle was
-OTHER's, so the caller attaches again for one of its own.
+buffer's draft, and the text of an edit's send goes on the kill ring
+with the dropped edit, OTHER's region holding it until the send answers.
+A window that showed OTHER shows this one, and OTHER's kill sends no
+`sessions/detach', which would silence the session this one now holds.
+What OTHER drew goes with it: the snapshot of this buffer's attach may
+have been drawn there, since until the reply the handle was OTHER's, so
+the caller attaches again for one of its own.
 A composer taken as this buffer's own is renamed after this buffer; one
 that stays secondary to this buffer's own composer keeps its name.
 The detach is disarmed for this kill alone, rather than skipped whenever
@@ -2223,12 +2228,16 @@ does, after OTHER's windows have been handed over, the indicator goes
 with OTHER: a merge happens in the buffer the user is acting in, the
 session's transcript is in view, and nothing would clear it, as
 `agentpane--clear-seen-turns' runs only when windows change."
-  (let ((buffer (current-buffer))
-        (draft (with-current-buffer other
-                 (if agentpane--editing
-                     (plist-get agentpane--editing :draft)
-                   (buffer-substring-no-properties agentpane--prompt-start (point-max)))))
-        (composer (buffer-local-value 'agentpane--composer other)))
+  (let* ((buffer (current-buffer))
+         (edit (buffer-local-value 'agentpane--editing other))
+         (region (with-current-buffer other
+                   (buffer-substring-no-properties agentpane--prompt-start (point-max))))
+         (draft (if edit (plist-get edit :draft) region))
+         (composer (buffer-local-value 'agentpane--composer other)))
+    (when (and edit (not (string-empty-p region)))
+      (kill-new region)
+      (message "agentpane: the edit in %s was dropped as it merged here; \
+its text is on the kill ring" (buffer-name other)))
     (unless (string-empty-p draft)
       (if agentpane--editing
           (let ((own (plist-get agentpane--editing :draft)))
