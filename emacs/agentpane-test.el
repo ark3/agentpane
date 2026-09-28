@@ -2607,11 +2607,13 @@ the edit's index, images and displaced draft, and what the separator says."
                         (substring-no-properties
                          (overlay-get (plist-get agentpane--editing :overlay) 'display)))))
 
-(defun agentpane-test--edit-last-streaming (backend)
-  "Edit the last message of a streaming BACKEND session, holding any abort's
-reply.  Return the methods sent, in order, and the edit's snapshot, taken
-while the abort, if any, is still unanswered."
-  (let ((ref (list :backend backend :id "parent")))
+(defun agentpane-test--edit-last-streaming (backend &optional streaming compaction)
+  "Edit the last message of a BACKEND session whose status says it is
+STREAMING, streaming when omitted, in the COMPACTION phase, holding any
+abort's reply.  Return the methods sent, in order, and the edit's snapshot,
+taken while the abort, if any, is still unanswered."
+  (let ((ref (list :backend backend :id "parent"))
+        (streaming (if (eq streaming 'idle) :json-false t)))
     (agentpane-test--with-helper
       (agentpane-test--forking
           [(:id "entry-0" :text "first draft" :index 0)]
@@ -2622,7 +2624,8 @@ while the abort, if any, is still unanswered."
                 agentpane--attach-sent t)
           (setq hold '(sessions/abort))
           (agentpane--on-notification
-           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+           nil 'session/status
+           (list :session ref :isStreaming streaming :compaction compaction :model nil))
           (goto-char (point-max))
           (agentpane-edit-last)
           (list (mapcar #'car (reverse sent))
@@ -2640,6 +2643,42 @@ waiting on the abort to fill; a streaming Codex session is not aborted
                    (list '(sessions/forkPoints sessions/abort) filled)))
     (should (equal (agentpane-test--edit-last-streaming "codex")
                    (list '(sessions/forkPoints) filled)))))
+
+(ert-deftest agentpane-test-edit-last-stops-nothing-idle-or-compacting ()
+  "`agentpane-edit-last' on a Pi session that is not streaming, or that is
+streaming through a compaction, aborts nothing, as the browser's Edit last
+message, which it shows then in place of Stop and edit, does not
+(`streamingAction' in src/client/App.svelte)."
+  (dolist (compaction '("requesting" "running"))
+    (should (equal (car (agentpane-test--edit-last-streaming "pi" t compaction))
+                   '(sessions/forkPoints))))
+  (should (equal (car (agentpane-test--edit-last-streaming "pi" 'idle))
+                 '(sessions/forkPoints))))
+
+(ert-deftest agentpane-test-edit-last-edits-a-recorded-node-not-yet-drawn ()
+  "`agentpane-edit-last' pressed while a `session/node' for a newer user
+message is recorded but not yet drawn edits that message, not the last one
+drawn (`agentpane--record', OW-roveze)."
+  (let ((ref '(:backend "codex" :id "parent")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          (vconcat agentpane-test--two-asks-points
+                   [(:id "entry-4" :text "third draft" :index 4)])
+          '(:backend "codex" :id "fork")
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--two-asks)
+          (setq agentpane--attached 'connection)
+          (agentpane--on-notification
+           nil 'session/node
+           (list :session ref
+                 :node '(:index 4 :role "user"
+                         :parts [(:type "text" :text "third draft"
+                                  :html "<p>third draft</p>\n")])))
+          (should (equal (agentpane-test--indices) '(0 1 2 3)))
+          (agentpane-edit-last)
+          (should (eql (plist-get agentpane--editing :index) 4))
+          (should (equal (agentpane-test--draft) "third draft"))
+          (agentpane-test--redraw buffer))))))
 
 (ert-deftest agentpane-test-edit-last-leaves-the-state-edit-does ()
   "`agentpane-edit-last', from the transcript or from its composer, leaves
@@ -2665,9 +2704,15 @@ in the transcript's prompt region, and the transcript is shown."
                  (agentpane-prompt)
                  (with-current-buffer (buffer-local-value 'agentpane--composer transcript)
                    (insert "composed")
+                   (setq hold '(sessions/forkPoints))
                    (agentpane-edit-last)
+                   ;; Shown at the press, not once the points answer.
+                   (should (eq (window-buffer (selected-window)) transcript))
+                   (select-window (get-buffer-window (current-buffer)))
+                   (setq hold nil)
+                   (funcall (cdr (pop held)) t)
+                   (should (eq (window-buffer (selected-window)) (current-buffer)))
                    (should (equal (buffer-string) "composed")))
-                 (should (eq (window-buffer (selected-window)) transcript))
                  (set-buffer transcript))))
             (push (agentpane-test--edit-snapshot) snapshots)
             (push (mapcar #'car (reverse sent)) requests)))))

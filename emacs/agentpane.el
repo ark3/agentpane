@@ -2837,39 +2837,46 @@ displaced, as in the browser (OW-bigotu)."
 browser's Edit last message does: `agentpane-edit' on that message, which
 leaves exactly the edit that would, wherever point is.  From a composer
 the edit opens in its transcript's prompt region, where it is sent from,
-and the transcript is shown.
+and the transcript is shown at the press, before the fork points are
+fetched, so the window it takes is the one the press was made from, not
+whichever the user has moved to by their reply.
 
-It is the last user message or none.  One no fork point names is refused
-as `agentpane-edit' refuses it, and no older message is edited instead,
-as the browser withdraws the control rather than quietly load an older
-one (OW-roveze).  A transcript holding no user message is refused too.
+It is the last user message to have arrived, the nodes recorded and not
+yet drawn (`agentpane--record') drawn first, or none.  One no fork point
+names is refused as `agentpane-edit' refuses it, and no older message is
+edited instead, as the browser withdraws the control rather than quietly
+load an older one (OW-roveze).  A transcript holding no user message is
+refused too.
 
 On a streaming Pi session this also aborts the turn, as the browser's
 Stop and edit does: the send would abort it anyway (`agentpane-fork'),
-and this stops it at the press instead.  The abort goes once the points
-are matched and the edit is open, so a message that is not forkable
-costs the turn nothing, and it is not waited on, since the send checks
-for a streaming turn again and aborts it again before it forks.  Codex
-and Claude Code keep a parent turn running through a fork, and are not
-aborted."
+and this stops it at the press instead.  Not through a compaction, which
+the browser's `streamingAction' leaves unstoppable, showing Edit last
+message there.  The abort goes once the points are matched and the edit
+is open, so a message that is not forkable costs the turn nothing, and it
+is not waited on, since the send checks for a streaming turn again and
+aborts it again before it forks.  Codex and Claude Code keep a parent
+turn running through a fork, and are not aborted."
   (interactive)
   (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
     (with-current-buffer (agentpane--transcript)
       (when agentpane--forking
         (user-error "A fork of this session is already in flight"))
+      (agentpane--draw-recorded (current-buffer))
       (let ((at (ewoc-nth (agentpane--ewoc) -1)))
         (while (and at (not (equal (plist-get (ewoc-data at) :role) "user")))
           (setq at (ewoc-prev agentpane--ewoc at)))
         (unless at
           (user-error "No user message to edit"))
+        (when composer
+          (pop-to-buffer (current-buffer)))
         (agentpane--edit
          (ewoc-data at) "C-c C-e" "the last message"
          (lambda ()
            (when (and agentpane--streaming
+                      (not (plist-get agentpane--status :compaction))
                       (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi"))
-             (agentpane-abort))
-           (when composer
-             (pop-to-buffer (current-buffer)))))))))
+             (agentpane-abort))))))))
 
 (defun agentpane--edit (node key what &optional then)
   "Open the edit of NODE, a user node, once a fork point names it, and call
