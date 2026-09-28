@@ -2362,6 +2362,102 @@ parent detached."
                          '(sessions/forkPoints sessions/fork sessions/detach
                            sessions/attach))))))))
 
+;;;; Editing an earlier message, against a stub connection
+
+(defconst agentpane-test--image-nodes
+  [(:index 0 :role "user"
+    :parts [(:type "text" :text "Fix the bug" :html "<p>Fix the bug</p>\n")
+            (:type "image" :mimeType "image/png" :data "AAAA")])
+   (:index 1 :role "assistant"
+    :parts [(:type "text" :text "Looking." :html "<p>Looking.</p>\n")]
+    :meta (:model "haiku" :usage (:totalTokens 12 :cost 0.001)))]
+  "A user message holding an image, then an assistant turn.")
+
+(defun agentpane-test--draft ()
+  "The prompt region's text in the current buffer."
+  (buffer-substring-no-properties agentpane--prompt-start (point-max)))
+
+(ert-deftest agentpane-test-edit-forks-with-the-edited-text-and-images ()
+  "`agentpane-edit' on a user message holding an image fills the prompt
+region with its text, and the send forks at that message and prompts the
+fork, not the parent, with the edited text and the message's image, in
+the shape `sessions/prompt''s `images' take."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (forked '(:backend "codex" :id "t2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--image-nodes)
+          (setq agentpane--attached 'connection)
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          (goto-char (point-max))
+          (insert " properly")
+          (agentpane-send)
+          (should (equal (assq 'sessions/fork sent)
+                         `(sessions/fork :session ,ref :entryId "turn-0")))
+          (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
+            (should (= (length prompts) 1))
+            (let ((params (cdar prompts)))
+              (should (equal (plist-get params :session) forked))
+              (should (equal (plist-get params :text) "Fix the bug properly"))
+              (should (equal (plist-get params :images)
+                             [(:mimeType "image/png" :base64 "AAAA")]))))
+          (should (equal (agentpane-test--draft) ""))
+          (should-not agentpane--editing))))))
+
+(ert-deftest agentpane-test-edit-abandoned-forks-nothing ()
+  "An edit abandoned with `agentpane-cancel-edit' puts back the draft it
+displaced and forks nothing: the next send prompts the session itself."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-0" :text "Fix the bug" :index 0)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--image-nodes)
+          (setq agentpane--attached 'connection)
+          (goto-char (point-max))
+          (insert "a draft")
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          (agentpane-cancel-edit)
+          (should (equal (agentpane-test--draft) "a draft"))
+          (agentpane-send)
+          (should-not (assq 'sessions/fork sent))
+          (let ((prompt (assq 'sessions/prompt sent)))
+            (should (equal (plist-get (cdr prompt) :session) ref))
+            (should (equal (plist-get (cdr prompt) :text) "a draft"))
+            (should-not (plist-get (cdr prompt) :images))))))))
+
+(ert-deftest agentpane-test-edit-refused-at-the-press ()
+  "`agentpane-edit' on a message no fork point names fills nothing and says
+it is not forkable; on a previewed buffer it attaches, fills nothing, and
+says to press again, as `agentpane-fork' does."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "turn-2" :text "More" :index 2)]
+          '(:backend "codex" :id "t2")
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--image-nodes)
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (should (equal (mapcar #'car sent) '(sessions/attach)))
+          (should (seq-some (lambda (text) (string-search "press e again" text)) said))
+          (setq sent nil)
+          (agentpane-test--goto-index 0)
+          (agentpane-edit)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+          (should (seq-some (lambda (text) (string-search "not forkable" text)) said))
+          (should (equal (agentpane-test--draft) ""))
+          (should-not agentpane--editing))))))
+
 ;;;; Sending, against a stub connection
 
 (ert-deftest agentpane-test-one-send-at-a-time ()

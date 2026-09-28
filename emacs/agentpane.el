@@ -34,7 +34,11 @@
 ;; `n' and `p' step between nodes, `TAB' toggles the fold at point, `g'
 ;; refetches, `f' forks at the user message at point into a buffer of its
 ;; own -- on a previewed transcript it attaches first, and forks at the
-;; next press -- `r' toggles reading view, and `q' buries.
+;; next press -- `e' takes the user message at point back into the prompt
+;; region to edit, as the browser's pencil does, so that `C-RET' forks at
+;; that message and sends the edited text and the message's images into
+;; the fork, and `C-c C-k' abandons the edit -- `r' toggles reading view,
+;; and `q' buries.
 ;; Reading view is the browser's (`condense' in
 ;; src/client/render/transcript.ts): tool calls, tool results and thinking
 ;; are elided, and while a turn streams the line above the prompt names the
@@ -87,7 +91,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 149 tests, 146 results as expected, 0 unexpected, 3 skipped
+;;     Ran 165 tests, 162 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1816,6 +1820,8 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
     (define-key map (kbd "f") #'agentpane-fork)
+    (define-key map (kbd "e") #'agentpane-edit)
+    (define-key map (kbd "C-c C-k") #'agentpane-cancel-edit)
     (define-key map (kbd "r") #'agentpane-toggle-reading)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "C-<return>") #'agentpane-send)
@@ -2391,11 +2397,22 @@ before the fork did not reach; see `agentpane--watch-turn'."
   "Non-nil while a prompt this transcript buffer sent, or the attach before
 it, has not answered.")
 
-(defun agentpane--send-prompt (text sent)
+(defvar-local agentpane--editing nil
+  "While the prompt region holds an earlier user message taken back to edit
+\(`agentpane-edit'), a plist: `:index', that message's transcript index;
+`:images', its images as the prompt's `images' take them; `:draft', the
+prompt region's text the edit displaced; `:overlay', the overlay naming
+the edit over the prompt separator.  Nil otherwise.")
+
+(defun agentpane--send-prompt (text sent &optional images)
   "Send TEXT as a prompt to the session of the current buffer's transcript,
-then call SENT.  A prompt the server refuses, such as one sent mid-turn
+with IMAGES, a list of the plists the prompt's `images' take, then call
+SENT.  A prompt the server refuses, such as one sent mid-turn
 \(DESIGN D16), shows the server's text in the echo area and SENT is not
 called, so the draft stays where it was.
+While the transcript holds an edit (`agentpane-edit'), TEXT goes instead
+into a fork at the edited message, with that message's images; see
+`agentpane--send-edit'.
 
 One send at a time per session, as the browser allows (OW-nasofa): until
 the prompt has answered, which it does once the turn is accepted, a second
@@ -2448,23 +2465,27 @@ handling exits non-locally was admitted, and keeps its watch too."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
-    (when agentpane--sending
+    (cond
+     (agentpane--editing (agentpane--send-edit text sent))
+     (agentpane--sending
       (user-error "A prompt to this session is already being sent"))
-    (setq agentpane--sending t)
-    (let ((failed (lambda () (setq agentpane--sending nil)))
-          (prior (and agentpane--error agentpane--error-id)))
-      (agentpane--attached-then
-       (lambda ()
-         (let ((watch (agentpane--watch-submit)))
-           (agentpane--request 'sessions/prompt
-                               (list :session (agentpane--ref agentpane--session) :text text
-                                     :priorErrorId prior)
-                               (lambda (_)
-                                 (setq agentpane--sending nil)
-                                 (funcall sent))
-                               t failed agentpane--spawn-timeout
-                               (lambda () (agentpane--watch-abandon watch)))))
-       failed))))
+     (t
+      (setq agentpane--sending t)
+      (let ((failed (lambda () (setq agentpane--sending nil)))
+            (prior (and agentpane--error agentpane--error-id)))
+        (agentpane--attached-then
+         (lambda ()
+           (let ((watch (agentpane--watch-submit)))
+             (agentpane--request 'sessions/prompt
+                                 (append (list :session (agentpane--ref agentpane--session) :text text
+                                               :priorErrorId prior)
+                                         (and images (list :images (vconcat images))))
+                                 (lambda (_)
+                                   (setq agentpane--sending nil)
+                                   (funcall sent))
+                                 t failed agentpane--spawn-timeout
+                                 (lambda () (agentpane--watch-abandon watch)))))
+         failed))))))
 
 (defun agentpane--clear-sent (buffer beg text)
   "Delete TEXT from BEG to the end of BUFFER, if it is still exactly there."
@@ -2705,7 +2726,7 @@ second press says so and sends nothing."
   (unless (agentpane-index-at-point)
     (user-error "No message at point"))
   (cond
-   ((agentpane--attached-p) (agentpane--fork-points))
+   ((agentpane--attached-p) (agentpane--fork-points (agentpane-index-at-point)))
    (agentpane--attaching
     (user-error "This session is still attaching; press f once it has"))
    (t (agentpane--attach
@@ -2713,35 +2734,46 @@ second press says so and sends nothing."
          (message "agentpane: the transcript now shows the live session; \
 press f again at the message to fork"))))))
 
-(defun agentpane--fork-points ()
-  "Fetch this attached buffer's fork points, and fork at the one naming the
-index at point.  See `agentpane-fork'."
-  (let* ((index (agentpane-index-at-point))
-         (parent (agentpane--ref agentpane--session))
+(defun agentpane--fork-point (index then &optional failed)
+  "Fetch this attached buffer's fork points, and call THEN with the one
+naming INDEX; when none does, call FAILED, if given, and say the message is
+not forkable.  See `agentpane-fork'."
+  (agentpane--request
+   'sessions/forkPoints (list :session (agentpane--ref agentpane--session))
+   (lambda (points)
+     (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
+       (if point
+           (funcall then point)
+         (when failed (funcall failed))
+         (message "agentpane: the message at point is not forkable"))))
+   t failed agentpane--spawn-timeout))
+
+(defun agentpane--fork-points (index &optional then)
+  "Fork this attached buffer's session at the fork point naming INDEX, and
+call THEN, if given, in the fork's buffer once its attach has gone out.
+See `agentpane-fork'."
+  (let* ((parent (agentpane--ref agentpane--session))
          (pi-backend (equal (plist-get parent :backend) "pi"))
          (window (get-buffer-window))
          (failed (lambda () (setq agentpane--forking nil))))
     (setq agentpane--forking t)
-    (agentpane--request
-     'sessions/forkPoints (list :session parent)
-     (lambda (points)
-       (let ((point (seq-find (lambda (point) (eql (plist-get point :index) index)) points)))
-         (cond
-          ((not point)
-           (setq agentpane--forking nil)
-           (message "agentpane: the message at point is not forkable"))
-          ((and pi-backend agentpane--streaming)
-           (agentpane--watch-forget agentpane--handle)
-           (agentpane--request 'sessions/abort (list :session parent)
-                               (lambda (_) (agentpane--fork-at parent point window failed))
-                               t failed))
-          (t (agentpane--fork-at parent point window failed)))))
-     t failed agentpane--spawn-timeout)))
+    (agentpane--fork-point
+     index
+     (lambda (point)
+       (if (and pi-backend agentpane--streaming)
+           (progn
+             (agentpane--watch-forget agentpane--handle)
+             (agentpane--request 'sessions/abort (list :session parent)
+                                 (lambda (_) (agentpane--fork-at parent point window failed then))
+                                 t failed))
+         (agentpane--fork-at parent point window failed then)))
+     failed)))
 
-(defun agentpane--fork-at (parent point window failed)
+(defun agentpane--fork-at (parent point window failed &optional then)
   "Fork the session PARENT at the fork POINT, and open the fork attached in a
 buffer of its own, shown in WINDOW if it is still live; FAILED runs if the
-fork fails.  See `agentpane-fork'."
+fork fails, and THEN, if given, in the fork's buffer once its attach has
+gone out.  See `agentpane-fork'."
   (agentpane--request
    'sessions/fork (list :session parent :entryId (plist-get point :id))
    (lambda (forked)
@@ -2753,11 +2785,130 @@ fork fails.  See `agentpane-fork'."
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
          (agentpane--draw [] (agentpane--transcript-header summary))
-         (agentpane--attach))
+         (agentpane--attach)
+         (when then (funcall then)))
        (if (window-live-p window)
            (set-window-buffer window buffer)
          (pop-to-buffer buffer '(display-buffer-same-window)))))
    t failed agentpane--spawn-timeout))
+
+(defun agentpane-edit ()
+  "Take the user message at point back into the prompt region to edit, as the
+browser's pencil does: its text replaces the prompt region's, and the
+separator above it says which message is being edited.  The next send from
+this buffer or its composer forks at that message, as `agentpane-fork'
+does, and prompts the fork with the text sent and the message's images,
+leaving this buffer holding its session.  `C-c C-k'
+\(`agentpane-cancel-edit') abandons the edit and forks nothing.
+
+A message no fork point names is not editable (DESIGN D20).  The points
+are fetched and matched at the press, as `agentpane-fork' matches them, so
+such a message is refused here rather than at the send, and are matched
+again at the send, which refuses rather than forks elsewhere should the
+set have moved meanwhile.  On a buffer only previewed the press attaches
+and edits nothing, as `agentpane-fork''s does and for its reason: a
+preview's index can name another message than the live one (OW-gekiki).
+
+Pressed on another message while an edit is open, the edit moves there,
+and the draft put back on abandoning it is still the one the first press
+displaced, as in the browser (OW-bigotu)."
+  (interactive)
+  (when agentpane--forking
+    (user-error "A fork of this session is already in flight"))
+  (let* ((at (agentpane--locate))
+         (node (and at (ewoc-data at))))
+    (unless (equal (plist-get node :role) "user")
+      (user-error "No user message at point"))
+    (cond
+     ((agentpane--attached-p)
+      (agentpane--fork-point (plist-get node :index)
+                             (lambda (_) (agentpane--start-edit node))))
+     (agentpane--attaching
+      (user-error "This session is still attaching; press e once it has"))
+     (t (agentpane--attach
+         (lambda ()
+           (message "agentpane: the transcript now shows the live session; \
+press e again at the message to edit")))))))
+
+(defun agentpane--start-edit (node)
+  "Open the edit of NODE, a user node, in this buffer; see `agentpane-edit'.
+Its text parts become the prompt region's text, joined by a blank line as
+the browser's `startEdit' joins them, and its image parts, carrying `data',
+are kept as the prompt's `images' take them, carrying `base64'."
+  (let* ((parts (plist-get node :parts))
+         (text (mapconcat (lambda (part) (plist-get part :text))
+                          (seq-filter (lambda (part) (equal (plist-get part :type) "text")) parts)
+                          "\n\n"))
+         (images (seq-map (lambda (part)
+                            (list :mimeType (plist-get part :mimeType)
+                                  :base64 (plist-get part :data)))
+                          (seq-filter (lambda (part) (equal (plist-get part :type) "image")) parts)))
+         (overlay (if agentpane--editing
+                      (plist-get agentpane--editing :overlay)
+                    (make-overlay agentpane--prompt-separator (1- agentpane--prompt-start)
+                                  nil t nil))))
+    (overlay-put overlay 'display
+                 (propertize (format "── editing “%s” · C-RET forks there · C-c C-k cancels ──"
+                                     (agentpane--one-line text 40))
+                             'face 'agentpane-warning))
+    (setq agentpane--editing
+          (list :index (plist-get node :index)
+                :images images
+                :draft (if agentpane--editing
+                           (plist-get agentpane--editing :draft)
+                         (buffer-substring-no-properties agentpane--prompt-start (point-max)))
+                :overlay overlay))
+    (agentpane--set-draft text)))
+
+(defun agentpane--set-draft (text)
+  "Replace the prompt region's text with TEXT, and move point, in this buffer
+and in any window showing it, to the end."
+  (delete-region agentpane--prompt-start (point-max))
+  (goto-char (point-max))
+  (insert text)
+  (dolist (window (get-buffer-window-list nil nil t))
+    (set-window-point window (point-max))))
+
+(defun agentpane--end-edit ()
+  "Close this buffer's edit, leaving the prompt region as it is."
+  (delete-overlay (plist-get agentpane--editing :overlay))
+  (setq agentpane--editing nil))
+
+(defun agentpane-cancel-edit ()
+  "Abandon the edit `agentpane-edit' opened, forking nothing, and put back
+the draft it displaced."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (unless agentpane--editing
+      (user-error "No edit to cancel"))
+    (let ((draft (plist-get agentpane--editing :draft)))
+      (agentpane--end-edit)
+      (agentpane--set-draft draft))))
+
+(defun agentpane--send-edit (text sent)
+  "Fork this buffer's session at the message its edit holds, and prompt the
+fork with TEXT and that message's images; once the prompt has answered,
+end the edit and call SENT.  The fork is `agentpane-fork''s, a streaming
+Pi turn's abort and the one fork at a time included, and the prompt is
+the fork buffer's own `agentpane--send-prompt'.  A fork or a prompt that
+fails leaves the edit standing, the edited text still in the prompt
+region, as the browser's `send' leaves its edit mode."
+  (when agentpane--forking
+    (user-error "A fork of this session is already in flight"))
+  (let ((edit agentpane--editing)
+        (parent (current-buffer)))
+    (agentpane--fork-points
+     (plist-get edit :index)
+     (lambda ()
+       (agentpane--send-prompt
+        text
+        (lambda ()
+          (when (buffer-live-p parent)
+            (with-current-buffer parent
+              (when (eq agentpane--editing edit)
+                (agentpane--end-edit))))
+          (funcall sent))
+        (plist-get edit :images))))))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)
