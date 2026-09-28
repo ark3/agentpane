@@ -12,6 +12,11 @@ A `#start` that publishes its adapter during that await clears `starting`, so `c
 Where the parked entry's adapter and the starting one are the same object -- a parked Codex fork handle whose attach is in flight -- that adapter is disposed twice.
 Since OW-suyinu `close()` gathers parked entries under every name of the container, which widens the set of calls that await here.
 
+OW-sirofi's adversarial read, 2026-09-28, named a second cost of the same window.
+`pending.torndown` is set only after that await, so the start publishes its adapter as if no close were out: the attach that started it answers 200 for a session being closed, and until `close()` resumes `isAttached` is true for the ref, so a `prompt`, `model` or `fork` passes the route's `not_attached` check in `src/server/http/app.ts` and reaches an adapter about to be disposed.
+Nothing respawns, but D25 decision 1 in `docs/DESIGN.md` ("`close()` takes the container out of the table before its first await") is untrue for this one path until the fix lands; whatever the fix, D25's sentence is left true of it.
+
 Judged not worth blocking on: no incident, and whether a second `dispose()` does harm depends on each adapter's idempotency, which nobody has checked.
 
 Done when a test in `src/server/http/session-manager.test.ts` holds a parked Codex fork's attach mid-start (`FakeAdapterFactory` `holdStart`, `forkMode: "codex"`, `sharedChild`), closes the fork's ref, lets the start publish during the parked dispose, and asserts the adapter's dispose count is one -- red first against the current `close()`.
+The same test, or a sibling, asserts the held attach does not answer as attached for the closed ref and that `isAttached` is false once `close()` has been called.
