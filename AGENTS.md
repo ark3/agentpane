@@ -104,7 +104,6 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
 Work items are cards.
 `card status` reports this repo's deck, `card workflow` is the contract, and `card author` and `card execute` carry the two procedures.
 Read those rather than a retelling; what follows is only what card cannot know about this repo.
-Run `card workflow` when cards come up in the session, and not before: there is no session-opening question to ask about which of card's procedures this session is going to be, and asking one was a defect.
 
 Card reads this deck through per-clone config that is deliberately not synced: `.git/card/card-config.toml` must carry `prefix = "OW"`, `deck = "../../docs/work"` (resolved relative to `.git/card/`), and `public = true`, which stands card's commit-lint gate down and is what keeps citing `OW-` ids in commit subjects legal here.
 It may also carry local card-runner settings, such as this work laptop's `[run]` block; those do not change the deck contract.
@@ -134,8 +133,6 @@ D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 202
 `emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
 `d24` marks the seven cards D24 filed on 2026-09-24 -- OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, OW-kimaya, OW-danifa and OW-mofuho -- and `card list --open --label d24` is that stream, blockers and all.
 
-What runs next, and in what order, is settled in conversation, not stored in the deck.
-The session proposes a set of cards in an order, and the owner either pastes that order into `card run` or asks for them to be executed in a fresh session.
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
 Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
 
@@ -158,11 +155,7 @@ It therefore starts at local `main`'s tip and there is **nothing to fast-forward
 `.worktrees/<id>` inside the repo tree is not a preference.
 On the home server that tree is the only path mounted read-write, and a worktree anywhere outside it fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment gotchas"); `card worktree` satisfies that by construction.
 
-Two things card cannot know, so the dispatch prompt has to carry them:
-
-- **`bun install` in the fresh worktree** before any `src/` work.
-- A dispatched subagent does **not** inherit `CLAUDE.md` or `AGENTS.md`.
-  Hand them over: tell it to read them as files in its worktree.
+The dispatch prompt carries one thing card cannot know: **`bun install` in the fresh worktree** before any `src/` work.
 
 Never `/code-review ultra` in an execution session — it has cost a full budget window.
 The old skill's blanket ban on review subagents does *not* survive with it: `card execute` positively requires dispatching an adversarial reader at finished work, and card wins there.

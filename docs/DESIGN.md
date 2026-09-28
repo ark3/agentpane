@@ -984,7 +984,7 @@ Three of the eight are what it cost to learn this.
 
 **Built.**
 Seven cards, labelled `d24`, filed 2026-09-24 and all closed `--done` by 2026-09-25 with OW-mofuho: OW-sewewe serialises the mutations; OW-dutute makes hydrate a merge; OW-nikogo adds the identity event; OW-suyinu mints the handle and puts it on both wires, blocked by OW-nikogo; OW-kimaya keys the shared reducer and the browser by it and OW-danifa keys agentpane-mode by it, both blocked by OW-suyinu; OW-mofuho retires `renamed`, blocked by both.
-The order to run them in is settled in conversation, as `AGENTS.md` says of every set; the one proposed on the day was OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, then OW-kimaya and OW-danifa, then OW-mofuho, with a cold read at OW-nikogo and OW-suyinu before either starts.
+The order to run them in is the owner's call, as `card execute` says of every set; the one proposed on the day was OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, then OW-kimaya and OW-danifa, then OW-mofuho, with a cold read at OW-nikogo and OW-suyinu before either starts.
 The open cards that close under them: OW-woyifu under OW-sewewe, OW-zudase under OW-dutute, OW-nuzepi and OW-hikefi under OW-nikogo.
 
 ## The backend adapter contract
