@@ -4614,12 +4614,13 @@ from elsewhere under the handle a re-attach answers raises nothing
       (should-not (agentpane-test--turn-done-p)))))
 
 (defun agentpane-test--reattach-after-helper-death (snapshot-first)
-  "Submit a turn, see it stream, let the helper exit, and prompt again
-through a new helper, whose attach answers under the same handle and
-whose snapshot says the first turn is over: handled before the attach's
-reply when SNAPSHOT-FIRST and after it otherwise (D2).  Nothing is
-raised before the second prompt's turn streams; return whether its end,
-unseen, raises the indicator."
+  "Submit a turn, see it stream, let the helper exit, which raises the
+indicator for that turn, as a `session/detached' does, and clear it; then
+prompt again through a new helper, whose attach answers under the same
+handle and whose snapshot says the first turn is over: handled before
+the attach's reply when SNAPSHOT-FIRST and after it otherwise (D2).
+Nothing more is raised before the second prompt's turn streams; return
+whether its end, unseen, raises the indicator."
   (agentpane-test--submitting
     (let ((global-mode-string global-mode-string)
           (snapshot (lambda ()
@@ -4642,7 +4643,8 @@ unseen, raises the indicator."
         (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
                                           (+ (float-time) 10))))
       (should-not agentpane--streaming)
-      (should-not (agentpane-test--turn-done-p))
+      (should (agentpane-test--turn-done-p))
+      (setq agentpane--turns-done nil)
       (setq agentpane--connection 'connection
             hold '(sessions/attach))
       (funcall submit)
@@ -4655,44 +4657,72 @@ unseen, raises the indicator."
       (agentpane-test--turn-done-p))))
 
 (ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
-  "A helper that exits ends the watch on every handle it carried, and each
-buffer attached through it reads as not streaming, since nothing will say
-otherwise: after a crash mid-turn the re-attach's snapshot raises nothing
+  "A helper that exits ends the watch on every handle it carried as a
+`session/detached' does, and each buffer attached through it reads as
+not streaming, so a turn seen streaming ends there as an aborted one does
+(D25): after a crash mid-turn the re-attach's snapshot raises nothing more
 for the turn it finds over, whichever of it and the next prompt's attach
 reply is handled first, and that prompt's own turn raises the indicator
 when it ends (OW-dunahe)."
   (should (agentpane-test--reattach-after-helper-death nil))
   (should (agentpane-test--reattach-after-helper-death t)))
 
-(ert-deftest agentpane-test-refetch-attaches-again-after-the-helper-dies ()
-  "A `g' in a buffer attached through a helper that has since exited
-attaches its ref again rather than previewing the stored transcript over
-the live one it drew: the session may still be running on the server,
-though nothing said its handle is gone (OW-mirifa)."
-  (let ((ref '(:backend "claude" :id "real-1"))
-        (agentpane--connection nil)
-        (agentpane--stream-down nil))
+(ert-deftest agentpane-test-helper-death-detaches-every-buffer-it-served ()
+  "A helper that exits leaves each buffer attached through it as a
+`session/detached' for its handle leaves it: holding no handle, not
+attached, dropped, with its ref and the transcript it drew, and reading
+as not streaming, the tail's running tool call drawn `ok' (D25).  So
+`agentpane-close-session' refuses it and a `g' attaches its ref again,
+as each does for a buffer told its handle is gone."
+  (let ((agentpane--connection nil)
+        (agentpane--stream-down nil)
+        (refs '((:backend "claude" :id "real-1") (:backend "codex" :id "t1"))))
     (agentpane-test--forking nil nil
-      (setq attached (list :ref ref :handle "h1"))
       (cl-letf (((symbol-function 'agentpane--start-helper)
                  (lambda ()
                    (make-process :name "agentpane-test helper"
                                  :command '("cat")
                                  :connection-type 'pipe
-                                 :noquery t))))
-        (let ((buffer (agentpane--transcript-buffer (list :ref ref)))
-              (connection (agentpane--connection)))
-          (with-current-buffer buffer
-            (agentpane--attach)
-            (should (agentpane--attached-p)))
+                                 :noquery t)))
+                ((symbol-function 'jsonrpc-async-request) #'ignore))
+        (let* ((connection (agentpane--connection))
+               (buffers
+                (seq-map-indexed
+                 (lambda (ref index)
+                   (let ((buffer (agentpane--transcript-buffer (list :ref ref)))
+                         (handle (format "h%d" (1+ index))))
+                     (setq attached (list :ref ref :handle handle))
+                     (with-current-buffer buffer (agentpane--attach))
+                     (agentpane--on-notification
+                      nil 'session/snapshot
+                      (list :session ref :handle handle :isStreaming t :model "luna"
+                            :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
+                     (with-current-buffer buffer
+                       (should (agentpane--attached-p))
+                       (should agentpane--streaming))
+                     buffer))
+                 refs)))
           (kill-process (jsonrpc--process connection))
           (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
                                             (+ (float-time) 10)))
-          (with-current-buffer buffer
-            (should-not (agentpane--attached-p))
-            (setq sent nil)
-            (agentpane-refetch)
-            (should (equal sent `((sessions/attach :session ,ref))))))))))
+          (seq-mapn
+           (lambda (buffer ref)
+             (with-current-buffer buffer
+               (should-not agentpane--handle)
+               (should-not agentpane--attached)
+               (should agentpane--dropped)
+               (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref))
+               (should (equal (agentpane-test--indices) '(3)))
+               (should-not agentpane--streaming)
+               (should (equal mode-line-process " [luna]"))
+               (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60")))
+               (setq sent nil)
+               (should-error (agentpane-close-session) :type 'user-error)
+               (should-not sent)
+               (setq attached nil)
+               (agentpane-refetch)
+               (should (equal sent `((sessions/attach :session ,ref))))))
+           buffers refs))))))
 
 (ert-deftest agentpane-test-late-sentinel-keeps-the-replacement-helper ()
   "A helper that has exited but whose sentinel has not yet run is replaced

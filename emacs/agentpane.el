@@ -360,20 +360,11 @@ connection named \"agentpane\", so the helper's own stderr lands there."
 (defvar agentpane--handle)
 
 (defun agentpane--helper-gone (connection)
-  "Forget CONNECTION, the helper's, which has exited, and end what each
-transcript buffer attached through it was waiting to hear.
-The turn-done watch on each such buffer's handle ends raising nothing,
-and the buffer reads as not streaming, as a `session/detached' leaves it,
-since nothing will say otherwise through a helper that is gone; see
-`agentpane--watch-turn'.  The turn may go on running on the server, and
-the handle stay live there, so a re-attach may answer under it: a watch
-left `sent' then waited on whatever turn the session ran next, and one
-left `streamed', with the buffer still reading streaming, took the next
-prompt's arming for a turn already seen and ended at the re-attach's
-snapshot, before that prompt's own turn had begun.
-Each such buffer's `agentpane--attached' is left standing, marking a
-session it held live, which `agentpane-refetch' attaches again rather
-than previews (OW-mirifa).
+  "Forget CONNECTION, the helper's, which has exited, and leave each
+transcript buffer attached through it as a `session/detached' for its
+handle would, through `agentpane--let-go': any helper's death is taken to
+mean every buffer it served is detached, whatever the cause, a helper
+that crashed over a live server being rare and costing a `g' (D25).
 CONNECTION is forgotten only while it is still the current one: its
 process reads as not live before its sentinel, which calls this, has run,
 so a use of the connection in between starts a replacement, which this
@@ -387,8 +378,7 @@ inherit this helper's `reconnecting'."
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
-        (agentpane--watch-forget agentpane--handle)
-        (agentpane--read-idle)))))
+        (agentpane--let-go)))))
 
 (defun agentpane-shutdown ()
   "Stop the helper, if one is running.
@@ -420,7 +410,8 @@ Nil in a buffer that has not attached.  A buffer detached keeps the one
 it held, which the server never mints again: the parent of a Pi fork,
 whose container the server has let go, and whose detach names it.  One
 the helper told its handle is gone, by a `session/detached', lets go of
-it instead; see `agentpane--dropped'.")
+it instead, as does one attached through a helper that has exited (D25);
+see `agentpane--let-go'.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for `sessions/attach', which may spawn the session's
@@ -538,11 +529,7 @@ Every other notification but a snapshot, whose redraw discards what is
 recorded, draws what is recorded first, so it finds the buffer as it
 would have had each node been drawn on arrival.
 A `session/detached' says the server let go of the handle the buffer
-holds, and the buffer lets go of it too, and reads as the status that
-ends a turn leaves it, nothing streaming or compacting, since nothing
-will say so under that handle; see `agentpane--dropped'.  The turn-done
-watch on that handle is folded that status, then ends with the handle;
-see `agentpane--watch-turn'."
+holds, and the buffer lets go of it too; see `agentpane--let-go'."
   (cond
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
@@ -576,18 +563,27 @@ see `agentpane--watch-turn'."
             ('session/request (agentpane--upsert (list :request (plist-get params :request))))
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
-            ('session/detached
-             (agentpane--read-idle)
-             (agentpane--watch-forget agentpane--handle)
-             (setq agentpane--handle nil
-                   agentpane--dropped t)
-             (agentpane--hold-attached nil)))))))))
+            ('session/detached (agentpane--let-go)))))))))
+
+(defun agentpane--let-go ()
+  "Let go of the handle this buffer holds, which will say nothing more to
+it: the server let go of it (`session/detached'), or the helper it was
+attached through is gone (`agentpane--helper-gone'), which D25 takes to
+mean the same.  The buffer holds no handle and is not attached, and is
+dropped; see `agentpane--dropped'.  It reads as the status that ends a
+turn leaves it, nothing streaming or compacting, since nothing will say
+so under that handle.  The turn-done watch on that handle is folded that
+status, then ends with the handle; see `agentpane--watch-turn'."
+  (agentpane--read-idle)
+  (agentpane--watch-forget agentpane--handle)
+  (setq agentpane--handle nil
+        agentpane--dropped t)
+  (agentpane--hold-attached nil))
 
 (defun agentpane--read-idle ()
   "Show this buffer's session as the status that ends a turn leaves it,
 nothing streaming or compacting, for a buffer that nothing will send
-another status: its handle let go of (`session/detached'), or its helper
-gone (`agentpane--helper-gone')."
+another status; see `agentpane--let-go'."
   (agentpane--set-status
    (plist-put (plist-put (copy-sequence agentpane--status) :isStreaming :json-false)
               :compaction nil)))
@@ -1826,10 +1822,9 @@ and the helper's event stream is down (`agentpane--stream-down')."
 (defvar-local agentpane--attached nil
   "The helper connection this buffer attached its session through, or nil.
 Attached only while that is still the running connection: a fresh helper
-has attached nothing.  One that has exited is kept rather than cleared,
-marking a session this buffer held live, which `agentpane-refetch'
-attaches again rather than previews.  Set only through
-`agentpane--hold-attached'.")
+has attached nothing.  One that has exited is cleared, as a
+`session/detached' clears it (D25); see `agentpane--let-go'.  Set only
+through `agentpane--hold-attached'.")
 
 (defun agentpane--hold-attached (connection)
   "Make CONNECTION, or nil, the helper connection this buffer is attached
@@ -1852,7 +1847,8 @@ a snapshot's `askedFor' only to such a buffer.")
 `session/detached', until an attach of this buffer's answers: the
 helper's listing, asked at a `sessions-changed' or a reopen of its event
 stream, lacked the handle, a server restart or a close elsewhere having
-let go of it (OW-yibijo).  The buffer then holds no
+let go of it (OW-yibijo).  A helper that exits leaves each buffer it
+served so too (D25); see `agentpane--let-go'.  The buffer then holds no
 handle and is not attached, and keeps its ref and what it drew, so
 `agentpane-refetch' attaches again rather than drawing the stored
 transcript over the live one.  That attach, or a prompt's, is a first
@@ -2085,9 +2081,7 @@ node stays on it, or goes to the next drawn one when it is elided."
 A stored transcript is read through `sessions/preview'; an attached one is
 attached again, which answers with a fresh `session/snapshot', since a
 preview would draw the stored transcript over the live one.  So is one
-attached through a helper that has since exited, which may have left the
-session running on the server, as is one told its handle is gone; see
-`agentpane--attached' and `agentpane--dropped' (OW-mirifa).  One still
+dropped; see `agentpane--dropped'.  One still
 attaching sends nothing: its attach's snapshot is the refetch, and a
 preview sent now would supersede the attach and draw over that snapshot.
 Nor does one with a fork in flight; see `agentpane-fork'.  Nor one with a
@@ -3464,12 +3458,13 @@ one is never minted again.  A prompt arms only once its own attach has
 answered, under the handle that attach answered.
 A `session/detached' folds the not-streaming status it leaves the buffer
 reading, so a turn seen streaming ends there as an aborted one does, and
-a watch still `sent' is dropped, which only keeps the list short.
+a watch still `sent' is dropped, which only keeps the list short; so
+does a helper's exit, for every handle it carried, which D25 takes to
+mean the same (`agentpane--helper-gone').
 Where the handle stays live and this Emacs stops hearing it, keying
 alone is not enough, and the watch ends raising nothing: at a detach
 this Emacs sends (`agentpane--detach'), from a killed buffer or a Pi
-fork's parent, and for every handle a helper carried when it exits
-\(`agentpane--helper-gone'), the turn going on unheard on the server.
+fork's parent, the turn going on unheard on the server.
 
 Elsewhere, the favicon's unfocused window, is here a buffer that no
 window shows (`agentpane--shown-p'): Emacs's own focus says nothing about
