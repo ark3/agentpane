@@ -79,3 +79,19 @@ The reader reproduced all four cases going red before and green after, and found
 - A success reply through a torn-down helper runs UNSENT, which says the request reached no backend, though the reply proves it did: a prompt the server accepted keeps its draft.
 - A chain begun from the dead helper's reply while it is still current but dead -- an attach answered, then `agentpane--attached-then` running the prompt -- arms the turn-done watch, then `agentpane--request`'s `agentpane--connection` runs the teardown inside that call, forgetting the watch and dropping the buffer, and the prompt still goes out through the replacement.
   Not a regression (`main` ends in the same state), but a case the teardown's ownership misses.
+
+## Amended 2026-09-28 from the adversarial read of the second cut
+
+The second cut deferred the sentinel's teardown behind the helper's queued messages, kept the synchronous teardown in `agentpane--connection` for a replacement started in the gap, and added a table of in-flight requests that teardown fails.
+Its reader reproduced, with probes whose ordering is driven by real processes:
+
+- An attach that the helper answered after writing a `session/snapshot` and then exiting is failed by the new check in `agentpane--attach`, so the buffer never becomes attached and the teardown's `eq` test on `agentpane--attached` skips it: it keeps the dead helper's handle and reads streaming, and `g` previews rather than re-attaches.
+  The same end state follows, on `main` too, when the helper writes the snapshot and dies before it replies.
+- A request sent from the handling of the dead helper's own queued messages, such as the picker refetch a `sessions/changed` runs, tears the helper down synchronously mid-drain, and the notification filter then drops the node it flushed after that `sessions/changed` (OW-mepufi).
+- The `jsonrpc-running-p` check on the attach reply is a check at the site: a helper dying between it and the chained prompt's `agentpane--connection` still sends the prompt through the replacement.
+- A prompt reply held as a jsonrpc.el "anxious continuation" behind an outstanding synchronous request is re-queued after the teardown, so the prompt fails though the backend admitted it; `main` ran both its callback and its failure.
+
+What the first three share is `agentpane--connection` replacing a connection that has exited but not yet been torn down.
+So the ownership this card asks for now reads: a helper starts only once the previous one's teardown has run, the teardown being the one thing that retires a connection.
+And the teardown lets go of every buffer the dead helper gave a handle, attached or not.
+The done-condition gains a test for each of the first three, red before and green after; the fourth is either fixed with a test or recorded as the design's accepted cost where the next reader will find it.
