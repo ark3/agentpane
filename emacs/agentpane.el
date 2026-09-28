@@ -1850,6 +1850,21 @@ handle.  It stays set when that attach fails, so a `g' attaches again.")
 waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
 `agentpane--attach' was given; nil otherwise.")
 
+(defvar-local agentpane--closing nil
+  "Non-nil while a `sessions/close' this buffer sent has not answered.
+The buffer still holds its handle and counts as attached meanwhile, but
+the server has already taken the session out of its table and is waiting
+on its subprocess (`SessionManager.close' in
+src/server/http/session-manager.ts), so an attach, or a route that
+attaches first, would spawn it again: a respawn the helper's close never
+records, or a turn nobody sees (OW-dakeyi).  So nothing that would reach
+the session goes out while it is set: every attach, synchronous or not,
+and every request `agentpane--attached-then' or `agentpane--fork-point'
+sends refuses through `agentpane--refuse-closing', and
+`agentpane-refetch' and a second `agentpane-close-session' read it
+themselves.  Cleared when the close answers, whether it succeeded or
+failed.")
+
 (defvar agentpane-prompt-region-map
   (let ((map (make-keymap)))
     (set-char-table-range (nth 1 map) (cons ?\s ?~) #'self-insert-command)
@@ -2051,9 +2066,11 @@ attached again, which answers with a fresh `session/snapshot', since a
 preview would draw the stored transcript over the live one.  One still
 attaching sends nothing: its attach's snapshot is the refetch, and a
 preview sent now would supersede the attach and draw over that snapshot.
-Nor does one with a fork in flight; see `agentpane-fork'.  Either says
-why in the echo area rather than signalling, since opening a session from
-the picker refetches its buffer, and an error would leave it unshown."
+Nor does one with a fork in flight; see `agentpane-fork'.  Nor one with a
+close in flight, whose attach would spawn the session being closed; see
+`agentpane--closing'.  Each says why in the echo area rather than
+signalling, since opening a session from the picker refetches its buffer,
+and an error would leave it unshown."
   (interactive)
   (unless agentpane--session
     (user-error "Not an agentpane transcript buffer"))
@@ -2062,6 +2079,8 @@ the picker refetches its buffer, and an error would leave it unshown."
     (message "agentpane: still attaching; the attach's snapshot redraws the transcript"))
    (agentpane--forking
     (message "agentpane: a fork of this session is in flight; refetch once it lands"))
+   (agentpane--closing
+    (message "agentpane: this session is closing; the close redraws the buffer once it lands"))
    ((or (agentpane--attached-p) agentpane--dropped)
     (agentpane--attach))
    (t
@@ -2305,6 +2324,16 @@ the listing fail, no effort is named until the model changes."
   (and agentpane--attached (eq agentpane--attached agentpane--connection)
        (jsonrpc-running-p agentpane--attached)))
 
+(defun agentpane--refuse-closing (&optional failed)
+  "Signal a user error, sending nothing, while this buffer's close is in
+flight (`agentpane--closing'), calling FAILED first, if given, so that a
+flag its caller set before asking, such as `agentpane--sending', does not
+outlive the refusal, as `agentpane--request' calls FAILED when sending
+exits non-locally.  Otherwise return nil."
+  (when agentpane--closing
+    (when failed (funcall failed))
+    (user-error "This session is closing")))
+
 (defun agentpane--attach (&optional then failed)
   "Attach this buffer's session through `sessions/attach', then call THEN,
 or FAILED if the attach fails.
@@ -2315,7 +2344,11 @@ One attach at a time per buffer: while one is in flight nothing is sent,
 and THEN or FAILED waits on that one's answer instead.  Two in flight
 answered separately, and the first to fail ended the wait while the other
 was still out, so a refetch then sent a preview that could draw the
-stored transcript over the live one the other's snapshot drew (OW-yibimi)."
+stored transcript over the live one the other's snapshot drew (OW-yibimi).
+
+None while a close is in flight: FAILED is called and a user error
+signalled instead; see `agentpane--closing'."
+  (agentpane--refuse-closing failed)
   (if agentpane--attaching
       (setq agentpane--attaching
             (append agentpane--attaching (list (cons then failed))))
@@ -2357,9 +2390,11 @@ a second attach beside that one is what `agentpane--attach' exists to
 prevent, and waiting for it here would block Emacs on a reply that may
 take the whole timeout.  `agentpane-set-model' reaches this with a first
 prompt's attach out; asked again once that has answered, it finds the
-session attached and needs no attach at all."
+session attached and needs no attach at all.  It refuses too while a
+close is in flight; see `agentpane--closing'."
   (when agentpane--attaching
     (user-error "This session is still attaching; try again once it has"))
+  (agentpane--refuse-closing)
   (setq agentpane--attach-sent t)
   (let ((attached (jsonrpc-request (agentpane--connection) 'sessions/attach
                                    (list :session (agentpane--ref agentpane--session))
@@ -2370,7 +2405,10 @@ session attached and needs no attach at all."
 
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
-if it is only a preview; call FAILED instead if that attach fails."
+if it is only a preview; call FAILED instead if that attach fails.
+While a close is in flight, call FAILED and signal a user error instead,
+attached or not; see `agentpane--closing'."
+  (agentpane--refuse-closing failed)
   (if (agentpane--attached-p)
       (funcall fn)
     (agentpane--attach fn failed)))
@@ -2598,7 +2636,19 @@ since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); one with a prompt or a fork in flight, both of which the
 browser's `sending' covers; and one with a request pending.  Refused too,
 beyond the browser's predicate, with an attach in flight, whose answer
-would count the buffer attached to what was closed.
+would count the buffer attached to what was closed.  That clause stays: an attach sent before the close is an
+ordering the close in flight does not cover.  And refused with a close
+already in flight.
+
+The close in flight is state the buffer owns, `agentpane--closing', set
+as the close goes out and cleared when it answers.  Meanwhile the buffer
+still holds its handle and counts as attached, but nothing that would
+reach the session goes out: an attach, a prompt, a fork or its points
+would spawn again, on the server, the session being closed, and another
+close would go out beside this one (OW-dakeyi).  Each is refused, `g'
+in the echo area and the rest by a user error, as they refuse with an
+attach or a fork in flight.  See `agentpane--closing' for where it is
+read.
 
 Once the close answers the buffer holds no handle and no attachment, and
 its turn-done watch on the handle ends, as `agentpane--detach' ends it;
@@ -2621,6 +2671,8 @@ the echo area and leaves the buffer as it was."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (cond
+     (agentpane--closing
+      (user-error "This session is already closing"))
      ((not (agentpane--attached-p))
       (user-error "This session is not attached; there is nothing to close"))
      ((or agentpane--streaming (plist-get agentpane--status :compaction))
@@ -2631,12 +2683,14 @@ the echo area and leaves the buffer as it was."
            (ewoc-collect agentpane--ewoc (lambda (data) (plist-member data :request))))
       (user-error "This session is waiting on a request; close it once that is resolved")))
     (let ((ref (agentpane--ref agentpane--session)))
+      (setq agentpane--closing t)
       (agentpane--request
        'sessions/close (append (list :session ref)
                                (and agentpane--handle (list :handle agentpane--handle)))
        (lambda (_)
          (agentpane--watch-forget agentpane--handle)
-         (setq agentpane--handle nil
+         (setq agentpane--closing nil
+               agentpane--handle nil
                agentpane--attach-sent nil
                agentpane--dropped nil)
          (agentpane--hold-attached nil)
@@ -2651,7 +2705,8 @@ the echo area and leaves the buffer as it was."
                 (agentpane-refetch)
               (kill-buffer)))
           t))
-       t))))
+       t
+       (lambda () (setq agentpane--closing nil))))))
 
 (defun agentpane-dismiss-error ()
   "Dismiss this buffer's turn error through `sessions/dismissError'.
@@ -2868,7 +2923,10 @@ press f again at the message to fork"))))))
   "Fetch this attached buffer's fork points, and call THEN with the one
 naming INDEX; when none does, call FAILED, if given, and say the message,
 which WHAT names, \"the message at point\" when nil, is not forkable.
+While a close is in flight, call FAILED and signal a user error instead,
+since the route attaches first; see `agentpane--closing'.
 See `agentpane-fork'."
+  (agentpane--refuse-closing failed)
   (agentpane--request
    'sessions/forkPoints (list :session (agentpane--ref agentpane--session))
    (lambda (points)

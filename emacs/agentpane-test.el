@@ -3328,6 +3328,69 @@ asking for no listing, as the browser's Detach leaves its live view."
       (should (agentpane--attached-p))
       (should (equal (mapcar #'car sent) '(sessions/close))))))
 
+(ert-deftest agentpane-test-close-session-in-flight-reaches-nothing ()
+  "While a `sessions/close' is out the buffer still holds its handle and
+counts as attached, and the server, having let go of the session, would
+spawn it again for an attach or for a route that attaches first.  So
+`g', `C-RET', `f', `e' and a second `C-c C-q' each send nothing: `g' says
+why in the echo area, as it does for an attach or a fork in flight, and
+the rest signal a user error, leaving no send or fork counted in flight.
+The close, released, still lands on the preview."
+  (dolist (case (list (list (lambda () (agentpane-refetch)) nil)
+                      (list (lambda ()
+                              (goto-char (point-max))
+                              (insert "hello")
+                              (agentpane-send))
+                            t)
+                      (list (lambda ()
+                              (agentpane-test--goto-index 0)
+                              (agentpane-fork))
+                            t)
+                      (list (lambda ()
+                              (agentpane-test--goto-index 0)
+                              (agentpane-edit))
+                            t)
+                      (list (lambda () (agentpane-close-session)) t)))
+    (agentpane-test--closing
+      (setq listed (vector (list :ref ref :onDisk t))
+            hold '(sessions/close))
+      (with-current-buffer buffer
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
+               :nodes agentpane-test--nodes))
+        (agentpane-close-session)
+        (setq sent nil
+              said nil)
+        (let ((signalled (condition-case nil
+                             (progn (funcall (car case)) nil)
+                           (user-error t))))
+          (should-not sent)
+          (should (eq signalled (cadr case)))
+          (unless signalled
+            (should (seq-some (lambda (text) (string-search "closing" text)) said))))
+        (should-not agentpane--sending)
+        (should-not agentpane--forking)
+        (funcall (cdr (pop held)) t)
+        (should-not held)
+        (should (equal (reverse sent)
+                       `((sessions/list)
+                         (sessions/preview :session ,ref))))))))
+
+(ert-deftest agentpane-test-close-session-that-fails-frees-the-buffer ()
+  "A `sessions/close' that fails ends the close in flight, so the buffer,
+left as it was, attaches again at `g' and can be closed again."
+  (agentpane-test--closing
+    (setq hold '(sessions/close))
+    (with-current-buffer buffer
+      (agentpane-close-session)
+      (funcall (cdr (pop held)) nil)
+      (setq sent nil)
+      (agentpane-refetch)
+      (agentpane-close-session)
+      (should (equal (mapcar #'car (reverse sent))
+                     '(sessions/attach sessions/close))))))
+
 (ert-deftest agentpane-test-close-session-refused-where-the-browser-offers-no-detach ()
   "`agentpane-close-session' signals a user error and sends nothing in each
 case the browser's `detachable' refuses (src/client/App.svelte): a
