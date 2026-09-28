@@ -851,18 +851,20 @@ describe("client controller", () => {
 	// pressed Refresh: the exact untruthful indicator Detach exists to clear
 	// (OW-lejahi). The detach itself no longer asks for that listing; the
 	// reconnect does (D21), so the stripe clears when the stream comes back and
-	// no broadcast is needed anywhere in this test.
+	// no broadcast is needed anywhere in this test. The attach comes after the
+	// drop because the drop itself takes every live selection down (D25), so
+	// only a session attached while the stream is still down is one to detach
+	// here; its snapshot cannot arrive until the stream does.
 	it("clears a detached row's stripe at the reconnect when no broadcast followed the detach", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		api.open();
-		await controller.select(ref);
-		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		api.listSessions.mockResolvedValue([detachedSummary]);
 
 		api.drop();
+		await controller.select(ref);
 		await controller.detach();
 		await settle();
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
@@ -967,6 +969,78 @@ describe("client controller", () => {
 		}
 	});
 
+	function opening(session: SessionRef): ServerEvent {
+		return { type: "snapshot", session, handle: h(session), seq: 1, messages: [{ role: "user", content: "hello", timestamp: 1 }], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] };
+	}
+
+	// A drop is taken to mean the server exited and every agent with it (D25),
+	// so the tab holds nothing live the moment it happens, rather than waiting
+	// for the reconnect's listing to pair each view with a `detached` summary --
+	// which a restarted server never lists for a view a rename moved (OW-fiheli).
+	// The selection goes with its view: left standing with neither a view nor a
+	// preview, it is a composer whose Send meets a server holding nothing.
+	for (const fatal of [false, true]) {
+		it(`drops every live view at once, and the selection with them, when the stream drops${fatal ? " fatally" : ""}`, async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			api.emit(opening(ref));
+			api.emit(opening(attachedRef));
+			await controller.preview(attachedRef);
+			controller.setDraft("sent to nobody");
+			expect(Object.keys(controller.getView().state.sessions)).toHaveLength(2);
+
+			api.drop(fatal);
+
+			expect(controller.getView().state.sessions).toEqual({});
+			expect(controller.getView().state.selected).toBeNull();
+			expect(controller.getView().preview).toBeNull();
+			expect(await controller.submit()).toBe(false);
+			expect(api.prompt).not.toHaveBeenCalled();
+			controller.dispose();
+		});
+	}
+
+	// A preview is not live, so the drop leaves it on screen with its Attach,
+	// and its own poll re-reads it once the server answers again.
+	it("keeps a stored session's preview through a drop", async () => {
+		const api = new FakeApi();
+		const turns = [previewAssistant("stored")];
+		api.preview.mockResolvedValue({ ref: attachedRef, turns });
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		api.emit(opening(ref));
+		await controller.preview(attachedRef);
+
+		api.drop();
+
+		expect(controller.getView().state.sessions).toEqual({});
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(controller.getView().preview).toEqual({ ref: attachedRef, turns });
+		controller.dispose();
+	});
+
+	// A drop the server survived still costs the tab its views, and the
+	// server's opening snapshots at the reconnect are what put back each one it
+	// still holds (D25).
+	it("re-introduces a session the server still holds from the reconnect's opening snapshot", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		api.emit(opening(ref));
+		api.drop();
+		expect(viewAt(controller, ref)).toBeUndefined();
+
+		api.open();
+		api.emit(opening(ref));
+
+		expect(viewAt(controller, ref)?.messages).toHaveLength(1);
+		controller.dispose();
+	});
+
 	// The first open is `start()`'s own listing arriving by another door: the
 	// native `EventSource` fires `onopen` on the initial connect as well as on
 	// every re-establish, and `refreshInFlight` only coalesces listings that
@@ -1027,18 +1101,18 @@ describe("client controller", () => {
 	// which is what the sidebar renders, and clicking it lands on exactly the
 	// screen OW-vasubu exists to prevent. So this exit asks for the listing
 	// itself rather than waiting for the reconnect the stripe waits for (D21).
-	// The stream is down here and no event is emitted.
+	// The stream is down here and no event is emitted; the session is created
+	// after the drop, which would otherwise have taken its selection down (D25).
 	it("drops the phantom row of a detached session with nothing on disk, with no broadcast to ride on", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
+		api.drop();
 		await controller.create("/work", "pi");
-		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
 		api.listSessions.mockResolvedValue([]);
 
-		api.drop();
 		await controller.detach();
 		await settle();
 

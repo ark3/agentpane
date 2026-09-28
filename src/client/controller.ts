@@ -696,9 +696,24 @@ export function createController(
 		 *
 		 * An ordinary drop reports `CONNECTING`: the browser's own retry is
 		 * already under way and rebuilding would only race it.
+		 *
+		 * Either way the tab holds nothing live from here (D25): a stream drops
+		 * only when the server exits, so every view goes at once, and a drop the
+		 * server survived gets back what it still holds from the reconnect's
+		 * opening snapshots. The selection goes too unless a preview is on
+		 * screen, since a selection with neither is a composer whose Send meets a
+		 * server holding nothing, and the preview `detach()` would land on cannot
+		 * be fetched with the server down. So this is `detach()`'s other exit,
+		 * the startup view, and a click on the row reads the transcript again
+		 * once the server answers. The intent is not bumped: a gesture still in
+		 * flight settles on its own, failing against a dead server or landing on
+		 * a live one, and a bump would strand its `busy`.
 		 */
 		onDisconnect(fatal: boolean) {
-			publish({ connection: "reconnecting" });
+			publish({
+				connection: "reconnecting",
+				state: { ...view.state, sessions: {}, selected: view.preview === null ? null : view.state.selected },
+			});
 			if (fatal) scheduleReconnect();
 		},
 		onMalformed(error: Error) {

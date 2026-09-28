@@ -963,8 +963,11 @@
 			autoWorkspace = workspace;
 			autoPreviewedKey = topKey;
 			if (top) void controller.preview(top.ref);
-		} else if (view.state.selected === null && top && autoPreviewedKey !== topKey) {
-			// Startup: sessions arrived after the filter had already settled.
+		} else if (view.state.selected === null && top && autoPreviewedKey !== topKey && view.connection !== "reconnecting") {
+			// Startup: sessions arrived after the filter had already settled. Or a
+			// stream drop cleared a live selection (D25), which waits for the
+			// stream: the server it is taken to have lost cannot answer a preview,
+			// and the failed fetch would sit in the error slot past the outage.
 			autoPreviewedKey = topKey;
 			void controller.preview(top.ref);
 		}
