@@ -2537,6 +2537,21 @@ prompt -- frees the buffer, so the next send goes out."
       (agentpane-send)
       (should (assq 'sessions/forkPoints sent)))))
 
+(ert-deftest agentpane-test-edit-send-freed-when-the-fork-buffer-is-killed ()
+  "Killing the fork's buffer while its attach is in flight, the fork having
+answered, frees the parent: the requests left are the killed buffer's, and
+none of their answers runs, so the next send from the parent goes out."
+  (agentpane-test--editing "codex"
+    (setq hold '(sessions/attach))
+    (agentpane-send)
+    (should (equal (mapcar #'car (reverse sent))
+                   '(sessions/forkPoints sessions/fork sessions/attach)))
+    (kill-buffer (agentpane--buffer-for '(:backend "codex" :id "fork")))
+    (should-not agentpane--sending)
+    (setq hold nil held nil sent nil)
+    (agentpane-send)
+    (should (assq 'sessions/forkPoints sent))))
+
 (ert-deftest agentpane-test-edit-send-attaches-a-detached-parent-first ()
   "An edit's send from a buffer no longer attached, as a Pi fork's parent is
 left, attaches before it asks for the fork points, as `agentpane-fork' does."

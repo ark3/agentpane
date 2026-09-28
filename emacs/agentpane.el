@@ -91,7 +91,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 170 tests, 167 results as expected, 0 unexpected, 3 skipped
+;;     Ran 171 tests, 168 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2907,7 +2907,12 @@ of it (OW-kelede), and every failure along the way frees it.  Guarded by
 `agentpane--forking' alone, which the fork's reply clears, a second send
 while the fork's prompt waited on its attach forked again.
 A buffer no longer attached, as a Pi fork's parent is left once its fork
-has answered, attaches first, as `agentpane-fork' does."
+has answered, attaches first, as `agentpane-fork' does.
+From the fork's reply on, the requests that free this buffer are the fork
+buffer's, and `agentpane--request' runs nothing for a buffer killed before
+its answer, so until the fork's prompt answers, killing the fork's buffer
+frees this one too; otherwise a fork buffer killed as it appeared, during
+a slow spawn, left this buffer refusing every send."
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
   (let* ((edit agentpane--editing)
@@ -2922,9 +2927,11 @@ has answered, attaches first, as `agentpane-fork' does."
        (agentpane--fork-points
         (plist-get edit :index)
         (lambda ()
+          (add-hook 'kill-buffer-hook free nil t)
           (agentpane--send-prompt
            text
            (lambda ()
+             (remove-hook 'kill-buffer-hook free t)
              (funcall free)
              (when (buffer-live-p parent)
                (with-current-buffer parent
@@ -2932,7 +2939,9 @@ has answered, attaches first, as `agentpane-fork' does."
                    (agentpane--end-edit))))
              (funcall sent))
            (plist-get edit :images)
-           free))
+           (lambda ()
+             (remove-hook 'kill-buffer-hook free t)
+             (funcall free))))
         free))
      free)))
 
