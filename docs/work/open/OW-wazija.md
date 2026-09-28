@@ -14,7 +14,8 @@ It deliberately does not bump `selectionIntent`: its docblock says a gesture sti
 That misses an attach the server answered just before it exited, where the tab handles the stream's error before the fetch's reply.
 `attachAndSelect`, and `create` through it, then calls `applyAttached(..., true)`: the session is selected with no view (its snapshot died with the stream), the preview is cleared, and an `attached` summary is written — the composer OW-fiheli exists to remove, whose Send meets a dead server.
 `forkAndSubmit` does the same with the fork, since its `takesSelection` still reads true.
-A `recover` in flight across the drop only relights its row's summary as attached; it never moves the selection (and OW-lunihe retires recovery by attach anyway).
+OW-lunihe retired recovery by attach on 2026-09-28, so no `recover` is in flight across the drop any more.
+OW-tefigi, filed the same day, is the same landing reached through a sequence gap with the stream up: an attach reply that finds no view selects the session anyway; one owner of the attach's landing may settle both.
 
 Mitigation, from the HTML spec and not measured: `EventSource` fires `error` again on every failed reconnection attempt, and a fatal close is rebuilt by `scheduleReconnect`, so `onDisconnect` likely runs again within seconds and clears the selection again; the `attached` summary it wrote would stand until the reconnect's listing.
 

@@ -21,6 +21,7 @@ If the snapshot lands first and puts the view in place, an event under that hand
 The composer sits over an empty transcript, `submit()` succeeds because the server holds the session, and every later event under the handle is ignored until some other snapshot arrives.
 The same holds through `create` and through `forkAndSubmit`'s attach of the fork.
 Before OW-lunihe, `recover`'s attach sent another snapshot and healed it; nothing does now.
+OW-wazija is the same landing reached through a stream drop instead of a gap, and names `applyAttached` as a candidate owner of the attach's landing; read it before choosing one.
 
 ## Ordering two: a selection with both
 
