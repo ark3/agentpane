@@ -5004,6 +5004,81 @@ attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
   (agentpane-test--snapshot-then-death t)
   (agentpane-test--snapshot-then-death nil))
 
+(ert-deftest agentpane-test-late-error-reply-fails-once ()
+  "An error reply a dead helper wrote, handled after its sentinel has
+failed the request as the helper's death, does not fail it again
+\(OW-bukupu)."
+  (let ((failures 0)
+        (unsents 0))
+    (agentpane-test--outliving
+        (list (list :jsonrpc "2.0" :id 1
+                    :error (list :code -32603 :message "stream dropped")))
+      (agentpane--request 'sessions/preview nil #'ignore nil
+                          (lambda () (cl-incf failures)) nil
+                          (lambda () (cl-incf unsents)))
+      (let* ((dead agentpane--connection)
+             (process (jsonrpc--process dead)))
+        (agentpane-test--dead-unheard process)
+        (agentpane-test--heard-out dead)
+        (should (= failures 1))
+        (should (= unsents 1))))))
+
+(ert-deftest agentpane-test-late-success-reply-answers-once ()
+  "A prompt's answer a helper wrote as it exited, while Emacs was busy, is
+the prompt's one answer: the backend admitted the prompt, so its callback
+runs, clearing a draft, and nothing reports it failed, though the
+helper's death reached the request first (OW-bukupu)."
+  (let ((answers 0)
+        (failures 0)
+        (unsents 0))
+    (agentpane-test--outliving
+        (list (list :jsonrpc "2.0" :id 1 :result nil))
+      (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
+                          (lambda () (cl-incf failures)) nil
+                          (lambda () (cl-incf unsents)))
+      (let* ((dead agentpane--connection)
+             (process (jsonrpc--process dead)))
+        (agentpane-test--dead-unheard process)
+        (agentpane-test--heard-out dead)
+        (should (equal (list answers failures unsents) '(1 0 0)))))))
+
+(defun agentpane-test--answers-then-dies ()
+  "Start a process standing in for a helper that, after 0.3s, answers the
+request with id 1 with a null result, then exits 0.3s later."
+  (let ((json (json-serialize (list :jsonrpc "2.0" :id 1 :result nil))))
+    (make-process
+     :name "agentpane-test dying helper"
+     :command (list "sh" "-c" "sleep 0.3; printf %s \"$1\"; sleep 0.3" "sh"
+                    (format "Content-Length: %d\r\n\r\n%s" (string-bytes json) json))
+     :connection-type 'pipe
+     :noquery t)))
+
+(ert-deftest agentpane-test-held-back-reply-answers-once ()
+  "A prompt's answer that jsonrpc.el held back behind a synchronous request,
+as an \"anxious continuation\", while the helper died is the prompt's one
+answer, though it runs after the helper's teardown: the sentinel fails
+only the requests it still waits on, and the synchronous one's end hands
+on the held answer after the teardown's timer (Emacs 31.1, jsonrpc.el
+1.0.29, measured 2026-09-28; OW-bukupu)."
+  (let ((agentpane--connection nil)
+        (answers 0)
+        (failures 0)
+        (unsents 0))
+    (agentpane-test--with-session '(:backend "codex" :id "t1")
+      (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--answers-then-dies)
+                ((symbol-function 'message) #'ignore))
+        (agentpane--request 'sessions/prompt nil (lambda (_) (cl-incf answers)) t
+                            (lambda () (cl-incf failures)) nil
+                            (lambda () (cl-incf unsents)))
+        (let ((dead agentpane--connection))
+          (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
+          (agentpane-test--heard-out dead)
+          (should (agentpane-test--wait-for (lambda () (> (+ answers failures) 0))
+                                            (+ (float-time) 5)))
+          (with-current-buffer (jsonrpc-events-buffer dead)
+            (should (string-search "anxious continuation" (buffer-string))))
+          (should (equal (list answers failures unsents) '(1 0 0))))))))
+
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
 fail HOW -- `timeout', `reply-exit' (handling its reply signals), `error'

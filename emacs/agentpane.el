@@ -468,6 +468,28 @@ killed meanwhile must not strand, as a prompt's turn-done watch is
 \(`agentpane--send-prompt').  A timeout, and a non-local exit running
 CALLBACK, run FAILED alone, the request having perhaps been carried out.
 
+Each request has one answer, the first of its reply, its timeout and its
+helper's death; whatever comes after is dropped.  The death comes as
+jsonrpc.el's error from the helper's sentinel, which calls every pending
+request's error handler without forgetting the request, so a reply read
+after it still reached the success handler, and an error reply ran the
+error handler a second time (Emacs 31.1, jsonrpc.el 1.0.29, measured
+2026-09-28; OW-bukupu).  That error is handled from a zero-delay timer,
+behind the messages the helper wrote before it died, which the sentinel
+finds queued (see `agentpane--helper-exited'), so a reply among them is
+the answer: a prompt the backend admitted clears its draft.  The
+helper's teardown, queued at the same sentinel after these errors, runs
+after them.  A reply jsonrpc.el held back, as an \"anxious continuation\",
+behind a synchronous request still out when the helper died is no
+pending request to the sentinel, gets no error, and is handed on after
+the teardown, where it is still the answer.  An attach so answered is
+the design's accepted cost: `agentpane--attached-as' binds the buffer to
+`agentpane--connection', nil after the teardown, so the buffer holds the
+dead helper's handle, neither attached nor dropped, and a prompt waiting
+on the attach starts the next helper and goes out through it, which
+forwards nothing under that handle.  It takes a helper dying while a
+synchronous request is out and an attach's reply is held behind it.
+
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
 that the later request's replaces.  Such a request still supersedes every
@@ -480,32 +502,46 @@ does whenever it lands during a transcript refetch: on Emacs 31.1 with
 jsonrpc.el 1.0.29 both replies were in by 0.3s and the outer call still
 returned only at its own timeout's deadline, 10s later (OW-bonode; the
 ert tests `agentpane-test-nested-refetch-*' provoke it)."
-  (let ((buffer (current-buffer))
-        id)
+  (let* ((buffer (current-buffer))
+         (answered nil)
+         (fail (lambda (error)
+                 (unless answered
+                   (setq answered t)
+                   (message "agentpane: %s failed: %s" method (plist-get error :message))
+                   (when unsent (funcall unsent))
+                   (agentpane--failed buffer failed))))
+         connection
+         id)
     (setq id (car (agentpane--failing
                    (lambda ()
                      (when unsent (funcall unsent))
                      (when failed (funcall failed)))
                    (lambda ()
+                     (setq connection (agentpane--connection))
                      (jsonrpc-async-request
-                      (agentpane--connection) method (or params :jsonrpc-omit)
+                      connection method (or params :jsonrpc-omit)
                       ;; An explicit nil would mean no timeout at all.
                       :timeout (or timeout jsonrpc-default-request-timeout)
                       :success-fn
                       (lambda (result)
-                        (when (buffer-live-p buffer)
-                          (with-current-buffer buffer
-                            (when (or always (eql id agentpane--latest-request))
-                              (agentpane--failing failed (lambda () (funcall callback result)))))))
+                        (unless answered
+                          (setq answered t)
+                          (when (buffer-live-p buffer)
+                            (with-current-buffer buffer
+                              (when (or always (eql id agentpane--latest-request))
+                                (agentpane--failing failed (lambda () (funcall callback result))))))))
                       :error-fn
                       (lambda (error)
-                        (message "agentpane: %s failed: %s" method (plist-get error :message))
-                        (when unsent (funcall unsent))
-                        (agentpane--failed buffer failed))
+                        (if (jsonrpc-running-p connection)
+                            (funcall fail error)
+                          ;; The helper's death, from its sentinel.
+                          (run-at-time 0 nil fail error)))
                       :timeout-fn
                       (lambda ()
-                        (message "agentpane: %s timed out" method)
-                        (agentpane--failed buffer failed)))))))
+                        (unless answered
+                          (setq answered t)
+                          (message "agentpane: %s timed out" method)
+                          (agentpane--failed buffer failed))))))))
     (setq agentpane--latest-request id)))
 
 (defun agentpane--failing (failed fn)
