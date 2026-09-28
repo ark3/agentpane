@@ -2742,6 +2742,37 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
+		// The read was out when the stream dropped, and fails only after the
+		// reconnect: that is the outage, not the server's answer, so it is asked
+		// again rather than taken as a reason to leave the session.
+		it("asks again for a preview whose read the stream dropped under, even when it fails after the reconnect (OW-forinu)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const outage = deferred<SessionPreviewResponse>();
+			api.preview.mockClear();
+			api.preview.mockReturnValueOnce(outage.promise);
+			api.preview.mockResolvedValue({ ref, turns });
+
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			expect(api.preview).toHaveBeenCalledOnce();
+			api.drop();
+			api.open();
+			outage.reject(new TypeError("Failed to fetch"));
+			await settle();
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(api.preview).toHaveBeenCalledTimes(2);
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
+		});
+
 		// A drop leaves a session with a transcript on disk selected, and its
 		// preview waits for a server that can answer it (D25 point 3).
 		it("keeps a dropped selection detached-loading, and fetches its preview only once the stream is back (OW-forinu)", async () => {

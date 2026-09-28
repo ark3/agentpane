@@ -112,10 +112,13 @@ export type PaneMode = "live" | "preview" | "loading";
  * composer over no view (OW-zivamo, OW-wazija, OW-tefigi) or a preview over a
  * live one (OW-tefigi).
  *
- * An attach reply can beat its own snapshot (D2), and that window is
- * `loading` too: nothing in the state tells it from a view a gap dropped, so
- * the Attach button stands over an empty pane for that instant, which is the
- * owner's empty pane doing what it was chosen to do.
+ * An attach reply can beat its own snapshot (D2), and that window is not
+ * `live` either: nothing in the state tells it from a view a gap dropped, so
+ * the Attach button stands until the snapshot lands -- over the preview the
+ * user attached from, if one is stored, and otherwise over an empty pane,
+ * whose preview `publish` may fetch meanwhile. Accepted at filing: the
+ * server broadcasts an attach's snapshot before it replies, so the window is
+ * the reordering D2 allows and usually nothing.
  */
 export function paneMode(view: Pick<ControllerView, "state" | "preview">): PaneMode | null {
 	const selected = view.state.selected;
@@ -204,8 +207,9 @@ export interface AgentpaneController {
 	 * (OW-forinu). No-op with nothing selected.
 	 *
 	 * Not held to a live pane, as the other session verbs are: after a gap the
-	 * server still holds the session with no view in this tab, and this is what
-	 * closes it.
+	 * server still holds the session with no view in this tab, and a detach is
+	 * still the way to close it. The browser offers Detach only in the composer,
+	 * so only on a live pane, today.
 	 *
 	 * The caller decides *when* this is offered -- the composer's Tools menu
 	 * gates it on the exemption predicate D12 wrote for its reaper, because
@@ -294,6 +298,8 @@ export function createController(
 	const forkPointsInFlight = new Set<string>();
 	/** Sessions, by ref key, whose preview `loadPreview` has out. */
 	const previewLoads = new Set<string>();
+	/** How many times the stream has dropped: a read out across one was cut by the outage. */
+	let streamDrops = 0;
 	const listeners = new Set<(next: ControllerView) => void>();
 
 	/**
@@ -328,15 +334,20 @@ export function createController(
 	 * A failed read falls to the startup view, reporting nothing, rather than
 	 * trying again, which against a server answering an error would be a hot
 	 * loop: the selection goes and nothing is loading any more. The exception is
-	 * a read the stream dropped under, which is the outage and not an answer;
-	 * that one is simply forgotten, and the reconnect's publish asks again.
+	 * a read the stream dropped under, which is the outage and not an answer.
+	 * That one is asked again, once per drop, which waits for `connected`: the
+	 * reconnect may have published before the read failed, while its key was
+	 * still out, so nothing else would ask. A read that fails as the server
+	 * exits but before the tab has heard the stream drop cannot be told from an
+	 * answer, and still falls to the startup view.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;
-		if (selected === null || view.connection !== "connected") return;
+		if (selected === null || view.connection !== "connected" || paneMode(view) !== "loading") return;
 		const key = sessionKey(selected);
 		if (previewLoads.has(key)) return;
 		previewLoads.add(key);
+		const drops = streamDrops;
 		const loading = () =>
 			!disposed && view.state.selected !== null && sessionKey(view.state.selected) === key && paneMode(view) === "loading";
 		api.preview(selected).then(
@@ -346,7 +357,9 @@ export function createController(
 			},
 			() => {
 				previewLoads.delete(key);
-				if (loading() && view.connection === "connected") publish({ state: { ...view.state, selected: null } });
+				if (!loading()) return;
+				if (drops !== streamDrops || view.connection !== "connected") loadPreview();
+				else publish({ state: { ...view.state, selected: null } });
 			},
 		);
 	}
@@ -574,8 +587,8 @@ export function createController(
 		// undefined forever. Nothing is published when the length is unchanged, so a
 		// quiet poll costs the transcript no re-render.
 		if (turns.length === current.turns.length) return false;
-		// Keeps the preview's own ref rather than the response's, so the documented
-		// `preview.ref === state.selected` invariant holds without touching
+		// Keeps the preview's own ref rather than the response's, so the preview
+		// still names the selection and `paneMode` still reads it, without touching
 		// `selected` -- a refresh must never move the selection.
 		publish({ preview: { ref: current.ref, turns } });
 		return true;
@@ -822,6 +835,7 @@ export function createController(
 		 * a rename moved the ref during the outage (`followRef`).
 		 */
 		onDisconnect(fatal: boolean) {
+			streamDrops += 1;
 			const selected = view.state.selected;
 			let kept = true;
 			const summaries: SessionSummary[] = [];

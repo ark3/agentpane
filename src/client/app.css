@@ -341,7 +341,7 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
    came from: it takes over the row's auto-margin spacer while it is present. */
 .compaction-status { margin: 0 auto 0 0; align-self: center; color: var(--ap-fg-muted); font-size: var(--ap-text-sm); }
 .prompt-actions:has(.compaction-status) .tools-menu { margin-right: 0; }
-/* A read-only preview has no composer -- attaching is the one explicit action. */
+/* A detached pane, previewed or loading, has no composer -- attaching is the one explicit action. */
 .attach button { width: 100%; border-color: var(--ap-accent); color: var(--ap-accent); }
 .abort { color: var(--ap-danger); }
 /* The edit mode banner (OW-hezidi). It sits above the composer and carries the
