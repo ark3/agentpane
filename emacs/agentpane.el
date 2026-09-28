@@ -101,7 +101,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 185 tests, 182 results as expected, 0 unexpected, 3 skipped
+;;     Ran 186 tests, 183 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2596,13 +2596,18 @@ attached, for there is nothing of its own to close -- a session
 virtual one is an attached buffer here; one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); one with a prompt or a fork in flight, both of which the
-browser's `sending' covers, or an attach, whose answer would count the
-buffer attached to what was closed; and one with a request pending.
+browser's `sending' covers; and one with a request pending.  Refused too,
+beyond the browser's predicate, with an attach in flight, whose answer
+would count the buffer attached to what was closed.
 
 Once the close answers the buffer holds no handle and no attachment, and
 its turn-done watch on the handle ends, as `agentpane--detach' ends it;
 nor has it sent an attach, so a later kill sends no `sessions/detach' for
-a session the helper, having closed it, no longer holds.  Then the
+a session the helper, having closed it, no longer holds.  Nor is it
+dropped, though a `session/detached' for the handle may have come while
+the close was out, the server letting go of the session before its
+subprocess is gone: dropped, it would attach the session again where it
+should preview.  Then the
 listing says whether the session is on disk, as the browser reads
 `onDisk' after its close.  One that is is redrawn from its stored
 transcript, the read-only preview the browser lands on, and a send
@@ -2632,7 +2637,8 @@ the echo area and leaves the buffer as it was."
        (lambda (_)
          (agentpane--watch-forget agentpane--handle)
          (setq agentpane--handle nil
-               agentpane--attach-sent nil)
+               agentpane--attach-sent nil
+               agentpane--dropped nil)
          (agentpane--hold-attached nil)
          (agentpane--request
           'sessions/list nil

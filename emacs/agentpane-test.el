@@ -3280,6 +3280,25 @@ the browser lands on the read-only preview.  A kill after that sends no
       (kill-buffer buffer)
       (should-not sent))))
 
+(ert-deftest agentpane-test-close-session-detached-meanwhile-previews ()
+  "A `session/detached' for the handle while the close is out -- the
+server has let go of the session before its subprocess is disposed of,
+and a listing the helper asks meanwhile lacks it -- leaves the buffer not
+dropped once the close answers, so it previews the stored transcript
+rather than attaching again the session just closed."
+  (agentpane-test--closing
+    (setq listed (vector (list :ref ref :onDisk t))
+          hold '(sessions/close))
+    (with-current-buffer buffer
+      (agentpane-close-session)
+      (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+      (funcall (cdr (pop held)) t)
+      (should-not agentpane--dropped)
+      (should (equal (reverse sent)
+                     `((sessions/close :session ,ref :handle "h1")
+                       (sessions/list)
+                       (sessions/preview :session ,ref)))))))
+
 (ert-deftest agentpane-test-close-session-with-nothing-on-disk-kills-the-buffer ()
   "A session the listing after the close does not carry, or carries as not
 on disk -- one created or forked and never prompted -- has no transcript to
