@@ -11,6 +11,10 @@ The kill discards whatever the user had typed in the buffer's prompt region, and
 The browser's single `view.draft` survives that same Detach.
 The composer orphaning is what any manual kill of a transcript does too; the lost draft is what this command added.
 
+The adversarial read of OW-dakeyi on 2026-09-28 named a second thing the same kill discards, read and not run.
+OW-dakeyi's `agentpane--closing` refuses every send while the close is out, but clears when the close answers, before the `sessions/list` request goes out; a `C-RET` in the gap between the close answering and the listing answering attaches and prompts, and a listing reporting the session not on disk then kills the buffer with that prompt in flight.
+Whatever the remedy chosen here, it covers that prompt as well as the draft, or the close state is held until the listing has answered.
+
 What is in service of: a user who closes a never-prompted session loses nothing they typed.
 Which remedy fits — keep the buffer as an empty unattached one, carry the draft somewhere, or ask before killing when a draft is non-empty — is this card's to decide, and the choice goes in the command's docstring.
 
