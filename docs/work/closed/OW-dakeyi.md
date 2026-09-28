@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane-close-session leaves its buffer attached while the close is in flight, so g, C-RET, f and a second C-c C-q all go ahead and can respawn the session being closed
@@ -26,3 +27,25 @@ What is load-bearing: a close in flight is a state the buffer owns, set when the
 State in the change what becomes of `agentpane-close-session`'s `agentpane--attaching` clause — kept, because an attach sent before the close is a distinct ordering, or subsumed.
 
 Done when ERT tests in `emacs/agentpane-test.el`, built on the `agentpane-test--closing` macro OW-yosege added, hold `sessions/close` (its `hold` list) and show `g`, `C-RET`, `f` and a second `C-c C-q` each sending nothing to the session while it is held, and a close pressed after `agentpane-compact` sent but before any status refused, each red before the change and green after; run with `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Landed on `main` as 86d5648, 6d85775, 9cc668e and ca23ffb, all Emacs Lisp only, so `bun run check` was not run.
+
+A close in flight is now state the buffer owns: `agentpane--closing` in `emacs/agentpane.el`, set as `sessions/close` goes out and cleared when it answers, success or failure (the failed-close lambda passed to `agentpane--request`, which jsonrpc also runs on "Server died").
+It is read at the four chokepoints every request that would reach the session goes through, via `agentpane--refuse-closing`: `agentpane--attach`, `agentpane--attach-now`, `agentpane--attached-then` and `agentpane--fork-point`.
+Two per-command reads remain, each for a reason: `agentpane-refetch` answers in the echo area rather than signalling, because the picker refetches a buffer to show it, and `agentpane-close-session` says "already closing" to a second press.
+Every other refused command signals `user-error`, calling the caller's FAILED first so `agentpane--sending` and `agentpane--forking` do not stay set.
+Requests still sent directly while closing — abort, dismissError, requests/reply — reach routes that never attach.
+`agentpane-close-session`'s `agentpane--attaching` clause is kept, not subsumed: an attach sent before the close is an ordering the new state does not cover.
+
+Compaction: `agentpane-compact` writes `:compaction "requesting"` into the buffer's status as the request goes out, mirroring `compact` in `src/client/controller.ts`, and a failed request clears it if it still reads that.
+No mark is written while the buffer has no status yet, as `setSessionCompaction` skips it before any snapshot (OW-kimaya); the first cut wrote it anyway and blanked the model, which the adversarial read caught.
+Emacs now shares the race the browser accepted in OW-husivu (declined): a status or snapshot carrying no compaction that lands before the server's own "requesting" wipes the mark, so on a just-attached buffer a close can still go out with the compact unanswered; the docstring says so.
+
+Verified by ERT in `emacs/agentpane-test.el`, on `agentpane-test--closing` with `sessions/close` held: `agentpane-test-close-session-in-flight-reaches-nothing` (g, C-RET, f, e and a second C-c C-q each send nothing, then the released close still lands), `agentpane-test-close-session-in-flight-detached-meanwhile-reaches-nothing` (the same after a `session/detached` mid-close, which only the `agentpane--attach` and `agentpane--attach-now` guards catch), `agentpane-test-close-session-that-fails-frees-the-buffer`, `agentpane-test-close-session-refused-once-compaction-requested` and `agentpane-test-compact-before-any-status-marks-nothing`.
+The in-flight and compaction tests were run red against main's `agentpane.el` by the dispatching session; the implementer and the adversarial reader each showed the rest red by deleting the guard each covers.
+Full suite: 191 tests, 188 as expected, 3 skipped, 0 unexpected.
+
+The browser half went to its own card, OW-ripahi, since it lands in a different client and test suite.
+The adversarial read's findings outside this card: OW-wezaji (the helper's sequence-gap re-attach has no close guard), OW-wovamo (close goes ahead with setModel or setEffort in flight), the close-side case of the helper's per-ref `pending` added to OW-jofodu, and the gap between the close answering and its listing added to OW-watawe.
