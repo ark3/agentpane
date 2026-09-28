@@ -3477,17 +3477,21 @@ change's, raises nothing (OW-dunahe)."
       (should-not (agentpane-test--turn-done-p)))))
 
 (defun agentpane-test--attach-to-a-running-turn (snapshot-first)
-  "Send from a previewed buffer whose attach finds a turn from elsewhere
-streaming, its snapshot handled before the attach's reply when
-SNAPSHOT-FIRST and after it otherwise (D2), then end that turn unseen, and
-return whether the indicator is raised."
+  "Send from a previewed buffer, holding no handle, whose attach finds a
+turn from elsewhere streaming under the handle \"h1\", its snapshot handled
+before the attach's reply when SNAPSHOT-FIRST, the buffer taking the
+handle from the snapshot, and after it otherwise, taking it from the
+reply (D2); then end that turn unseen, and return whether the indicator
+is raised."
   (agentpane-test--submitting
     (setq agentpane--attached nil
+          agentpane--handle nil
           hold '(sessions/attach))
     (let ((snapshot (lambda ()
                       (agentpane--on-notification
                        nil 'session/snapshot
-                       (list :session ref :nodes agentpane-test--nodes :isStreaming t)))))
+                       (list :session ref :handle "h1" :nodes agentpane-test--nodes
+                             :isStreaming t)))))
       (funcall submit)
       (when snapshot-first (funcall snapshot))
       (funcall (cdr (pop held)) t)
@@ -3626,20 +3630,20 @@ from elsewhere under the handle a re-attach answers raises nothing
       (funcall status nil)
       (should-not (agentpane-test--turn-done-p)))))
 
-(ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
-  "A helper that exits ends the watch on every handle it carried, and each
-buffer attached through it reads as not streaming, since nothing will say
-otherwise: after a crash mid-turn the re-attach's snapshot raises nothing
-for the turn it finds over, whatever that snapshot's order with the next
-prompt's attach reply, and that prompt's own turn raises the indicator
-when it ends (OW-dunahe)."
+(defun agentpane-test--reattach-after-helper-death (snapshot-first)
+  "Submit a turn, see it stream, let the helper exit, and prompt again
+through a new helper, whose attach answers under the same handle and
+whose snapshot says the first turn is over: handled before the attach's
+reply when SNAPSHOT-FIRST and after it otherwise (D2).  Nothing is
+raised before the second prompt's turn streams; return whether its end,
+unseen, raises the indicator."
   (agentpane-test--submitting
     (let ((global-mode-string global-mode-string)
-          (snapshot (lambda (streaming)
+          (snapshot (lambda ()
                       (agentpane--on-notification
                        nil 'session/snapshot
                        (list :session ref :handle "h1" :nodes agentpane-test--nodes
-                             :isStreaming (if streaming t :json-false))))))
+                             :isStreaming :json-false)))))
       (funcall submit)
       (funcall status t)
       (setq agentpane--connection nil)
@@ -3655,15 +3659,27 @@ when it ends (OW-dunahe)."
         (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
                                           (+ (float-time) 10))))
       (should-not agentpane--streaming)
+      (should-not (agentpane-test--turn-done-p))
       (setq agentpane--connection 'connection
             hold '(sessions/attach))
       (funcall submit)
+      (when snapshot-first (funcall snapshot))
       (funcall (cdr (pop held)) t)
-      (funcall snapshot nil)
+      (unless snapshot-first (funcall snapshot))
       (should-not (agentpane-test--turn-done-p))
       (funcall status t)
       (funcall status nil)
-      (should (agentpane-test--turn-done-p)))))
+      (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
+  "A helper that exits ends the watch on every handle it carried, and each
+buffer attached through it reads as not streaming, since nothing will say
+otherwise: after a crash mid-turn the re-attach's snapshot raises nothing
+for the turn it finds over, whichever of it and the next prompt's attach
+reply is handled first, and that prompt's own turn raises the indicator
+when it ends (OW-dunahe)."
+  (should (agentpane-test--reattach-after-helper-death nil))
+  (should (agentpane-test--reattach-after-helper-death t)))
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
