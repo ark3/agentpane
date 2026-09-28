@@ -2458,6 +2458,109 @@ says to press again, as `agentpane-fork' does."
           (should (equal (agentpane-test--draft) ""))
           (should-not agentpane--editing))))))
 
+(defmacro agentpane-test--editing (backend &rest body)
+  "Run BODY in a buffer attached to a session on BACKEND, drawn with
+`agentpane-test--image-nodes', with an edit of the message at index 0 open,
+under `agentpane-test--forking'.  The fork points answered are `points',
+which BODY may set; `sent' starts empty once the edit is open."
+  (declare (indent 1))
+  `(let ((points [(:id "entry-0" :text "Fix the bug" :index 0)]))
+     (agentpane-test--with-helper
+       (agentpane-test--forking
+           points
+           (list :backend ,backend :id "fork")
+         (agentpane-test--with-session (list :backend ,backend :id "parent")
+           (agentpane--draw agentpane-test--image-nodes)
+           (setq agentpane--attached 'connection)
+           (agentpane-test--goto-index 0)
+           (agentpane-edit)
+           (should agentpane--editing)
+           (setq sent nil)
+           ,@body)))))
+
+(defun agentpane-test--count (method sent)
+  "How many of the requests SENT went out as METHOD."
+  (seq-count (lambda (entry) (eq (car entry) method)) sent))
+
+(ert-deftest agentpane-test-edit-send-in-flight-refuses-a-second ()
+  "A second send while an edit's send is in flight -- the fork answered, and
+the fork's prompt still waiting on the fork's attach -- says so and sends
+nothing, so one edit forks once (OW-kelede)."
+  (agentpane-test--editing "codex"
+    (setq hold '(sessions/attach))
+    (agentpane-send)
+    (should (equal (mapcar #'car (reverse sent))
+                   '(sessions/forkPoints sessions/fork sessions/attach)))
+    (should-error (agentpane-send) :type 'user-error)
+    (should (= (agentpane-test--count 'sessions/fork sent) 1))
+    (funcall (cdr (pop held)) t)
+    (should (= (agentpane-test--count 'sessions/prompt sent) 1))
+    (should-not agentpane--sending)))
+
+(ert-deftest agentpane-test-edit-send-while-a-prompt-is-in-flight-forks-nothing ()
+  "An edit's send while a plain prompt from the buffer is still in flight
+says so and forks nothing, as a second plain send is refused."
+  (agentpane-test--with-helper
+    (agentpane-test--forking
+        [(:id "turn-0" :text "Fix the bug" :index 0)]
+        '(:backend "codex" :id "t2")
+      (agentpane-test--with-session '(:backend "codex" :id "t1")
+        (agentpane--draw agentpane-test--image-nodes)
+        (setq agentpane--attached 'connection)
+        (setq hold '(sessions/prompt))
+        (goto-char (point-max))
+        (insert "hello")
+        (agentpane-send)
+        (agentpane-test--goto-index 0)
+        (agentpane-edit)
+        (should agentpane--editing)
+        (should-error (agentpane-send) :type 'user-error)
+        (should-not (assq 'sessions/fork sent))))))
+
+(ert-deftest agentpane-test-edit-send-failed-frees-the-next-send ()
+  "An edit's send that fails anywhere -- its fork points, a message no
+longer forkable, a streaming Pi turn's abort, the fork, or the fork's
+prompt -- frees the buffer, so the next send goes out."
+  (dolist (how '(forkPoints unforkable abort fork prompt))
+    (agentpane-test--editing (if (eq how 'abort) "pi" "codex")
+      (pcase how
+        ('forkPoints (setq hold '(sessions/forkPoints)))
+        ('unforkable (setq points []))
+        ('abort (setq agentpane--streaming t hold '(sessions/abort)))
+        ('fork (setq hold '(sessions/fork)))
+        ('prompt (setq hold '(sessions/prompt))))
+      (agentpane-send)
+      (while held (funcall (cdr (pop held)) nil))
+      (should-not agentpane--sending)
+      (should agentpane--editing)
+      (setq hold nil sent nil)
+      (agentpane-send)
+      (should (assq 'sessions/forkPoints sent)))))
+
+(ert-deftest agentpane-test-edit-send-attaches-a-detached-parent-first ()
+  "An edit's send from a buffer no longer attached, as a Pi fork's parent is
+left, attaches before it asks for the fork points, as `agentpane-fork' does."
+  (agentpane-test--editing "pi"
+    (setq agentpane--attached nil)
+    (agentpane-send)
+    (should (equal (seq-take (mapcar #'car (reverse sent)) 2)
+                   '(sessions/attach sessions/forkPoints)))))
+
+(ert-deftest agentpane-test-composer-send-refused-while-editing ()
+  "A composer send while its transcript holds an edit says so and sends
+nothing, leaving the edit, the prompt region's text and the composer's."
+  (agentpane-test--editing "codex"
+    (let ((transcript (current-buffer)))
+      (agentpane-prompt)
+      (with-current-buffer (buffer-local-value 'agentpane--composer transcript)
+        (insert "from the composer")
+        (should-error (agentpane-composer-send) :type 'user-error)
+        (should (equal (buffer-string) "from the composer")))
+      (with-current-buffer transcript
+        (should agentpane--editing)
+        (should (equal (agentpane-test--draft) "Fix the bug")))
+      (should-not sent))))
+
 ;;;; Sending, against a stub connection
 
 (ert-deftest agentpane-test-one-send-at-a-time ()

@@ -91,7 +91,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 165 tests, 162 results as expected, 0 unexpected, 3 skipped
+;;     Ran 170 tests, 167 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2404,12 +2404,13 @@ it, has not answered.")
 prompt region's text the edit displaced; `:overlay', the overlay naming
 the edit over the prompt separator.  Nil otherwise.")
 
-(defun agentpane--send-prompt (text sent &optional images)
+(defun agentpane--send-prompt (text sent &optional images failed)
   "Send TEXT as a prompt to the session of the current buffer's transcript,
 with IMAGES, a list of the plists the prompt's `images' take, then call
 SENT.  A prompt the server refuses, such as one sent mid-turn
 \(DESIGN D16), shows the server's text in the echo area and SENT is not
-called, so the draft stays where it was.
+called, so the draft stays where it was; FAILED, if given, is called
+instead, as it is for any other failure of the attach or the prompt.
 While the transcript holds an edit (`agentpane-edit'), TEXT goes instead
 into a fork at the edited message, with that message's images; see
 `agentpane--send-edit'.
@@ -2466,12 +2467,14 @@ handling exits non-locally was admitted, and keeps its watch too."
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
     (cond
-     (agentpane--editing (agentpane--send-edit text sent))
      (agentpane--sending
       (user-error "A prompt to this session is already being sent"))
+     (agentpane--editing (agentpane--send-edit text sent))
      (t
       (setq agentpane--sending t)
-      (let ((failed (lambda () (setq agentpane--sending nil)))
+      (let ((failed (lambda ()
+                      (setq agentpane--sending nil)
+                      (when failed (funcall failed))))
             (prior (and agentpane--error agentpane--error-id)))
         (agentpane--attached-then
          (lambda ()
@@ -2748,14 +2751,17 @@ not forkable.  See `agentpane-fork'."
          (message "agentpane: the message at point is not forkable"))))
    t failed agentpane--spawn-timeout))
 
-(defun agentpane--fork-points (index &optional then)
+(defun agentpane--fork-points (index &optional then failed)
   "Fork this attached buffer's session at the fork point naming INDEX, and
-call THEN, if given, in the fork's buffer once its attach has gone out.
-See `agentpane-fork'."
+call THEN, if given, in the fork's buffer once its attach has gone out,
+or FAILED, if given, here should the points, the abort or the fork fail,
+or no point name INDEX.  See `agentpane-fork'."
   (let* ((parent (agentpane--ref agentpane--session))
          (pi-backend (equal (plist-get parent :backend) "pi"))
          (window (get-buffer-window))
-         (failed (lambda () (setq agentpane--forking nil))))
+         (failed (lambda ()
+                   (setq agentpane--forking nil)
+                   (when failed (funcall failed)))))
     (setq agentpane--forking t)
     (agentpane--fork-point
      index
@@ -2892,23 +2898,43 @@ end the edit and call SENT.  The fork is `agentpane-fork''s, a streaming
 Pi turn's abort and the one fork at a time included, and the prompt is
 the fork buffer's own `agentpane--send-prompt'.  A fork or a prompt that
 fails leaves the edit standing, the edited text still in the prompt
-region, as the browser's `send' leaves its edit mode."
+region, as the browser's `send' leaves its edit mode.
+
+This buffer counts as sending, `agentpane--sending', for the whole round
+trip -- the attach, the points, any abort, the fork, and the fork's attach
+and prompt -- as the browser's `forkAndSubmit' holds `sending' across all
+of it (OW-kelede), and every failure along the way frees it.  Guarded by
+`agentpane--forking' alone, which the fork's reply clears, a second send
+while the fork's prompt waited on its attach forked again.
+A buffer no longer attached, as a Pi fork's parent is left once its fork
+has answered, attaches first, as `agentpane-fork' does."
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
-  (let ((edit agentpane--editing)
-        (parent (current-buffer)))
-    (agentpane--fork-points
-     (plist-get edit :index)
+  (let* ((edit agentpane--editing)
+         (parent (current-buffer))
+         (free (lambda ()
+                 (when (buffer-live-p parent)
+                   (with-current-buffer parent
+                     (setq agentpane--sending nil))))))
+    (setq agentpane--sending t)
+    (agentpane--attached-then
      (lambda ()
-       (agentpane--send-prompt
-        text
+       (agentpane--fork-points
+        (plist-get edit :index)
         (lambda ()
-          (when (buffer-live-p parent)
-            (with-current-buffer parent
-              (when (eq agentpane--editing edit)
-                (agentpane--end-edit))))
-          (funcall sent))
-        (plist-get edit :images))))))
+          (agentpane--send-prompt
+           text
+           (lambda ()
+             (funcall free)
+             (when (buffer-live-p parent)
+               (with-current-buffer parent
+                 (when (eq agentpane--editing edit)
+                   (agentpane--end-edit))))
+             (funcall sent))
+           (plist-get edit :images)
+           free))
+        free))
+     free)))
 
 ;;;###autoload
 (defun agentpane-new-session (backend)
@@ -3005,8 +3031,14 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
                                               (window-height . 8))))))
 
 (defun agentpane-composer-send ()
-  "Send the composer's text as a prompt, and clear the composer once sent."
+  "Send the composer's text as a prompt, and clear the composer once sent.
+Refused while the transcript holds an edit (`agentpane-edit'), which lives
+in the transcript's prompt region: sent from here it would fork with this
+text and strand the message's text there."
   (interactive)
+  (when (buffer-local-value 'agentpane--editing (agentpane--transcript))
+    (user-error "The transcript holds an edit: send it from its prompt region, \
+or cancel it there with C-c C-k"))
   (let ((composer (current-buffer))
         (text (buffer-substring-no-properties (point-min) (point-max))))
     (agentpane--send-prompt
