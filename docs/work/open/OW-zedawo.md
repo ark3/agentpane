@@ -38,3 +38,10 @@ ERT tests in `emacs/agentpane-test.el`, red first, drive both cases through a re
 The `agentpane--attached`-keyed selection in `agentpane--helper-gone` is gone, replaced by whatever owns "buffers this connection fed".
 The suite passes with `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
 OW-bukupu owns the late-reply-onto-a-replacement case and the `eq` guard; leave both to it.
+
+## Amended 2026-09-28 after OW-bukupu
+
+OW-bukupu settled case 1: `agentpane--on-notification` now records the connection that gave a buffer its handle in the buffer-local `agentpane--served-by`, and `agentpane--helper-gone` lets go of a buffer that either it or `agentpane--attached` names; `agentpane-test-snapshot-before-a-death-is-let-go` is the case-1 test, red on main.
+The selection is therefore no longer keyed on `agentpane--attached` alone, though that key survives beside `agentpane--served-by`; whether one owner should replace both is this card's call.
+Case 2 stands, with a changed order: jsonrpc.el's "Server died" is now handled from a zero-delay timer, behind the helper's queued messages and ahead of the teardown `agentpane--helper-exited` defers (see "Each request has one answer" in `agentpane--request`'s docstring), so the prompt's UNSENT still forgets the watch before `agentpane--let-go` could fold it.
+Drop case 1 from the done-condition; case 2's test and the suite remain.
