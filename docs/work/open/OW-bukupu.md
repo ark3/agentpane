@@ -65,3 +65,17 @@ Cases 2 and 3 are gone: `stream/changed` and `agentpane--stream-down` no longer 
 `agentpane--helper-gone` now leaves each buffer attached through the dead connection by `agentpane--let-go`, which reads the buffer idle, forgets its turn-done watch and drops its handle; that per-buffer `agentpane--let-go` is the teardown the ownership change moves, and OW-mirifa has closed, so nothing else extends it.
 Cases 1, 4 and 5 stand as read against that code: `agentpane--attached-as` still sets `agentpane--attached` from the global, `agentpane--helper-gone` still skips a buffer whose `agentpane--attached` is no longer the dead connection, `agentpane--on-notification` still ignores its connection argument, and `agentpane--request`'s success handler still compares only ids.
 This section supersedes the done-condition above: an ERT test for each of cases 1, 4 and 5 (both halves of 5: the late `session/status` and a late reply whose id matches `agentpane--latest-request` on the replacement) goes red before the change and green after; the `eq` guard is gone as stated; the two named tests still pass; and the suite passes.
+
+## Amended 2026-09-28 from the adversarial read of the first cut
+
+The first cut (branch `card/OW-bukupu`, three commits) moved the teardown into `agentpane--connection` and added a filter in `agentpane--on-notification` and in `agentpane--request`'s success handler that drops whatever is delivered through a connection that is no longer current.
+The reader reproduced all four cases going red before and green after, and found these against the filters; each is part of this card's done-condition:
+
+- The filters decide by when jsonrpc.el delivers a message, not by when the dead helper wrote it, so the last `session/node` or `session/error` a helper wrote before exiting is dropped whenever its sentinel runs first, which undoes OW-mepufi's flush of the throttled node before exit ("fix(emacs): send a node the throttle holds before the helper exits at a drop").
+  Reproduced with the helper writing a node and exiting while Emacs is busy: nothing drawn; `main` draws it, but only by re-binding the let-go buffer to the dead handle, which is case 5.
+  A test must show such a final node drawn and the buffer still let go afterwards.
+- `:error-fn` is the failure path itself and never consults the `answered` flag, so an error reply the dead helper wrote before exiting fails the request a second time after the sentinel failed it; the docstring's "fails once" is false there.
+  A test must show one failure.
+- A success reply through a torn-down helper runs UNSENT, which says the request reached no backend, though the reply proves it did: a prompt the server accepted keeps its draft.
+- A chain begun from the dead helper's reply while it is still current but dead -- an attach answered, then `agentpane--attached-then` running the prompt -- arms the turn-done watch, then `agentpane--request`'s `agentpane--connection` runs the teardown inside that call, forgetting the watch and dropping the buffer, and the prompt still goes out through the replacement.
+  Not a regression (`main` ends in the same state), but a case the teardown's ownership misses.
