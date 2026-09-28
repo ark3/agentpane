@@ -1489,6 +1489,34 @@ and the other's composer, text and all, sends to the survivor."
         (should (eq (agentpane--transcript) previewing))
         (should (equal (buffer-string) "composed"))))))
 
+(ert-deftest agentpane-test-attach-onto-a-held-handle-drops-an-edit ()
+  "When an attach reply merges a buffer holding an edit into the one that
+attached, the draft that edit displaced follows the survivor's own, and
+the message's text loaded to fork with does not: sent from the survivor,
+which holds no edit, it would prompt the session itself (OW-bifevo)."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (with-current-buffer previewing
+        (goto-char (point-max))
+        (insert "mine"))
+      (with-current-buffer holder
+        (setq agentpane--attached agentpane--connection)
+        (agentpane--draw agentpane-test--image-nodes)
+        (goto-char (point-max))
+        (insert "theirs")
+        (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+        (should (equal (agentpane-test--draft) "Fix the bug")))
+      (with-current-buffer previewing
+        (agentpane--attach)
+        (should-not (buffer-live-p holder))
+        (should-not agentpane--editing)
+        (should (equal (agentpane-test--draft) "mine\ntheirs"))
+        (agentpane-send))
+      (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
+        (should (= (length prompts) 1))
+        (should (equal (plist-get (cdar prompts) :session) canonical))
+        (should (equal (plist-get (cdar prompts) :text) "mine\ntheirs"))))))
+
 (ert-deftest agentpane-test-attach-onto-a-held-handle-names-the-adopted-composer ()
   "When an attach reply's merge hands the buffer that attached, which has
 no composer, the other's, that composer is named after the survivor."

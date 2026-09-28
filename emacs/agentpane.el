@@ -2171,6 +2171,7 @@ into this one, which then wants a snapshot; see `agentpane--absorb'."
 
 (defvar agentpane--composer-transcript)
 (defvar agentpane--turns-done)
+(defvar agentpane--editing)
 
 (defun agentpane--absorb (other)
   "Take the transcript buffer OTHER's draft, composer and windows into this
@@ -2189,6 +2190,11 @@ own, and its composer, if any, sends here from then on, and is this
 buffer's composer if it has none.  Should this buffer have a prompt in
 flight, its answer then leaves the sent text in place rather than
 clearing it, as it does whenever the region changed after the send.
+An edit OTHER holds (`agentpane-edit') is dropped, as `agentpane-cancel-edit'
+drops it, and what follows is the draft it displaced: moved here as a
+plain draft, the message's text loaded to fork with would prompt this
+buffer's session itself (OW-bifevo).  The message is still in the
+transcript, to edit again here.
 Requests of OTHER's still in flight are dropped with it, as any killed
 buffer's are; a prompt of its own that went out leaves its text in this
 buffer's draft.  A window that showed OTHER shows this one, and OTHER's
@@ -2212,7 +2218,9 @@ session's transcript is in view, and nothing would clear it, as
 `agentpane--clear-seen-turns' runs only when windows change."
   (let ((buffer (current-buffer))
         (draft (with-current-buffer other
-                 (buffer-substring-no-properties agentpane--prompt-start (point-max))))
+                 (if agentpane--editing
+                     (plist-get agentpane--editing :draft)
+                   (buffer-substring-no-properties agentpane--prompt-start (point-max)))))
         (composer (buffer-local-value 'agentpane--composer other)))
     (unless (string-empty-p draft)
       (save-excursion
