@@ -258,14 +258,15 @@ export function clearSessionError(state: ClientState, handle: string): ClientSta
  * in the composer would bring the same defect with it, and is what would
  * reopen this.
  *
- * It writes only a view that exists (OW-kimaya). Compact is enabled on
- * `selected !== null`, so the click can land before any snapshot has
- * introduced the view: on a preview, or between an attach reply and its
- * snapshot. This used to create `emptySession(ref)` there, under the ref it
- * was keyed by; keyed by the handle, a preview has none to key it by, and a
- * view made from the summary's handle would be the one view no snapshot
- * introduced (OW-pezazo). The mark is skipped instead, and the snapshot that
- * introduces the view carries the server's own `compaction`.
+ * It writes only a view that exists (OW-kimaya), and creates none: a view
+ * made here would be the one view no snapshot introduced (OW-pezazo). Its one
+ * caller, `compact()` in `controller.ts`, acts only on a live pane since
+ * OW-forinu, so a view stands at the click; a click on a preview or between
+ * an attach reply and its snapshot, which this once had to skip, is refused
+ * before it gets here. A view gone by the time a failed request comes back
+ * to clear its mark -- a gap, a drop or a listing can take it meanwhile -- is
+ * caught by that caller, which reads the mark through the view first, so no
+ * caller reaches the check today; it stays as this function's own contract.
  */
 export function setSessionCompaction(
 	state: ClientState,

@@ -166,7 +166,13 @@ class FakeController implements AgentpaneController {
 		this.previewed.push(ref);
 	}
 
-	/** The real attach path clears the preview and gives the session a live view. */
+	/**
+	 * The real attach's end state once its snapshot has landed: a live view of
+	 * the session, with the stored preview gone -- the real `publish` drops it
+	 * the moment the pane reads live (OW-forinu), and the attach reply alone
+	 * clears nothing. The fake skips the window between the reply and the
+	 * snapshot, where the pane is not yet live.
+	 */
 	async select(ref: SessionRef) {
 		this.selected.push(ref);
 		this.publish({

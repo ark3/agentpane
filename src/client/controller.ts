@@ -1204,9 +1204,10 @@ export function createController(
 			if (paneMode(view) !== "live") return;
 			// Marked and cleared under the handle, which a rename landing while the
 			// request is in flight (D9) leaves naming the session that holds the
-			// mark. None before the snapshot: `setSessionCompaction` says why that
-			// marks nothing.
-			const handle = handleOf(view.state, selected);
+			// mark. The pane is live, so the selection names a view and the handle
+			// is its key (OW-forinu): a click before the snapshot, on a preview or
+			// between an attach reply and its snapshot, was refused just above.
+			const handle = handleOf(view.state, selected)!;
 			// The session reads "requesting" from the click itself rather than from
 			// the server: its own "requesting" status races the POST response (D2),
 			// and the composer needs the acknowledgment either way (OW-natiha).
@@ -1215,7 +1216,7 @@ export function createController(
 			publish({
 				busy: "compacting",
 				error: null,
-				state: handle === undefined ? view.state : setSessionCompaction(view.state, handle, "requesting"),
+				state: setSessionCompaction(view.state, handle, "requesting"),
 			});
 			try {
 				await api.compact(selected);
@@ -1232,9 +1233,11 @@ export function createController(
 					//
 					// Threshold compaction is why this is narrow rather than
 					// unconditional: it enters at "running", never "requesting", so
-					// only a click-shaped mark is in scope here.
-					const current = handle === undefined ? undefined : view.state.sessions[handle]?.compaction;
-					const state = handle !== undefined && current === "requesting"
+					// only a click-shaped mark is in scope here. The view itself may be
+					// gone by now -- a gap, a drop or a listing can take it while the
+					// request is out -- and then there is no mark left to clear.
+					const current = view.state.sessions[handle]?.compaction;
+					const state = current === "requesting"
 						? setSessionCompaction(view.state, handle, null)
 						: view.state;
 					publish({ error: errorMessage(error), state });
