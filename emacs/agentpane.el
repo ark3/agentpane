@@ -1862,8 +1862,12 @@ the session goes out while it is set: every attach, synchronous or not,
 and every request `agentpane--attached-then' or `agentpane--fork-point'
 sends refuses through `agentpane--refuse-closing', and
 `agentpane-refetch' and a second `agentpane-close-session' read it
-themselves.  Cleared when the close answers, whether it succeeded or
-failed.")
+themselves.  Cleared when the close fails, and when it succeeds only
+once the listing asked after it has answered or failed, since until then
+the buffer may yet be killed: a prompt sent in that gap to a session
+with nothing on disk would attach in vain, the server no longer holding
+it (`SessionManager.attach' answers `UnknownSessionError'), and the kill
+would then take the text it failed to send (OW-watawe).")
 
 (defvar agentpane-prompt-region-map
   (let ((map (make-keymap)))
@@ -2704,7 +2708,9 @@ ordering the close in flight does not cover.  And refused with a close
 already in flight.
 
 The close in flight is state the buffer owns, `agentpane--closing', set
-as the close goes out and cleared when it answers.  Meanwhile the buffer
+as the close goes out and cleared when it fails, or, when it succeeds,
+once the listing below has answered or failed, since until the listing
+answers the buffer may yet be killed.  Meanwhile the buffer
 still holds its handle and counts as attached, but nothing that would
 reach the session goes out: an attach, a prompt, a fork or its points
 would spawn again, on the server, the session being closed, and another
@@ -2729,8 +2735,17 @@ carries -- a session created or forked and never prompted -- has nothing
 to preview: `sessions/preview' answers its ref with an empty transcript
 rather than an error, and a send could only attach a ref the server no
 longer holds (OW-vasubu).  Its buffer is killed, as the browser clears
-its selection to the startup view.  A close that fails is reported in
-the echo area and leaves the buffer as it was."
+its selection to the startup view.  What the user typed in the prompt
+region goes on the kill ring first, the echo area saying so, as the
+browser's draft survives its Detach (OW-watawe); under an edit, as on a
+fork closed before its first turn, the edit's text goes there and then
+the draft it displaced, so that `yank' brings back the draft and
+`yank-pop' the edit.  The kill ring rather than keeping the buffer, whose
+send could only attach that ref in vain, or asking before the kill,
+which would prompt from inside the listing's callback; `agentpane--absorb'
+set the precedent for text a buffer's end would otherwise take with it.
+A close that fails is reported in the echo area and leaves the buffer as
+it was."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (cond
@@ -2752,22 +2767,32 @@ the echo area and leaves the buffer as it was."
                                (and agentpane--handle (list :handle agentpane--handle)))
        (lambda (_)
          (agentpane--watch-forget agentpane--handle)
-         (setq agentpane--closing nil
-               agentpane--handle nil
+         (setq agentpane--handle nil
                agentpane--attach-sent nil
                agentpane--dropped nil)
          (agentpane--hold-attached nil)
          (agentpane--request
           'sessions/list nil
           (lambda (listing)
+            (setq agentpane--closing nil)
             (if (eq (plist-get (seq-find (lambda (summary)
                                            (agentpane--same-ref-p (agentpane--ref summary) ref))
                                          listing)
                                :onDisk)
                     t)
                 (agentpane-refetch)
-              (kill-buffer)))
-          t))
+              (let ((texts (seq-remove
+                            #'string-empty-p
+                            (delq nil (list (buffer-substring-no-properties
+                                             agentpane--prompt-start (point-max))
+                                            (plist-get agentpane--editing :draft))))))
+                (mapc #'kill-new texts)
+                (when texts
+                  (message "agentpane: %s had nothing on disk and was killed; \
+its prompt's text is on the kill ring" (buffer-name)))
+                (kill-buffer))))
+          t
+          (lambda () (setq agentpane--closing nil))))
        t
        (lambda () (setq agentpane--closing nil))))))
 

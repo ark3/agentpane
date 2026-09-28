@@ -3406,6 +3406,88 @@ the browser lands on its startup view, and its kill sends no
                      `((sessions/close :session ,ref :handle "h1")
                        (sessions/list)))))))
 
+(ert-deftest agentpane-test-close-session-with-nothing-on-disk-keeps-the-draft ()
+  "The kill of a buffer whose session is not on disk after the close puts
+what the user typed in its prompt region on the kill ring, the echo area
+saying so, as the browser's draft survives its Detach (OW-watawe).  An
+empty region puts nothing there."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--closing
+      (with-current-buffer buffer
+        (agentpane-close-session))
+      (should-not (buffer-live-p buffer))
+      (should-not kill-ring))
+    (agentpane-test--closing
+      (with-current-buffer buffer
+        (goto-char (point-max))
+        (insert "half a thought")
+        (agentpane-close-session))
+      (should-not (buffer-live-p buffer))
+      (should (equal kill-ring '("half a thought")))
+      (should (seq-some (lambda (text) (string-search "kill ring" text)) said)))))
+
+(ert-deftest agentpane-test-close-session-with-nothing-on-disk-keeps-an-edit ()
+  "With an edit open (`agentpane-edit'), as on a fork closed before its
+first turn, the kill puts both the edit's text, the user's changes and
+all, and the draft the edit displaced on the kill ring, the draft last,
+so that `yank' brings back what the user was writing (OW-watawe)."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--closing
+      (with-current-buffer buffer
+        (goto-char (point-max))
+        (insert "my draft")
+        (agentpane--start-edit (aref agentpane-test--nodes 0))
+        (goto-char (point-max))
+        (insert " now")
+        (agentpane-close-session))
+      (should-not (buffer-live-p buffer))
+      (should (equal kill-ring '("my draft" "Fix the bug now"))))))
+
+(ert-deftest agentpane-test-close-session-listing-out-reaches-nothing ()
+  "The close stays in flight until the listing after it has answered: a
+send in between, to a session with nothing on disk, would attach in vain,
+and a listing then saying so would kill the buffer and the text with it
+(OW-watawe).  So `C-RET' there signals a user error and sends nothing,
+and the text it would have sent survives the kill on the kill ring."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--closing
+      (setq hold '(sessions/list))
+      (with-current-buffer buffer
+        (agentpane-close-session)
+        (goto-char (point-max))
+        (insert "hello")
+        (setq sent nil)
+        (should-error (agentpane-send) :type 'user-error)
+        (should-not sent)
+        (should-not agentpane--sending)
+        (should-not agentpane--attaching)
+        (funcall (cdr (pop held)) t))
+      (should-not (buffer-live-p buffer))
+      (should (equal kill-ring '("hello"))))))
+
+(ert-deftest agentpane-test-close-session-listing-that-fails-frees-the-buffer ()
+  "A listing after the close that fails ends the close in flight, so the
+buffer, holding no handle, previews its session again at `g' rather than
+refusing everything for good."
+  (agentpane-test--closing
+    (setq hold '(sessions/list))
+    (with-current-buffer buffer
+      (agentpane-close-session)
+      (funcall (cdr (pop held)) nil)
+      (should-not agentpane--closing)
+      (setq sent nil)
+      (agentpane-refetch)
+      (should (equal sent `((sessions/preview :session ,ref)))))))
+
 (ert-deftest agentpane-test-close-session-that-fails-leaves-the-buffer-attached ()
   "A `sessions/close' that fails leaves the buffer attached under its handle,
 asking for no listing, as the browser's Detach leaves its live view."
