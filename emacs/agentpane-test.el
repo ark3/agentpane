@@ -4664,6 +4664,41 @@ when it ends (OW-dunahe)."
   (should (agentpane-test--reattach-after-helper-death nil))
   (should (agentpane-test--reattach-after-helper-death t)))
 
+(ert-deftest agentpane-test-late-sentinel-keeps-the-replacement-helper ()
+  "A helper that has exited but whose sentinel has not yet run is replaced
+by the next use of the connection, and that sentinel, running after, leaves
+the replacement current rather than forgetting it beside a third (OW-toyupa)."
+  (let ((agentpane--connection nil)
+        (agentpane--stream-down nil))
+    (cl-letf (((symbol-function 'agentpane--start-helper)
+               (lambda ()
+                 (make-process :name "agentpane-test helper"
+                               :command '("cat")
+                               :connection-type 'pipe
+                               :noquery t))))
+      (let* ((dead (agentpane--connection))
+             (process (jsonrpc--process dead))
+             (deadline (+ (float-time) 10))
+             replacement)
+        (unwind-protect
+            (progn
+              (signal-process process 'SIGKILL)
+              ;; No yielding here: the sentinel runs only when Emacs waits.
+              (while (and (process-live-p process) (< (float-time) deadline)))
+              (should-not (process-live-p process))
+              (should-not (process-get process 'jsonrpc-sentinel-cleanup-started))
+              (setq replacement (agentpane--connection))
+              (should-not (eq replacement dead))
+              (should (agentpane-test--wait-for
+                       (lambda () (process-get process 'jsonrpc-sentinel-cleanup-started))
+                       deadline))
+              (should (eq agentpane--connection replacement)))
+          (when replacement
+            (kill-process (jsonrpc--process replacement))
+            (agentpane-test--wait-for
+             (lambda () (not (memq (jsonrpc--process replacement) (process-list))))
+             (+ (float-time) 10))))))))
+
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
 fail HOW -- `timeout', `reply-exit' (handling its reply signals), `error'

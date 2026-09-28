@@ -370,8 +370,16 @@ the handle stay live there, so a re-attach may answer under it: a watch
 left `sent' then waited on whatever turn the session ran next, and one
 left `streamed', with the buffer still reading streaming, took the next
 prompt's arming for a turn already seen and ended at the re-attach's
-snapshot, before that prompt's own turn had begun."
-  (setq agentpane--connection nil)
+snapshot, before that prompt's own turn had begun.
+CONNECTION is forgotten only while it is still the current one: its
+process reads as not live before its sentinel, which calls this, has run,
+so a use of the connection in between starts a replacement, which this
+must not forget (Emacs 31.1, measured 2026-09-28; OW-toyupa).
+`agentpane--stream-down' is cleared either way, since a replacement says
+nothing of its stream until an open fails or it drops, and would otherwise
+inherit this helper's `reconnecting'."
+  (when (eq agentpane--connection connection)
+    (setq agentpane--connection nil))
   (agentpane--hold-stream-down nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
