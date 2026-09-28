@@ -2040,8 +2040,9 @@ Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
 onto `said'.  A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
 ANSWER with t to deliver the reply, or with nil to fail the request as
-`agentpane--request' reports an error.  Either way the answer runs in the
-buffer that sent the request.  Every buffer BODY made is killed afterwards."
+`agentpane--request' reports an error, running the request's UNSENT and
+then its FAILED.  Either way the answer runs in the buffer that sent the
+request.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
          (said nil)
@@ -2050,7 +2051,7 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
          (attached nil)
          (buffers (buffer-list)))
      (cl-letf (((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed &rest _)
+                (lambda (method params callback &optional _always failed _timeout unsent)
                   (push (cons method params) sent)
                   (let* ((from (current-buffer))
                          (reply (pcase method
@@ -2062,6 +2063,7 @@ buffer that sent the request.  Every buffer BODY made is killed afterwards."
                                    (with-current-buffer from
                                      (if ok
                                          (funcall callback reply)
+                                       (when unsent (funcall unsent))
                                        (when failed (funcall failed)))))))
                     (if (memq method hold)
                         (setq held (append held (list (cons method answer))))
@@ -3549,6 +3551,43 @@ raised, naming the survivor (OW-dunahe)."
   (should (equal (agentpane-test--merge-during-a-turn 'running) '(t . t)))
   (should (equal (agentpane-test--merge-during-a-turn 'prompted) '(t . t)))
   (should (equal (agentpane-test--merge-during-a-turn 'ended) '(t . t))))
+
+(ert-deftest agentpane-test-turn-done-abandoned-by-a-refusal-after-a-merge ()
+  "A prompt refused after a merge has killed the buffer that sent it still
+abandons the watch it armed, which is on the handle the survivor holds,
+so a turn from elsewhere that then ends unseen raises nothing.  Through
+`agentpane--request' over a stub jsonrpc, which, unlike the requests
+`agentpane-test--forking' answers, runs nothing in a killed buffer
+\(OW-dunahe)."
+  (let ((request (symbol-function 'agentpane--request))
+        (calls nil))
+    (agentpane-test--watching
+      (agentpane-test--with-helper
+        (agentpane-test--merging
+          (cl-letf (((symbol-function 'agentpane--request) request)
+                    ((symbol-function 'jsonrpc-async-request)
+                     (lambda (_conn method _params &rest args)
+                       (push (cons method args) calls)
+                       (list 1 nil))))
+            (let ((status (lambda (streaming)
+                            (agentpane--on-notification
+                             nil 'session/status
+                             (list :session canonical :handle "h1"
+                                   :isStreaming (if streaming t :json-false))))))
+              (with-current-buffer holder
+                (setq agentpane--attached agentpane--connection)
+                (goto-char (point-max))
+                (insert "hello")
+                (agentpane-send))
+              (let ((prompt (cdr (assq 'sessions/prompt calls))))
+                (with-current-buffer previewing (agentpane--attach))
+                (funcall (plist-get (cdr (assq 'sessions/attach calls)) :success-fn)
+                         (list :ref canonical :handle "h1"))
+                (should-not (buffer-live-p holder))
+                (funcall (plist-get prompt :error-fn) '(:message "Refused")))
+              (funcall status t)
+              (funcall status nil)
+              (should-not (agentpane-test--turn-done-p)))))))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-after-a-detach-before-streaming ()
   "A `session/detached' that arrives after a prompt went out and before

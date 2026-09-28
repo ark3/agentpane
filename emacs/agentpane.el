@@ -390,7 +390,7 @@ timed.  60s is what `agentpane-new-session''s synchronous attach already
 allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
 helper costs only a minute before a refused second send is accepted again.")
 
-(defun agentpane--request (method params callback &optional always failed timeout timed-out)
+(defun agentpane--request (method params callback &optional always failed timeout unsent)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
@@ -405,9 +405,13 @@ It runs too, and the signal goes on, when sending the request or running
 CALLBACK exits non-locally -- the helper failing to start, or a reply's
 handling failing partway -- so a flag that FAILED clears never outlives the
 request that set it.
-TIMED-OUT, when given, runs in FAILED's place after a timeout: for a
-request the helper may yet carry out, whose reply is only discarded, as a
-prompt's is (`agentpane--send-prompt').
+UNSENT, when given, runs with no arguments when the request reached no
+backend -- the helper answered it with an error, or sending it exited
+non-locally -- before FAILED, and whether or not this buffer is still
+live: for state the request set outside the buffer, which a buffer
+killed meanwhile must not strand, as a prompt's turn-done watch is
+\(`agentpane--send-prompt').  A timeout, and a non-local exit running
+CALLBACK, run FAILED alone, the request having perhaps been carried out.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -424,7 +428,9 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
   (let ((buffer (current-buffer))
         id)
     (setq id (car (agentpane--failing
-                   failed
+                   (lambda ()
+                     (when unsent (funcall unsent))
+                     (when failed (funcall failed)))
                    (lambda ()
                      (jsonrpc-async-request
                       (agentpane--connection) method (or params :jsonrpc-omit)
@@ -439,11 +445,12 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                       :error-fn
                       (lambda (error)
                         (message "agentpane: %s failed: %s" method (plist-get error :message))
+                        (when unsent (funcall unsent))
                         (agentpane--failed buffer failed))
                       :timeout-fn
                       (lambda ()
                         (message "agentpane: %s timed out" method)
-                        (agentpane--failed buffer (or timed-out failed))))))))
+                        (agentpane--failed buffer failed)))))))
     (setq agentpane--latest-request id)))
 
 (defun agentpane--failing (failed fn)
@@ -2414,7 +2421,12 @@ out, after any attach, so under the handle that attach answered; see
 abandons the watch it armed, as the browser's `watchAbandon' does for a
 refused or failed POST: refused, the prompt started nothing, and the next
 turn on the session is not one this Emacs asked for.  So does one that
-never went out, sending it having exited non-locally.
+never went out, sending it having exited non-locally.  The watch is
+abandoned even when a merge has killed this buffer before the answer
+\(`agentpane--absorb'), as UNSENT in `agentpane--request' runs whether
+or not the buffer lives: the watch is on the handle, which the survivor
+holds, and left standing it raised the indicator for the next turn from
+elsewhere to end there.
 One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the
 reply is discarded, not refused, and the prompt may have been admitted
 and its turn run.  Kept, the watch raises the indicator at the end of
@@ -2439,15 +2451,10 @@ non-locally was admitted, and keeps its watch too."
                                (list :session (agentpane--ref agentpane--session) :text text
                                      :priorErrorId prior)
                                (lambda (_)
-                                 (setq watch nil
-                                       agentpane--sending nil)
+                                 (setq agentpane--sending nil)
                                  (funcall sent))
-                               t
-                               (lambda ()
-                                 (agentpane--watch-abandon watch)
-                                 (funcall failed))
-                               agentpane--spawn-timeout
-                               failed)))
+                               t failed agentpane--spawn-timeout
+                               (lambda () (agentpane--watch-abandon watch)))))
        failed))))
 
 (defun agentpane--clear-sent (buffer beg text)
