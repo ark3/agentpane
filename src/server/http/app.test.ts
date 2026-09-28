@@ -572,15 +572,19 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 
 		const closing = app.fetch(new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, { method: "DELETE" }));
 		await vi.waitFor(() => expect(app.sessions.isAttached(PI_SESSION)).toBe(false));
-		const prompt = post(ROUTES.prompt(PI_SESSION), { text: "hello" });
-		const model = post(ROUTES.model(PI_SESSION), { model: "pi-2" });
-		held.resolve();
+		// Answered while the disposal is still held, so both reach their route
+		// inside the close's window.
+		const answers = await Promise.all([
+			post(ROUTES.prompt(PI_SESSION), { text: "hello" }),
+			post(ROUTES.model(PI_SESSION), { model: "pi-2" }),
+		]);
+		expect(pi.created).toHaveLength(1);
+		expect(answers.map((answer) => answer.status)).toEqual([409, 409]);
 
+		held.resolve();
 		expect((await closing).status).toBe(204);
-		const answers = await Promise.all([prompt, model]);
 		expect(pi.created).toHaveLength(1);
 		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
-		expect(answers.map((answer) => answer.status)).toEqual([409, 409]);
 	});
 });
 

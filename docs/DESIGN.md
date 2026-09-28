@@ -1008,12 +1008,14 @@ D12's OW-35 asked that a prompt to a session the server had reclaimed re-attach 
 The owner, on 2026-09-28: that was written before any experience of attaching and detaching; the unattached preview is a mode worth having in its own right, and attaching is fast (1.138s for a re-attach on `pi 0.85.1`, OW-jamoyi).
 The browser had already stopped prompting an unattached session: since OW-tewave and OW-jamoyi a preview replaces the composer with an Attach button.
 Read on 2026-09-28 and confirmed by OW-sirofi the same day, neither client's deliberate paths needs a route to attach for it: the browser's `create` and `select` call `api.attach` first, and agentpane-mode's new session and its send from an unattached buffer send `sessions/attach` first (`agentpane--attached-then`).
+The one exception it found is the browser's selected session closed by another client with the stream up: `replaceSessionSummaries` in `src/client/session-state.ts` drops the live view but leaves the selection and no preview, so the composer stays and its Send meets 409 `not_attached` where it used to respawn, which OW-zivamo files as falling back to a preview with the Attach button.
 
 **The decision.**
 
 1. Only the attach route, the `GET` of `ROUTES.session`, spawns.
    Every other session route acts on an attached session or refuses, as `compact`, `abort` and `reply` already did.
    `close()` takes the container out of the table before its first await, so a request arriving after a close has begun is refused and nothing respawns, with no guard of its own.
+   The exception is a close that first disposes parked-fork adapters, which awaits before the container leaves the table; OW-vodinu records it.
    Requests do not carry the handle they were sent for: the one ordering that leaves, a stale request landing on a deliberate re-attach made after the close, respawns nothing, and was judged not worth a wire field.
 2. D12's transparent re-attach is withdrawn, and OW-35 is declined.
    A reaper or cap, if one is ever built, evicts as a visible close, as Detach does: the session goes back to a preview and the user attaches it again when they want it.

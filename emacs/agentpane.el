@@ -2732,8 +2732,9 @@ as the close goes out and cleared when it fails, or, when it succeeds,
 once the listing below has answered or failed, since until the listing
 answers the buffer may yet be killed.  Meanwhile the buffer
 still holds its handle and counts as attached, but nothing that would
-reach the session goes out: an attach, a prompt, a fork or its points
-would spawn again, on the server, the session being closed, and another
+reach the session goes out: an attach would spawn again, on the server,
+the session being closed, a prompt, a fork or its points the server
+would refuse, since only an attach starts a session (D25), and another
 close would go out beside this one (OW-dakeyi).  Each is refused, `g'
 in the echo area and the rest by a user error, as they refuse with an
 attach or a fork in flight.  See `agentpane--closing' for where it is
