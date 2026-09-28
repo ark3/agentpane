@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-kakate, OW-mepufi]
+closed: done
 ---
 
 # agentpane-mode lets a dead helper's late sentinel and its late-delivered messages act on the helper that replaced it; teardown and message dispatch should be owned per connection, retiring OW-toyupa's eq guard
@@ -95,3 +96,14 @@ What the first three share is `agentpane--connection` replacing a connection tha
 So the ownership this card asks for now reads: a helper starts only once the previous one's teardown has run, the teardown being the one thing that retires a connection.
 And the teardown lets go of every buffer the dead helper gave a handle, attached or not.
 The done-condition gains a test for each of the first three, red before and green after; the fourth is either fixed with a test or recorded as the design's accepted cost where the next reader will find it.
+
+## Close note
+
+Landed on main 2026-09-28 in three commits after three implementer cuts and three adversarial reads.
+The ownership change: `agentpane--connection` in `emacs/agentpane.el` starts a helper only when none is set, and refuses with "The agentpane helper has exited" while an exited one awaits its teardown, so no replacement ever stands beside a dead connection; the teardown, `agentpane--helper-gone`, is the only thing that clears it, and the sentinel's `:on-shutdown`, `agentpane--helper-exited`, defers it by a zero-delay timer behind the messages the helper wrote last, so its final node (OW-mepufi) and last status reach the buffer before it is let go.
+The OW-toyupa `eq` guard is gone.
+The teardown also lets go of every buffer the dead helper gave a handle through a notification, recorded in the buffer-local `agentpane--served-by`, attached or not, which also settles OW-zedawo's case 1.
+`agentpane--request` answers each request once, the sentinel's "Server died" deferred behind the helper's queued replies, so a late error reply fails once and an admitted prompt clears its draft.
+Rejected on the way: filtering messages from a non-current connection by delivery time (dropped the helper's last node), and a synchronous teardown in the gap with a table of in-flight requests (reentrancy, and three regressions the second read reproduced).
+Verified: 13 new ERT tests in `emacs/agentpane-test.el`, 12 red on main's `agentpane.el` as run by the third reader (`agentpane-test-held-back-reply-answers-once` guards the accepted cost and passes on main); the full suite at 208 tests, 205 expected, 3 skipped, green on main after the cherry-pick; `agentpane-test-turn-done-watch-ends-with-the-helper` still passes and `agentpane-test-late-sentinel-keeps-the-replacement-helper` became `agentpane-test-no-replacement-before-the-teardown`.
+Filed from the third read: OW-laluso (sentinel walk cut short by a synchronous request's throw leaves older requests unanswered, pre-existing), OW-kifuhi (held-back attach reply after the teardown, the design's accepted cost), OW-kimafi (refusal noise in timer handlers); OW-zedawo amended, its case 2 standing.
