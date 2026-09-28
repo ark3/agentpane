@@ -532,8 +532,61 @@ describe("SSE stream", () => {
 	});
 });
 
+describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
+	/** Refused as a session not attached, with nothing spawned for it. */
+	async function expectRefused(response: Response): Promise<void> {
+		expect(pi.created).toHaveLength(0);
+		expect(response.status).toBe(409);
+		expect(((await response.json()) as ApiError).error).toBe("not_attached");
+	}
+
+	it("refuses a prompt to a session not attached", async () => {
+		await expectRefused(await post(ROUTES.prompt(PI_SESSION), { text: "hello" }));
+	});
+
+	it("refuses a fork of a session not attached", async () => {
+		await expectRefused(await post(ROUTES.fork(PI_SESSION), { entryId: "e1" }));
+	});
+
+	it("refuses the fork points of a session not attached", async () => {
+		await expectRefused(await get(ROUTES.forkPoints(PI_SESSION)));
+	});
+
+	it("refuses a model for a session not attached", async () => {
+		await expectRefused(await post(ROUTES.model(PI_SESSION), { model: "pi-1" }));
+	});
+
+	it("refuses an effort for a session not attached", async () => {
+		await expectRefused(await post(ROUTES.effort(PI_SESSION), { effort: "low" }));
+	});
+
+	it("respawns nothing for a prompt or a model that arrives while a close is out", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const adapter = pi.forRef(PI_SESSION)!;
+		const held = deferred();
+		const dispose = adapter.dispose.bind(adapter);
+		adapter.dispose = async () => {
+			await held.promise;
+			await dispose();
+		};
+
+		const closing = app.fetch(new Request(`http://127.0.0.1${ROUTES.session(PI_SESSION)}`, { method: "DELETE" }));
+		await vi.waitFor(() => expect(app.sessions.isAttached(PI_SESSION)).toBe(false));
+		const prompt = post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+		const model = post(ROUTES.model(PI_SESSION), { model: "pi-2" });
+		held.resolve();
+
+		expect((await closing).status).toBe(204);
+		const answers = await Promise.all([prompt, model]);
+		expect(pi.created).toHaveLength(1);
+		expect(app.sessions.isAttached(PI_SESSION)).toBe(false);
+		expect(answers.map((answer) => answer.status)).toEqual([409, 409]);
+	});
+});
+
 describe("prompting", () => {
-	it("accepts a prompt without waiting for the turn, attaching if needed", async () => {
+	it("accepts a prompt without waiting for the turn", async () => {
+		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 		const response = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
 
@@ -570,6 +623,7 @@ describe("prompting", () => {
 			},
 		});
 		app = createApp({ index, adapters: { pi: eager } });
+		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 
 		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go" });
@@ -583,12 +637,13 @@ describe("prompting", () => {
 		await client.close();
 	});
 
-	it("spawns a virtual session on its first prompt with no resumeId", async () => {
+	it("spawns a virtual session on its attach with no resumeId, and prompts it", async () => {
 		const { ref } = (await (
 			await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi", model: "pi-1" })
 		).json()) as CreateSessionResponse;
 
-		await post(ROUTES.prompt(ref), { text: "first" });
+		expect((await get(ROUTES.session(ref))).status).toBe(200);
+		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
 
 		const adapter = pi.forRef(ref);
 		expect(adapter?.startOptions).toEqual({ cwd: WORKSPACE, model: "pi-1" });
@@ -619,6 +674,7 @@ describe("prompting", () => {
 		).json()) as CreateSessionResponse;
 		expect(ref.id).toContain("virtual:");
 
+		await get(ROUTES.session(ref));
 		expect((await post(ROUTES.prompt(ref), { text: "first" })).status).toBe(202);
 
 		const real: SessionRef = { backend: "pi", id: REAL };
@@ -660,6 +716,7 @@ describe("prompting", () => {
 			},
 		});
 		app = createApp({ index, adapters: { pi: failing } });
+		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();
 
 		const response = await post(ROUTES.prompt(PI_SESSION), { text: "go" });
@@ -890,21 +947,6 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		expect((await dismiss(PI_SESSION, {})).status).toBe(400);
 	});
 
-	it("keeps an error the adapter raised while the prompt that started it was being admitted", async () => {
-		// A Pi `extension_error` while its extensions load, say: raised inside
-		// `start()`, which this prompt's own attach ran. Nobody had seen it when
-		// the prompt was sent, so admitting the prompt must not clear it (OW-31).
-		const raising = new FakeAdapterFactory({ onStart: (adapter) => adapter.emitError("extension failed to load") });
-		app = createApp({ index, adapters: { pi: raising } });
-
-		expect((await post(ROUTES.prompt(PI_SESSION), { text: "hello" })).status).toBe(202);
-
-		const client = await openStream();
-		await client.waitForCount(1);
-		expect(client.typed("snapshot")[0]?.error).toBe("extension failed to load");
-		await client.close();
-	});
-
 	it("clears at admission the error the prompt names as the one its sender held (OW-jokoto)", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		const held = await raise("turn failed");
@@ -981,12 +1023,14 @@ describe("fork, model, and enumeration routes", () => {
 			forkPoints: [{ id: "e1", text: "first ask", index: 0 }],
 		});
 		app = createApp({ index, adapters: { pi: withPoints } });
+		await get(ROUTES.session(PI_SESSION));
 
 		const body = (await (await get(ROUTES.forkPoints(PI_SESSION))).json()) as ForkPointsResponse;
 		expect(body.points).toEqual([{ id: "e1", text: "first ask", index: 0 }]);
 	});
 
 	it("forks and hands back the new ref", async () => {
+		await get(ROUTES.session(PI_SESSION));
 		const response = await post(ROUTES.fork(PI_SESSION), { entryId: "e1" });
 		expect(response.status).toBe(201);
 		const body = (await response.json()) as ForkResponse;
@@ -995,6 +1039,7 @@ describe("fork, model, and enumeration routes", () => {
 	});
 
 	it("sets the model", async () => {
+		await get(ROUTES.session(PI_SESSION));
 		expect((await post(ROUTES.model(PI_SESSION), { model: "pi-2" })).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.model).toBe("pi-2");
 	});
@@ -1053,6 +1098,7 @@ describe("fork, model, and enumeration routes", () => {
 			},
 		});
 		app = createApp({ index, adapters: { pi, codex: factory } });
+		await get(ROUTES.session(CODEX_SESSION));
 		await post(ROUTES.model(CODEX_SESSION), { model: "cx-plain" });
 
 		// The effort is sent while the model that lists it is still being set.
@@ -1075,6 +1121,7 @@ describe("fork, model, and enumeration routes", () => {
 			},
 		});
 		app = createApp({ index, adapters: { pi: refusing } });
+		await get(ROUTES.session(PI_SESSION));
 
 		const refused = await post(ROUTES.model(PI_SESSION), { model: "nobody/nothing" });
 		expect(refused.status).toBe(400);
@@ -1118,6 +1165,7 @@ describe("fork, model, and enumeration routes", () => {
 			},
 		]);
 
+		await get(ROUTES.session(CODEX_SESSION));
 		expect((await post(ROUTES.model(CODEX_SESSION), { model: "cx-1" })).status).toBe(204);
 		expect((await post(ROUTES.effort(CODEX_SESSION), { effort: "low" })).status).toBe(204);
 		expect(withEfforts.forRef(CODEX_SESSION)?.effort).toBe("low");
@@ -1137,6 +1185,7 @@ describe("fork, model, and enumeration routes", () => {
 			],
 		});
 		app = createApp({ index, adapters: { pi, codex: factory } });
+		await get(ROUTES.session(CODEX_SESSION));
 
 		// No model known yet: the clients offer no effort then, and neither does this.
 		const unknown = await post(ROUTES.effort(CODEX_SESSION), { effort: "low" });

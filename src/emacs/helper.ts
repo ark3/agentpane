@@ -257,11 +257,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * close by another client, leaves one that no event will ever come under
 	 * again. With the stream up that matters as much as across an outage: the
 	 * buffer still counts itself attached, so a prompt from it sends no
-	 * attach, and the prompt route's own attach mints a handle whose snapshot
-	 * this helper drops, so the turn would run unseen. The
-	 * unfiltered listing puts `handle` on every session the server holds
-	 * (`SessionManager.list` in src/server/http/session-manager.ts), and a
-	 * handle is never minted twice (D24), so one it lacks is gone for good.
+	 * attach, and the prompt route refuses it, since only an attach starts a
+	 * session (D25). The unfiltered listing puts `handle` on every session
+	 * the server holds (`SessionManager.list` in
+	 * src/server/http/session-manager.ts), and a handle is never minted twice
+	 * (D24), so one it lacks is gone for good.
 	 * Where the session went is not worked out here: another name may reach
 	 * it, or none, and only the server's `#names` knows. The buffer holding
 	 * the handle lets go of it, and its own next attach, by the ref it holds,

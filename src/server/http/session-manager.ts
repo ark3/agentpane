@@ -524,7 +524,9 @@ export class SessionManager {
 	 *    and its answer can be stale by the time a client acts on it whether or
 	 *    not it waits.
 	 *  - `attach`. It creates the adapter this queues on, and `#attaching`
-	 *    already collapses concurrent attaches; each route attaches, then queues.
+	 *    already collapses concurrent attaches. Only the attach route calls it
+	 *    (D25); every other route queues on an adapter already there, or is
+	 *    refused.
 	 *  - `close` and `disposeAll`. Teardown is ordered by `#disposing`,
 	 *    `PendingStart.torndown` and `#terminate`, and waits behind nothing. A
 	 *    verb still queued when it runs reaches the disposed adapter, as an
@@ -577,9 +579,8 @@ export class SessionManager {
 			// error raised after that, by the start of an attach the send made or
 			// while the request was on its way, is newer than the prompt, and
 			// nobody had seen it to clear. A caller that names none gets what the
-			// server holds now, which a caller that attaches first must read before
-			// that attach. It is compared by id, not text, because a newer error can
-			// repeat the held one word for word, and one can land before
+			// server holds now. It is compared by id, not text, because a newer
+			// error can repeat the held one word for word, and one can land before
 			// `adapter.submit` resolves (OW-lameke): Pi's and Codex's adapters both
 			// handle backend events while awaiting a reply -- the `prompt`
 			// command's, and for a Pi id not yet resolved a `get_state` after it
@@ -1165,8 +1166,8 @@ export class SessionManager {
 	 * the last one out kills the child.
 	 *
 	 * D12's reaper (OW-33) inherits this path, including the disposal guard that
-	 * prevents a transparent re-attach from sharing a session file with the
-	 * adapter being evicted.
+	 * prevents a re-attach from sharing a session file with the adapter being
+	 * evicted.
 	 */
 	async close(ref: SessionRef): Promise<void> {
 		const session = this.#lookup(ref);

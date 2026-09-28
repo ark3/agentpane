@@ -285,18 +285,15 @@ export function createApp(deps: AppDeps): App {
 					return error(400, "bad_request", "priorErrorId must be a string or null");
 				}
 				// Which error the sender held when the user sent, by id: only that one
-				// may go at admission. One raised after -- by the start of the attach
-				// below, while this request was on its way, or during admission with
-				// this one's text -- is not one the sender saw (OW-31, OW-bipume,
-				// OW-lameke, OW-jokoto); see `SessionManager.submit`. A sender that
-				// names none gets the error held now, read before the attach, which
-				// may start the session and raise one.
+				// may go at admission. One raised after -- while this request was on
+				// its way, or during admission with this one's text -- is not one the
+				// sender saw (OW-31, OW-bipume, OW-lameke, OW-jokoto); see
+				// `SessionManager.submit`. A sender that names none gets the error
+				// held now.
 				const priorError = priorErrorId === undefined ? sessions.errorIdOf(ref) : priorErrorId;
-				// Only a session not yet running is attached here. An attach
-				// re-snapshots one already attached, which a prompt has no use for
-				// and every client pays for with a whole-transcript redraw
-				// (OW-yirosu); the GET above is the attach that wants it.
-				if (!sessions.isAttached(ref)) await sessions.attach(ref);
+				// Only the GET above starts a session (D25): a prompt that arrives
+				// for one not attached, a close under way included, is refused.
+				if (!sessions.isAttached(ref)) return notAttached(ref);
 				// Through the manager, not straight at the adapter: it queues the
 				// prompt behind the session's other verbs (D24).
 				//
@@ -341,11 +338,10 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.entryId !== "string") {
 					return error(400, "bad_request", "entryId is required");
 				}
-				// Attach first so the session has a live adapter, then fork through
-				// the manager (not straight at the adapter): it queues the fork and
-				// keeps what the attach of the fork will need (see
-				// SessionManager.fork).
-				await sessions.attach(ref);
+				// Only an attached session forks (D25). Through the manager, not
+				// straight at the adapter: it queues the fork and keeps what the
+				// attach of the fork will need (see SessionManager.fork).
+				if (!sessions.isAttached(ref)) return notAttached(ref);
 				const forked = await sessions.fork(ref, body.value.entryId);
 				// The backends' forks are asymmetric, settled live (see
 				// docs/HANDOFF.md and docs/MANUAL_TESTING.md, OW-pifowo/OW-22 for Pi
@@ -384,7 +380,8 @@ export function createApp(deps: AppDeps): App {
 			}
 			case "fork-points": {
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
-				const adapter = await sessions.attach(ref);
+				const adapter = sessions.adapterFor(ref);
+				if (!adapter) return notAttached(ref);
 				const response: ForkPointsResponse = { points: await adapter.listForkPoints() };
 				return json(response);
 			}
@@ -395,7 +392,7 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.model !== "string") {
 					return error(400, "bad_request", "model is required");
 				}
-				await sessions.attach(ref);
+				if (!sessions.isAttached(ref)) return notAttached(ref);
 				await sessions.setModel(ref, body.value.model);
 				return noContent();
 			}
@@ -406,7 +403,7 @@ export function createApp(deps: AppDeps): App {
 				if (typeof body.value.effort !== "string") {
 					return error(400, "bad_request", "effort is required");
 				}
-				await sessions.attach(ref);
+				if (!sessions.isAttached(ref)) return notAttached(ref);
 				// The manager refuses a level the model does not list, with
 				// `EffortNotOfferedError` (OW-tewofe).
 				await sessions.setEffort(ref, body.value.effort);
@@ -415,6 +412,15 @@ export function createApp(deps: AppDeps): App {
 			default:
 				return notFound(`/api/sessions/${ref.backend}/.../${action}`);
 		}
+	}
+
+	/**
+	 * The refusal of a route that acts on a running session, sent for one that
+	 * is not: only the attach route, the GET of `ROUTES.session`, starts one
+	 * (D25). A 409 and not a 404, since the session exists and is listed.
+	 */
+	function notAttached(ref: SessionRef): Response {
+		return error(409, "not_attached", `session ${sessionKey(ref)} is not attached`);
 	}
 
 	function requireAttached(ref: SessionRef): BackendAdapter {

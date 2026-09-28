@@ -423,11 +423,13 @@ the helper told its handle is gone, by a `session/detached', lets go of
 it instead; see `agentpane--dropped'.")
 
 (defconst agentpane--spawn-timeout 60
-  "Seconds to wait for a request that may spawn the session's backend:
-`sessions/attach', and `sessions/prompt', `sessions/forkPoints' and
-`sessions/fork', whose server routes attach first (src/server/http/app.ts).
-`sessions/setModel', whose route attaches too, still takes jsonrpc.el's
-default.
+  "Seconds to wait for `sessions/attach', which may spawn the session's
+backend, and since D25 is the only request that can: every other route
+acts on a session already attached, or refuses (src/server/http/app.ts).
+`sessions/prompt', `sessions/forkPoints' and `sessions/fork' still take
+this too, from when their routes attached first; each now waits only on
+a backend already running, and whether they want jsonrpc.el's default
+instead, as `sessions/setModel' takes, has not been weighed.
 Past this the reply is discarded even if it comes, so a spawn that ran long
 but succeeded reads as a failure and leaves the buffer unattached though
 its session is live.  jsonrpc.el's default is 10s, and the one attach
@@ -1869,13 +1871,14 @@ waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
 The buffer still holds its handle and counts as attached meanwhile, but
 the server has already taken the session out of its table and is waiting
 on its subprocess (`SessionManager.close' in
-src/server/http/session-manager.ts), so an attach, or a route that
-attaches first, would spawn it again: a respawn the helper's close never
-records, or a turn nobody sees (OW-dakeyi).  So nothing that would reach
-the session goes out while it is set: every attach, synchronous or not,
-and every request `agentpane--attached-then' or `agentpane--fork-point'
-sends refuses through `agentpane--refuse-closing', and
-`agentpane-refetch' and a second `agentpane-close-session' read it
+src/server/http/session-manager.ts), so an attach would spawn it again:
+a respawn the helper's close never records (OW-dakeyi).  Every other
+request the server refuses, since only an attach starts a session (D25).
+So nothing that would reach the session goes out while it is set, which
+spares the user a respawn or a refused request: every attach,
+synchronous or not, and every request `agentpane--attached-then' or
+`agentpane--fork-point' sends refuses through `agentpane--refuse-closing',
+and `agentpane-refetch' and a second `agentpane-close-session' read it
 themselves.  Cleared when the close fails, and when it succeeds only
 once the listing asked after it has answered or failed, since until then
 the buffer may yet be killed: a prompt sent in that gap to a session
@@ -2597,11 +2600,11 @@ or not the buffer lives: the watch is on the handle, which the survivor
 holds, and left standing it raised the indicator for the next turn from
 elsewhere to end there.
 One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the
-reply is discarded, not refused, and the prompt route attaches a session
-not yet running before it submits, answering only once the backend has
-admitted the turn (src/server/http/app.ts), so a reply that long in
-coming most likely means a backend slow to spawn, and a prompt admitted
-once it had.
+reply is discarded, not refused, and the prompt route answers only once
+the backend has admitted the turn (src/server/http/app.ts), so a reply
+that long in coming most likely means a backend slow to admit it, behind
+a Pi compaction, say (`SessionManager.#serially'), and a prompt admitted
+once it could.
 Abandoned, as it was until OW-dunahe, that admitted turn's end raised
 nothing.  The cost falls on a timed-out prompt never admitted: its watch
 stays `sent', and the next turn on the session, from anywhere, ends it
@@ -2980,10 +2983,11 @@ what the server emits of the fork's shortened transcript goes out under
 the fork's handle and ref, never the parent's (OW-zovaye, OW-nikogo).
 A detached buffer usually shows the store's projection instead, which for
 Pi can omit messages the live one keeps, but nothing here trusts an index
-from it: a fork attaches first, and a send attaches and redraws.  While
-the fork is in flight `agentpane-refetch' sends nothing: on the attached
-parent it would attach again, and a reply to that landing after the
-fork's would count the parent attached, the server having detached it.
+from it: a fork from it attaches and forks nothing, and a send attaches
+and redraws.  While the fork is in flight `agentpane-refetch' sends
+nothing: on the attached parent it would attach again, and a reply to
+that landing after the fork's would count the parent attached, the
+server having detached it.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
@@ -2994,8 +2998,8 @@ lands.
 A buffer not attached, only previewed, is attached and forks nothing: once
 the attach answers, the echo area says the transcript now shows the live
 session and to press `f' again at the message to fork.  Its indices are the
-stored projection's, and the fork points are the live adapter's, since the
-route attaches first, and the two can name different messages: a Pi
+stored projection's, and the fork points are the live adapter's, which
+alone answers the route, and the two can name different messages: a Pi
 preview drops the `custom_message' entries and roles such as
 `bashExecution' that `get_messages' keeps (read from `pi 0.87.1''s
 source), and nothing makes the Claude Code store and live projections
@@ -3029,7 +3033,7 @@ press f again at the message to fork"))))))
 naming INDEX; when none does, call FAILED, if given, and say the message,
 which WHAT names, \"the message at point\" when nil, is not forkable.
 While a close is in flight, call FAILED and signal a user error instead,
-since the route attaches first; see `agentpane--closing'.
+sparing the user a refused request; see `agentpane--closing'.
 See `agentpane-fork'."
   (agentpane--refuse-closing failed)
   (agentpane--request

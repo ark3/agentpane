@@ -336,9 +336,11 @@ export interface CreateSessionResponse {
 
 /**
  * GET /api/sessions/:backend/:id -- "open this session": spawns if needed and
- * snapshots over SSE. The transcript is deliberately not in this body (D3); what
- * is here is the summary, whose `ref` is *authoritative*. It can differ from the
- * ref in the URL, because a session adopts its backend id on attach -- see
+ * snapshots over SSE. It is the only route that spawns (D25): every other
+ * session route acts on a session already attached, or refuses. The
+ * transcript is deliberately not in this body (D3); what is here is the
+ * summary, whose `ref` is *authoritative*. It can differ from the ref in the
+ * URL, because a session adopts its backend id on attach -- see
  * `ServerEvent`, whose snapshot under the summary's `handle` carries it too.
  */
 export interface AttachSessionResponse {

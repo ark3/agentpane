@@ -340,7 +340,7 @@ Clients follow a move the same way: both key a live session by that handle and t
 
 **Spawn only on attach.**
 The list needs metadata only — id, cwd, timestamp, and a preview — all cheap to read from the file.
-A session becomes `attached` when the user prompts it or opens its transcript.
+A session becomes `attached` only when a client attaches it, as both do when the user opens it live, and agentpane-mode also before a prompt sent from a preview; since D25 the attach route is the only one that spawns (OW-sirofi).
 
 Two corrections from building this, both verified:
 
@@ -773,7 +773,7 @@ Nor, since OW-yibijo, does either order of a re-attach and a rename in one outag
 At every reopen of its stream, and on every `sessions-changed` while it is up, the helper asks the unfiltered listing, which puts `handle` on every session the server holds, and drops each attachment held when it asked whose handle the answer lacks, telling Emacs by a `session/detached` under that handle; a handle is never minted twice (D24), so one the listing lacks is gone for good.
 The buffer holding it lets go of the handle, keeps its ref and its transcript, and counts itself detached, and its next attach, by `g` or by a prompt, is a first attach by that ref: the attach route resolves it by any name the session's container has and answers the current handle and ref, which the buffer takes by the `askedFor` the attach's snapshot carries.
 It is the listing this decision asks for at every reopen and the browser asks for at every `sessions-changed`, here the helper's own and unfiltered, read for which handles the server still holds.
-The server sends `sessions-changed` once a close has taken the session out of its table, and at every attach and every turn's start and end among others, so a close elsewhere with the stream up reaches the buffer too, before a prompt from it -- which would send no attach, the buffer counting itself attached -- lets the prompt route attach the session under a handle whose snapshot the helper drops.
+The server sends `sessions-changed` once a close has taken the session out of its table, and at every attach and every turn's start and end among others, so a close elsewhere with the stream up reaches the buffer too, before a prompt from it -- which would send no attach, the buffer counting itself attached -- is refused, since D25 by a prompt route that attaches nothing (OW-sirofi).
 Each event asks a listing of its own, since one in flight may predate the close that sent a later event, and passes that overlap are safe: a handle once gone never returns, and each pass drops only what it held when it asked.
 The helper re-attaches nothing itself, which would respawn a backend for every open buffer on every server restart, so after one every attached buffer reads as detached and comes back on `g` or its next prompt.
 Until OW-yibijo the helper worked out where each session went: a snapshot under a handle no attachment held sent it to a read-only `live` route, which answered, per attachment, the live handle the ref last told Emacs named now, and the attachment moved there under a snapshot carrying `movedFrom` (OW-gusaru).
@@ -782,7 +782,8 @@ It read a failed request as not live, and asked again only at some later snapsho
 Still open is a buffer whose ref no longer reaches its session: a rename it never heard, then a close, leaves it told it is detached, but its next attach resolves only the name it holds, which no container carries once the renamed one is gone.
 D9's first-prompt rename of a `virtual` session strands a buffer that way, since a `virtual` session closed is gone and an attach of its ref answers 404.
 A Claude Code session renamed by an `init` naming another `session_id` (`ClaudeAdapter.ref`'s docblock) may too, but differently, and unmeasured: whether the CLI leaves the old id's store file behind, so that the attach resumes the pre-rename conversation beside the live renamed one, has not been checked.
-Also open is a prompt that races the close: sent before the listing that `sessions-changed` asks has landed, it is attached by the prompt route under a new handle whose snapshot the helper drops, and the buffer, told it is detached a moment later, shows the turn only once `g` or its next prompt attaches it.
+Also open was a prompt that raced the close: sent before the listing that `sessions-changed` asks had landed, it was attached by the prompt route under a new handle whose snapshot the helper dropped, and the buffer, told it was detached a moment later, showed the turn only once `g` or its next prompt attached it.
+Since OW-sirofi (D25) the prompt route attaches nothing, and such a prompt is refused.
 Of the eight `SessionSummary` fields, `status` and `updatedAt` are the two that go both wrong and visible, and a listing is the only thing that moves either.
 `status` lights the sidebar's attached stripe and is the first conjunct of the composer Tools menu's `detachable`, which reads `"attached"` or `"virtual"`.
 `updatedAt` drives the whole sidebar ordering; it is the session file's mtime for a stored session, and `session.createdAt` for one the manager minted itself, which `#ownSummary` reports as both stamps.
@@ -1006,7 +1007,7 @@ D21 and D24 both listed a prompt that races a close as still open.
 D12's OW-35 asked that a prompt to a session the server had reclaimed re-attach transparently, so that eviction would be invisible.
 The owner, on 2026-09-28: that was written before any experience of attaching and detaching; the unattached preview is a mode worth having in its own right, and attaching is fast (1.138s for a re-attach on `pi 0.85.1`, OW-jamoyi).
 The browser had already stopped prompting an unattached session: since OW-tewave and OW-jamoyi a preview replaces the composer with an Attach button.
-Read on 2026-09-28, and to be confirmed by OW-sirofi, neither client's deliberate paths needs a route to attach for it: the browser's `create` and `select` call `api.attach` first, and agentpane-mode's new session and its send from an unattached buffer send `sessions/attach` first (`agentpane--attached-then`).
+Read on 2026-09-28 and confirmed by OW-sirofi the same day, neither client's deliberate paths needs a route to attach for it: the browser's `create` and `select` call `api.attach` first, and agentpane-mode's new session and its send from an unattached buffer send `sessions/attach` first (`agentpane--attached-then`).
 
 **The decision.**
 

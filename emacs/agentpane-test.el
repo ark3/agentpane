@@ -3503,7 +3503,7 @@ asking for no listing, as the browser's Detach leaves its live view."
 (ert-deftest agentpane-test-close-session-in-flight-reaches-nothing ()
   "While a `sessions/close' is out the buffer still holds its handle and
 counts as attached, and the server, having let go of the session, would
-spawn it again for an attach or for a route that attaches first.  So
+spawn it again for an attach and refuse any other request (D25).  So
 `g', `C-RET', `f', `e' and a second `C-c C-q' each send nothing: `g' says
 why in the echo area, as it does for an attach or a fork in flight, and
 the rest signal a user error, leaving no send or fork counted in flight.
