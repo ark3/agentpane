@@ -3459,6 +3459,23 @@ from elsewhere raises nothing (OW-lohavi)."
     (funcall status nil)
     (should-not (agentpane-test--turn-done-p))))
 
+(ert-deftest agentpane-test-turn-done-one-watch-per-handle ()
+  "A second prompt accepted into a running turn, as a Codex steer, joins
+the watch the first armed rather than arming one of its own, so the
+turn's end in view ends the only watch on the handle, and a later
+not-streaming status while the buffer is unseen, such as a model
+change's, raises nothing (OW-dunahe)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (agentpane-test--show buffer)
+      (funcall submit)
+      (funcall status t)
+      (funcall submit)
+      (funcall status nil)
+      (agentpane-test--show (get-buffer-create "*scratch*"))
+      (funcall status nil)
+      (should-not (agentpane-test--turn-done-p)))))
+
 (defun agentpane-test--attach-to-a-running-turn (snapshot-first)
   "Send from a previewed buffer whose attach finds a turn from elsewhere
 streaming, its snapshot handled before the attach's reply when

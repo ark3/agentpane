@@ -2871,8 +2871,9 @@ A merge moves the buffer it kills to the one it keeps
   "The turns this Emacs waits on for the turn-done indicator, as an alist
 from a session's handle to `sent', until a status under that handle says
 the session is streaming, then `streamed' until one says it is not.
-Each entry is its own cons, which is how `agentpane--watch-abandon' tells
-the watch a prompt armed from one it joined.  See `agentpane--watch-turn'.")
+One entry per handle (`agentpane--watch-submit'), each its own cons,
+which `agentpane--watch-abandon' drops by identity.  See
+`agentpane--watch-turn'.")
 
 (defun agentpane--watch-turn (streaming)
   "Fold STREAMING, whether this buffer's latest status says its session
@@ -2962,13 +2963,19 @@ that turn becomes this prompt's and its end raises the indicator.  So too
 a turn a previewed buffer's attach finds running, whichever of the
 attach's snapshot and its reply is handled first (D2): either the level
 is folded here, or the snapshot's status folds it after.
-A watch already armed on the handle is joined, not armed again, and the
-level is not folded into it, since it has heard every status under that
-handle.  The level may not have: after a merge the survivor's is the one
-its preview left, until its own attach's snapshot, and folding it ended a
-running turn's watch.  Joined, the watch is not this prompt's to abandon,
-which is the case the distinction exists for: a prompt refused mid-turn
-\(D16) must leave standing the watch of the turn it was refused for."
+A watch already armed on the handle is joined, not armed again, so a
+handle has one watch at most.  Two, from a second prompt accepted into a
+running turn, as a Codex steer, both read `streamed'; the turn's end
+ended only the one `assoc' finds, even in view, and the other raised the
+indicator at the next not-streaming status while the buffer was unseen,
+a model change's, for a turn long over.  Nor is the level folded into a
+watch joined, which has heard every status under that handle; the
+level may not have: after a merge the survivor's is the one its preview
+left, until its own attach's snapshot, and folding it ended a running
+turn's watch.
+A prompt refused mid-turn (D16) leaves the running turn's watch standing
+by identity: `agentpane--watch-abandon' drops only the cons this call
+returned, nil when it joined, and would drop only its own were there two."
   (when (and agentpane--handle (not (assoc agentpane--handle agentpane--turn-watches)))
     (let ((watch (cons agentpane--handle 'sent)))
       (push watch agentpane--turn-watches)
