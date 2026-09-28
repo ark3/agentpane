@@ -3709,8 +3709,13 @@ went out, abandons it, as the browser's `watchAbandon' does (OW-dunahe)."
   "Submit a turn on a Pi session shown in the selected window, see it
 stream, and fork the session there, which aborts that turn.  Its
 not-streaming status arrives before the fork's reply when ORDER is
-`before', after it when `after', and never when `never', the helper having
-stopped forwarding the parent's handle; then the parent attaches again
+`before', as that abort answered first makes usual, the parent's window
+switched to another buffer by then; after it when `after'; and never when
+`never', the helper having stopped forwarding the parent's handle.  When
+ORDER is `unstreamed' the turn is not yet seen streaming at the fork,
+which then aborts nothing, and its statuses, streaming and then not,
+arrive after the fork's reply, sent before the helper heard the detach.
+Then the parent attaches again
 under a new handle, and a turn from elsewhere streams there and ends.
 Return whether the indicator is raised."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
@@ -3735,14 +3740,19 @@ Return whether the indicator is raised."
               (goto-char (point-max))
               (insert "hello")
               (agentpane-send)
-              (funcall status t)
+              (unless (eq order 'unstreamed) (funcall status t))
               (setq hold '(sessions/fork))
               (agentpane-test--goto-index 0)
               (agentpane-fork)
-              (when (eq order 'before) (funcall status nil))
+              (when (eq order 'before)
+                (agentpane-test--show (get-buffer-create "*scratch*"))
+                (funcall status nil))
               (funcall (cdr (pop held)) t)
               (should-not (eq (window-buffer (selected-window)) buffer))
               (when (eq order 'after) (funcall status nil))
+              (when (eq order 'unstreamed)
+                (funcall status t)
+                (funcall status nil))
               (setq attached (list :ref ref :handle "h3"))
               (agentpane--attach)
               (should (equal agentpane--handle "h3"))
@@ -3754,11 +3764,34 @@ Return whether the indicator is raised."
   "A Pi fork ends the parent's watch without raising the indicator: the
 turn it stops is one the user stopped on purpose, and the parent's window
 now shows the fork.  So neither that turn's not-streaming status, before
-the fork's reply or after it, nor a later turn from elsewhere on the
-parent, re-attached, raises it (OW-dunahe)."
+the fork's reply, with the parent already out of view, or after it, nor a
+later turn from elsewhere on the parent, re-attached, raises it
+\(OW-dunahe)."
   (should-not (agentpane-test--pi-fork-during-a-turn 'before))
   (should-not (agentpane-test--pi-fork-during-a-turn 'after))
-  (should-not (agentpane-test--pi-fork-during-a-turn 'never)))
+  (should-not (agentpane-test--pi-fork-during-a-turn 'never))
+  (should-not (agentpane-test--pi-fork-during-a-turn 'unstreamed)))
+
+(ert-deftest agentpane-test-turn-done-watch-ends-with-a-killed-buffer ()
+  "Killing a buffer whose turn is still running ends the watch on its
+handle, so a buffer reopened on the session, whose attach answers under
+that same handle, raises nothing when a turn from elsewhere ends unseen
+\(OW-dunahe)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string)
+          (status (lambda (streaming)
+                    (agentpane--on-notification
+                     nil 'session/status
+                     (list :session ref :handle "h1" :isStreaming (if streaming t :json-false))))))
+      (funcall submit)
+      (funcall status t)
+      (kill-buffer buffer)
+      (with-current-buffer (agentpane--transcript-buffer (list :ref ref))
+        (agentpane--attach)
+        (should (equal agentpane--handle "h1")))
+      (funcall status t)
+      (funcall status nil)
+      (should-not (agentpane-test--turn-done-p)))))
 
 ;;;; A new session whose attach fails, against a stub jsonrpc
 

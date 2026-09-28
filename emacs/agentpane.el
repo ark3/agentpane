@@ -2356,9 +2356,11 @@ which lets it through under `debug-on-error'.
 
 Sent or not, the turn-done watch on the handle this buffer holds ends
 here, raising nothing: this Emacs hears nothing more under that handle,
-so nothing would end it.  For a Pi fork's parent that is the point, the
-turn the fork stopped being one the user stopped on purpose; see
-`agentpane--watch-turn'."
+so nothing would end it, and a buffer attached to the session later
+takes the same handle while the server holds it, where a watch left
+standing raised the indicator for a turn from elsewhere.  For a Pi
+fork's parent it ends a watch not yet seen streaming, which the abort
+before the fork did not reach; see `agentpane--watch-turn'."
   (agentpane--watch-forget agentpane--handle)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection)
              (or agentpane--handle agentpane--attach-sent))
@@ -2641,7 +2643,12 @@ A Pi fork of a streaming session stops the turn whether or not anything
 aborts it, so the turn is aborted first, the loss made deliberate, as the
 browser's `forkAndSubmit' does; that abort is the client's under D15, and
 the server's fork route aborts nothing.  It goes after the points are
-matched, so a message that is not forkable costs the turn nothing.  Codex
+matched, so a message that is not forkable costs the turn nothing.  The
+turn-done watch on the parent's handle ends as the abort goes out,
+raising nothing (`agentpane--watch-turn'), since the aborted turn's last
+status usually arrives before the fork's reply, and the parent's window
+may show something else by then.  An abort that fails leaves that turn
+running unwatched, the one the user asked to stop.  Codex
 and Claude Code keep a parent turn running through a fork, and are not
 aborted.  A Pi fork also moves the parent's live process onto the fork, a
 container of its own under a handle of its own, and takes the parent's
@@ -2721,6 +2728,7 @@ index at point.  See `agentpane-fork'."
            (setq agentpane--forking nil)
            (message "agentpane: the message at point is not forkable"))
           ((and pi-backend agentpane--streaming)
+           (agentpane--watch-forget agentpane--handle)
            (agentpane--request 'sessions/abort (list :session parent)
                                (lambda (_) (agentpane--fork-at parent point window failed))
                                t failed))
@@ -2931,12 +2939,16 @@ Nothing moves a watch to a fork: the browser's `watchMove' follows the
 prompt it sends onto the fork, and here a fork sends nothing and opens in
 a buffer of its own (`agentpane-fork'), so a turn running on the parent
 stays the parent's, and ends there, on Codex and Claude Code, which keep
-it running.  A Pi fork stops it, the loss deliberate, and detaches the
-parent, which ends the parent's watch as above: kept, that turn's last
-status, which may come after the fork's reply has shown the fork in the
-parent's window, raised the indicator for a turn the user had stopped on
-purpose, and one the helper no longer forwarded left the watch waiting on
-the parent's next turn."
+it running.  A Pi fork stops it, the loss deliberate, and the abort it
+sends first, for a parent reading streaming, ends the parent's watch
+raising nothing (`agentpane--fork-points'): kept, that turn's last
+status, which usually arrives before the fork's reply, raised the
+indicator for a turn the user had stopped on purpose whenever the
+parent's window had been switched away by then, and one the helper no
+longer forwarded, once the fork's reply had detached the parent, left
+the watch waiting on the parent's next turn.  The detach at the fork's
+reply ends any watch still on the parent, one whose turn was not yet
+seen streaming and so was not aborted."
   (let ((entry (and agentpane--handle (assoc agentpane--handle agentpane--turn-watches))))
     (pcase (cdr entry)
       ('sent (when streaming (setcdr entry 'streamed)))
