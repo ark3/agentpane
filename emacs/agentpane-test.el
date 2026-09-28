@@ -3526,10 +3526,11 @@ snapshot and its reply is handled first (OW-lohavi)."
 (defun agentpane-test--merge-during-a-turn (how)
   "Submit a turn from a buffer holding the handle \"h1\", see it stream,
 then merge that buffer into one whose attach answers under the same
-handle, and end the turn unseen: before the merge when HOW is `ended',
-after it when `running', and after it when `prompted', the survivor
-having attached to send a prompt into that turn, and nothing raised
-before that end.  Return whether the indicator names the survivor alone,
+handle, and end the turn unseen: before the merge when HOW is `ended'
+or `ended-in-view', the survivor shown in the selected window in the
+latter, after it when `running', and after it when `prompted', the
+survivor having attached to send a prompt into that turn, and nothing
+raised before that end.  Return whether the indicator names the survivor alone,
 and whether it is raised, as a cons."
   (agentpane-test--watching
     (agentpane-test--with-helper
@@ -3545,7 +3546,8 @@ and whether it is raised, as a cons."
             (insert "hello")
             (agentpane-send))
           (funcall status t)
-          (when (eq how 'ended) (funcall status nil))
+          (when (memq how '(ended ended-in-view)) (funcall status nil))
+          (when (eq how 'ended-in-view) (agentpane-test--show previewing))
           (with-current-buffer previewing
             (if (not (eq how 'prompted))
                 (agentpane--attach)
@@ -3553,7 +3555,7 @@ and whether it is raised, as a cons."
               (insert "more")
               (agentpane-send)))
           (should-not (buffer-live-p holder))
-          (unless (eq how 'ended)
+          (unless (memq how '(ended ended-in-view))
             (should-not (agentpane-test--turn-done-p))
             (funcall status nil))
           (cons (equal agentpane--turns-done (list previewing))
@@ -3564,10 +3566,12 @@ and whether it is raised, as a cons."
 watch knew: a turn still running ends in the survivor, which holds the
 same handle, and raises the indicator there, a prompt the survivor sends
 into it joining that watch; one that had already ended unseen stays
-raised, naming the survivor (OW-dunahe)."
+raised, naming the survivor, unless a window shows the survivor, where
+the user is acting, which clears it as showing a buffer does (OW-dunahe)."
   (should (equal (agentpane-test--merge-during-a-turn 'running) '(t . t)))
   (should (equal (agentpane-test--merge-during-a-turn 'prompted) '(t . t)))
-  (should (equal (agentpane-test--merge-during-a-turn 'ended) '(t . t))))
+  (should (equal (agentpane-test--merge-during-a-turn 'ended) '(t . t)))
+  (should (equal (agentpane-test--merge-during-a-turn 'ended-in-view) '(nil . nil))))
 
 (ert-deftest agentpane-test-turn-done-abandoned-by-a-refusal-after-a-merge ()
   "A prompt refused after a merge has killed the buffer that sent it still

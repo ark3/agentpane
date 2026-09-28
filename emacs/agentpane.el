@@ -2124,8 +2124,12 @@ So the turn-done watch on the handle, which a detach would end, goes on
 in this buffer, which holds that handle: a turn submitted from OTHER ends
 here and raises the indicator here (`agentpane--watch-turn').  An
 indicator OTHER had raised, for a turn that ended while no window showed
-it, is raised for this buffer instead, the place that turn's end is now
-read, rather than cleared by the kill with nobody having seen it."
+it, is raised for this buffer instead when no window shows this one
+either, since this is where that turn's end is now read.  When a window
+does, after OTHER's windows have been handed over, the indicator goes
+with OTHER: a merge happens in the buffer the user is acting in, the
+session's transcript is in view, and nothing would clear it, as
+`agentpane--clear-seen-turns' runs only when windows change."
   (let ((buffer (current-buffer))
         (draft (with-current-buffer other
                  (buffer-substring-no-properties agentpane--prompt-start (point-max))))
@@ -2145,7 +2149,7 @@ read, rather than cleared by the kill with nobody having seen it."
             (rename-buffer name t)))))
     (dolist (window (get-buffer-window-list other nil t))
       (set-window-buffer window buffer))
-    (when (memq other agentpane--turns-done)
+    (when (and (memq other agentpane--turns-done) (not (agentpane--shown-p buffer)))
       (cl-pushnew buffer agentpane--turns-done))
     (with-current-buffer other
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
@@ -2864,8 +2868,8 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
 (defvar agentpane--turns-done nil
   "The transcript buffers where a turn this Emacs submitted ended while no
 window showed them, until a window does; see `agentpane--watch-turn'.
-A merge moves the buffer it kills to the one it keeps
-\(`agentpane--absorb').")
+A merge moves the buffer it kills to the one it keeps, when no window
+shows that one (`agentpane--absorb').")
 
 (defvar agentpane--turn-watches nil
   "The turns this Emacs waits on for the turn-done indicator, as an alist
