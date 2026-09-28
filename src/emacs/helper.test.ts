@@ -922,6 +922,16 @@ describe("the node throttle (OW-jeruye)", () => {
 		expect(node.parts).toMatchObject([{ type: "tool", name: "bash", result: "out" }]);
 	});
 
+	it("sends a held node before it exits at a drop of the stream (D25)", async () => {
+		const { io, source, done, upsert, since } = await streaming();
+		upsert(1, said("a"));
+		upsert(1, said("ab"));
+		source.opens[0]!.onDisconnect(true);
+		await done;
+		expect(since()).toEqual(["session/node"]);
+		expect(textOf(io.out.at(-1)!)).toEqual(["ab"]);
+	});
+
 	it("sends a held node before the status written after it", async () => {
 		const { io, upsert, status, since } = await streaming();
 		upsert(1, said("a"));

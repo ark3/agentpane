@@ -398,10 +398,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			// A drop, or a failed first open, ends the helper (D25 point 4):
 			// cancelling the input ends the read loop below as its end would,
 			// and under `main.ts` the process with it, Emacs's end of stdin
-			// still open (bun 1.4.0, measured 2026-09-28).
+			// still open (bun 1.4.0, measured 2026-09-28). A node the throttle
+			// holds goes out first, since no timer will send it after the exit.
 			onDisconnect() {
 				closeStream();
 				if (stopped) return;
+				flushNodes();
 				stopped = true;
 				void reader.cancel();
 			},
