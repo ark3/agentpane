@@ -1,5 +1,6 @@
 ---
 labels: [change, d25]
+closed: done
 ---
 
 # The browser stores the pane's preview beside the selection and infers live from its absence, so paths that add or drop a view leave a composer over nothing or a preview over a live session; the pane's mode should be derived
@@ -80,3 +81,19 @@ Tests in `src/client/controller.test.ts`, each red first on the code as it stand
 
 A test on `App.svelte` shows the Attach button and no composer in the detached-loading mode.
 `bun run check` passes, and `bun run test:browser` passes, since this changes what the composer's action row draws (`AGENTS.md`).
+
+## Close note
+
+Built 2026-09-28 in three commits on `main`: "derive the pane's mode from what the tab holds, and fetch a detached pane's preview in one place", "ask again for a detached pane's preview whose read the stream dropped under", and "retire compact()'s no-view branches and the prose the live gate made false", all (OW-forinu).
+
+`paneMode(view)` in `src/client/controller.ts` derives live / preview / loading (null with nothing selected, which keeps the startup composer); `App.svelte` draws from it, and `submit`, `compact`, `abort` and `forkAndSubmit` act only on `live`.
+`publish` drops any stored preview the mode does not show and calls `loadPreview`, the one fetch owner, which reads the preview while the pane is loading and the stream is `connected`, keyed by `previewLoads`; a failed read falls to the startup view, except one the stream dropped under, which is asked again once per drop through a `streamDrops` counter.
+The poll runs only in the preview mode.
+An attach reply keeps the listed row's `status` (`replaceSummary`), a row no listing has named reading `detached`; `onDisconnect` keys its no-disk rule on `onDisk` for that reason and keeps an on-disk selection across a drop.
+Removed: `applyAttached`'s and `reselectLive`'s preview clears, `detachGapped`'s own fetch (it now only drops the view and moves the selection to the gapped event's ref), `onDisconnect`'s keep-only-with-a-preview rule, and `detach()`'s trailing `preview()`; kept: `detach()`'s and `onDisconnect`'s no-disk exits, and `preview()`'s re-check, for the live selection's model list.
+
+Before the work, a cold read found the card's calls left open, and they were settled in the card's "Settled at execution" section (commit "amend OW-forinu with the calls its cold read found open").
+Verified: each of the five done-condition tests in `src/client/controller.test.ts` and the App test "draws the Attach button and no composer over an empty pane for a selection with neither a view nor a preview" ran red on the old code, first with a stub `paneMode` and again with the mode assertions stripped; `bun run check` passed (1492 tests) and `bun run test:browser` passed (26) on `main` after the cherry-pick.
+About 25 controller tests and 2 App tests were rewritten to emit a snapshot or open the stream before their live verbs; none were deleted.
+
+The adversarial read proved four residuals by probe, filed as OW-sabova (a coalesced listing now leaves a live row reading `detached` and Detach disabled, a regression), OW-lejape (a no-disk session let go outside `detach()` and `onDisconnect` lands on the empty preview), OW-bilogo (replace `loadPreview`'s failed-read rule and its `streamDrops` counter, which miss a read failing before the drop is heard or before an attach's snapshot, and a hung read), and OW-didose (Attach does not focus the prompt when the reply beats its snapshot).
