@@ -325,32 +325,65 @@ connection named \"agentpane\", so the helper's own stderr lands there."
                   :stderr (get-buffer-create "*agentpane stderr*"))))
 
 (defun agentpane--connection ()
-  "The connection to the helper, started on first use."
-  (unless (and agentpane--connection (jsonrpc-running-p agentpane--connection))
+  "The connection to the helper, started on first use.
+A helper starts only once the last one's teardown has run, which alone
+forgets it (`agentpane--helper-gone'); until then, one that has exited
+is refused with an error, and nothing is started or sent.  Its process
+reads as not live before its sentinel has run, which it does only once
+Emacs next waits (Emacs 31.1, measured 2026-09-28; OW-toyupa), so this is
+met only by code running in the same command or timer pass as the death,
+or by a handler of what the helper wrote last, which runs before the
+teardown; see `agentpane--helper-exited'.  `agentpane--request' fails a
+request refused here as it fails any that cannot be sent.
+Started there instead, a replacement stood beside a connection buffers
+were still attached through, and the teardown missed a buffer re-attached
+through it, a late attach reply bound a buffer to it, and a late reply
+could carry the id of a request sent through it (OW-bukupu)."
+  (cond
+   ((null agentpane--connection)
     (setq agentpane--connection
           (make-instance 'jsonrpc-process-connection
                          :name "agentpane"
                          :process #'agentpane--start-helper
                          :notification-dispatcher #'agentpane--on-notification
-                         :on-shutdown #'agentpane--helper-gone)))
+                         :on-shutdown #'agentpane--helper-exited)))
+   ((not (jsonrpc-running-p agentpane--connection))
+    (error "The agentpane helper has exited")))
   agentpane--connection)
+
+(defun agentpane--helper-exited (connection)
+  "Tear CONNECTION down once what its helper wrote last has been handled.
+The connection's `:on-shutdown', which its sentinel calls.  Emacs reads
+what a dead process wrote before it runs the sentinel, and jsonrpc.el
+hands each message on from a zero-delay timer, so at the sentinel the
+helper's last messages are queued but not yet handled; the zero-delay
+timer started here runs after them (Emacs 31.1, jsonrpc.el 1.0.29,
+measured 2026-09-28).  So they are handled while CONNECTION is still
+current, and reach the buffers it served: the node the helper flushes
+before it exits at a drop is drawn (OW-mepufi), and a buffer's last
+status is read before the teardown reads it idle (OW-bukupu).  Run at
+the sentinel, the teardown let go of the buffers first, and those
+messages then found a buffer by its ref and bound the dead helper's
+handle to it again."
+  (run-at-time 0 nil #'agentpane--helper-gone connection))
 
 (defvar agentpane--handle)
 
 (defun agentpane--helper-gone (connection)
-  "Forget CONNECTION, the helper's, which has exited, and leave each
-transcript buffer attached through it as a `session/detached' for its
-handle would, through `agentpane--let-go': any helper's death is taken to
-mean every buffer it served is detached, whatever the cause, a helper
-that crashed over a live server being rare and costing a `g' (D25).
-CONNECTION is forgotten only while it is still the current one: its
-process reads as not live before its sentinel, which calls this, has run,
-so a use of the connection in between starts a replacement, which this
-must not forget (Emacs 31.1, measured 2026-09-28; OW-toyupa).
+  "Tear down CONNECTION, the helper's, which has exited: forget it, and
+leave each transcript buffer attached through it as a `session/detached'
+for its handle would, through `agentpane--let-go': any helper's death is
+taken to mean every buffer it served is detached, whatever the cause, a
+helper that crashed over a live server being rare and costing a `g'
+\(D25).
+Run from its sentinel, behind what the helper wrote last; see
+`agentpane--helper-exited'.  Only this forgets a connection, and no
+helper starts before it has (`agentpane--connection'), so every buffer
+attached through a helper is attached through the one being torn down,
+and CONNECTION is still `agentpane--connection' here.
 The helper exits when its event stream drops or its first open fails, so
 this is also how a server that went away reaches the buffers (D25)."
-  (when (eq agentpane--connection connection)
-    (setq agentpane--connection nil))
+  (setq agentpane--connection nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
@@ -364,7 +397,11 @@ it, and after 0.3s without an exit it warns and kills the process.  Once
 the helper is reading its input, it exited within 0.1s of the close, even
 with its event stream open or an HTTP request of its own unanswered, which
 it aborts (Emacs 31.1, bun 1.4.0, measured 2026-09-22;
-docs/MANUAL_TESTING.md, OW-bonode and OW-kofuda)."
+docs/MANUAL_TESTING.md, OW-bonode and OW-kofuda).
+The teardown, which the sentinel defers behind what the helper wrote last
+\(`agentpane--helper-exited'), ran within `jsonrpc-shutdown''s wait too,
+so the helper is forgotten once this returns (Emacs 31.1, jsonrpc.el
+1.0.29, measured 2026-09-28 by `agentpane-test-shutdown-ends-the-helper')."
   (interactive)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
     (process-send-eof (jsonrpc--process agentpane--connection))

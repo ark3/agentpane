@@ -4617,39 +4617,361 @@ as each does for a buffer told its handle is gone."
                (should (equal sent `((sessions/attach :session ,ref))))))
            buffers refs))))))
 
-(ert-deftest agentpane-test-late-sentinel-keeps-the-replacement-helper ()
-  "A helper that has exited but whose sentinel has not yet run is replaced
-by the next use of the connection, and that sentinel, running after, leaves
-the replacement current rather than forgetting it beside a third (OW-toyupa)."
-  (let ((agentpane--connection nil))
-    (cl-letf (((symbol-function 'agentpane--start-helper)
-               (lambda ()
-                 (make-process :name "agentpane-test helper"
-                               :command '("cat")
-                               :connection-type 'pipe
-                               :noquery t))))
+(defun agentpane-test--last-words (messages &optional prompted linger)
+  "Start a process standing in for a helper that writes MESSAGES, each a
+JSON-RPC message as a plist, framed as the helper frames them: at once,
+or, when PROMPTED, once it has read the first byte Emacs sends it.  It
+then exits, or, when LINGER, waits to be killed."
+  (make-process
+   :name "agentpane-test dying helper"
+   :command (list "sh" "-c"
+                  (concat (and prompted "head -c 1 >/dev/null; ")
+                          "printf %s \"$1\""
+                          (and linger "; exec sleep 60"))
+                  "sh"
+                  (mapconcat (lambda (message)
+                               (let ((json (json-serialize message)))
+                                 (format "Content-Length: %d\r\n\r\n%s" (string-bytes json) json)))
+                             messages))
+   :connection-type 'pipe
+   :noquery t))
+
+(defun agentpane-test--mute-helper ()
+  "Start a process standing in for a helper that reads nothing and writes
+nothing until it is killed."
+  (make-process :name "agentpane-test mute helper"
+                :command '("sleep" "60")
+                :connection-type 'pipe
+                :noquery t))
+
+(defun agentpane-test--dead-unheard (process)
+  "Wait without yielding until PROCESS reads as not live, so that its
+sentinel, and anything it wrote that Emacs has not read, are still to be
+handled: the gap `agentpane-test-late-sentinel-keeps-the-replacement-helper'
+drives."
+  (let ((deadline (+ (float-time) 10)))
+    (while (and (process-live-p process) (< (float-time) deadline))))
+  (should-not (process-live-p process))
+  (should-not (process-get process 'jsonrpc-sentinel-cleanup-started)))
+
+(defun agentpane-test--heard-out (connection)
+  "Let Emacs handle what CONNECTION's dead process left: wait until its
+sentinel has run, no request sent on it awaits a reply, and it has been
+torn down."
+  (should (agentpane-test--wait-for
+           (lambda ()
+             (and (process-get (jsonrpc--process connection) 'jsonrpc-sentinel-cleanup-started)
+                  (zerop (jsonrpc-continuation-count connection))
+                  (not (eq connection agentpane--connection))))
+           (+ (float-time) 10))))
+
+(defun agentpane-test--end-helper (connection)
+  "Kill CONNECTION's process, when CONNECTION is non-nil and its process
+is live, and wait until it has left the process table and been torn
+down, so that no teardown of it runs in a later test."
+  (when (and connection (process-live-p (jsonrpc--process connection)))
+    (kill-process (jsonrpc--process connection)))
+  (when connection
+    (agentpane-test--wait-for
+     (lambda () (not (or (memq (jsonrpc--process connection) (process-list))
+                         (eq connection agentpane--connection))))
+     (+ (float-time) 10))))
+
+(defmacro agentpane-test--outliving (last-words &rest body)
+  "Run BODY in a fresh transcript buffer for the session `ref', with no
+helper started, where the first helper started writes LAST-WORDS, as
+`agentpane-test--last-words' does, once the first request is sent to it
+unless `prompted' is nil, and then exits, or waits to be killed when
+`linger' is non-nil, each as BODY has set it when the helper starts;
+every later helper is mute.  Nothing is said in the echo area.
+Whichever helper is current when BODY ends is killed."
+  (declare (indent 1))
+  `(let ((agentpane--connection nil)
+         (ref '(:backend "codex" :id "t1"))
+         (prompted t)
+         (linger nil)
+         (started nil))
+     (agentpane-test--with-session ref
+       (cl-letf (((symbol-function 'agentpane--start-helper)
+                  (lambda ()
+                    (if started
+                        (agentpane-test--mute-helper)
+                      (setq started t)
+                      (agentpane-test--last-words ,last-words prompted linger))))
+                 ((symbol-function 'message) #'ignore))
+         (unwind-protect (progn ,@body)
+           (agentpane-test--end-helper agentpane--connection))))))
+
+(ert-deftest agentpane-test-no-replacement-before-the-teardown ()
+  "A helper that has exited but whose teardown has not yet run is not
+replaced: a use of the connection in that gap signals and starts
+nothing, and once the sentinel and the teardown behind it have run, the
+next use starts a new helper (OW-bukupu).  Until OW-bukupu that use
+started the replacement, and OW-toyupa kept the late sentinel from
+forgetting it; but every late message of the dead helper's then reached
+state the replacement had since taken, so no helper starts before the
+last one's teardown."
+  (let ((agentpane--connection nil)
+        replacement)
+    (cl-letf (((symbol-function 'agentpane--start-helper) #'agentpane-test--mute-helper))
       (let* ((dead (agentpane--connection))
-             (process (jsonrpc--process dead))
-             (deadline (+ (float-time) 10))
-             replacement)
+             (process (jsonrpc--process dead)))
         (unwind-protect
             (progn
               (signal-process process 'SIGKILL)
-              ;; No yielding here: the sentinel runs only when Emacs waits.
-              (while (and (process-live-p process) (< (float-time) deadline)))
-              (should-not (process-live-p process))
-              (should-not (process-get process 'jsonrpc-sentinel-cleanup-started))
+              (agentpane-test--dead-unheard process)
+              (should-error (agentpane--connection))
+              (should (eq agentpane--connection dead))
+              (agentpane-test--heard-out dead)
+              (should-not agentpane--connection)
               (setq replacement (agentpane--connection))
-              (should-not (eq replacement dead))
-              (should (agentpane-test--wait-for
-                       (lambda () (process-get process 'jsonrpc-sentinel-cleanup-started))
-                       deadline))
-              (should (eq agentpane--connection replacement)))
-          (when replacement
-            (kill-process (jsonrpc--process replacement))
-            (agentpane-test--wait-for
-             (lambda () (not (memq (jsonrpc--process replacement) (process-list))))
-             (+ (float-time) 10))))))))
+              (should (jsonrpc-running-p replacement)))
+          (agentpane-test--end-helper replacement))))))
+
+(ert-deftest agentpane-test-no-re-attach-before-the-teardown ()
+  "A buffer whose helper has exited, attached again before that helper's
+sentinel has run, is refused rather than attached through a replacement
+the teardown would then miss, and the teardown lets go of it: the turn
+seen streaming through the dead helper ends there, and the watch on its
+handle ends with it (OW-bukupu, as
+`agentpane-test-turn-done-watch-ends-with-the-helper')."
+  (agentpane-test--watching
+    (agentpane-test--outliving nil
+      (setq prompted nil)
+      (let* ((dead (agentpane--connection))
+             (process (jsonrpc--process dead)))
+        (setq agentpane--attached dead
+              agentpane--handle "h1")
+        (agentpane--watch-submit)
+        (agentpane--on-notification
+         agentpane--connection 'session/status
+         (list :session ref :handle "h1" :isStreaming t))
+        (should agentpane--streaming)
+        (agentpane-test--dead-unheard process)
+        (should-error (agentpane--attach))
+        (should (eq agentpane--connection dead))
+        (should-not agentpane--attaching)
+        (agentpane-test--heard-out dead)
+        (should-not agentpane--streaming)
+        (should (agentpane-test--turn-done-p))
+        (should-not agentpane--turn-watches)
+        (should agentpane--dropped)
+        (should-not agentpane--handle)))))
+
+(defun agentpane-test--late-attach-reply (before-sentinel)
+  "Attach a buffer through a helper that answers the attach and dies while
+Emacs is busy, use the connection in that gap, then let Emacs handle the
+dead helper's sentinel, its reply and its teardown: the reply first when
+BEFORE-SENTINEL, as when Emacs had read it before the helper died, and
+after the sentinel otherwise, as jsonrpc.el hands on what a dead process
+wrote last (Emacs 31.1, jsonrpc.el 1.0.29).  The use in the gap must be
+refused, and the buffer end let go of, attached to nothing (OW-bukupu)."
+  (agentpane-test--outliving
+      (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
+    (setq linger before-sentinel)
+    (agentpane--attach)
+    (let* ((dead agentpane--connection)
+           (process (jsonrpc--process dead)))
+      (when before-sentinel
+        ;; Read the reply and queue its delivery, running no timer.
+        (should (accept-process-output process 10 nil 1))
+        (signal-process process 'SIGKILL))
+      (agentpane-test--dead-unheard process)
+      (should-error (agentpane--connection))
+      (agentpane-test--heard-out dead)
+      (should-not agentpane--connection)
+      (should-not agentpane--attached)
+      (should-not agentpane--attaching)
+      (should-not agentpane--handle)
+      (should agentpane--dropped))))
+
+(ert-deftest agentpane-test-late-attach-reply-attaches-nothing ()
+  "An attach reply a dead helper wrote binds the buffer to no replacement,
+since none starts before the dead helper's teardown, which then lets go
+of the buffer, whether the reply is handled before or after its sentinel
+\(OW-bukupu)."
+  (agentpane-test--late-attach-reply nil)
+  (agentpane-test--late-attach-reply t))
+
+(ert-deftest agentpane-test-no-request-before-the-teardown ()
+  "A request sent after the helper has exited, before its teardown, fails
+and sends nothing, leaving the buffer's latest request the one sent
+through the dead helper, whose reply is then the one the callback takes:
+no request goes through a replacement, whose ids would count from 1
+again and could match a late reply's (OW-bukupu)."
+  (let ((got nil)
+        (failures 0))
+    (agentpane-test--outliving
+        (list (list :jsonrpc "2.0" :id 1 :result "the dead helper's"))
+      (agentpane--request 'sessions/preview nil (lambda (result) (push result got)))
+      (let* ((dead agentpane--connection)
+             (process (jsonrpc--process dead)))
+        (agentpane-test--dead-unheard process)
+        (should-error (agentpane--request 'sessions/preview nil
+                                          (lambda (result) (push (cons 'second result) got))
+                                          nil (lambda () (cl-incf failures))))
+        (should (= failures 1))
+        (should (eq agentpane--connection dead))
+        (should (eql agentpane--latest-request 1))
+        (agentpane-test--heard-out dead)
+        (should (equal got '("the dead helper's")))))))
+
+(ert-deftest agentpane-test-late-status-leaves-the-buffer-idle ()
+  "A `session/status' reading streaming that a helper wrote as it exited,
+while Emacs was busy, is read before the teardown, which then leaves the
+buffer let go of, idle and holding no handle.  Handled after a teardown
+run at the sentinel, it found the buffer by its ref and bound the dead
+helper's handle to it again, reading streaming (OW-bukupu)."
+  (let* ((heard nil)
+         (dispatch (symbol-function 'agentpane--on-notification)))
+    (cl-letf (((symbol-function 'agentpane--on-notification)
+               (lambda (&rest args)
+                 (apply dispatch args)
+                 (setq heard t))))
+      (agentpane-test--outliving
+          (list (list :jsonrpc "2.0" :method "session/status"
+                      :params (list :session ref :handle "h1" :isStreaming t)))
+        (setq prompted nil)
+        (let* ((dead (agentpane--connection))
+               (process (jsonrpc--process dead)))
+          (setq agentpane--attached dead
+                agentpane--handle "h1")
+          (agentpane-test--dead-unheard process)
+          (should (agentpane-test--wait-for (lambda () heard) (+ (float-time) 10)))
+          (agentpane-test--heard-out dead)
+          (should agentpane--dropped)
+          (should-not agentpane--attached)
+          (should-not agentpane--handle)
+          (should-not agentpane--streaming))))))
+
+(ert-deftest agentpane-test-last-node-is-drawn-before-the-teardown ()
+  "A `session/node' a helper wrote just before it exited, while Emacs was
+busy, is drawn, as the helper flushes its last node before it exits at a
+drop so that it reaches the buffer (OW-mepufi), and the buffer is let go
+of after it, holding no handle (OW-bukupu)."
+  (agentpane-test--outliving
+      (list (list :jsonrpc "2.0" :method "session/node"
+                  :params (list :session ref :handle "h1"
+                                :node (agentpane-test--assistant 3 "<p>Final words.</p>"))))
+    (setq prompted nil)
+    (let* ((dead (agentpane--connection))
+           (process (jsonrpc--process dead)))
+      (setq agentpane--attached dead
+            agentpane--handle "h1")
+      (agentpane-test--dead-unheard process)
+      (agentpane-test--heard-out dead)
+      (should (agentpane-test--wait-for (lambda () (null agentpane--recorded))
+                                        (+ (float-time) 10)))
+      (should (string-search "Final words." (buffer-string)))
+      (should agentpane--dropped)
+      (should-not agentpane--attached)
+      (should-not agentpane--handle))))
+
+(ert-deftest agentpane-test-last-node-drawn-past-a-refused-refetch ()
+  "The node a dying helper flushed after a `sessions/changed' is drawn,
+and the buffer then let go of, though the picker refetch that
+notification runs, handled first, finds the helper exited: the refetch
+is refused, rather than tearing the helper down, or replacing it, under
+the messages still to come (OW-bukupu).  The helper's `write' flushes a
+held node before any other message it writes (src/emacs/helper.ts), so a
+node after a `sessions/changed' is its order at a drop."
+  (let ((picker (generate-new-buffer "*agentpane-test picker*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer picker (agentpane-sessions-mode))
+          (agentpane-test--outliving
+              (list (list :jsonrpc "2.0" :method "sessions/changed")
+                    (list :jsonrpc "2.0" :method "session/node"
+                          :params (list :session ref :handle "h1"
+                                        :node (agentpane-test--assistant 3 "<p>Final words.</p>"))))
+            (setq prompted nil)
+            (let* ((dead (agentpane--connection))
+                   (process (jsonrpc--process dead)))
+              (setq agentpane--attached dead
+                    agentpane--handle "h1")
+              (agentpane-test--dead-unheard process)
+              (agentpane-test--heard-out dead)
+              (should (agentpane-test--wait-for (lambda () (null agentpane--recorded))
+                                                (+ (float-time) 10)))
+              (should (string-search "Final words." (buffer-string)))
+              (should-not agentpane--connection)
+              (should agentpane--dropped)
+              (should-not agentpane--handle))))
+      (kill-buffer picker))))
+
+(ert-deftest agentpane-test-prompt-after-its-helper-died-is-refused ()
+  "A prompt waiting on an attach, whose helper answers the attach and then
+exits before the prompt goes out, is refused, keeping its draft, rather
+than sent through a replacement for a buffer that helper's teardown then
+lets go of, and no turn-done watch outlives it (OW-bukupu)."
+  (let ((calls nil)
+        (async (symbol-function 'jsonrpc-async-request))
+        (submit (symbol-function 'agentpane--watch-submit))
+        dead)
+    (agentpane-test--watching
+      (cl-letf (((symbol-function 'jsonrpc-async-request)
+                 (lambda (conn method &rest args)
+                   (push method calls)
+                   (apply async conn method args)))
+                ((symbol-function 'agentpane--watch-submit)
+                 (lambda ()
+                   ;; The helper dies between its attach reply and the prompt.
+                   (let ((process (jsonrpc--process dead)))
+                     (signal-process process 'SIGKILL)
+                     (agentpane-test--dead-unheard process))
+                   (funcall submit))))
+        (agentpane-test--outliving
+            (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
+          (setq linger t)
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (setq dead agentpane--connection)
+          (agentpane-test--heard-out dead)
+          (should (equal calls '(sessions/attach)))
+          (should-not agentpane--connection)
+          (should-not agentpane--sending)
+          (should-not agentpane--attached)
+          (should-not agentpane--handle)
+          (should-not agentpane--turn-watches)
+          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                         "hello")))))))
+
+(ert-deftest agentpane-test-attach-answered-by-an-exited-helper-fails ()
+  "An attach reply handled after the helper that wrote it has exited, but
+before its sentinel has run, sends none of the prompt waiting on it,
+which keeps its draft, and no turn-done watch outlives the teardown,
+rather than the prompt's own request tearing that helper down under it
+and going out through a replacement for a buffer holding no handle
+\(OW-bukupu)."
+  (let ((calls nil)
+        (async (symbol-function 'jsonrpc-async-request)))
+    (agentpane-test--watching
+      (cl-letf (((symbol-function 'jsonrpc-async-request)
+                 (lambda (conn method &rest args)
+                   (push method calls)
+                   (apply async conn method args))))
+        (agentpane-test--outliving
+            (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
+          (setq linger t)
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (let* ((dead agentpane--connection)
+                 (process (jsonrpc--process dead)))
+            ;; Read the reply and queue its delivery, running no timer:
+            ;; the next wait runs it before it runs the sentinel.
+            (should (accept-process-output process 10 nil 1))
+            (signal-process process 'SIGKILL)
+            (agentpane-test--dead-unheard process)
+            (agentpane-test--heard-out dead)
+            (should (equal calls '(sessions/attach)))
+            (should-not agentpane--sending)
+            (should-not agentpane--connection)
+            (should-not agentpane--attached)
+            (should-not agentpane--turn-watches)
+            (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                           "hello"))))))))
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
