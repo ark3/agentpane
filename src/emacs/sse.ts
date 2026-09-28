@@ -11,8 +11,8 @@
  * which is what the server's heartbeat is (`broadcaster.ts`).
  *
  * Nothing here retries. Every drop is final for this connection, so
- * `onDisconnect` always reports `fatal: true` and the helper reopens the
- * stream itself (`helper.ts`). `close()` aborts the request and is silent:
+ * `onDisconnect` always reports `fatal: true`, and the helper exits on it
+ * (`helper.ts`, D25). `close()` aborts the request and is silent:
  * a native `EventSource.close()` fires no `onerror` either.
  */
 

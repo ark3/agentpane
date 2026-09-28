@@ -59,10 +59,9 @@
 ;; the helper's notifications drive the buffer: a snapshot redraws every
 ;; node, a node update redraws the node with its index or appends it, and
 ;; the mode line shows streaming, compaction, the model and its effort,
-;; the model's default one when the session reports none.  While the
-;; helper's event stream is down, which the helper says by
-;; `stream/changed', every attached buffer's mode line leads with
-;; `reconnecting', until the helper says it is back.  A prompt is
+;; the model's default one when the session reports none.  When the
+;; helper's event stream drops, the helper exits, and every buffer it served
+;; is left detached (D25).  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, `C-c C-a' aborts the running turn, and
@@ -313,27 +312,6 @@ stylesheet.  Roughly the browser's theme, by role rather than by colour.")
 (defvar agentpane--connection nil
   "The `jsonrpc-process-connection' to the helper, once started.")
 
-(defvar agentpane--stream-down nil
-  "Non-nil while the helper says its event stream is down and reconnecting.
-Set by `stream/changed', which the helper sends when the stream drops and
-again when it is back (OW-mareju); one stream serves every session, so this
-is not per buffer.  A buffer attached through the helper says so in its
-mode line (`agentpane--show-mode-line'), since nothing it shows moves until
-the stream is back, as the browser's status line says Reconnecting.
-Set only through `agentpane--hold-stream-down'.")
-
-(defun agentpane--hold-stream-down (down)
-  "Set `agentpane--stream-down' to DOWN, and show every transcript buffer's
-mode line again, which says `reconnecting' in the attached ones while it
-is non-nil.  The redraw is here, where the flag changes, so no path that
-changes it can leave a mode line saying the old state; attaching and
-detaching do the same through `agentpane--hold-attached'."
-  (setq agentpane--stream-down down)
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'agentpane-transcript-mode)
-        (agentpane--show-mode-line)))))
-
 (defun agentpane--start-helper ()
   "Start the helper process in `agentpane-project-directory'.
 The stderr buffer is named as `jsonrpc-process-connection' expects for a
@@ -369,12 +347,10 @@ CONNECTION is forgotten only while it is still the current one: its
 process reads as not live before its sentinel, which calls this, has run,
 so a use of the connection in between starts a replacement, which this
 must not forget (Emacs 31.1, measured 2026-09-28; OW-toyupa).
-`agentpane--stream-down' is cleared either way, since a replacement says
-nothing of its stream until an open fails or it drops, and would otherwise
-inherit this helper's `reconnecting'."
+The helper exits when its event stream drops or its first open fails, so
+this is also how a server that went away reaches the buffers (D25)."
   (when (eq agentpane--connection connection)
     (setq agentpane--connection nil))
-  (agentpane--hold-stream-down nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
@@ -513,11 +489,8 @@ non-nil, on the way out."
 
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
-Every one but `sessions/changed' and `stream/changed' is about one
-session, and goes to the transcript buffer `agentpane--notified-buffer'
-finds for it, if any.  A `stream/changed' says the helper's event stream
-went down or came back, and every attached buffer's mode line says which;
-see `agentpane--hold-stream-down'.
+Every one but `sessions/changed' is about one session, and goes to the
+transcript buffer `agentpane--notified-buffer' finds for it, if any.
 That buffer takes the notification's handle, and its `session' as the
 session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
@@ -534,8 +507,6 @@ gapped, and the buffer lets go of it too; see `agentpane--let-go'."
   (cond
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
-   ((eq method 'stream/changed)
-    (agentpane--hold-stream-down (equal (plist-get params :state) "reconnecting")))
    (t
     (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
@@ -579,8 +550,8 @@ handle is folded that status, then ends with the handle; see
   (agentpane--read-idle)
   (agentpane--watch-forget agentpane--handle)
   (setq agentpane--handle nil
-        agentpane--dropped t)
-  (agentpane--hold-attached nil))
+        agentpane--attached nil
+        agentpane--dropped t))
 
 (defun agentpane--read-idle ()
   "Show this buffer's session as the status that ends a turn leaves it,
@@ -1808,13 +1779,10 @@ view or the streaming status change."
 
 (defun agentpane--show-mode-line ()
   "Show the status fields in the mode line, after `reading' when reading
-view is on, and first of all `reconnecting' while the buffer is attached
-and the helper's event stream is down (`agentpane--stream-down')."
+view is on."
   (let ((fields (if agentpane--reading
                     (cons "reading" agentpane--status-fields)
                   agentpane--status-fields)))
-    (when (and agentpane--stream-down (agentpane--attached-p))
-      (push (propertize "reconnecting" 'face 'agentpane-warning) fields))
     (setq mode-line-process
           (and fields (concat " [" (mapconcat #'identity fields " · ") "]")))
     (force-mode-line-update)))
@@ -1825,19 +1793,7 @@ and the helper's event stream is down (`agentpane--stream-down')."
   "The helper connection this buffer attached its session through, or nil.
 Attached only while that is still the running connection: a fresh helper
 has attached nothing.  One that has exited is cleared, as a
-`session/detached' clears it (D25); see `agentpane--let-go'.  Set only
-through `agentpane--hold-attached'.")
-
-(defun agentpane--hold-attached (connection)
-  "Make CONNECTION, or nil, the helper connection this buffer is attached
-through, and show its mode line again, which says `reconnecting' only
-while the buffer is attached: an attach answered while the helper's event
-stream is down gets no snapshot to redraw it until the stream is back,
-and a buffer detached meanwhile would otherwise keep the field
-\(OW-mareju).  The redraw is here, where attachment changes, as
-`agentpane--hold-stream-down' has it where the stream's state does."
-  (setq agentpane--attached connection)
-  (agentpane--show-mode-line))
+`session/detached' clears it (D25); see `agentpane--let-go'.")
 
 (defvar-local agentpane--attach-sent nil
   "Non-nil once this buffer has sent a `sessions/attach', whatever became of
@@ -1847,9 +1803,9 @@ a snapshot's `askedFor' only to such a buffer.")
 (defvar-local agentpane--dropped nil
   "Non-nil once the helper detached the handle this buffer held, by a
 `session/detached', until an attach of this buffer's answers: the
-helper's listing, asked at a `sessions-changed' or a reopen of its event
-stream, lacked the handle, a server restart or a close elsewhere having
-let go of it (OW-yibijo), or the session's `seq' gapped (D25, OW-filuge).
+helper's listing, asked at a `sessions-changed', lacked the handle, a
+close elsewhere having let go of it (OW-yibijo), or the session's `seq'
+gapped (D25, OW-filuge).
 A helper that exits leaves each buffer it served so too (D25); see
 `agentpane--let-go'.  The buffer then holds no handle and is not
 attached, and keeps its ref and what it drew, so `agentpane-refetch'
@@ -2180,8 +2136,8 @@ back to the session id keeps the old one."
 the session's handle, and its ref, which is authoritative and may differ
 from the one asked for.  Return non-nil when that merged another buffer
 into this one, which then wants a snapshot; see `agentpane--absorb'."
-  (agentpane--hold-attached agentpane--connection)
-  (setq agentpane--dropped nil)
+  (setq agentpane--attached agentpane--connection
+        agentpane--dropped nil)
   (let* ((handle (plist-get summary :handle))
          (other (and handle (agentpane--buffer-holding handle))))
     (setq agentpane--handle handle)
@@ -2786,9 +2742,9 @@ it was."
        (lambda (_)
          (agentpane--watch-forget agentpane--handle)
          (setq agentpane--handle nil
+               agentpane--attached nil
                agentpane--attach-sent nil
                agentpane--dropped nil)
-         (agentpane--hold-attached nil)
          (agentpane--request
           'sessions/list nil
           (lambda (listing)
@@ -3079,7 +3035,7 @@ gone out.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (agentpane--hold-attached nil))
+       (setq agentpane--attached nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer

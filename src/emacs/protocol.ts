@@ -21,7 +21,10 @@
  * OW-mareju raised it a seventh, for `stream/changed`, which says the event
  * stream dropped and came back, where the helper had reopened it silently.
  * OW-filuge raised it an eighth, sending `session/detached` for a session
- * whose `seq` gapped, where the helper had attached it again.
+ * whose `seq` gapped, where the helper had attached it again. OW-mepufi
+ * raised it a ninth, retiring `stream/changed`: the helper exits when its
+ * event stream drops or its first open fails (D25 point 4), and reopens
+ * nothing.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -216,7 +219,7 @@
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about, and none arrives for a session Emacs has not attached, except
- * `sessions/changed` and `stream/changed`:
+ * `sessions/changed`:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
  *   model, effort, unrestoredModel, error, errorId, requests, notices }`.
@@ -286,32 +289,20 @@
  * - `session/detached` -- `{ session, handle }`. Nothing more comes under
  *   `handle`, and the helper has dropped the attachment: either the server
  *   no longer holds it, the helper's own listing, asked at each
- *   `sessions/changed` it sends, having lacked it -- a server restart, or a
- *   close by another client (OW-yibijo) -- or the session's `seq` gapped,
+ *   `sessions/changed` it sends, having lacked it -- a close by another
+ *   client (OW-yibijo) -- or the session's `seq` gapped,
  *   and the helper detaches that one session rather than attach it again
  *   (D25 point 5, OW-filuge). `session` is the ref it last named the
  *   session by. The buffer holding `handle` lets go of it and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever
  *   handle and ref the session has now, if any, as a first attach is.
- * - `sessions/changed` -- no `params`. Refetch the listing. Also sent each
- *   time the helper reopens a dropped event stream, since a listing change
- *   while it was down is gone. Any `session/detached` the helper's own
- *   listing brings follows it.
- * - `stream/changed` -- `{ state }`. The helper's one event stream, shared
- *   by every session, went down or came back up (OW-mareju), so a buffer can
- *   tell a quiet session from a dead stream, as the browser's status line
- *   does. `state` (string, always) is `"reconnecting"` when the stream
- *   drops or an open of it fails, sent once per outage however many reopens
- *   fail in it, and `"connected"` when the open that ends the outage
- *   succeeds, sent ahead of the `sessions/changed` that open sends -- which
- *   it sends only if the stream had opened before: where the very first
- *   open failed, the one that ends that outage sends `"connected"` and no
- *   `sessions/changed`. Carries no `session` and no `handle`. There is no
- *   `"connecting"` for the first open, which the first `sessions/list` or
- *   `sessions/attach` starts: Emacs reads the stream as up until told
- *   otherwise, and a buffer attaching draws nothing live before the
- *   snapshot that open brings anyway.
+ * - `sessions/changed` -- no `params`. Refetch the listing. Any
+ *   `session/detached` the helper's own listing brings follows it.
+ *
+ * No notification says the event stream dropped. When it does, or its first
+ * open fails, the helper exits (D25 point 4, OW-mepufi), and Emacs sees its
+ * process end.
  */
 
 import type {
@@ -384,8 +375,7 @@ export type HelperNotification =
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
 	| { method: "session/detached"; params: { session: SessionRef; handle: string } }
-	| { method: "sessions/changed"; params?: undefined }
-	| { method: "stream/changed"; params: { state: "reconnecting" | "connected" } };
+	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {
 	index: number;

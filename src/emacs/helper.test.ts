@@ -50,8 +50,13 @@ function stdio() {
 		send(message: unknown) {
 			controller.enqueue(encodeFrame(message));
 		},
+		/** Close the input, unless the helper already cancelled it on leaving. */
 		end() {
-			controller.close();
+			try {
+				controller.close();
+			} catch {
+				// Already closed by the helper's own exit (D25 point 4).
+			}
 		},
 		/** Wait until the output holds `count` frames. */
 		async until(count: number): Promise<void> {
@@ -107,6 +112,11 @@ function fetchFor(routes: Record<string, Route>) {
 	return { fetch: fetch as unknown as typeof globalThis.fetch, calls };
 }
 
+/** Whether `promise` settles within 50ms, so a helper that never exits fails its test rather than timing it out. */
+function settled(promise: Promise<unknown>): Promise<"resolved" | "pending"> {
+	return Promise.race([promise.then(() => "resolved" as const), new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 50))]);
+}
+
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const noContent = () => new Response(null, { status: 204 });
@@ -118,11 +128,11 @@ afterEach(async () => {
 	stop = null;
 });
 
-function start(routes: Record<string, Route>, reconnectDelayMs = 0, renderMarkdown: Render = render) {
+function start(routes: Record<string, Route>, renderMarkdown: Render = render) {
 	const io = stdio();
 	const source = eventSource();
 	const { fetch, calls } = fetchFor(routes);
-	const done = runHelper({ input: io.input, write: io.write, fetch, openEvents: source.openEvents, render: renderMarkdown, reconnectDelayMs });
+	const done = runHelper({ input: io.input, write: io.write, fetch, openEvents: source.openEvents, render: renderMarkdown });
 	stop = async () => {
 		io.end();
 		await done;
@@ -642,50 +652,6 @@ describe("notifications", () => {
 		});
 	});
 
-	it("relays sessions-changed, and reopens a dropped stream with a sessions/changed after every reopen", async () => {
-		const { io, source } = start(attachRoutes(pi));
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
-		source.emit({ type: "sessions-changed" });
-		await io.until(2);
-		expect(io.notifications()).toEqual([{ jsonrpc: "2.0", method: "sessions/changed" }]);
-
-		source.opens[0]!.onDisconnect(true);
-		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
-		await io.until(5);
-		expect(io.notifications().slice(1)).toEqual([{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } }, { jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } }, { jsonrpc: "2.0", method: "sessions/changed" }]);
-		expect(source.closed).toEqual([0]);
-	});
-
-	it("says the stream is reconnecting once when it drops, however many reopens fail, and connected when one opens (OW-mareju)", async () => {
-		const { io, source } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
-		await io.until(1);
-		await vi.waitFor(() => expect(source.opens).toHaveLength(1));
-
-		source.failing = 2;
-		source.opens[0]!.onDisconnect(true);
-		await vi.waitFor(() => expect(source.opens).toHaveLength(4));
-		await io.until(4);
-		expect(io.notifications()).toEqual([
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
-			{ jsonrpc: "2.0", method: "sessions/changed" },
-		]);
-	});
-
-	it("says the stream is reconnecting when its very first open fails, and connected when a reopen succeeds (OW-mareju)", async () => {
-		const { io, source } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
-		source.failing = 1;
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
-		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
-		await io.until(3);
-		expect(io.notifications().filter((message) => message["method"] === "stream/changed")).toEqual([
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
-		]);
-	});
-
 	it("opens the stream before the listing call, so a picker hears sessions/changed with nothing attached (OW-nufafi)", async () => {
 		let streamsOpenAtList = -1;
 		const { io, source } = start({
@@ -701,13 +667,35 @@ describe("notifications", () => {
 		await io.until(2);
 		expect(io.notifications()).toEqual([{ jsonrpc: "2.0", method: "sessions/changed" }]);
 	});
+
+	it("exits when the stream it opened for sessions/list drops, and opens it no more (D25)", async () => {
+		const { io, source, done } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await io.until(1);
+		expect(source.opens).toHaveLength(1);
+
+		source.opens[0]!.onDisconnect(true);
+		expect(await settled(done)).toBe("resolved");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(source.opens).toHaveLength(1);
+	});
+
+	it("exits when the first open of its stream fails, and opens it no more (D25)", async () => {
+		const { io, source, done } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		source.failing = 1;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+
+		expect(await settled(done)).toBe("resolved");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(source.opens).toHaveLength(1);
+	});
 });
 
 // Nothing tells the helper a handle died, and only the server's `#names`
-// knows where a session went; the listing after a reopen or a
-// sessions-changed says which handles are still held, and a buffer told its
-// handle is gone finds its session by its ref at its next attach.
-describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
+// knows where a session went; the listing after a sessions-changed says
+// which handles are still held, and a buffer told its handle is gone finds
+// its session by its ref at its next attach.
+describe("the listing after a sessions-changed (OW-yibijo)", () => {
 	const snapshot = (session: SessionRef, handle: string, seq = 1): ServerEvent => ({
 		type: "snapshot",
 		session,
@@ -739,7 +727,7 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		io.notifications().map((message) => [message["method"], (message["params"] as { handle?: string } | undefined)?.handle]);
 	const lookups = (calls: { url: string }[]) => calls.filter((call) => call.url.endsWith("/live"));
 
-	it("tells Emacs an attachment whose handle the reopen's listing lacks is detached, and says nothing more under it", async () => {
+	it("tells Emacs an attachment whose handle the listing lacks is detached, and says nothing more under it", async () => {
 		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
 		const { io, source, calls } = start({
 			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
@@ -750,21 +738,20 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
-		// Re-attached elsewhere under h2 and renamed, in one outage.
-		source.opens[0]!.onDisconnect(false);
-		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
+		// Closed by another client, and attached there again under h2 by
+		// another name: the listing holds the session, under a handle this
+		// attachment never held.
 		source.emit(snapshot(renamed, "h2", 0));
-		await io.until(6);
+		source.emit({ type: "sessions-changed" });
+		await io.until(4);
 		source.emit(status(pi, "h1", 2));
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
-			["stream/changed", undefined],
-			["stream/changed", undefined],
 			["sessions/changed", undefined],
 			["session/detached", "h1"],
 		]);
-		expect(io.notifications()[4]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
+		expect(io.notifications()[2]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
 		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`, `GET ${ROUTES.sessions}`]);
 		expect(lookups(calls)).toEqual([]);
 	});
@@ -785,21 +772,19 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
-		source.opens[0]!.onDisconnect(false);
+		source.emit({ type: "sessions-changed" });
 		await vi.waitFor(() => expect(calls.filter((call) => call.url === ROUTES.sessions)).toHaveLength(1));
 		// The buffer's own `g`, answered under h3 before the listing lands.
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(6);
+		await io.until(4);
 		source.emit(snapshot(pi, "h3", 0));
-		await io.until(7);
+		await io.until(5);
 		release();
-		await io.until(8);
+		await io.until(6);
 		source.emit(status(pi, "h3", 1));
-		await io.until(9);
+		await io.until(7);
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
-			["stream/changed", undefined],
-			["stream/changed", undefined],
 			["sessions/changed", undefined],
 			["session/snapshot", "h3"],
 			["session/detached", "h1"],
@@ -861,46 +846,16 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
-		source.opens[0]!.onDisconnect(false);
-		await io.until(5);
+		source.emit({ type: "sessions-changed" });
+		await io.until(3);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: "h1" } });
-		await io.until(6);
+		await io.until(4);
 		release();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
-			["stream/changed", undefined],
-			["stream/changed", undefined],
 			["sessions/changed", undefined],
 		]);
-	});
-
-	it("tells Emacs the same after a rename, a close elsewhere and a re-attach by the new ref, in one outage", async () => {
-		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
-		const { io, source, calls } = start({
-			[`GET ${ROUTES.session(virtual)}`]: () => json({ session: summary(virtual, "h1") }),
-			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [summary(pi, "h3")] }),
-		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(1);
-		source.emit(snapshot(virtual, "h1"));
-		await io.until(2);
-
-		// The first prompt elsewhere renames virtual onto pi under h1, a client
-		// closes it, and another attaches pi, minting h3: no name of h1's
-		// container survives to link virtual to pi.
-		source.opens[0]!.onDisconnect(false);
-		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
-		source.emit(snapshot(pi, "h3", 0));
-		await io.until(6);
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.notifications().slice(1)).toEqual([
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
-			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
-			{ jsonrpc: "2.0", method: "sessions/changed" },
-			{ jsonrpc: "2.0", method: "session/detached", params: { session: virtual, handle: "h1" } },
-		]);
-		expect(lookups(calls)).toEqual([]);
 	});
 });
 
@@ -918,7 +873,7 @@ describe("the node throttle (OW-jeruye)", () => {
 	/** Attached to `pi`, streaming, a user turn drawn; the interval runs on fake timers from here on, and only what renders after this counts. */
 	async function streaming(routes: Record<string, Route> = {}) {
 		const rendered: string[] = [];
-		const started = start({ ...attachRoutes(pi), ...routes }, 0, (markdown) => {
+		const started = start({ ...attachRoutes(pi), ...routes }, (markdown) => {
 			if (markdown === unrenderable) throw new Error("render failed");
 			rendered.push(markdown);
 			return `stub:${markdown}`;

@@ -20,7 +20,8 @@
  * attached it, and nothing is attached on its behalf (`detachGapped` below).
  *
  * One stream, filtered. It opens lazily at the first `sessions/list` or
- * `sessions/attach`, before that request's REST call, and it stays open. At
+ * `sessions/attach`, before that request's REST call, and it stays open
+ * until the helper exits. At
  * the listing so the picker hears `sessions/changed` before anything is
  * attached, and a listing change after the stream is up is not lost between
  * the list and the open (OW-nufafi); at the attach, since a buffer may
@@ -35,9 +36,9 @@
  * before the REST call (D2) and nothing has named a handle yet, and moves to
  * the handle with the first event under one that carries that ref, or with
  * the attach reply. An attachment never moves to another handle: one whose
- * handle the server let go of is dropped at the next `sessions-changed` or
- * reopen of the stream, and Emacs told (`dropDead` below, OW-yibijo).
- * `sessions/changed` and `stream/changed` are unfiltered.
+ * handle the server let go of is dropped at the next `sessions-changed`,
+ * and Emacs told (`dropDead` below, OW-yibijo). `sessions/changed` is
+ * unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
@@ -61,16 +62,13 @@
  * agentpane-mode binds it to the buffer that asked, which takes the handle
  * from it (`askedFor` below, `agentpane--notified-buffer` in
  * emacs/agentpane.el). The hand-rolled
- * reader in `sse.ts` does not retry, so a drop is reopened after
- * `reconnectDelayMs`, and every open after the first emits
- * `sessions/changed`: a listing change while the stream was down is gone
- * (D21). The outage itself is not silent (OW-mareju): the drop, or a failed
- * open, sends `stream/changed` with `"reconnecting"`, once however many
- * reopens fail after it, and the open that ends it sends `"connected"`,
- * ahead of that `sessions/changed` where it sends one -- not where the very
- * first open failed, since `opens` counts only opens that succeeded -- so a
- * buffer can tell a quiet session from a dead stream as the browser's status
- * line does.
+ * reader in `sse.ts` does not retry, and neither does the helper: when the
+ * stream drops, or its first open fails, the helper exits (D25 point 4).
+ * Agentpane is local-only, so a drop means the server went away, and there
+ * is nothing to reconnect to. agentpane-mode takes the exit to mean every
+ * buffer the helper served is detached, and the next command that needs a
+ * helper starts a new one (`agentpane--helper-gone` and
+ * `agentpane--connection` in emacs/agentpane.el).
  *
  * Nodes are throttled (OW-jeruye). The server sends every streamed token as
  * an `upsert` carrying the whole message so far, about 34 a second on Haiku,
@@ -114,7 +112,6 @@ export interface HelperOptions {
 	fetch: typeof fetch;
 	openEvents: NonNullable<ApiOptions["openEvents"]>;
 	render: Render;
-	reconnectDelayMs?: number;
 }
 
 type Handlers = { [M in keyof HelperRequests]: (params: HelperRequests[M]["params"]) => Promise<HelperRequests[M]["result"]> };
@@ -126,7 +123,6 @@ interface JsonRpcRequest {
 	params?: unknown;
 }
 
-const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 /** The owner's first cut, 2026-09-25, to be judged by use (OW-jeruye). */
 const NODE_INTERVAL_MS = 250;
 
@@ -139,7 +135,8 @@ interface HeldNode {
 }
 
 /**
- * Runs until `input` ends; then closes the stream, aborts every request still
+ * Runs until `input` ends, or the event stream drops or fails its first open
+ * (D25 point 4); then closes the stream, aborts every request still
  * waiting on the server, and resolves. Each request is answered detached from
  * the read loop, so without the abort a server that never answers holds its
  * socket, and Bun's event loop and the process with it, open past the end of
@@ -147,7 +144,6 @@ interface HeldNode {
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;
-	const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
 	const inFlight = new AbortController();
 	const fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
 		options.fetch(input, { ...init, signal: inFlight.signal })) as typeof globalThis.fetch;
@@ -167,11 +163,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 */
 	const askedFor = new Map<string, SessionRef>();
 	let connection: ReturnType<typeof api.connect> | null = null;
-	let opens = 0;
-	/** Whether Emacs was last told the stream is down, so an outage is said once however many reopens fail. */
-	let down = false;
-	let reconnect: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
+	const reader = options.input.getReader();
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
 	const waiting = new Map<string, HeldNode>();
 	let flushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -250,16 +243,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 
 	/**
 	 * Drop each attachment whose handle the server no longer holds, and tell
-	 * Emacs so. Run at every reopen of the stream and on every
-	 * `sessions-changed`, which the server sends once a close has taken the
-	 * session out of its table, as well as at each attach and each turn's
-	 * start and end, since nothing says a handle died: a server restart, or a
-	 * close by another client, leaves one that no event will ever come under
-	 * again. With the stream up that matters as much as across an outage: the
-	 * buffer still counts itself attached, so a prompt from it sends no
-	 * attach, and the prompt route refuses it, since only an attach starts a
-	 * session (D25). The unfiltered listing puts `handle` on every session
-	 * the server holds (`SessionManager.list` in
+	 * Emacs so. Run on every `sessions-changed`, which the server sends once
+	 * a close has taken the session out of its table, as well as at each
+	 * attach and each turn's start and end, since nothing says a handle died:
+	 * a close by another client leaves one that no event will ever come under
+	 * again. The buffer still counts itself attached, so a prompt from it
+	 * sends no attach, and the prompt route refuses it, since only an attach
+	 * starts a session (D25). The unfiltered listing puts `handle` on every
+	 * session the server holds (`SessionManager.list` in
 	 * src/server/http/session-manager.ts), and a handle is never minted twice
 	 * (D24), so one it lacks is gone for good.
 	 * Where the session went is not worked out here: another name may reach
@@ -267,8 +258,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * the handle lets go of it, and its own next attach, by the ref it holds,
 	 * finds the session wherever it is now, the route answering the current
 	 * handle and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
-	 * Re-attaching here instead would respawn a backend for every open buffer
-	 * on every server restart.
+	 * Re-attaching here instead would respawn the session the other client
+	 * closed.
 	 *
 	 * Only a handle held when the listing was asked for can be dropped by its
 	 * answer: one an attach answered meanwhile the listing may predate. And
@@ -277,7 +268,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * predate the close that sent a later event; passes that overlap are
 	 * safe, since a handle once gone is never minted again (D24) and each
 	 * drops only what it held when it asked. A failed listing drops nothing,
-	 * and the next `sessions-changed` or reopen asks again.
+	 * and the next `sessions-changed` asks again.
 	 */
 	const dropDead = async (): Promise<void> => {
 		const held = [...attached.keys()];
@@ -403,27 +394,16 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (stopped || connection) return;
 		connection = api.connect({
 			onEvent,
-			onOpen() {
-				opens += 1;
-				if (down) {
-					down = false;
-					notify({ method: "stream/changed", params: { state: "connected" } });
-				}
-				if (opens === 1) return;
-				notify({ method: "sessions/changed" });
-				void dropDead();
-			},
+			onOpen() {},
+			// A drop, or a failed first open, ends the helper (D25 point 4):
+			// cancelling the input ends the read loop below as its end would,
+			// and under `main.ts` the process with it, Emacs's end of stdin
+			// still open (bun 1.4.0, measured 2026-09-28).
 			onDisconnect() {
 				closeStream();
 				if (stopped) return;
-				if (!down) {
-					down = true;
-					notify({ method: "stream/changed", params: { state: "reconnecting" } });
-				}
-				reconnect = setTimeout(() => {
-					reconnect = undefined;
-					openStream();
-				}, reconnectDelayMs);
+				stopped = true;
+				void reader.cancel();
 			},
 			// The server frames its own JSON; a frame that fails to parse has no
 			// session to report against, and dropping it costs at most a seq gap,
@@ -553,7 +533,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	const decoder = new FrameDecoder();
-	const reader = options.input.getReader();
 	for (;;) {
 		const { done, value: chunk } = await reader.read();
 		if (done) break;
@@ -561,7 +540,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	}
 
 	stopped = true;
-	if (reconnect !== undefined) clearTimeout(reconnect);
 	clearTimeout(flushTimer);
 	waiting.clear();
 	closeStream();
