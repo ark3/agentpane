@@ -1411,14 +1411,18 @@ the next helper, which has said nothing of a drop, does not say
 handle \"h1\" at a ref it has since left for `canonical', and a buffer
 `previewing' holding it at the ref `alias' and no handle, whose attach the
 helper answers with the session's summary, and every request answered as
-`agentpane-test--forking' answers it.  BODY sends the attach.
+`agentpane-test--forking' answers it, `sessions/forkPoints' and
+`sessions/fork' with whatever BODY has put in `points' and `forked', nil
+unless it has.  BODY sends the attach.
 The reply naming `canonical' has overtaken the notification under the
 handle that would move `holder' there, which it may, the two being
 unordered (D2), so only the handle joins the two buffers."
   (declare (indent 0))
   `(let ((canonical '(:backend "claude" :id "real-2"))
-         (alias '(:backend "claude" :id "pending-1")))
-     (agentpane-test--forking nil nil
+         (alias '(:backend "claude" :id "pending-1"))
+         (points nil)
+         (forked nil))
+     (agentpane-test--forking points forked
        (setq attached (list :ref canonical :handle "h1"))
        (let ((holder (agentpane--transcript-buffer
                       (list :ref '(:backend "claude" :id "real-1") :cwd "/tmp/x/sandbox")))
@@ -1516,6 +1520,58 @@ which holds no edit, it would prompt the session itself (OW-bifevo)."
         (should (= (length prompts) 1))
         (should (equal (plist-get (cdar prompts) :session) canonical))
         (should (equal (plist-get (cdar prompts) :text) "mine\ntheirs"))))))
+
+(ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-the-survivors-edit ()
+  "When an attach reply merges the buffer holding its handle into one that
+holds an edit, the other's draft joins the draft that edit displaced, and
+the prompt region, holding the edit's text, is left as it was: cancelling
+the edit puts both drafts back."
+  (agentpane-test--merging
+    (with-current-buffer holder
+      (goto-char (point-max))
+      (insert "theirs"))
+    (with-current-buffer previewing
+      (agentpane--draw agentpane-test--image-nodes)
+      (goto-char (point-max))
+      (insert "mine")
+      (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+      (agentpane--attach)
+      (should-not (buffer-live-p holder))
+      (should agentpane--editing)
+      (should (equal (agentpane-test--draft) "Fix the bug"))
+      (agentpane-cancel-edit)
+      (should (equal (agentpane-test--draft) "mine\ntheirs")))))
+
+(ert-deftest agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt ()
+  "An edit sent from a buffer only previewed attaches first, and when that
+attach's reply merges the buffer holding its handle into this one, the
+other's draft goes with the edit: once the fork's prompt has answered the
+prompt region is empty, and nothing is left to prompt the parent with."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
+            forked '(:backend "claude" :id "fork-1")
+            hold '(sessions/fork))
+      (with-current-buffer holder
+        (goto-char (point-max))
+        (insert "theirs"))
+      (with-current-buffer previewing
+        (agentpane--draw agentpane-test--image-nodes)
+        (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+        (goto-char (point-max))
+        (insert " properly")
+        (agentpane-send)
+        (should-not (buffer-live-p holder))
+        ;; The fork's own attach names no handle this buffer holds.
+        (setq attached nil)
+        (funcall (cdr (pop held)) t)
+        (should-not agentpane--editing)
+        (should (equal (agentpane-test--draft) ""))
+        (should-error (agentpane-send) :type 'user-error))
+      (let ((prompts (seq-filter (lambda (entry) (eq (car entry) 'sessions/prompt)) sent)))
+        (should (= (length prompts) 1))
+        (should (equal (plist-get (cdar prompts) :session) forked))
+        (should (equal (plist-get (cdar prompts) :text) "Fix the bug properly"))))))
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-names-the-adopted-composer ()
   "When an attach reply's merge hands the buffer that attached, which has

@@ -2187,7 +2187,14 @@ This one survives because it is the one attached, and its own callbacks
 are running: the attach reply goes on to call its waiters, a prompt among
 them, in this buffer.  OTHER's prompt-region draft follows this one's
 own, and its composer, if any, sends here from then on, and is this
-buffer's composer if it has none.  Should this buffer have a prompt in
+buffer's composer if it has none.  While this buffer holds an edit of its
+own (`agentpane-edit'), that draft follows instead the draft the edit
+displaced, and the prompt region, holding the edit's text, is left as it
+was: an edit sent here meanwhile, whose attach made the merge, would
+otherwise end leaving the draft behind the text it sent, for the next
+send to prompt this buffer's session with.  Cancelling the edit puts
+both back; a fork drops both, as the browser's edit drops the draft it
+displaced unless cancelled.  Should this buffer have a prompt in
 flight, its answer then leaves the sent text in place rather than
 clearing it, as it does whenever the region changed after the send.
 An edit OTHER holds (`agentpane-edit') is dropped, as `agentpane-cancel-edit'
@@ -2223,10 +2230,17 @@ session's transcript is in view, and nothing would clear it, as
                    (buffer-substring-no-properties agentpane--prompt-start (point-max)))))
         (composer (buffer-local-value 'agentpane--composer other)))
     (unless (string-empty-p draft)
-      (save-excursion
-        (goto-char (point-max))
-        (unless (= (point) agentpane--prompt-start) (insert "\n"))
-        (insert draft)))
+      (if agentpane--editing
+          (let ((own (plist-get agentpane--editing :draft)))
+            ;; In place, so that an edit send in flight, which ends the
+            ;; edit only while it is still the one sent, still finds it.
+            (setq agentpane--editing
+                  (plist-put agentpane--editing :draft
+                             (if (string-empty-p own) draft (concat own "\n" draft)))))
+        (save-excursion
+          (goto-char (point-max))
+          (unless (= (point) agentpane--prompt-start) (insert "\n"))
+          (insert draft))))
     (when (buffer-live-p composer)
       (with-current-buffer composer
         (setq agentpane--composer-transcript buffer))
