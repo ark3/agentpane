@@ -58,3 +58,10 @@ Under D25 the helper exits when its stream drops and never sends `stream/changed
 And a helper's death leaves every buffer as a `session/detached` does (OW-kakate), which changes what `agentpane--helper-gone` does and so what case 4 reads.
 Cases 1, 4 and 5 stand, since Emacs still starts a replacement lazily through `agentpane--connection`, and helper deaths become the normal path whenever the server goes away.
 Blocked by OW-kakate and OW-mepufi so that this card is written against what they leave; re-read the cases then, and drop any they settled.
+
+## Re-read 2026-09-28, with OW-kakate and OW-mepufi closed
+
+Cases 2 and 3 are gone: `stream/changed` and `agentpane--stream-down` no longer exist anywhere in `emacs/` or `src/emacs/` (the retirement is recorded in the version history at the top of `src/emacs/protocol.ts`), so the ownership change's stream-down reset goes with them.
+`agentpane--helper-gone` now leaves each buffer attached through the dead connection by `agentpane--let-go`, which reads the buffer idle, forgets its turn-done watch and drops its handle; that per-buffer `agentpane--let-go` is the teardown the ownership change moves, and OW-mirifa has closed, so nothing else extends it.
+Cases 1, 4 and 5 stand as read against that code: `agentpane--attached-as` still sets `agentpane--attached` from the global, `agentpane--helper-gone` still skips a buffer whose `agentpane--attached` is no longer the dead connection, `agentpane--on-notification` still ignores its connection argument, and `agentpane--request`'s success handler still compares only ids.
+This section supersedes the done-condition above: an ERT test for each of cases 1, 4 and 5 (both halves of 5: the late `session/status` and a late reply whose id matches `agentpane--latest-request` on the replacement) goes red before the change and green after; the `eq` guard is gone as stated; the two named tests still pass; and the suite passes.
