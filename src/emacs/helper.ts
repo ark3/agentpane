@@ -15,9 +15,8 @@
  * gap, ignore an event for a view it does not hold (D2) -- and answers
  * `{ state, recover, refreshSessions }` and nothing more, so
  * the loop dispatches on the raw event's `type` beside that result. A `seq`
- * gap is healed the way `recover` in `$client/controller.ts` heals it: an
- * `api.attach`, after which the server broadcasts a fresh snapshot over the
- * stream, and that snapshot is what reaches Emacs.
+ * gap is healed by an `api.attach`, after which the server broadcasts a fresh
+ * snapshot over the stream, and that snapshot is what reaches Emacs.
  *
  * One stream, filtered. It opens lazily at the first `sessions/list` or
  * `sessions/attach`, before that request's REST call, and it stays open. At

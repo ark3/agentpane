@@ -671,24 +671,167 @@ describe("client controller", () => {
 		expect(viewAt(controller, renamed)?.seq).toBe(2);
 	});
 
-	it("coalesces recovery attaches while a sequence-gap recovery is in flight", async () => {
+	// D25 point 5: a gap detaches the session in this tab, and nothing attaches
+	// it on the client's behalf -- an attach is what spawns, and the user clicking
+	// the row is the deliberate one. However many events gap, none attaches.
+	it("detaches a selected session whose sequence gaps and lands on its preview, without attaching it (OW-lunihe)", async () => {
 		const api = new FakeApi();
-		const recovery = deferred<LiveSessionSummary>();
-		api.attach.mockImplementationOnce(async (session) => summary(session)).mockImplementationOnce(() => recovery.promise);
+		api.abort.mockRejectedValueOnce(new Error("abort failed"));
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await controller.abort();
+		api.attach.mockClear();
+
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 4, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await settle();
+
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().preview).toEqual({ ref, turns: [] });
+		// Not a gesture, so it empties no mail the user has not read.
+		expect(controller.getView().error).toBe("abort failed");
+		controller.dispose();
+	});
+
+	// Unlike detach()'s no-disk exit, the server still holds the session, so the
+	// empty preview's Attach reaches it and the poll finds the first turn's file.
+	it("lands a gapped selection with nothing on disk on its preview (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		api.attach.mockClear();
+
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await settle();
+
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(api.preview).toHaveBeenCalledWith(ref);
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().preview).toEqual({ ref, turns: [] });
+		controller.dispose();
+	});
+
+	// The reducer returns on a gap before it moves anything, so the selection
+	// still names the old ref; the gapped event's is the session's current one.
+	it("previews the ref a gapped event renamed the session to (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
+
+		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await settle();
+
+		expect(api.preview).toHaveBeenCalledWith(renamed);
+		expect(api.preview).not.toHaveBeenCalledWith(ref);
+		expect(controller.getView().state.selected).toEqual(renamed);
+		expect(controller.getView().preview).toEqual({ ref: renamed, turns: [] });
+		controller.dispose();
+	});
+
+	it("leaves a gapped selection on the startup view when its preview cannot be read (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		api.preview.mockRejectedValueOnce(new Error("preview failed"));
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
-		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await settle();
 
-		expect(api.attach).toHaveBeenCalledTimes(2);
-		recovery.resolve(summary(ref));
-		await recovery.promise;
+		expect(controller.getView().state.selected).toBeNull();
+		expect(controller.getView().preview).toBeNull();
+		// Nobody asked for that preview, so its failure is nobody's to read.
+		expect(controller.getView().error).toBeNull();
+		controller.dispose();
 	});
 
-	it("keeps the view error through a sequence-gap recovery (OW-yasewo)", async () => {
+	// The gap takes no intent, so a click made before it is still the user's
+	// last word: its attach landing first is not overwritten by the gap's preview.
+	it("leaves the selection on a row clicked before the gap when the gap's preview lands after it (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		const previewing = deferred<SessionPreviewResponse>();
+		api.preview.mockReturnValueOnce(previewing.promise);
+		const attaching = deferred<LiveSessionSummary>();
+		api.attach.mockReturnValueOnce(attaching.promise);
+
+		const selecting = controller.select(attachedRef);
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		attaching.resolve(summary(attachedRef));
+		await selecting;
+		previewing.resolve({ ref, turns: [] });
+		await settle();
+
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(controller.getView().preview).toBeNull();
+		expect(controller.getView().busy).toBe("idle");
+		controller.dispose();
+	});
+
+	// Another client's attach snapshots the session to every client, which
+	// brings its live view back here while the gap's preview is out.
+	it("keeps a gapped session live when a snapshot re-introduces it before its preview lands (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		const previewing = deferred<SessionPreviewResponse>();
+		api.preview.mockReturnValueOnce(previewing.promise);
+
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		previewing.resolve({ ref, turns: [] });
+		await settle();
+
+		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().preview).toBeNull();
+		controller.dispose();
+	});
+
+	// The attach reply and its snapshot are unordered (D2), so the gap's preview
+	// can resolve between them, when the selection names the session and no
+	// view is back yet; landing it then leaves a preview over a live session.
+	it("does not land the gap's preview over an attach of the same session made while it was out (OW-lunihe)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		const previewing = deferred<SessionPreviewResponse>();
+		api.preview.mockReturnValueOnce(previewing.promise);
+
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await controller.select(ref);
+		previewing.resolve({ ref, turns: [] });
+		await settle();
+
+		expect(controller.getView().preview).toBeNull();
+		expect(controller.getView().state.selected).toEqual(ref);
+
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
+		expect(controller.getView().preview).toBeNull();
+		controller.dispose();
+	});
+
+	it("keeps the error slot through a sequence gap (OW-yasewo)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -699,14 +842,16 @@ describe("client controller", () => {
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
-		expect(api.attach).toHaveBeenCalledWith(ref);
+		expect(api.attach).not.toHaveBeenCalled();
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		expect(controller.getView().error).toBe("Select a session before submitting a prompt.");
 		controller.dispose();
 	});
 
-	// `busy` is one global slot and `recover` is per-session, so a gap on B used
-	// to write "Opening session…" over the prompt the user is watching in A.
-	it("leaves busy at submitting across another session's recovery (OW-yasewo)", async () => {
+	// `busy` is one global slot and a gap is per-session, so a gap on B must not
+	// write over the prompt the user is watching in A, nor move the selection
+	// off it; re-attaching B used to write "Opening session…" there.
+	it("leaves busy at submitting and the selection in place across another session's sequence gap (OW-yasewo)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -720,6 +865,8 @@ describe("client controller", () => {
 		api.emit({ type: "status", session: attachedRef, handle: h(attachedRef), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
+		expect(controller.getView().state.sessions[h(attachedRef)]).toBeUndefined();
+		expect(controller.getView().state.selected).toEqual(ref);
 		expect(controller.getView().busy).toBe("submitting");
 		prompt.resolve();
 		await submitted;
@@ -728,9 +875,9 @@ describe("client controller", () => {
 	});
 
 	// A regression guard, not a red-first test: since OW-kelede the send guard
-	// reads `sending`, which no recovery touches. Nothing else pins `recover`
+	// reads `sending`, which a gap does not touch. Nothing else pins a gap
 	// against that guard, and the guard has moved once already.
-	it("ignores a second submit while another session recovers (OW-yasewo)", async () => {
+	it("ignores a second submit while another session's sequence gaps (OW-yasewo)", async () => {
 		const api = new FakeApi();
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
@@ -751,16 +898,26 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("does not select an unrelated session while recovering it", async () => {
+	it("does not select a session whose sequence gaps, nor touch the preview on screen", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		await settle();
+		expect(controller.getView().state.selected).toBeNull();
+		expect(controller.getView().preview).toBeNull();
 
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await controller.preview(attachedRef);
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
-		await Promise.resolve();
+		await settle();
 
-		expect(controller.getView().state.selected).toBeNull();
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+		expect(controller.getView().state.selected).toEqual(attachedRef);
+		expect(api.preview).toHaveBeenCalledOnce();
+		controller.dispose();
 	});
 
 	it("coalesces concurrent session-list refreshes", async () => {
@@ -1301,9 +1458,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A dropped SSE event lands as a sequence gap, and the reducer answers a gap
-	// by asking for a re-attach -- which, inside a detach's window, would spawn
-	// the subprocess the user just asked to be rid of (OW-sugome).
+	// A gap inside a detach's window used to re-attach, spawning the subprocess
+	// the user just asked to be rid of (OW-sugome); since D25 a gap attaches
+	// nothing, and the detach still ends where it would have.
 	it("does not re-attach a session whose detach is still in flight when its sequence gaps", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
@@ -1325,6 +1482,8 @@ describe("client controller", () => {
 
 		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(controller.getView().preview).toEqual({ ref, turns: [] });
 		controller.dispose();
 	});
 

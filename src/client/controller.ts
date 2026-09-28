@@ -4,6 +4,7 @@ import type {
 	ModelInfo,
 	PromptRequest,
 	ServerEvent,
+	SessionPreviewResponse,
 	SessionPreviewTurn,
 	SessionRef,
 	SessionSummary,
@@ -240,9 +241,6 @@ export function createController(
 	let refreshSurfacing = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
-	const recoveries = new Map<string, Promise<void>>();
-	/** Handles whose `detach` is between `api.close` and the live view being dropped -- see `recover` (OW-sugome). */
-	const detaching = new Set<string>();
 	const forkPointsInFlight = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 
@@ -271,13 +269,12 @@ export function createController(
 	function applyAttached(summary: SessionSummary, select: boolean, requested: SessionRef): void {
 		// By ref, not by handle: the ref asked for may have none yet -- a fork's
 		// has none until this reply puts the summary carrying it in place
-		// (OW-kimaya). The two `select: false` callers say why each keeps it.
+		// (OW-kimaya). The one `select: false` caller says why it keeps it.
 		const takesSelection = select ||
 			(view.state.selected !== null && sessionKey(view.state.selected) === sessionKey(requested));
 		const selected = takesSelection ? summary.ref : view.state.selected;
-		// The error slot is gated on `select`, because neither caller that passes
-		// `false` has standing over it: `recover`, which no gesture reaches -- see
-		// its docblock (OW-yasewo) -- and a `forkAndSubmit` the user has clicked
+		// The error slot is gated on `select`, because the caller that passes
+		// `false` has no standing over it: a `forkAndSubmit` the user has clicked
 		// away from, which under D17 still lands its prompt but owns neither the
 		// error slot nor the preview of the session they went to (OW-miyemo).
 		//
@@ -287,17 +284,13 @@ export function createController(
 		// -- clicking the fork's own row during its round trip (OW-tatebi). The
 		// selection moves to the live session, so the read-only preview that click
 		// opened has to go with it or it sits frozen over a streaming transcript.
-		// This does not loosen `recover`: the session it re-attaches is one this
-		// client already had attached, and an attached selection has no preview to
-		// clear (see `ControllerView.preview`), so the residual publishes a null
-		// that is already null.
 		publish({
 			state: { ...replaceSummary(summary, requested), selected },
 			...(select ? { error: null } : {}),
 			...(takesSelection ? { preview: null } : {}),
 		});
 		// Only where the transcript is about to be drawn with Edit controls on it
-		// (OW-roveze); a background `recover` renders nothing and needs none.
+		// (OW-roveze).
 		if (takesSelection) refreshForkPoints(summary.ref);
 	}
 
@@ -534,58 +527,69 @@ export function createController(
 	}
 
 	/**
-	 * Re-attach a session whose SSE sequence gapped (`acceptsSequence` in
-	 * `session-state.ts`), which means this client dropped an event. Nothing
-	 * user-driven reaches here: the only caller is `onEvent`, so every recovery is
-	 * background repair, for whichever session gapped -- not necessarily the
-	 * selected one.
+	 * Detach, in this tab alone, a session whose SSE sequence gapped
+	 * (`acceptsSequence` in `session-state.ts`), which means this client dropped
+	 * an event (D25 point 5). The view goes, and with it everything this tab held
+	 * under the handle; the server still holds the session for every other
+	 * client, so nothing is closed and its row keeps what the server listed.
+	 * Nothing is attached on the client's behalf either: an attach is what
+	 * spawns, and one here once re-spawned a session whose close was out
+	 * (OW-sugome). The preview's Attach button is the deliberate attach.
 	 *
-	 * It therefore writes neither `busy` nor `error`, deliberately, and does not
-	 * report its own failure (OW-yasewo; OW-dinuwu is the same defect through the
-	 * re-list door). `busy` is one global slot naming what the user's own last
-	 * gesture is doing: `"attaching"` here wrote "Opening session…" over the
-	 * "Sending prompt…" of a prompt the user was watching in another session, and
-	 * the `finally`'s `busy: "idle"` cut a genuine `attachAndSelect`'s status short
-	 * as well. The error slot is mail the user has not read; a recovery nobody
-	 * asked for has no standing to empty it, and a failed one has none to fill it
-	 * either -- an error with no gesture behind it is unattributable, and the
-	 * remedy is automatic anyway: the next event for that session gaps again and
-	 * retries, and a Refresh re-lists regardless. A background attach that reports
-	 * nothing is the intended behaviour, not an oversight.
+	 * A selected session lands on its preview, under the gapped event's `ref`:
+	 * the reducer returns on a gap before it moves anything, so where that
+	 * event is the first to carry a rename the selection still names the old
+	 * ref (D24). Unlike `detach()`, this previews a session with nothing on
+	 * disk too: the server still holds it, so the empty preview's Attach
+	 * reaches it rather than 404ing (OW-vasubu), and the poll finds the
+	 * transcript once the first turn writes one.
 	 *
-	 * The one session it must not re-attach is one the user is detaching
-	 * (OW-sugome). A gap dropped inside `detach`'s window -- `api.close` awaits
-	 * the subprocess's disposal, and the live view goes only after that returns
-	 * -- would reach `api.attach` here and spawn the subprocess again behind the
-	 * user, leaving a read-only preview on screen over a session that is live on
-	 * the server. Outside that window the gap is harmless: the detach has already
-	 * dropped the view, so the reducer has no `seq` to compare against and asks
-	 * for no recovery at all.
+	 * No gesture reaches here -- the only caller is `onEvent` -- so, like the
+	 * stream drop's detach in `onDisconnect`, this writes neither `busy` nor
+	 * `error` and does not bump the intent (OW-yasewo), only reads it. The
+	 * preview therefore lands only if no gesture has taken the selection since
+	 * the gap -- an attach of this very session can reply before its snapshot
+	 * does (D2), and a preview landing between the two would sit over the live
+	 * view the snapshot brings back -- the selection still names the session,
+	 * since a click made before the gap may land first, and no snapshot brought
+	 * its live view back meanwhile. A failure to read it falls to the startup
+	 * view under the same test, reporting nothing, since no gesture stands
+	 * behind it to read the error.
 	 */
-	async function recover({ ref, handle }: Recovery): Promise<void> {
-		if (detaching.has(handle)) return;
-		const inFlight = recoveries.get(handle);
-		if (inFlight) return inFlight;
-		const request = (async () => {
-			try {
-				const attached = await api.attach(ref);
-				// `false` still moves the selection where it named `ref`, onto the
-				// ref the attach answers (OW-yasewo), and is kept under the handle
-				// (OW-kimaya). `ref` is the gapped event's own, and the reducer
-				// returns on a gap before it moves anything, so where that event is
-				// the first to carry a new ref the selection still names the old one
-				// and this moves nothing; the snapshot the attach broadcasts under
-				// the same handle moves it then, as any event with a new ref does.
-				if (!disposed) applyAttached(attached, false, ref);
-			} catch {
-				// Silent by design -- see the docblock above.
-			}
-		})();
-		recoveries.set(handle, request);
-		void request.finally(() => {
-			if (recoveries.get(handle) === request) recoveries.delete(handle);
+	function detachGapped({ ref, handle }: Recovery): void {
+		const selected = view.state.selected;
+		const onScreen = selects(handle);
+		const sessions = { ...view.state.sessions };
+		delete sessions[handle];
+		publish({ state: { ...view.state, sessions } });
+		if (!onScreen || selected === null) return;
+		const key = sessionKey(selected);
+		const intent = selectionIntent;
+		const still = () =>
+			!disposed && intent === selectionIntent &&
+			view.state.selected !== null && sessionKey(view.state.selected) === key &&
+			viewOf(view.state, selected) === undefined;
+		api.preview(ref).then(
+			(response) => {
+				if (still()) openPreview(response);
+			},
+			() => {
+				if (still()) publish({ state: { ...view.state, selected: null }, preview: null });
+			},
+		);
+	}
+
+	/** Put a fetched preview on screen, polling it from quiet. */
+	function openPreview(response: SessionPreviewResponse, next: Partial<ControllerView> = {}): void {
+		publish({
+			state: { ...view.state, selected: response.ref },
+			preview: { ref: response.ref, turns: response.turns },
+			...next,
 		});
-		return request;
+		// A freshly opened preview starts quiet, whatever the last one settled at.
+		pollDelay = PREVIEW_POLL_IDLE_MS;
+		stopPoll();
+		syncPoll();
 	}
 
 	async function attachAndSelect(ref: SessionRef, intent: number): Promise<void> {
@@ -646,7 +650,8 @@ export function createController(
 				const moved = event.type === "snapshot" || isStreaming !== wasStreaming;
 				if (moved && selects(event.handle)) refreshForkPoints(event.session);
 			}
-			for (const recovery of result.recover) void recover(recovery);
+			// A gap detaches that one session (D25 point 5); see `detachGapped`.
+			for (const recovery of result.recover) detachGapped(recovery);
 			if (result.refreshSessions) void refreshSessions(false);
 		},
 		/**
@@ -797,15 +802,7 @@ export function createController(
 						await reselectLive(live.ref);
 						return;
 					}
-					publish({
-						state: { ...view.state, selected: response.ref },
-						preview: { ref: response.ref, turns: response.turns },
-						error: null,
-					});
-					// A freshly opened preview starts quiet, whatever the last one settled at.
-					pollDelay = PREVIEW_POLL_IDLE_MS;
-					stopPoll();
-					syncPoll();
+					openPreview(response, { error: null });
 				}
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
@@ -1140,17 +1137,11 @@ export function createController(
 			const key = sessionKey(selected);
 			const handle = handleOf(view.state, selected);
 			publish({ error: null });
-			// Held across the close and released before the view is dropped, with
-			// nothing awaited in between: a gap arriving in that window must not
-			// re-attach what is being closed (`recover`, OW-sugome).
-			if (handle !== undefined) detaching.add(handle);
 			try {
 				await api.close(selected);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 				return;
-			} finally {
-				if (handle !== undefined) detaching.delete(handle);
 			}
 			if (disposed || intent !== selectionIntent) return;
 			// Drop the live view here rather than waiting for the `sessions-changed`

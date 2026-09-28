@@ -6,9 +6,10 @@
  * carries its `SessionRef` and clients filter.
  *
  * D3 -- `seq` is monotonic *per session*. A gap tells the client it missed an
- * update; recovery is a fresh snapshot, which is free on loopback. Two kinds of
- * snapshot exist here and the distinction is the whole trick to keeping one
- * counter honest across several clients:
+ * update, and since D25 the client detaches the session rather than taking a
+ * fresh snapshot (the Emacs helper still re-attaches until OW-filuge). Two
+ * kinds of snapshot exist here and the distinction is the whole trick to
+ * keeping one counter honest across several clients:
  *
  *   - `broadcastSnapshot` goes to *every* client, so it may reset the counter
  *     to 0 -- nobody is left holding a stale expectation.

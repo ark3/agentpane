@@ -173,8 +173,8 @@ export interface AgentRequestReply {
  * would wall at six).
  *
  * `seq` is monotonic *per session*. A gap means the client missed an update;
- * recovery is to re-subscribe and take a fresh snapshot, which is free on
- * loopback. Snapshots reset the sequence.
+ * since D25 the browser detaches the session, and the Emacs helper re-attaches
+ * it for a fresh snapshot until OW-filuge. Snapshots reset the sequence.
  *
  * Every arm but `sessions-changed` carries `handle` beside `session`: the
  * session's `SessionSummary.handle`, which a rename leaves alone while `session`
