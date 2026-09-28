@@ -27,3 +27,8 @@ The server side of this says it: a short note at `SessionManager.close` or at th
 It cites OW-puduro rather than restating the chain, so there is one copy of the reasoning and one pointer to it, not two copies to drift apart.
 
 Whether OW-35's constraint to keep the route still earns its keep with no caller is a live question this does not settle and should not be folded into it; if the answer looks like no, that is its own card.
+
+## Amended 2026-09-28 under D25
+
+OW-35 closed `--declined` under D25 on 2026-09-28; the constraint to keep the `DELETE` route is stated in D12 in `docs/DESIGN.md` ("The `DELETE` route it calls was always going to stay"), which is where to read it now.
+The premise that no client calls the route has been false since OW-tewave put Detach in the browser, and agentpane-mode's `agentpane-close-session` calls it too.

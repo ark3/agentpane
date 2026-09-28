@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # The Emacs helper re-attaches on any sequence gap with no guard against a sessions/close in flight, the gap OW-sugome closed in the browser
@@ -15,3 +16,7 @@ The window is narrow: the server stops broadcasting under the handle as its clos
 What is load-bearing: the helper owns the close in flight for the ref, from the request to its answer, and its recovery reads that; OW-sugome's close note records how the browser placed the same state.
 
 Done when a test in `src/emacs/helper.test.ts`, red first, sends `sessions/close` for an attached ref, holds its REST reply, drives a sequence gap for that ref, and asserts no `attach` reaches the API; `bun run check` green.
+
+## Close note
+
+Moot under D25 (2026-09-28): the helper no longer answers a sequence gap by attaching (OW-filuge detaches the session instead), and no route but attach spawns (OW-sirofi), so there is no respawn for a close in flight to guard against.

@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # agentpane-close-session refuses a buffer whose helper died under it, though agentpane-refetch now treats that buffer as holding its session live
@@ -16,3 +17,8 @@ Whether close attaches first (as `agentpane--attached-then` does for sends, comp
 The same review noted that the "only previewed" wording in the docblocks of `agentpane-fork` and `agentpane-edit` no longer names every buffer their attach-first branch serves; correct them if this change touches that vocabulary.
 
 Done when an ERT test in `emacs/agentpane-test.el`, modelled on `agentpane-test-refetch-attaches-again-after-the-helper-dies` (which stands up and kills a `cat` helper under an attached buffer), calls `agentpane-close-session` after the helper dies and asserts a close-path request was sent rather than the `user-error`, going red before the change and green after, run with `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Moot under D25 (2026-09-28): the disagreement between `agentpane-close-session` and `agentpane-refetch` exists because a buffer whose helper died keeps its attachment as a marker (OW-mirifa).
+OW-kakate makes a helper's death leave every buffer as a `session/detached` does, one state that both commands read alike, and its done condition asserts that.

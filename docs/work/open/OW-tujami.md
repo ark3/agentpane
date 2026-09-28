@@ -26,3 +26,8 @@ The browser may have the same gap for a view holding the old ref; check it, and 
 ## Done when
 
 A test in `src/emacs/helper.test.ts` or `emacs/agentpane-test.el`, red first, drives rename, close, re-attach by the new id, and the buffer's `g`, and asserts the chosen outcome; and D21's "Still open" sentence says what is still open, if anything.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the helper no longer reopens its stream (OW-mepufi), so the outage branch of "while the Emacs helper's stream is down, or with it up" goes away; after an outage the helper has exited and every buffer is detached (OW-kakate).
+The core case stands: `dropDead` at a `sessions-changed`, then `g` attaching by a `virtual` ref that answers 404.

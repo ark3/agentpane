@@ -40,3 +40,9 @@ It asserts the `seq: 0` snapshot is applied and that no recovery is requested, a
 Watch it go red by adding `acceptsSequence` to the snapshot arm before deleting that line again -- a test that has never failed has not been shown to test anything, and here the red run is also what proves the loop this exemption avoids.
 
 And a short note in the snapshot arm itself saying the exemption is the contract, citing `protocol.ts`'s "Snapshots reset the sequence" rather than restating the reasoning, so there is one copy and a pointer.
+
+## Amended 2026-09-28 under D25
+
+Under D25 a sequence gap no longer asks for a recovery by attach; it detaches the session (OW-lunihe in the browser, OW-filuge in the helper).
+So the failure the exemption prevents is now a snapshot detaching a session it merely repainted, not a recovery loop, and the test's assertion that no recovery is requested becomes an assertion that the session is not detached.
+The test is still worth having; take the wording from whichever of those cards has landed.

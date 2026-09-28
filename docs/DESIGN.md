@@ -396,6 +396,7 @@ The handle is required on every per-session event since the browser's reducer ke
 
 **Decided on 2026-08-15, not yet built, and deliberately so.**
 The reaper is OW-33, the cap OW-34, and the transparent re-attach that makes eviction invisible OW-35; the prose below is written as the design reads once they land.
+Amended by D25 on 2026-09-28: the transparent re-attach is withdrawn and OW-35 declined, so wherever the prose below says eviction is invisible or a detached session re-spawns on its next prompt, read instead that eviction is a visible close, as Detach is, and the user attaches the session again when they want it.
 
 Those three are open and are not a fire.
 The pressure this decision relieves does not arise yet: agentpane is still changed several times a day, and each restart reclaims every subprocess, so attached sessions never pile up far enough for an idle timer or a cap to have anything to do.
@@ -757,6 +758,7 @@ That set is an affordance and may be briefly stale; nothing is decided on it.
 
 Every re-establish of the SSE stream asks for one unsurfaced session listing, so state that moved while the connection was down heals without a gesture.
 The owner took this on 2026-09-16 (OW-vukoku).
+Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
@@ -941,7 +943,7 @@ What the split between a rename and a fork settled stays in force: a fork's cont
 Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), and a parked fork gets its handle at the attach that builds its container, since until then nothing is emitted for it and `ForkResponse` carries a ref only (OW-lajehi).
 Teardown stops an event-driven rename or fork by unsubscribing: `close()` and `disposeAll()` drop a container's subscriptions in the same synchronous run that takes it out of the table, so no event reaches `#rename` or `#forkOnto` for it afterwards, and the `ManagedSession.torndown` flag that stopped the polled re-key is retired with the polling (OW-yavewa, OW-jimasu, OW-nikogo).
 D13's file is keyed by the backend id and stays so: it names a session on disk, which is an identity a handle does not have.
-D21's reconnect gap closed in the browser when OW-kimaya keyed its views by the handle: a rename missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref, and a re-attach elsewhere in that window leaves one view of the ref, under the new handle; in agentpane-mode a missed rename closed with OW-danifa, whose buffers the same snapshot moves, and a re-attach elsewhere, alone or with a rename in either order in one outage, with OW-yibijo, which does not move the buffer: the helper drops, at each reopen and on every `sessions-changed`, every attachment whose handle the listing lacks and tells its buffer, which comes back by its ref on `g` or its next prompt; still open are a buffer whose ref a rename it never heard, then a close, left reaching nothing, and a prompt that races a close (D21).
+D21's reconnect gap closed in the browser when OW-kimaya keyed its views by the handle: a rename missed while the stream was down no longer strands a view, since the opening snapshot under the handle carries the current ref, and a re-attach elsewhere in that window leaves one view of the ref, under the new handle; in agentpane-mode a missed rename closed with OW-danifa, whose buffers the same snapshot moves, and a re-attach elsewhere, alone or with a rename in either order in one outage, with OW-yibijo, which does not move the buffer: the helper drops, at each reopen and on every `sessions-changed`, every attachment whose handle the listing lacks and tells its buffer, which comes back by its ref on `g` or its next prompt; still open are a buffer whose ref a rename it never heard, then a close, left reaching nothing, and a prompt that races a close (D21). D25 closes the second by making the attach route the only one that spawns.
 
 **Serialisation: nothing on the server runs one session's mutations one at a time.**
 The routes in `src/server/http/app.ts` reach the adapter directly for set-model, set-effort, compact, abort, fork points and reply, and only `submit` and `fork` go through the manager, for the re-key and not for order; OW-yavewa's close note records that nothing serialises the routes, each a concurrent `Bun.serve` handler.
@@ -986,6 +988,54 @@ Three of the eight are what it cost to learn this.
 Seven cards, labelled `d24`, filed 2026-09-24 and all closed `--done` by 2026-09-25 with OW-mofuho: OW-sewewe serialises the mutations; OW-dutute makes hydrate a merge; OW-nikogo adds the identity event; OW-suyinu mints the handle and puts it on both wires, blocked by OW-nikogo; OW-kimaya keys the shared reducer and the browser by it and OW-danifa keys agentpane-mode by it, both blocked by OW-suyinu; OW-mofuho retires `renamed`, blocked by both.
 The order to run them in is the owner's call, as `card execute` says of every set; the one proposed on the day was OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, then OW-kimaya and OW-danifa, then OW-mofuho, with a cold read at OW-nikogo and OW-suyinu before either starts.
 The open cards that close under them: OW-woyifu under OW-sewewe, OW-zudase under OW-dutute, OW-nuzepi and OW-hikefi under OW-nikogo.
+
+### D25. Only an attach starts an agent, and a client that loses its connection holds nothing live
+
+The owner took this on 2026-09-28, after asking whether the close races the deck kept filing had a root rather than more edge cases.
+Decided and not yet built, in the sense D12 and D24 are: the prose reads as the design will once the cards named at the end land.
+
+**What the deck showed.**
+OW-dakeyi, closed 2026-09-28, made a close in flight state of the agentpane-mode buffer that refuses every attach and live request.
+Its adversarial read, and those of the cards run beside it, filed OW-wovamo (a setModel or setEffort in flight across the close), OW-wezaji (the helper's gap recovery during a close) and OW-ripahi (the browser's Send, Fork and Compact during a Detach), each a request site the refusal did not reach.
+The browser had already guarded one such site, its gap recovery, with OW-sugome's `detaching` set.
+Every case is one mechanism: the prompt, fork, fork-points, model and effort routes in `src/server/http/app.ts` attached first, and `SessionManager.attach` waits out a disposal in `#disposing` and then spawns afresh.
+The server cannot tell a request sent before a close from one meant to reopen, so it reopened, and each client guarded each request site.
+D21 and D24 both listed a prompt that races a close as still open.
+
+**Why the routes attached first, and why that no longer holds.**
+D12's OW-35 asked that a prompt to a session the server had reclaimed re-attach transparently, so that eviction would be invisible.
+The owner, on 2026-09-28: that was written before any experience of attaching and detaching; the unattached preview is a mode worth having in its own right, and attaching is fast (1.138s for a re-attach on `pi 0.85.1`, OW-jamoyi).
+The browser had already stopped prompting an unattached session: since OW-tewave and OW-jamoyi a preview replaces the composer with an Attach button.
+Read on 2026-09-28, and to be confirmed by OW-sirofi, neither client's deliberate paths needs a route to attach for it: the browser's `create` and `select` call `api.attach` first, and agentpane-mode's new session and its send from an unattached buffer send `sessions/attach` first (`agentpane--attached-then`).
+
+**The decision.**
+
+1. Only the attach route, the `GET` of `ROUTES.session`, spawns.
+   Every other session route acts on an attached session or refuses, as `compact`, `abort` and `reply` already did.
+   `close()` takes the container out of the table before its first await, so a request arriving after a close has begun is refused and nothing respawns, with no guard of its own.
+   Requests do not carry the handle they were sent for: the one ordering that leaves, a stale request landing on a deliberate re-attach made after the close, respawns nothing, and was judged not worth a wire field.
+2. D12's transparent re-attach is withdrawn, and OW-35 is declined.
+   A reaper or cap, if one is ever built, evicts as a visible close, as Detach does: the session goes back to a preview and the user attaches it again when they want it.
+   The rest of D12 stands, its unbuilt status and the reason for it included.
+3. A client whose event stream drops holds nothing live: on the drop, every session it held is detached, at once.
+   Agentpane is local-only, and on both machines it runs on a stream drops only when the server exits -- the owner stopping it, or Windows stopping WSL2 under the work laptop -- so a drop is taken to mean every agent is gone.
+   The server announces no restart and neither client shows one; the owner, on 2026-09-28: every session detached is what they expect after a restart.
+   D21's listing at a reconnect stays, and so do the server's opening snapshots, which re-introduce whatever is still live after a drop the server survived.
+4. The Emacs helper exits when its event stream drops or its first open fails, and does not reconnect.
+   agentpane-mode takes any helper's death to mean every buffer it served is detached, whatever the cause: a helper that crashed over a live server is rare, and costs a `g`.
+   A picker open at that moment goes stale until `g`, which the owner accepted.
+5. A sequence gap detaches that one session, in either client, instead of attaching it to recover a snapshot.
+
+**What this retires.**
+Per-session reconciliation across an outage: the helper's reopen, its `stream/changed` and agentpane-mode's `reconnecting` mode line (OW-mareju), `dropDead`'s run at a reopen (OW-yibijo), and D21's paragraphs on agentpane-mode's reopen, which read as history once OW-mepufi lands.
+Gap recovery by attach in both clients, which OW-refibu chose for the helper, and with it OW-sugome's `detaching` set.
+OW-mirifa's rule that a buffer whose helper died keeps its attachment as a marker.
+The listing-based dropping at every `sessions-changed` while the stream is up stays in both clients, since another client's close is still a real case, and so do the `agentpane--closing` refusals, which now spare the user a refused request rather than a respawn.
+
+**Cards.**
+Six, labelled `d25`, filed 2026-09-28: OW-sirofi, the routes; OW-fiheli, a browser stream drop, and OW-lunihe, a browser gap; OW-kakate, a helper's death in agentpane-mode, OW-filuge, a helper gap, and OW-mepufi, the helper's exit, blocked by OW-kakate.
+OW-bukupu, the dead helper's late messages acting on its replacement, keeps its surviving cases and waits on OW-kakate and OW-mepufi.
+Closed moot into them the same day: OW-wovamo, OW-ripahi and OW-wezaji into OW-sirofi, OW-filuge and OW-lunihe; OW-keleti into OW-fiheli; OW-vayeze into OW-kakate; OW-sosape into OW-mepufi.
 
 ## The backend adapter contract
 

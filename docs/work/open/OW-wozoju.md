@@ -17,3 +17,8 @@ The browser's behaviour is pinned by `src/client/App.test.ts` "offers no Edit on
 How the mark looks is this card's to choose; what is load-bearing is that it is refreshed when the browser's is, at attach and at each turn boundary, so a message steering added mid-turn is not shown as forkable.
 
 Done when an ERT test in `emacs/agentpane-test.el` draws a transcript with one fork-point user message and one steered-in user message and finds the mark on the first only, red before the change and green after.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the fork-points route no longer attaches first (OW-sirofi): fetching points for a preview is refused rather than spawning a backend.
+The conclusion above, fetch only for an attached buffer, holds; its reason changes.

@@ -15,3 +15,8 @@ OW-luzipe is the adjacent open deferral on what a single turn sends.
 ## Done when
 
 A test in `app.test.ts` or `broadcaster.test.ts` holds a subscriber's reader closed while several snapshots broadcast and asserts the chosen bound holds; it fails before the change.
+
+## Amended 2026-09-28 under D25
+
+Under D25 a client whose stream drops detaches every session it held (OW-fiheli, OW-mepufi), so the policy of dropping a stalled subscriber and letting it reconnect into fresh snapshots is no longer free: it detaches that tab's live sessions.
+Weigh that when choosing the bound.

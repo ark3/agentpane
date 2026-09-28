@@ -23,3 +23,8 @@ What a failed part carries instead of HTML is this card's decision to make and r
 The renderer, `src/emacs/render.ts`, has its own try/catch and nobody has seen it throw, which is why this is a deferral.
 
 Done: tests in `src/emacs/helper.test.ts`, with a `render` that throws for one text, go red first and green after, showing that a snapshot carrying that text goes out with the other parts intact from `onEvent`, from `reconcile` and before an attach's reply, and the flush's own per-node catch is gone with the OW-vejeka tests still green.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the helper exits when its stream drops (OW-mepufi), so a render throw that ends the stream no longer makes a reconnect loop that stalls every attached session: it ends the helper and detaches every buffer (OW-kakate).
+The defect stands; only its consequence above changes.

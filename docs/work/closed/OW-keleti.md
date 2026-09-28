@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # A live view whose handle the server let go, renamed as well while this tab's stream was down, stays in the browser's state
@@ -33,3 +34,8 @@ OW-yibijo says why the alternative, asking the server per ref which handle it na
 A reducer test in `src/client/session-state.test.ts`, red first against the reducer as OW-kimaya left it: a view of R under H1, an opening snapshot under H2 carrying R2, a re-list listing R2 attached under H2 and not R, and then `viewOf(state, R)` is undefined and `state.sessions` holds H2 alone.
 The D21 and D24 sentences in `docs/DESIGN.md` about the reconnect gap stay true as written after the fix, or are corrected in the same change.
 `bun run check` green.
+
+## Close note
+
+Moot under D25 (2026-09-28): the stale view it describes survives a reconnect only because the tab keeps its live views through an outage and reconciles them against the listing after.
+OW-fiheli makes a stream drop detach every live view at once, so after any outage the tab holds no view to go stale; the unselected per-tab state it noted goes with the views.

@@ -1,0 +1,30 @@
+---
+labels: [change, emacs, d25]
+blocked-by: [OW-kakate]
+---
+
+# The Emacs helper reopens its event stream after a drop and tells Emacs by stream/changed, a reconnect machinery D25 retires; the helper should exit when its stream drops or its first open fails
+
+Filed 2026-09-28 under D25 in `docs/DESIGN.md`, which the owner took that day; read D25 first.
+Blocked by OW-kakate, which makes a helper's death leave every buffer detached; land that first, so that the exits this card starts causing mean the right thing when they begin.
+
+## What happens
+
+`openStream` in `src/emacs/helper.ts` answers a drop by reopening after `reconnectDelayMs`, sends Emacs `stream/changed` (`reconnecting`, then `connected`, OW-mareju), and on every open after the first sends `sessions/changed` and runs `dropDead` to drop attachments whose handles the listing lacks (OW-refibu, OW-yibijo).
+In `emacs/agentpane.el`, `agentpane--stream-down` and `agentpane--hold-stream-down` carry that state, and every attached buffer's mode line leads with `reconnecting` while it is set.
+OW-sosape, closed moot into this card, was a gap in that machinery: a first open that fails and a later one that succeeds sends no `sessions/changed`.
+
+## The change
+
+When the helper's event stream drops, or its first open fails, the helper exits: `runHelper` resolves and the process ends, and Emacs's sentinel runs `agentpane--helper-gone`.
+Agentpane is local-only and a drop means the server went away (D25), so there is nothing to reconnect to; the next command that needs the helper starts a new one through `agentpane--connection`, and a request to a server that is still down fails there, visibly.
+What goes, with its docblocks and tests: the reopen and `reconnectDelayMs`, the `opens` count and the `sessions/changed` it sends at a reopen, `dropDead`'s run at a reopen, and `stream/changed` on both sides with `agentpane--stream-down`, `agentpane--hold-stream-down` and the `reconnecting` mode line.
+What stays: `dropDead`'s run on every `sessions-changed`, since another client's close while the stream is up is still a real case (D25).
+A picker open when the helper exits goes stale until `g`, which the owner accepted on 2026-09-28; it shows no disconnection of its own.
+The helper's module docblock and D21's paragraphs on agentpane-mode's reopen are brought in line; D25 already says D21's reopen paragraphs are superseded for this client.
+
+## Done when
+
+A test in `src/emacs/helper.test.ts`, red first, opens the stream through `sessions/list`, drops it, and asserts `runHelper` resolves and no second open was made; another fails the first open and asserts the same.
+The tests of the reopen, of `stream/changed` and of the `reconnecting` mode line are removed, and named in the commit message.
+`bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.

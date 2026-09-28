@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # The Emacs helper sends no sessions/changed when its event stream's first open fails and a later one succeeds, so a picker opened while the server was down never re-lists
@@ -16,3 +17,7 @@ Load-bearing: the predicate that decides whether an open re-lists must be "has t
 The sentence in `src/emacs/protocol.ts`, the `stream/changed` entry, that states the exception ("except after a first open that failed", or however OW-mareju's review worded it) becomes false once this lands, and the change retires it; grep `src/emacs/helper.ts`'s module docblock for the same exception.
 
 Done when a test in `src/emacs/helper.test.ts` whose event source fails the first open and then succeeds (the `failing` counter on `eventSource()` that OW-mareju added) sees `sessions/changed` after `stream/changed` `"connected"`, red before the change and green after.
+
+## Close note
+
+Moot under D25 (2026-09-28): OW-mepufi makes the helper exit when its first open fails or its stream drops, so there is no later successful open for a `sessions/changed` to be missing from.

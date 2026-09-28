@@ -29,3 +29,8 @@ Weigh it against what the browser does with a `503` on each of those routes: a r
 ## Done when
 
 Either `handle()` (or whichever narrower site the reasoning lands on) refuses during shutdown, with a test in `src/server/http/app.test.ts` that drives a request into an app whose `close()` is in flight and asserts the refusal, going red first -- or this card closes `--declined` with the reasoning recorded, naming which routes were judged harmless mid-shutdown and why the reconnecting event-stream client is acceptable.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the prompt, fork, fork-points, model and effort routes stop attaching first (OW-sirofi), so they no longer reach `attach`'s `#shuttingDown` check and join abort and compact among the routes that serve during shutdown.
+The reconnecting client above still applies, since D25 keeps D21's listing at a reconnect.

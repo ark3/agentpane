@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+blocked-by: [OW-kakate, OW-mepufi]
 ---
 
 # agentpane-mode lets a dead helper's late sentinel and its late-delivered messages act on the helper that replaced it; teardown and message dispatch should be owned per connection, retiring OW-toyupa's eq guard
@@ -50,3 +51,10 @@ The reader also suggested, unverified, that timers run before sentinels in each 
 - An ERT test in `emacs/agentpane-test.el` for each of cases 1 through 4 goes red before the change and green after; delivering a message on a dead connection can go through a fake helper that writes and exits while Emacs does not yield, as the reader did, or through `jsonrpc-connection-receive` called on the dead connection after its shutdown, whichever drives the order deterministically.
 - The `eq` guard OW-toyupa added in `agentpane--helper-gone` is gone, replaced by the ownership change rather than kept beside it, and `agentpane-test-late-sentinel-keeps-the-replacement-helper` and `agentpane-test-turn-done-watch-ends-with-the-helper` still pass.
 - The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the helper exits when its stream drops and never sends `stream/changed` (OW-mepufi), so cases 2 and 3 above, a late or early `reconnecting`, disappear with `agentpane--stream-down`.
+And a helper's death leaves every buffer as a `session/detached` does (OW-kakate), which changes what `agentpane--helper-gone` does and so what case 4 reads.
+Cases 1, 4 and 5 stand, since Emacs still starts a replacement lazily through `agentpane--connection`, and helper deaths become the normal path whenever the server goes away.
+Blocked by OW-kakate and OW-mepufi so that this card is written against what they leave; re-read the cases then, and drop any they settled.

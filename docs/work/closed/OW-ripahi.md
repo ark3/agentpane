@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # The browser's Detach leaves Send, Fork and Compact open while its close is in flight, so a prompt or fork POST attaches first and respawns the session being detached
@@ -17,3 +18,8 @@ OW-dakeyi's close note records how the Emacs side placed its reads (`agentpane--
 
 Done when tests in `src/client/controller.test.ts`, red first, hold `api.close` for the selected session and show `submit`, `forkAndSubmit`, `compact` and a second `detach` each calling nothing on `api` while it is held, and a test on `App.svelte` shows the Send, Compact and Detach controls disabled in that window; `bun run check` green.
 Whether this needs `bun run test:browser` depends on whether the change touches the composer's action row, per `AGENTS.md`.
+
+## Close note
+
+Moot under D25 (2026-09-28): the respawn it describes comes from the prompt and fork routes attaching first, which OW-sirofi removes; a Send, Fork or Compact during a Detach is then refused rather than spawning the session again.
+Two leftovers were judged not worth a card: a second Detach sends a second `DELETE`, which finds nothing and returns; and a Send in that window now shows a refusal instead of a respawn.

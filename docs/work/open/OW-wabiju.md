@@ -22,3 +22,8 @@ If the helper has taken handle H from an attach reply Emacs has parked, and H di
 The parked reply then gives the buffer the dead H, and it counts itself attached to it.
 That needs a synchronous request lasting across a server restart or a close elsewhere, so it is narrow.
 Decide whether it is worth closing, and record the decision in the `agentpane--notified-buffer` docstring whichever way it goes: either fix it, with an ert test that parks the reply, delivers the detached first, and asserts the buffer ends up not attached, red first; or drop the docstring's claim.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the helper no longer reopens its stream (OW-mepufi), so the second edge's route through "the stream reopens before the synchronous request ends" goes away; its other trigger, a `session/detached` from a close elsewhere reported by the listing at a `sessions-changed`, still stands.
+The first edge, a Pi fork's parent, is unaffected.

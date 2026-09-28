@@ -24,3 +24,8 @@ Reaching it takes a second buffer on another name of the same live session insid
 Whatever remedy this card picks for a request dropped with OTHER, say in the close note whether it covers a close in flight.
 
 Done when an ERT test in `emacs/agentpane-test.el`, run as that file's Commentary says, goes red before and green after: it has a buffer send `sessions/fork` through the fake helper, merges that buffer into another through the attach path `agentpane-test--merging` drives before the fork answers, answers the fork, and asserts that a buffer holding the forked ref exists and is attached.
+
+## Amended 2026-09-28 under D25
+
+Under D25 the prompt route no longer attaches first (OW-sirofi), so the close half above, a survivor's prompt reaching the session being closed, becomes a refused request rather than a respawn.
+The fork half, a merge dropping a `sessions/fork` reply, stands.
