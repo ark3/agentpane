@@ -75,9 +75,8 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   The loss is agentpane's kill, not the CLI's; see `docs/MANUAL_TESTING.md` OW-japuzo.
 - A test that has never failed has not been shown to test anything.
   For a fix, break it again and watch it go red first.
-- A race fix that adds a guard at the site, and whose adversarial read then names a case the guard misses, has found that the state has the wrong owner, not that it needs a second guard.
-  The sibling is authored as the ownership change for that state and names the guard it retires; a second guard is not filed.
-  Every further case the reader names against the same guard goes into that sibling's done condition, not into a card of its own: OW-gusaru's review filed four on 2026-09-25, OW-nibihi as the sibling and OW-ruzazi, OW-nukuse and OW-novone beside it, where one card carrying all four cases would have cost a quarter of the authoring and left nothing out.
+- The sibling rule -- a guard at the site whose adversarial read names a case it misses gets one sibling card that changes the state's owner and retires the guard -- is `card execute`'s, and what follows is what it cost here.
+  OW-gusaru's review filed four cards on 2026-09-25, OW-nibihi as the sibling and OW-ruzazi, OW-nukuse and OW-novone beside it, where one card carrying all four cases would have cost a quarter of the authoring and left nothing out.
   Three of the eight race fixes closed between 2026-09-22 and 2026-09-24 produced exactly such a sibling -- OW-zovaye filed OW-nuzepi, OW-zasozo filed OW-woyifu, OW-vijuyi filed OW-zudase -- and D24 is what those three cost.
 - When a run overturns a fact the repo already recorded, the same change retires **every** copy of it.
   Grep the flag name or the phrase; the copies are not all in docs.
@@ -115,9 +114,6 @@ Do not take formatting from the cards already in the deck.
 `card author` sets the body's shape — one sentence per line — and the existing cards are hard-wrapped instead, so a card read for prior art teaches the wrong house style while looking authoritative.
 Read those cards for their content and the payload for their form.
 
-`card author` sweeps the closed pile before writing, and here the sweep takes in the open pile too, with the same `card cmd -- rg -l '<term>' open`.
-A finding a review names is often one an earlier review already filed: OW-lokima duplicated OW-bomolu on 2026-09-25, filed from two adversarial reads one run apart, and closed moot the next day.
-
 ### Labels
 
 Card treats labels as opaque strings and cannot know this repo's set.
@@ -143,10 +139,6 @@ The session proposes a set of cards in an order, and the owner either pastes tha
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
 Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
 
-A card closes once its work is shown to work — tests red first and green after, output that changed — and never waits on the owner trying it or passing a verdict; details are iterated afterwards, in new cards.
-So a done-condition names no owner trial, and where an existing card's does, the executor treats that clause as met by the evidence and moves on.
-Set by the owner on 2026-09-23, after OW-motuso's "the owner has used the toggle" held a landed, tested change open and stopped the set.
-
 ### Both clients
 
 The Emacs client is first-class and stays at feature parity with the browser; set by the owner on 2026-09-23.
@@ -166,15 +158,12 @@ It therefore starts at local `main`'s tip and there is **nothing to fast-forward
 `.worktrees/<id>` inside the repo tree is not a preference.
 On the home server that tree is the only path mounted read-write, and a worktree anywhere outside it fails with `Read-only file system` (`docs/HANDOFF.md`, "Environment gotchas"); `card worktree` satisfies that by construction.
 
-Three things card cannot know, so the dispatch prompt has to carry them:
+Two things card cannot know, so the dispatch prompt has to carry them:
 
 - **`bun install` in the fresh worktree** before any `src/` work.
 - A dispatched subagent does **not** inherit `CLAUDE.md` or `AGENTS.md`.
   Hand them over: tell it to read them as files in its worktree.
-- **From inside a worktree the `card` CLI resolves to the main checkout's deck**, not the worktree's copy, so a deck-mutating verb run there writes outside the implementer's branch entirely.
-  An implementer runs the read-only verbs only; filing and closing are the dispatching session's job.
 
 Never `/code-review ultra` in an execution session — it has cost a full budget window.
 The old skill's blanket ban on review subagents does *not* survive with it: `card execute` positively requires dispatching an adversarial reader at finished work, and card wins there.
 Only the `/code-review ultra` ban is repo-local.
-That reader's brief carries one line card cannot know: for a fix that closes a timing or ordering defect, the reader says whether the fix is a guard at the site and, if it is, names the case the guard misses, before the card closes -- the sibling rule under "Evidence".

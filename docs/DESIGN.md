@@ -979,7 +979,7 @@ So on Pi the truncating merge is the replace `hydrateMessages` already made, and
 **How a race fix is made from here.**
 A guard at the site is not refused.
 But a guard whose adversarial read names a case it misses has found that the state has the wrong owner, and the sibling is authored as the ownership change, naming the guard it retires; a second guard is not filed.
-`AGENTS.md` carries that rule under "Evidence", and its "Dispatching an implementer" section has the reader ask the question at close time rather than a week later.
+`card execute` carries that rule and has the adversarial reader ask the question at close time rather than a week later; `AGENTS.md`, under "Evidence", keeps what it cost here.
 Three of the eight are what it cost to learn this.
 
 **Built.**
