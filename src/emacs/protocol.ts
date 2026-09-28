@@ -300,11 +300,14 @@
  *   does. `state` (string, always) is `"reconnecting"` when the stream
  *   drops or an open of it fails, sent once per outage however many reopens
  *   fail in it, and `"connected"` when the open that ends the outage
- *   succeeds, sent ahead of the `sessions/changed` that open sends. Carries
- *   no `session` and no `handle`. There is no `"connecting"` for the first
- *   open, which the first `sessions/list` or `sessions/attach` starts: Emacs
- *   reads the stream as up until told otherwise, and a buffer attaching
- *   draws nothing live before the snapshot that open brings anyway.
+ *   succeeds, sent ahead of the `sessions/changed` that open sends -- which
+ *   it sends only if the stream had opened before: where the very first
+ *   open failed, the one that ends that outage sends `"connected"` and no
+ *   `sessions/changed`. Carries no `session` and no `handle`. There is no
+ *   `"connecting"` for the first open, which the first `sessions/list` or
+ *   `sessions/attach` starts: Emacs reads the stream as up until told
+ *   otherwise, and a buffer attaching draws nothing live before the
+ *   snapshot that open brings anyway.
  */
 
 import type {

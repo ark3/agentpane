@@ -645,6 +645,18 @@ describe("notifications", () => {
 		]);
 	});
 
+	it("says the stream is reconnecting when its very first open fails, and connected when a reopen succeeds (OW-mareju)", async () => {
+		const { io, source } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		source.failing = 1;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
+		await io.until(3);
+		expect(io.notifications().filter((message) => message["method"] === "stream/changed")).toEqual([
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
+		]);
+	});
+
 	it("opens the stream before the listing call, so a picker hears sessions/changed with nothing attached (OW-nufafi)", async () => {
 		let streamsOpenAtList = -1;
 		const { io, source } = start({

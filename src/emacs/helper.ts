@@ -66,9 +66,11 @@
  * `sessions/changed`: a listing change while the stream was down is gone
  * (D21). The outage itself is not silent (OW-mareju): the drop, or a failed
  * open, sends `stream/changed` with `"reconnecting"`, once however many
- * reopens fail after it, and the open that ends it sends `"connected"`
- * ahead of that `sessions/changed`, so a buffer can tell a quiet session
- * from a dead stream as the browser's status line does.
+ * reopens fail after it, and the open that ends it sends `"connected"`,
+ * ahead of that `sessions/changed` where it sends one -- not where the very
+ * first open failed, since `opens` counts only opens that succeeded -- so a
+ * buffer can tell a quiet session from a dead stream as the browser's status
+ * line does.
  *
  * Nodes are throttled (OW-jeruye). The server sends every streamed token as
  * an `upsert` carrying the whole message so far, about 34 a second on Haiku,
