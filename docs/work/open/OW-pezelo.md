@@ -1,0 +1,26 @@
+---
+labels: [defect, emacs]
+---
+
+# When the Emacs helper exits because its first stream open failed, the request that opened it is answered "The operation was aborted." instead of saying the server is unreachable
+
+Found 2026-09-28 by OW-mepufi's adversarial read, and a regression of OW-mepufi: before it the reply carried the connection error.
+In service of D25 point 4's promise, in `docs/DESIGN.md`, that with the server down "a request ... fails there, visibly" — visibly and legibly, so the user knows to start the server.
+
+## What happens
+
+Since OW-mepufi, `runHelper` in `src/emacs/helper.ts` exits when its event stream drops or its first open fails: `onDisconnect` cancels the stdin reader, and the teardown after the read loop aborts `inFlight`, the `AbortController` every REST call from the helper carries.
+The first `sessions/list` or `sessions/attach` opens the stream before its own REST call (`openStream`, OW-nufafi), so with no server listening the stream's refusal lands first, the teardown aborts the request's fetch, and its reply is `-32603 "The operation was aborted."`.
+Emacs shows `agentpane: sessions/list failed: The operation was aborted.` through `agentpane--request`'s error handler in `emacs/agentpane.el`, and jsonrpc's sentinel then replaces it in the echo area with `[jsonrpc] Server exited with status 0`.
+Nothing the user sees says the server is unreachable.
+The reader reproduced it by running `bun run src/emacs/main.ts` with its stdin held open and no server on the port (bun 1.4.0).
+The same holds for a request in flight when an established stream drops, which is less important: the user was already attached and sees the buffers detach.
+
+## Why the tests did not see it
+
+`fetchFor` in `src/emacs/helper.test.ts` ignores `init.signal`, so no fake fetch is ever aborted, and the test "exits when the first open of its stream fails, and opens it no more (D25)" asserts only that `runHelper` resolves and that one open was made, never the reply the triggering request got.
+
+## Done when
+
+A test in `src/emacs/helper.test.ts`, red first, fails the first open of the stream with the listing's fetch honouring its abort signal (or refusing as a down server would), and asserts the error reply to `sessions/list` is not the abort and says the server could not be reached; the same for `sessions/attach` if its path differs.
+How the helper gets there is the implementer's call — answering requests in flight with the stream's own failure before the teardown aborts them is one way — but whatever it is must not keep the process alive past the exit OW-mepufi measured, and `bun run check` passes.
