@@ -1,5 +1,6 @@
 ---
 labels: [defect, browser-testing]
+closed: declined
 ---
 
 # The single-column layout's 1fr row is the session list, which the conversation squeezes to nothing
@@ -17,3 +18,8 @@ Keep the banners row from OW-watajo in the same place relative to the conversati
 
 Done when a spec in `e2e/` at a viewport narrower than 42rem, with a transcript long enough to overflow, asserts the session list has non-zero height and the conversation's box ends above the prompt's within the viewport — red against today's CSS first and green after, with `bun run test:browser` as the vehicle.
 If the browser shows the session list already visible at that size, the measurement above was wrong: close this `--moot` with what the browser showed.
+
+## Close note
+
+Declined by the owner on 2026-09-27: agentpane is localhost only, so the narrow single-column layout this card repairs has no user; nobody drives it from a phone.
+The 0px session-list measurement was never re-taken, so whether the defect is real at that width is still unknown; if agentpane ever serves beyond localhost, re-open this reasoning and re-measure first.
