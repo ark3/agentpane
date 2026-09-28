@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # A listing that drops the selected session's live view leaves the browser's composer up, and since OW-sirofi its Send can only fail with 409 not_attached; the selection should fall back to a preview with the Attach button
@@ -28,3 +29,7 @@ Where the eviction runs -- `replaceSessionSummaries` is a pure state function, a
 A test in `src/client/controller.test.ts`, red first, holds S attached and selected, answers a re-list with S `detached`, and asserts S's view is gone, `view.preview` holds S's turns, and the controller sends no prompt for S (a `submit` issues no `api.prompt`).
 A sibling of "forgets a cached live session when a fresh listing reports it detached" in that file is the place to start.
 `bun run check` passes, and `bun run test:browser` too if the composer's action row or `App.svelte` changes, per `AGENTS.md`.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-forinu derives the pane's mode, so a selected session with no live view never draws the composer, and one place fetches its preview; this card's ordering, a listing evicting the selected session's view, is one of OW-forinu's red-first tests.

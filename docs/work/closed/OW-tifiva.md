@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # An attach reply that lands after the Emacs helper detached its gapped session leaves the buffer attached and hearing nothing
@@ -33,3 +34,7 @@ Two tests in `src/emacs/helper.test.ts`, each red first, drive one ordering apie
 Where the fix changes what Emacs sees, an ert test in `emacs/agentpane-test.el` asserts that the buffer ends `agentpane--dropped` after ordering 2's frames, in either delivery order.
 The `detachGapped` docblock states what happens to an attach in flight.
 `bun run check` passes.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-rebawa makes the helper's notifications the only thing that binds a buffer, and the helper records an attachment only when it forwards its snapshot, so neither a late reply nor a reply with no view can leave a buffer believing it is attached; both of this card's orderings are OW-rebawa's red-first tests.

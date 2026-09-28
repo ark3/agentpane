@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # agentpane-mode's helper death detaches only buffers whose attach reply was handled: one fed a handle by the attach's snapshot before the reply stays streaming under that handle, and a prompt in flight loses its turn-done watch
@@ -45,3 +46,8 @@ OW-bukupu settled case 1: `agentpane--on-notification` now records the connectio
 The selection is therefore no longer keyed on `agentpane--attached` alone, though that key survives beside `agentpane--served-by`; whether one owner should replace both is this card's call.
 Case 2 stands, with a changed order: jsonrpc.el's "Server died" is now handled from a zero-delay timer, behind the helper's queued messages and ahead of the teardown `agentpane--helper-exited` defers (see "Each request has one answer" in `agentpane--request`'s docstring), so the prompt's UNSENT still forgets the watch before `agentpane--let-go` could fold it.
 Drop case 1 from the done-condition; case 2's test and the suite remain.
+
+## Close note
+
+Case 1 was settled by OW-bukupu (`agentpane--served-by`, `agentpane-test-snapshot-before-a-death-is-let-go`); case 2 is moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-mopuyi makes the teardown decide the turn-done watch at a helper's death, raising it for a turn seen streaming, and carries case 2 as a red-first test.
+Whether `agentpane--attached` and `agentpane--served-by` collapse into one record is OW-rebawa's to decide.

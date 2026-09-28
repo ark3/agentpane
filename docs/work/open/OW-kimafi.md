@@ -23,3 +23,10 @@ What this card may change is how a refused request reads and what the user is le
 
 An ERT test in `emacs/agentpane-test.el` drives a dead helper whose last messages are `sessions/changed` then `session/node`, with an `agentpane-sessions-mode` buffer open, and asserts no "Error running timer" is logged to `*Messages*` and the node is drawn (it is today; keep it so), red before, green after, plus whatever the chosen treatment of the stale picker asserts.
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Amended 2026-09-28 under D25's follow-up
+
+D25's "What the run found, and the two ownership changes it asked for" in `docs/DESIGN.md` makes the teardown own a helper's death (OW-mopuyi) and the helper's notifications alone bind a buffer (OW-rebawa); this card stays, since the refusal it describes is OW-bukupu's and stands.
+The owner agreed on 2026-09-28 how it should read: a refused chained request is dropped quietly, with no "Error running timer", and a picker left stale waits for `g`, as D25 point 4 already accepts.
+The one thing kept from the user-facing list above: a fork buffer created in that window is still shown, detached, so `g` can bring it back rather than it staying hidden.
+Write the done condition's "chosen treatment of the stale picker" as: nothing refetches it.

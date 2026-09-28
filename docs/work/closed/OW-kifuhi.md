@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # An attach reply jsonrpc.el held back behind a synchronous request arrives after its helper's teardown and binds the buffer to nothing, or to the next helper, which forwards nothing under that handle
@@ -27,3 +28,7 @@ OW-tifiva is the same shape from another trigger, a reply landing after the help
 An ERT test in `emacs/agentpane-test.el` holds an attach reply behind a synchronous request as a real helper process dies, for each outcome, and asserts the buffer ends not attached, holding no handle, and dropped, with no prompt sent; red before, green after.
 The paragraph naming this as an accepted cost in `agentpane--request`'s docstring is removed or rewritten to match.
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-rebawa stops the attach reply binding anything, so a reply jsonrpc.el held behind a synchronous request binds nothing when it arrives after its helper's death; both of this card's outcomes are OW-rebawa's red-first tests, and the synchronous requests stay.

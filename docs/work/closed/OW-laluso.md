@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # A helper's death leaves older requests unanswered when a synchronous request is out: jsonrpc.el's sentinel throws out of its error-handler walk, so agentpane--sending and its siblings stay set for good
@@ -30,3 +31,7 @@ Build the connection as the tests around `agentpane-test-late-error-reply-fails-
 An ERT test in `emacs/agentpane-test.el` drives that order through a real process and asserts the async request fails exactly once, and that `agentpane--sending` is clear after the teardown; red before, green after.
 Whatever answers the skipped requests owns them per connection rather than re-walking jsonrpc.el's internals at the site; the teardown in `agentpane--helper-gone` is the natural owner, since it runs whatever the walk did.
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-mopuyi makes the teardown answer every request the dead helper had out, whatever jsonrpc.el's walk reached, and clear each served buffer's in-flight flags; this card's ordering is OW-mopuyi's red-first test, extended to `agentpane--attaching`.

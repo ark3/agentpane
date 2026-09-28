@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # A browser attach whose reply lands after the event stream drops re-selects a live session with no view, putting back the composer OW-fiheli took down
@@ -30,3 +31,7 @@ Whichever it is, it must not strand `busy`.
 A test in `src/client/controller.test.ts`, red first, starts `controller.select(ref)` with `api.attach` held, drops the stream, resolves the attach, and asserts `view.state.selected` offers no send (`submit()` issues no `api.prompt`), no summary reads `attached`, and `view.busy` is back to `"idle"`.
 The same holds for `create` and for `forkAndSubmit`.
 `bun run check` passes.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): OW-forinu derives the pane's mode, so an attach reply that lands after a stream drop selects a session the pane shows as detached, and the listing alone owns a row's `status`; this card's ordering, through `select`, `create` and `forkAndSubmit`, with `busy` back to idle, is one of OW-forinu's red-first tests.

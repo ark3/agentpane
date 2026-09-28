@@ -27,3 +27,8 @@ Decide whether it is worth closing, and record the decision in the `agentpane--n
 
 Under D25 the helper no longer reopens its stream (OW-mepufi), so the second edge's route through "the stream reopens before the synchronous request ends" goes away; its other trigger, a `session/detached` from a close elsewhere reported by the listing at a `sessions-changed`, still stands.
 The first edge, a Pi fork's parent, is unaffected.
+
+## Amended 2026-09-28 under D25's follow-up
+
+The second edge, a `session/detached` that lands ahead of a parked attach reply, is covered by OW-rebawa: the reply no longer binds a buffer, so a parked one cannot give it the dead handle.
+Only the first edge, a Pi fork's parent, remains for this card.

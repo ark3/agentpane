@@ -25,3 +25,7 @@ Once OW-mepufi makes the helper exit when its stream drops, most helper deaths f
 
 The owner's decision on each case is recorded where the next reader will look: amended into D25 point 4 in `docs/DESIGN.md`, and, where it keeps the current behaviour, in the docstring of `agentpane-close-session` (case 1) or `agentpane-shutdown` (case 2).
 A decision to change either behaviour becomes a `change` card, labelled `emacs`, filed when this one closes.
+
+## Amended 2026-09-28 under D25's follow-up
+
+OW-mopuyi, filed 2026-09-28, makes the teardown own what a helper's death does to requests and buffers, and keeps today's outcome for both of this card's cases unless this card closes with a decision first; a decision recorded here after OW-mopuyi lands becomes a `change` card against the teardown it built.

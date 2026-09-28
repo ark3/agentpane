@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # The browser keeps a selected session's live view and its preview apart at each path that touches one, and two orderings leave a selection with both or with neither
@@ -40,3 +41,7 @@ The design is the executor's; the load-bearing part is that the pairing is decid
 Two tests in `src/client/controller.test.ts`, each red first on the code as it stands, drive the orderings above and assert the invariant: for the first, the selection ends on a live view or a preview and not on neither; for the second, `preview` is null once the snapshot has landed.
 The per-path checks named under "The invariant" that the owner makes redundant are gone, and the commit message names each one it kept and what that one still guards that the owner does not.
 `bun run check` passes, and `bun run test:browser` passes if `App.svelte` changes.
+
+## Close note
+
+Moot under D25's "What the run found, and the two ownership changes it asked for" (2026-09-28): this card asked for one owner of the pairing between a live view and a preview, and OW-forinu is that owner, deriving the pane's mode with live taking precedence; both of this card's orderings are OW-forinu's red-first tests.

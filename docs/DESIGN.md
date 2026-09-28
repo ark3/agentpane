@@ -1008,7 +1008,7 @@ D12's OW-35 asked that a prompt to a session the server had reclaimed re-attach 
 The owner, on 2026-09-28: that was written before any experience of attaching and detaching; the unattached preview is a mode worth having in its own right, and attaching is fast (1.138s for a re-attach on `pi 0.85.1`, OW-jamoyi).
 The browser had already stopped prompting an unattached session: since OW-tewave and OW-jamoyi a preview replaces the composer with an Attach button.
 Read on 2026-09-28 and confirmed by OW-sirofi the same day, neither client's deliberate paths needs a route to attach for it: the browser's `create` and `select` call `api.attach` first, and agentpane-mode's new session and its send from an unattached buffer send `sessions/attach` first (`agentpane--attached-then`).
-The one exception it found is the browser's selected session closed by another client with the stream up: `replaceSessionSummaries` in `src/client/session-state.ts` drops the live view but leaves the selection and no preview, so the composer stays and its Send meets 409 `not_attached` where it used to respawn, which OW-zivamo files as falling back to a preview with the Attach button.
+The one exception it found is the browser's selected session closed by another client with the stream up: `replaceSessionSummaries` in `src/client/session-state.ts` drops the live view but leaves the selection and no preview, so the composer stays and its Send meets 409 `not_attached` where it used to respawn, which OW-zivamo filed; OW-forinu settles it by deriving the pane's mode ("What the run found", below).
 
 **The decision.**
 
@@ -1039,6 +1039,25 @@ The listing-based dropping at every `sessions-changed` while the stream is up st
 Six, labelled `d25`, filed 2026-09-28: OW-sirofi, the routes; OW-fiheli, a browser stream drop, and OW-lunihe, a browser gap; OW-kakate, a helper's death in agentpane-mode, OW-filuge, a helper gap, and OW-mepufi, the helper's exit, blocked by OW-kakate.
 OW-bukupu, the dead helper's late messages acting on its replacement, keeps its surviving cases and waits on OW-kakate and OW-mepufi.
 Closed moot into them the same day: OW-wovamo, OW-ripahi and OW-wezaji into OW-sirofi, OW-filuge and OW-lunihe; OW-keleti into OW-fiheli; OW-vayeze into OW-kakate; OW-sosape into OW-mepufi.
+All six, and OW-bukupu, closed `--done` on 2026-09-28.
+
+**What the run found, and the two ownership changes it asked for.**
+The run closed seven cards and its adversarial reads filed eleven; none was a respawn, so the class this decision set out to close stayed closed.
+They clustered one layer out, and the owner took the two roots the same day.
+
+The browser's pane stored its preview beside the selection and read "live" from the preview's absence, so each path that adds or drops a view kept the pairing by hand, and three of them slipped: a composer over no view (OW-zivamo, OW-wazija, OW-tefigi) and a preview over a live view (OW-tefigi).
+The pane's mode is derived instead, by a fixed precedence: live when the tab holds a view of the selected session, and the composer only then; preview when it holds a preview and no view; otherwise detached and loading, which draws the Attach button over an empty pane, the owner preferring an honest empty pane to a stale transcript.
+One place fetches the preview, once the stream is up, and the listing alone owns a row's `status`.
+That is OW-forinu.
+
+agentpane-mode bound a buffer to a handle on two channels, the attach reply and the helper's snapshot, so a reply that landed after a gap or behind a synchronous request rebound a buffer the helper no longer fed (OW-tifiva, OW-kifuhi).
+The helper's notifications alone say a buffer is attached: from a snapshot under its handle until a `session/detached` or the helper's death; the reply only ends the request.
+That is OW-rebawa.
+The synchronous requests were suspected and are not the cause: each of the four needs its answer before the minibuffer prompts, and once no reply binds and no cleanup rides jsonrpc.el's walk, what they disturb no longer matters.
+
+A buffer's in-flight flags were cleared only by each request's own failure path, which jsonrpc.el at a helper's death skips (OW-laluso) or runs before the teardown could see a turn had streamed (OW-zedawo).
+The teardown answers every request the dead helper had out and settles each served buffer, per point 4; per-request handlers own every failure that is not a death.
+That is OW-mopuyi.
 
 ## The backend adapter contract
 

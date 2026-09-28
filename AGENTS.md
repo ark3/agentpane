@@ -132,7 +132,7 @@ Seven cross-cutting labels may follow that kind.
 D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 2026-09-22, and the ACP-shim stream filed 2026-09-13 as OW-fenobo, OW-basoga, OW-limejo and OW-mikuyo closed `--declined` under it; OW-vibipo is the question card that chose.
 `emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
 `d24` marks the seven cards D24 filed on 2026-09-24 -- OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, OW-kimaya, OW-danifa and OW-mofuho -- and `card list --open --label d24` is that stream, blockers and all.
-`d25` marks the six cards D25 filed on 2026-09-28 -- OW-sirofi, OW-fiheli, OW-lunihe, OW-kakate, OW-filuge and OW-mepufi -- and `card list --open --label d25` is that stream.
+`d25` marks the six cards D25 filed on 2026-09-28 -- OW-sirofi, OW-fiheli, OW-lunihe, OW-kakate, OW-filuge and OW-mepufi -- and the three its follow-up filed the same day -- OW-forinu, OW-rebawa and OW-mopuyi -- and `card list --open --label d25` is that stream.
 
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
 Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.
