@@ -55,7 +55,10 @@
 ;; the helper's notifications drive the buffer: a snapshot redraws every
 ;; node, a node update redraws the node with its index or appends it, and
 ;; the mode line shows streaming, compaction, the model and its effort,
-;; the model's default one when the session reports none.  A prompt is
+;; the model's default one when the session reports none.  While the
+;; helper's event stream is down, which the helper says by
+;; `stream/changed', every attached buffer's mode line leads with
+;; `reconnecting', until the helper says it is back.  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
 ;; a newline and `C-RET' sends, `C-c C-a' aborts the running turn, and
@@ -94,7 +97,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 171 tests, 168 results as expected, 0 unexpected, 3 skipped
+;;     Ran 179 tests, 176 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -306,6 +309,14 @@ stylesheet.  Roughly the browser's theme, by role rather than by colour.")
 (defvar agentpane--connection nil
   "The `jsonrpc-process-connection' to the helper, once started.")
 
+(defvar agentpane--stream-down nil
+  "Non-nil while the helper says its event stream is down and reconnecting.
+Set by `stream/changed', which the helper sends when the stream drops and
+again when it is back (OW-mareju); one stream serves every session, so this
+is not per buffer.  A buffer attached through the helper says so in its
+mode line (`agentpane--show-mode-line'), since nothing it shows moves until
+the stream is back, as the browser's status line says Reconnecting.")
+
 (defun agentpane--start-helper ()
   "Start the helper process in `agentpane-project-directory'.
 The stderr buffer is named as `jsonrpc-process-connection' expects for a
@@ -343,7 +354,8 @@ left `sent' then waited on whatever turn the session ran next, and one
 left `streamed', with the buffer still reading streaming, took the next
 prompt's arming for a turn already seen and ended at the re-attach's
 snapshot, before that prompt's own turn had begun."
-  (setq agentpane--connection nil)
+  (setq agentpane--connection nil
+        agentpane--stream-down nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
@@ -480,8 +492,12 @@ non-nil, on the way out."
 
 (defun agentpane--on-notification (_conn method params)
   "Handle notification METHOD, with PARAMS, from the helper.
-Every one but `sessions/changed' is about one session, and goes to the
-transcript buffer `agentpane--notified-buffer' finds for it, if any.
+Every one but `sessions/changed' and `stream/changed' is about one
+session, and goes to the transcript buffer `agentpane--notified-buffer'
+finds for it, if any.  A `stream/changed' says the helper's event stream
+went down or came back, and every transcript buffer's mode line is shown
+again, which says so in the attached ones, and takes it away from one
+detached while the stream was down; see `agentpane--stream-down'.
 That buffer takes the notification's handle, and its `session' as the
 session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
@@ -498,8 +514,16 @@ ends a turn leaves it, nothing streaming or compacting, since nothing
 will say so under that handle; see `agentpane--dropped'.  The turn-done
 watch on that handle is folded that status, then ends with the handle;
 see `agentpane--watch-turn'."
-  (if (eq method 'sessions/changed)
-      (agentpane--revert-pickers)
+  (cond
+   ((eq method 'sessions/changed)
+    (agentpane--revert-pickers))
+   ((eq method 'stream/changed)
+    (setq agentpane--stream-down (equal (plist-get params :state) "reconnecting"))
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (derived-mode-p 'agentpane-transcript-mode)
+          (agentpane--show-mode-line)))))
+   (t
     (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
         (with-current-buffer buffer
@@ -532,7 +556,7 @@ see `agentpane--watch-turn'."
              (agentpane--watch-forget agentpane--handle)
              (setq agentpane--handle nil
                    agentpane--attached nil
-                   agentpane--dropped t))))))))
+                   agentpane--dropped t)))))))))
 
 (defun agentpane--read-idle ()
   "Show this buffer's session as the status that ends a turn leaves it,
@@ -1760,11 +1784,14 @@ view or the streaming status change."
                            'face 'agentpane-dim))))))
 
 (defun agentpane--show-mode-line ()
-  "Show the status fields, after `reading' when reading view is on, in the
-mode line."
+  "Show the status fields in the mode line, after `reading' when reading
+view is on, and first of all `reconnecting' while the buffer is attached
+and the helper's event stream is down (`agentpane--stream-down')."
   (let ((fields (if agentpane--reading
                     (cons "reading" agentpane--status-fields)
                   agentpane--status-fields)))
+    (when (and agentpane--stream-down (agentpane--attached-p))
+      (push (propertize "reconnecting" 'face 'agentpane-warning) fields))
     (setq mode-line-process
           (and fields (concat " [" (mapconcat #'identity fields " · ") "]")))
     (force-mode-line-update)))

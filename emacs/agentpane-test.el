@@ -1300,6 +1300,58 @@ still previews."
             (agentpane-refetch)
             (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
 
+(ert-deftest agentpane-test-stream-down-shows-reconnecting-until-it-is-back ()
+  "A `stream/changed' saying the helper's event stream is reconnecting puts
+`reconnecting' first in the mode line of a buffer attached through the
+helper, as the browser's status line says Reconnecting, and leaves a
+buffer only previewing as it was; one saying the stream is connected
+again takes it away (OW-mareju)."
+  (let ((ref '(:backend "claude" :id "real-1"))
+        (previewed '(:backend "claude" :id "real-2")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
+          (let ((agentpane--stream-down nil)
+                (buffer (agentpane--transcript-buffer (list :ref ref)))
+                (preview (agentpane--transcript-buffer (list :ref previewed))))
+            (with-current-buffer buffer (agentpane--attach))
+            (agentpane--on-notification
+             nil 'session/snapshot
+             (list :session ref :handle "h1" :isStreaming :json-false :model "luna" :nodes []))
+            (with-current-buffer buffer
+              (should (equal mode-line-process " [luna]")))
+            (agentpane--on-notification nil 'stream/changed '(:state "reconnecting"))
+            (with-current-buffer buffer
+              (should (equal (substring-no-properties mode-line-process)
+                             " [reconnecting · luna]")))
+            (with-current-buffer preview
+              (should-not (string-search "reconnecting" (or mode-line-process ""))))
+            (agentpane--on-notification nil 'stream/changed '(:state "connected"))
+            (with-current-buffer buffer
+              (should (equal mode-line-process " [luna]")))))))))
+
+(ert-deftest agentpane-test-stream-back-clears-reconnecting-from-a-buffer-detached-meanwhile ()
+  "A buffer that stops being attached while the helper's event stream is
+down, as a Pi fork's parent does, loses `reconnecting' from its mode line
+when the stream is back, like one still attached (OW-mareju)."
+  (let ((ref '(:backend "pi" :id "real-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
+          (let ((agentpane--stream-down nil)
+                (buffer (agentpane--transcript-buffer (list :ref ref))))
+            (with-current-buffer buffer (agentpane--attach))
+            (agentpane--on-notification
+             nil 'session/snapshot
+             (list :session ref :handle "h1" :isStreaming :json-false :model "luna" :nodes []))
+            (agentpane--on-notification nil 'stream/changed '(:state "reconnecting"))
+            (with-current-buffer buffer
+              (should (string-search "reconnecting" mode-line-process))
+              (setq agentpane--attached nil))
+            (agentpane--on-notification nil 'stream/changed '(:state "connected"))
+            (with-current-buffer buffer
+              (should (equal mode-line-process " [luna]")))))))))
+
 (defmacro agentpane-test--merging (&rest body)
   "Run BODY with a transcript buffer `holder' holding the session under the
 handle \"h1\" at a ref it has since left for `canonical', and a buffer
