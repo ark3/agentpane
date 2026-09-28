@@ -3391,6 +3391,58 @@ left as it was, attaches again at `g' and can be closed again."
       (should (equal (mapcar #'car (reverse sent))
                      '(sessions/attach sessions/close))))))
 
+(ert-deftest agentpane-test-close-session-in-flight-detached-meanwhile-reaches-nothing ()
+  "A `session/detached' for the handle while the close is out leaves the
+buffer no longer counting as attached, so `f', `e' and `C-RET' would
+attach it first, and that attach would spawn the session being closed;
+each signals a user error and sends nothing.  `M-x agentpane-set-model'
+on such a buffer, whose attach is synchronous, refuses and sends nothing
+too."
+  (dolist (press (list (lambda ()
+                         (agentpane-test--goto-index 0)
+                         (agentpane-fork))
+                       (lambda ()
+                         (agentpane-test--goto-index 0)
+                         (agentpane-edit))
+                       (lambda ()
+                         (goto-char (point-max))
+                         (insert "hello")
+                         (agentpane-send))))
+    (agentpane-test--closing
+      (setq hold '(sessions/close))
+      (with-current-buffer buffer
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
+               :nodes agentpane-test--nodes))
+        (agentpane-close-session)
+        (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+        (should-not (agentpane--attached-p))
+        (setq sent nil)
+        (should-error (funcall press) :type 'user-error)
+        (should-not sent)
+        (should-not agentpane--sending)
+        (should-not agentpane--forking)
+        (should-not agentpane--attaching))))
+  (agentpane-test--closing
+    (setq hold '(sessions/close))
+    (cl-letf (((symbol-function 'jsonrpc-request)
+               (lambda (_connection method &rest _)
+                 (push (list method) sent)
+                 (pcase method
+                   ('sessions/attach (list :ref ref))
+                   ('models/list [(:id "gpt-5.6-luna")]))))
+              ((symbol-function 'completing-read) (lambda (&rest _) "gpt-5.6-luna")))
+      (with-current-buffer buffer
+        (agentpane--on-notification
+         nil 'session/snapshot
+         (list :session ref :handle "h1" :isStreaming :json-false :model "luna" :nodes []))
+        (agentpane-close-session)
+        (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+        (setq sent nil)
+        (should-error (call-interactively #'agentpane-set-model) :type 'user-error)
+        (should-not sent)))))
+
 (ert-deftest agentpane-test-close-session-refused-once-compaction-requested ()
   "A close pressed after `agentpane-compact' has sent its request, before
 any status carries the compaction, is refused and sends nothing, as the
