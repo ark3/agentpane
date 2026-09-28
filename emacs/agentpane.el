@@ -2610,14 +2610,29 @@ The first prompt on a previewed session attaches it."
                         #'ignore t)))
 
 (defun agentpane-compact ()
-  "Compact this buffer's session through `sessions/compact'."
+  "Compact this buffer's session through `sessions/compact'.
+As the request goes out, the buffer's status reads the compaction
+`requesting', as the browser's `compact' (src/client/controller.ts) marks
+it from the click, so that `agentpane-close-session' refuses before the
+server's own status carrying it arrives.  The next status or snapshot
+overwrites the mark, the request answering being admission, not
+completion; a request that fails clears it, if it still reads
+`requesting'."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (agentpane--attached-then
      (lambda ()
+       (agentpane--set-status
+        (plist-put (copy-sequence agentpane--status) :compaction "requesting"))
        (agentpane--request 'sessions/compact
                            (list :session (agentpane--ref agentpane--session))
-                           #'ignore t)))))
+                           #'ignore t
+                           (lambda ()
+                             (when (equal (plist-get agentpane--status :compaction)
+                                          "requesting")
+                               (agentpane--set-status
+                                (plist-put (copy-sequence agentpane--status)
+                                           :compaction nil)))))))))
 
 (defun agentpane-close-session ()
   "Close this buffer's session through `sessions/close', which ends its
@@ -2634,9 +2649,12 @@ attached, for there is nothing of its own to close -- a session
 virtual one is an attached buffer here; one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); one with a prompt or a fork in flight, both of which the
-browser's `sending' covers; and one with a request pending.  Refused too,
-beyond the browser's predicate, with an attach in flight, whose answer
-would count the buffer attached to what was closed.  That clause stays: an attach sent before the close is an
+browser's `sending' covers; and one with a request pending.  Compacting
+counts from the moment `agentpane-compact' sends, as the browser's
+`compact' marks it from the click, not from the first status that
+carries it.  Refused too, beyond the browser's predicate, with an attach
+in flight, whose answer would count the buffer attached to what was
+closed.  That clause stays: an attach sent before the close is an
 ordering the close in flight does not cover.  And refused with a close
 already in flight.
 

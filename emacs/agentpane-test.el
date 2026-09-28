@@ -3391,6 +3391,37 @@ left as it was, attaches again at `g' and can be closed again."
       (should (equal (mapcar #'car (reverse sent))
                      '(sessions/attach sessions/close))))))
 
+(ert-deftest agentpane-test-close-session-refused-once-compaction-requested ()
+  "A close pressed after `agentpane-compact' has sent its request, before
+any status carries the compaction, is refused and sends nothing, as the
+browser refuses it from the click (`compact' in src/client/controller.ts).
+The request answering is admission, not completion, and still refuses; a
+status then carrying no compaction, or the request failing, frees it."
+  (agentpane-test--closing
+    (setq listed (vector (list :ref ref :onDisk t))
+          hold '(sessions/compact))
+    (with-current-buffer buffer
+      (agentpane-compact)
+      (setq sent nil)
+      (should-error (agentpane-close-session) :type 'user-error)
+      (funcall (cdr (pop held)) t)
+      (should-error (agentpane-close-session) :type 'user-error)
+      (should-not sent)
+      (agentpane--on-notification
+       nil 'session/status
+       (list :session ref :handle "h1" :isStreaming :json-false :model "luna"))
+      (agentpane-close-session)
+      (should (assq 'sessions/close sent))))
+  (agentpane-test--closing
+    (setq listed (vector (list :ref ref :onDisk t))
+          hold '(sessions/compact))
+    (with-current-buffer buffer
+      (agentpane-compact)
+      (setq sent nil)
+      (funcall (cdr (pop held)) nil)
+      (agentpane-close-session)
+      (should (assq 'sessions/close sent)))))
+
 (ert-deftest agentpane-test-close-session-refused-where-the-browser-offers-no-detach ()
   "`agentpane-close-session' signals a user error and sends nothing in each
 case the browser's `detachable' refuses (src/client/App.svelte): a
