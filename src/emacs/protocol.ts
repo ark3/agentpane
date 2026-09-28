@@ -18,6 +18,8 @@
  * send back. OW-nufafi raised it a sixth, opening the event stream at the
  * first `sessions/list` as well as at the first `sessions/attach`, so
  * `sessions/changed` flows to a picker before anything is attached.
+ * OW-mareju raised it a seventh, for `stream/changed`, which says the event
+ * stream dropped and came back, where the helper had reopened it silently.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -212,7 +214,7 @@
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about, and none arrives for a session Emacs has not attached, except
- * `sessions/changed`:
+ * `sessions/changed` and `stream/changed`:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
  *   model, effort, unrestoredModel, error, errorId, requests, notices }`.
@@ -292,6 +294,17 @@
  *   time the helper reopens a dropped event stream, since a listing change
  *   while it was down is gone. Any `session/detached` the helper's own
  *   listing brings follows it.
+ * - `stream/changed` -- `{ state }`. The helper's one event stream, shared
+ *   by every session, went down or came back up (OW-mareju), so a buffer can
+ *   tell a quiet session from a dead stream, as the browser's status line
+ *   does. `state` (string, always) is `"reconnecting"` when the stream
+ *   drops or an open of it fails, sent once per outage however many reopens
+ *   fail in it, and `"connected"` when the open that ends the outage
+ *   succeeds, sent ahead of the `sessions/changed` that open sends. Carries
+ *   no `session` and no `handle`. There is no `"connecting"` for the first
+ *   open, which the first `sessions/list` or `sessions/attach` starts: Emacs
+ *   reads the stream as up until told otherwise, and a buffer attaching
+ *   draws nothing live before the snapshot that open brings anyway.
  */
 
 import type {
@@ -364,7 +377,8 @@ export type HelperNotification =
 	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
 	| { method: "session/detached"; params: { session: SessionRef; handle: string } }
-	| { method: "sessions/changed"; params?: undefined };
+	| { method: "sessions/changed"; params?: undefined }
+	| { method: "stream/changed"; params: { state: "reconnecting" | "connected" } };
 
 export interface TranscriptNode {
 	index: number;

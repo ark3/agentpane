@@ -67,22 +67,29 @@ function stdio() {
 	};
 }
 
-/** The server's event stream, scripted: every open captures the handlers so the test can push events. */
+/**
+ * The server's event stream, scripted: every open captures the handlers so the test can push events.
+ * While `failing` is above zero an open fails instead, as `sse.ts` reports one, and counts it down.
+ */
 function eventSource() {
 	const opens: EventHandlers[] = [];
 	const closed: number[] = [];
-	return {
+	const source = {
 		opens,
 		closed,
+		failing: 0,
 		openEvents: (_url: string, handlers: EventHandlers) => {
 			const index = opens.push(handlers) - 1;
-			queueMicrotask(() => handlers.onOpen());
+			const fails = source.failing > 0;
+			if (fails) source.failing -= 1;
+			queueMicrotask(() => (fails ? handlers.onDisconnect(true) : handlers.onOpen()));
 			return { close: () => void closed.push(index) };
 		},
 		emit(event: ServerEvent) {
 			opens.at(-1)!.onEvent(event);
 		},
 	};
+	return source;
 }
 
 type Route = (url: string, init: RequestInit | undefined) => Response | Promise<Response>;
@@ -616,9 +623,26 @@ describe("notifications", () => {
 
 		source.opens[0]!.onDisconnect(true);
 		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
-		await io.until(3);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "sessions/changed" });
+		await io.until(5);
+		expect(io.notifications().slice(1)).toEqual([{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } }, { jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } }, { jsonrpc: "2.0", method: "sessions/changed" }]);
 		expect(source.closed).toEqual([0]);
+	});
+
+	it("says the stream is reconnecting once when it drops, however many reopens fail, and connected when one opens (OW-mareju)", async () => {
+		const { io, source } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await io.until(1);
+		await vi.waitFor(() => expect(source.opens).toHaveLength(1));
+
+		source.failing = 2;
+		source.opens[0]!.onDisconnect(true);
+		await vi.waitFor(() => expect(source.opens).toHaveLength(4));
+		await io.until(4);
+		expect(io.notifications()).toEqual([
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
+			{ jsonrpc: "2.0", method: "sessions/changed" },
+		]);
 	});
 
 	it("opens the stream before the listing call, so a picker hears sessions/changed with nothing attached (OW-nufafi)", async () => {
@@ -689,15 +713,17 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		source.opens[0]!.onDisconnect(false);
 		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
 		source.emit(snapshot(renamed, "h2", 0));
-		await io.until(4);
+		await io.until(6);
 		source.emit(status(pi, "h1", 2));
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
+			["stream/changed", undefined],
+			["stream/changed", undefined],
 			["sessions/changed", undefined],
 			["session/detached", "h1"],
 		]);
-		expect(io.notifications()[2]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
+		expect(io.notifications()[4]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
 		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`, `GET ${ROUTES.sessions}`]);
 		expect(lookups(calls)).toEqual([]);
 	});
@@ -722,15 +748,17 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		await vi.waitFor(() => expect(calls.filter((call) => call.url === ROUTES.sessions)).toHaveLength(1));
 		// The buffer's own `g`, answered under h3 before the listing lands.
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(4);
-		source.emit(snapshot(pi, "h3", 0));
-		await io.until(5);
-		release();
 		await io.until(6);
-		source.emit(status(pi, "h3", 1));
+		source.emit(snapshot(pi, "h3", 0));
 		await io.until(7);
+		release();
+		await io.until(8);
+		source.emit(status(pi, "h3", 1));
+		await io.until(9);
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
+			["stream/changed", undefined],
+			["stream/changed", undefined],
 			["sessions/changed", undefined],
 			["session/snapshot", "h3"],
 			["session/detached", "h1"],
@@ -793,13 +821,15 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		await io.until(2);
 
 		source.opens[0]!.onDisconnect(false);
-		await io.until(3);
+		await io.until(5);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: "h1" } });
-		await io.until(4);
+		await io.until(6);
 		release();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
+			["stream/changed", undefined],
+			["stream/changed", undefined],
 			["sessions/changed", undefined],
 		]);
 	});
@@ -821,9 +851,11 @@ describe("the listing after a reopen or a sessions-changed (OW-yibijo)", () => {
 		source.opens[0]!.onDisconnect(false);
 		await vi.waitFor(() => expect(source.opens).toHaveLength(2));
 		source.emit(snapshot(pi, "h3", 0));
-		await io.until(4);
+		await io.until(6);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.notifications().slice(1)).toEqual([
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "reconnecting" } },
+			{ jsonrpc: "2.0", method: "stream/changed", params: { state: "connected" } },
 			{ jsonrpc: "2.0", method: "sessions/changed" },
 			{ jsonrpc: "2.0", method: "session/detached", params: { session: virtual, handle: "h1" } },
 		]);

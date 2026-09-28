@@ -37,7 +37,7 @@
  * the attach reply. An attachment never moves to another handle: one whose
  * handle the server let go of is dropped at the next `sessions-changed` or
  * reopen of the stream, and Emacs told (`dropDead` below, OW-yibijo).
- * `sessions/changed` is unfiltered.
+ * `sessions/changed` and `stream/changed` are unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
@@ -64,7 +64,11 @@
  * reader in `sse.ts` does not retry, so a drop is reopened after
  * `reconnectDelayMs`, and every open after the first emits
  * `sessions/changed`: a listing change while the stream was down is gone
- * (D21).
+ * (D21). The outage itself is not silent (OW-mareju): the drop, or a failed
+ * open, sends `stream/changed` with `"reconnecting"`, once however many
+ * reopens fail after it, and the open that ends it sends `"connected"`
+ * ahead of that `sessions/changed`, so a buffer can tell a quiet session
+ * from a dead stream as the browser's status line does.
  *
  * Nodes are throttled (OW-jeruye). The server sends every streamed token as
  * an `upsert` carrying the whole message so far, about 34 a second on Haiku,
@@ -162,6 +166,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const askedFor = new Map<string, SessionRef>();
 	let connection: ReturnType<typeof api.connect> | null = null;
 	let opens = 0;
+	/** Whether Emacs was last told the stream is down, so an outage is said once however many reopens fail. */
+	let down = false;
 	let reconnect: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
 	/** Held nodes by handle and node index, in the order each was first held; a later upsert keeps its place. */
@@ -369,6 +375,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			onEvent,
 			onOpen() {
 				opens += 1;
+				if (down) {
+					down = false;
+					notify({ method: "stream/changed", params: { state: "connected" } });
+				}
 				if (opens === 1) return;
 				notify({ method: "sessions/changed" });
 				void dropDead();
@@ -376,6 +386,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			onDisconnect() {
 				closeStream();
 				if (stopped) return;
+				if (!down) {
+					down = true;
+					notify({ method: "stream/changed", params: { state: "reconnecting" } });
+				}
 				reconnect = setTimeout(() => {
 					reconnect = undefined;
 					openStream();
