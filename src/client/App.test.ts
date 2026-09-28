@@ -951,7 +951,9 @@ describe("App", () => {
 	// A drop clears a live selection (D25), and the server it is taken to have
 	// lost cannot answer a preview: an auto-select then would only fill the
 	// error slot with a failed fetch that outlives the outage. It waits for the
-	// stream instead, and lands where startup would.
+	// stream instead and then asks as startup does; where the reconnect's
+	// opening snapshot has put the session back by the time the fetch returns,
+	// `controller.preview` reselects it live rather than previewing it.
 	it("does not auto-select while the stream is reconnecting, and does once it is back", async () => {
 		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
 		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });

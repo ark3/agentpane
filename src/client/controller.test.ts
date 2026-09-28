@@ -969,8 +969,11 @@ describe("client controller", () => {
 		}
 	});
 
-	function opening(session: SessionRef): ServerEvent {
-		return { type: "snapshot", session, handle: h(session), seq: 1, messages: [{ role: "user", content: "hello", timestamp: 1 }], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] };
+	const virtualRef: SessionRef = { backend: "codex", id: "virtual:new" };
+	const storedRef: SessionRef = { backend: "pi", id: "/sessions/stored.jsonl" };
+
+	function opening(session: SessionRef, handle = h(session)): ServerEvent {
+		return { type: "snapshot", session, handle, seq: 1, messages: [{ role: "user", content: "hello", timestamp: 1 }], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] };
 	}
 
 	// A drop is taken to mean the server exited and every agent with it (D25),
@@ -982,6 +985,12 @@ describe("client controller", () => {
 	for (const fatal of [false, true]) {
 		it(`drops every live view at once, and the selection with them, when the stream drops${fatal ? " fatally" : ""}`, async () => {
 			const api = new FakeApi();
+			const streaming = { ...summary(ref), isStreaming: true };
+			const virtual = { ...summary(virtualRef), status: "virtual" as const, onDisk: false };
+			const fileless = { ...summary(forkedRef), onDisk: false };
+			const stored: SessionSummary = { ...summary(storedRef), status: "detached" };
+			delete stored.handle;
+			api.listSessions.mockResolvedValue([streaming, summary(attachedRef), virtual, fileless, stored]);
 			const controller = createController(api);
 			await controller.start();
 			api.open();
@@ -996,6 +1005,14 @@ describe("client controller", () => {
 			expect(controller.getView().state.sessions).toEqual({});
 			expect(controller.getView().state.selected).toBeNull();
 			expect(controller.getView().preview).toBeNull();
+			// The rows say so too: nothing on disk is gone with the server, and the
+			// rest read detached and idle, keeping the handle a reconnect's opening
+			// snapshot pairs by.
+			expect(controller.getView().state.summaries).toEqual([
+				{ ...streaming, status: "detached", isStreaming: false },
+				{ ...summary(attachedRef), status: "detached" },
+				stored,
+			]);
 			expect(await controller.submit()).toBe(false);
 			expect(api.prompt).not.toHaveBeenCalled();
 			controller.dispose();
@@ -1019,6 +1036,70 @@ describe("client controller", () => {
 		expect(controller.getView().state.sessions).toEqual({});
 		expect(controller.getView().state.selected).toEqual(attachedRef);
 		expect(controller.getView().preview).toEqual({ ref: attachedRef, turns });
+		controller.dispose();
+	});
+
+	// A previewed row the drop removes has nothing to preview or attach once
+	// the server is back (OW-vasubu), so the selection goes with the row.
+	it("clears a previewed selection whose row the drop removes", async () => {
+		const api = new FakeApi();
+		api.listSessions.mockResolvedValue([{ ...summary(virtualRef), status: "virtual", onDisk: false }]);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.preview(virtualRef);
+		expect(controller.getView().preview).not.toBeNull();
+
+		api.drop();
+
+		expect(controller.getView().state.summaries).toEqual([]);
+		expect(controller.getView().state.selected).toBeNull();
+		expect(controller.getView().preview).toBeNull();
+		controller.dispose();
+	});
+
+	// A rename that landed while the stream was down reaches this client only
+	// as the opening snapshot under the same handle, carrying the new ref; with
+	// the view gone, the summary's kept handle is what that snapshot pairs by
+	// (`followRef`, D24).
+	it("follows a rename made during the outage onto the row the drop kept", async () => {
+		const api = new FakeApi();
+		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		api.emit(opening(ref));
+		api.drop();
+
+		api.open();
+		api.emit(opening(renamed, h(ref)));
+
+		expect(controller.getView().state.summaries.map((item) => item.ref)).toEqual([renamed]);
+		expect(viewAt(controller, renamed)).toBeDefined();
+		controller.dispose();
+	});
+
+	// The reconnect publishes `connected` before its opening snapshots arrive,
+	// so App's auto-select can ask for a preview of a session the snapshot then
+	// re-introduces while the fetch is out. Landing that preview would put a
+	// read-only transcript over a live session, which `ControllerView.preview`
+	// rules out.
+	it("reselects the live session when a snapshot introduces it during its preview fetch", async () => {
+		const api = new FakeApi();
+		const fetch = deferred<SessionPreviewResponse>();
+		api.preview.mockReturnValue(fetch.promise);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+
+		const previewing = controller.preview(ref);
+		api.emit(opening(ref));
+		fetch.resolve({ ref, turns: [previewAssistant("stale")] });
+		await previewing;
+
+		expect(controller.getView().preview).toBeNull();
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(viewAt(controller, ref)).toBeDefined();
 		controller.dispose();
 	});
 

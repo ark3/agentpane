@@ -708,11 +708,28 @@ export function createController(
 		 * once the server answers. The intent is not bumped: a gesture still in
 		 * flight settles on its own, failing against a dead server or landing on
 		 * a live one, and a bump would strand its `busy`.
+		 *
+		 * The rows say the same, since the sidebar's stripe and streaming dot read
+		 * them until the reconnect's listing, which may be the whole outage. A
+		 * row the server held with nothing on disk went with the server, as at
+		 * `detach()`'s no-disk exit, and takes a preview of it along; the rest
+		 * read detached and idle. Each keeps its `handle`: with its view gone, it
+		 * is what pairs a reconnect's opening snapshot with the row when a rename
+		 * moved the ref during the outage (`followRef`).
 		 */
 		onDisconnect(fatal: boolean) {
+			const selected = view.state.selected;
+			let kept = view.preview !== null;
+			const summaries: SessionSummary[] = [];
+			for (const summary of view.state.summaries) {
+				if (summary.status === "detached") summaries.push(summary);
+				else if (summary.onDisk) summaries.push({ ...summary, status: "detached", isStreaming: false });
+				else if (selected !== null && sessionKey(summary.ref) === sessionKey(selected)) kept = false;
+			}
 			publish({
 				connection: "reconnecting",
-				state: { ...view.state, sessions: {}, selected: view.preview === null ? null : view.state.selected },
+				state: { summaries, sessions: {}, selected: kept ? selected : null },
+				...(kept ? {} : { preview: null }),
 			});
 			if (fatal) scheduleReconnect();
 		},
@@ -752,22 +769,34 @@ export function createController(
 			const intent = ++selectionIntent;
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
-			if (viewOf(view.state, ref)) {
+			const reselectLive = async (live: SessionRef) => {
 				publish({
-					state: { ...view.state, selected: ref },
+					state: { ...view.state, selected: live },
 					preview: null,
 					error: null,
 					models: [],
-					modelSetting: modelSettingForSession(ref),
-					effortSetting: effortSettingForSession(ref),
+					modelSetting: modelSettingForSession(live),
+					effortSetting: effortSettingForSession(live),
 				});
 				await loadModelsForSelected(intent);
+			};
+			if (viewOf(view.state, ref)) {
+				await reselectLive(ref);
 				return;
 			}
 			publish({ error: null });
 			try {
 				const response = await api.preview(ref);
 				if (!disposed && intent === selectionIntent) {
+					// A snapshot can introduce the session while the fetch is out --
+					// the reconnect's opening snapshots trail its `connected`, which is
+					// when App's auto-select asks -- and a preview over a live session
+					// is what `ControllerView.preview` rules out.
+					const live = viewOf(view.state, response.ref);
+					if (live) {
+						await reselectLive(live.ref);
+						return;
+					}
 					publish({
 						state: { ...view.state, selected: response.ref },
 						preview: { ref: response.ref, turns: response.turns },
