@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane-mode cannot take an earlier message back into the composer to edit and fork with, as the browser's pencil control does
@@ -23,3 +24,15 @@ The Emacs shape of the gesture is this card's to choose.
 What is load-bearing is that the edited text and the message's images both reach the fork's first prompt, and that an edit can be abandoned without forking anything.
 
 Done when ERT tests in `emacs/agentpane-test.el`, run as that file's Commentary says, go red before the change and green after: one edits a message holding an image and sees the fork prompted with the edited text and that image, and one abandons an edit and sees no `sessions/fork` sent.
+
+## Close note
+
+Landed on main as b8d962a, 69f56ae and dbf9bfc.
+In agentpane-mode, `e` on a user message checks the fork points and refuses a message none of them names (D20).
+On a preview it attaches first and asks for a second press (OW-gekiki).
+Otherwise it fills the prompt region with the message's text and keeps its images, converting `data` to `base64`.
+C-RET forks at that message and prompts the fork with the edited text and those images, and C-c C-k abandons the edit and puts the displaced draft back.
+The adversarial review found four defects, all fixed in the follow-up commits: a second send could fork twice, an edit-send skipped the sending guard, a composer send forked with the composer's text, and an edit-send on a detached parent did not attach first.
+While the edit's send is in flight, the parent is marked as sending, and killing the fork's buffer clears that mark.
+ERT went red first and then green: 171 tests, 168 passed, 3 skipped.
+Filed from the review: OW-bileva (Stop and fork wording) and OW-bifevo (a merge drops an open edit).
