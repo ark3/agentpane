@@ -3443,6 +3443,22 @@ too."
         (should-error (call-interactively #'agentpane-set-model) :type 'user-error)
         (should-not sent)))))
 
+(ert-deftest agentpane-test-compact-before-any-status-marks-nothing ()
+  "`agentpane-compact' on a buffer no status has reached yet -- a preview
+whose attach has answered before its snapshot has come (D2) -- marks no
+compaction, as the browser's `setSessionCompaction' writes only a view
+that exists (OW-kimaya): a status made of the mark alone would name no
+model.  The snapshot that comes carries the server's own compaction."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (agentpane-compact)
+          (should (equal (mapcar #'car (reverse sent))
+                         '(sessions/attach sessions/compact)))
+          (should-not agentpane--status)
+          (should-not agentpane--status-fields))))))
+
 (ert-deftest agentpane-test-close-session-refused-once-compaction-requested ()
   "A close pressed after `agentpane-compact' has sent its request, before
 any status carries the compaction, is refused and sends nothing, as the

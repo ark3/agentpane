@@ -2617,13 +2617,27 @@ it from the click, so that `agentpane-close-session' refuses before the
 server's own status carrying it arrives.  The next status or snapshot
 overwrites the mark, the request answering being admission, not
 completion; a request that fails clears it, if it still reads
-`requesting'."
+`requesting'.
+
+No mark is made while no status has reached the buffer, as on a preview
+whose attach has answered before its snapshot has come (D2): the mark
+alone would be a status naming no model, and the snapshot that comes
+carries the server's own compaction.  The browser's
+`setSessionCompaction' (src/client/session-state.ts) skips its mark there
+too (OW-kimaya).
+
+And Emacs shares the race the browser accepted there (OW-husivu,
+declined): a status or snapshot carrying no compaction that lands before
+the server's own `requesting' wipes the mark.  So on a buffer just
+attached, whose snapshot may come after the request has gone out, a
+close can still go out with the compact unanswered."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (agentpane--attached-then
      (lambda ()
-       (agentpane--set-status
-        (plist-put (copy-sequence agentpane--status) :compaction "requesting"))
+       (when agentpane--status
+         (agentpane--set-status
+          (plist-put (copy-sequence agentpane--status) :compaction "requesting")))
        (agentpane--request 'sessions/compact
                            (list :session (agentpane--ref agentpane--session))
                            #'ignore t
