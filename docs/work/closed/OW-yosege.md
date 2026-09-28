@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane-mode has no command that closes a session's subprocess, as the browser's Tools Detach does; killing a buffer only stops its notifications
@@ -24,3 +25,18 @@ The browser's behaviour is pinned by `src/client/App.test.ts` "disables the comp
 Done when ERT tests in `emacs/agentpane-test.el` go red before the change and green after.
 One sees the command send `sessions/close` and leave the buffer unattached and redrawn from `sessions/preview`, and one sees it refused in each case `detachable` refuses.
 `emacs/fake-helper.ts` answers only `sessions/list` and `sessions/preview` and records no params, so these tests stub the request as `agentpane-test--forking` does, or extend the fake helper.
+
+## Close note
+
+Built `agentpane-close-session`, bound `C-c C-q` in `agentpane-transcript-mode`, in `emacs/agentpane.el`: the Emacs analogue of the browser's Tools → Detach.
+It sends the helper's `sessions/close`, which kills the subprocess; killing a buffer still sends only `sessions/detach` and leaves the session running.
+It refuses, sending nothing, in every case the browser's `detachable` refuses: not attached, streaming or compacting, a prompt or fork in flight, a request pending.
+It also refuses an attach in flight, which the browser has no counterpart for.
+A virtual or elsewhere-attached row opened from the picker is a preview in Emacs and cannot be closed; the adversarial read found the browser the same, since its Detach renders only outside the preview branch.
+When the close answers, the buffer forgets its handle, its attach-sent flag, its attachment, its dropped flag and its turn-done watch.
+The listing then decides what comes next: a session on disk is redrawn from `sessions/preview`, and one not on disk, or no longer listed, has its buffer killed, as the browser falls back to the startup view (OW-vasubu).
+The adversarial read found that a `session/detached` arriving while the close was in flight left `agentpane--dropped` set, so the refetch re-attached and respawned the closed session; the fix clears it, with a test red first.
+Verified by five ERT tests in `emacs/agentpane-test.el` built on the `agentpane-test--closing` macro, all red before the change.
+The reader mutated the command 15 ways and every mutation turned a test red.
+Full suite: 186 tests, 0 unexpected.
+Filed from the review: OW-dakeyi, the wider in-flight close window, and OW-watawe, the draft lost when a buffer with nothing on disk is killed.
