@@ -46,7 +46,11 @@
 ;; are elided, and while a turn streams the line above the prompt names the
 ;; tool or thinking it is running.  It is per buffer and not kept, and the
 ;; mode line says when it is on.  Killing a transcript buffer stops its
-;; session's notifications and leaves the session running on the server.
+;; session's notifications and leaves the session running on the server;
+;; `C-c C-q' (`agentpane-close-session') ends the session's subprocess
+;; instead, as the browser's Tools Detach does, while no turn runs, and
+;; leaves the buffer previewing the stored transcript, or kills it when
+;; there is none on disk.
 ;;
 ;; `M-x agentpane-new-session' asks for a backend, creates a session in the
 ;; current buffer's project, opens it attached and asks for one of the
@@ -97,7 +101,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 181 tests, 178 results as expected, 0 unexpected, 3 skipped
+;;     Ran 185 tests, 182 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -1877,6 +1881,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "C-<return>") #'agentpane-send)
     (define-key map (kbd "C-c C-a") #'agentpane-abort)
     (define-key map (kbd "C-c C-d") #'agentpane-dismiss-error)
+    (define-key map (kbd "C-c C-q") #'agentpane-close-session)
     map)
   "Keymap for `agentpane-transcript-mode'.")
 
@@ -2575,6 +2580,72 @@ The first prompt on a previewed session attaches it."
        (agentpane--request 'sessions/compact
                            (list :session (agentpane--ref agentpane--session))
                            #'ignore t)))))
+
+(defun agentpane-close-session ()
+  "Close this buffer's session through `sessions/close', which ends its
+subprocess on the server, as the browser's Tools Detach does (`detach' in
+src/client/controller.ts).  Not `agentpane--detach', which killing the
+buffer runs, and which only stops the helper's notifications, leaving the
+session running: the browser's Detach is the helper's `sessions/close',
+not its `sessions/detach'.
+
+Refused, sending nothing, wherever the browser offers no Detach
+\(`detachable' in src/client/App.svelte): a session this buffer has not
+attached, for there is nothing of its own to close -- a session
+`agentpane-new-session' creates is attached at once, so the browser's
+virtual one is an attached buffer here; one streaming or compacting,
+since a kill mid-turn loses the reply, on Claude Code all of it
+\(OW-japuzo); one with a prompt or a fork in flight, both of which the
+browser's `sending' covers, or an attach, whose answer would count the
+buffer attached to what was closed; and one with a request pending.
+
+Once the close answers the buffer holds no handle and no attachment, and
+its turn-done watch on the handle ends, as `agentpane--detach' ends it;
+nor has it sent an attach, so a later kill sends no `sessions/detach' for
+a session the helper, having closed it, no longer holds.  Then the
+listing says whether the session is on disk, as the browser reads
+`onDisk' after its close.  One that is is redrawn from its stored
+transcript, the read-only preview the browser lands on, and a send
+attaches it again.  One that is not, or that the listing no longer
+carries -- a session created or forked and never prompted -- has nothing
+to preview: `sessions/preview' answers its ref with an empty transcript
+rather than an error, and a send could only attach a ref the server no
+longer holds (OW-vasubu).  Its buffer is killed, as the browser clears
+its selection to the startup view.  A close that fails is reported in
+the echo area and leaves the buffer as it was."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (cond
+     ((not (agentpane--attached-p))
+      (user-error "This session is not attached; there is nothing to close"))
+     ((or agentpane--streaming (plist-get agentpane--status :compaction))
+      (user-error "This session is running a turn; close it once the turn ends"))
+     ((or agentpane--sending agentpane--forking agentpane--attaching)
+      (user-error "A request to this session is in flight; close it once it answers"))
+     ((and agentpane--ewoc
+           (ewoc-collect agentpane--ewoc (lambda (data) (plist-member data :request))))
+      (user-error "This session is waiting on a request; close it once that is resolved")))
+    (let ((ref (agentpane--ref agentpane--session)))
+      (agentpane--request
+       'sessions/close (append (list :session ref)
+                               (and agentpane--handle (list :handle agentpane--handle)))
+       (lambda (_)
+         (agentpane--watch-forget agentpane--handle)
+         (setq agentpane--handle nil
+               agentpane--attach-sent nil)
+         (agentpane--hold-attached nil)
+         (agentpane--request
+          'sessions/list nil
+          (lambda (listing)
+            (if (eq (plist-get (seq-find (lambda (summary)
+                                           (agentpane--same-ref-p (agentpane--ref summary) ref))
+                                         listing)
+                               :onDisk)
+                    t)
+                (agentpane-refetch)
+              (kill-buffer)))
+          t))
+       t))))
 
 (defun agentpane-dismiss-error ()
   "Dismiss this buffer's turn error through `sessions/dismissError'.

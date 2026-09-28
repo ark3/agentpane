@@ -2141,7 +2141,8 @@ shows.  A session with no nodes never shows it."
   "Run BODY with every request answered as the helper would: POINTS for
 `sessions/forkPoints', FORKED for `sessions/fork', a summary of the ref
 asked for for `sessions/attach', unless BODY has put a summary of its own
-in `attached', and the fixed nodes for `sessions/preview'.
+in `attached', the fixed nodes for `sessions/preview', and for
+`sessions/list' whatever BODY has put in `listed', nil unless it has.
 Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
 onto `said'.  A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
@@ -2155,6 +2156,7 @@ request.  Every buffer BODY made is killed afterwards."
          (hold nil)
          (held nil)
          (attached nil)
+         (listed nil)
          (buffers (buffer-list)))
      (cl-letf (((symbol-function 'agentpane--request)
                 (lambda (method params callback &optional _always failed _timeout unsent)
@@ -2164,7 +2166,8 @@ request.  Every buffer BODY made is killed afterwards."
                                   ('sessions/forkPoints ,points)
                                   ('sessions/fork ,forked)
                                   ('sessions/attach (or attached (list :ref (plist-get params :session))))
-                                  ('sessions/preview agentpane-test--nodes)))
+                                  ('sessions/preview agentpane-test--nodes)
+                                  ('sessions/list listed)))
                          (answer (lambda (ok)
                                    (with-current-buffer from
                                      (if ok
@@ -3225,6 +3228,129 @@ does not stop the transcript buffer from being killed."
         (setq agentpane--attached agentpane--connection)
         (kill-buffer buffer)
         (should-not (buffer-live-p buffer))))))
+
+;;;; Closing a session, against a stub connection
+
+(defmacro agentpane-test--closing (&rest body)
+  "Run BODY in a transcript buffer `buffer' attached to the Codex session
+`ref' under the handle \"h1\" through a helper that counts as running,
+drawn by a snapshot under that handle as the node at index 5 alone, idle
+on the model \"luna\".  Every request is answered as
+`agentpane-test--forking' answers it, and `sent' starts empty."
+  (declare (indent 0))
+  `(let ((ref '(:backend "codex" :id "t1"))
+         (agentpane--turn-watches nil))
+     (agentpane-test--with-helper
+       (agentpane-test--forking nil nil
+         (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
+           (setq attached (list :ref ref :handle "h1"))
+           (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+             (with-current-buffer buffer (agentpane--attach))
+             (agentpane--on-notification
+              nil 'session/snapshot
+              (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
+                    :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))))
+             (setq sent nil)
+             ,@body))))))
+
+(ert-deftest agentpane-test-close-session-closes-it-onto-its-preview ()
+  "`agentpane-close-session' on an idle attached session sends
+`sessions/close' under the buffer's handle, as the browser's Tools Detach
+sends its DELETE, and once it answers leaves the buffer holding no handle
+and unattached, the turn-done watch on the handle ended, and, the listing
+saying the session is on disk, redrawn from its `sessions/preview', as
+the browser lands on the read-only preview.  A kill after that sends no
+`sessions/detach' for a session the helper no longer holds."
+  (agentpane-test--closing
+    (setq listed (vector (list :ref '(:backend "codex" :id "other") :onDisk :json-false)
+                         (list :ref ref :onDisk t)))
+    (push (cons "h1" 'sent) agentpane--turn-watches)
+    (with-current-buffer buffer
+      (agentpane-close-session)
+      (should (equal (reverse sent)
+                     `((sessions/close :session ,ref :handle "h1")
+                       (sessions/list)
+                       (sessions/preview :session ,ref))))
+      (should-not agentpane--handle)
+      (should-not (agentpane--attached-p))
+      (should-not (assoc "h1" agentpane--turn-watches))
+      (should (equal (agentpane-test--indices)
+                     (mapcar (lambda (node) (plist-get node :index)) agentpane-test--nodes)))
+      (setq sent nil)
+      (kill-buffer buffer)
+      (should-not sent))))
+
+(ert-deftest agentpane-test-close-session-with-nothing-on-disk-kills-the-buffer ()
+  "A session the listing after the close does not carry, or carries as not
+on disk -- one created or forked and never prompted -- has no transcript to
+preview, and `sessions/preview' would answer its ref with an empty one
+that a send could only attach in vain (OW-vasubu).  So the buffer goes, as
+the browser lands on its startup view, and its kill sends no
+`sessions/detach'."
+  (dolist (listing (list [] (vector (list :ref '(:backend "codex" :id "t1") :onDisk :json-false))))
+    (agentpane-test--closing
+      (setq listed listing)
+      (with-current-buffer buffer
+        (agentpane-close-session))
+      (should-not (buffer-live-p buffer))
+      (should (equal (reverse sent)
+                     `((sessions/close :session ,ref :handle "h1")
+                       (sessions/list)))))))
+
+(ert-deftest agentpane-test-close-session-that-fails-leaves-the-buffer-attached ()
+  "A `sessions/close' that fails leaves the buffer attached under its handle,
+asking for no listing, as the browser's Detach leaves its live view."
+  (agentpane-test--closing
+    (setq hold '(sessions/close))
+    (with-current-buffer buffer
+      (agentpane-close-session)
+      (funcall (cdr (pop held)) nil)
+      (should (equal agentpane--handle "h1"))
+      (should (agentpane--attached-p))
+      (should (equal (mapcar #'car sent) '(sessions/close))))))
+
+(ert-deftest agentpane-test-close-session-refused-where-the-browser-offers-no-detach ()
+  "`agentpane-close-session' signals a user error and sends nothing in each
+case the browser's `detachable' refuses (src/client/App.svelte): a
+session only previewed; one streaming or compacting, since a kill
+mid-turn loses the reply; one with a prompt or a fork in flight, as the
+browser's `sending' covers both, or an attach in flight, whose answer
+would count it attached again; and one with a request pending."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (agentpane-refetch)
+          (setq sent nil)
+          (should-error (agentpane-close-session) :type 'user-error)
+          (should-not sent)))))
+  (dolist (setup (list (lambda (ref)
+                         (agentpane--on-notification
+                          nil 'session/status
+                          (list :session ref :handle "h1" :isStreaming t :model "luna")))
+                       (lambda (ref)
+                         (agentpane--on-notification
+                          nil 'session/status
+                          (list :session ref :handle "h1" :isStreaming :json-false
+                                :compaction "running" :model "luna")))
+                       (lambda (_) (setq agentpane--sending t))
+                       (lambda (_) (setq agentpane--forking t))
+                       (lambda (_) (agentpane--attach))
+                       (lambda (ref)
+                         (agentpane--on-notification
+                          nil 'session/request
+                          (list :session ref :handle "h1"
+                                :request `(:requestId "r1" :session ,ref
+                                           :kind "item/fileChange/requestApproval"
+                                           :payload nil))))))
+    (agentpane-test--closing
+      (setq hold '(sessions/attach))
+      (with-current-buffer buffer
+        (funcall setup ref)
+        (setq sent (seq-remove (lambda (request) (eq (car request) 'sessions/attach)) sent))
+        (should (agentpane--attached-p))
+        (should-error (agentpane-close-session) :type 'user-error)
+        (should-not sent)))))
 
 ;;;; Each buffer's default-directory, against a stub connection
 
