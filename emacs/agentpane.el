@@ -371,6 +371,9 @@ left `sent' then waited on whatever turn the session ran next, and one
 left `streamed', with the buffer still reading streaming, took the next
 prompt's arming for a turn already seen and ended at the re-attach's
 snapshot, before that prompt's own turn had begun.
+Each such buffer's `agentpane--attached' is left standing, marking a
+session it held live, which `agentpane-refetch' attaches again rather
+than previews (OW-mirifa).
 CONNECTION is forgotten only while it is still the current one: its
 process reads as not live before its sentinel, which calls this, has run,
 so a use of the connection in between starts a replacement, which this
@@ -1821,7 +1824,10 @@ and the helper's event stream is down (`agentpane--stream-down')."
 (defvar-local agentpane--attached nil
   "The helper connection this buffer attached its session through, or nil.
 Attached only while that is still the running connection: a fresh helper
-has attached nothing.  Set only through `agentpane--hold-attached'.")
+has attached nothing.  One that has exited is kept rather than cleared,
+marking a session this buffer held live, which `agentpane-refetch'
+attaches again rather than previews.  Set only through
+`agentpane--hold-attached'.")
 
 (defun agentpane--hold-attached (connection)
   "Make CONNECTION, or nil, the helper connection this buffer is attached
@@ -2075,7 +2081,10 @@ node stays on it, or goes to the next drawn one when it is elided."
   "Refetch this buffer's transcript and redraw it.
 A stored transcript is read through `sessions/preview'; an attached one is
 attached again, which answers with a fresh `session/snapshot', since a
-preview would draw the stored transcript over the live one.  One still
+preview would draw the stored transcript over the live one.  So is one
+attached through a helper that has since exited, which may have left the
+session running on the server, as is one told its handle is gone; see
+`agentpane--attached' and `agentpane--dropped' (OW-mirifa).  One still
 attaching sends nothing: its attach's snapshot is the refetch, and a
 preview sent now would supersede the attach and draw over that snapshot.
 Nor does one with a fork in flight; see `agentpane-fork'.  Nor one with a
@@ -2093,7 +2102,7 @@ and an error would leave it unshown."
     (message "agentpane: a fork of this session is in flight; refetch once it lands"))
    (agentpane--closing
     (message "agentpane: this session is closing; the close redraws the buffer once it lands"))
-   ((or (agentpane--attached-p) agentpane--dropped)
+   ((or agentpane--attached agentpane--dropped)
     (agentpane--attach))
    (t
     (agentpane--request 'sessions/preview

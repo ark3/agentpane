@@ -4664,6 +4664,36 @@ when it ends (OW-dunahe)."
   (should (agentpane-test--reattach-after-helper-death nil))
   (should (agentpane-test--reattach-after-helper-death t)))
 
+(ert-deftest agentpane-test-refetch-attaches-again-after-the-helper-dies ()
+  "A `g' in a buffer attached through a helper that has since exited
+attaches its ref again rather than previewing the stored transcript over
+the live one it drew: the session may still be running on the server,
+though nothing said its handle is gone (OW-mirifa)."
+  (let ((ref '(:backend "claude" :id "real-1"))
+        (agentpane--connection nil)
+        (agentpane--stream-down nil))
+    (agentpane-test--forking nil nil
+      (setq attached (list :ref ref :handle "h1"))
+      (cl-letf (((symbol-function 'agentpane--start-helper)
+                 (lambda ()
+                   (make-process :name "agentpane-test helper"
+                                 :command '("cat")
+                                 :connection-type 'pipe
+                                 :noquery t))))
+        (let ((buffer (agentpane--transcript-buffer (list :ref ref)))
+              (connection (agentpane--connection)))
+          (with-current-buffer buffer
+            (agentpane--attach)
+            (should (agentpane--attached-p)))
+          (kill-process (jsonrpc--process connection))
+          (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
+                                            (+ (float-time) 10)))
+          (with-current-buffer buffer
+            (should-not (agentpane--attached-p))
+            (setq sent nil)
+            (agentpane-refetch)
+            (should (equal sent `((sessions/attach :session ,ref))))))))))
+
 (ert-deftest agentpane-test-late-sentinel-keeps-the-replacement-helper ()
   "A helper that has exited but whose sentinel has not yet run is replaced
 by the next use of the connection, and that sentinel, running after, leaves
