@@ -319,8 +319,29 @@ connection named \"agentpane\", so the helper's own stderr lands there."
                          :name "agentpane"
                          :process #'agentpane--start-helper
                          :notification-dispatcher #'agentpane--on-notification
-                         :on-shutdown (lambda (_conn) (setq agentpane--connection nil)))))
+                         :on-shutdown #'agentpane--helper-gone)))
   agentpane--connection)
+
+(defvar agentpane--handle)
+
+(defun agentpane--helper-gone (connection)
+  "Forget CONNECTION, the helper's, which has exited, and end what each
+transcript buffer attached through it was waiting to hear.
+The turn-done watch on each such buffer's handle ends raising nothing,
+and the buffer reads as not streaming, as a `session/detached' leaves it,
+since nothing will say otherwise through a helper that is gone; see
+`agentpane--watch-turn'.  The turn may go on running on the server, and
+the handle stay live there, so a re-attach may answer under it: a watch
+left `sent' then waited on whatever turn the session ran next, and one
+left `streamed', with the buffer still reading streaming, took the next
+prompt's arming for a turn already seen and ended at the re-attach's
+snapshot, before that prompt's own turn had begun."
+  (setq agentpane--connection nil)
+  (dolist (buffer (buffer-list))
+    (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
+      (with-current-buffer buffer
+        (agentpane--watch-forget agentpane--handle)
+        (agentpane--read-idle)))))
 
 (defun agentpane-shutdown ()
   "Stop the helper, if one is running.
@@ -369,7 +390,7 @@ timed.  60s is what `agentpane-new-session''s synchronous attach already
 allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
 helper costs only a minute before a refused second send is accepted again.")
 
-(defun agentpane--request (method params callback &optional always failed timeout)
+(defun agentpane--request (method params callback &optional always failed timeout timed-out)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
@@ -384,6 +405,9 @@ It runs too, and the signal goes on, when sending the request or running
 CALLBACK exits non-locally -- the helper failing to start, or a reply's
 handling failing partway -- so a flag that FAILED clears never outlives the
 request that set it.
+TIMED-OUT, when given, runs in FAILED's place after a timeout: for a
+request the helper may yet carry out, whose reply is only discarded, as a
+prompt's is (`agentpane--send-prompt').
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -419,7 +443,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                       :timeout-fn
                       (lambda ()
                         (message "agentpane: %s timed out" method)
-                        (agentpane--failed buffer failed)))))))
+                        (agentpane--failed buffer (or timed-out failed))))))))
     (setq agentpane--latest-request id)))
 
 (defun agentpane--failing (failed fn)
@@ -457,7 +481,9 @@ would have had each node been drawn on arrival.
 A `session/detached' says the server let go of the handle the buffer
 holds, and the buffer lets go of it too, and reads as the status that
 ends a turn leaves it, nothing streaming or compacting, since nothing
-will say so under that handle; see `agentpane--dropped'."
+will say so under that handle; see `agentpane--dropped'.  The turn-done
+watch on that handle is folded that status, then ends with the handle;
+see `agentpane--watch-turn'."
   (if (eq method 'sessions/changed)
       (agentpane--revert-pickers)
     (let ((buffer (agentpane--notified-buffer method params)))
@@ -488,13 +514,20 @@ will say so under that handle; see `agentpane--dropped'."
             ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
             ('session/detached
+             (agentpane--read-idle)
+             (agentpane--watch-forget agentpane--handle)
              (setq agentpane--handle nil
                    agentpane--attached nil
-                   agentpane--dropped t)
-             (agentpane--set-status
-              (plist-put (plist-put (copy-sequence agentpane--status)
-                                    :isStreaming :json-false)
-                         :compaction nil)))))))))
+                   agentpane--dropped t))))))))
+
+(defun agentpane--read-idle ()
+  "Show this buffer's session as the status that ends a turn leaves it,
+nothing streaming or compacting, for a buffer that nothing will send
+another status: its handle let go of (`session/detached'), or its helper
+gone (`agentpane--helper-gone')."
+  (agentpane--set-status
+   (plist-put (plist-put (copy-sequence agentpane--status) :isStreaming :json-false)
+              :compaction nil)))
 
 (defvar agentpane--attach-sent)
 
@@ -782,11 +815,6 @@ It names nothing while `agentpane--error' is nil.")
 
 (defvar-local agentpane--streaming nil
   "Non-nil while the last status this buffer heard said a turn is streaming.")
-
-(defvar-local agentpane--turn-watch nil
-  "Whether this buffer waits on a turn it submitted, for the turn-done
-indicator: nil, `sent' until a status says the session is streaming, then
-`streamed' until one says it is not.  See `agentpane--watch-turn'.")
 
 (defvar-local agentpane--reading nil
   "Non-nil while this buffer shows reading view; see `agentpane-toggle-reading'.
@@ -2055,6 +2083,7 @@ into this one, which then wants a snapshot; see `agentpane--absorb'."
       t)))
 
 (defvar agentpane--composer-transcript)
+(defvar agentpane--turns-done)
 
 (defun agentpane--absorb (other)
   "Take the transcript buffer OTHER's draft, composer and windows into this
@@ -2083,7 +2112,13 @@ OTHER's, so the caller attaches again for one of its own.
 A composer taken as this buffer's own is renamed after this buffer; one
 that stays secondary to this buffer's own composer keeps its name.
 The detach is disarmed for this kill alone, rather than skipped whenever
-another buffer holds the handle, since only here is a second holder meant."
+another buffer holds the handle, since only here is a second holder meant.
+So the turn-done watch on the handle, which a detach would end, goes on
+in this buffer, which holds that handle: a turn submitted from OTHER ends
+here and raises the indicator here (`agentpane--watch-turn').  An
+indicator OTHER had raised, for a turn that ended while no window showed
+it, is raised for this buffer instead, the place that turn's end is now
+read, rather than cleared by the kill with nobody having seen it."
   (let ((buffer (current-buffer))
         (draft (with-current-buffer other
                  (buffer-substring-no-properties agentpane--prompt-start (point-max))))
@@ -2103,6 +2138,8 @@ another buffer holds the handle, since only here is a second holder meant."
             (rename-buffer name t)))))
     (dolist (window (get-buffer-window-list other nil t))
       (set-window-buffer window buffer))
+    (when (memq other agentpane--turns-done)
+      (cl-pushnew buffer agentpane--turns-done))
     (with-current-buffer other
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
     (kill-buffer other)))
@@ -2304,7 +2341,14 @@ Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that
 has just broken, is reported and goes no further, since an error in
 `kill-buffer-hook' stops the kill; not through `with-demoted-errors',
-which lets it through under `debug-on-error'."
+which lets it through under `debug-on-error'.
+
+Sent or not, the turn-done watch on the handle this buffer holds ends
+here, raising nothing: this Emacs hears nothing more under that handle,
+so nothing would end it.  For a Pi fork's parent that is the point, the
+turn the fork stopped being one the user stopped on purpose; see
+`agentpane--watch-turn'."
+  (agentpane--watch-forget agentpane--handle)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection)
              (or agentpane--handle agentpane--attach-sent))
     (condition-case err
@@ -2364,24 +2408,22 @@ admission (OW-jokoto).  Read here, before the attach a previewed buffer
 sends first: an error that attach's start raises, drawn from its
 snapshot, is newer than the prompt, and admitting it must not clear it.
 
-The prompt arms the turn-done watch as it goes out, after any attach, and
-folds the streaming level the buffer holds into it at once, as the
-browser's `watchSessions' reads the level at the publish that follows its
-submit; see `agentpane--watch-turn'.  A session streaming then is running
-a turn the server takes this prompt into, as a Codex steer, and no fresh
-`streaming' follows, so that turn becomes this prompt's and its end
-raises the indicator.  So too a turn a previewed buffer's attach finds
-running, whichever of the attach's snapshot and its reply is handled
-first (D2): either the level is folded here, or the snapshot's status
-folds it after.  A watch already armed is left as it is, so that a
-prompt refused mid-turn cannot disarm the turn an earlier one armed.
-A prompt that fails disarms only the watch it armed.  Refused, the
-prompt started nothing, and the next turn on the session is not one this
-Emacs asked for, as the browser's `watchAbandon' has it.  The same
-callback runs when the reply outlasts `agentpane--spawn-timeout' and when
-sending or handling the reply exits non-locally (`agentpane--request'),
-where the prompt may have been admitted and its turn run; that turn's
-end then raises nothing."
+The prompt arms the turn-done watch on the session's handle as it goes
+out, after any attach, so under the handle that attach answered; see
+`agentpane--watch-submit'.  A prompt the helper answers with an error
+abandons the watch it armed, as the browser's `watchAbandon' does for a
+refused or failed POST: refused, the prompt started nothing, and the next
+turn on the session is not one this Emacs asked for.  So does one that
+never went out, sending it having exited non-locally.
+One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the
+reply is discarded, not refused, and the prompt may have been admitted
+and its turn run.  Kept, the watch raises the indicator at the end of
+the session's next turn, this prompt's if it was admitted and whichever
+comes next if it was not; abandoned, as it was until OW-dunahe, an
+admitted turn's end raised nothing.  A dot not needed costs a glance,
+one that never appears costs the feature, as src/client/favicon.ts
+weighs focus against visibility.  One whose reply's handling exits
+non-locally was admitted, and keeps its watch too."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
@@ -2392,22 +2434,20 @@ end then raises nothing."
           (prior (and agentpane--error agentpane--error-id)))
       (agentpane--attached-then
        (lambda ()
-         (let ((armed (not agentpane--turn-watch)))
-           (when armed
-             (setq agentpane--turn-watch 'sent))
-           (agentpane--watch-turn agentpane--streaming)
+         (let ((watch (agentpane--watch-submit)))
            (agentpane--request 'sessions/prompt
                                (list :session (agentpane--ref agentpane--session) :text text
                                      :priorErrorId prior)
                                (lambda (_)
-                                 (setq agentpane--sending nil)
+                                 (setq watch nil
+                                       agentpane--sending nil)
                                  (funcall sent))
                                t
                                (lambda ()
-                                 (when armed
-                                   (setq agentpane--turn-watch nil))
+                                 (agentpane--watch-abandon watch)
                                  (funcall failed))
-                               agentpane--spawn-timeout)))
+                               agentpane--spawn-timeout
+                               failed)))
        failed))))
 
 (defun agentpane--clear-sent (buffer beg text)
@@ -2597,8 +2637,9 @@ container of its own under a handle of its own, and takes the parent's
 container out of the server's table (D24, `SessionManager' in
 src/server/http/session-manager.ts), so the parent's handle hears nothing
 more.  This buffer then counts itself detached too, detaches the parent
-from the helper by that handle, and its next command that needs the
-session attaches it again, under whatever handle that attach answers.
+from the helper by that handle, which ends the turn-done watch on it
+\(`agentpane--watch-turn'), and its next command that needs the session
+attaches it again, under whatever handle that attach answers.
 The fork's buffer takes the fork's handle from its own attach.  Codex
 and Claude Code leave the parent attached.
 
@@ -2815,25 +2856,53 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
 
 (defvar agentpane--turns-done nil
   "The transcript buffers where a turn this Emacs submitted ended while no
-window showed them, until a window does; see `agentpane--watch-turn'.")
+window showed them, until a window does; see `agentpane--watch-turn'.
+A merge moves the buffer it kills to the one it keeps
+\(`agentpane--absorb').")
+
+(defvar agentpane--turn-watches nil
+  "The turns this Emacs waits on for the turn-done indicator, as an alist
+from a session's handle to `sent', until a status under that handle says
+the session is streaming, then `streamed' until one says it is not.
+Each entry is its own cons, which is how `agentpane--watch-abandon' tells
+the watch a prompt armed from one it joined.  See `agentpane--watch-turn'.")
 
 (defun agentpane--watch-turn (streaming)
   "Fold STREAMING, whether this buffer's latest status says its session
-streams, into its turn-done watch, and raise the turn-done indicator when
-a turn this buffer submitted ends while no window shows the buffer.
+streams, into the turn-done watch on the handle it holds, and raise the
+turn-done indicator when a turn this Emacs submitted ends while no window
+shows the buffer.
 The favicon badge's counterpart (`watchSessions' in
 src/client/favicon.ts), with the same semantics.  Only a turn this Emacs
-submitted arms it (`agentpane--send-prompt'), never one it only watched:
+submitted arms it (`agentpane--watch-submit'), never one it only watched:
 one running when the buffer attached, or prompted from elsewhere, unless
 a prompt from here joins it.  Done is a transition, not a level: a
 session still reads not streaming for a beat after the prompt goes out,
 so only a status that is not streaming after one that is ends the watch.
-An aborted or errored turn ends it as a finished one does, and so does a
-`session/detached' once the turn has been seen streaming, as it leaves
-the buffer reading not streaming.  A detach that arrives while the watch
-is still `sent' leaves it armed, a known limitation: a later turn from
-elsewhere may then raise the indicator.  Once ended, the watch is gone
-whether the turn ended in view or not.
+An aborted or errored turn ends it as a finished one does.  Once ended,
+the watch is gone whether the turn ended in view or not.
+
+The watch is on the session's handle, as the browser's is (D24), rather
+than on the buffer.  On the buffer, it was lost to a merge, which kills
+one of two buffers holding one handle (`agentpane--absorb'), and it
+outlived the handle: a `session/detached' before the turn was seen
+streaming left it `sent', and a turn from elsewhere under the handle a
+re-attach answered raised the indicator.  On the handle, a merge moves
+nothing, the turn ending in the survivor, which holds that handle; and a
+watch on a handle the server has let go of is never read again, since a
+buffer moves to another handle only by attaching again, which answers
+under another only when the server has let go of the old one, and that
+one is never minted again.  A prompt arms only once its own attach has
+answered, under the handle that attach answered.
+A `session/detached' folds the not-streaming status it leaves the buffer
+reading, so a turn seen streaming ends there as an aborted one does, and
+a watch still `sent' is dropped, which only keeps the list short.
+Where the handle stays live and this Emacs stops hearing it, keying
+alone is not enough, and the watch ends raising nothing: at a detach
+this Emacs sends (`agentpane--detach'), from a killed buffer or a Pi
+fork's parent, and for every handle a helper carried when it exits
+\(`agentpane--helper-gone'), the turn going on unheard on the server.
+
 Elsewhere, the favicon's unfocused window, is here a buffer that no
 window shows (`agentpane--shown-p'): Emacs's own focus says nothing about
 where the user is looking within it, and a buffer shown is where the
@@ -2849,23 +2918,68 @@ desktop notification needs a GUI, which the home server has not.
 Nothing moves a watch to a fork: the browser's `watchMove' follows the
 prompt it sends onto the fork, and here a fork sends nothing and opens in
 a buffer of its own (`agentpane-fork'), so a turn running on the parent
-stays the parent's, and ends there."
-  (pcase agentpane--turn-watch
-    ('sent (when streaming (setq agentpane--turn-watch 'streamed)))
-    ('streamed
-     (unless streaming
-       (setq agentpane--turn-watch nil)
-       (unless (agentpane--shown-p (current-buffer))
-         (cl-pushnew (current-buffer) agentpane--turns-done)
-         ;; Only a list whose first element is a string or a list is a
-         ;; list of elements; a user's single construct, a string or an
-         ;; `:eval' or conditional, becomes one element of such a list.
-         (unless (or (stringp (car-safe global-mode-string))
-                     (consp (car-safe global-mode-string)))
-           (setq global-mode-string (delq nil (list "" global-mode-string))))
-         (add-to-list 'global-mode-string '(:eval (agentpane--turn-done-lighter)) t)
-         (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
-         (force-mode-line-update t))))))
+stays the parent's, and ends there, on Codex and Claude Code, which keep
+it running.  A Pi fork stops it, the loss deliberate, and detaches the
+parent, which ends the parent's watch as above: kept, that turn's last
+status, which may come after the fork's reply has shown the fork in the
+parent's window, raised the indicator for a turn the user had stopped on
+purpose, and one the helper no longer forwarded left the watch waiting on
+the parent's next turn."
+  (let ((entry (and agentpane--handle (assoc agentpane--handle agentpane--turn-watches))))
+    (pcase (cdr entry)
+      ('sent (when streaming (setcdr entry 'streamed)))
+      ('streamed
+       (unless streaming
+         (setq agentpane--turn-watches (delq entry agentpane--turn-watches))
+         (unless (agentpane--shown-p (current-buffer))
+           (cl-pushnew (current-buffer) agentpane--turns-done)
+           ;; Only a list whose first element is a string or a list is a
+           ;; list of elements; a user's single construct, a string or an
+           ;; `:eval' or conditional, becomes one element of such a list.
+           (unless (or (stringp (car-safe global-mode-string))
+                       (consp (car-safe global-mode-string)))
+             (setq global-mode-string (delq nil (list "" global-mode-string))))
+           (add-to-list 'global-mode-string '(:eval (agentpane--turn-done-lighter)) t)
+           (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
+           (force-mode-line-update t)))))))
+
+(defun agentpane--watch-submit ()
+  "Arm the turn-done watch on the handle this buffer holds, for a prompt
+going out once the buffer is attached, and return the watch armed, or nil
+when the prompt joins one already armed there.
+A new watch takes the streaming level the buffer holds at once, as the
+browser's `watchSessions' reads the level at the publish that follows its
+submit.  A session streaming then is running a turn the server takes
+this prompt into, as a Codex steer, and no fresh `streaming' follows, so
+that turn becomes this prompt's and its end raises the indicator.  So too
+a turn a previewed buffer's attach finds running, whichever of the
+attach's snapshot and its reply is handled first (D2): either the level
+is folded here, or the snapshot's status folds it after.
+A watch already armed on the handle is joined, not armed again, and the
+level is not folded into it, since it has heard every status under that
+handle.  The level may not have: after a merge the survivor's is the one
+its preview left, until its own attach's snapshot, and folding it ended a
+running turn's watch.  Joined, the watch is not this prompt's to abandon,
+which is the case the distinction exists for: a prompt refused mid-turn
+\(D16) must leave standing the watch of the turn it was refused for."
+  (when (and agentpane--handle (not (assoc agentpane--handle agentpane--turn-watches)))
+    (let ((watch (cons agentpane--handle 'sent)))
+      (push watch agentpane--turn-watches)
+      (agentpane--watch-turn agentpane--streaming)
+      watch)))
+
+(defun agentpane--watch-abandon (watch)
+  "Drop WATCH, a watch `agentpane--watch-submit' armed, if it still stands:
+its prompt reached no backend, so the next turn on the session is not one
+this Emacs asked for.  A WATCH of nil, a prompt that joined another's, or
+one that has since ended, drops nothing."
+  (setq agentpane--turn-watches (delq watch agentpane--turn-watches)))
+
+(defun agentpane--watch-forget (handle)
+  "End the turn-done watch on HANDLE, if any, raising nothing: this Emacs
+hears nothing more under it.  See `agentpane--watch-turn'."
+  (when handle
+    (setq agentpane--turn-watches (assoc-delete-all handle agentpane--turn-watches))))
 
 (defun agentpane--turn-done-lighter ()
   "The turn-done indicator, while `agentpane--turns-done' names a buffer."
