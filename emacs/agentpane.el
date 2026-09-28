@@ -477,18 +477,26 @@ error handler a second time (Emacs 31.1, jsonrpc.el 1.0.29, measured
 2026-09-28; OW-bukupu).  That error is handled from a zero-delay timer,
 behind the messages the helper wrote before it died, which the sentinel
 finds queued (see `agentpane--helper-exited'), so a reply among them is
-the answer: a prompt the backend admitted clears its draft.  The
-helper's teardown, queued at the same sentinel after these errors, runs
-after them.  A reply jsonrpc.el held back, as an \"anxious continuation\",
+the answer: a prompt the backend admitted clears its draft.  An error
+reply among them is not: the sentinel's error, deferred first, is
+handled first, so the request fails once, but as \"Server died\" rather
+than with the helper's own message.  The helper's teardown, queued at
+the same sentinel after these errors, runs after them.
+Two orders break the one answer.  The sentinel calls the error handlers
+newest first, and a synchronous request's handler throws out of that
+walk, so an older request still pending gets no answer at all (OW-laluso).
+And a reply jsonrpc.el held back, as an \"anxious continuation\",
 behind a synchronous request still out when the helper died is no
 pending request to the sentinel, gets no error, and is handed on after
 the teardown, where it is still the answer.  An attach so answered is
-the design's accepted cost: `agentpane--attached-as' binds the buffer to
-`agentpane--connection', nil after the teardown, so the buffer holds the
-dead helper's handle, neither attached nor dropped, and a prompt waiting
-on the attach starts the next helper and goes out through it, which
-forwards nothing under that handle.  It takes a helper dying while a
-synchronous request is out and an attach's reply is held behind it.
+the design's accepted cost (OW-kifuhi): `agentpane--attached-as' binds
+the buffer to `agentpane--connection', nil after the teardown, so the
+buffer holds the dead helper's handle, neither attached nor dropped, and
+a prompt waiting on the attach starts the next helper and goes out
+through it, which forwards nothing under that handle; with several
+replies so held, the next helper may already be running, and a later one
+binds its buffer to it.  It takes a helper dying while a synchronous
+request is out and an attach's reply is held behind it.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
