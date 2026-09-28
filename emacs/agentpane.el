@@ -2857,7 +2857,12 @@ stays the parent's, and ends there."
        (setq agentpane--turn-watch nil)
        (unless (agentpane--shown-p (current-buffer))
          (cl-pushnew (current-buffer) agentpane--turns-done)
-         (or global-mode-string (setq global-mode-string '("")))
+         ;; Only a list whose first element is a string or a list is a
+         ;; list of elements; a user's single construct, a string or an
+         ;; `:eval' or conditional, becomes one element of such a list.
+         (unless (or (stringp (car-safe global-mode-string))
+                     (consp (car-safe global-mode-string)))
+           (setq global-mode-string (delq nil (list "" global-mode-string))))
          (add-to-list 'global-mode-string '(:eval (agentpane--turn-done-lighter)) t)
          (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
          (force-mode-line-update t))))))

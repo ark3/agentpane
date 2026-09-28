@@ -3339,12 +3339,17 @@ marked done.  `status' is bound to a function that delivers a
 line draws by default, draws the turn-done indicator.
 The entries are evaluated here rather than through `format-mode-line',
 which in batch Emacs answers \"\" for every format, a plain string
-included (Emacs 31.1, measured 2026-09-27)."
+included (Emacs 31.1, measured 2026-09-27).  Only a list whose first
+element is a string or a list is a list of elements; any other is one
+construct, an `:eval' form or a conditional, whose tail is not drawn as
+entries."
   (seq-some (lambda (entry)
               (let ((drawn (and (eq (car-safe entry) :eval) (eval (cadr entry) t))))
                 (and (stringp drawn)
                      (text-property-any 0 (length drawn) 'face 'agentpane-turn-finished drawn))))
-            (and (listp global-mode-string) global-mode-string)))
+            (and (or (stringp (car-safe global-mode-string))
+                     (consp (car-safe global-mode-string)))
+                 global-mode-string)))
 
 (ert-deftest agentpane-test-turn-done-raised-unseen-and-cleared-on-show ()
   "A turn this Emacs submitted that ends while no window shows its buffer
@@ -3356,6 +3361,20 @@ raises the indicator, and showing the buffer clears it (OW-lohavi)."
     (should (agentpane-test--turn-done-p))
     (agentpane-test--show buffer)
     (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-raised-beside-a-users-own-construct ()
+  "A `global-mode-string' the user set to a single mode-line construct, a
+string or an `:eval' form, keeps drawing it, and the indicator beside it,
+and the status that ends the turn still reaches the mode line (OW-ratati)."
+  (dolist (own '("USER" (:eval (format "X"))))
+    (let ((global-mode-string own))
+      (agentpane-test--submitting
+        (funcall submit)
+        (funcall status t)
+        (funcall status nil)
+        (should-not (member "streaming" agentpane--status-fields))
+        (should (agentpane-test--turn-done-p))
+        (should (member own global-mode-string))))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-for-a-turn-not-submitted-here ()
   "A turn this Emacs did not submit, one prompted from elsewhere, raises
