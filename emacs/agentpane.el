@@ -97,7 +97,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 179 tests, 176 results as expected, 0 unexpected, 3 skipped
+;;     Ran 181 tests, 178 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -315,7 +315,20 @@ Set by `stream/changed', which the helper sends when the stream drops and
 again when it is back (OW-mareju); one stream serves every session, so this
 is not per buffer.  A buffer attached through the helper says so in its
 mode line (`agentpane--show-mode-line'), since nothing it shows moves until
-the stream is back, as the browser's status line says Reconnecting.")
+the stream is back, as the browser's status line says Reconnecting.
+Set only through `agentpane--hold-stream-down'.")
+
+(defun agentpane--hold-stream-down (down)
+  "Set `agentpane--stream-down' to DOWN, and show every transcript buffer's
+mode line again, which says `reconnecting' in the attached ones while it
+is non-nil.  The redraw is here, where the flag changes, so no path that
+changes it can leave a mode line saying the old state; attaching and
+detaching do the same through `agentpane--hold-attached'."
+  (setq agentpane--stream-down down)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (derived-mode-p 'agentpane-transcript-mode)
+        (agentpane--show-mode-line)))))
 
 (defun agentpane--start-helper ()
   "Start the helper process in `agentpane-project-directory'.
@@ -354,8 +367,8 @@ left `sent' then waited on whatever turn the session ran next, and one
 left `streamed', with the buffer still reading streaming, took the next
 prompt's arming for a turn already seen and ended at the re-attach's
 snapshot, before that prompt's own turn had begun."
-  (setq agentpane--connection nil
-        agentpane--stream-down nil)
+  (setq agentpane--connection nil)
+  (agentpane--hold-stream-down nil)
   (dolist (buffer (buffer-list))
     (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
       (with-current-buffer buffer
@@ -495,9 +508,8 @@ non-nil, on the way out."
 Every one but `sessions/changed' and `stream/changed' is about one
 session, and goes to the transcript buffer `agentpane--notified-buffer'
 finds for it, if any.  A `stream/changed' says the helper's event stream
-went down or came back, and every transcript buffer's mode line is shown
-again, which says so in the attached ones, and takes it away from one
-detached while the stream was down; see `agentpane--stream-down'.
+went down or came back, and every attached buffer's mode line says which;
+see `agentpane--hold-stream-down'.
 That buffer takes the notification's handle, and its `session' as the
 session's ref: the ref is an attribute any notification may move, and
 nothing is re-keyed, so a rename needs no handling of its own, and the
@@ -518,11 +530,7 @@ see `agentpane--watch-turn'."
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
    ((eq method 'stream/changed)
-    (setq agentpane--stream-down (equal (plist-get params :state) "reconnecting"))
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (derived-mode-p 'agentpane-transcript-mode)
-          (agentpane--show-mode-line)))))
+    (agentpane--hold-stream-down (equal (plist-get params :state) "reconnecting")))
    (t
     (let ((buffer (agentpane--notified-buffer method params)))
       (when buffer
@@ -555,8 +563,8 @@ see `agentpane--watch-turn'."
              (agentpane--read-idle)
              (agentpane--watch-forget agentpane--handle)
              (setq agentpane--handle nil
-                   agentpane--attached nil
-                   agentpane--dropped t)))))))))
+                   agentpane--dropped t)
+             (agentpane--hold-attached nil)))))))))
 
 (defun agentpane--read-idle ()
   "Show this buffer's session as the status that ends a turn leaves it,
@@ -1801,7 +1809,18 @@ and the helper's event stream is down (`agentpane--stream-down')."
 (defvar-local agentpane--attached nil
   "The helper connection this buffer attached its session through, or nil.
 Attached only while that is still the running connection: a fresh helper
-has attached nothing.")
+has attached nothing.  Set only through `agentpane--hold-attached'.")
+
+(defun agentpane--hold-attached (connection)
+  "Make CONNECTION, or nil, the helper connection this buffer is attached
+through, and show its mode line again, which says `reconnecting' only
+while the buffer is attached: an attach answered while the helper's event
+stream is down gets no snapshot to redraw it until the stream is back,
+and a buffer detached meanwhile would otherwise keep the field
+\(OW-mareju).  The redraw is here, where attachment changes, as
+`agentpane--hold-stream-down' has it where the stream's state does."
+  (setq agentpane--attached connection)
+  (agentpane--show-mode-line))
 
 (defvar-local agentpane--attach-sent nil
   "Non-nil once this buffer has sent a `sessions/attach', whatever became of
@@ -2116,8 +2135,8 @@ back to the session id keeps the old one."
 the session's handle, and its ref, which is authoritative and may differ
 from the one asked for.  Return non-nil when that merged another buffer
 into this one, which then wants a snapshot; see `agentpane--absorb'."
-  (setq agentpane--attached agentpane--connection
-        agentpane--dropped nil)
+  (agentpane--hold-attached agentpane--connection)
+  (setq agentpane--dropped nil)
   (let* ((handle (plist-get summary :handle))
          (other (and handle (agentpane--buffer-holding handle))))
     (setq agentpane--handle handle)
@@ -2818,7 +2837,7 @@ gone out.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil))
+       (agentpane--hold-attached nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer

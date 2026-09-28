@@ -1352,6 +1352,60 @@ when the stream is back, like one still attached (OW-mareju)."
             (with-current-buffer buffer
               (should (equal mode-line-process " [luna]")))))))))
 
+(ert-deftest agentpane-test-attach-answered-during-an-outage-shows-reconnecting ()
+  "A buffer whose attach answers after the helper said its event stream is
+reconnecting -- an attach in flight when the stream dropped -- leads its
+mode line with `reconnecting' at once, since no snapshot can come to
+redraw it while the stream is down (OW-mareju)."
+  (let ((ref '(:backend "claude" :id "real-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (let ((agentpane--stream-down nil)
+              (buffer (agentpane--transcript-buffer (list :ref ref))))
+          (setq hold '(sessions/attach)
+                attached (list :ref ref :handle "h1"))
+          (with-current-buffer buffer (agentpane--attach))
+          (agentpane--on-notification nil 'stream/changed '(:state "reconnecting"))
+          (funcall (cdr (pop held)) t)
+          (with-current-buffer buffer
+            (should (agentpane--attached-p))
+            (should (equal (substring-no-properties (or mode-line-process ""))
+                           " [reconnecting]"))))))))
+
+(ert-deftest agentpane-test-reconnecting-leaves-a-buffer-detached-meanwhile-and-the-next-helper ()
+  "A `session/detached' while the helper's event stream is down takes
+`reconnecting' out of the buffer's mode line at once, and it stays out when
+the helper exits before the stream is back; and a buffer attached through
+the next helper, which has said nothing of a drop, does not say
+`reconnecting' (OW-mareju)."
+  (let ((ref '(:backend "claude" :id "real-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore))
+          (let ((agentpane--stream-down nil)
+                (buffer (agentpane--transcript-buffer (list :ref ref))))
+            (setq attached (list :ref ref :handle "h1"))
+            (with-current-buffer buffer (agentpane--attach))
+            (agentpane--on-notification
+             nil 'session/snapshot
+             (list :session ref :handle "h1" :isStreaming :json-false :model "luna" :nodes []))
+            (agentpane--on-notification nil 'stream/changed '(:state "reconnecting"))
+            (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+            (with-current-buffer buffer
+              (should (equal mode-line-process " [luna]")))
+            (agentpane--helper-gone agentpane--connection)
+            (with-current-buffer buffer
+              (should (equal mode-line-process " [luna]")))
+            (setq agentpane--connection 'next-connection
+                  attached (list :ref ref :handle "h2"))
+            (with-current-buffer buffer (agentpane--attach))
+            (agentpane--on-notification
+             nil 'session/snapshot
+             (list :session ref :handle "h2" :isStreaming :json-false :model "luna" :nodes []))
+            (with-current-buffer buffer
+              (should (agentpane--attached-p))
+              (should (equal mode-line-process " [luna]")))))))))
+
 (defmacro agentpane-test--merging (&rest body)
   "Run BODY with a transcript buffer `holder' holding the session under the
 handle \"h1\" at a ref it has since left for `canonical', and a buffer
