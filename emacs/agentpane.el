@@ -37,8 +37,10 @@
 ;; next press -- `e' takes the user message at point back into the prompt
 ;; region to edit, as the browser's pencil does, so that `C-RET' forks at
 ;; that message and sends the edited text and the message's images into
-;; the fork, and `C-c C-k' abandons the edit -- `r' toggles reading view,
-;; and `q' buries.
+;; the fork, and `C-c C-k' abandons the edit -- `C-c C-e' does as `e' does
+;; on the last user message, wherever point is, and on a streaming Pi turn
+;; stops the turn too, as the browser's Edit last message and Stop and edit
+;; do -- `r' toggles reading view, and `q' buries.
 ;; Reading view is the browser's (`condense' in
 ;; src/client/render/transcript.ts): tool calls, tool results and thinking
 ;; are elided, and while a turn streams the line above the prompt names the
@@ -56,7 +58,8 @@
 ;; the model's default one when the session reports none.  A prompt is
 ;; typed in the region below the last node, or in the composer
 ;; `M-x agentpane-prompt' opens below the transcript; in both `RET' inserts
-;; a newline and `C-RET' sends, and `C-c C-a' aborts the running turn.
+;; a newline and `C-RET' sends, `C-c C-a' aborts the running turn, and
+;; `C-c C-e' edits the last user message in the transcript's prompt region.
 ;; A turn sent from this Emacs that ends while no window shows its buffer
 ;; puts a red `●agentpane' in every mode line, until a window shows it.
 ;; A buffer holds one turn error, the one the server holds: a newer one
@@ -1821,6 +1824,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "g") #'agentpane-refetch)
     (define-key map (kbd "f") #'agentpane-fork)
     (define-key map (kbd "e") #'agentpane-edit)
+    (define-key map (kbd "C-c C-e") #'agentpane-edit-last)
     (define-key map (kbd "C-c C-k") #'agentpane-cancel-edit)
     (define-key map (kbd "r") #'agentpane-toggle-reading)
     (define-key map (kbd "q") #'quit-window)
@@ -2737,10 +2741,11 @@ second press says so and sends nothing."
          (message "agentpane: the transcript now shows the live session; \
 press f again at the message to fork"))))))
 
-(defun agentpane--fork-point (index then &optional failed)
+(defun agentpane--fork-point (index then &optional failed what)
   "Fetch this attached buffer's fork points, and call THEN with the one
-naming INDEX; when none does, call FAILED, if given, and say the message is
-not forkable.  See `agentpane-fork'."
+naming INDEX; when none does, call FAILED, if given, and say the message,
+which WHAT names, \"the message at point\" when nil, is not forkable.
+See `agentpane-fork'."
   (agentpane--request
    'sessions/forkPoints (list :session (agentpane--ref agentpane--session))
    (lambda (points)
@@ -2748,7 +2753,7 @@ not forkable.  See `agentpane-fork'."
        (if point
            (funcall then point)
          (when failed (funcall failed))
-         (message "agentpane: the message at point is not forkable"))))
+         (message "agentpane: %s is not forkable" (or what "the message at point")))))
    t failed agentpane--spawn-timeout))
 
 (defun agentpane--fork-points (index &optional then failed)
@@ -2825,16 +2830,64 @@ displaced, as in the browser (OW-bigotu)."
          (node (and at (ewoc-data at))))
     (unless (equal (plist-get node :role) "user")
       (user-error "No user message at point"))
-    (cond
-     ((agentpane--attached-p)
-      (agentpane--fork-point (plist-get node :index)
-                             (lambda (_) (agentpane--start-edit node))))
-     (agentpane--attaching
-      (user-error "This session is still attaching; press e once it has"))
-     (t (agentpane--attach
+    (agentpane--edit node "e" "the message at point")))
+
+(defun agentpane-edit-last ()
+  "Take the last user message back into the prompt region to edit, as the
+browser's Edit last message does: `agentpane-edit' on that message, which
+leaves exactly the edit that would, wherever point is.  From a composer
+the edit opens in its transcript's prompt region, where it is sent from,
+and the transcript is shown.
+
+It is the last user message or none.  One no fork point names is refused
+as `agentpane-edit' refuses it, and no older message is edited instead,
+as the browser withdraws the control rather than quietly load an older
+one (OW-roveze).  A transcript holding no user message is refused too.
+
+On a streaming Pi session this also aborts the turn, as the browser's
+Stop and edit does: the send would abort it anyway (`agentpane-fork'),
+and this stops it at the press instead.  The abort goes once the points
+are matched and the edit is open, so a message that is not forkable
+costs the turn nothing, and it is not waited on, since the send checks
+for a streaming turn again and aborts it again before it forks.  Codex
+and Claude Code keep a parent turn running through a fork, and are not
+aborted."
+  (interactive)
+  (let ((composer (and (derived-mode-p 'agentpane-composer-mode) (current-buffer))))
+    (with-current-buffer (agentpane--transcript)
+      (when agentpane--forking
+        (user-error "A fork of this session is already in flight"))
+      (let ((at (ewoc-nth (agentpane--ewoc) -1)))
+        (while (and at (not (equal (plist-get (ewoc-data at) :role) "user")))
+          (setq at (ewoc-prev agentpane--ewoc at)))
+        (unless at
+          (user-error "No user message to edit"))
+        (agentpane--edit
+         (ewoc-data at) "C-c C-e" "the last message"
          (lambda ()
-           (message "agentpane: the transcript now shows the live session; \
-press e again at the message to edit")))))))
+           (when (and agentpane--streaming
+                      (equal (plist-get (agentpane--ref agentpane--session) :backend) "pi"))
+             (agentpane-abort))
+           (when composer
+             (pop-to-buffer (current-buffer)))))))))
+
+(defun agentpane--edit (node key what &optional then)
+  "Open the edit of NODE, a user node, once a fork point names it, and call
+THEN, if given, once it is open; the body of `agentpane-edit', which see.
+KEY is the command's key and WHAT names the message, for the echo area."
+  (cond
+   ((agentpane--attached-p)
+    (agentpane--fork-point (plist-get node :index)
+                           (lambda (_)
+                             (agentpane--start-edit node)
+                             (when then (funcall then)))
+                           nil what))
+   (agentpane--attaching
+    (user-error "This session is still attaching; press %s once it has" key))
+   (t (agentpane--attach
+       (lambda ()
+         (message "agentpane: the transcript now shows the live session; \
+press %s again to edit %s" key what))))))
 
 (defun agentpane--start-edit (node)
   "Open the edit of NODE, a user node, in this buffer; see `agentpane-edit'.
@@ -3004,13 +3057,15 @@ in the echo area, and the effort read for it is never sent."
     (define-key map (kbd "C-<return>") #'agentpane-composer-send)
     (define-key map (kbd "C-c C-k") #'agentpane-composer-discard)
     (define-key map (kbd "C-c C-a") #'agentpane-abort)
+    (define-key map (kbd "C-c C-e") #'agentpane-edit-last)
     map)
   "Keymap for `agentpane-composer-mode'.")
 
 (define-derived-mode agentpane-composer-mode text-mode "agentpane-composer"
   "Major mode for drafting a prompt to an agentpane session, as for a commit
 message: `C-c C-c' or `C-RET' sends, `C-c C-k' discards, `C-c C-a' aborts
-the running turn.
+the running turn, `C-c C-e' edits the last user message in the
+transcript's prompt region.
 \\{agentpane-composer-mode-map}")
 
 (defun agentpane--composer-name ()

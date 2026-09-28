@@ -2576,6 +2576,145 @@ nothing, leaving the edit, the prompt region's text and the composer's."
         (should (equal (agentpane-test--draft) "Fix the bug")))
       (should-not sent))))
 
+;;;; Editing the last message, against a stub connection
+
+(defconst agentpane-test--two-asks
+  [(:index 0 :role "user"
+    :parts [(:type "text" :text "first draft" :html "<p>first draft</p>\n")])
+   (:index 1 :role "assistant"
+    :parts [(:type "text" :text "an answer" :html "<p>an answer</p>\n")]
+    :meta (:model "haiku" :usage (:totalTokens 12 :cost 0.001)))
+   (:index 2 :role "user"
+    :parts [(:type "text" :text "second draft" :html "<p>second draft</p>\n")
+            (:type "image" :mimeType "image/png" :data "AAAA")])
+   (:index 3 :role "assistant"
+    :parts [(:type "text" :text "another answer" :html "<p>another answer</p>\n")]
+    :meta (:model "haiku" :usage (:totalTokens 12 :cost 0.001)))]
+  "Two user messages, the last holding an image, each answered.")
+
+(defconst agentpane-test--two-asks-points
+  [(:id "entry-0" :text "first draft" :index 0) (:id "entry-2" :text "second draft" :index 2)]
+  "Fork points naming both user messages of `agentpane-test--two-asks'.")
+
+(defun agentpane-test--edit-snapshot ()
+  "Everything this buffer's edit is observable as: the prompt region's text,
+the edit's index, images and displaced draft, and what the separator says."
+  (list :draft (agentpane-test--draft)
+        :index (plist-get agentpane--editing :index)
+        :images (plist-get agentpane--editing :images)
+        :displaced (plist-get agentpane--editing :draft)
+        :separator (and agentpane--editing
+                        (substring-no-properties
+                         (overlay-get (plist-get agentpane--editing :overlay) 'display)))))
+
+(defun agentpane-test--edit-last-streaming (backend)
+  "Edit the last message of a streaming BACKEND session, holding any abort's
+reply.  Return the methods sent, in order, and the edit's snapshot, taken
+while the abort, if any, is still unanswered."
+  (let ((ref (list :backend backend :id "parent")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "first draft" :index 0)]
+          (list :backend backend :id "fork")
+        (agentpane-test--with-session ref
+          (agentpane--draw (seq-take agentpane-test--two-asks 2))
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t)
+          (setq hold '(sessions/abort))
+          (agentpane--on-notification
+           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+          (goto-char (point-max))
+          (agentpane-edit-last)
+          (list (mapcar #'car (reverse sent))
+                (agentpane-test--edit-snapshot)))))))
+
+(ert-deftest agentpane-test-edit-last-stops-a-streaming-pi-turn ()
+  "`agentpane-edit-last' on a streaming Pi session takes the last message
+back into the prompt region and aborts the turn at the press, as the
+browser's Stop and edit does, after the points are matched and without
+waiting on the abort to fill; a streaming Codex session is not aborted
+(OW-relehi, D15)."
+  (let ((filled (list :draft "first draft" :index 0 :images nil :displaced ""
+                      :separator "── editing “first draft” · C-RET forks there · C-c C-k cancels ──")))
+    (should (equal (agentpane-test--edit-last-streaming "pi")
+                   (list '(sessions/forkPoints sessions/abort) filled)))
+    (should (equal (agentpane-test--edit-last-streaming "codex")
+                   (list '(sessions/forkPoints) filled)))))
+
+(ert-deftest agentpane-test-edit-last-leaves-the-state-edit-does ()
+  "`agentpane-edit-last', from the transcript or from its composer, leaves
+exactly the edit `agentpane-edit' on the last user message leaves, and
+sends no more than it does (OW-relehi).  From the composer the edit opens
+in the transcript's prompt region, and the transcript is shown."
+  (let (snapshots requests)
+    (dolist (how '(at-point last from-composer))
+      (agentpane-test--with-helper
+        (agentpane-test--forking
+            agentpane-test--two-asks-points
+            '(:backend "codex" :id "fork")
+          (agentpane-test--with-session '(:backend "codex" :id "parent")
+            (agentpane--draw agentpane-test--two-asks)
+            (setq agentpane--attached 'connection)
+            (goto-char (point-max))
+            (insert "a draft")
+            (pcase how
+              ('at-point (agentpane-test--goto-index 2) (agentpane-edit))
+              ('last (agentpane-test--goto-index 0) (agentpane-edit-last))
+              ('from-composer
+               (let ((transcript (current-buffer)))
+                 (agentpane-prompt)
+                 (with-current-buffer (buffer-local-value 'agentpane--composer transcript)
+                   (insert "composed")
+                   (agentpane-edit-last)
+                   (should (equal (buffer-string) "composed")))
+                 (should (eq (window-buffer (selected-window)) transcript))
+                 (set-buffer transcript))))
+            (push (agentpane-test--edit-snapshot) snapshots)
+            (push (mapcar #'car (reverse sent)) requests)))))
+    (should (equal (car (last snapshots))
+                   (list :draft "second draft" :index 2
+                         :images '((:mimeType "image/png" :base64 "AAAA"))
+                         :displaced "a draft"
+                         :separator "── editing “second draft” · C-RET forks there · C-c C-k cancels ──")))
+    (should (equal (delete-dups snapshots) (last snapshots)))
+    (should (equal requests '((sessions/forkPoints) (sessions/forkPoints) (sessions/forkPoints))))))
+
+(ert-deftest agentpane-test-edit-last-refused-when-the-last-is-not-a-fork-point ()
+  "`agentpane-edit-last' whose last user message no fork point names edits
+nothing, never an older message a point does name, says it is not
+forkable, and stops no streaming Pi turn (OW-roveze); on a transcript
+holding no user message it refuses and sends nothing."
+  (let ((ref '(:backend "pi" :id "parent")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "first draft" :index 0)]
+          '(:backend "pi" :id "fork")
+        (agentpane-test--with-session ref
+          (agentpane--draw agentpane-test--two-asks)
+          (setq agentpane--attached 'connection
+                agentpane--attach-sent t)
+          (agentpane--on-notification
+           nil 'session/status (list :session ref :isStreaming t :compaction nil :model nil))
+          (agentpane-edit-last)
+          (should (equal (mapcar #'car sent) '(sessions/forkPoints)))
+          (should (seq-some (lambda (text) (string-search "not forkable" text)) said))
+          (should-not agentpane--editing)
+          (should (equal (agentpane-test--draft) ""))
+          (setq sent nil)
+          (agentpane--draw (seq-drop agentpane-test--two-asks 3))
+          (should-error (agentpane-edit-last) :type 'user-error)
+          (should-not sent))))))
+
+(ert-deftest agentpane-test-edit-last-bound-where-a-prompt-is-typed ()
+  "`agentpane-edit-last' is on `C-c C-e' in the transcript, the prompt region
+included, whose map leaves it to fall through, and in the composer."
+  (agentpane-test--with-session '(:backend "codex" :id "t1")
+    (goto-char (point-max))
+    (should (eq (key-binding (kbd "C-c C-e") t nil (point)) #'agentpane-edit-last))
+    (agentpane-test--goto-index 0)
+    (should (eq (key-binding (kbd "C-c C-e") t nil (point)) #'agentpane-edit-last)))
+  (should (eq (lookup-key agentpane-composer-mode-map (kbd "C-c C-e")) #'agentpane-edit-last)))
+
 ;;;; Sending, against a stub connection
 
 (ert-deftest agentpane-test-one-send-at-a-time ()
