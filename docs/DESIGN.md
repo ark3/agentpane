@@ -1049,6 +1049,8 @@ The browser's pane stored its preview beside the selection and read "live" from 
 The pane's mode is derived instead, by a fixed precedence: live when the tab holds a view of the selected session, and the composer only then; preview when it holds a preview and no view; otherwise detached and loading, which draws the Attach button over an empty pane, the owner preferring an honest empty pane to a stale transcript.
 One place fetches the preview, once the stream is up, and the listing alone owns a row's `status`.
 That is OW-forinu.
+Built the same day: `paneMode` in `src/client/controller.ts` is the derivation, `publish` fetches the detached-loading pane's preview, and an attach reply keeps the listed row's `status`, a row no listing has named yet reading `detached`.
+A stream drop now keeps a selection whose transcript is on disk, on the detached-loading pane, and still clears one with nothing on disk.
 
 agentpane-mode bound a buffer to a handle on two channels, the attach reply and the helper's snapshot, so a reply that landed after a gap or behind a synchronous request rebound a buffer the helper no longer fed (OW-tifiva, OW-kifuhi).
 The helper's notifications alone say a buffer is attached: from a snapshot under its handle until a `session/detached` or the helper's death; the reply only ends the request.

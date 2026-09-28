@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 	import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
-	import type { AgentpaneController, ControllerView } from "./controller.ts";
+	import { paneMode, type AgentpaneController, type ControllerView } from "./controller.ts";
 	import {
 		emptyTurnWatch,
 		setFaviconBadge,
@@ -243,8 +243,21 @@
 	const filteredSummaries = $derived(
 		workspace === ALL_WORKSPACES ? sortedSummaries : sortedSummaries.filter((summary) => summary.cwd === workspace),
 	);
+	/**
+	 * What the pane shows for the selection: live, its preview, or detached and
+	 * loading; null with nothing selected, the startup view. Derived, and never
+	 * read off whether a preview is stored (`paneMode` in `controller.ts`,
+	 * OW-forinu).
+	 */
+	const mode = $derived(paneMode(view));
 	/** Whether the pane is showing a read-only preview rather than a live/attached transcript. */
-	const previewing = $derived(view.preview !== null);
+	const previewing = $derived(mode === "preview");
+	/**
+	 * Whether the selection is detached in this tab, previewed or loading: the
+	 * Attach button stands where the composer would. Loading draws it over an
+	 * empty pane, which the owner chose over the last live transcript.
+	 */
+	const detachedPane = $derived(mode === "preview" || mode === "loading");
 	/** The preview's store timestamps converted for the one Transcript both paths share. */
 	const previewMessageList = $derived(
 		view.preview ? previewMessages(view.preview.turns) : [],
@@ -965,9 +978,12 @@
 			if (top) void controller.preview(top.ref);
 		} else if (view.state.selected === null && top && autoPreviewedKey !== topKey && view.connection !== "reconnecting") {
 			// Startup: sessions arrived after the filter had already settled. Or a
-			// stream drop cleared a live selection (D25), which waits for the
-			// stream: the server it is taken to have lost cannot answer a preview,
-			// and the failed fetch would sit in the error slot past the outage.
+			// stream drop cleared a selection with nothing on disk (D25), which
+			// waits for the stream: the server it is taken to have lost cannot
+			// answer a preview, and the failed fetch would sit in the error slot
+			// past the outage. A selection with a transcript on disk survives the
+			// drop, and the controller reads its preview once the stream is back
+			// (OW-forinu).
 			autoPreviewedKey = topKey;
 			void controller.preview(top.ref);
 		}
@@ -1055,9 +1071,9 @@
 
 	/**
 	 * End the selected conversation's subprocess. A session with a transcript on
-	 * disk stays on it, now a read-only preview (OW-tewave); one with nothing on
-	 * disk lands on the startup view (OW-vasubu). `detach()` in `controller.ts`
-	 * says why.
+	 * disk stays selected, its pane detached until the controller's read of its
+	 * preview lands (OW-tewave, OW-forinu); one with nothing on disk lands on the
+	 * startup view (OW-vasubu). `detach()` in `controller.ts` says why.
 	 */
 	function detachSession(): void {
 		void controller.detach();
@@ -1076,9 +1092,13 @@
 		void controller.preview(ref);
 	}
 
-	/** Promote a read-only preview into a live session via the existing attach path, then focus the prompt. */
+	/**
+	 * Attach the selection through the existing attach path, then focus the
+	 * prompt. The selection and not the preview's ref: a detached-loading pane
+	 * has no preview to read one from (OW-forinu).
+	 */
 	async function attachSelected(): Promise<void> {
-		const ref = view.preview?.ref;
+		const ref = view.state.selected;
 		if (!ref) return;
 		await controller.select(ref);
 		await tick();
@@ -1421,7 +1441,7 @@
 		</button>
 	</nav>
 
-	{#if previewing}
+	{#if detachedPane}
 		<div class="prompt attach">
 			<button type="button" onclick={() => void attachSelected()}>Attach</button>
 		</div>

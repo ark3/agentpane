@@ -13,7 +13,7 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
-import { createController, type AgentpaneController } from "./controller.ts";
+import { createController, paneMode, type AgentpaneController } from "./controller.ts";
 import { sessionKey } from "$shared/protocol.ts";
 
 const ref: SessionRef = { backend: "pi", id: "virtual-a" };
@@ -65,6 +65,15 @@ function previewAssistant(text: string): SessionPreviewTurn {
  */
 function viewAt(controller: AgentpaneController, session: SessionRef) {
 	return Object.values(controller.getView().state.sessions).find((view) => sessionKey(view.ref) === sessionKey(session));
+}
+
+/**
+ * The snapshot that introduces a live view of `session` in this tab, which is
+ * the only thing that makes its pane live (OW-forinu): an attach reply alone
+ * leaves it detached.
+ */
+function snapshotOf(session: SessionRef, handle = h(session)): ServerEvent {
+	return { type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] };
 }
 
 /** Let every microtask and the timer-free tail of an in-flight refresh run out. */
@@ -458,7 +467,12 @@ describe("client controller", () => {
 		await selectingFirst;
 
 		expect(controller.getView().state.selected).toEqual(secondRef);
-		expect(controller.getView().state.summaries).toEqual([summary(secondRef), summary(firstRef)]);
+		// No listing has named either, and an attach reply writes no `status`
+		// (OW-wazija): the listing that follows each attach is what says attached.
+		expect(controller.getView().state.summaries).toEqual([
+			{ ...summary(secondRef), status: "detached" },
+			{ ...summary(firstRef), status: "detached" },
+		]);
 	});
 
 	it("ignores a stale create response after a newer selection completes", async () => {
@@ -487,7 +501,9 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		api.prompt.mockRejectedValue(new Error("offline"));
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("keep me");
 
 		await controller.submit();
@@ -527,7 +543,9 @@ describe("client controller", () => {
 	it("clears the draft only after the prompt is accepted", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("send me");
 
 		await controller.submit();
@@ -541,7 +559,9 @@ describe("client controller", () => {
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("send me once");
 
 		const first = controller.submit();
@@ -574,6 +594,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("hello");
 		const submitted = controller.submit();
 
@@ -598,6 +619,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("hello");
 		const first = controller.submit();
 
@@ -634,7 +656,9 @@ describe("client controller", () => {
 		const prompt = deferred<void>();
 		api.prompt.mockReturnValue(prompt.promise);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("send me");
 
 		const submitted = controller.submit();
@@ -650,7 +674,9 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		api.attach.mockResolvedValue(summary(attachedRef));
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(attachedRef));
 
 		await controller.abort();
 
@@ -679,8 +705,10 @@ describe("client controller", () => {
 		api.abort.mockRejectedValueOnce(new Error("abort failed"));
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
 		await controller.abort();
 		api.attach.mockClear();
 
@@ -691,6 +719,7 @@ describe("client controller", () => {
 		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		expect(controller.getView().state.selected).toEqual(ref);
+		expect(paneMode(controller.getView())).toBe("preview");
 		expect(controller.getView().preview).toEqual({ ref, turns: [] });
 		// Not a gesture, so it empties no mail the user has not read.
 		expect(controller.getView().error).toBe("abort failed");
@@ -704,9 +733,12 @@ describe("client controller", () => {
 		api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
 		api.attach.mockClear();
+		api.preview.mockClear();
 
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
@@ -725,8 +757,11 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
+		api.preview.mockClear();
 		const renamed: SessionRef = { backend: "pi", id: "/sessions/renamed.jsonl" };
 
 		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
@@ -741,11 +776,13 @@ describe("client controller", () => {
 
 	it("leaves a gapped selection on the startup view when its preview cannot be read (OW-lunihe)", async () => {
 		const api = new FakeApi();
-		api.preview.mockRejectedValueOnce(new Error("preview failed"));
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
+		api.preview.mockRejectedValueOnce(new Error("preview failed"));
 
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
@@ -763,8 +800,10 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
 		const previewing = deferred<SessionPreviewResponse>();
 		api.preview.mockReturnValueOnce(previewing.promise);
 		const attaching = deferred<LiveSessionSummary>();
@@ -778,7 +817,8 @@ describe("client controller", () => {
 		await settle();
 
 		expect(controller.getView().state.selected).toEqual(attachedRef);
-		expect(controller.getView().preview).toBeNull();
+		// The click's own row loaded its preview, and the gap's never replaced it.
+		expect(controller.getView().preview).toEqual({ ref: attachedRef, turns: [] });
 		expect(controller.getView().busy).toBe("idle");
 		controller.dispose();
 	});
@@ -789,8 +829,10 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
 		const previewing = deferred<SessionPreviewResponse>();
 		api.preview.mockReturnValueOnce(previewing.promise);
 
@@ -801,19 +843,23 @@ describe("client controller", () => {
 
 		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
 		expect(controller.getView().state.selected).toEqual(ref);
+		expect(paneMode(controller.getView())).toBe("live");
 		expect(controller.getView().preview).toBeNull();
 		controller.dispose();
 	});
 
 	// The attach reply and its snapshot are unordered (D2), so the gap's preview
 	// can resolve between them, when the selection names the session and no
-	// view is back yet; landing it then leaves a preview over a live session.
-	it("does not land the gap's preview over an attach of the same session made while it was out (OW-lunihe)", async () => {
+	// view is back yet. It lands then, and the snapshot outranks it (`paneMode`).
+	it("goes live over the gap's preview once the attach of the same session made while it was out brings its snapshot (OW-lunihe, OW-forinu)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await settle();
+		api.preview.mockClear();
 		const previewing = deferred<SessionPreviewResponse>();
 		api.preview.mockReturnValueOnce(previewing.promise);
 
@@ -822,11 +868,15 @@ describe("client controller", () => {
 		previewing.resolve({ ref, turns: [] });
 		await settle();
 
-		expect(controller.getView().preview).toBeNull();
+		// The reply beat its snapshot, and in that window the pane is not live,
+		// whatever it shows: one read, the gap's, served both.
+		expect(api.preview).toHaveBeenCalledOnce();
 		expect(controller.getView().state.selected).toEqual(ref);
+		expect(paneMode(controller.getView())).not.toBe("live");
 
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
+		expect(paneMode(controller.getView())).toBe("live");
 		expect(controller.getView().preview).toBeNull();
 		controller.dispose();
 	});
@@ -858,6 +908,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("hello");
 		const submitted = controller.submit();
 
@@ -884,6 +935,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("hello");
 		const first = controller.submit();
 
@@ -957,8 +1009,8 @@ describe("client controller", () => {
 	});
 
 	// Both orderings, because the detach must not depend on the broadcast: the
-	// re-list is what `replaceSessionSummaries` drops a live view from, and
-	// `preview` short-circuits on a session this client still has attached, so
+	// re-list is what `replaceSessionSummaries` drops a live view from, and until
+	// the view goes the pane reads live and nothing fetches its preview, so
 	// whichever wins the race the view has to be gone and the preview on screen.
 	for (const relistFirst of [true, false]) {
 		const when = relistFirst ? "before" : "after";
@@ -966,6 +1018,7 @@ describe("client controller", () => {
 			const api = new FakeApi();
 			const controller = createController(api);
 			await controller.start();
+			api.open();
 			await controller.select(ref);
 			api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 			const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
@@ -996,6 +1049,7 @@ describe("client controller", () => {
 			const detachedView = controller.getView();
 			expect(detachedView.state.sessions[h(ref)]).toBeUndefined();
 			expect(detachedView.state.selected).toEqual(ref);
+			expect(paneMode(detachedView)).toBe("preview");
 			expect(detachedView.preview).toEqual({ ref, turns });
 			expect(detachedView.state.summaries).toEqual([detachedSummary]);
 			controller.dispose();
@@ -1008,20 +1062,22 @@ describe("client controller", () => {
 	// pressed Refresh: the exact untruthful indicator Detach exists to clear
 	// (OW-lejahi). The detach itself no longer asks for that listing; the
 	// reconnect does (D21), so the stripe clears when the stream comes back and
-	// no broadcast is needed anywhere in this test. The attach comes after the
-	// drop because the drop itself takes every live selection down (D25), so
-	// only a session attached while the stream is still down is one to detach
-	// here; its snapshot cannot arrive until the stream does.
+	// no broadcast is needed anywhere in this test. The row is lit by a Refresh
+	// taken after the drop, because the drop itself reads every row detached
+	// (D25) and an attach reply lights nothing (OW-wazija): only a listing lit
+	// while the stream is still down is one only the reconnect can put out.
 	it("clears a detached row's stripe at the reconnect when no broadcast followed the detach", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		api.open();
-		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
-		api.listSessions.mockResolvedValue([detachedSummary]);
 
 		api.drop();
+		await controller.refreshSessions();
 		await controller.select(ref);
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+		const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
+		api.listSessions.mockResolvedValue([detachedSummary]);
 		await controller.detach();
 		await settle();
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
@@ -1137,10 +1193,10 @@ describe("client controller", () => {
 	// so the tab holds nothing live the moment it happens, rather than waiting
 	// for the reconnect's listing to pair each view with a `detached` summary --
 	// which a restarted server never lists for a view a rename moved (OW-fiheli).
-	// The selection goes with its view: left standing with neither a view nor a
-	// preview, it is a composer whose Send meets a server holding nothing.
+	// A selection with a transcript on disk stays, on the detached-loading pane,
+	// whose preview waits for a server that can answer it (OW-forinu).
 	for (const fatal of [false, true]) {
-		it(`drops every live view at once, and the selection with them, when the stream drops${fatal ? " fatally" : ""}`, async () => {
+		it(`drops every live view at once, leaving the selection detached, when the stream drops${fatal ? " fatally" : ""}`, async () => {
 			const api = new FakeApi();
 			const streaming = { ...summary(ref), isStreaming: true };
 			const virtual = { ...summary(virtualRef), status: "virtual" as const, onDisk: false };
@@ -1157,11 +1213,14 @@ describe("client controller", () => {
 			controller.setDraft("sent to nobody");
 			expect(Object.keys(controller.getView().state.sessions)).toHaveLength(2);
 
+			api.preview.mockClear();
+
 			api.drop(fatal);
 
 			expect(controller.getView().state.sessions).toEqual({});
-			expect(controller.getView().state.selected).toBeNull();
-			expect(controller.getView().preview).toBeNull();
+			expect(controller.getView().state.selected).toEqual(attachedRef);
+			expect(paneMode(controller.getView())).toBe("loading");
+			expect(api.preview).not.toHaveBeenCalled();
 			// The rows say so too: nothing on disk is gone with the server, and the
 			// rest read detached and idle, keeping the handle a reconnect's opening
 			// snapshot pairs by.
@@ -1175,6 +1234,30 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 	}
+
+	// Nothing on disk went with the server: there is nothing left to preview,
+	// and the preview the server would answer is an empty one whose Attach can
+	// only 404 (OW-vasubu), so the selection goes with the row.
+	it("clears a live selection with nothing on disk when the stream drops", async () => {
+		const api = new FakeApi();
+		api.listSessions.mockResolvedValue([{ ...summary(forkedRef), onDisk: false }]);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		api.emit(opening(forkedRef));
+		await controller.preview(forkedRef);
+		expect(paneMode(controller.getView())).toBe("live");
+		api.preview.mockClear();
+
+		api.drop();
+		expect(controller.getView().state.summaries).toEqual([]);
+		api.open();
+		await settle();
+
+		expect(controller.getView().state.selected).toBeNull();
+		expect(api.preview).not.toHaveBeenCalled();
+		controller.dispose();
+	});
 
 	// A preview is not live, so the drop leaves it on screen with its Attach,
 	// and its own poll re-reads it once the server answers again.
@@ -1238,9 +1321,9 @@ describe("client controller", () => {
 
 	// The reconnect publishes `connected` before its opening snapshots arrive,
 	// so App's auto-select can ask for a preview of a session the snapshot then
-	// re-introduces while the fetch is out. Landing that preview would put a
-	// read-only transcript over a live session, which `ControllerView.preview`
-	// rules out.
+	// re-introduces while the fetch is out. The pane reads live over it either
+	// way (`paneMode`), and the reselect is what gives the live selection its
+	// model list and pending flags.
 	it("reselects the live session when a snapshot introduces it during its preview fetch", async () => {
 		const api = new FakeApi();
 		const fetch = deferred<SessionPreviewResponse>();
@@ -1366,9 +1449,12 @@ describe("client controller", () => {
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.create("/work", "pi");
 		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(createdRef);
+		await settle();
+		api.preview.mockClear();
 
 		await controller.detach();
 		await settle();
@@ -1396,11 +1482,15 @@ describe("client controller", () => {
 		);
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 		expect((await controller.forkAndSubmit(0))?.ref).toEqual(forkedRef);
 		api.emit({ type: "snapshot", session: forkedRef, handle: h(forkedRef), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		expect(controller.getView().state.selected).toEqual(forkedRef);
+		await settle();
+		api.preview.mockClear();
 
 		await controller.detach();
 		await settle();
@@ -1422,11 +1512,13 @@ describe("client controller", () => {
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.create("/work", "pi");
 		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		api.listSessions.mockResolvedValue([{ ...summary(createdRef), onDisk: true }]);
 		api.emit({ type: "sessions-changed" });
 		await settle();
+		api.preview.mockClear();
 
 		await controller.detach();
 		await settle();
@@ -1465,6 +1557,7 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
+		api.open();
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		const closing = deferred<void>();
@@ -1685,6 +1778,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 
 		const compacted = controller.compact();
 
@@ -1783,7 +1877,9 @@ describe("client controller", () => {
 			{ id: "turn-3", text: "same words", index: 4 },
 		]);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		await controller.forkAndSubmit(2);
@@ -1817,7 +1913,9 @@ describe("client controller", () => {
 			{ id: "turn-2", text: "second", index: 4 },
 		]);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		expect((await controller.forkAndSubmit(4))?.ref).toEqual(forkedRef);
@@ -1843,7 +1941,9 @@ describe("client controller", () => {
 			{ id: "turn-3", text: "third", index: 6 },
 		]);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		expect(await controller.forkAndSubmit(2)).toBeNull();
@@ -1860,6 +1960,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		api.attach.mockClear();
 		controller.setDraft("reworded");
 
@@ -1936,6 +2037,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
@@ -1991,6 +2093,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		// After the select: attaching a session refreshes its fork points for the
 		// transcript's Edit controls (OW-roveze), and that read is not this one.
 		api.forkPoints.mockClear();
@@ -2054,6 +2157,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
@@ -2092,6 +2196,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
@@ -2111,9 +2216,12 @@ describe("client controller", () => {
 	 * `selectionIntent` -- but `applyAttached`'s residual moves the selection
 	 * anyway, because the selection it finds is already the fork. The live
 	 * transcript then has to take over from the read-only preview that click
-	 * opened, or the user reads a frozen copy of a session that is streaming.
+	 * opened, or the user reads a frozen copy of a session that is streaming;
+	 * it does once the fork's snapshot gives this tab a view (`paneMode`,
+	 * OW-forinu), and the preview stays until then only because nothing live
+	 * has replaced it.
 	 */
-	it("clears the preview when the click it declined to overtake landed on the fork itself (OW-tatebi)", async () => {
+	it("goes live over the preview the declined click opened on the fork itself, once the fork's snapshot lands (OW-tatebi)", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		api.fork.mockResolvedValue(forkedRef);
@@ -2121,6 +2229,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		const attachingFork = deferred<LiveSessionSummary>();
@@ -2130,11 +2239,13 @@ describe("client controller", () => {
 		// The fork is listed by now, and the click lands on it while its own
 		// attach is still in flight.
 		await controller.preview(forkedRef);
-		expect(controller.getView().preview).not.toBeNull();
+		expect(paneMode(controller.getView())).toBe("preview");
 		attachingFork.resolve(summary(forkedRef));
 
 		expect((await submitted)?.ref).toEqual(forkedRef);
 		expect(controller.getView().state.selected).toEqual(forkedRef);
+		api.emit(snapshotOf(forkedRef));
+		expect(paneMode(controller.getView())).toBe("live");
 		expect(controller.getView().preview).toBeNull();
 		controller.dispose();
 	});
@@ -2153,6 +2264,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		// The attach's own fork-points read (OW-roveze) is not one of the two this
 		// test is counting.
 		api.forkPoints.mockClear();
@@ -2187,6 +2299,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		const submitted = controller.forkAndSubmit(0);
@@ -2214,6 +2327,7 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("hello");
 		const first = controller.submit();
 		await settle();
@@ -2233,7 +2347,9 @@ describe("client controller", () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
 		const controller = createController(api);
+		await controller.start();
 		await controller.select(ref);
+		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
 		expect(await controller.forkAndSubmit(4)).toBeNull();
@@ -2496,6 +2612,164 @@ describe("client controller", () => {
 			} finally {
 				vi.useRealTimers();
 			}
+		});
+	});
+
+	/**
+	 * The pane's mode is derived from what the tab holds for the selected
+	 * session, live first (OW-forinu): each path that adds or drops a view used
+	 * to keep a stored preview paired with it by hand, and these are the
+	 * orderings where that pairing slipped.
+	 */
+	describe("the pane's mode", () => {
+		// Another client closes S while S is selected here; the stream is up, so
+		// the server answers the preview S's pane now needs.
+		it("previews a selected session a listing evicts, and sends it nothing (OW-zivamo)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			expect(paneMode(controller.getView())).toBe("live");
+			api.preview.mockClear();
+			api.preview.mockResolvedValue({ ref, turns });
+			api.listSessions.mockResolvedValueOnce([{ ...summary(ref), status: "detached", isStreaming: false }]);
+
+			api.emit({ type: "sessions-changed" });
+			await settle();
+
+			expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref);
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.setDraft("sent to nobody");
+			expect(await controller.submit()).toBe(false);
+			expect(api.prompt).not.toHaveBeenCalled();
+			controller.dispose();
+		});
+
+		// The server answered the attach just before it exited, and the tab handled
+		// the stream's error before the reply (D25 point 3).
+		for (const path of ["select", "create", "forkAndSubmit"] as const) {
+			it(`lands an attach reply that follows a stream drop on a pane that is not live, through ${path} (OW-wazija)`, async () => {
+				const api = new FakeApi();
+				api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+				const created: SessionRef = { backend: "pi", id: "virtual:created" };
+				api.createSession.mockResolvedValue(created);
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				if (path === "forkAndSubmit") {
+					await controller.select(ref);
+					api.emit(snapshotOf(ref));
+					controller.setDraft("reworded");
+				}
+				const target = path === "select" ? ref : path === "create" ? created : forkedRef;
+				const attaching = deferred<LiveSessionSummary>();
+				api.attach.mockReturnValueOnce(attaching.promise);
+
+				const landing = path === "select"
+					? controller.select(ref)
+					: path === "create"
+						? controller.create("/work", "pi")
+						: controller.forkAndSubmit(0);
+				await settle();
+				expect(api.attach).toHaveBeenLastCalledWith(target);
+				api.drop();
+				attaching.resolve({ ...summary(target), onDisk: path === "select" });
+				await landing;
+				await settle();
+
+				const landed = controller.getView();
+				expect(landed.state.selected).toEqual(target);
+				expect(paneMode(landed)).not.toBe("live");
+				expect(landed.state.summaries.filter((item) => item.status === "attached")).toEqual([]);
+				expect(landed.busy).toBe("idle");
+				api.prompt.mockClear();
+				controller.setDraft("sent to nobody");
+				expect(await controller.submit()).toBe(false);
+				expect(api.prompt).not.toHaveBeenCalled();
+				controller.dispose();
+			});
+		}
+
+		// The attach's snapshot beats its reply (D2), a gap then drops the view it
+		// made, and only then does the reply select the session.
+		it("lands an attach whose snapshot's view a gap dropped before the reply on the detached-loading pane (OW-tefigi)", async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			const previewing = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValue(previewing.promise);
+			const attaching = deferred<LiveSessionSummary>();
+			api.attach.mockReturnValueOnce(attaching.promise);
+
+			const selecting = controller.select(ref);
+			api.emit(snapshotOf(ref));
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+			attaching.resolve(summary(ref));
+			await selecting;
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("loading");
+			expect(api.preview).toHaveBeenCalledWith(ref);
+			controller.setDraft("sent to nobody");
+			expect(await controller.submit()).toBe(false);
+			expect(api.prompt).not.toHaveBeenCalled();
+			controller.dispose();
+		});
+
+		// Another client's attach, a gap on the selected session followed by any
+		// snapshot of it, or a reconnect's opening snapshot over a kept preview.
+		it("goes live when a snapshot introduces a view of the session whose preview is on screen (OW-tefigi)", async () => {
+			const api = new FakeApi();
+			api.preview.mockResolvedValue({ ref, turns: [previewAssistant("stored")] });
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.preview(ref);
+			expect(paneMode(controller.getView())).toBe("preview");
+
+			api.emit(snapshotOf(ref));
+
+			expect(paneMode(controller.getView())).toBe("live");
+			// Discarded, not merely outranked, so its poll has nothing to re-read.
+			expect(controller.getView().preview).toBeNull();
+			controller.dispose();
+		});
+
+		// A drop leaves a session with a transcript on disk selected, and its
+		// preview waits for a server that can answer it (D25 point 3).
+		it("keeps a dropped selection detached-loading, and fetches its preview only once the stream is back (OW-forinu)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.preview.mockClear();
+			api.preview.mockResolvedValue({ ref, turns });
+
+			api.drop();
+			await settle();
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("loading");
+			expect(api.preview).not.toHaveBeenCalled();
+
+			api.open();
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref);
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
 		});
 	});
 });

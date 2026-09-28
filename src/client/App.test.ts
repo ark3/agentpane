@@ -690,11 +690,13 @@ describe("App", () => {
 		// entry inherits the selected session's own backend. The selected session
 		// is codex; the backend select stays on its default. Inheriting the
 		// backend is what this asserts -- so the created backend is codex, not the
-		// select's value.
+		// select's value. Live, since the composer is drawn only over a session
+		// this tab holds a view of (OW-forinu).
 		const controller = new FakeController(view({
 			state: state({
 				selected: codexSession,
 				summaries: [summary(codexSession, "C", { cwd: "/work/project" })],
+				sessions: { [sessionKey(codexSession)]: { ref: codexSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] } },
 			}),
 		}));
 		render(App, { props: { controller } });
@@ -714,7 +716,11 @@ describe("App", () => {
 
 	it("the composer's Compact tool compacts the selected session (OW-72)", async () => {
 		const controller = new FakeController(view({
-			state: state({ selected: piSession, summaries: [summary(piSession, "P")] }),
+			state: state({
+				selected: piSession,
+				summaries: [summary(piSession, "P")],
+				sessions: { [sessionKey(piSession)]: { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null, requests: [] } },
+			}),
 		}));
 		render(App, { props: { controller } });
 
@@ -948,12 +954,13 @@ describe("App", () => {
 		expect(controller.previewed).toEqual([piSession]);
 	});
 
-	// A drop clears a live selection (D25), and the server it is taken to have
-	// lost cannot answer a preview: an auto-select then would only fill the
-	// error slot with a failed fetch that outlives the outage. It waits for the
-	// stream instead and then asks as startup does; where the reconnect's
-	// opening snapshot has put the session back by the time the fetch returns,
-	// `controller.preview` reselects it live rather than previewing it.
+	// A drop clears a selection with nothing on disk (D25, OW-forinu), and the
+	// server it is taken to have lost cannot answer a preview: an auto-select
+	// then would only fill the error slot with a failed fetch that outlives the
+	// outage. It waits for the stream instead and then asks as startup does;
+	// where the reconnect's opening snapshot has put the session back by the
+	// time the fetch returns, `controller.preview` reselects it live rather than
+	// previewing it.
 	it("does not auto-select while the stream is reconnecting, and does once it is back", async () => {
 		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
 		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });
@@ -1019,6 +1026,23 @@ describe("App", () => {
 		await tick();
 		await tick();
 		expect(screen.getByLabelText("Prompt")).toHaveFocus();
+	});
+
+	// A selection this tab holds neither a view nor a preview of is detached and
+	// loading (OW-forinu): the owner chose an empty pane over the last transcript,
+	// and its Attach attaches the selection, there being no preview to read it from.
+	it("draws the Attach button and no composer over an empty pane for a selection with neither a view nor a preview", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+		expect(container.querySelectorAll(".conversation [data-role]")).toHaveLength(0);
+
+		await fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+		expect(controller.selected).toEqual([piSession]);
 	});
 
 	it("renders a preview through the same transcript DOM as an attached session", async () => {

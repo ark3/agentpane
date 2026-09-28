@@ -51,10 +51,15 @@ export interface ControllerView {
 	/** The effort select's own flag, as `modelSetting` is the model picker's. */
 	effortSetting: boolean;
 	/**
-	 * Read-only transcript of the selected session (OW-39), when it is being
-	 * *previewed* rather than attached. Null once the session is attached (a
-	 * live transcript takes over) or when nothing is being previewed. Its `ref`
-	 * always equals `state.selected` while non-null.
+	 * Read-only transcript of the selected session (OW-39), as last read from
+	 * its store. Whether the pane shows it is `paneMode`'s to say, not this
+	 * field's: its absence does not mean the session is live (OW-forinu).
+	 *
+	 * Kept only while it is what the pane shows. `publish` drops it once the tab
+	 * holds a live view of the selection or the selection leaves its ref, so a
+	 * view dropped later lands on the detached-loading pane and a fresh read,
+	 * never on this stale one, and the poll never re-reads a transcript nobody
+	 * is looking at.
 	 */
 	preview: { ref: SessionRef; turns: SessionPreviewTurn[] } | null;
 	/**
@@ -82,6 +87,44 @@ export interface ControllerView {
 	forkIndices: number[] | null;
 }
 
+export type PaneMode = "live" | "preview" | "loading";
+
+/**
+ * What the pane shows for the selected session, derived by a fixed precedence
+ * from what this tab holds for it and never stored (D25, OW-forinu):
+ *
+ *  - `live` while the tab holds a live view of it: the transcript and the
+ *    composer, and only here. A stored preview is ignored.
+ *  - `preview` while it holds no view and a preview of that session is
+ *    stored: the read-only transcript and the Attach button.
+ *  - `loading` while it holds neither: the Attach button over an empty pane,
+ *    which the owner chose on 2026-09-28 over keeping the last live transcript
+ *    on screen, because it says honestly that something is going on.
+ *    `publish` fetches the preview that moves it on.
+ *
+ * Null with nothing selected, which is none of the three: the startup view,
+ * whose composer answers a Send by asking for a selection.
+ *
+ * `App.svelte` draws from this and the controller's live verbs act only on
+ * `live`, so nothing sends without a view whatever the UI draws. The pane used
+ * to read "live" off the preview's absence, and every path that adds or drops
+ * a view kept the two paired by hand; three of them slipped, leaving a
+ * composer over no view (OW-zivamo, OW-wazija, OW-tefigi) or a preview over a
+ * live one (OW-tefigi).
+ *
+ * An attach reply can beat its own snapshot (D2), and that window is
+ * `loading` too: nothing in the state tells it from a view a gap dropped, so
+ * the Attach button stands over an empty pane for that instant, which is the
+ * owner's empty pane doing what it was chosen to do.
+ */
+export function paneMode(view: Pick<ControllerView, "state" | "preview">): PaneMode | null {
+	const selected = view.state.selected;
+	if (selected === null) return null;
+	if (viewOf(view.state, selected) !== undefined) return "live";
+	if (view.preview !== null && sessionKey(view.preview.ref) === sessionKey(selected)) return "preview";
+	return "loading";
+}
+
 export interface AgentpaneController {
 	getView(): ControllerView;
 	subscribe(listener: (view: ControllerView) => void): () => void;
@@ -102,10 +145,11 @@ export interface AgentpaneController {
 	 * Send the current draft to the selected session.
 	 *
 	 * Resolves **true** only when the prompt landed, the way `forkAndSubmit`
-	 * below does, because there are three ways for it not to -- nothing
-	 * selected, an empty draft or a prompt already in flight, and a rejected
-	 * POST -- and the caller arms per-tab state on a submit that only the answer
-	 * here can tell it to take back down (OW-mifuki).
+	 * below does, because there are four ways for it not to -- nothing
+	 * selected, a selection this tab holds no live view of (OW-forinu), an
+	 * empty draft or a prompt already in flight, and a rejected POST -- and the
+	 * caller arms per-tab state on a submit that only the answer here can tell
+	 * it to take back down (OW-mifuki).
 	 */
 	submit(): Promise<boolean>;
 	/**
@@ -135,9 +179,9 @@ export interface AgentpaneController {
 	 * after `submit()` -- and by then no view or summary carries the ref the
 	 * attach replied with, so a lookup by it finds nothing (OW-kimaya).
 	 *
-	 * Null means a genuine failure -- nothing selected, an empty draft, a press
-	 * on top of one still in flight, no fork point at that index, or a rejected
-	 * request.
+	 * Null means a genuine failure -- nothing selected, a selection this tab
+	 * holds no live view of (OW-forinu), an empty draft, a press on top of one
+	 * still in flight, no fork point at that index, or a rejected request.
 	 * Clicking another session mid-fork is not one of them: under D17 that is
 	 * navigation, not a retraction, so the round trip runs to completion and the
 	 * ref comes back while the selection stays where the click put it
@@ -149,13 +193,19 @@ export interface AgentpaneController {
 	 * is about to send.
 	 */
 	forkAndSubmit(index: number, images?: PromptRequest["images"]): Promise<LiveSessionSummary | null>;
+	/** Stop the selected session's turn; no-op unless its pane is live (OW-forinu). */
 	abort(): Promise<void>;
-	/** Compact the selected session's context (OW-72); no-op with nothing selected. */
+	/** Compact the selected session's context (OW-72); no-op unless its pane is live (OW-forinu). */
 	compact(): Promise<void>;
 	/**
 	 * End the selected session's subprocess and leave the user on its read-only
 	 * preview (OW-tewave), which is where a click on that row would have put
-	 * them. No-op with nothing selected.
+	 * them: the pane reads detached, and `publish` fetches the preview
+	 * (OW-forinu). No-op with nothing selected.
+	 *
+	 * Not held to a live pane, as the other session verbs are: after a gap the
+	 * server still holds the session with no view in this tab, and this is what
+	 * closes it.
 	 *
 	 * The caller decides *when* this is offered -- the composer's Tools menu
 	 * gates it on the exemption predicate D12 wrote for its reaper, because
@@ -242,12 +292,63 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
+	/** Sessions, by ref key, whose preview `loadPreview` has out. */
+	const previewLoads = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 
+	/**
+	 * The controller's one chokepoint, so the pane's mode is settled here and
+	 * no path that adds or drops a view can forget it (OW-forinu): a stored
+	 * preview the mode no longer shows is dropped before anyone sees it, and a
+	 * detached-loading pane gets its preview fetched.
+	 */
 	function publish(next: Partial<ControllerView>): void {
 		if (disposed) return;
 		view = { ...view, ...next };
+		const mode = paneMode(view);
+		if (view.preview !== null && mode !== "preview") view = { ...view, preview: null };
 		for (const listener of listeners) listener(view);
+		if (mode === "loading") loadPreview();
+	}
+
+	/**
+	 * The one place that fetches the preview a detached-loading pane waits on
+	 * (OW-forinu): whenever the pane is in that mode, the stream is up, and no
+	 * fetch for that ref is already out. It replaced a fetch at each path that
+	 * dropped a view -- `detachGapped`'s and `detach()`'s -- and it waits out a
+	 * server that is down, which is why a stream drop can keep the selection
+	 * where it used to clear it: the drop's own `publish` finds the stream
+	 * `reconnecting`, and the reconnect's `connected` is the publish that fetches.
+	 *
+	 * No gesture stands behind it, so like the drop it writes neither `busy` nor
+	 * `error` nor the selection intent. Its preview lands only if the selection
+	 * still names that session and the pane there is still loading: a click
+	 * elsewhere has moved on, and a view that came back meanwhile outranks it.
+	 *
+	 * A failed read falls to the startup view, reporting nothing, rather than
+	 * trying again, which against a server answering an error would be a hot
+	 * loop: the selection goes and nothing is loading any more. The exception is
+	 * a read the stream dropped under, which is the outage and not an answer;
+	 * that one is simply forgotten, and the reconnect's publish asks again.
+	 */
+	function loadPreview(): void {
+		const selected = view.state.selected;
+		if (selected === null || view.connection !== "connected") return;
+		const key = sessionKey(selected);
+		if (previewLoads.has(key)) return;
+		previewLoads.add(key);
+		const loading = () =>
+			!disposed && view.state.selected !== null && sessionKey(view.state.selected) === key && paneMode(view) === "loading";
+		api.preview(selected).then(
+			(response) => {
+				previewLoads.delete(key);
+				if (loading()) openPreview({ ref: selected, turns: response.turns });
+			},
+			() => {
+				previewLoads.delete(key);
+				if (loading() && view.connection === "connected") publish({ state: { ...view.state, selected: null } });
+			},
+		);
 	}
 
 	function errorMessage(error: unknown): string {
@@ -258,12 +359,27 @@ export function createController(
 		return view.busy === value;
 	}
 
+	/**
+	 * Put an attach reply's summary in the sidebar, in place of the row it
+	 * attached, keeping that row's `status` (OW-wazija). The listing owns
+	 * `status`, as it does for every other row: a reply that lands after the
+	 * stream dropped describes an agent the tab takes to be gone (D25 point 3),
+	 * and writing its `attached` lit the row until the reconnect's listing. A row
+	 * no listing has named yet -- a session created or forked here -- reads
+	 * `detached` until one does, which claims nothing; the attach broadcasts
+	 * `sessions-changed` before it replies, so that listing is already on its way.
+	 *
+	 * Only `status` is kept. The rest of the reply stands, `handle` above all:
+	 * `handleOf` falls back to it in the window before the snapshot, and
+	 * `followRef` pairs a snapshot that renamed the session through it.
+	 */
 	function replaceSummary(summary: SessionSummary, requested: SessionRef): ClientState {
-		const summaries = view.state.summaries.filter((item) => {
-			const key = sessionKey(item.ref);
-			return key !== sessionKey(summary.ref) && key !== sessionKey(requested);
-		});
-		return { ...view.state, summaries: [...summaries, summary] };
+		const replaced = (item: SessionSummary) =>
+			sessionKey(item.ref) === sessionKey(summary.ref) || sessionKey(item.ref) === sessionKey(requested);
+		const listed = view.state.summaries.find((item) => sessionKey(item.ref) === sessionKey(summary.ref)) ??
+			view.state.summaries.find((item) => sessionKey(item.ref) === sessionKey(requested));
+		const summaries = view.state.summaries.filter((item) => !replaced(item));
+		return { ...view.state, summaries: [...summaries, { ...summary, status: listed?.status ?? "detached" }] };
 	}
 
 	function applyAttached(summary: SessionSummary, select: boolean, requested: SessionRef): void {
@@ -278,16 +394,12 @@ export function createController(
 		// away from, which under D17 still lands its prompt but owns neither the
 		// error slot nor the preview of the session they went to (OW-miyemo).
 		//
-		// The preview is gated on the selection actually landing here instead,
-		// which is wider: the residual above also fires with `select: false`, when
-		// the click that declined the attach landed on the very ref being attached
-		// -- clicking the fork's own row during its round trip (OW-tatebi). The
-		// selection moves to the live session, so the read-only preview that click
-		// opened has to go with it or it sits frozen over a streaming transcript.
+		// The selection may land on a session this tab holds no view of -- the
+		// snapshot is still to come (D2), or a gap or a drop took it -- and the
+		// pane then reads detached, whatever preview stands (`paneMode`).
 		publish({
 			state: { ...replaceSummary(summary, requested), selected },
 			...(select ? { error: null } : {}),
-			...(takesSelection ? { preview: null } : {}),
 		});
 		// Only where the transcript is about to be drawn with Edit controls on it
 		// (OW-roveze).
@@ -450,11 +562,11 @@ export function createController(
 		}
 		if (disposed || intent !== selectionIntent) return false;
 		// Re-read rather than reusing `showing`: another refresh may have published
-		// in the meantime. The intent guard above has already covered the ref
-		// *changing* under us -- every writer of `view.preview` bumps
-		// `selectionIntent` -- so this is the narrowing, not a second guard.
+		// in the meantime, and the preview may have changed hands without a
+		// gesture -- `loadPreview` writes one and bumps no intent (OW-forinu) --
+		// so what is on screen now has to be the session this read was of.
 		const current = view.preview;
-		if (!current) return false;
+		if (!current || sessionKey(current.ref) !== sessionKey(ref)) return false;
 		// `turns.length` is the change test, decided 2026-08-18: both extractors map
 		// one JSONL record to at most one turn (`pi.ts:119`, `codex.ts:192`) and a
 		// JSONL only appends, so new content is always new turns -- while the last
@@ -480,17 +592,21 @@ export function createController(
 	 * the poll forever. Callers that mean to apply a new delay `stopPoll()` first.
 	 *
 	 * Only the sites that *start* a poll call this. Nothing calls it to stop one
-	 * when the preview goes away -- attaching, or reselecting a live session --
-	 * because `pollTick` re-evaluates here on the way out and disarms itself, so
-	 * the worst an attach leaves behind is a single wake-up that fetches nothing.
-	 * One invariant in one place beats a `syncPoll()` at every publish that might
-	 * have cleared the preview, which is a thing to forget.
+	 * when the pane leaves the preview -- a snapshot bringing a live view, or
+	 * reselecting a live session -- because `pollTick` re-evaluates here on the
+	 * way out and disarms itself, so the worst that leaves behind is a single
+	 * wake-up that fetches nothing. One invariant in one place beats a
+	 * `syncPoll()` at every publish that might have changed the mode, which is a
+	 * thing to forget.
+	 *
+	 * It polls only while the pane's mode is the preview (OW-forinu), not while a
+	 * preview is merely stored: a preview beside a live view is not on screen.
 	 *
 	 * A chained timeout, not `setInterval`: the delay changes on every tick, and
 	 * this way a slow fetch cannot overlap the next one.
 	 */
 	function syncPoll(): void {
-		if (disposed || view.preview === null || !isVisible()) {
+		if (disposed || paneMode(view) !== "preview" || !isVisible()) {
 			stopPoll();
 			return;
 		}
@@ -536,47 +652,25 @@ export function createController(
 	 * spawns, and one here once re-spawned a session whose close was out
 	 * (OW-sugome). The preview's Attach button is the deliberate attach.
 	 *
-	 * A selected session lands on its preview, under the gapped event's `ref`:
-	 * the reducer returns on a gap before it moves anything, so where that
-	 * event is the first to carry a rename the selection still names the old
-	 * ref (D24). Unlike `detach()`, this previews a session with nothing on
-	 * disk too: the server still holds it, so the empty preview's Attach
-	 * reaches it rather than 404ing (OW-vasubu), and the poll finds the
-	 * transcript once the first turn writes one.
+	 * A selected session is left detached-loading, and `publish`'s preview
+	 * fetch takes it from there (OW-forinu), under the gapped event's `ref`: the
+	 * reducer returns on a gap before it moves anything, so where that event is
+	 * the first to carry a rename the selection still names the old ref (D24),
+	 * and it is moved here or the fetch would read the old one. Unlike
+	 * `detach()`, this keeps a session with nothing on disk selected too: the
+	 * server still holds it, so the empty preview's Attach reaches it rather
+	 * than 404ing (OW-vasubu), and the poll finds the transcript once the first
+	 * turn writes one.
 	 *
 	 * No gesture reaches here -- the only caller is `onEvent` -- so, like the
 	 * stream drop's detach in `onDisconnect`, this writes neither `busy` nor
-	 * `error` and does not bump the intent (OW-yasewo), only reads it. The
-	 * preview therefore lands only if no gesture has taken the selection since
-	 * the gap -- an attach of this very session can reply before its snapshot
-	 * does (D2), and a preview landing between the two would sit over the live
-	 * view the snapshot brings back -- the selection still names the session,
-	 * since a click made before the gap may land first, and no snapshot brought
-	 * its live view back meanwhile. A failure to read it falls to the startup
-	 * view under the same test, reporting nothing, since no gesture stands
-	 * behind it to read the error.
+	 * `error` and does not bump the intent (OW-yasewo).
 	 */
 	function detachGapped({ ref, handle }: Recovery): void {
-		const selected = view.state.selected;
 		const onScreen = selects(handle);
 		const sessions = { ...view.state.sessions };
 		delete sessions[handle];
-		publish({ state: { ...view.state, sessions } });
-		if (!onScreen || selected === null) return;
-		const key = sessionKey(selected);
-		const intent = selectionIntent;
-		const still = () =>
-			!disposed && intent === selectionIntent &&
-			view.state.selected !== null && sessionKey(view.state.selected) === key &&
-			viewOf(view.state, selected) === undefined;
-		api.preview(ref).then(
-			(response) => {
-				if (still()) openPreview(response);
-			},
-			() => {
-				if (still()) publish({ state: { ...view.state, selected: null }, preview: null });
-			},
-		);
+		publish({ state: { ...view.state, sessions, ...(onScreen ? { selected: ref } : {}) } });
 	}
 
 	/** Put a fetched preview on screen, polling it from quiet. */
@@ -705,36 +799,39 @@ export function createController(
 		 * Either way the tab holds nothing live from here (D25): a stream drops
 		 * only when the server exits, so every view goes at once, and a drop the
 		 * server survived gets back what it still holds from the reconnect's
-		 * opening snapshots. The selection goes too unless a preview is on
-		 * screen, since a selection with neither is a composer whose Send meets a
-		 * server holding nothing, and the preview `detach()` would land on cannot
-		 * be fetched with the server down. So this is `detach()`'s other exit,
-		 * the startup view, and a click on the row reads the transcript again
-		 * once the server answers. The intent is not bumped: a gesture still in
-		 * flight settles on its own, failing against a dead server or landing on
-		 * a live one, and a bump would strand its `busy`.
+		 * opening snapshots. A selected session with a transcript on disk stays
+		 * selected, and its pane reads detached: a preview on screen stays, and a
+		 * live one becomes the detached-loading pane, whose preview `publish`
+		 * fetches once the reconnect reports `connected` (OW-forinu) -- or which
+		 * the reconnect's opening snapshot makes live again first. The intent is
+		 * not bumped: a gesture still in flight settles on its own, failing
+		 * against a dead server or landing on a live one, and a bump would strand
+		 * its `busy`.
 		 *
 		 * The rows say the same, since the sidebar's stripe and streaming dot read
 		 * them until the reconnect's listing, which may be the whole outage. A
-		 * row the server held with nothing on disk went with the server, as at
-		 * `detach()`'s no-disk exit, and takes a preview of it along; the rest
-		 * read detached and idle. Each keeps its `handle`: with its view gone, it
-		 * is what pairs a reconnect's opening snapshot with the row when a rename
-		 * moved the ref during the outage (`followRef`).
+		 * row with nothing on disk went with the server, as at `detach()`'s
+		 * no-disk exit, and takes the selection along if it held it: there is
+		 * nothing left to preview or attach, and the preview the server would
+		 * answer for its ref is an empty one whose Attach can only 404
+		 * (OW-vasubu). This is where that decision lives for a drop; it reads
+		 * `onDisk` and not `status`, because a row an attach reply added before
+		 * any listing reads `detached` (`replaceSummary`) whatever it holds. The
+		 * rest read detached and idle. Each keeps its `handle`: with its view
+		 * gone, it is what pairs a reconnect's opening snapshot with the row when
+		 * a rename moved the ref during the outage (`followRef`).
 		 */
 		onDisconnect(fatal: boolean) {
 			const selected = view.state.selected;
-			let kept = view.preview !== null;
+			let kept = true;
 			const summaries: SessionSummary[] = [];
 			for (const summary of view.state.summaries) {
-				if (summary.status === "detached") summaries.push(summary);
-				else if (summary.onDisk) summaries.push({ ...summary, status: "detached", isStreaming: false });
+				if (summary.onDisk) summaries.push(summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false });
 				else if (selected !== null && sessionKey(summary.ref) === sessionKey(selected)) kept = false;
 			}
 			publish({
 				connection: "reconnecting",
 				state: { summaries, sessions: {}, selected: kept ? selected : null },
-				...(kept ? {} : { preview: null }),
 			});
 			if (fatal) scheduleReconnect();
 		},
@@ -777,7 +874,6 @@ export function createController(
 			const reselectLive = async (live: SessionRef) => {
 				publish({
 					state: { ...view.state, selected: live },
-					preview: null,
 					error: null,
 					models: [],
 					modelSetting: modelSettingForSession(live),
@@ -795,8 +891,10 @@ export function createController(
 				if (!disposed && intent === selectionIntent) {
 					// A snapshot can introduce the session while the fetch is out --
 					// the reconnect's opening snapshots trail its `connected`, which is
-					// when App's auto-select asks -- and a preview over a live session
-					// is what `ControllerView.preview` rules out.
+					// when App's auto-select asks. The pane would read live over the
+					// preview anyway (`paneMode`); what reselecting it still buys is the
+					// live selection's model list and pending flags, which
+					// `openPreview` does not set.
 					const live = viewOf(view.state, response.ref);
 					if (live) {
 						await reselectLive(live.ref);
@@ -862,6 +960,11 @@ export function createController(
 				publish({ error: "Select a session before submitting a prompt." });
 				return false;
 			}
+			// Only to a session this tab holds live (OW-forinu). The pane draws no
+			// composer anywhere else, but the controller does not lean on that: a
+			// session with no view here is one the server may no longer hold, and
+			// the prompt route answers that with 409 `not_attached` (D25).
+			if (paneMode(view) !== "live") return false;
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
@@ -923,6 +1026,10 @@ export function createController(
 				publish({ error: "Select a session before submitting a prompt." });
 				return null;
 			}
+			// Only from a session this tab holds live, as `submit` (OW-forinu). The
+			// prompt to the fork further down is not checked: the fork's snapshot
+			// usually lands after that prompt goes, so it is never live by then.
+			if (paneMode(view) !== "live") return null;
 			// One send at a time, the rule `submit` above states and this path did
 			// not have (OW-kelede). Two fast presses in edit mode started two whole
 			// forks -- two aborts against the parent, two forks, two attaches and
@@ -1062,6 +1169,8 @@ export function createController(
 				publish({ error: "Select a session before aborting." });
 				return;
 			}
+			// Only a session this tab holds live, as `submit` (OW-forinu).
+			if (paneMode(view) !== "live") return;
 			publish({ busy: "aborting", error: null });
 			try {
 				await api.abort(selected);
@@ -1077,6 +1186,8 @@ export function createController(
 				publish({ error: "Select a session before compacting." });
 				return;
 			}
+			// Only a session this tab holds live, as `submit` (OW-forinu).
+			if (paneMode(view) !== "live") return;
 			// Marked and cleared under the handle, which a rename landing while the
 			// request is in flight (D9) leaves naming the session that holds the
 			// mark. None before the snapshot: `setSessionCompaction` says why that
@@ -1124,12 +1235,9 @@ export function createController(
 			// Captured rather than bumped: a detach is not a selection change, and
 			// bumping would retract a preview or attach the user started before
 			// clicking it. `api.close` awaits the subprocess's disposal, so the
-			// window is wide enough to matter twice over -- the preview below would
-			// snap the selection back off a row clicked during it, and its own bump
-			// would drop an `attachAndSelect` for that row into the branch that
-			// publishes no live view, leaving the client selected on a session the
-			// server has already spawned. Bailing costs nothing: the re-list the
-			// close broadcasts drops the dead view on its own.
+			// window is wide enough to matter: the no-disk exit below would snap the
+			// selection back off a row clicked during it. Bailing costs nothing: the
+			// re-list the close broadcasts drops the dead view on its own.
 			const intent = selectionIntent;
 			// The live view is found through its handle, and the summary below by
 			// ref: `list()` gives a summary a handle only while the server holds
@@ -1145,25 +1253,21 @@ export function createController(
 			}
 			if (disposed || intent !== selectionIntent) return;
 			// Drop the live view here rather than waiting for the `sessions-changed`
-			// re-list to do it through `replaceSessionSummaries`. That re-list is
-			// asynchronous, and `preview` below short-circuits on a session this
-			// client still has attached -- so letting the two race leaves the dead
-			// view on screen whenever the preview wins.
-			if (handle !== undefined && view.state.sessions[handle] !== undefined) {
-				const sessions = { ...view.state.sessions };
-				delete sessions[handle];
-				publish({ state: { ...view.state, sessions } });
-			}
+			// re-list to do it through `replaceSessionSummaries`, which is
+			// asynchronous: until it lands the pane would still read live.
+			const sessions = { ...view.state.sessions };
+			if (handle !== undefined) delete sessions[handle];
 			// A session with nothing on disk has nothing to preview and no row to go
 			// back to: `readSessionPreview` answers its ref with an
 			// empty-but-*non-null* transcript rather than an error, which is enough
-			// to put `App.svelte` on its preview branch, whose one control is an
-			// Attach that can only 404 on a ref the session manager no longer holds
-			// (OW-vasubu). Land on the startup view instead -- selection cleared, no
-			// preview -- which is where every user starts anyway. Bumping the intent
-			// here is safe and makes this the last word on the selection, as
-			// `preview` below would have been: the intent is unchanged, so nothing
-			// the user started during the close is in flight.
+			// to put the pane on its preview, whose one control is an Attach that can
+			// only 404 on a ref the session manager no longer holds (OW-vasubu). Land
+			// on the startup view instead -- selection cleared -- which is where
+			// every user starts anyway, and decide it before the view goes, in the
+			// same publish, so the detached-loading pane in between never asks for
+			// that preview. Bumping the intent here is safe and makes this the last
+			// word on the selection: the intent is unchanged, so nothing the user
+			// started during the close is in flight.
 			//
 			// Read off the summary's `onDisk`, which is the session index's answer,
 			// and not off anything that merely correlates with it. Not `status`: a
@@ -1178,7 +1282,7 @@ export function createController(
 			// errs the same way, and the re-list below brings its row back.
 			const listed = view.state.summaries.find((item) => sessionKey(item.ref) === key);
 			if (!listed?.onDisk) {
-				// This exit asks for the listing itself, and the one below does not
+				// This exit asks for the listing itself, and the other does not
 				// (D21). The difference is what the stale row means. A detached stored
 				// session lists with the wrong `status` -- the stripe says attached
 				// when it is not -- which is merely untrue and can wait for the
@@ -1191,12 +1295,13 @@ export function createController(
 				// comes up. Not awaited, and `false`: nobody asked for this listing.
 				void refreshSessions(false);
 				++selectionIntent;
-				publish({ state: { ...view.state, selected: null }, preview: null });
+				publish({ state: { ...view.state, sessions, selected: null } });
 				return;
 			}
 			// A session with a transcript on disk ends where a click on its
-			// now-detached row would have put the user (OW-tewave).
-			await controller.preview(selected);
+			// now-detached row would have put the user (OW-tewave): its pane reads
+			// detached-loading, and `publish` fetches the preview (OW-forinu).
+			publish({ state: { ...view.state, sessions } });
 		},
 		clearError() {
 			const selected = view.state.selected;
