@@ -2434,14 +2434,17 @@ or not the buffer lives: the watch is on the handle, which the survivor
 holds, and left standing it raised the indicator for the next turn from
 elsewhere to end there.
 One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the
-reply is discarded, not refused, and the prompt may have been admitted
-and its turn run.  Kept, the watch raises the indicator at the end of
-the session's next turn, this prompt's if it was admitted and whichever
-comes next if it was not; abandoned, as it was until OW-dunahe, an
-admitted turn's end raised nothing.  A dot not needed costs a glance,
-one that never appears costs the feature, as src/client/favicon.ts
-weighs focus against visibility.  One whose reply's handling exits
-non-locally was admitted, and keeps its watch too."
+reply is discarded, not refused, and the prompt route attaches a session
+not yet running before it submits, answering only once the backend has
+admitted the turn (src/server/http/app.ts), so a reply that long in
+coming most likely means a backend slow to spawn, and a prompt admitted
+once it had.
+Abandoned, as it was until OW-dunahe, that admitted turn's end raised
+nothing.  The cost falls on a timed-out prompt never admitted: its watch
+stays `sent', and the next turn on the session, from anywhere, ends it
+and raises the indicator; a later prompt refused meanwhile joins that
+watch and cannot clear it (`agentpane--watch-submit').  One whose reply's
+handling exits non-locally was admitted, and keeps its watch too."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
