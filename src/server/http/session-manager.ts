@@ -287,7 +287,9 @@ export class SessionManager {
 	 * attach until it is retired (`#retire`): what `disposeAll()` walks to reach
 	 * an adapter that is still starting, and what collapses two attaches on one
 	 * spelling -- or finds the startup for a `close()` on it -- while no
-	 * container exists yet, which for a stored session is the index lookup.
+	 * container exists yet, which for a stored session is the index lookup. A
+	 * startup a close has flagged is retired from here at once, and
+	 * `disposeAll()` reaches it through that close's `#disposing` entry.
 	 * Once a container exists the startup is on it as well
 	 * (`ManagedSession.starting`), and that is how an attach or close under any
 	 * of its names finds it.
@@ -298,7 +300,8 @@ export class SessionManager {
 	 * disposing. Keyed by every name the closed container had, so a stale client
 	 * id cannot bypass the guard; by name and not by handle, since what it holds
 	 * back is an attach, which arrives with a name after the container and its
-	 * handle are gone.
+	 * handle are gone. Every disposal `close()` starts is one entry here,
+	 * registered before its first await, so `disposeAll()` waits on these too.
 	 */
 	readonly #disposing = new Map<string, PendingDisposal>();
 	/**
@@ -498,8 +501,9 @@ export class SessionManager {
 	 * when `#start` publishes its adapter or hands back another startup's
 	 * container, once it has failed and reaped what it spawned, or when
 	 * teardown flags it. From here nothing joins it, so an attach that finds no
-	 * container starts afresh. A handle a fork starts from is retired earlier,
-	 * at the claim (`#start`), since from there the adapter is this record's.
+	 * container starts afresh. A handle a fork starts from is not this
+	 * function's: it leaves `#pendingForks` at the claim (`#start`), since from
+	 * there its adapter is the startup's.
 	 */
 	#retire(pending: PendingStart): void {
 		if (this.#attaching.get(pending.key) === pending) this.#attaching.delete(pending.key);
@@ -1232,6 +1236,11 @@ export class SessionManager {
 		this.#shuttingDown = true;
 		const sessions = [...this.#sessions.values()];
 		const starting = [...this.#attaching.values()];
+		// What a `close()` still in flight is letting go of -- a container it
+		// took out of the table, a startup it retired, a parked handle -- which
+		// none of the tables here reach any more. One disposal sits under every
+		// name its container had, so once each.
+		const closing = [...new Set(this.#disposing.values())];
 		// Forks nobody attached. Dropping a recipe on the floor costs nothing;
 		// dropping a live handle leaks the app-server share it holds (OW-lajehi),
 		// so they are disposed alongside everything else below.
@@ -1268,6 +1277,7 @@ export class SessionManager {
 			// leaves the parked forks at the claim that makes it a startup's.
 			...starting.map((pending) => this.#terminate(pending)),
 			...parkedForks.map((adapter) => adapter.dispose()),
+			...closing.map((disposal) => disposal.promise),
 		]);
 	}
 

@@ -20,6 +20,7 @@ import {
 	deferred,
 	type FakeAdapter,
 	FakeAdapterFactory,
+	type FakeAdapterOptions,
 	FakeSessionIndex,
 	FakeSharedChild,
 	storedSession,
@@ -60,6 +61,17 @@ function naming(ref: SessionRef, events: ServerEvent[]): ServerEvent[] {
 /** Let queued microtasks drain, so `start()` has actually been entered. */
 async function settle(): Promise<void> {
 	for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
+/** Hold `adapter.dispose()` open until the returned release is called. */
+function holdDispose(adapter: FakeAdapter): () => void {
+	const held = deferred();
+	const dispose = adapter.dispose.bind(adapter);
+	adapter.dispose = async () => {
+		await held.promise;
+		await dispose();
+	};
+	return () => held.resolve();
 }
 
 describe("attach", () => {
@@ -586,6 +598,29 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect((await sessions.list({ cwd: WORKSPACE })).map((s) => sessionKey(s.ref))).toContain(
 			sessionKey(forked),
 		);
+	});
+
+	it("keeps the recipe parked when the fork's start fails, so a retry starts it", async () => {
+		// Replayable, unlike a handle: the recipe is the whole of what a retry
+		// has left to work from, since the index cannot answer for the fork.
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		// One options object every adapter the factory builds reads, so the
+		// fork's start can fail without the parent's having failed.
+		const options: FakeAdapterOptions = { forkMode: "claude" };
+		const claude = new FakeAdapterFactory(options);
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+		const forked = await sessions.fork(claudeRef, "e1");
+
+		options.failStart = "fork refused";
+		await expect(sessions.attach(forked)).rejects.toThrow("fork refused");
+		delete options.failStart;
+		const retried = (await sessions.attach(forked)) as FakeAdapter;
+
+		expect(claude.created).toHaveLength(3);
+		expect(retried).toBe(claude.created[2]);
+		expect(retried.startOptions).toEqual({ cwd: WORKSPACE, forkOf: { parentId: "parent", entryId: "e1" } });
 	});
 
 	it("discards the recipe for a fork the caller deleted before ever attaching it", async () => {
@@ -1250,10 +1285,10 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 	});
 
 	it("discards the handle and releases the share when the fork's own start fails", async () => {
-		// A handle is single-use: the reaping disposes its adapter, which releases
-		// the share, so leaving it parked would hand a retry a dead adapter. A
-		// recipe is replayable and is deliberately kept -- this is where the two
-		// shapes part company.
+		// A handle is single-use: it leaves `#pendingForks` at the claim, and the
+		// reaping disposes its adapter, which releases the share, so a retry
+		// finds no dead adapter parked. A recipe is replayable and is
+		// deliberately kept -- this is where the two shapes part company.
 		codex = new FakeAdapterFactory({
 			forkMode: "shared",
 			sharedChild: child,
@@ -1331,17 +1366,6 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 			if (!built) throw new Error("no fork adapter");
 			return built;
 		};
-	}
-
-	/** Hold `adapter.dispose()` open until the returned release is called. */
-	function holdDispose(adapter: FakeAdapter): () => void {
-		const held = deferred();
-		const dispose = adapter.dispose.bind(adapter);
-		adapter.dispose = async () => {
-			await held.promise;
-			await dispose();
-		};
-		return () => held.resolve();
 	}
 
 	it("refuses the attach of a fork closed while it was starting, and disposes its adapter once", async () => {
@@ -1523,6 +1547,28 @@ describe("lifecycle", () => {
 		expect(first.disposed).toBe(true);
 		expect(pi.created).toHaveLength(2);
 		expect(aliasAdapter).toBe(canonicalAdapter);
+	});
+
+	it("resolves shutdown only once a close has disposed the session's adapter", async () => {
+		await sessions.attach(REF);
+		const adapter = pi.created[0];
+		if (!adapter) throw new Error("no adapter");
+		const release = holdDispose(adapter);
+
+		const closing = sessions.close(REF);
+		let shutDown = false;
+		const shutdown = sessions.disposeAll().then(() => {
+			shutDown = true;
+		});
+		await settle();
+		await settle();
+
+		expect(shutDown).toBe(false);
+
+		release();
+		await shutdown;
+		await closing;
+		expect(adapter.disposals).toBe(1);
 	});
 
 	it("keeps a closing adapter's replacement waiting through a second close of the same session", async () => {
@@ -1925,6 +1971,55 @@ describe("teardown racing a startup", () => {
 		const adapter = await second;
 		expect(pi.created).toEqual([adapter]);
 		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	it("starts afresh for an attach that follows a close of a session whose start outlives its disposal", async () => {
+		// The fake's `dispose()` does not release `holdStart`, so the closed
+		// startup is still unsettled when the next attach arrives.
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+
+		const first = sessions.attach(REF);
+		await settle();
+		await sessions.close(REF);
+		const second = sessions.attach(REF);
+		gate.resolve();
+
+		await expect(first).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(await second).toBe(slow.created[1]);
+		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	it("resolves shutdown only once a close has disposed the adapter that was starting", async () => {
+		// `disposeAll()` resolving is the server's licence to exit, and a close
+		// still inside the kill's grace has not finished letting go.
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index, adapters: { pi: slow } }, broadcaster);
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		const attaching = sessions.attach(ref);
+		await settle();
+		const adapter = slow.created[0];
+		if (!adapter) throw new Error("no adapter");
+		const release = holdDispose(adapter);
+
+		const closing = sessions.close(ref);
+		let shutDown = false;
+		const shutdown = sessions.disposeAll().then(() => {
+			shutDown = true;
+		});
+		await settle();
+		await settle();
+
+		expect(shutDown).toBe(false);
+
+		release();
+		await shutdown;
+		await closing;
+		expect(adapter.disposed).toBe(true);
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
 	});
 
 	it("disposes an adapter once when shutdown lands between its publication and its attach's return", async () => {
