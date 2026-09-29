@@ -27,10 +27,47 @@ Any design this card chooses answers each of those, whether or not it resembles 
 Dispatch a cold-read reader first, asked to map every writer and reader of the five records above as the code stands, and to say which of them would remain under the owner it proposes.
 Amend this card with its map before choosing.
 
+## The cold read's map (2026-09-29, at 46f79fc)
+
+A reader mapped the five records from the code and confirmed all three cases below by probe on `46f79fc`, adding two variants of case 1.
+
+- `#sessions` and `#names` are the table: `#add`, `#remove` and `#addName` write them, and everything that goes through `#lookup` reads them.
+  They answer "which container does this name reach", which is not a startup's question.
+- `ManagedSession.starting` is written by `attach` (existing container), `#afterDisposal` and `#start`'s claim, cleared by `#retire`, and read by `attach`'s join, `#handOver`'s `const winner = container.starting`, and `close()`'s precedence line.
+- `#attaching` is written only by `#hold`, from `attach`, `#handOver` (the winner takes the loser's keys) and the failure path's `for (const name of bound.names) this.#hold(pending, name)`; `#retire` is its only remover.
+  It is read by `attach`'s join without a container, `#hold`'s no-displace guard, `close()`'s no-container branch and `disposeAll()`.
+  `PendingStart.keys` is read by `#retire`, `#handOver`, `#afterDisposal`, the claim, and `close()`'s `disposalKeys` only when there is no container.
+- `#disposing` is written by `close()` alone and read by `attach` (by the spelling asked for), `#start`'s canonical-disposal loop and `disposeAll()`.
+- `#pendingForks` is written by `fork()`, deleted by `#start` (a handle at the claim, a recipe at publish), `close()` by `parkedKeys`, and `disposeAll()`.
+
+The two variants, both reproduced on `46f79fc`:
+
+- **1a.** As case 1, but P has already published when `close(C)` lands: `B.starting` is `undefined`, so the precedence line finds no startup at all, and Q publishes after the close returned.
+- **1b.** Q = `attach(R)` is in its index lookup when a container's start renames it to R; `#addName` gives the container R while `#attaching[R]` still holds Q, and `close(R)` flags only the container's startup, so Q publishes after the close returned.
+  Any name a container gains that a startup is still looking up does the same.
+
+The reader proposed one startup per name, with a container that gains a held name superseding the startup holding it.
+That was not chosen: once the superseding startup has published, a close of its container has no record through which to reach the superseded one, which is still in its lookup, and case 1a comes back one level down.
+It also recommended landing a `close()`-only fix first; that is the fourth patch this card exists not to be, and it was declined.
+
+## Chosen 2026-09-29
+
+The owner of a startup in flight is `PendingStart`, and `PendingStart.keys` is the one record of the names it answers to, from its attach until `#retire`.
+`#attaching` becomes the one index from a name to the startups under it, and holds more than one startup per name, because the collisions above are states the manager legitimately reaches; nothing refuses a hold.
+A startup bound to a container in the table is held under every name of that container, gaining each at the moment the container does -- the claim, a rename, `#handOver`, `#afterDisposal` -- and keeping each until it is retired, including the names a failed start takes back off the container.
+`close(name)` asks that index alone for startups: it flags every startup held under the name, under each name of the container the name reaches, and under each key of every startup it flags, and that one key set is what it discards parked forks under and registers its disposal under.
+`ManagedSession.starting` remains only as the inverse of `PendingStart.session`, answering which startup builds a container (`attach`'s join with a container, `#handOver`); `close()` never reads it.
+Arbitration is unchanged: a container is still built only at the claim, after the index lookup, and `#handOver` still decides between two startups for one file.
+So of OW-bulanu's four objections, the duplicate row, the unknown `cwd` and the claim's no-await invariant do not arise, since nothing is created earlier; and no waiter is bound to a startup that validated nothing, since a close reaches a startup only through a spelling its attach asked for, a name a container got from the index or its adapter, or a key `#handOver` moved after a lookup.
+Retired: `#hold`'s no-displace guard, `close()`'s precedence line, the failure path's hold loop, and the separate `parkedKeys` and `disposalKeys` constructions.
+Kept: the table, `#disposing` (it outlives both container and startup, keyed by name because what it holds back arrives as a name), and `#pendingForks` (a parked fork has neither container nor startup).
+"Does the manager hold this ref", for OW-royosa: a name in `#names`, a non-empty entry in `#attaching`, or an entry in `#pendingForks`; a close retires what it flags from `#attaching` at once, so a close still disposing does not count.
+The change fits this card, so it is built here rather than filed.
+
 ## Done when (replaces the original below)
 
 The decision is recorded in `docs/DESIGN.md`, as an amendment to D24 or a new decision, naming the one owner of a startup in flight, the records it retires, and how it answers OW-bulanu's four objections.
-The three cases below are tests in `src/server/http/session-manager.test.ts` that go red first and green after, with the assertions the original "Done when" names; the tests OW-bulanu and OW-yufazo added keep passing without edits to their assertions.
+The three cases below, and variants 1a and 1b above, are tests in `src/server/http/session-manager.test.ts` that go red first and green after, with the assertions the original "Done when" names; the tests OW-bulanu and OW-yufazo added keep passing without edits to their assertions.
 The `#hold` no-displace guard is gone, and so is every other guard the new owner makes redundant, each named in the close note.
 If the change is too large for one card, this card closes on the decision and files the implementation cards, labelled `sweep-0929`.
 
