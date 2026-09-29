@@ -124,7 +124,7 @@ Every card carries exactly one kind, given to `card new --label`:
 - `question` — a decision nobody has made yet; it closes when the decision is recorded where the next reader will look.
 - `unverified` — behaviour believed to work but never proven; it closes when durable evidence exists.
 
-Seven cross-cutting labels may follow that kind.
+Eight cross-cutting labels may follow that kind.
 `work-laptop` marks work that needs the work laptop itself — that clone's provisioning, or the reference material addressed there by absolute path — as described under "Evidence"; it stopped gating live Pi evidence when the home server got `pi` on 2026-09-13.
 `browser-testing` marks work whose done condition needs `bun run test:browser` or a human observation in a real browser; it does not belong on ordinary client work that jsdom can settle.
 `card list --open --label browser-testing` is the browser-validation queue.
@@ -133,6 +133,10 @@ D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 202
 `emacs-native` rides on top of `emacs` and marks that chosen stream, filed 2026-09-15 as OW-mutufa, OW-refibu, OW-wavone, OW-gunuke and OW-fojike, with OW-dekate the spike that decided it; `card list --open --label emacs-native` is that stream alone.
 `d24` marks the seven cards D24 filed on 2026-09-24 -- OW-sewewe, OW-dutute, OW-nikogo, OW-suyinu, OW-kimaya, OW-danifa and OW-mofuho -- and `card list --open --label d24` is that stream, blockers and all.
 `d25` marks the six cards D25 filed on 2026-09-28 -- OW-sirofi, OW-fiheli, OW-lunihe, OW-kakate, OW-filuge and OW-mepufi -- and the three its follow-up filed the same day -- OW-forinu, OW-rebawa and OW-mopuyi -- and `card list --open --label d25` is that stream.
+`sweep-0929` marks what a sweep of the open deck for consolidations filed or amended on 2026-09-29: new cards where several open cards were one state with more than one owner, amendments where one open card already had the right shape, and OW-geselo for the cards it found moot or stale.
+Unlike `now`, this stream has an order, proposed by the session that filed it, and it is recorded here because a label cannot carry it: OW-letevu, OW-bulanu, OW-pihuko, OW-zavehi, OW-hiliti then OW-pezelo, OW-kutome, OW-wukako, OW-sihoma, OW-dajove, OW-sozopu, OW-yehisa then OW-sofige and OW-zadupu, OW-novuye then OW-gogona, OW-fifaji, and OW-geselo whenever convenient.
+Only OW-pezelo and OW-zadupu carry real blockers; the rest of the order is a judgment about which change makes the next one smaller, so a card executed out of it is not wrong, only possibly larger than it needed to be.
+`card list --open --label sweep-0929` is the stream.
 
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.
 Open cards are not a backlog awaiting their turn — they are the archive, read by grep when a theme comes up.

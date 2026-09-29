@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, sweep-0929]
 ---
 
 # agentpane_pi_smoke.py takes its model from the mutable settings file, not from the pin
@@ -21,3 +21,11 @@ Worth deciding while here, rather than assuming: whether `agentpane_codex_smoke.
 
 `agentpane_pi_smoke.py` sends an explicit `--model`, defaulting to the ref `AGENTS.md` pins, and a run on the home server records that ref in its evidence blob as the flag it passed alongside the model it read back — so the two can be compared rather than one inferred from the other.
 Say in `docs/MANUAL_TESTING.md` what the Codex harness turned out to do, whichever way that came out.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) found the same defect in `resources/probes/capture_fixtures.py`: it starts Pi as `pi --mode rpc --no-session` with no `--model`, while its Codex path is pinned.
+Fix both here.
+OW-sofige's live runs and OW-zadupu's capture pass are meant to run after this lands.
+
+Done also requires `capture_fixtures.py` to pass Pi an explicit `--model` defaulting to the pinned ref, with the ref recorded in the capture's metadata beside the model the capture read back.

@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: moot
 ---
 
 # Neither smoke probe can show that /abort tears down a large buffered transcript
@@ -30,3 +31,8 @@ Note that field's limit, carried by OW-sofige: it is a session maximum, not the 
 
 A run of each probe on the home server shows a pre-abort transcript of a different order of magnitude than a few hundred characters — tens of kilobytes, say — with the abort still answered and the transcript still not growing afterwards, and the runs are written up in `docs/MANUAL_TESTING.md` naming the version each was measured on.
 If a backend's pinned model refuses every reasonable long prompt, that is the answer: record it in the probe beside the prompt and in `docs/MANUAL_TESTING.md`, and close this card on that evidence rather than on a wording nobody found.
+
+## Close note
+
+Folded into OW-sofige on 2026-09-29 by the sweep behind the `sweep-0929` cards: a long pre-abort transcript proves nothing without OW-sofige's per-turn length, both probes share the abort prompt and the length helper, and the two are one change to `agentpane_live_support.py` plus one live run per backend.
+OW-sofige now carries this card's done condition and its escape for a model that refuses every long prompt.

@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # A composer outlives its killed transcript, so a later transcript's composer can take a <N> of its own
@@ -16,3 +17,8 @@ Judged not worth blocking OW-mikayi on: it needs a kill, a reopen in the same pr
 The likely fix is deciding what a composer should do when its transcript dies — killed with it, or kept for its draft — and that decision, not the naming, is the work.
 
 Done when an `ert` test in `emacs/agentpane-test.el` that kills a transcript with a composer open, opens a new transcript in the same project and opens its composer, goes red first and green after, asserting the new composer is named after its transcript with no `<N>` of its own; the whole file green, run as that file's Commentary says, with the pass count in `emacs/agentpane.el`'s Commentary updated.
+
+## Close note
+
+Folded into OW-sihoma on 2026-09-29 by the sweep behind the `sweep-0929` cards: the leftover composer that takes a later composer's name is OW-sihoma's composer outliving its transcript, and this card's own body said deciding what a composer does when its transcript dies is the work.
+OW-sihoma now carries this card's naming test in its done condition.

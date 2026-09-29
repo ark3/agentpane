@@ -1,5 +1,6 @@
 ---
-labels: [defect, emacs]
+labels: [defect, emacs, sweep-0929]
+blocked-by: [OW-hiliti]
 ---
 
 # When the Emacs helper exits because its first stream open failed, the request that opened it is answered "The operation was aborted." instead of saying the server is unreachable
@@ -24,3 +25,9 @@ The same holds for a request in flight when an established stream drops, which i
 
 A test in `src/emacs/helper.test.ts`, red first, fails the first open of the stream with the listing's fetch honouring its abort signal (or refusing as a down server would), and asserts the error reply to `sessions/list` is not the abort and says the server could not be reached; the same for `sessions/attach` if its path differs.
 How the helper gets there is the implementer's call — answering requests in flight with the stream's own failure before the teardown aborts them is one way — but whatever it is must not keep the process alive past the exit OW-mepufi measured, and `bun run check` passes.
+
+## Amended 2026-09-29
+
+The sweep behind OW-hiliti read this card as filed before OW-mopuyi landed: since then `agentpane--request` discards an error reply the dying helper writes and fails the request as the death, so a helper-side fix here would still never reach the echo area.
+This card is now blocked by OW-hiliti and, once that lands, is only its `src/emacs/helper.ts` half: answer the request that opened the helper with the server being unreachable, rather than aborting it.
+Re-read what Emacs shows before starting; the account above of "The operation was aborted." in the echo area may no longer hold.

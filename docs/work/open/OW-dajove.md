@@ -1,5 +1,5 @@
 ---
-labels: [unverified]
+labels: [unverified, sweep-0929]
 ---
 
 # D21 skips the listing at a first open that lands after the startup listing, but a change made between that listing's live read and the stream's registration reaches the tab by neither
@@ -21,3 +21,11 @@ Since OW-sabova, a first open that lands while the startup listing is still out 
 
 Either a controller test in `src/client/controller.test.ts` plus a change that makes the first open list whenever the stream registered after the startup listing's live read could have happened (and D21's "Not on the first open" paragraph and the `onOpen` docblock say so), or a recorded argument in D21 showing why the window cannot occur, citing the server code that orders `addClient` before `list()`'s live read.
 Whichever it is, D21's "for nothing" sentence ends up true or gone.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) checked this card's claims and found them to hold: `addClient` runs inside the stream's `start` in `src/server/http/app.ts`, and `list()` in `src/server/http/session-manager.ts` reads the live overlay only after awaiting the index.
+It proposes a third way to close the window, beside the two above: the server sends `sessions-changed` straight after the opening snapshots on every open, and the client lists only on `sessions-changed`.
+The listing then always follows registration, and `start()`'s own listing, the `opened` and `listedOk` booleans gating it in `src/client/controller.ts`, and D21's "Not on the first open" paragraph all go, for the same number of requests.
+The Emacs helper opens the same stream; say in the close note what the change means for it.
+Which of the three to take is this card's call.

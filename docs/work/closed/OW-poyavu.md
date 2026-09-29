@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # Why the client never calls the DELETE route is recorded only in controller.ts, a module away from the code that would falsify it
@@ -32,3 +33,8 @@ Whether OW-35's constraint to keep the route still earns its keep with no caller
 
 OW-35 closed `--declined` under D25 on 2026-09-28; the constraint to keep the `DELETE` route is stated in D12 in `docs/DESIGN.md` ("The `DELETE` route it calls was always going to stay"), which is where to read it now.
 The premise that no client calls the route has been false since OW-tewave put Detach in the browser, and agentpane-mode's `agentpane-close-session` calls it too.
+
+## Close note
+
+Moot, found 2026-09-29 by the sweep behind the `sweep-0929` cards: the premise that no client calls the `DELETE` route has been false since OW-tewave put Detach in the browser (`src/client/api.ts` sends it), and `agentpane-close-session` calls it from Emacs, as this card's own 2026-09-28 amendment already recorded.
+The five-point chain it asked to document is gone too: `#adoptRef` and the alias table no longer exist in `src/server/http/session-manager.ts`, and the constraint to keep the route lives in D12.

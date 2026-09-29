@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, sweep-0929]
 ---
 
 # Pi's child stdin has no `error` listener, and the three process shells are the same hundred lines, which is how the fix landed in two of them
@@ -34,3 +34,13 @@ DESIGN's "What the wrapper chain does to process events" is the contract the she
 - A test asserts `PiAdapter.start()` after `dispose()` rejects.
 - `rg -n 'class LineSplitter' src/server` returns one definition, and the three escalation sequences are one.
 - The existing process tests for all three adapters pass without edits to their assertions.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) found two more cards that are this shell's duplication showing, and one shell absorbs them:
+- OW-16: the kill escalation drops `closesWithin`'s result in all three shells now, not two (`finishTermination` or its equivalent in `codex/process.ts`, `claude/process.ts` and `pi/process.ts`).
+- OW-10: a spawn error is flattened to a string in all three shells, not only Pi's.
+  `onError` hands clients a string, so the error's identity is lost at the contract anyway; the shell should keep `cause` on what it throws internally, and whether anything more is worth it is a candidate to decline inside this card.
+
+Done also requires: a test that a child not closed within the escalation's deadline after SIGKILL is reported (through `onError` or a rejected `dispose()`, recorded in the docblock which), and a test that a spawn failure's internal error carries the original as `cause`.
+Then OW-16 and OW-10 close `--moot` citing this card.

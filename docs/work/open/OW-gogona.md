@@ -1,5 +1,5 @@
 ---
-labels: [deferral, emacs]
+labels: [deferral, emacs, sweep-0929]
 ---
 
 # A tool summary holding a newline draws a two-line fold header in agentpane-mode, because string-pixel-width measures only its widest line
@@ -21,3 +21,8 @@ How the browser draws such a summary was not checked.
 A summary holding a newline draws a one-line header, which red-then-green in `emacs/agentpane-test.el` pins, and the browser's behaviour for the same summary is stated in the close note.
 Whether to fix it where the summary is built (`toolSummary`, both clients at once) or where Emacs draws it is the executor's call; the close note says which and why.
 Once no summary reaching `agentpane--fit-header` can hold a newline, the `\n` in `agentpane--cut-by-motion`'s fallback is dead, so the same change retires it and the docstring sentence behind it.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) confirmed the location above and took the fix in `toolSummary` as the one that settles both clients, since `src/emacs/nodes.ts` builds Emacs tool parts from the same helper.
+OW-vipiso fits headers through the same `fits` closure in `agentpane--fit-header`, so the `\n` fallback retired here is one of the two escape hatches that closure forced; leave the other, the selected-frame test in `agentpane--motion-window`, to OW-vipiso.

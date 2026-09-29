@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, sweep-0929]
 ---
 
 # assistant_length_at_abort is a session maximum, so it cannot attribute itself to the aborted turn
@@ -28,3 +28,12 @@ The growth check should then compare that message's length rather than the sessi
 Both probes report the aborted turn's own transcript length, and the post-abort growth check compares that length.
 Seen red first: a deliberate break — comparing the wrong message, or asserting the growth check against a message that did grow — must fail the run, and the failure is recorded.
 A run of each probe on the home server then passes, written up in `docs/MANUAL_TESTING.md` with the version it was measured on, and the "upper bound, not the aborted turn's length" paragraph in the OW-hahohi section is retired in the same change rather than left standing beside its correction.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) folded OW-fagemo into this card, which closed `--moot`: its done condition, a pre-abort transcript tens of kilobytes long, means nothing without this card's per-turn attribution, and both probes' abort phases send the same prompt (`agentpane_pi_smoke.py` and `agentpane_codex_smoke.py`) and read the length through the same `max_assistant_length` in `resources/probes/agentpane_live_support.py`.
+So this is one change to the support module and one live run per backend.
+
+Done also requires OW-fagemo's condition, measured by this card's per-turn length: a run of each probe on the home server whose aborted turn is of a different order than a few hundred characters, with the abort answered and the transcript not growing afterwards.
+OW-fagemo's escape stands too: if a backend's pinned model refuses every reasonable long prompt, record that beside the prompt and in `docs/MANUAL_TESTING.md` and close on that evidence.
+Run it after OW-yehisa lands, so the Pi run is pinned.
