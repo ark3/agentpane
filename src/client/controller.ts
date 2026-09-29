@@ -323,6 +323,15 @@ export function createController(
 	const previewLoads = new Map<string, { abort: AbortController; timeout: ReturnType<typeof setTimeout> }>();
 	/** Whether the `previewFailure` on the view holds `loadPreview` back until the next `connected`. */
 	let previewHeld = false;
+	/**
+	 * The ref keys `detach()` has a close out for, whose preview `loadPreview`
+	 * leaves to it. The server's `ended` drops the view before the close
+	 * answers (D26), and until then `detach()` has not decided whether its
+	 * no-disk exit clears the selection; a read in between is the one that exit
+	 * promises is never asked. An interim: OW-lilami retires that exit, and this
+	 * with it.
+	 */
+	const detaching = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 
 	/**
@@ -390,7 +399,7 @@ export function createController(
 		const selected = view.state.selected;
 		if (selected === null || view.connection !== "connected" || previewHeld || paneMode(view) !== "loading") return;
 		const key = sessionKey(selected);
-		if (previewLoads.has(key)) return;
+		if (previewLoads.has(key) || detaching.has(key)) return;
 		const abort = new AbortController();
 		const timeout = setTimeout(
 			() => abort.abort(new Error(`No answer within ${PREVIEW_READ_TIMEOUT_MS / 1000}s.`)),
@@ -858,8 +867,10 @@ export function createController(
 			// to point at. And a snapshot, which replaces the array wholesale --
 			// the client-visible form of the adapter's `reset`, after which no
 			// index held from before means anything. Only for the selected
-			// session: it is the only transcript drawing Edit controls.
-			if (event.type !== "sessions-changed") {
+			// session: it is the only transcript drawing Edit controls. Not at
+			// `ended`, whose dropped view reads as a turn ending on a handle with
+			// nothing left to fork (D26).
+			if (event.type !== "sessions-changed" && event.type !== "ended") {
 				const isStreaming = result.state.sessions[event.handle]?.isStreaming === true;
 				const moved = event.type === "snapshot" || isStreaming !== wasStreaming;
 				if (moved && selects(event.handle)) refreshForkPoints(event.session);
@@ -1375,8 +1386,11 @@ export function createController(
 			const key = sessionKey(selected);
 			const handle = handleOf(view.state, selected);
 			publish({ error: null });
+			detaching.add(key);
 			try {
-				await api.close(selected);
+				// Released before anything below publishes, so the pane that
+				// publish leaves loading, if any, reads its preview.
+				await api.close(selected).finally(() => detaching.delete(key));
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
 				return;
@@ -1395,9 +1409,10 @@ export function createController(
 			// on the startup view instead -- selection cleared -- which is where
 			// every user starts anyway, and decide it before the view goes, in the
 			// same publish, so the detached-loading pane in between never asks for
-			// that preview. Bumping the intent here is safe and makes this the last
-			// word on the selection: the intent is unchanged, so nothing the user
-			// started during the close is in flight.
+			// that preview; the one an `ended` leaves while the close is still out
+			// does not ask either (`detaching`). Bumping the intent here is safe
+			// and makes this the last word on the selection: the intent is
+			// unchanged, so nothing the user started during the close is in flight.
 			//
 			// Read off the summary's `onDisk`, which is the session index's answer,
 			// and not off anything that merely correlates with it. Not `status`: a

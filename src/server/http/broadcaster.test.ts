@@ -165,6 +165,17 @@ describe("sequence bookkeeping", () => {
 		]);
 		expect(broadcaster.seqOf(HANDLE)).toBe(1);
 	});
+
+	it("says a handle ended with no seq, and does not bring back the counter its forget dropped (D26)", () => {
+		const { broadcaster, session, events } = oneSession();
+		broadcaster.status(session, true, null, null, null, null);
+
+		broadcaster.forget(HANDLE);
+		broadcaster.ended(session);
+
+		expect(events.at(-1)).toEqual({ type: "ended", session: REF, handle: HANDLE });
+		expect(broadcaster.seqOf(HANDLE)).toBe(0);
+	});
 });
 
 describe("the handle (D24, OW-suyinu)", () => {

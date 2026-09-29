@@ -142,7 +142,7 @@ export interface AgentNotice {
  *
  * `seq` is monotonic *per session*. A gap means the client missed an update;
  * since D25 the client, the browser or the Emacs helper, detaches the
- * session. Snapshots reset the sequence.
+ * session. Snapshots reset the sequence. `ended` alone carries none (D26).
  *
  * Every arm but `sessions-changed` carries `handle` beside `session`: the
  * session's `SessionSummary.handle`, which a rename leaves alone while `session`
@@ -260,6 +260,24 @@ export type ServerEvent =
 			handle: string;
 			seq: number;
 			notice: AgentNotice;
+	  }
+	| {
+			/**
+			 * The server let go of the live session under `handle` -- a close, or
+			 * on Pi a fork moving the process onto a conversation of its own --
+			 * and nothing goes out under it again (D26, OW-sodohi). Drop the view.
+			 * One a fork sends names no fork: the parent's ref is all it carries
+			 * (OW-suhoto).
+			 *
+			 * No `seq`: one would have to come from the counter the server has
+			 * just dropped for the handle, recreating it (`submit` in
+			 * `session-manager.ts`), so a client applies this whatever the
+			 * handle's sequence stands at. Nor does it say whether anything is
+			 * left on disk, which is the preview's to answer.
+			 */
+			type: "ended";
+			session: SessionRef;
+			handle: string;
 	  }
 	/** The session list changed (created, deleted, or newly attached). Refetch it. */
 	| { type: "sessions-changed" };

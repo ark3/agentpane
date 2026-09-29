@@ -296,6 +296,17 @@ export function setSessionCompaction(
 export function reduceServerEvent(state: ClientState, event: ServerEvent): ReduceResult {
 	if (event.type === "sessions-changed") return result(state, [], true);
 
+	// The server let go of the handle, and nothing comes under it again (D26).
+	// Before the sequence check below, since it carries no seq: whatever the
+	// view's count stands at, it has nothing left to wait for. The selection is
+	// the consumer's; the browser's pane falls to the preview.
+	if (event.type === "ended") {
+		if (state.sessions[event.handle] === undefined) return result(state);
+		const sessions = { ...state.sessions };
+		delete sessions[event.handle];
+		return result({ ...state, sessions });
+	}
+
 	if (event.type === "snapshot") {
 		// This and the `status` arm below both overwrite `compaction`, which may
 		// be holding a click-time mark rather than wire truth. Overwriting it is

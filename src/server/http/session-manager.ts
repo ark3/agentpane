@@ -846,9 +846,12 @@ export class SessionManager {
 	 * fork that is false for every client, and actively wrong for the ones
 	 * that did not fork -- it would throw away a parent transcript the server
 	 * still lists and drag a reader onto a conversation nobody there opened
-	 * (OW-suhoto). `sessionsChanged` alone; the client that forked has the
-	 * fork's ref from the response and attaches it, which is what snapshots it
-	 * under the fork's own handle.
+	 * (OW-suhoto). What goes there is `ended`, under the parent's own ref, and
+	 * then `sessionsChanged` (D26): a client that did not fork and held the
+	 * parent live loses that view and falls to the parent's preview, its
+	 * selection standing. The client that forked has the fork's ref from the
+	 * response and attaches it, which is what snapshots it under the fork's own
+	 * handle.
 	 */
 	#forkOnto(parent: ManagedSession, next: SessionRef): ManagedSession {
 		const fork = this.#container(next, {
@@ -886,6 +889,7 @@ export class SessionManager {
 		parent.adapter = undefined;
 		this.#add(fork);
 		this.broadcaster.forget(parent.handle);
+		this.broadcaster.ended(parent);
 		this.broadcaster.sessionsChanged();
 		return fork;
 	}
@@ -1279,6 +1283,12 @@ export class SessionManager {
 			// behind us (`ManagedSession.subscriptions`).
 			for (const off of session.subscriptions.splice(0)) off();
 			this.broadcaster.forget(session.handle);
+			// Said here, where the handle is let go of, and not after the disposal
+			// below, which can run to the kill's grace: until then another client
+			// held a live-looking view whose Send met 409 (D26). A close that found
+			// no container sends neither, having no handle for a client to hold.
+			this.broadcaster.ended(session);
+			this.broadcaster.sessionsChanged();
 		}
 		// Swallowed deliberately. By this point the session is out of the table
 		// and unsubscribed, so it *is* closed as far as the caller is concerned;
@@ -1305,7 +1315,6 @@ export class SessionManager {
 				if (this.#disposing.get(disposalKey) === disposal) this.#disposing.delete(disposalKey);
 			}
 		}
-		if (session) this.broadcaster.sessionsChanged();
 	}
 
 	async disposeAll(): Promise<void> {
@@ -1344,6 +1353,9 @@ export class SessionManager {
 				// still moving cannot name one or fork out of one
 				// (`ManagedSession.subscriptions`).
 				for (const off of session.subscriptions.splice(0)) off();
+				// No `ended`, unlike `close()`: `app.close()` closes every stream
+				// before this runs, and a client reads the drop as every session
+				// detached (D25 point 3, D26).
 				this.broadcaster.forget(session.handle);
 				await session.adapter?.dispose();
 			}),

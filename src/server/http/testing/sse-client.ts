@@ -70,7 +70,9 @@ export class SseTestClient {
 	#accept(event: ServerEvent): void {
 		if (this.options.drop?.(event, this.#received++)) return;
 		this.events.push(event);
-		if (event.type !== "sessions-changed") {
+		// `ended` carries no seq to count (D26), and nothing comes under its
+		// handle after it, so like `sessions-changed` it touches nothing here.
+		if (event.type !== "sessions-changed" && event.type !== "ended") {
 			const key = event.handle;
 			this.#refs.delete(key);
 			this.#refs.set(key, sessionKey(event.session));

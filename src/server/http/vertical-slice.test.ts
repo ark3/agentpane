@@ -161,7 +161,8 @@ describe("offline vertical slice", () => {
 		// Pi is the only backend whose own ref moves on fork, so it is the only one
 		// that reaches `#forkOnto` at all. The parent is detached, not
 		// renamed: it is still on disk and still listed, so a second browser that
-		// was reading it must keep both its selection and its transcript.
+		// was reading it must keep its selection. Its live view goes with the
+		// parent's handle (D26), and the pane falls to the parent's preview.
 		const parent: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/parent.jsonl" };
 		const fork: SessionRef = { backend: "pi", id: `${parent.id}#fork-e1` };
 		const pi = new FakeAdapterFactory({
@@ -194,7 +195,7 @@ describe("offline vertical slice", () => {
 
 		const state = reduceEvents(parent, onlooker.events);
 		expect(state.selected).toEqual(parent);
-		expect(transcript(state, parent)).toEqual([userMessage("hello"), assistantMessage("parent reply")]);
+		expect(viewOf(state, parent)).toBeUndefined();
 		expect(viewOf(state, fork)).toBeUndefined();
 		// And the reason it holds: nothing was renamed, a second conversation was
 		// created under a handle of its own, so no event re-keys anyone.

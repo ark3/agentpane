@@ -1583,6 +1583,58 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
+	// The server says `ended` where it lets go of the handle, before the
+	// disposal the close answers after (D26), so the view drops while the close
+	// is still out and the pane goes detached-loading under a selection the exit
+	// has yet to clear. Until OW-lilami retires the exit, that pane must not ask.
+	it("never reads the preview of a session with nothing on disk whose ended lands before its close answers (OW-sodohi)", async () => {
+		const api = new FakeApi();
+		createRenamedAtAttach(api, false);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.create("/work", "pi");
+		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await settle();
+		api.preview.mockClear();
+		const closing = deferred<void>();
+		api.close.mockReturnValueOnce(closing.promise);
+
+		const detaching = controller.detach();
+		await settle();
+		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
+		await settle();
+		expect(controller.getView().state.sessions[h(createdRef)]).toBeUndefined();
+		closing.resolve();
+		await detaching;
+		await settle();
+
+		expect(api.preview).not.toHaveBeenCalled();
+		expect(controller.getView().state.selected).toBeNull();
+		controller.dispose();
+	});
+
+	// A streaming view dropped reads as a turn ending, but nothing is left to
+	// cut: the handle is gone, and the attach reply's summary still carrying it
+	// would send a fork-points read that can only answer 409 (D26).
+	it("asks for no fork points when the selected session's handle ends mid-turn (OW-sodohi)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		await controller.select(ref);
+		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		await settle();
+		api.forkPoints.mockClear();
+
+		api.emit({ type: "ended", session: ref, handle: h(ref) });
+		await settle();
+
+		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+		expect(api.forkPoints).not.toHaveBeenCalled();
+		controller.dispose();
+	});
+
 	// A fork is born with no file on every backend, and gets one only when its
 	// first turn ends (OW-japuzo, OW-hojefo). Detaching it mid-turn kills that
 	// turn, so nothing is ever written.

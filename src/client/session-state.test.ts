@@ -358,6 +358,56 @@ describe("client session state", () => {
 		expect(result.state.sessions[h(ref)]?.messages).toEqual([replacement]);
 	});
 
+	it("drops the view under a handle that ended whatever its sequence stands at, and leaves other views alone (D26)", () => {
+		// `ended` carries no seq, so no count of what came before it can hold it
+		// back or read it as a gap: it lands on a view at 3 and one at 7 alike.
+		const other: SessionRef = { backend: "codex", id: "thread-b" };
+		const third: SessionRef = { backend: "claude", id: "session-c" };
+		let state = stateAtSequence(ref, 3);
+		for (const [session, seq] of [[other, 7], [third, 0]] as const) {
+			state = reduceServerEvent(state, {
+				type: "snapshot",
+				session,
+				handle: h(session),
+				seq,
+				messages: [],
+				isStreaming: false,
+				compaction: null,
+				model: null,
+				effort: null,
+				unrestoredModel: null,
+				error: null,
+				errorId: null,
+				notices: [],
+			}).state;
+		}
+		const thirdView = state.sessions[h(third)];
+
+		for (const session of [ref, other]) {
+			const result = reduceServerEvent(state, { type: "ended", session, handle: h(session) });
+			expect(result.state.sessions[h(session)]).toBeUndefined();
+			expect(result.recover).toEqual([]);
+			expect(result.refreshSessions).toBe(false);
+			state = result.state;
+		}
+
+		expect(Object.keys(state.sessions)).toEqual([h(third)]);
+		expect(state.sessions[h(third)]).toBe(thirdView);
+		// The selection is not the reducer's to move.
+		expect(state.selected).toEqual(ref);
+	});
+
+	it("says nothing of an ended handle it holds no view of (D26)", () => {
+		const state = stateAtSequence(ref, 3);
+		const other: SessionRef = { backend: "codex", id: "thread-b" };
+
+		const result = reduceServerEvent(state, { type: "ended", session: other, handle: h(other) });
+
+		expect(result.state).toBe(state);
+		expect(result.recover).toEqual([]);
+		expect(result.refreshSessions).toBe(false);
+	});
+
 	it("ignores a status event for a session it holds no view of, rather than resurrecting one (OW-pezazo)", () => {
 		const state = initialClientState();
 		const result = reduceServerEvent(state, {

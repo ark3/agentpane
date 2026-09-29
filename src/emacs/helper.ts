@@ -388,6 +388,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		}
 
 		if (state === before) return;
+		// The reducer has dropped the view; the attachment under the handle, and
+		// telling Emacs, are left to the listing `close()` and `#forkOnto` send
+		// with it (`dropDead`) until OW-likopo makes this their owner (D26).
+		if (event.type === "ended") return;
 
 		if (event.type === "snapshot") {
 			introduce(event);

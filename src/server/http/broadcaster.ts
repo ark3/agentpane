@@ -182,6 +182,15 @@ export class Broadcaster {
 		this.#fanout({ type: "sessions-changed" });
 	}
 
+	/**
+	 * The last event under a handle the session manager has let go of (D26).
+	 * Unnumbered, and it leaves the counter alone: `forget` drops that beside it,
+	 * and numbering this would put it back.
+	 */
+	ended(session: Addressed): void {
+		this.#fanout({ type: "ended", session: session.ref, handle: session.handle });
+	}
+
 	/** Drop a closed session's counter, so the map does not grow with the uptime. */
 	forget(handle: string): void {
 		this.#seq.delete(handle);

@@ -471,7 +471,9 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
 			expect(factory.created).toHaveLength(1);
 			expect(factory.created[0]?.disposed).toBe(true);
-			expect(naming(real, wire)).toEqual([]);
+			// Nothing but the close's `ended`, under a handle no snapshot ever gave
+			// a client, so none holds a view for it to end (D26).
+			expect(naming(real, wire).map((event) => event.type)).toEqual(["ended"]);
 			expect(sessions.liveRefs()).toEqual([]);
 			expect(sessions.summaryOf(REF)).toBeNull();
 			expect(sessions.summaryOf(real)).toBeNull();
@@ -597,8 +599,12 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		expect(sessions.liveRefs()).toEqual([moved]);
 		// But nothing under the parent's handle names the fork: the parent was not
 		// renamed, it was left behind as a second conversation, and a new ref under
-		// its handle tells every client the opposite (OW-suhoto).
-		expect(events.filter((event) => "handle" in event && event.handle === parentHandle)).toEqual([]);
+		// its handle tells every client the opposite (OW-suhoto). What goes there
+		// is that the handle has ended, under the parent's own ref, and nothing
+		// after it (D26).
+		expect(events.filter((event) => "handle" in event && event.handle === parentHandle)).toEqual([
+			{ type: "ended", session: REF, handle: parentHandle },
+		]);
 	});
 
 	it("does NOT re-key when a Codex-style fork leaves the adapter's own ref unchanged", async () => {
@@ -829,7 +835,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			const events = collectEvents();
 
 			expect(await sessions.fork(REF, "e1")).toEqual(moved);
-			expect(under(REF, events)).toEqual([]);
+			// The parent's handle ending is all that names it (D26).
+			expect(under(REF, events).map((event) => event.type)).toEqual(["ended"]);
 
 			await sessions.attach(moved);
 			expect(under(moved, events).findLast((event) => event.type === "snapshot")).toMatchObject({
@@ -842,7 +849,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			const events = collectEvents();
 
 			await expect(sessions.fork(REF, "e1")).rejects.toThrow("get_messages failed");
-			expect(under(REF, events)).toEqual([]);
+			expect(under(REF, events).map((event) => event.type)).toEqual(["ended"]);
 			// Re-keyed all the same: the live adapter is on the fork.
 			expect(sessions.liveRefs()).toEqual([moved]);
 		});
@@ -870,7 +877,8 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			secondGate.resolve();
 			const again = await second;
 
-			expect(under(moved, events.slice(fromSecond))).toEqual([]);
+			// The first fork's handle ends, as any parent's does (D26).
+			expect(under(moved, events.slice(fromSecond)).map((event) => event.type)).toEqual(["ended"]);
 			expect(under(again, events.slice(fromSecond)).map((event) => event.type)).toEqual(["snapshot"]);
 		});
 
@@ -907,7 +915,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
 			adapter.emitError("the fork's turn failed");
 
-			expect(under(REF, events)).toEqual([]);
+			// The parent's handle ending, when the fork moved the adapter, is all
+			// that names it (D26).
+			expect(under(REF, events).map((event) => event.type)).toEqual(["ended"]);
 			expect(under(moved, events).map((event) => event.type)).toEqual(["snapshot", "error"]);
 			expect(under(moved, events)[0]).toMatchObject({ messages: [userMessage("one")] });
 			hold.resolve();
@@ -1476,6 +1486,18 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		expect(forkAdapter().disposals).toBe(1);
 	});
 
+	it("says nothing at the close of a parked fork, which has no handle for a client to hold (D26)", async () => {
+		await sessions.attach(parentRef);
+		const forkAdapter = capturingForks();
+		const forked = await sessions.fork(parentRef, "e1");
+		const events = broadcastEvents();
+
+		await sessions.close(forked);
+
+		expect(forkAdapter().disposals).toBe(1);
+		expect(events).toEqual([]);
+	});
+
 	it("disposes a starting fork's adapter once when shutdown lands during its attach", async () => {
 		const gate = deferred();
 		codex = new FakeAdapterFactory({
@@ -1604,6 +1626,27 @@ describe("lifecycle", () => {
 		expect(first.disposed).toBe(true);
 		expect(pi.created).toHaveLength(2);
 		expect(aliasAdapter).toBe(canonicalAdapter);
+	});
+
+	it("says a close ended the handle, and that the list changed, before the adapter's disposal settles (D26, OW-sodohi)", async () => {
+		// Up to the kill's grace passes between the forget and the disposal
+		// settling, and a client that heard nothing meanwhile held a view whose
+		// Send met 409.
+		await sessions.attach(REF);
+		const handle = sessions.summaryOf(REF)?.handle;
+		const adapter = pi.created[0];
+		if (!adapter) throw new Error("no adapter");
+		const release = holdDispose(adapter);
+		const events = broadcastEvents();
+
+		const closing = sessions.close(REF);
+		await settle();
+
+		const said = [{ type: "ended", session: REF, handle }, { type: "sessions-changed" }];
+		expect(events).toEqual(said);
+		release();
+		await closing;
+		expect(events).toEqual(said);
 	});
 
 	it("resolves shutdown only once a close has disposed the session's adapter", async () => {
