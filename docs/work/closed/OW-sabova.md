@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Since OW-forinu an attach reply no longer lights its row, so a sessions-changed that joins a listing already in flight leaves a live session's row reading detached and Detach disabled until some later listing
@@ -33,3 +34,16 @@ A test in `src/client/controller.test.ts`, red first on `main` as OW-forinu left
 A second test holds one listing in flight, delivers several `sessions-changed`, and asserts exactly one further listing follows it.
 The existing coalescing tests pass, or are changed and named in the commit message.
 `bun run check` passes.
+
+## Close note
+
+Landed on main as eebcb7b and 3eb65ff.
+`refreshSessions` in `src/client/controller.ts` keeps coalescing and owes one fresh listing: a call that arrives while a listing is out waits on exactly one more, asked when that one lands, so an attach whose `sessions-changed` joins a listing in flight now ends with its row `attached`.
+There is at most one listing out and one owed.
+A Refresh press that joins owns only what it owned before: the owed listing's failure and its idle, never a start announcement, which would clobber an attach made after the press (found by the adversarial read, fixed in 3eb65ff).
+The owed listing refreshes the preview like any listing.
+A first open that lands inside the startup listing now lists once more after it; D21 carries an amendment line saying so.
+New tests in `src/client/controller.test.ts`, each shown red on the unfixed code: "lights the row of a session attached while a listing was in flight (OW-sabova)", "coalesces a burst of session-list refreshes into one owed listing", "lists once more after the startup listing when the first open lands inside it", and the two "leaves an attach made after a joining Refresh ..." variants.
+Changed tests are named in the commit messages.
+`bun run check` passes, 1505 tests.
+The review also surfaced a pre-existing gap in D21's first-open skip, filed as OW-dajove.
