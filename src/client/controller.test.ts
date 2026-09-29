@@ -1081,7 +1081,10 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("forgets a cached live session when a fresh listing reports it detached", async () => {
+	// The listing owns the row and its `status`, and the server's `ended` alone
+	// says the handle is gone (D26): a listing that reads the session detached
+	// before the `ended` lands moves the row and leaves the view.
+	it("keeps a live view a fresh listing reports detached until its handle ends (D26)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -1092,7 +1095,9 @@ describe("client controller", () => {
 
 		api.emit({ type: "sessions-changed" });
 		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([detached]));
+		expect(controller.getView().state.sessions[h(ref)]).toBeDefined();
 
+		api.emit({ type: "ended", session: ref, handle: h(ref) });
 		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		expect(controller.getView().state.summaries[0]?.isStreaming).toBe(false);
 		api.preview.mockClear();
@@ -1100,13 +1105,14 @@ describe("client controller", () => {
 		expect(api.preview).toHaveBeenCalledWith(ref);
 	});
 
-	// Both orderings, because the detach must not depend on the broadcast: the
-	// re-list is what `replaceSessionSummaries` drops a live view from, and until
-	// the view goes the pane reads live and nothing fetches its preview, so
+	// Both orderings, because the server writes the `ended` and the
+	// `sessions-changed` before it answers the close, but the stream and the
+	// reply are unordered (D2): the view goes on the `ended` alone (D26), and
+	// until it goes the pane reads live and nothing fetches its preview, so
 	// whichever wins the race the view has to be gone and the preview on screen.
-	for (const relistFirst of [true, false]) {
-		const when = relistFirst ? "before" : "after";
-		it(`detaches the selected session onto its read-only preview, with the re-list landing ${when} the preview`, async () => {
+	for (const endedFirst of [true, false]) {
+		const when = endedFirst ? "before" : "after";
+		it(`detaches the selected session onto its read-only preview, with its ended landing ${when} the close answers`, async () => {
 			const api = new FakeApi();
 			const controller = createController(api);
 			await controller.start();
@@ -1116,26 +1122,25 @@ describe("client controller", () => {
 			const detachedSummary = { ...summary(ref), status: "detached" as const, isStreaming: false };
 			api.listSessions.mockResolvedValue([detachedSummary]);
 			const turns: SessionPreviewTurn[] = [{ role: "user", content: "done" }];
-			const previewed = deferred<SessionPreviewResponse>();
-			// The re-list refreshes whatever preview is on screen, so a second read
-			// can follow the first; both answer with the same stored transcript.
 			api.preview.mockResolvedValue({ ref, turns });
-			api.preview.mockReturnValueOnce(previewed.promise);
+			const closing = deferred<void>();
+			api.close.mockReturnValueOnce(closing.promise);
+			const ended = async () => {
+				api.emit({ type: "ended", session: ref, handle: h(ref) });
+				api.emit({ type: "sessions-changed" });
+				await settle();
+			};
 
 			const detaching = controller.detach();
 			await settle();
-
 			expect(api.close).toHaveBeenCalledWith(ref);
-			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
-			if (relistFirst) {
-				api.emit({ type: "sessions-changed" });
-				await settle();
-			}
-			previewed.resolve({ ref, turns });
+			if (endedFirst) await ended();
+			closing.resolve();
 			await detaching;
-			if (!relistFirst) {
-				api.emit({ type: "sessions-changed" });
-				await settle();
+			await settle();
+			if (!endedFirst) {
+				expect(paneMode(controller.getView())).toBe("live");
+				await ended();
 			}
 
 			const detachedView = controller.getView();
@@ -1570,6 +1575,10 @@ describe("client controller", () => {
 
 		await controller.detach();
 		await settle();
+		// The close answered first here; the `ended` the server wrote before it
+		// lands after (D2), and drops the view under a selection already cleared.
+		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
+		await settle();
 
 		const detachedView = controller.getView();
 		expect(api.close).toHaveBeenCalledWith(createdRef);
@@ -1685,6 +1694,7 @@ describe("client controller", () => {
 		api.preview.mockClear();
 
 		await controller.detach();
+		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
 		await settle();
 
 		expect(api.preview).toHaveBeenCalledWith(createdRef, expect.any(AbortSignal));
@@ -2789,8 +2799,9 @@ describe("client controller", () => {
 	 */
 	describe("the pane's mode", () => {
 		// Another client closes S while S is selected here; the stream is up, so
-		// the server answers the preview S's pane now needs.
-		it("previews a selected session a listing evicts, and sends it nothing (OW-zivamo)", async () => {
+		// the `ended` the close sends drops the view (D26), and the server answers
+		// the preview S's pane now needs.
+		it("previews a selected session another client closes, and sends it nothing (OW-zivamo)", async () => {
 			const api = new FakeApi();
 			const turns = [previewAssistant("stored")];
 			const controller = createController(api);
@@ -2803,6 +2814,7 @@ describe("client controller", () => {
 			api.preview.mockResolvedValue({ ref, turns });
 			api.listSessions.mockResolvedValueOnce([{ ...summary(ref), status: "detached", isStreaming: false }]);
 
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
 			api.emit({ type: "sessions-changed" });
 			await settle();
 
@@ -2816,19 +2828,20 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
-		// Another client closes S, which has nothing on disk, so the re-list
-		// carries no summary of it at all.
-		it("drops the view of a selected session a listing omits, and sends it nothing (OW-pihuko)", async () => {
+		// Another client closes S with the stream up, and the listing the close's
+		// `sessions-changed` asks fails: the `ended` alone says the handle is gone
+		// (D26), and no listing is needed to drop the view.
+		it("drops the view of a selected session another client closes though the listing its close asks fails, and sends it nothing (D26)", async () => {
 			const api = new FakeApi();
-			api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
 			const controller = createController(api);
 			await controller.start();
 			api.open();
 			await controller.select(ref);
 			api.emit(snapshotOf(ref));
 			expect(paneMode(controller.getView())).toBe("live");
-			api.listSessions.mockResolvedValueOnce([]);
+			api.listSessions.mockRejectedValueOnce(new Error("offline"));
 
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
 			api.emit({ type: "sessions-changed" });
 			await settle();
 

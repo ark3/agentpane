@@ -1594,8 +1594,9 @@ describe("App", () => {
 
 	it("carries the selected session's per-tab state onto the new handle a re-attach elsewhere gave its ref (OW-kimaya)", async () => {
 		// Another client detached and attached this session again, and the server
-		// minted a new handle for it; the reducer keeps one view per ref, so the
-		// view moves from h1 to h2 under the same selection.
+		// minted a new handle for it; h1's `ended` precedes h2's snapshot (D26), so
+		// one view per ref stands, and the view moves from h1 to h2 under the same
+		// selection.
 		const messages = [user("question"), assistant([{ type: "text", text: "answer" }])];
 		const under = (handle: string) => state({
 			selected: piSession,

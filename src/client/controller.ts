@@ -1358,7 +1358,7 @@ export function createController(
 					// Threshold compaction is why this is narrow rather than
 					// unconditional: it enters at "running", never "requesting", so
 					// only a click-shaped mark is in scope here. The view itself may be
-					// gone by now -- a gap, a drop, an `ended` or a listing can take it while the
+					// gone by now -- a gap, a stream drop or an `ended` can take it while the
 					// request is out -- and then there is no mark left to clear.
 					const current = view.state.sessions[handle]?.compaction;
 					const state = current === "requesting"
@@ -1378,13 +1378,12 @@ export function createController(
 			// clicking it. `api.close` awaits the subprocess's disposal, so the
 			// window is wide enough to matter: the no-disk exit below would snap the
 			// selection back off a row clicked during it. Bailing costs nothing: the
-			// re-list the close broadcasts drops the dead view on its own.
+			// `ended` the close sends drops the dead view on its own (D26).
 			const intent = selectionIntent;
-			// The live view is found through its handle, and the summary below by
-			// ref: `list()` gives a summary a handle only while the server holds
-			// the session, so one re-listed after the close carries none.
+			// The summary below is found by ref: `list()` gives a summary a handle
+			// only while the server holds the session, so one re-listed after the
+			// close carries none.
 			const key = sessionKey(selected);
-			const handle = handleOf(view.state, selected);
 			publish({ error: null });
 			detaching.add(key);
 			try {
@@ -1396,21 +1395,21 @@ export function createController(
 				return;
 			}
 			if (disposed || intent !== selectionIntent) return;
-			// Drop the live view here rather than waiting for the `sessions-changed`
-			// re-list to do it through `replaceSessionSummaries`, which is
-			// asynchronous: until it lands the pane would still read live.
-			const sessions = { ...view.state.sessions };
-			if (handle !== undefined) delete sessions[handle];
+			// The live view is not dropped here: the server's `ended` drops it
+			// (D26), and though the server writes that before it answers the
+			// close, the stream and the reply are unordered (D2), so the pane may
+			// still read live until it lands.
+			//
 			// A session with nothing on disk has nothing to preview and no row to go
 			// back to: `readSessionPreview` answers its ref with an
 			// empty-but-*non-null* transcript rather than an error, which is enough
 			// to put the pane on its preview, whose one control is an Attach that can
 			// only 404 on a ref the session manager no longer holds (OW-vasubu). Land
 			// on the startup view instead -- selection cleared -- which is where
-			// every user starts anyway, and decide it before the view goes, in the
-			// same publish, so the detached-loading pane in between never asks for
-			// that preview; the one an `ended` leaves while the close is still out
-			// does not ask either (`detaching`). Bumping the intent here is safe
+			// every user starts anyway, so a view the `ended` has yet to drop
+			// never leaves a detached-loading pane asking for that preview; the
+			// one an `ended` leaves while the close is still out does not ask
+			// either (`detaching`). Bumping the intent here is safe
 			// and makes this the last word on the selection: the intent is
 			// unchanged, so nothing the user started during the close is in flight.
 			//
@@ -1440,13 +1439,16 @@ export function createController(
 				// comes up. Not awaited, and `false`: nobody asked for this listing.
 				void refreshSessions(false);
 				++selectionIntent;
-				publish({ state: { ...view.state, sessions, selected: null } });
+				publish({ state: { ...view.state, selected: null } });
 				return;
 			}
 			// A session with a transcript on disk ends where a click on its
-			// now-detached row would have put the user (OW-tewave): its pane reads
-			// detached-loading, and `publish` fetches the preview (OW-forinu).
-			publish({ state: { ...view.state, sessions } });
+			// now-detached row would have put the user (OW-tewave): once the view
+			// has gone its pane reads detached-loading, and `publish` fetches the
+			// preview (OW-forinu). An `ended` that landed while the close was out
+			// left that fetch to this publish (`detaching`); one still to come
+			// makes its own.
+			publish({});
 		},
 		clearError() {
 			const selected = view.state.selected;

@@ -102,29 +102,20 @@ function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<stri
 }
 
 /**
- * Replace the disk listing and forget the live views of sessions the server
- * has let go.
+ * Replace the disk listing, which owns the rows and their `status`
+ * (OW-forinu) and no longer says which live views stand. While the stream is
+ * up a handle ends by the server's `ended` alone (D26), and a stream that
+ * drops takes every view with it (D25), so a view whose handle the listing
+ * lacks, or that a `detached` summary pairs with, stays until its `ended`
+ * drops it.
  *
- * A view held when the listing was asked for whose handle no listed summary
- * carries goes first (OW-pihuko), and besides the server's `ended` (D26) it
- * is the only drop a session closed with nothing on disk meets, since it
- * leaves no summary at all. It is the
- * rule the Emacs helper applies to its attachments (`dropDead` in
- * emacs/helper.ts, OW-yibijo), stated in both places rather than shared,
- * since all that would be shared is a set-membership test over what each
- * client holds. An event since does not keep the view: a held view's
- * container was in the server's table before the listing read it, and a
- * handle once gone is never minted again (D24), so a handle the listing
- * lacks is dead however new its view.
- *
- * A listed summary pairs with a view by ref, not by handle: `list()` gives a
- * summary a handle only for a container still in the server's table, so a
- * session closed since carries none, and that summary is exactly the one
- * whose view goes. Paired, the view is evicted only if it is the very object
- * that stood when the listing was asked for; a view an event has touched
- * since is newer than the listing, which keeps it and the summary it had
- * (OW-fihuma). Run after the drop above, it keeps no view the drop removed,
- * so no summary is kept for a view that is gone.
+ * What the listing does not write is a row a view has outrun. A listed
+ * summary pairs with a view by ref, not by handle: `list()` gives a summary a
+ * handle only for a container still in the server's table. A view an event
+ * has touched since the listing was asked for, or one that did not stand
+ * then, is newer than the listing, so a `detached` summary paired with it
+ * gives way to the summary the view had (OW-fihuma). That answers a stale
+ * listing racing an attach, not an end.
  */
 export function replaceSessionSummaries(
 	state: ClientState,
@@ -133,34 +124,20 @@ export function replaceSessionSummaries(
 ): ClientState {
 	const listedHandles = handlesByRef(sessionsWhenListed);
 	const currentHandles = handlesByRef(state.sessions);
-	let sessions = state.sessions;
 	let nextSummaries = summaries;
-	const live = new Set(summaries.map((summary) => summary.handle));
-	for (const handle of Object.keys(sessionsWhenListed)) {
-		if (live.has(handle) || sessions[handle] === undefined) continue;
-		if (sessions === state.sessions) sessions = { ...sessions };
-		delete sessions[handle];
-	}
 	for (const [index, summary] of summaries.entries()) {
 		if (summary.status !== "detached") continue;
 		const key = sessionKey(summary.ref);
 		const handle = listedHandles.get(key) ?? currentHandles.get(key);
 		if (handle === undefined) continue;
-		const listedView = sessionsWhenListed[handle];
-		const currentView = sessions[handle];
-		if (currentView !== undefined && currentView !== listedView) {
-			const current = state.summaries.find((item) => sessionKey(item.ref) === key);
-			if (current !== undefined) {
-				if (nextSummaries === summaries) nextSummaries = [...summaries];
-				nextSummaries[index] = current;
-			}
-			continue;
-		}
-		if (listedView === undefined) continue;
-		if (sessions === state.sessions) sessions = { ...sessions };
-		delete sessions[handle];
+		const currentView = state.sessions[handle];
+		if (currentView === undefined || currentView === sessionsWhenListed[handle]) continue;
+		const current = state.summaries.find((item) => sessionKey(item.ref) === key);
+		if (current === undefined) continue;
+		if (nextSummaries === summaries) nextSummaries = [...summaries];
+		nextSummaries[index] = current;
 	}
-	return { ...state, summaries: nextSummaries, sessions };
+	return { ...state, summaries: nextSummaries };
 }
 
 function emptySession(ref: SessionRef): SessionView {
@@ -219,27 +196,6 @@ function followRef(state: ClientState, handle: string, previous: SessionView | u
 	};
 }
 
-/**
- * A ref names at most one live session: the server maps each name to one
- * handle (`#names` in `session-manager.ts`), so a snapshot introducing `ref`
- * under `handle` means any other handle this client holds for it names a
- * session the server has let go -- detached and attached again by another
- * client, say, with a new handle minted, while this tab's stream was down or
- * before its re-list. That view is dropped here, at the one arm that
- * introduces views, which owns the rule; it is not a guard at a read site.
- * Left standing, `handleOf` answered the old handle and the pane showed a
- * frozen transcript while the new one's upserts landed unseen (OW-kimaya).
- */
-function withoutOtherViewsOf(state: ClientState, ref: SessionRef, handle: string): ClientState {
-	let sessions: Record<string, SessionView> | undefined;
-	for (const [other, view] of Object.entries(state.sessions)) {
-		if (other === handle || !sameRef(view.ref, ref)) continue;
-		sessions ??= { ...state.sessions };
-		delete sessions[other];
-	}
-	return sessions === undefined ? state : { ...state, sessions };
-}
-
 /** Clear a session's persisted turn error, as a dismissal does (`clearError` in `controller.ts`). */
 export function clearSessionError(state: ClientState, handle: string): ClientState {
 	const view = state.sessions[handle];
@@ -280,7 +236,7 @@ export function clearSessionError(state: ClientState, handle: string): ClientSta
  * OW-forinu, so a view stands at the click; a click on a preview or between
  * an attach reply and its snapshot, which this once had to skip, is refused
  * before it gets here. A view gone by the time a failed request comes back
- * to clear its mark -- a gap, a drop, an `ended` or a listing can take it meanwhile -- is
+ * to clear its mark -- a gap, a stream drop or an `ended` can take it meanwhile -- is
  * caught by that caller, which reads the mark through the view first, so no
  * caller reaches the check today; it stays as this function's own contract.
  */
@@ -329,17 +285,19 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			notices: [...event.notices],
 		};
 		return result(
-			followRef(updateSession(withoutOtherViewsOf(state, event.session, event.handle), event.handle, view), event.handle, previous, event.session),
+			followRef(updateSession(state, event.handle, view), event.handle, previous, event.session),
 		);
 	}
 
 	// From here on the arms only *update* a view; none of them may create one
 	// (OW-pezazo). Creating was resurrecting sessions this client had deliberately
-	// dropped: `detach` in `controller.ts` removes the live view while events for
-	// it are still on the wire -- `broadcaster.forget` only stops the counter, it
-	// cannot recall what has been fanned out -- and a late `status` rebuilt the
-	// entry, re-lighting the session list's streaming dot on a dead row until the
-	// next re-list healed it.
+	// dropped: `detach` in `controller.ts` once removed the live view itself while
+	// events for it were still on the wire -- `broadcaster.forget` only stops the
+	// counter, it cannot recall what has been fanned out -- and a late `status`
+	// rebuilt the entry, re-lighting the session list's streaming dot on a dead
+	// row until the next re-list healed it. The view now goes on `ended`, the
+	// last event under its handle (D26), but a gap still drops one whose handle
+	// goes on streaming (`Recovery`), and this is what keeps that one dropped.
 	//
 	// A snapshot is how the server introduces a session to a client --
 	// `sendOpeningSnapshots` on connect for every live ref, and `broadcastSnapshot`

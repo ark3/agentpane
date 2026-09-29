@@ -206,11 +206,12 @@ describe("client session state", () => {
 		expect(result.state.sessions[h(oldRef)]).toMatchObject({ ref: newRef, seq: 7 });
 	});
 
-	// The server maps a name to at most one handle, so a snapshot introducing a
-	// ref under a new handle means the old handle's session is gone: here,
-	// while this tab's stream was down, another client detached R and attached
-	// it again, and the server minted h2 for it (D24).
-	it("keeps one live view per ref: a snapshot under a new handle drops the view another handle held for that ref", () => {
+	// A ref names at most one live session, but the reducer no longer enforces
+	// that at the snapshot: the server sends the old handle's `ended` before any
+	// re-attach's snapshot can come under a new one (D26), and a stream that was
+	// down dropped every view already (D25). Here the two arrive as they would
+	// if the `ended` were the one missed, and the old view waits for it.
+	it("leaves the view another handle holds of a snapshot's ref to that handle's ended (D26)", () => {
 		const held = { ...stateAtSequence(ref, 3), summaries: [{ ...summary(ref), handle: "h1" }] };
 		const underH1 = { ...held, sessions: { h1: held.sessions[h(ref)]! } };
 		const opened = reduceServerEvent(underH1, {
@@ -228,12 +229,13 @@ describe("client session state", () => {
 			errorId: null,
 			notices: [],
 		}).state;
-		// The re-list lists R attached under h2, so it evicts nothing.
-		const relisted = replaceSessionSummaries(opened, [{ ...summary(ref), handle: "h2" }], opened.sessions);
 
-		expect(Object.keys(relisted.sessions)).toEqual(["h2"]);
-		expect(handleOf(relisted, ref)).toBe("h2");
-		const streamed = reduceServerEvent(relisted, {
+		expect(Object.keys(opened.sessions)).toEqual(["h1", "h2"]);
+		expect(opened.sessions["h1"]).toBe(underH1.sessions["h1"]);
+		const ended = reduceServerEvent(opened, { type: "ended", session: ref, handle: "h1" }).state;
+		expect(Object.keys(ended.sessions)).toEqual(["h2"]);
+		expect(handleOf(ended, ref)).toBe("h2");
+		const streamed = reduceServerEvent(ended, {
 			type: "upsert",
 			session: ref,
 			handle: "h2",
@@ -244,44 +246,16 @@ describe("client session state", () => {
 		expect(viewOf(streamed, ref)?.messages).toEqual([userMessage("before"), userMessage("after the re-attach"), userMessage("streamed")]);
 	});
 
-	it("drops a view held when the listing was asked whose handle the listing lacks, touched since or not, and keeps one it never held (OW-pihuko)", () => {
-		const other: SessionRef = { backend: "codex", id: "thread-b" };
+	// The listing owns rows and their `status`, and no longer says a handle
+	// ended: a view it lacks the handle of, or pairs by ref with a `detached`
+	// summary, stays until the server's `ended` drops it (D26).
+	it("leaves a view whose handle the listing lacks, or that a detached summary pairs with, in place (D26)", () => {
 		const listedWith = stateAtSequence(ref, 3);
-		expect(replaceSessionSummaries(listedWith, [], listedWith.sessions).sessions).toEqual({});
+		expect(replaceSessionSummaries(listedWith, [], listedWith.sessions).sessions).toBe(listedWith.sessions);
 
-		const opened = reduceServerEvent(listedWith, {
-			type: "snapshot",
-			session: other,
-			handle: h(other),
-			seq: 0,
-			messages: [],
-			isStreaming: false,
-			compaction: null,
-			model: null,
-			effort: null,
-			unrestoredModel: null,
-			error: null,
-			errorId: null,
-			notices: [],
-		}).state;
-		expect(Object.keys(replaceSessionSummaries(opened, [], listedWith.sessions).sessions)).toEqual([h(other)]);
-
-		const touched = reduceServerEvent(listedWith, {
-			type: "upsert",
-			session: ref,
-			handle: h(ref),
-			seq: 4,
-			index: 1,
-			message: userMessage("after the listing was asked"),
-		}).state;
-		expect(touched.sessions[h(ref)]).not.toBe(listedWith.sessions[h(ref)]);
-		expect(replaceSessionSummaries(touched, [], listedWith.sessions).sessions).toEqual({});
-
-		// On disk, the same close lists the session detached: its view goes, and
-		// the summary it had does not stay behind it.
 		const detached: SessionSummary = { ...summary(ref), status: "detached" };
-		const relisted = replaceSessionSummaries(touched, [detached], listedWith.sessions);
-		expect(relisted.sessions).toEqual({});
+		const relisted = replaceSessionSummaries(listedWith, [detached], listedWith.sessions);
+		expect(relisted.sessions).toBe(listedWith.sessions);
 		expect(relisted.summaries).toEqual([detached]);
 	});
 
