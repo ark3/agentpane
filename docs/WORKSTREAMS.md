@@ -49,7 +49,7 @@ If you write another adapter, `ref` is not stable — fire `onRefChanged` where 
   The attach's reply could not carry that link: as of jsonrpc.el 1.0.29 on Emacs 31.1, a reply to an asynchronous request that arrives while a synchronous one is outstanding is held back as an "anxious continuation" until that one returns, while notifications arriving meanwhile are handled at once (`docs/MANUAL_TESTING.md`, "jsonrpc.el runs an async reply after later notifications").
   No event says a rename, on either wire, since OW-mofuho retired the `renamed` event and the helper's `session/renamed` that forwarded it: the server sends a snapshot under the handle carrying the new ref.
   A new ref under a handle a client already holds means one conversation took a new id, and nothing else does: the old id keeps working on REST routes indefinitely, so an in-flight POST is safe, but no *event* will ever carry it again, and a client is right to move its selection across.
-  A fork never sends one, on any backend (OW-suhoto) — a fork creates a second conversation under a handle of its own and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`.
+  A fork never sends one, on any backend (OW-suhoto) — a fork creates a second conversation under a handle of its own and the parent keeps its own id, so all a fork tells other clients is `sessions-changed`, and on Pi, whose fork moves the process off the parent, `ended` under the parent's handle (D26, OW-sodohi).
 - **`/api` rejects a non-loopback `Origin`** (D8).
   Nothing to do from the app; it matters if you ever test the API from a page served from somewhere else.
 

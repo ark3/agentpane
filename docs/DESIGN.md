@@ -168,6 +168,7 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 - beyond attach, reconnect and session switch, a snapshot goes out only where no upsert or `status` can say what changed; as of OW-yirosu those are a rename of the session's id, a transcript replaced wholesale, an update naming an index that holds no message, and a changed message landing with a compaction change (OW-jelovu)
 - an `error-cleared` event when the server stops holding a session's turn error, at a prompt's admission or a client's dismissal, which until OW-jopifu only a snapshot could say
 - a monotonic `seq` detects a dropped update; recovery was "re-snapshot" until D25 point 5 amended it: the browser (OW-lunihe) and the Emacs helper (OW-filuge) now each detach the one session
+- an `ended` event, carrying no `seq`, where the server lets go of a handle at a close or a Pi fork, after which nothing goes out under it (D26, OW-sodohi)
 
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.
 
@@ -391,6 +392,7 @@ The alternative — vendoring the `.d.ts` files into `src/` — trades drift sur
 
 Both ends of D2/D3 are ours, so the SSE event union and the REST request/response types live in one module under `src/shared/` and are imported by server and client alike.
 Snapshot, upsert, and server-request events are a discriminated union on a `type` field with the `seq` and session id at the top level.
+`ended` alone carries no `seq` (D26, OW-sodohi): a number would have to come from the handle's counter, which the server has just dropped.
 
 This is the one place worth being concrete rather than leaving to implementation judgement: the two halves are written at different times and will drift if the contract is only described in prose.
 D24 added a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retired the `renamed` event once both clients keyed by it (OW-mofuho).
@@ -762,7 +764,7 @@ Every re-establish of the SSE stream asks for one unsurfaced session listing, so
 The owner took this on 2026-09-16 (OW-vukoku).
 Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
 Amended by OW-sabova on 2026-09-29: a first open that lands while the startup listing is still out asks for one listing after it, because every call that arrives mid-listing is owed one; only a first open after the startup listing has landed lists nothing.
-Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` takes for a session with nothing on disk goes, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until D26's cards land it did only after the disposal.
+Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` takes for a session with nothing on disk goes, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until OW-sodohi it did only after the disposal.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
