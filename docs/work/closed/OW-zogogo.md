@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: declined
 ---
 
 # Whether any Codex `ServerRequest` kind can reach agentpane under its own configuration, now that the approval kinds cannot
@@ -45,3 +46,9 @@ Needs a live Codex run and no work-laptop trip: `codex` is on the home server, a
 
 Then, whichever way it comes out, record the disposition in OW-bijera: an arriving kind makes that card real and names the kind its live run should use, and a clean sweep with nothing reachable makes it a candidate for `--moot` — the owner's call, not this card's.
 If the answer is instead that a kind is reachable only under a configuration agentpane does not use, that is a third outcome and belongs in OW-bijera as such, not forced into either of the first two.
+
+## Close note
+
+Declined on 2026-09-29 under OW-letevu, which made D2a final: every Codex `ServerRequest` is refused at arrival — declined where it has a decline shape, errored out with `-32601` otherwise — and named in a session error.
+Whether a kind can reach agentpane no longer licenses unbuilt code, which is why D18 had defended this fact; the error line is now the runtime assertion D18 asks for, and its appearing in the owner's use is D2a's named condition for reopening.
+D18's paragraph in `docs/DESIGN.md` was rewritten to say so.

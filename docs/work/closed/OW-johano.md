@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # The tool turn's request window is never written when a request actually blocks the turn
@@ -20,3 +21,8 @@ Nothing has ever observed a live `type: "request"` event from Pi on any run, so 
 ## Done when
 
 A `--tool-check` run whose tool turn does not reach idle still produces a `tool_turn` window covering what the stream carried between the tool prompt and the failure, and `docs/MANUAL_TESTING.md` records a run that exercised that path — the timeout forced, by a shortened wait or an equivalent, so the failing path is seen writing the window rather than argued to.
+
+## Close note
+
+Moot on 2026-09-29: a Pi dialog can no longer block a turn, because OW-letevu's D2a cancels every dialog at arrival, so the tool turn reaches idle and its window is written.
+OW-letevu also rewrote the window itself: `agent_requests_seen` became `agent_dialogs_cancelled`, counting the session errors that name a cancelled dialog (`resources/probes/agentpane_pi_smoke.py`, `dialogs_in`); its first live run is OW-yehisa's.

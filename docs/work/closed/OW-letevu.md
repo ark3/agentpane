@@ -1,5 +1,6 @@
 ---
 labels: [change, sweep-0929]
+closed: done
 ---
 
 # Remove agentpane's agent-request pipeline, keeping only the refusal at arrival and its error line, now that D2a is final: no approvals and no questions
@@ -29,7 +30,7 @@ The pipeline that exists only so a request could wait for a human:
 - Claude Code's inert `onRequest` and `reply` in `src/server/adapters/claude/adapter.ts`;
 - `SessionManager`'s `#pendingRequests`, `ManagedSession.requests`, `clearRequest`, `reply`, the fork's re-owning of its parent's requests and `close()`'s request cleanup, in `src/server/http/session-manager.ts`, plus `reply`'s entry in the `#serially` docblock;
 - the reply route (`replyToRequest`) in `src/server/http/app.ts`, and the client's call to it in `src/client/api.ts`;
-- the `request` and `request-resolved` events and every snapshot's `requests` field in `src/shared/protocol.ts`, and their counterparts in the Emacs contract `src/emacs/protocol.ts` (raise it in that file's FROZEN INTERFACE docblock, as its seventh raising or whichever number it has reached), `src/emacs/helper.ts`, and `agentpane--draw`'s REQUESTS in `emacs/agentpane.el`;
+- the `request` and `request-resolved` events and every snapshot's `requests` field in `src/shared/protocol.ts`, and their counterparts in the Emacs contract `src/emacs/protocol.ts` (raise it in that file's FROZEN INTERFACE docblock, as its eleventh raising, after OW-rebawa's tenth), `src/emacs/helper.ts`, and `agentpane--draw`'s REQUESTS in `emacs/agentpane.el`;
 - `requests` in `src/client/session-state.ts` and whatever the browser draws for a pending request, with the pending-request banner in `e2e/harness.ts`;
 - the fakes in `src/server/http/testing/fakes.ts`, and the tests that assert the pipeline, in `codex/adapter.test.ts`, `pi/process.test.ts`, `session-manager.test.ts`, `app.test.ts`, `controller.test.ts`, `App.test.ts`, `session-state.test.ts`, `helper.test.ts` and `emacs/agentpane-test.el`.
 `agentpane--requests-out` in `emacs/agentpane.el` is unrelated — it tracks JSON-RPC requests to the helper — and stays.
@@ -81,3 +82,17 @@ OW-25 is amended: with approvals refused at arrival, what is left is whether the
 - `bun run check` passes, and `bun run test:browser` too, since the browser's pending-request drawing and `e2e/harness.ts` change.
 - The ERT suite passes, run as `emacs/agentpane.el`'s Commentary says, with the pass count there updated to what the run prints; that count was already stale before this card (186 recorded, 218 `ert-deftest`s on 2026-09-29), so never derive it by subtraction.
 - D2a and D12 read as above.
+
+## Close note
+
+Landed 2026-09-29 as cf297f1, 0f1433e and 5f6b6e2 on main.
+The agent-request pipeline is gone end to end: the adapter contract's `onRequest`, `onRequestResolved` and `reply`, `AgentRequest`, Codex's request namespace and reverse mapping with the reducer's `request-resolved` effect and `issuerThreadId`, Pi's `pendingUiRequests` and `buildUiReplyCommand`, the server's pending-request table and `/api/requests/:id` route, the `request` and `request-resolved` events and every snapshot's `requests`, the Emacs helper's `requests/reply`, `session/request` and `session/requestResolved` (the FROZEN INTERFACE's eleventh raising), and both clients' pending-request drawing and the D12 exemption each client copied into Detach and `agentpane-close-session`.
+What stays: Codex declines a kind with a decline shape, errors out the rest with `-32601`, and Pi cancels a dialog, each in the tick it arrives and each followed by a session error naming the kind, with "yet" dropped from the two messages that promised holding.
+Claude Code builds no refusal, because the deny shape was never captured and `can_use_tool` cannot arrive without `--permission-prompt-tool stdio`; the silent drop of any `control_request` it did send is filed as OW-kihubu.
+
+Verified: the widened done-grep finds nothing in `src`, `emacs` or `e2e` beyond `emacs/fake-helper.ts`'s unrelated `onRequest`; the Codex and Pi refusal tests in `codex/adapter.test.ts` ("CodexAdapter requests, refused at arrival (D2a)") and `pi/process.test.ts` ("PiAdapter dialogs, cancelled at arrival (D2a)") were each seen red by removing the decline or cancel write, the error line, the `-32601` answer, and the Pi after-dispose try/catch in turn; `bun run check` passed 1489 tests, `bun run test:browser` passed 26, and ERT ran 216 tests, 213 as expected, 3 skipped, which the Commentary in `emacs/agentpane.el` now records.
+An adversarial read confirmed no behaviour change beyond intent other than Pi no longer emitting a pointless status update when a dialog arrives.
+
+Docs: D2a in `docs/DESIGN.md` is rewritten as final with the error lines as its reopening tripwire; D12's pending-request exemption is gone and its counts follow; D2's bullet, D18's instance, D24's queued verbs and the architecture diagram no longer describe the pipeline as current.
+`resources/probes/agentpane_pi_smoke.py` now counts cancelled-dialog errors as `agent_dialogs_cancelled` and was not run live; OW-yehisa, whose done condition already requires a home-server run, was amended to record that change at its run.
+Settled: OW-bijera, OW-bovase and OW-zogogo closed declined; OW-siguzo, OW-nobeko and OW-johano closed moot; OW-25 was rewritten to the question of whether the probes still need to copy `trust.json`.

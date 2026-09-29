@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-zisumi]
+closed: declined
 ---
 
 # Nothing in the client can answer an agent's approval request, so a `ServerRequest` hangs the turn forever behind one line of text.
@@ -96,3 +97,9 @@ OW-sewewe put `reply` in the per-session queue in `src/server/http/session-manag
 That is safe only while no queued verb waits on a request being answered, which held on 2026-09-24 because every adapter disposes of a request as it arrives: Pi cancels its dialogs (OW-yosuzo), Codex declines on publish, and Claude Code's `reply` does nothing.
 Once a human can answer, a verb whose backend response waits on a dialog — a Pi `fork` or `compact` whose extension hook opens one — deadlocks with the reply queued behind it, until a close.
 So whatever makes a request answerable also takes `reply` out of the queue, or shows by a test that no queued verb can wait on a request, and `#serially`'s docblock is amended to say which.
+
+## Close note
+
+Declined on 2026-09-29 under OW-letevu, which made D2a final by the owner's decision: agentpane never holds an agent request, so no client answers one.
+Each Codex request and Pi dialog is refused at arrival and named in a session error, and OW-letevu removed the server half this card would have built on (`ROUTES.reply`, the pending-request table, the `request` and `request-resolved` events, the snapshots' `requests`).
+The reasoning is D2a in `docs/DESIGN.md`; it reopens if the error line appears in the owner's own use, and git history before OW-letevu holds the machinery.

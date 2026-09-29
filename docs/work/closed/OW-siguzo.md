@@ -1,6 +1,7 @@
 ---
 labels: [deferral]
 blocked-by: [OW-bijera]
+closed: moot
 ---
 
 # A Pi dialog that times out while held is never retracted, and its pendingUiRequests entry never expires
@@ -27,3 +28,7 @@ If OW-bijera keeps cancelling Pi dialogs at arrival, this card is moot.
 - A test in `src/server/adapters/pi/process.test.ts`, with a held dialog carrying a `timeout`, advances fake timers past it and asserts `onRequestResolved` fired with the request's id and a late `reply()` produces no error; red first.
 - A test in the same file asserts `fork()` retracts a held dialog and empties `pendingUiRequests`; red first.
 - `bun run check` passes.
+
+## Close note
+
+Moot on 2026-09-29: OW-letevu removed `pendingUiRequests` and the whole path by which a Pi dialog was held, so no dialog is ever pending long enough for Pi's `timeout` to pass, and D2a in `docs/DESIGN.md` is now final rather than provisional, so OW-bijera will not hold dialogs again.

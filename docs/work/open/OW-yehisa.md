@@ -29,3 +29,9 @@ Fix both here.
 OW-sofige's live runs and OW-zadupu's capture pass are meant to run after this lands.
 
 Done also requires `capture_fixtures.py` to pass Pi an explicit `--model` defaulting to the pinned ref, with the ref recorded in the capture's metadata beside the model the capture read back.
+
+## Amended 2026-09-29, at OW-letevu's close
+
+OW-letevu removed the `request` SSE events the probe's dialog window observed, and rewrote that observation without a live run: `requests_in` became `dialogs_in`, which counts `error` events whose message begins "Pi sent a dialog agentpane cannot answer", and the evidence key `agent_requests_seen` became `agent_dialogs_cancelled` (`resources/probes/agentpane_pi_smoke.py`, the `DIALOG_CANCELLED` constant and the `if args.tool_check:` block).
+The home-server run this card already requires is therefore the probe's first since that change.
+Done also requires that run to complete with `agent_dialogs_cancelled` in its blob, `docs/MANUAL_TESTING.md` to say in that run's entry that the key and what it counts changed under OW-letevu, and the probe's "Verified with" line in `resources/probes/README.md` to name that run.

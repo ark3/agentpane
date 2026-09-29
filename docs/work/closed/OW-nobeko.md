@@ -1,6 +1,7 @@
 ---
 labels: [deferral]
 blocked-by: [OW-bijera]
+closed: moot
 ---
 
 # Three Codex request tests went vacuous when OW-zisumi declined every request at arrival, and need their subject back once requests are held again
@@ -26,3 +27,8 @@ If OW-bijera instead keeps declining some kinds, the tests go on a kind it holds
 
 - For each of the three, a test in `src/server/adapters/codex/adapter.test.ts` that drives a held request goes red when the logic it names is broken by hand (collapse `wireRequestKey` to `String(id)`, drop the `clearPendingRequests()` call on the failed start, drop the `resolvedListeners` call in the `"request-resolved"` case) and green once restored.
 - D2a's line "Until OW-bijera the first finds nothing to act on" is gone or true.
+
+## Close note
+
+Moot on 2026-09-29: the three Codex paths this card wanted tests for — the request namespace, the typed reverse mapping, and wire-id scoping — were removed by OW-letevu along with the rest of the request pipeline, and D2a in `docs/DESIGN.md` is final, so requests will not be held again.
+The refusal at arrival that replaced them has its own tests in `src/server/adapters/codex/adapter.test.ts`, under "CodexAdapter requests, refused at arrival (D2a)".

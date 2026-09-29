@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: declined
 ---
 
 # Surface Claude Code's `can_use_tool` control request as an `AgentRequest`, replacing the Claude adapter's inert `onRequest`.
@@ -40,3 +41,9 @@ Left open rather than closed only so the decline can cite the `docs/DESIGN.md` d
 It is written over Codex, but its reasoning is the general one this card's decline rests on — prompts are to be avoided rather than surfaced, and the trade is no dialog against a turn that hangs behind one line of text.
 The decline note has something durable to cite whenever the owner chooses to write it.
 Pulled off `now` on 2026-09-11 for the same reason it is likely declined.
+
+## Close note
+
+Declined on 2026-09-29 under OW-letevu, which made D2a final: agentpane never holds an agent request, so there is no `AgentRequest` to surface a `can_use_tool` as, and OW-letevu removed `onRequest` and `reply` from the adapter contract.
+Prompts are avoided rather than surfaced, per D7a and D2a in `docs/DESIGN.md`.
+What remains of the Claude side — that a `control_request` the adapter did not send is dropped silently — is filed as OW-kihubu, which asks for it to be made loud at arrival, not surfaced.
