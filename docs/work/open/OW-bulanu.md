@@ -29,25 +29,49 @@ Adapters are disposed down three routes as well: `#terminate`, a direct `session
 
 ## The change
 
-One function retires a startup from every index — `#attaching` and `container.starting` — at the one moment it stops being live, whether that is publish, failure or teardown.
-`close()` does all of its synchronous work (table removal, `torndown`, removing the parked entry) before its first await, and folds the parked fork's disposal into the one disposal it registers in `#disposing`.
-A deeper version would create the container before the index lookup and retire `#attaching` altogether; it collides with the canonical-name arbitration in `#start` (OW-fumegi), so do not take it without a cold read that answers that.
+One function retires a startup from every record that says it is live — `#attaching`, `container.starting`, and the `#pendingForks` handle entry a handle-carrying fork starts from — at the one moment it stops being live, whether that is publish, failure or teardown.
+`attach`'s `finally` delete and the scattered `bound.starting = undefined` clears in `#start` go; the join in `attach` then never sees a torn-down startup because teardown has already retired it.
+`close()` does all of its synchronous work (table removal, `torndown`, retirement, removing the parked entry) before its first await, and folds the parked fork's disposal into the one disposal it registers in `#disposing` — including in the branch with no container, which today registers nothing.
+D25 decision 1 in `docs/DESIGN.md` names OW-vodinu as one of its known exceptions ("The exception is a close that first disposes parked-fork adapters"); that sentence goes in the same change.
 
-D25 decision 1 in `docs/DESIGN.md` names OW-vodinu as one of its known exceptions; that sentence goes in the same change.
+The deeper version — create the container before the index lookup and retire `#attaching` altogether — is not taken; the cold read below shows it breaks the canonical-name arbitration.
 
-## Before the implementer
+## What the cold read found (2026-09-29, at f89ab89)
 
-Dispatch a cold-read reader before any implementer, on top of the usual check of this card against the source, and amend this card with what it finds before dispatching the change.
-This card came from a sweep's reading and nothing in it was run, and OW-letevu (closed 2026-09-29) has since removed the request cleanup from `close()` and `disposeAll()`, so the ground under it has moved.
-The reader answers two questions, each from the code:
-1. Does one retirement point still cover every writer of whether a startup is live — every site that sets or clears `container.starting`, adds to or deletes from `#attaching`, sets `PendingStart.torndown`, or disposes an adapter — as the code stands after OW-letevu, or has a writer been missed or gone?
-2. Does the proposed shape stay clear of the canonical-name arbitration in `#start` (OW-fumegi), and, if the deeper version is still on the table, what exactly breaks in that arbitration if the container is created before the index lookup?
+A reader answered this card's two questions from the code after OW-letevu, which touched only request cleanup; the card's three claims all still hold.
+What it added:
+
+- **A fourth record: `#pendingForks`.**
+  For a Codex fork carrying its parent's handle, `#start` takes `adapter = forkStart?.adapter ?? factory.create(...)`, and the parked entry stays until publish (`this.#pendingForks.delete(sessionKey(ref))` after `bound.starting = undefined`) or failure.
+  For all of `start()` one adapter is reachable as both `pending.adapter` and the parked entry's `adapter`, so `close(F)` during F's in-flight attach disposes it once from the parked loop and again through `#terminate`, bypassing `#terminate`'s first-caller-owns-it memo, and `disposeAll()` does the same through `starting` and `parkedForks`.
+  The retirement takes the handle entry at the claim, not at publish.
+- **The no-container branch of `close()` must register a disposal.**
+  A parked fork nobody attached has no container: `close(F)` deletes the entry and awaits the dispose, and an attach arriving meanwhile finds no parked entry, goes to the index lookup, and spawns a factory adapter on F's thread while the parked one is still being disposed — overlap `#disposing` exists to prevent.
+  So the fold only works if that branch registers a `PendingDisposal` under the requested key.
+- **OW-vodinu is two sequences, not one.**
+  Case B, attach(F) already in flight when close begins: publish lands during close's parked await (`torndown` still false), attach resolves, then close disposes `session.adapter` a second time; `isAttached` is already false at the end at HEAD, so only the attach's resolution and the dispose count discriminate.
+  Case A, attach(F) arriving after close began: the overlap in the previous item.
+- **The loser of the arbitration needs retiring too.**
+  `#start`'s two early returns onto a canonical container (`if (canonicalSession?.adapter)` and the wait on `canonicalSession.starting.promise`) leave the loser's `#attaching` entry until the `finally`; the retirement runs there as well.
+  `#attaching` is keyed by the spelling the attach asked for, so `PendingStart` must carry that key for the retirement to find it.
+- **Stays clear of the arbitration.**
+  The loser awaits the winner's promise, not its record, so retiring at publish or failure does not affect it, and a teardown's `#disposing` entries under every name plus the canonical-disposal loop still gate a fresh spelling.
+  Do not claim to change this existing behaviour: `close(B)` while B's startup waits on a winner cancels only B, because B is not yet a name on the winner.
+- **Why the deeper version breaks it.**
+  `attach(A)` pre-creates X{A}, `attach(B)` pre-creates Y{B}, both look up canonical C; X takes C, Y waits on X's startup and then `#addName(X, B)` moves `#names[B]` to X — but Y is still in `#sessions`, so `list()` shows a second row for the conversation (what `#ownSummary`'s dedup exists to prevent) and `close(B)` never removes Y.
+  It would also bind waiters to startups that have validated nothing (a `close(C)` of a pre-created Z would reject X's attach though nobody closed A), needs a `cwd` nobody knows before the lookup, and inverts the "No await separates the arbitration above from this claim" invariant.
+- **Teardown ordering for a fresh attach is already sound.**
+  With a container the fresh attach waits on `#disposing`; with none, no adapter exists and each await in `#start` is followed by a `torndown` check, with nothing yielding between the last one and the claim.
 
 ## Done when
 
-Tests in `src/server/http/session-manager.test.ts` that fail before the change and pass after:
-- `close()` of a stored session still in its index lookup, then an immediate attach, starts afresh and answers 200 rather than 404;
-- a start that publishes while `close()` has a parked fork to dispose leaves the session closed, the attach not answered 200, and `isAttached` false;
-- `disposeAll()` inside the window between publish and attach's `finally` disposes the adapter once (assert on the adapter's dispose count, not on memoisation hiding a second call).
+Tests in `src/server/http/session-manager.test.ts`, each shown red at HEAD first, that pass after:
+- `close()` of a stored session still in its index lookup, then an immediate attach, starts afresh and answers rather than rejecting `UnknownSessionError`.
+  Reachable without `holdStart`: a `SessionIndex` whose `get` awaits a `deferred()`, as in "does not spawn at all when teardown beats the adapter into existence", plus `settle()`.
+- Case B: with a shared-handle fork's attach in flight (`FakeAdapterFactory({ forkMode: "shared", sharedChild, forkOptions: { holdStart } })`, as in "survives the parent being closed while the fork's attach is in flight"), `close(F)` rejects the attach, leaves `isAttached` false, and the fork adapter's `disposals` is 1.
+- Case A: with a parked shared-handle fork nobody attached and its `dispose` held open (wrap `codex.created[0].fork` and swap `dispose` on the returned adapter, as the existing `adapter.dispose = async () => {...}` tests do), an attach issued after `close(F)` began creates no adapter while the dispose is held.
+- `disposeAll()` inside the window between publish and attach's `finally` disposes the adapter once, asserting `disposals` — hooked deterministically by a broadcaster client that calls `disposeAll()` on the first `"sessions-changed"` frame, which `attach` emits inside that window.
+- `disposeAll()` during a shared fork's `holdStart` disposes the fork adapter once.
+The mechanism replaced is gone: `#attaching` and `container.starting` are cleared only in the one retirement function, and `attach`'s `finally` no longer deletes from `#attaching`.
 Then OW-14, OW-ganapi, OW-vodinu and OW-13 close `--moot` citing this card, and the D25 exception sentence is gone.
 OW-33 and OW-34 both evict through `close()`; note on each that this landed.
