@@ -2455,6 +2455,38 @@ holds, and the fork's buffer holds the handle its own attach answered."
           (should (equal (buffer-local-value 'agentpane--handle (agentpane--buffer-for forked))
                          "h2")))))))
 
+(ert-deftest agentpane-test-pi-fork-parent-detached-before-the-reply-previews ()
+  "A `session/detached' for a Pi fork's parent that lands before the
+`sessions/fork' reply -- the server's `ended' for the parent's handle
+goes out inside the fork, ahead of its answer (D26) -- leaves the parent
+not dropped once the reply lands, so `g' previews it rather than
+attaching its old branch again.  The reply's detach then names the ref
+alone, the handle gone, which the helper, holding nothing under that ref
+any longer, takes as a no-op."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t
+                agentpane--handle "h1"
+                attached (list :ref forked :handle "h2")
+                hold '(sessions/fork))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+          (funcall (cdr (pop held)) t)
+          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref)))
+          (with-current-buffer buffer
+            (should-not agentpane--dropped)
+            (should-not (agentpane--attached-p))
+            (setq sent nil)
+            (agentpane-refetch)
+            (should (equal sent `((sessions/preview :session ,ref))))))))))
+
 (ert-deftest agentpane-test-fork-in-flight-refuses-a-second ()
   "A second `agentpane-fork' while one is in flight says so and sends
 nothing; a fork that failed, or finished, frees the buffer for another."

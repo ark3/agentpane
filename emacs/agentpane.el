@@ -479,11 +479,13 @@ and a fork does not share (D24): the one the snapshot that attached the
 buffer carried, never the attach's reply (OW-rebawa), or one a later
 snapshot moved it onto; see `agentpane--notified-buffer'.
 Nil in a buffer that has not attached.  A buffer detached keeps the one
-it held, which the server never mints again: the parent of a Pi fork,
-whose container the server has let go, and whose detach names it.  One
-the helper detached, by a `session/detached', lets go of it instead, as
-does one attached through a helper that has exited (D25); see
-`agentpane--let-go'.")
+it held, which the server never mints again: the parent of a Pi fork
+whose reply lands before the `session/detached' for its handle, and
+whose detach names it.  One the helper detached, by a
+`session/detached', lets go of it instead -- usually a Pi fork's parent
+too, since the server's `ended' for it goes out inside the fork, ahead
+of the reply (D26) -- as does one attached through a helper that has
+exited (D25); see `agentpane--let-go'.")
 
 (defconst agentpane--spawn-timeout 60
   "Seconds to wait for `sessions/attach', which may spawn the session's
@@ -1980,7 +1982,10 @@ still need to tell it to stop.")
 `session/detached', until a snapshot attaches it again: the server
 let go of the handle and said so with an `ended' under it, a close
 elsewhere or a Pi fork (D26), or the session's `seq' gapped (D25,
-OW-filuge).
+OW-filuge).  The `ended' of this buffer's own close or Pi fork usually
+lands before that request's reply, which clears this again, so that the
+buffer previews at `g' rather than attaching what was closed or forked
+away from.
 A helper that exits leaves each buffer it served so too (D25); see
 `agentpane--let-go'.  The buffer then holds no handle and is not
 attached, and keeps its ref and what it drew, so `agentpane-refetch'
@@ -1999,9 +2004,10 @@ waiting on it, oldest first, each a cons (THEN . FAILED) of the arguments
 
 (defvar-local agentpane--closing nil
   "Non-nil while a `sessions/close' this buffer sent has not answered.
-The buffer still holds its handle and counts as attached meanwhile, but
-the server has already taken the session out of its table and is waiting
-on its subprocess (`SessionManager.close' in
+The buffer holds its handle and counts as attached until the
+`session/detached' the server's `ended' brings, which usually lands
+while the close is out (D26); either way the server has already taken
+the session out of its table and is waiting on its subprocess (`SessionManager.close' in
 src/server/http/session-manager.ts), so an attach would spawn it again:
 a respawn the helper's close never records (OW-dakeyi).  Every other
 request the server refuses, since only an attach starts a session (D25).
@@ -2875,9 +2881,10 @@ already in flight.
 The close in flight is state the buffer owns, `agentpane--closing', set
 as the close goes out and cleared when it fails, or, when it succeeds,
 once the listing below has answered or failed, since until the listing
-answers the buffer may yet be killed.  Meanwhile the buffer
-still holds its handle and counts as attached, but nothing that would
-reach the session goes out: an attach would spawn again, on the server,
+answers the buffer may yet be killed.  Meanwhile the buffer holds its
+handle and counts as attached until the `session/detached' for it, which
+usually comes while the close is out (D26), and either way nothing that
+would reach the session goes out: an attach would spawn again, on the server,
 the session being closed, a prompt, a fork or its points the server
 would refuse, since only an attach starts a session (D25), and another
 close would go out beside this one (OW-dakeyi).  Each is refused, `g'
@@ -2889,8 +2896,8 @@ Once the close answers the buffer holds no handle and no attachment, and
 its turn-done watch on the handle ends, as `agentpane--detach' ends it;
 nor has it sent an attach, so a later kill sends no `sessions/detach' for
 a session the helper, having closed it, no longer holds.  Nor is it
-dropped, though a `session/detached' for the handle may have come while
-the close was out, the server letting go of the session before its
+dropped, though a `session/detached' for the handle has usually come
+while the close was out, the server letting go of the session before its
 subprocess is gone: dropped, it would attach the session again where it
 should preview.  Then the
 listing says whether the session is on disk, as the browser reads
@@ -3114,10 +3121,16 @@ aborted.  A Pi fork also moves the parent's live process onto the fork, a
 container of its own under a handle of its own, and takes the parent's
 container out of the server's table (D24, `SessionManager' in
 src/server/http/session-manager.ts), so the parent's handle hears nothing
-more.  This buffer then counts itself detached too, detaches the parent
-from the helper by that handle, which ends the turn-done watch on it
-\(`agentpane--watch-turn'), and its next command that needs the session
-attaches it again, under whatever handle that attach answers.
+more but the `ended' that says so (D26).  The helper passes that on as a
+`session/detached', which usually lands before the fork's reply and lets
+go of the handle (`agentpane--let-go').  At the reply this buffer counts
+itself detached, and not dropped, so `g' previews it rather than
+attaching the parent's old branch again; detaches the parent from the
+helper, by the handle if it still holds it and else by its ref, which a
+helper that has let go of it takes as a no-op, and which ends the
+turn-done watch on it (`agentpane--watch-turn'); and its next command
+that needs the session attaches it again, under whatever handle that
+attach answers.
 The fork's buffer takes the fork's handle from its own attach.  Codex
 and Claude Code leave the parent attached.
 
@@ -3224,7 +3237,8 @@ gone out.  See `agentpane-fork'."
      (setq agentpane--forking nil)
      (when (equal (plist-get parent :backend) "pi")
        (agentpane--detach)
-       (setq agentpane--attached nil))
+       (setq agentpane--attached nil
+             agentpane--dropped nil))
      (let* ((summary (list :ref forked :cwd (plist-get agentpane--session :cwd)))
             (buffer (agentpane--transcript-buffer summary)))
        (with-current-buffer buffer
