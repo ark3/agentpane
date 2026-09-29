@@ -106,7 +106,7 @@ Building the transport first added a `renamed` arm for this, which every client 
 Codex's `ServerRequest` (`resources/codex-protocol/ServerRequest.ts`) is a request *from* the agent *to* the client, carrying a `RequestId`: approval requests, `item/tool/requestUserInput`, MCP elicitation, dynamic tool call.
 The agent blocks until answered.
 
-**agentpane never holds an agent request: the Codex and Pi adapters refuse one the moment it arrives, and name it in a session error; Claude Code's is never sent one (below).**
+**agentpane never holds an agent request: the Codex and Pi adapters refuse one the moment it arrives, and name it in a session error; Claude Code sends none under the flags agentpane spawns it with (below).**
 Decided by the owner on 2026-09-29 (OW-letevu), making final what OW-yikoyo decided provisionally on 2026-09-11.
 It covers approvals, which D7a already avoids by configuration, and questions: Codex's `item/tool/requestUserInput` and MCP elicitation, Pi's `select`, `confirm`, `input` and `editor` dialogs, and Claude Code's `can_use_tool` should it ever arrive.
 
