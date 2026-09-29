@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # loadPreview decides whether a failed preview read is an answer with a stream-drop counter, which still clears the selection for a read that fails before the tab hears the drop or before an attach's snapshot; the rule should be replaced, not extended
@@ -50,3 +51,18 @@ Tests in `src/client/controller.test.ts`, each red first:
 The test "asks again for a preview whose read the stream dropped under, even when it fails after the reconnect" is rewritten to the new rule rather than deleted, and the `streamDrops` counter is gone.
 A test on `src/client/App.svelte` shows the failure line over the Attach button.
 `bun run check` passes, and `bun run test:browser` passes, since the line changes what the composer's action row area draws (`AGENTS.md`).
+
+## Close note
+
+Landed on main in four commits (30ae3f9, df8b783, df78414, d57b9e5).
+
+A failed preview read is never an answer: `loadPreview` in `src/client/controller.ts` no longer clears the selection, and the `streamDrops` counter is gone.
+A read that fails with the stream up sets `previewFailure` on `ControllerView` and holds background reads (`previewHeld`) until the next `onOpen`; a re-select reads through `preview()` itself.
+`App.svelte` draws "Couldn't load the transcript: <message>" above the Attach button; `publish` drops the line (and the hold) once the pane leaves loading for that session.
+`api.preview` takes an optional `AbortSignal`; `loadPreview` aborts a read after `PREVIEW_READ_TIMEOUT_MS` (10s, a first cut), counted as a failed read.
+
+The adversarial read found the first cut stalled a read still out across a reconnect: its key turned away the `connected` publish's fresh read, and its later failure held the pane on a healthy server (worst via the timeout: a hung read across a short outage always held on "No answer within 10s.").
+Fixed by `previewLoads` becoming a Map of each read's AbortController and timer, and `onOpen` abandoning every read still out before publishing `connected`; an abandoned read's handlers find their record gone and do nothing. `dispose()` abandons them too.
+
+Verified: every done-condition test, plus the reconnect-spanning ones (plain, fake-timer hang, late success of an abandoned read), was seen red against the prior code and green after; mutation checks on the hold, its release at `onOpen`, the signal, and the record check each turned tests red. `bun run check` 1514 tests green; `bun run test:browser` 26 passed, though no e2e spec draws the new line.
+Left: OW-tuyewo, a click on a loading row reading outside `loadPreview` (double read, failure reported in two places). The Emacs client has no background-read loading pane (`sessions/preview` is a gesture request in `emacs/agentpane.el`), so there was nothing to mirror.
