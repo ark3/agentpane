@@ -3718,3 +3718,29 @@ To re-run, start a server as above, then from the checkout root run `emacs --bat
   (process-send-eof (jsonrpc--process conn))
   (jsonrpc-shutdown conn))
 ```
+
+## A refused Claude Code `can_use_tool`, by deny and by error reply, reaches the model and the turn ends (OW-kihubu)
+
+Measured on the home server 2026-09-29, `claude --version` answering `2.1.283 (Claude Code)`, on explicit `--model haiku`, which `init` resolved as `claude-haiku-4-5-20251001`.
+The question was which reply the adapter may write to a `control_request` it did not send, since the only capture of one, `permission-request.jsonl` under `claude 2.1.238`, answered with an allow.
+
+Each cell was a throwaway Python harness in a fresh `git init`ed directory under `/tmp` holding a one-line `notes.txt` reading `hello fixture`, spawning this, directly rather than through `sbox`, whose injected `bypassPermissions` would suppress the ask:
+
+```
+claude -p --model haiku --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-mode default --permission-prompt-tool stdio
+```
+
+It wrote one user message asking for an Edit of that line to `hello permission`, and, if refused, for no retry and the reason given.
+Each cell answered the one `can_use_tool` that arrived, in the same shape the 2.1.238 capture shows, at once and with the request's own `request_id`, then read stdout until `result` and closed stdin.
+The error cell ran twice, the second time only to log the `result` fields the first run's output cut off; both read the same.
+
+**(a) The error reply**, `{"type":"control_response","response":{"subtype":"error","request_id":…,"error":"agentpane declined this request (probe)"}}`, was taken.
+Within 20ms the CLI wrote a user line whose `tool_result` had `is_error: true` and content `Tool permission request failed: Error: agentpane declined this request (probe)`, with `tool_result_meta` `[{"id":…,"non_execution_kind":"permission-rule"}]`.
+The model's next message quoted the reason, and `result` followed with `subtype: "success"`, `is_error: false`, `num_turns: 3`, and the Edit listed in `permission_denials`.
+
+**(b) The deny**, `{"type":"control_response","response":{"subtype":"success","request_id":…,"response":{"behavior":"deny","message":"agentpane declined this request (probe)"}}}`, was taken the same way.
+The `tool_result` had `is_error: true` and content exactly the `message`, with no `Tool permission request failed: Error:` prefix, and the same `tool_result_meta`; the model quoted the reason, and `result` read as in (a), with the Edit in `permission_denials`.
+
+In every run `notes.txt` still read `hello fixture`, exactly one `can_use_tool` arrived, the CLI wrote no `control_response` of its own, and the process exited 0 once stdin closed.
+So both shapes are a "no" the model reads and the turn carries on from, and the deny reads more cleanly.
+No other CLI-initiated subtype could be provoked, so the error reply was measured on `can_use_tool` alone.
