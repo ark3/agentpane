@@ -328,6 +328,68 @@ describe("notifications", () => {
 		expect(io.out[4]).toMatchObject({ params: { session: renamed, handle: h(pi), isStreaming: true, askedFor: pi } });
 	});
 
+	it("records no attachment for an attach answered under another ref whose snapshot a gap took before the reply (OW-tifiva)", async () => {
+		// The snapshot under the new ref matches no pending attach, which waits
+		// under the ref it asked for, and the gap takes the view it formed; the
+		// reply then has no snapshot to forward. An attachment recorded there
+		// would be one Emacs was never told of: the listing that lacks the
+		// handle would then say `session/detached` for it.
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(alias)}`]: () => {
+				source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+				source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+				return json({ session: summary(pi) });
+			},
+			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await io.until(1);
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
+		source.emit({ type: "sessions-changed" });
+		await io.until(2);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "sessions/changed"]);
+	});
+
+	it("sends an attach's reply after the session/detached of the gap that took its snapshot, and records nothing at the reply (OW-tifiva)", async () => {
+		const { io, source } = start({
+			[`GET ${ROUTES.session(pi)}`]: () => {
+				source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+				source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+				return json({ session: summary(pi) });
+			},
+			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(3);
+		source.emit({ type: "sessions-changed" });
+		await io.until(4);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/detached", 1, "sessions/changed"]);
+	});
+
+	it("sends the view it holds as the snapshot of an attach whose reply lands ahead of it, before the reply (OW-rebawa)", async () => {
+		// A buffer killed and opened again: the detach drops the attachment
+		// and leaves the reducer's view, and the attach's own snapshot is still
+		// on its way when the reply lands. The reply attaches nothing in Emacs,
+		// so the snapshot that does must go before it.
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await io.until(1);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(2);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: h(pi) } });
+		await io.until(3);
+		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi } });
+		await io.until(5);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(io.out.slice(3).map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 3]);
+		expect(io.out[3]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
+		expect(io.out[3]!["params"]).not.toHaveProperty("askedFor");
+	});
+
 	it("says nothing for a session Emacs never attached, and nothing more after sessions/close", async () => {
 		const { io, source } = start({ ...attachRoutes(pi), [`DELETE ${ROUTES.session(pi)}`]: noContent });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
@@ -492,11 +554,11 @@ describe("notifications", () => {
 		]);
 	});
 
-	it("tags nothing for an attach of an alias whose handle another attach already holds, so its detach by that alias leaves the other fed", async () => {
+	it("drops only the alias's own wait on a detach by that alias, so an attach of the canonical ref to the same handle is still fed", async () => {
 		// B attaches the canonical ref and A an alias of the same session; both
 		// replies land before the session's snapshot, and A is killed before it.
-		// The buffer holding the canonical ref takes what follows, and A's reply,
-		// had it been handled, would have merged A into it.
+		// A's wait, moved onto the handle by its reply, goes with it, and the
+		// snapshot answers B's by its ref, untagged.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }),

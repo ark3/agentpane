@@ -32,10 +32,18 @@
  * too; notifications go out only for sessions Emacs attached through this
  * helper and has not detached or closed since. That set is kept here by
  * handle, like the reducer's views (OW-kimaya), so a rename moves nothing in
- * it; an attach waits in it under the ref it asked for, since it is entered
- * before the REST call (D2) and nothing has named a handle yet, and moves to
- * the handle with the first event under one that carries that ref, or with
- * the attach reply. An attachment never moves to another handle: one whose
+ * it. An attachment is recorded when the snapshot that introduces it goes
+ * out to Emacs, and at nothing else (OW-rebawa): that snapshot is what
+ * attaches the buffer that asked, and the attach's reply only ends its
+ * request (`agentpane--on-notification` in emacs/agentpane.el), so the
+ * helper feeds exactly the buffers it has told they are attached. Until
+ * then an attach waits under the ref it asked for, since it is entered
+ * before the REST call (D2) and nothing has named a handle yet, and the
+ * first snapshot under that ref answers it; or, once a reply answered it
+ * under another ref, under the reply's handle (`askedFor` below). A reply
+ * whose snapshot the helper already holds sends it before the reply, so
+ * the attachment is recorded there; one with none to send records none.
+ * An attachment never moves to another handle: one whose
  * handle the server let go of is dropped at the next `sessions-changed`,
  * and Emacs told (`dropDead` below, OW-yibijo). `sessions/changed` is
  * unfiltered.
@@ -54,14 +62,12 @@
  * needs (OW-mofuho). The one place that is not enough is an attach answered
  * under another ref than it asked for, whose snapshot under the new ref
  * reaches Emacs while the buffer that asked holds only the asked-for ref
- * and no handle, and whose reply cannot be relied on to reach it first:
- * jsonrpc.el 1.0.29 on Emacs 31.1 holds an async reply back as an "anxious
- * continuation" while a synchronous request is outstanding, and handles
- * notifications meanwhile (docs/MANUAL_TESTING.md). So the first snapshot
- * under that handle carries `askedFor`, the ref the attach asked for, and
- * agentpane-mode binds it to the buffer that asked, which takes the handle
- * from it (`askedFor` below, `agentpane--notified-buffer` in
- * emacs/agentpane.el). The hand-rolled
+ * and no handle, and whose reply binds nothing. So the snapshot that
+ * introduces that attachment carries `askedFor`, the ref the attach asked
+ * for, and agentpane-mode binds it to the buffer that asked, which takes
+ * the handle from it, and merges into that buffer one already holding the
+ * handle (`askedFor` below, `agentpane--notified-buffer` and
+ * `agentpane--absorb` in emacs/agentpane.el). The hand-rolled
  * reader in `sse.ts` does not retry, and neither does the helper: when the
  * stream drops, or its first open fails, the helper exits (D25 point 4).
  * Agentpane is local-only, so a drop means the server went away, and there
@@ -152,14 +158,15 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	let state: ClientState = initialClientState();
 	/** Handle of each session Emacs has attached -> the ref it last told Emacs, which is the one Emacs names it by. */
 	const attached = new Map<string, SessionRef>();
-	/** `sessionKey`s of attaches no event or reply has yet given a handle. */
+	/** `sessionKey`s of attaches no snapshot has yet answered, and no reply moved onto a handle. */
 	const pending = new Set<string>();
 	/**
-	 * Handle of an attach answered under another ref than it asked for -> the
-	 * ref it asked for, until the first snapshot under the handle carries it
-	 * to Emacs as `askedFor`, or the attachment is forgotten. That snapshot is
-	 * the first notification under the handle: the reducer forwards nothing
-	 * for a view it does not hold, and only a snapshot introduces one.
+	 * Handle of an attach answered under another ref than it asked for, whose
+	 * snapshot had not gone out by the reply -> the ref it asked for, until
+	 * the first snapshot under the handle answers it, carrying that ref to
+	 * Emacs as `askedFor`, or a detach by that ref forgets it. The attach
+	 * waits here rather than in `pending`, whose asked-for ref no snapshot
+	 * under the new ref would match.
 	 */
 	const askedFor = new Map<string, SessionRef>();
 	let connection: ReturnType<typeof api.connect> | null = null;
@@ -206,14 +213,20 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
-	const notifySnapshot = (view: SessionView, handle: string | undefined): void => {
-		const asked = handle === undefined ? undefined : askedFor.get(handle);
-		if (handle !== undefined) askedFor.delete(handle);
+	/**
+	 * Send `view` as a snapshot under `handle`, answering the attach waiting
+	 * on the handle, or `asked`, the ref an attach whose reply is sending it
+	 * asked for: that ref rides it as `askedFor` where the view names
+	 * another, since only by it can Emacs find the buffer that asked.
+	 */
+	const notifySnapshot = (view: SessionView, handle: string, asked = askedFor.get(handle)): void => {
+		askedFor.delete(handle);
+		const tag = asked !== undefined && sessionKey(asked) !== sessionKey(view.ref) ? asked : undefined;
 		notify({
 			method: "session/snapshot",
 			params: {
 				...statusOf(view, handle),
-				...(asked ? { askedFor: asked } : {}),
+				...(tag ? { askedFor: tag } : {}),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				errorId: view.errorId,
@@ -224,13 +237,19 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	/**
-	 * Whether Emacs attached the session `handle` names, moving a pending
-	 * attach on `ref` onto it; if so, `told` is the ref the notification about
-	 * to go out names.
+	 * Whether `event` goes out to Emacs, recording the attachment it
+	 * introduces if it is the snapshot that answers an attach waiting on its
+	 * ref or its handle. Nothing but a snapshot introduces one: only a
+	 * snapshot tells Emacs the buffer is attached (OW-rebawa), and every
+	 * other event under a handle Emacs has not been sent one for would reach
+	 * a buffer that holds nothing for it. A snapshot under an attached handle
+	 * answers an attach of its ref too, so the reply sends no second one.
 	 */
-	const isAttached = (handle: string, ref: SessionRef, told: SessionRef): boolean => {
-		if (!attached.has(handle) && !pending.delete(sessionKey(ref))) return false;
-		attached.set(handle, told);
+	const isAttached = (event: Exclude<ServerEvent, { type: "sessions-changed" }>): boolean => {
+		const { handle, session } = event;
+		const answers = event.type === "snapshot" && (pending.delete(sessionKey(session)) || askedFor.has(handle));
+		if (!answers && !attached.has(handle)) return false;
+		attached.set(handle, session);
 		return true;
 	};
 
@@ -297,9 +316,12 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * `sessions/close` is out. The buffer comes back on `g`. An attach whose
 	 * snapshot is still on its way when the gap lands needs nothing here:
 	 * that snapshot forms the view again and goes out as its first
-	 * notification. One whose snapshot arrived before the gap and whose reply
-	 * lands after it is not reconciled, and leaves the buffer counting itself
-	 * attached to a handle the helper says nothing under (OW-tifiva).
+	 * notification. One whose snapshot arrived before the gap needs nothing
+	 * either: sent, that snapshot attached the buffer, which the
+	 * `session/detached` here lets go of before the reply; not sent, since
+	 * it named another ref than the attach asked for, it recorded nothing,
+	 * and the reply finds no view to send and records nothing either
+	 * (OW-tifiva). Either way the attach ends with the buffer not attached.
 	 */
 	const detachGapped = (handle: string): void => {
 		const sessions = { ...state.sessions };
@@ -329,7 +351,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		if (state === before) return;
 
 		const { handle } = event;
-		if (!isAttached(handle, event.session, event.session)) return;
+		if (!isAttached(event)) return;
 		const view = state.sessions[handle]!;
 		switch (event.type) {
 			case "snapshot":
@@ -369,20 +391,17 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * which may be one from before a rename it has not heard (OW-wedeli).
 	 * Without one, it goes by the ref Emacs was last told, as it must for a
 	 * buffer whose attach never answered it: agentpane-mode sends that only
-	 * from a buffer that sent an attach (`agentpane--detach`), and matches an
-	 * attach answered under another ref by the ref it asked for until its
-	 * `askedFor` snapshot has gone out, since until then that buffer holds
-	 * no handle. Either way an attach still waiting for a handle is dropped
-	 * by the ref it asked for.
+	 * from a buffer that sent an attach (`agentpane--detach`). Either way an
+	 * attach still waiting is dropped by the ref it asked for, under that
+	 * ref or under the handle a reply moved it onto (`askedFor`), which
+	 * leaves any attachment another buffer holds under that handle alone.
 	 */
 	const forget = (session: SessionRef, handle: string | undefined): void => {
 		const key = sessionKey(session);
 		pending.delete(key);
+		for (const [held, asked] of askedFor) if (sessionKey(asked) === key) askedFor.delete(held);
 		if (handle !== undefined) drop(handle);
-		else {
-			for (const [held, told] of attached) if (sessionKey(told) === key) drop(held);
-			for (const [held, asked] of askedFor) if (sessionKey(asked) === key) drop(held);
-		}
+		else for (const [held, told] of attached) if (sessionKey(told) === key) drop(held);
 	};
 
 	const closeStream = (): void => {
@@ -432,37 +451,37 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			pending.add(key);
 			try {
 				const summary = await api.attach(session);
-				// The route's ref is authoritative and may differ from the one asked
-				// for: an attach through an alias an earlier rename left behind
+				// The server broadcasts the attach's snapshot before it answers, but
+				// the stream and the REST response are unordered (D2), so the reply
+				// may land first. An attach still pending here has had no snapshot
+				// answer it: its snapshot is still on its way, or it came under
+				// another ref than the one asked for, which the route's ref may be
+				// -- an attach through an alias an earlier rename left behind
 				// answers the new ref, and so does a first start that renamed a
-				// `virtual` id, and the snapshot either broadcasts carries only the
-				// new ref (`SessionManager`'s `attach` and `#rename`,
-				// src/server/http/session-manager.ts). Filtered by the asked-for key,
-				// that snapshot was dropped, so the attach moves onto the summary's
-				// handle here and the snapshot the reducer holds under it goes out
-				// now, before the reply; one still on its way is forwarded when it
-				// arrives. Either names the ref asked for in `askedFor`, since until
-				// it does no buffer holds that handle, and agentpane-mode may handle
-				// the reply after it whatever the order here. Only for the first
-				// attachment of the handle: where another already holds it, its
-				// snapshots were never dropped, the buffer that attached it takes
-				// what follows by that handle or by its own ref, and this attach's
-				// reply merges the asking buffer into that one
-				// (`agentpane--attached-as` and `agentpane--absorb` in
-				// emacs/agentpane.el), as it did before the tag; a tag here would
-				// also let a detach by this alias drop that buffer's attachment
-				// (`forget` above). An attach
-				// no longer pending was moved already, by an event under the handle
-				// that carried the asked-for ref, which the buffer matched by that
-				// ref, or dropped by a `sessions/detach` sent while this attach was in
-				// flight, which a reply that lands after it must not undo.
-				if (pending.delete(key)) {
-					const first = !attached.has(summary.handle);
-					attached.set(summary.handle, summary.ref);
-					if (first && sessionKey(summary.ref) !== key) {
+				// `virtual` id (`SessionManager`'s `attach` and `#rename`,
+				// src/server/http/session-manager.ts) -- or a gap took it. Where the
+				// reducer holds a view under the reply's handle, that goes out now,
+				// before the reply, as the snapshot that attaches the buffer, with
+				// the asked-for ref as `askedFor` where the view names another;
+				// also where another attachment already holds the handle, whose
+				// buffer agentpane-mode then merges into the one that asked
+				// (`agentpane--absorb` in emacs/agentpane.el). Where it holds none,
+				// nothing is recorded: the snapshot under the ref asked for answers
+				// the attach when it comes, and for another ref the attach waits
+				// under the handle (`askedFor`). A gap that took the view leaves
+				// that wait unanswered, and the buffer that asked not attached
+				// (OW-tifiva). An attach no longer pending was answered already, or
+				// dropped by a `sessions/detach` sent while it was in flight, which
+				// a reply that lands after it must not undo.
+				if (pending.has(key)) {
+					const view = state.sessions[summary.handle];
+					if (view) {
+						pending.delete(key);
+						attached.set(summary.handle, view.ref);
+						notifySnapshot(view, summary.handle, session);
+					} else if (sessionKey(summary.ref) !== key) {
+						pending.delete(key);
 						askedFor.set(summary.handle, session);
-						const view = state.sessions[summary.handle];
-						if (view) notifySnapshot(view, summary.handle);
 					}
 				}
 				return summary;

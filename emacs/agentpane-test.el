@@ -1040,7 +1040,7 @@ one draws it, stays attached, and hears the session under its handle."
         (let ((live (agentpane--transcript-buffer (list :ref alias)))
               (preview (agentpane--transcript-buffer (list :ref canonical))))
           (with-current-buffer live (agentpane--attach))
-          (agentpane--on-notification nil 'session/snapshot
+          (agentpane--on-notification agentpane--connection 'session/snapshot
                                       (list :session canonical :handle "h1" :askedFor alias
                                             :nodes []))
           (funcall (cdr (pop held)) t)
@@ -1083,8 +1083,9 @@ whatever ref the summary names, so no second buffer opens on the session."
   "Attach a buffer whose reply names another ref and a handle than the one
 it asked for, with the snapshot under that ref and handle, which the
 helper tags with the ref the attach asked for, handled before the reply's
-callback if SNAPSHOT-FIRST, else after it, and check that the buffer that
-asked drew it and holds the reply's handle and ref."
+callback if SNAPSHOT-FIRST, else after it, the reply delivered alone, and
+check that the buffer that asked drew it and holds the snapshot's handle
+and ref."
   (let ((asked '(:backend "claude" :id "pending-1"))
         (ref '(:backend "claude" :id "real-2")))
     (agentpane-test--forking nil nil
@@ -1098,7 +1099,7 @@ asked drew it and holds the reply's handle and ref."
             (progn
               (agentpane--on-notification nil 'session/snapshot snapshot)
               (funcall (cdr (pop held)) t))
-          (funcall (cdr (pop held)) t)
+          (funcall (cdr (pop held)) 'reply)
           (agentpane--on-notification nil 'session/snapshot snapshot))
         (with-current-buffer buffer
           (should (equal (agentpane-test--indices) '(3)))
@@ -1117,8 +1118,8 @@ finds the buffer that asked, which takes the handle from it."
 
 (ert-deftest agentpane-test-attach-answered-under-a-new-ref-draws-a-snapshot-handled-after-its-reply ()
   "An attach whose reply names another ref than the one asked for draws the
-snapshot under the new ref handled after the reply's callback, which finds
-the buffer by the handle the reply gave it."
+snapshot under the new ref handled after the reply's callback, which
+finds the buffer by its `askedFor', the reply having given it nothing."
   (agentpane-test--attach-answered-under-a-new-ref nil))
 
 (ert-deftest agentpane-test-attach-under-a-new-ref-holds-the-handle-its-snapshot-gave-when-the-reply-fails ()
@@ -1224,7 +1225,7 @@ answered as `agentpane-test--forking' answers it, and the model's
            (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
              (with-current-buffer buffer (agentpane--attach))
              (agentpane--on-notification
-              nil 'session/snapshot
+              agentpane--connection 'session/snapshot
               (list :session ref :handle "h1" :isStreaming t :model "luna"
                     :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
              (agentpane--on-notification nil 'session/detached
@@ -1262,7 +1263,7 @@ the snapshot redraws it, before the reply lands and after."
             attached (list :ref renamed :handle "h2"))
       (with-current-buffer buffer (agentpane-refetch))
       (agentpane--on-notification
-       nil 'session/snapshot
+       agentpane--connection 'session/snapshot
        (list :session renamed :handle "h2" :askedFor ref
              :nodes (vector (agentpane-test--assistant 5 "<p>Back.</p>"))))
       (with-current-buffer buffer
@@ -1300,16 +1301,81 @@ still previews."
             (agentpane-refetch)
             (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
 
+(ert-deftest agentpane-test-attach-reply-after-its-detached-attaches-nothing ()
+  "An attach whose snapshot the helper sent and then detached, a `seq' gap
+having landed between that snapshot and the reply, ends with the reply
+handled last, in wire order, as the helper writes them: the buffer is
+not attached, holds no handle and is dropped, so a `g' attaches again,
+and a prompt waiting on the attach is not sent (OW-tifiva).  Bound by
+the reply, the buffer counted itself attached to a handle the helper
+said nothing more under."
+  (let ((ref '(:backend "claude" :id "real-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/attach)
+              attached (list :ref ref :handle "h1"))
+        (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+          (with-current-buffer buffer
+            (agentpane--draw [])
+            (goto-char (point-max))
+            (insert "hello")
+            (agentpane-send))
+          (agentpane--on-notification agentpane--connection 'session/snapshot
+                                      (list :session ref :handle "h1" :nodes []))
+          (agentpane--on-notification agentpane--connection 'session/detached
+                                      (list :session ref :handle "h1"))
+          (funcall (cdr (pop held)) t)
+          (with-current-buffer buffer
+            (should-not (agentpane--attached-p))
+            (should-not agentpane--handle)
+            (should agentpane--dropped)
+            (should-not agentpane--attaching)
+            (should-not agentpane--sending))
+          (should-not (assq 'sessions/prompt sent)))))))
+
+(ert-deftest agentpane-test-attach-reply-ahead-of-its-snapshot-fails-its-waiters ()
+  "An attach whose reply is handled ahead of its snapshot -- the helper
+held no view to send before it (`sessions/attach' in src/emacs/helper.ts)
+-- attaches nothing: the prompt waiting on it is not sent, the buffer is
+free to send again, and the echo area says why.  The snapshot that
+follows then attaches the buffer (OW-rebawa).  Bound by the reply, the
+buffer counted itself attached whether or not a snapshot ever came."
+  (let ((ref '(:backend "claude" :id "real-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/attach)
+              attached (list :ref ref :handle "h1"))
+        (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+          (with-current-buffer buffer
+            (agentpane--draw [])
+            (goto-char (point-max))
+            (insert "hello")
+            (agentpane-send))
+          (funcall (cdr (pop held)) 'reply)
+          (with-current-buffer buffer
+            (should-not (agentpane--attached-p))
+            (should-not agentpane--handle)
+            (should-not agentpane--attaching)
+            (should-not agentpane--sending))
+          (should-not (assq 'sessions/prompt sent))
+          (should (seq-some (lambda (line) (string-search "nothing attached" line)) said))
+          (agentpane--on-notification agentpane--connection 'session/snapshot
+                                      (list :session ref :handle "h1" :nodes []))
+          (with-current-buffer buffer
+            (should (agentpane--attached-p))
+            (should (equal agentpane--handle "h1"))))))))
+
 (defmacro agentpane-test--merging (&rest body)
   "Run BODY with a transcript buffer `holder' holding the session under the
 handle \"h1\" at a ref it has since left for `canonical', and a buffer
 `previewing' holding it at the ref `alias' and no handle, whose attach the
-helper answers with the session's summary, and every request answered as
+helper answers with the session's summary, its snapshot under that
+handle carrying `alias' as its `askedFor', and every request answered as
 `agentpane-test--forking' answers it, `sessions/forkPoints' and
 `sessions/fork' with whatever BODY has put in `points' and `forked', nil
 unless it has.  BODY sends the attach.
-The reply naming `canonical' has overtaken the notification under the
-handle that would move `holder' there, which it may, the two being
+That snapshot names `canonical', and has overtaken the notification under
+the handle that would move `holder' there, which it may, the two being
 unordered (D2), so only the handle joins the two buffers."
   (declare (indent 0))
   `(let ((canonical '(:backend "claude" :id "real-2"))
@@ -1326,12 +1392,12 @@ unordered (D2), so only the handle joins the two buffers."
          ,@body))))
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-leaves-one-buffer ()
-  "An attach whose reply names the handle another transcript buffer holds
-leaves exactly one buffer holding it: the one that attached, which hears
-the session from then on.  The other is killed without detaching the
-session, a window that showed it shows the survivor, and the survivor
-attaches again, since the attach's snapshot may have been drawn in the
-other."
+  "An attach whose snapshot comes under the handle another transcript
+buffer holds, carrying the ref this one asked for, leaves exactly one
+buffer holding it: the one that attached, which hears the session from
+then on.  The other is killed without detaching the session, a window
+that showed it shows the survivor, and the survivor sends no second
+attach, the snapshot that merged being drawn there."
   (agentpane-test--with-helper
     (agentpane-test--merging
       (delete-other-windows)
@@ -1340,10 +1406,11 @@ other."
       (should-not (buffer-live-p holder))
       (should (equal (agentpane-test--holders canonical) (list previewing)))
       (should (eq (agentpane--buffer-holding "h1") previewing))
-      (should (equal (reverse sent)
-                     `((sessions/attach :session ,alias)
-                       (sessions/attach :session ,canonical))))
+      (should (equal sent `((sessions/attach :session ,alias))))
       (should (eq (window-buffer (selected-window)) previewing))
+      (with-current-buffer previewing
+        (should (agentpane--attached-p))
+        (should (equal (agentpane-test--indices) '(0 1))))
       (agentpane--on-notification
        nil 'session/snapshot
        (list :session canonical :handle "h1"
@@ -1351,16 +1418,24 @@ other."
       (with-current-buffer previewing
         (should (equal (agentpane-test--indices) '(3)))))))
 
-(ert-deftest agentpane-test-attach-now-onto-a-held-handle-attaches-again ()
-  "A synchronous attach whose reply names the handle another buffer holds
-merges that one into this one, which then attaches again, as the
-asynchronous attach does, for a snapshot of its own."
-  (agentpane-test--merging
-    (cl-letf (((symbol-function 'agentpane--connection) (lambda () 'connection))
-              ((symbol-function 'jsonrpc-request) (lambda (&rest _) attached)))
-      (with-current-buffer previewing (agentpane--attach-now))
-      (should-not (buffer-live-p holder))
-      (should (equal sent `((sessions/attach :session ,canonical)))))))
+(ert-deftest agentpane-test-attach-now-onto-a-held-handle-leaves-one-buffer ()
+  "A synchronous attach whose snapshot, handled while it waits, comes under
+the handle another buffer holds, carrying the ref this one asked for,
+merges that one into this one, as the asynchronous attach does, and
+sends nothing more: the snapshot that merges is this buffer's own."
+  (agentpane-test--with-helper
+    (agentpane-test--merging
+      (cl-letf (((symbol-function 'jsonrpc-request)
+                 (lambda (&rest _)
+                   (agentpane--on-notification
+                    agentpane--connection 'session/snapshot
+                    (list :session canonical :handle "h1" :askedFor alias :nodes []))
+                   attached)))
+        (with-current-buffer previewing
+          (agentpane--attach-now)
+          (should (agentpane--attached-p)))
+        (should-not (buffer-live-p holder))
+        (should-not sent)))))
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-drafts ()
   "When an attach reply merges the buffer holding its handle into the one
@@ -1511,14 +1586,26 @@ same distance from the end, and that of any other window where it was."
             (funcall snapshot agentpane-test--nodes)
             (should (= (window-start window) start))))))))
 
+(defun agentpane-test--attach-snapshot (ref &rest fields)
+  "Deliver, through `agentpane--connection', the `session/snapshot' under
+the handle \"h1\" that attaches the buffer waiting on an attach of REF,
+drawing no nodes, with FIELDS added to its params: what the helper sends
+before the attach's reply."
+  (agentpane--on-notification
+   agentpane--connection 'session/snapshot
+   (append (list :session ref :handle "h1" :nodes []) fields)))
+
 (ert-deftest agentpane-test-set-model-only-before-the-first-prompt ()
   "`agentpane-set-model' on a buffer with nodes signals the gate's error and
 sends nothing; on a buffer with none it attaches and sends `sessions/setModel'."
   (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection)
         (sent nil))
-    (cl-letf (((symbol-function 'agentpane--request)
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
                (lambda (method _params callback &rest _)
                  (push method sent)
+                 (when (eq method 'sessions/attach) (agentpane-test--attach-snapshot ref))
                  (funcall callback (list :ref ref))))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (&rest _) (push 'jsonrpc-async-request sent)))
@@ -1549,7 +1636,7 @@ whose model prompt answers CHOICE, and return the methods sent, in order."
                (lambda (_connection method &rest _)
                  (push method sent)
                  (pcase method
-                   ('sessions/attach (list :ref ref))
+                   ('sessions/attach (agentpane-test--attach-snapshot ref) (list :ref ref))
                    ('models/list [(:id "gpt-5.6-luna")]))))
               ((symbol-function 'completing-read) (lambda (&rest _) choice)))
       (agentpane-test--with-session ref
@@ -1584,10 +1671,13 @@ offering none.")
 signals the gate's error, naming the effort, and sends nothing; on a buffer
 with none it attaches and sends `sessions/setEffort'."
   (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection)
         (sent nil))
-    (cl-letf (((symbol-function 'agentpane--request)
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'agentpane--request)
                (lambda (method _params callback &rest _)
                  (push method sent)
+                 (when (eq method 'sessions/attach) (agentpane-test--attach-snapshot ref))
                  (funcall callback (list :ref ref))))
               ((symbol-function 'jsonrpc-async-request)
                (lambda (&rest _) (push 'jsonrpc-async-request sent)))
@@ -1623,7 +1713,9 @@ collections offered, then the user error signalled, if any."
                (lambda (_connection method &rest _)
                  (push method sent)
                  (pcase method
-                   ('sessions/attach (list :ref ref))
+                   ('sessions/attach
+                    (agentpane-test--attach-snapshot ref :isStreaming :json-false :model model)
+                    (list :ref ref))
                    ('models/list agentpane-test--models))))
               ;; The mode line's own listing, which these tests do not measure.
               ((symbol-function 'jsonrpc-async-request) #'ignore)
@@ -2128,9 +2220,17 @@ asked for for `sessions/attach', unless BODY has put a summary of its own
 in `attached', the fixed nodes for `sessions/preview', and for
 `sessions/list' whatever BODY has put in `listed', nil unless it has.
 Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
-onto `said'.  A request whose method BODY has put in `hold' is not answered
+onto `said'.  The reply to an attach is preceded, as the helper precedes
+it, by the `session/snapshot' that attaches the buffer, through
+`agentpane--connection', drawing the fixed nodes under the summary's
+handle and carrying the ref asked for as `askedFor' where the summary
+names another (`sessions/attach' in src/emacs/helper.ts), unless a
+snapshot has reached the buffer since the attach went out.
+A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
-ANSWER with t to deliver the reply, or with nil to fail the request as
+ANSWER with t to deliver the reply, with `reply' to deliver the reply
+alone, as when it lands ahead of the snapshot, or with nil to fail the
+request as
 `agentpane--request' reports an error, running the request's UNSENT and
 then its FAILED.  Either way the answer runs in the buffer that sent the
 request.  Every buffer BODY made is killed afterwards."
@@ -2141,10 +2241,18 @@ request.  Every buffer BODY made is killed afterwards."
          (held nil)
          (attached nil)
          (listed nil)
+         (snapshotted nil)
+         (attach-by (symbol-function 'agentpane--attach-by))
          (buffers (buffer-list)))
-     (cl-letf (((symbol-function 'agentpane--request)
+     (cl-letf (((symbol-function 'agentpane--attach-by)
+                (lambda (&rest args)
+                  (cl-pushnew (current-buffer) snapshotted)
+                  (apply attach-by args)))
+               ((symbol-function 'agentpane--request)
                 (lambda (method params callback &optional _always failed _timeout unsent)
                   (push (cons method params) sent)
+                  (when (eq method 'sessions/attach)
+                    (setq snapshotted (delq (current-buffer) snapshotted)))
                   (let* ((from (current-buffer))
                          (reply (pcase method
                                   ('sessions/forkPoints ,points)
@@ -2153,6 +2261,17 @@ request.  Every buffer BODY made is killed afterwards."
                                   ('sessions/preview agentpane-test--nodes)
                                   ('sessions/list listed)))
                          (answer (lambda (ok)
+                                   (when (and (eq ok t) (eq method 'sessions/attach)
+                                              (not (memq from snapshotted)))
+                                     (agentpane--on-notification
+                                      agentpane--connection 'session/snapshot
+                                      (append (list :session (plist-get reply :ref)
+                                                    :handle (plist-get reply :handle)
+                                                    :nodes agentpane-test--nodes)
+                                              (unless (agentpane--same-ref-p
+                                                       (plist-get reply :ref)
+                                                       (plist-get params :session))
+                                                (list :askedFor (plist-get params :session))))))
                                    (with-current-buffer from
                                      (if ok
                                          (funcall callback reply)
@@ -2394,7 +2513,7 @@ the message it is on."
           (should (equal (mapcar #'car sent) '(sessions/attach)))
           (should (seq-some (lambda (text) (string-search "press f again" text)) said))
           (agentpane--on-notification
-           nil 'session/snapshot
+           agentpane--connection 'session/snapshot
            (list :session ref
                  :nodes (vector '(:index 0 :role "custom"
                                   :parts [(:type "text" :text "A custom message"
@@ -2907,14 +3026,18 @@ what drops it: the server owns the error (OW-lohubo)."
   (let ((ref '(:backend "claude" :id "c1"))
         (snapshot (lambda (ref)
                     (agentpane--on-notification
-                     nil 'session/snapshot
-                     (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
+                     agentpane--connection 'session/snapshot
+                     (list :session ref :handle "h1" :isStreaming :json-false
+                           :nodes agentpane-test--nodes
                            :error (copy-sequence "Turn failed upstream")
                            :requests [] :notices [])))))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
+          ;; Drawn while attached, and dropped since, so the send attaches.
           (funcall snapshot ref)
+          (agentpane--on-notification agentpane--connection 'session/detached
+                                      (list :session ref :handle "h1"))
           (setq hold '(sessions/attach sessions/prompt))
           (goto-char (point-max))
           (insert "hello")
@@ -2925,7 +3048,7 @@ what drops it: the server owns the error (OW-lohubo)."
           (funcall (cdr (pop held)) t)
           (should (equal (mapcar #'car (reverse sent)) '(sessions/attach sessions/prompt)))
           (should (equal (agentpane-test--warnings) '("Turn failed upstream")))
-          (agentpane--on-notification nil 'session/errorCleared (list :session ref))
+          (agentpane--on-notification nil 'session/errorCleared (list :session ref :handle "h1"))
           (should (equal (agentpane-test--indices) '(0 1)))
           (should-not (agentpane-test--warnings)))))))
 
@@ -2960,7 +3083,7 @@ prompt, so admitting it must not clear it (OW-jokoto, OW-bomolu)."
           (insert "hello")
           (agentpane-send)
           (agentpane--on-notification
-           nil 'session/snapshot
+           agentpane--connection 'session/snapshot
            (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
                  :error "extension failed to load" :errorId "e9" :requests [] :notices []))
           (funcall (cdr (pop held)) t)
@@ -3028,7 +3151,7 @@ second-guess a snapshot (OW-sedosu, OW-jopifu)."
   (let ((ref '(:backend "codex" :id "t1"))
         (snapshot (lambda (ref error)
                     (agentpane--on-notification
-                     nil 'session/snapshot
+                     agentpane--connection 'session/snapshot
                      (list :session ref :isStreaming :json-false :nodes agentpane-test--nodes
                            :error error :requests [] :notices [])))))
     (agentpane-test--with-helper
@@ -3144,21 +3267,22 @@ in flight, a refetch reads the stored transcript."
 `agentpane-compact' does when its request cannot go out, a send waiting
 behind it is freed rather than left refusing every later send."
   (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--forking nil nil
-      (agentpane-test--with-session ref
-        (let ((request (symbol-function 'agentpane--request)))
-          (cl-letf (((symbol-function 'agentpane--request)
-                     (lambda (method &rest args)
-                       (when (eq method 'sessions/compact)
-                         (error "Process agentpane helper not running"))
-                       (apply request method args))))
-            (setq hold '(sessions/attach))
-            (agentpane-compact)
-            (goto-char (point-max))
-            (insert "hello")
-            (agentpane-send)
-            (should-error (funcall (cdr (pop held)) t))
-            (should-not agentpane--sending)))))))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (let ((request (symbol-function 'agentpane--request)))
+            (cl-letf (((symbol-function 'agentpane--request)
+                       (lambda (method &rest args)
+                         (when (eq method 'sessions/compact)
+                           (error "Process agentpane helper not running"))
+                         (apply request method args))))
+              (setq hold '(sessions/attach))
+              (agentpane-compact)
+              (goto-char (point-max))
+              (insert "hello")
+              (agentpane-send)
+              (should-error (funcall (cdr (pop held)) t))
+              (should-not agentpane--sending))))))))
 
 ;;;; Killing a transcript buffer, against a stub connection
 
@@ -3231,7 +3355,7 @@ on the model \"luna\".  Every request is answered as
            (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
              (with-current-buffer buffer (agentpane--attach))
              (agentpane--on-notification
-              nil 'session/snapshot
+              agentpane--connection 'session/snapshot
               (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
                     :nodes (vector (agentpane-test--assistant 5 "<p>Live.</p>"))))
              (setq sent nil)
@@ -3422,7 +3546,7 @@ The close, released, still lands on the preview."
             hold '(sessions/close))
       (with-current-buffer buffer
         (agentpane--on-notification
-         nil 'session/snapshot
+         agentpane--connection 'session/snapshot
          (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
                :nodes agentpane-test--nodes))
         (agentpane-close-session)
@@ -3478,7 +3602,7 @@ too."
       (setq hold '(sessions/close))
       (with-current-buffer buffer
         (agentpane--on-notification
-         nil 'session/snapshot
+         agentpane--connection 'session/snapshot
          (list :session ref :handle "h1" :isStreaming :json-false :model "luna"
                :nodes agentpane-test--nodes))
         (agentpane-close-session)
@@ -3501,29 +3625,13 @@ too."
               ((symbol-function 'completing-read) (lambda (&rest _) "gpt-5.6-luna")))
       (with-current-buffer buffer
         (agentpane--on-notification
-         nil 'session/snapshot
+         agentpane--connection 'session/snapshot
          (list :session ref :handle "h1" :isStreaming :json-false :model "luna" :nodes []))
         (agentpane-close-session)
         (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
         (setq sent nil)
         (should-error (call-interactively #'agentpane-set-model) :type 'user-error)
         (should-not sent)))))
-
-(ert-deftest agentpane-test-compact-before-any-status-marks-nothing ()
-  "`agentpane-compact' on a buffer no status has reached yet -- a preview
-whose attach has answered before its snapshot has come (D2) -- marks no
-compaction, as the browser's `setSessionCompaction' writes only a view
-that exists (OW-kimaya): a status made of the mark alone would name no
-model.  The snapshot that comes carries the server's own compaction."
-  (let ((ref '(:backend "codex" :id "t1")))
-    (agentpane-test--with-helper
-      (agentpane-test--forking nil nil
-        (agentpane-test--with-session ref
-          (agentpane-compact)
-          (should (equal (mapcar #'car (reverse sent))
-                         '(sessions/attach sessions/compact)))
-          (should-not agentpane--status)
-          (should-not agentpane--status-fields))))))
 
 (ert-deftest agentpane-test-close-session-refused-once-compaction-requested ()
   "A close pressed after `agentpane-compact' has sent its request, before
@@ -4021,10 +4129,11 @@ listed again after the user looked away (OW-yufahi)."
         (should-not (agentpane-test--finished-p picker "h-a"))))))
 
 (ert-deftest agentpane-test-picker-mark-cleared-when-a-shown-buffer-becomes-its-session ()
-  "A transcript already on screen that becomes a marked session, by its
-attach's reply or by a snapshot's `askedFor', drops the mark at the next
-redisplay, with no window changing buffer (OW-yufahi, OW-piweyi): the
-binding itself sets the flag that makes redisplay run the hook."
+  "A transcript already on screen that becomes a marked session, by a
+snapshot found by its ref or by a snapshot's `askedFor', drops the mark
+at the next redisplay, with no window changing buffer (OW-yufahi,
+OW-piweyi): the binding itself sets the flag that makes redisplay run the
+hook."
   (agentpane-test--listing
     (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer)))
           (x (agentpane--transcript-buffer (list :ref '(:backend "pi" :id "x"))))
@@ -4034,8 +4143,10 @@ binding itself sets the flag that makes redisplay run the hook."
       (funcall relist (agentpane-test--summary "a" t))
       (funcall relist (agentpane-test--summary "a" nil))
       (should (agentpane-test--finished-p picker "h-a"))
-      (with-current-buffer x
-        (agentpane--attached-as (agentpane-test--summary "a" nil)))
+      (agentpane--on-notification
+       agentpane--connection 'session/snapshot
+       (list :session '(:backend "pi" :id "x") :handle "h-a" :nodes [] :isStreaming :json-false))
+      (should (equal (buffer-local-value 'agentpane--handle x) "h-a"))
       (agentpane-test--redisplay)
       (should-not (agentpane-test--finished-p picker "h-a"))
       (agentpane-test--show y)
@@ -4353,36 +4464,34 @@ change's, raises nothing (OW-dunahe)."
       (funcall status nil)
       (should-not (agentpane-test--turn-done-p)))))
 
-(defun agentpane-test--attach-to-a-running-turn (snapshot-first)
+(defun agentpane-test--attach-to-a-running-turn ()
   "Send from a previewed buffer, holding no handle, whose attach finds a
-turn from elsewhere streaming under the handle \"h1\", its snapshot handled
-before the attach's reply when SNAPSHOT-FIRST, the buffer taking the
-handle from the snapshot, and after it otherwise, taking it from the
-reply (D2); then end that turn unseen, and return whether the indicator
-is raised."
+turn from elsewhere streaming under the handle \"h1\", its snapshot
+handled before the attach's reply, as the helper sends it, the buffer
+taking the handle from the snapshot; then end that turn unseen, and
+return whether the indicator is raised.  A reply handled first attaches
+nothing, and the prompt is not sent
+\(`agentpane-test-attach-reply-ahead-of-its-snapshot-fails-its-waiters')."
   (agentpane-test--submitting
     (setq agentpane--attached nil
           agentpane--handle nil
           hold '(sessions/attach))
     (let ((snapshot (lambda ()
                       (agentpane--on-notification
-                       nil 'session/snapshot
+                       agentpane--connection 'session/snapshot
                        (list :session ref :handle "h1" :nodes agentpane-test--nodes
                              :isStreaming t)))))
       (funcall submit)
-      (when snapshot-first (funcall snapshot))
+      (funcall snapshot)
       (funcall (cdr (pop held)) t)
-      (unless snapshot-first (funcall snapshot))
       (should (equal (mapcar #'car sent) '(sessions/prompt sessions/attach)))
       (funcall status nil)
       (agentpane-test--turn-done-p))))
 
 (ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-found-by-the-attach ()
   "A send from a previewed buffer whose attach finds a turn streaming joins
-it, and that turn's end raises the indicator, whichever of the attach's
-snapshot and its reply is handled first (OW-lohavi)."
-  (should (agentpane-test--attach-to-a-running-turn t))
-  (should (agentpane-test--attach-to-a-running-turn nil)))
+it, and that turn's end raises the indicator (OW-lohavi)."
+  (should (agentpane-test--attach-to-a-running-turn)))
 
 (ert-deftest agentpane-test-turn-done-cleared-when-its-buffer-is-killed ()
   "Killing a buffer whose turn ended unseen drops it from the indicator
@@ -4429,12 +4538,19 @@ and whether it is raised, as a cons."
           (funcall status t)
           (when (memq how '(ended ended-in-view)) (funcall status nil))
           (when (eq how 'ended-in-view) (agentpane-test--show previewing))
+          (setq hold '(sessions/attach))
           (with-current-buffer previewing
             (if (not (eq how 'prompted))
                 (agentpane--attach)
               (goto-char (point-max))
               (insert "more")
               (agentpane-send)))
+          ;; The attach's snapshot, reading the turn as it stands.
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :session canonical :handle "h1" :askedFor alias :nodes []
+                 :isStreaming (if (memq how '(ended ended-in-view)) :json-false t)))
+          (funcall (cdr (pop held)) t)
           (should-not (buffer-live-p holder))
           (unless (memq how '(ended ended-in-view))
             (should-not (agentpane-test--turn-done-p))
@@ -4483,6 +4599,10 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                 (agentpane-send))
               (let ((prompt (cdr (assq 'sessions/prompt calls))))
                 (with-current-buffer previewing (agentpane--attach))
+                (agentpane--on-notification
+                 agentpane--connection 'session/snapshot
+                 (list :session canonical :handle "h1" :askedFor alias :nodes []
+                       :isStreaming :json-false))
                 (funcall (plist-get (cdr (assq 'sessions/attach calls)) :success-fn)
                          (list :ref canonical :handle "h1"))
                 (should-not (buffer-live-p holder))
@@ -4507,19 +4627,19 @@ from elsewhere under the handle a re-attach answers raises nothing
       (funcall status nil)
       (should-not (agentpane-test--turn-done-p)))))
 
-(defun agentpane-test--reattach-after-helper-death (snapshot-first)
+(defun agentpane-test--reattach-after-helper-death ()
   "Submit a turn, see it stream, let the helper exit, which raises the
 indicator for that turn, as a `session/detached' does, and clear it; then
 prompt again through a new helper, whose attach answers under the same
-handle and whose snapshot says the first turn is over: handled before
-the attach's reply when SNAPSHOT-FIRST and after it otherwise (D2).
+handle and whose snapshot, handled before the attach's reply, as the
+helper sends it, says the first turn is over.
 Nothing more is raised before the second prompt's turn streams; return
 whether its end, unseen, raises the indicator."
   (agentpane-test--submitting
     (let ((global-mode-string global-mode-string)
           (snapshot (lambda ()
                       (agentpane--on-notification
-                       nil 'session/snapshot
+                       agentpane--connection 'session/snapshot
                        (list :session ref :handle "h1" :nodes agentpane-test--nodes
                              :isStreaming :json-false)))))
       (funcall submit)
@@ -4542,9 +4662,8 @@ whether its end, unseen, raises the indicator."
       (setq agentpane--connection 'connection
             hold '(sessions/attach))
       (funcall submit)
-      (when snapshot-first (funcall snapshot))
+      (funcall snapshot)
       (funcall (cdr (pop held)) t)
-      (unless snapshot-first (funcall snapshot))
       (should-not (agentpane-test--turn-done-p))
       (funcall status t)
       (funcall status nil)
@@ -4555,11 +4674,9 @@ whether its end, unseen, raises the indicator."
 `session/detached' does, and each buffer attached through it reads as
 not streaming, so a turn seen streaming ends there as an aborted one does
 (D25): after a crash mid-turn the re-attach's snapshot raises nothing more
-for the turn it finds over, whichever of it and the next prompt's attach
-reply is handled first, and that prompt's own turn raises the indicator
-when it ends (OW-dunahe)."
-  (should (agentpane-test--reattach-after-helper-death nil))
-  (should (agentpane-test--reattach-after-helper-death t)))
+for the turn it finds over, and the next prompt's own turn raises the
+indicator when it ends (OW-dunahe)."
+  (should (agentpane-test--reattach-after-helper-death)))
 
 (ert-deftest agentpane-test-helper-death-detaches-every-buffer-it-served ()
   "A helper that exits leaves each buffer attached through it as a
@@ -4587,7 +4704,7 @@ as each does for a buffer told its handle is gone."
                      (setq attached (list :ref ref :handle handle))
                      (with-current-buffer buffer (agentpane--attach))
                      (agentpane--on-notification
-                      nil 'session/snapshot
+                      agentpane--connection 'session/snapshot
                       (list :session ref :handle handle :isStreaming t :model "luna"
                             :nodes (vector (agentpane-test--running-tool 3 "sleep 60"))))
                      (with-current-buffer buffer
@@ -4758,21 +4875,26 @@ handle ends with it (OW-bukupu, as
         (should-not agentpane--handle)))))
 
 (defun agentpane-test--late-attach-reply (before-sentinel)
-  "Attach a buffer through a helper that answers the attach and dies while
-Emacs is busy, use the connection in that gap, then let Emacs handle the
-dead helper's sentinel, its reply and its teardown: the reply first when
-BEFORE-SENTINEL, as when Emacs had read it before the helper died, and
-after the sentinel otherwise, as jsonrpc.el hands on what a dead process
-wrote last (Emacs 31.1, jsonrpc.el 1.0.29).  The use in the gap must be
-refused, and the buffer end let go of, attached to nothing (OW-bukupu)."
+  "Attach a buffer through a helper that sends the attach's snapshot,
+answers the attach and dies while Emacs is busy, use the connection in
+that gap, then let Emacs handle the dead helper's sentinel, its reply and
+its teardown: the reply first when BEFORE-SENTINEL, as when Emacs had
+read it before the helper died, and after the sentinel otherwise, as
+jsonrpc.el hands on what a dead process wrote last (Emacs 31.1,
+jsonrpc.el 1.0.29).  The use in the gap must be refused, and the buffer
+end let go of, attached to nothing (OW-bukupu)."
   (agentpane-test--outliving
-      (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
+      (list (list :jsonrpc "2.0" :method "session/snapshot"
+                  :params (list :session ref :handle "h1" :isStreaming :false
+                                :nodes (vector)))
+            (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
     (setq linger before-sentinel)
     (agentpane--attach)
     (let* ((dead agentpane--connection)
            (process (jsonrpc--process dead)))
       (when before-sentinel
-        ;; Read the reply and queue its delivery, running no timer.
+        ;; Read the snapshot and the reply and queue their delivery,
+        ;; running no timer.
         (should (accept-process-output process 10 nil 1))
         (signal-process process 'SIGKILL))
       (agentpane-test--dead-unheard process)
@@ -4899,8 +5021,9 @@ node after a `sessions/changed' is its order at a drop."
       (kill-buffer picker))))
 
 (ert-deftest agentpane-test-prompt-after-its-helper-died-is-refused ()
-  "A prompt waiting on an attach, whose helper answers the attach and then
-exits before the prompt goes out, is refused, keeping its draft, rather
+  "A prompt waiting on an attach, whose helper sends the attach's snapshot,
+answers the attach and then exits before the prompt goes out, is
+refused, keeping its draft, rather
 than sent through a replacement for a buffer that helper's teardown then
 lets go of, and no turn-done watch outlives it (OW-bukupu)."
   (let ((calls nil)
@@ -4920,7 +5043,10 @@ lets go of, and no turn-done watch outlives it (OW-bukupu)."
                      (agentpane-test--dead-unheard process))
                    (funcall submit))))
         (agentpane-test--outliving
-            (list (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
+            (list (list :jsonrpc "2.0" :method "session/snapshot"
+                        :params (list :session ref :handle "h1" :isStreaming :false
+                                      :nodes (vector)))
+                  (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
           (setq linger t)
           (goto-char (point-max))
           (insert "hello")
@@ -5042,16 +5168,24 @@ helper's death reached the request first (OW-bukupu)."
         (agentpane-test--heard-out dead)
         (should (equal (list answers failures unsents) '(1 0 0)))))))
 
+(defun agentpane-test--writes-then-dies (messages)
+  "Start a process standing in for a helper that, after 0.3s, writes
+MESSAGES, each a JSON-RPC message as a plist, framed as the helper frames
+them, then exits 0.3s later."
+  (make-process
+   :name "agentpane-test dying helper"
+   :command (list "sh" "-c" "sleep 0.3; printf %s \"$1\"; sleep 0.3" "sh"
+                  (mapconcat (lambda (message)
+                               (let ((json (json-serialize message)))
+                                 (format "Content-Length: %d\r\n\r\n%s" (string-bytes json) json)))
+                             messages))
+   :connection-type 'pipe
+   :noquery t))
+
 (defun agentpane-test--answers-then-dies ()
   "Start a process standing in for a helper that, after 0.3s, answers the
 request with id 1 with a null result, then exits 0.3s later."
-  (let ((json (json-serialize (list :jsonrpc "2.0" :id 1 :result nil))))
-    (make-process
-     :name "agentpane-test dying helper"
-     :command (list "sh" "-c" "sleep 0.3; printf %s \"$1\"; sleep 0.3" "sh"
-                    (format "Content-Length: %d\r\n\r\n%s" (string-bytes json) json))
-     :connection-type 'pipe
-     :noquery t)))
+  (agentpane-test--writes-then-dies (list (list :jsonrpc "2.0" :id 1 :result nil))))
 
 (ert-deftest agentpane-test-held-back-reply-answers-once ()
   "A prompt's answer that jsonrpc.el held back behind a synchronous request,
@@ -5078,6 +5212,117 @@ on the held answer after the teardown's timer (Emacs 31.1, jsonrpc.el
           (with-current-buffer (jsonrpc-events-buffer dead)
             (should (string-search "anxious continuation" (buffer-string))))
           (should (equal (list answers failures unsents) '(1 0 0))))))))
+
+;; OW-kifuhi: the reply to an attach, held back as an anxious continuation
+;; behind a synchronous request still out when the helper died, is handed on
+;; after the helper's teardown.  Taken as binding the buffer, it bound it to
+;; `agentpane--connection' as it then stood: nil, leaving the dead helper's
+;; handle and a prompt waiting on the attach free to start the next helper;
+;; or, with several replies held, the helper the first one's prompt started.
+
+(defun agentpane-test--held-attach-replies (count)
+  "Send a prompt from each of COUNT unattached transcript buffers, whose
+attaches the helper answers, each after its snapshot, as the helper
+writes them, while a synchronous request is out, and then dies without
+answering that request.  Each buffer must end not attached, holding no
+handle, dropped and free to send again, and no prompt may go out, through
+that helper or any started after it (OW-kifuhi)."
+  (let* ((agentpane--connection nil)
+         (refs (seq-take '((:backend "codex" :id "t1") (:backend "codex" :id "t2")) count))
+         (handles (seq-map-indexed (lambda (_ index) (format "h%d" (1+ index))) refs))
+         (started 0)
+         (calls nil)
+         (async (symbol-function 'jsonrpc-async-request))
+         (buffers nil))
+    (agentpane-test--watching
+      (cl-letf (((symbol-function 'agentpane--start-helper)
+                 (lambda ()
+                   (if (> (cl-incf started) 1)
+                       (agentpane-test--mute-helper)
+                     (agentpane-test--writes-then-dies
+                      (append
+                       (seq-mapn (lambda (ref handle)
+                                   (list :jsonrpc "2.0" :method "session/snapshot"
+                                         :params (list :session ref :handle handle
+                                                       :isStreaming :false :nodes (vector))))
+                                 refs handles)
+                       (seq-map-indexed (lambda (ref index)
+                                          (list :jsonrpc "2.0" :id (1+ index)
+                                                :result (list :ref ref :handle (nth index handles))))
+                                        refs))))))
+                ((symbol-function 'jsonrpc-async-request)
+                 (lambda (conn method &rest args)
+                   (push method calls)
+                   (apply async conn method args)))
+                ((symbol-function 'message) #'ignore))
+        (unwind-protect
+            (let (dead)
+              (dolist (ref refs)
+                (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+                  (push buffer buffers)
+                  (with-current-buffer buffer
+                    (agentpane--draw [])
+                    (goto-char (point-max))
+                    (insert "hello")
+                    (agentpane-send))))
+              (setq dead agentpane--connection)
+              (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
+              (agentpane-test--heard-out dead)
+              (should (agentpane-test--wait-for
+                       (lambda ()
+                         (seq-every-p (lambda (buffer)
+                                        (not (buffer-local-value 'agentpane--attaching buffer)))
+                                      buffers))
+                       (+ (float-time) 5)))
+              (with-current-buffer (jsonrpc-events-buffer dead)
+                (should (string-search "anxious continuation" (buffer-string))))
+              ;; Whatever a prompt sent would have gone out by now.
+              (accept-process-output nil 0.1)
+              (dolist (buffer buffers)
+                (with-current-buffer buffer
+                  (should-not (agentpane--attached-p))
+                  (should-not agentpane--handle)
+                  (should agentpane--dropped)
+                  (should-not agentpane--sending)))
+              (should-not (memq 'sessions/prompt calls)))
+          (agentpane-test--end-helper agentpane--connection)
+          (mapc #'kill-buffer buffers))))))
+
+(ert-deftest agentpane-test-held-attach-reply-after-a-death-attaches-nothing ()
+  "One attach reply held back behind a synchronous request as its helper
+dies binds nothing when it is handed on after the teardown (OW-kifuhi)."
+  (agentpane-test--held-attach-replies 1))
+
+(ert-deftest agentpane-test-held-attach-replies-after-a-death-attach-nothing ()
+  "Two attach replies held back behind a synchronous request as their
+helper dies bind nothing when they are handed on after the teardown,
+the second to no helper the first one's waiter started (OW-kifuhi)."
+  (agentpane-test--held-attach-replies 2))
+
+(ert-deftest agentpane-test-attach-reply-held-after-its-detached-attaches-nothing ()
+  "An attach whose snapshot the helper sent and then detached, the reply
+coming last and held back as an anxious continuation behind a synchronous
+request, leaves the buffer not attached, holding no handle and dropped
+once the reply is handed on (OW-tifiva), as in wire order
+\(`agentpane-test-attach-reply-after-its-detached-attaches-nothing')."
+  (agentpane-test--outliving
+      (list (list :jsonrpc "2.0" :method "session/snapshot"
+                  :params (list :session ref :handle "h1" :isStreaming :false
+                                :nodes (vector)))
+            (list :jsonrpc "2.0" :method "session/detached"
+                  :params (list :session ref :handle "h1"))
+            (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1"))
+            (list :jsonrpc "2.0" :id 2 :result (vector)))
+    (setq linger t)
+    (agentpane--attach)
+    (should (equal (jsonrpc-request agentpane--connection 'models/list nil :timeout 5) []))
+    (should (agentpane-test--wait-for (lambda () (not agentpane--attaching))
+                                      (+ (float-time) 5)))
+    (with-current-buffer (jsonrpc-events-buffer agentpane--connection)
+      (should (string-search "anxious continuation" (buffer-string))))
+    (should-not (agentpane--attached-p))
+    (should-not agentpane--handle)
+    (should agentpane--dropped)))
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
@@ -5237,8 +5482,8 @@ window, where a send attaches it again, rather than in a buffer never shown."
 (defun agentpane-test--new-session (choices &optional current held)
   "Run `agentpane-new-session' on Codex against a stub jsonrpc whose
 `models/list' answers `agentpane-test--models' and whose prompts answer
-CHOICES in turn, the attach delivering a status naming CURRENT when it is
-non-nil.  Return the requests sent, in order, each as its method or, for
+CHOICES in turn, the attach's snapshot naming CURRENT as the model when
+it is non-nil.  Return the requests sent, in order, each as its method or, for
 `sessions/setModel' and `sessions/setEffort', as the method and the value
 set, then the collections offered.
 `sessions/setModel' is answered as it is sent, unless HELD is non-nil: then
@@ -5272,9 +5517,8 @@ its answer waits until `agentpane-new-session' has returned, and the symbol
                  (pcase method
                    ('sessions/create ref)
                    ('sessions/attach
-                    (when current
-                      (agentpane--set-status
-                       (list :session ref :isStreaming :json-false :model current)))
+                    (apply #'agentpane-test--attach-snapshot ref
+                           (and current (list :isStreaming :json-false :model current)))
                     (list :ref ref))
                    ('models/list agentpane-test--models))))
               ;; The mode line's own listing, which these tests do not measure.
@@ -5360,8 +5604,8 @@ whose attach reply signals while it is handled."
         (agentpane-send)
         (should (equal (reverse sent) '(sessions/preview sessions/attach)))
         (setq sent nil)
-        (cl-letf (((symbol-function 'agentpane--attached-as)
-                   (lambda (_) (error "Taking the reply failed"))))
+        (cl-letf (((symbol-function 'agentpane--attached-p)
+                   (lambda () (error "Taking the reply failed"))))
           (should-error (funcall success (list :ref ref))))
         (agentpane-send)
         (should (equal sent '(sessions/attach)))))))

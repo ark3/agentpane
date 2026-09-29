@@ -24,7 +24,10 @@
  * whose `seq` gapped, where the helper had attached it again. OW-mepufi
  * raised it a ninth, retiring `stream/changed`: the helper exits when its
  * event stream drops or its first open fails (D25 point 4), and reopens
- * nothing.
+ * nothing. OW-rebawa raised it a tenth: the reply to `sessions/attach` no
+ * longer says a buffer is attached, only the `session/snapshot` that
+ * introduces the attachment does, and `askedFor` rides that snapshot also
+ * where another attachment already holds the handle.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -163,15 +166,18 @@
  *   at when none is chosen.
  * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
  *   route answers, carrying the session's `handle`. Its `ref` is
- *   authoritative and may differ from the one asked for. When it does, and
- *   this attach is the first attachment of the summary's `handle`, the first
- *   `session/snapshot` under that handle from the reply on carries
- *   `askedFor`: sent before the reply if the helper holds one yet, and else
- *   when it arrives. Not when the stream already carried the asked-for ref
- *   under that handle, nor when a `sessions/detach` for it landed while the
- *   attach was in flight. Where another attachment already holds the handle,
- *   no snapshot carries it: that one's buffer hears the session, and this
- *   reply names the handle it holds.
+ *   authoritative and may differ from the one asked for. The reply ends
+ *   the request and says nothing about attachment: the session is attached
+ *   from the `session/snapshot` that introduces it, and only then
+ *   (OW-rebawa). That snapshot goes out before the reply wherever the
+ *   helper holds the session's view by then, and else when the view
+ *   arrives, after the reply. Where the reply's `ref` differs from the one
+ *   asked for, it carries `askedFor`, whether or not another attachment
+ *   already holds the handle; not when the stream already carried the
+ *   asked-for ref under that handle, nor when a `sessions/detach` for it
+ *   landed while the attach was in flight. An attach whose snapshot a `seq`
+ *   gap took before the reply is answered with no snapshot at all, and
+ *   nothing is attached.
  *   Opens the event stream if it is not open yet, as `sessions/list` does,
  *   and from here on the per-session notifications below flow for this
  *   session.
@@ -196,9 +202,8 @@
  *   session goes on running on the server. Sent when Emacs stops showing a
  *   session. With `handle`, the notifications under that handle stop,
  *   whatever ref `session` is; without, those for the session last named
- *   `session` to Emacs, and those of an attach of `session` answered under
- *   another ref whose `askedFor` snapshot has not yet gone out; and either
- *   way an attach of `session` still in flight.
+ *   `session` to Emacs; and either way an attach of `session` no snapshot
+ *   has answered yet, in flight or answered under another ref.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -219,7 +224,8 @@
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about, and none arrives for a session Emacs has not attached, except
- * `sessions/changed`:
+ * `sessions/changed`; the first under a handle is the `session/snapshot`
+ * that attaches it:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
  *   model, effort, unrestoredModel, error, errorId, requests, notices }`.
@@ -242,10 +248,11 @@
  *   says carries it) is the ref that attach asked for, where its reply
  *   named another. It is request correlation, not identity: it says which
  *   waiting attach this handle answers, so the receiver can bind the handle
- *   to what sent that attach without waiting for the reply, which it cannot
- *   rely on handling first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the
- *   reply to an asynchronous request that arrives while a synchronous one
- *   is outstanding runs only once that one returns, while notifications are
+ *   to what sent that attach, and is the only thing that does, the reply
+ *   binding nothing (OW-rebawa). Nor could the receiver rely on handling
+ *   the reply first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the reply to
+ *   an asynchronous request that arrives while a synchronous one is
+ *   outstanding runs only once that one returns, while notifications are
  *   handled at once (docs/MANUAL_TESTING.md, "jsonrpc.el runs an async reply
  *   after later notifications").
  * - `session/node` -- `{ session, handle, node }`. One node to replace by
