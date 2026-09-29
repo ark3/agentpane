@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, d25]
+closed: done
 ---
 
 # An agentpane-mode buffer is bound to a handle both by its attach reply and by the helper's snapshot, so a reply that lands late rebinds a buffer the helper no longer feeds; only the helper's notifications should say a buffer is attached
@@ -41,3 +42,18 @@ Tests, each red first on the code as it stands:
 
 The existing merge tests pass unchanged or are named in the commit where they moved.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Built in three commits on main, 4a03a2a, e0cf7a4 and 9fafcc3.
+In `emacs/agentpane.el` only a `session/snapshot` attaches a buffer: `agentpane--attach-by` binds the handle, sets `agentpane--attached` and clears `agentpane--dropped`, and merges an existing holder of the handle (`agentpane--absorb`).
+`agentpane--attached-as` is gone.
+`agentpane--attached` is the one record of attachment; `agentpane--served-by` is retired, and `agentpane--attach-sent` stays because it records a request rather than an attachment.
+The attach reply only ends the request: its waiters run if a snapshot has attached the buffer, and fail otherwise, and `agentpane--attach-now` user-errors likewise.
+In `src/emacs/helper.ts` an attachment is recorded only as the snapshot that introduces it goes out (`introduce`, `answer`), every such snapshot carries `askedFor`, one per attach it answers, and the helper holds an attach's reply (`Attaching`) until that snapshot has gone out.
+The wait ends early, with nothing recorded, on a detach of the asked-for ref, on a listing without the handle, at the helper's end, or where a snapshot under the handle already came and a gap took it.
+The hold was added after a first cut that failed waiters whenever the reply beat the snapshot: against `createApp` on fake Codex adapters and a real helper, 12 of 30 cold attaches failed on that cut, 0 of 30 on the old code, and 0 of 60 with the hold; the raw REST reply beat the SSE snapshot in about half of cold attaches.
+Red-first tests: OW-tifiva's orderings in `src/emacs/helper.test.ts` and, as Emacs sees them, in `emacs/agentpane-test.el`, in wire order and held as an anxious continuation; OW-kifuhi's one-reply and two-reply outcomes against a dying real helper; the same-ref merge; the reply held until its snapshot; attach-now's check.
+A second adversarial read mutated each part of the fix and saw each mutation fail tests.
+Residual orderings are named in docstrings (`detachGapped`, `agentpane--detach`'s "Three cases stay"), and one, an attach answered by ref from an older container another client then closes, is OW-savafi.
+bun run check 1501 passed; Emacs suite 215 tests, 212 as expected, 3 skipped.
