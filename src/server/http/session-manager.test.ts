@@ -596,18 +596,24 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			const failing = sessions.attach(virtualRef);
 			await reaping.promise;
 			await settle();
-			const closing = sessions.close(virtualRef);
-			const throughReal = sessions.attach(real);
+			let closed = false;
+			const closing = sessions.close(virtualRef).then(() => {
+				closed = true;
+			});
+			// How it ends is not this card's: it resumes under the virtual ref the
+			// disposal carries, although `real` is in the index.
+			const throughReal = Promise.allSettled([sessions.attach(real)]);
 			await settle();
 			await settle();
 
+			expect(closed).toBe(false);
 			expect(factory.created).toHaveLength(1);
 			expect(factory.created[0]?.disposed).toBe(false);
 
 			releaseDispose?.();
 			await closing;
 			await expect(failing).rejects.toThrow("get_messages failed");
-			await expect(throughReal).rejects.toBeInstanceOf(UnknownSessionError);
+			await throughReal;
 			expect(factory.created).toHaveLength(1);
 			expect(factory.created[0]?.disposals).toBe(1);
 			expect(sessions.liveRefs()).toEqual([]);
@@ -829,7 +835,12 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 		await reaping.promise;
 		await settle();
 
-		const closing = sessions.close({ backend: "claude", id: "fork-thread" });
+		let closed = false;
+		const closing = sessions.close({ backend: "claude", id: "fork-thread" }).then(() => {
+			closed = true;
+		});
+		await settle();
+		expect(closed).toBe(false);
 		releaseDispose?.();
 		await closing;
 		await expect(failing).rejects.toThrow("fork refused");
@@ -2421,6 +2432,72 @@ describe("teardown racing a startup", () => {
 			await expect(throughR).rejects.toBeInstanceOf(UnknownSessionError);
 			expect(factory.created).toHaveLength(1);
 			expect(factory.created[0]?.disposed).toBe(true);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+	});
+
+	describe("an attach whose file a failed start is still reaping (OW-kamave)", () => {
+		// The index resolves every ref to C. The first adapter's start fails and
+		// its dispose is held, so its startup is reaping, its container out of
+		// the table, while the other attach reaches C.
+		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
+
+		/** An index resolving every ref to C, whose lookup of C itself waits for `lookupOfC` if given. */
+		function canonicalisingToC(lookupOfC?: Promise<void>): SessionIndex {
+			const summary = storedSession(C, WORKSPACE);
+			return {
+				list: async () => [summary],
+				get: async (ref) => {
+					if (lookupOfC && sessionKey(ref) === sessionKey(C)) await lookupOfC;
+					return summary;
+				},
+				preview: async () => [],
+			};
+		}
+
+		/** A factory whose first adapter fails `start()`, then holds its dispose until released. */
+		function failingFirst() {
+			const factory = new FakeAdapterFactory();
+			const disposing = deferred();
+			const release = deferred();
+			const create = factory.create.bind(factory);
+			factory.create = (ref) => {
+				const adapter = create(ref);
+				if (factory.created.length === 1) {
+					adapter.start = async () => {
+						throw new Error("start failed");
+					};
+					const dispose = adapter.dispose.bind(adapter);
+					adapter.dispose = async () => {
+						disposing.resolve();
+						await release.promise;
+						await dispose();
+					};
+				}
+				return adapter;
+			};
+			return { factory, disposing: disposing.promise, releaseDispose: () => release.resolve() };
+		}
+
+		it("joins the failure when the attach arrives under the canonical name a failed alias's start claimed", async () => {
+			// C was never asked for: the failed startup holds it only because its
+			// container was named by it (`#bind`).
+			const { factory, disposing, releaseDispose } = failingFirst();
+			sessions = new SessionManager({ index: canonicalisingToC(), adapters: { pi: factory } }, broadcaster);
+
+			const throughRef = sessions.attach(REF);
+			await disposing;
+			const throughC = sessions.attach(C);
+			await settle();
+			await settle();
+
+			expect(factory.created).toHaveLength(1);
+			expect(factory.created[0]?.disposed).toBe(false);
+
+			releaseDispose();
+			await expect(throughRef).rejects.toThrow("start failed");
+			await expect(throughC).rejects.toThrow();
+			expect(factory.created).toHaveLength(1);
 			expect(sessions.liveRefs()).toEqual([]);
 		});
 	});
