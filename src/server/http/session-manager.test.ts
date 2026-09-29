@@ -518,6 +518,63 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 			expect(sessions.summaryOf(virtualRef)).toEqual(expect.objectContaining({ ref: virtualRef, handle, status: "virtual" }));
 			expect(sessions.summaryOf(real)).toBeNull();
 		});
+
+		it("holds back an attach under either name while a start that failed after the rename reaps its adapter (OW-yufazo)", async () => {
+			let releaseDispose: (() => void) | undefined;
+			const reaping = deferred();
+			const factory = renamingInsideStart(async (adapter) => {
+				if (releaseDispose) return;
+				releaseDispose = holdDispose(adapter);
+				reaping.resolve();
+				throw new Error("get_messages failed");
+			});
+			index.summaries = [storedSession(REF, WORKSPACE), storedSession(real, WORKSPACE)];
+			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
+
+			const failing = sessions.attach(REF);
+			await reaping.promise;
+			await settle();
+			const closing = sessions.close(real);
+			const throughReal = sessions.attach(real);
+			const throughRef = sessions.attach(REF);
+			await settle();
+
+			expect(factory.created).toHaveLength(1);
+
+			releaseDispose?.();
+			await closing;
+			await expect(failing).rejects.toThrow("get_messages failed");
+			const replacement = await throughReal;
+			expect(await throughRef).toBe(replacement);
+			expect(factory.created).toEqual([expect.anything(), replacement]);
+			expect(factory.created[0]?.disposals).toBe(1);
+			expect(sessions.liveRefs()).toEqual([real]);
+		});
+
+		it("resumes the stored session, not the id the failed start announced, for an attach held back by a close during its reaping (OW-yufazo)", async () => {
+			// The index has never heard of `real`: the failed start announced it and stored nothing.
+			let releaseDispose: (() => void) | undefined;
+			const reaping = deferred();
+			const factory = renamingInsideStart(async (adapter) => {
+				if (releaseDispose) return;
+				releaseDispose = holdDispose(adapter);
+				reaping.resolve();
+				throw new Error("get_messages failed");
+			});
+			sessions = new SessionManager({ index, adapters: { pi: factory } }, broadcaster);
+
+			const failing = sessions.attach(REF);
+			await reaping.promise;
+			await settle();
+			const closing = sessions.close(real);
+			const throughReal = sessions.attach(real);
+			releaseDispose?.();
+			await closing;
+
+			await expect(failing).rejects.toThrow("get_messages failed");
+			expect(await throughReal).toBe(factory.created[1]);
+			expect(factory.created[1]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: REF.id });
+		});
 	});
 });
 
@@ -1971,6 +2028,113 @@ describe("teardown racing a startup", () => {
 		const adapter = await second;
 		expect(pi.created).toEqual([adapter]);
 		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	describe("an attach that waited out the close of a session with two names (OW-yufazo)", () => {
+		// The session was attached as REF and renamed itself to C inside start(),
+		// so its container had both names and the close's disposal sits under
+		// each, resolving to C. An attach under REF that waits it out resumes C.
+		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
+
+		/** Close that session with its adapter's dispose held, and hold every index lookup from here on. */
+		async function closeHeld() {
+			index.summaries = [storedSession(REF, WORKSPACE), storedSession(C, WORKSPACE)];
+			const lookup = deferred();
+			let holding = false;
+			const held: SessionIndex = {
+				list: (query) => index.list(query),
+				get: async (ref) => {
+					if (holding) await lookup.promise;
+					return index.get(ref);
+				},
+				preview: (ref) => index.preview(ref),
+			};
+			pi = new FakeAdapterFactory({ materialiseOnStart: C.id });
+			sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
+			await sessions.attach(REF);
+			const adapter = pi.created[0];
+			if (!adapter) throw new Error("no adapter");
+			const releaseDispose = holdDispose(adapter);
+			holding = true;
+			const closing = sessions.close(C);
+			return { closing, releaseDispose, releaseLookup: () => lookup.resolve() };
+		}
+
+		it("is stopped by a close under the spelling it asked for, while in its index lookup", async () => {
+			const { closing, releaseDispose, releaseLookup } = await closeHeld();
+			const attaching = sessions.attach(REF);
+			releaseDispose();
+			await closing;
+			await settle();
+
+			await sessions.close(REF);
+			releaseLookup();
+
+			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
+			expect(pi.created).toHaveLength(1);
+			expect(sessions.isAttached(C)).toBe(false);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+
+		it("is stopped by a close under the spelling it asked for when it joined another attach's startup", async () => {
+			const { closing, releaseDispose, releaseLookup } = await closeHeld();
+			const throughC = sessions.attach(C);
+			const throughRef = sessions.attach(REF);
+			releaseDispose();
+			await closing;
+			await settle();
+
+			await sessions.close(REF);
+			releaseLookup();
+
+			await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
+			await expect(throughRef).rejects.toBeInstanceOf(UnknownSessionError);
+			expect(pi.created).toHaveLength(1);
+			expect(sessions.isAttached(C)).toBe(false);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+
+		it("keeps the spelling it asked for as a name of the container it attached", async () => {
+			const { closing, releaseDispose, releaseLookup } = await closeHeld();
+			const attaching = sessions.attach(REF);
+			releaseDispose();
+			releaseLookup();
+			await closing;
+			await attaching;
+
+			expect(sessions.isAttached(REF)).toBe(true);
+			await sessions.close(REF);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+	});
+
+	it("stops the startup an unseen alias's attach collapsed into, when closed under that alias", async () => {
+		const canonical: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/a.jsonl" };
+		const aliasA: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/ws/../ws/a.jsonl" };
+		const aliasB: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/other/../ws/a.jsonl" };
+		const summary = storedSession(canonical, WORKSPACE);
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async () => summary,
+			preview: async () => [],
+		};
+		const gate = deferred();
+		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
+		sessions = new SessionManager({ index: canonicalizingIndex, adapters: { pi: slow } }, broadcaster);
+
+		const throughA = sessions.attach(aliasA);
+		await settle();
+		const throughB = sessions.attach(aliasB);
+		await settle();
+		await sessions.close(aliasB);
+		gate.resolve();
+
+		await expect(throughA).rejects.toBeInstanceOf(UnknownSessionError);
+		await expect(throughB).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(slow.created).toHaveLength(1);
+		expect(slow.created[0]?.disposed).toBe(true);
+		expect(sessions.isAttached(canonical)).toBe(false);
+		expect(sessions.liveRefs()).toEqual([]);
 	});
 
 	it("starts afresh for an attach that follows a close of a session whose start outlives its disposal", async () => {
