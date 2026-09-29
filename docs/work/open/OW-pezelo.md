@@ -31,3 +31,8 @@ How the helper gets there is the implementer's call — answering requests in fl
 The sweep behind OW-hiliti read this card as filed before OW-mopuyi landed: since then `agentpane--request` discards an error reply the dying helper writes and fails the request as the death, so a helper-side fix here would still never reach the echo area.
 This card is now blocked by OW-hiliti and, once that lands, is only its `src/emacs/helper.ts` half: answer the request that opened the helper with the server being unreachable, rather than aborting it.
 Re-read what Emacs shows before starting; the account above of "The operation was aborted." in the echo area may no longer hold.
+
+## Amended 2026-09-29 under D26
+
+OW-likopo makes the helper wait for its stream's `onOpen` before its first REST call (D26 point 4 in `docs/DESIGN.md`), so with no server listening the request that opened the helper sends no fetch at all, and the abort this card describes has nothing to abort.
+What the request is answered with when the first open fails is still this card's question; re-read the path once OW-likopo lands.

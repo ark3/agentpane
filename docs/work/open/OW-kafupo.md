@@ -17,3 +17,9 @@ In the browser that gate is `syncPoll` and `refreshPreview` with the injected `i
 The browser's behaviour is pinned by the "preview self-refresh" block in `src/client/controller.test.ts` and by `src/client/preview-poll.test.ts`.
 
 Done when an ERT test in `emacs/agentpane-test.el` sees a shown preview buffer re-request `sessions/preview` with no keypress, and one not shown in any window not do so, red before the change and green after.
+
+## Amended 2026-09-29 under D26
+
+Once OW-vugefa lands (D26 point 7 in `docs/DESIGN.md`), a buffer is a preview exactly when it is not `agentpane--attached`, which is the predicate to gate the poll on.
+A poll answered `404` `gone` (OW-royosa) kills the buffer as any other preview read does there, matching the browser's `refetchPreview` under OW-lilami.
+Building this before OW-vugefa means gating on `(and (not agentpane--attached) (not agentpane--dropped))` and changing it when the flag goes.

@@ -136,6 +136,7 @@ D22 chose a native `agentpane-mode` over a JSON-RPC helper agentpane owns on 202
 `sweep-0929` marks what a sweep of the open deck for consolidations filed or amended on 2026-09-29: new cards where several open cards were one state with more than one owner, amendments where one open card already had the right shape, and OW-geselo for the cards it found moot or stale.
 Unlike `now`, this stream has an order, proposed by the session that filed it, and it is recorded here because a label cannot carry it: OW-letevu, OW-bulanu, OW-pihuko, OW-zavehi (which absorbed OW-denuse), OW-kamave (reframed from OW-yufazo's review), OW-hiliti then OW-pezelo, OW-kutome, OW-wukako, OW-sihoma, OW-dajove, OW-sozopu, OW-yehisa then OW-sofige and OW-zadupu, OW-novuye then OW-gogona, OW-fifaji, and OW-geselo whenever convenient.
 Only OW-pezelo and OW-zadupu carry real blockers; the rest of the order is a judgment about which change makes the next one smaller, so a card executed out of it is not wrong, only possibly larger than it needed to be.
+OW-zavehi's D26 filed six more into the stream on 2026-09-29, whose blockers set their order: OW-sodohi, then OW-vebeno and OW-likopo; OW-royosa once OW-kamave closes; then OW-lilami, and OW-vugefa once OW-bupivi closes too.
 `card list --open --label sweep-0929` is the stream.
 
 `now` marks cards the owner wants soon, but a label carries no order, so `card list --open --label now` is a reminder and never the sequence to execute.

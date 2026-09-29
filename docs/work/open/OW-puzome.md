@@ -27,3 +27,8 @@ An ert test in `emacs/agentpane-test.el`, red first, arms a turn from a buffer n
 If the helper's notification changes, a test in `src/emacs/helper.test.ts` asserts the gap's form of it and `dropDead`'s form stays as it was.
 The `agentpane--watch-turn` and `agentpane--let-go` docstrings name the gap among the cases that raise nothing.
 `bun run check` passes, and so does the ert suite.
+
+## Amended 2026-09-29 under D26
+
+OW-likopo retires `dropDead`'s eviction: the helper sends `session/detached` for a handle the server let go at the server's `ended` event instead (D26 point 4 in `docs/DESIGN.md`).
+Read "`dropDead`'s form" in the done-condition as the form sent at `ended`; that is the server-side let-go, which must still raise the indicator.

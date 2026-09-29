@@ -79,3 +79,11 @@ The decision is recorded in `docs/DESIGN.md` as D26, naming the one owner of "th
 Whatever the answer, the record says what becomes of cases 1 and 2 under "What the server knows and does not say".
 If the terminal event is adopted, its cards are one carrying it onto both wires (the HTTP event stream and `src/emacs/protocol.ts`) and one per client blocked by it, the Emacs one labelled `emacs`.
 Whatever the answer, each card named under "What it would settle" is closed or amended to say what this decision means for it, and the implementation cards D26 calls for are filed, labelled `sweep-0929`, one per client where the Both clients rule in `AGENTS.md` asks for it.
+
+## Amended 2026-09-29 at execution
+
+Two clauses of "Done when" changed as the decision was taken.
+The fork-on-disk measurement is not needed: D26 point 5 counts a parked fork as held, so no backend's timing for a fork's file can make a held session read as gone, and the owner agreed on 2026-09-29 to cite the existing records rather than measure.
+Those records: a regular Codex fork's rollout was on disk when `fork` returned on `codex-cli 0.148.0`, `0.154.0` and `0.156.0` (`docs/MANUAL_TESTING.md`, "Settling the fork's returned ref (OW-pifowo, OW-22)", OW-lajehi and OW-sayaju); a Pi fork's moved file was on disk at return on `pi 0.85.1` (OW-gajesu); a Claude Code fork and a Codex first-message fork send the CLI nothing at `fork` (`ClaudeAdapter.fork`, and `CodexAdapter.fork` since OW-hojefo), so neither has a file then, by construction.
+OW-bilogo's docblock rule at `loadPreview` is amended by D26 point 6 in `docs/DESIGN.md` and changes in the code with OW-lilami, which makes the exception; a docblock that described the exception before the code made it would be false at the site.
+Also, the preview's answer is `404` with the code `gone`, not `not_found`, which an unmatched route also answers (D26 point 5).

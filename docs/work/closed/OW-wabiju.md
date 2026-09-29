@@ -1,6 +1,7 @@
 ---
 labels: [deferral, emacs]
 blocked-by: [OW-yibijo]
+closed: moot
 ---
 
 # Two edges of agentpane--dropped: a Pi fork's parent keeps it set, and a session/detached that lands before a deferred attach reply reaches no buffer
@@ -32,3 +33,9 @@ The first edge, a Pi fork's parent, is unaffected.
 
 The second edge, a `session/detached` that lands ahead of a parked attach reply, is covered by OW-rebawa: the reply no longer binds a buffer, so a parked one cannot give it the dead handle.
 Only the first edge, a Pi fork's parent, remains for this card.
+
+## Close note
+
+Folded 2026-09-29 into OW-vugefa by OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7, which retires `agentpane--dropped`.
+The one edge left here, a Pi fork's parent keeping the flag set, cannot happen without the flag; OW-vugefa's done-condition carries its ordering as a test that `g` on the parent previews.
+The second edge had already gone under OW-rebawa (see this card's second amendment), and the `agentpane--notified-buffer` docstring claim it asked about is not touched by D26.

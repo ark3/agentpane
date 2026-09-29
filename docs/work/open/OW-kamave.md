@@ -56,3 +56,8 @@ OW-yufazo made `#hold` refuse to displace another live startup rather than chang
 
 Each case above is a test in `src/server/http/session-manager.test.ts` that goes red first and green after, asserting that the close stops every startup under the name (the attach rejects, one adapter was created, `liveRefs()` is empty) or, for case 3, that `attach(forkRef)` after the close does not fork again.
 The fix makes one record own name → startups, so that `close()` consults a single place that can hold more than one startup per name, and the `#hold` no-displace guard OW-yufazo added is gone.
+
+## Amended 2026-09-29 under D26
+
+OW-royosa, filed by OW-zavehi (D26 point 5 in `docs/DESIGN.md`), is blocked by this card because it needs one answer to "does the manager hold this ref" -- the table, parked forks and a startup in flight, and not a close still disposing -- and this card decides who owns the last of those.
+Whichever way this card closes, say in the decision how that question is answered, and if it closes on the decision and files the cards that build the owner, add the one that builds it to OW-royosa's `blocked-by` in the same session, so OW-royosa does not come free before the owner exists.

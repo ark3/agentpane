@@ -32,3 +32,9 @@ Whatever the fix, a buffer must still be attached only by a snapshot (D25, "What
 
 A test in `src/emacs/helper.test.ts`, red first, drives the ordering above with the fake event source and `fetch` the file's other tests use, and asserts that Emacs ends up attached to the reply's handle and receives its events, or ends not attached with the reply sent after a `session/detached` for the old handle, whichever the fix chooses.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Amended 2026-09-29 under D26
+
+Under D26 (`docs/DESIGN.md`, point 4) the heal comes sooner and by another route: OW-likopo has the helper send `session/detached` for H1 at the server's `ended`, sent where the close forgets H1, rather than at the next `sessions-changed`'s listing, and under OW-vugefa a buffer so let go of previews on `g`.
+The race itself stands: `ended` for H1 and the reply naming H2 travel on unordered channels (D2), so the reply can still land first and run the waiters against H1.
+Re-read the ordering against `main` once OW-likopo lands; `dropDead` is gone then.

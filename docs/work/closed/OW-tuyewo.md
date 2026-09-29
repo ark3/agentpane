@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # Clicking a selected row whose pane is detached-loading reads its preview outside loadPreview, so it can fire two reads and report one failure in two places
@@ -22,3 +23,9 @@ Neither loses data or stalls the pane; it is judged not worth blocking OW-bilogo
 
 A test in `src/client/controller.test.ts`, red first, shows a click on a selected detached-loading row issues exactly one preview read, and one that a failure of that read reports in exactly one place.
 Which place, and whether the click should go through `loadPreview` rather than its own fetch, is the implementer's call; the owner's rule from OW-bilogo, that a failed read is never an answer and the selection stands, still binds.
+
+## Close note
+
+Folded 2026-09-29 into OW-lilami by OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 6, which routes a row click's preview read through `loadPreview` so that a `gone` answer is read in one place.
+OW-lilami's done-condition carries this card's two tests: one read per click on a selected detached-loading row, and one place its failure reports.
+OW-bilogo's rule that a failed read is never an answer still binds, with the one exception D26 makes for `gone`.

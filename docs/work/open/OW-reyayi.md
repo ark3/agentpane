@@ -29,3 +29,10 @@ A decision to change either behaviour becomes a `change` card, labelled `emacs`,
 ## Amended 2026-09-28 under D25's follow-up
 
 OW-mopuyi, filed 2026-09-28, makes the teardown own what a helper's death does to requests and buffers, and keeps today's outcome for both of this card's cases unless this card closes with a decision first; a decision recorded here after OW-mopuyi lands becomes a `change` card against the teardown it built.
+
+## Amended 2026-09-29 under D26
+
+OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7, retires `agentpane--dropped`, so a `g` in a buffer that is not attached previews rather than attaches (OW-vugefa).
+That settles case 1: a buffer whose close was in flight when the helper died no longer respawns the closed session on `g`; it previews, and a session with nothing on disk answers `gone` and the buffer is killed.
+D25 point 4 now reads "costs an attach".
+Only case 2, the turn-done indicator at a deliberate `agentpane-shutdown`, is left for this card to decide.

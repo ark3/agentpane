@@ -31,3 +31,10 @@ A test in `src/emacs/helper.test.ts` or `emacs/agentpane-test.el`, red first, dr
 
 Under D25 the helper no longer reopens its stream (OW-mepufi), so the outage branch of "while the Emacs helper's stream is down, or with it up" goes away; after an outage the helper has exited and every buffer is detached (OW-kakate).
 The core case stands: `dropDead` at a `sessions-changed`, then `g` attaching by a `virtual` ref that answers 404.
+
+## Amended 2026-09-29 under D26
+
+OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7, retires `agentpane--dropped` (OW-vugefa), so the buffer's `g` previews rather than retrying an attach that answers 404.
+For a gone `virtual` ref the preview answers `404` `gone` (OW-royosa) and, as a first cut, the buffer is killed, though the conversation lives on under the name it went to and is reachable from the picker.
+The endless retry this card describes goes with that; what remains is whether the buffer can learn the name its session went to instead of being killed, and the Claude Code `init` measurement, which still stands.
+Re-read the sequence against `main` once OW-vugefa lands; the done-condition's `g` then previews.

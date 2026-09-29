@@ -1118,7 +1118,7 @@ agentpane-mode's `agentpane--dropped`, which makes `g` attach a buffer the helpe
    A parked fork counts as held, so no backend's timing for a fork's file can make a held session read as gone; `#disposing` does not count, since a closing session with nothing on disk is going.
    `SessionIndex.preview` in `src/server/http/deps.ts` answers only turns today, `readSessionPreview` in `src/server/sessions/preview.ts` returns `[]` for a missing file by design, and the route "deliberately never touches `sessions`" (OW-38); the seam gains a distinct answer for no file, and the route consults the manager.
    It rests on one answer to "does the manager hold this ref", which is OW-kamave's to give, so it waits on that card.
-6. The browser clears the selection on `gone` from any preview read of the selected session: `loadPreview`'s fetch for a detached-loading pane, the self-refresh poll (`refetchPreview`) over a pane already on its preview, and a row click, which reads through `loadPreview` rather than its own fetch.
+6. The browser clears the selection on `gone` from any preview read of the selected session: `loadPreview`'s fetch for a detached-loading pane, the self-refresh poll (`refetchPreview`) over a pane already on its preview, and a row click, which shares `loadPreview`'s read rather than making its own, but not its gates, so a click still asks a held read again and still reads while the stream reconnects.
    So a dropped view lands on the startup view once the one fetch answers, and so does a previewed session another client closed, or one previewed across a server restart, at the poll's next tick.
    OW-bilogo's "a failed read is never an answer" stands with that one exception, keyed on `gone` and never on a transport failure.
    `detach()`'s no-disk exit and `onDisconnect`'s no-disk branch go, and with them D21's exception for the former.
@@ -1138,7 +1138,9 @@ OW-bilogo's rule at `loadPreview`, by point 6's one exception.
 The docblocks that describe today's behaviour change with the code, each in the card that changes it: `#forkOnto`, `ServerEvent` in `src/shared/protocol.ts`, the preview route, `replaceSessionSummaries` and the reducer's OW-pezazo comment, `setSessionCompaction` and `compact()` ("a gap, a drop or a listing can take it"), `detach()`, `onDisconnect`, `detachGapped`, `loadPreview`, the head of `src/emacs/helper.ts` with its attach and `onMalformed` comments, and in `emacs/agentpane.el` `agentpane--let-go`, `agentpane-refetch` and `agentpane-close-session`.
 
 **Cards.**
-Six, labelled `sweep-0929`, filed 2026-09-29 and listed at OW-zavehi's close: the `ended` event on the HTTP stream and the shared reducer; the browser's listing drops retired, and the helper's with its wait for the open, labelled `emacs`, each blocked by it; the preview's `gone`, blocked by OW-kamave; the browser's selection at `gone`, blocked by it and the browser's card; and agentpane-mode's `agentpane--dropped` retired, labelled `emacs`, blocked by the preview's card, the helper's and OW-bupivi.
+Six, labelled `sweep-0929`, filed 2026-09-29: OW-sodohi, the `ended` event on the HTTP stream and the shared reducer; OW-vebeno, the browser's listing drops retired, and OW-likopo, the helper's with its wait for the open, labelled `emacs`, each blocked by OW-sodohi; OW-royosa, the preview's `gone`, blocked by OW-kamave; OW-lilami, the browser's selection at `gone`, blocked by OW-royosa and OW-vebeno; and OW-vugefa, agentpane-mode's `agentpane--dropped` retired, labelled `emacs`, blocked by OW-royosa, OW-likopo and OW-bupivi.
+Closed moot into them the same day: OW-lejape and OW-tuyewo into OW-lilami, OW-wabiju and OW-vetebu into OW-vugefa.
+Amended to say what D26 means for them: OW-reyayi, whose case 1 it settles; OW-tujami, whose endless retry goes; OW-kafupo, OW-bupivi, OW-savafi, OW-puzome and OW-pezelo.
 
 ## The backend adapter contract
 

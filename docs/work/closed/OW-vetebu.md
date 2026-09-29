@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # agentpane-close-session leaves a never-prompted session's buffer standing when the listing after the close fails, so g previews it empty and a send attaches a ref the server no longer holds
@@ -16,3 +17,9 @@ In service of a closed session's buffer ending in the state the listing would ha
 Which remedy fits -- retry the listing, report the failure in the echo area and leave the buffer marked as not knowing, or decide from what the buffer already knows (a fork or virtual session it created and never prompted) -- is open.
 
 Done when an ERT test built on the `agentpane-test--closing` macro holds the `sessions/list` reply, fails it, and asserts the chosen outcome, red before the change and green after.
+
+## Close note
+
+Folded 2026-09-29 into OW-vugefa by OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7.
+`agentpane-close-session` asks no listing under D26: once the close answers it previews, and a preview answered `404` `gone` (OW-royosa) kills the buffer with the composer text on the kill ring, so the failed listing this card was about no longer exists.
+OW-vugefa's done-condition carries the case, built on the `agentpane-test--closing` macro, and replaces `agentpane-test-close-session-listing-that-fails-frees-the-buffer`'s intent.

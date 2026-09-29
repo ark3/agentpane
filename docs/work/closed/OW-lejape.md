@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # A selected session with nothing on disk that the server let go of outside detach() and onDisconnect lands on an empty preview whose Attach can only 404
@@ -25,3 +26,10 @@ A rule of "no sidebar row, so clear the selection" at the listing has a race to 
 
 Tests in `src/client/controller.test.ts`, red first: each ordering above ends on the startup view (`state.selected === null`), with no empty preview on screen; and a listing answered before a `create`'s snapshot, not naming it, leaves that selection standing.
 `bun run check` passes.
+
+## Close note
+
+Folded 2026-09-29 into OW-lilami by OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 6.
+Under D26 the browser clears a selection whose session is gone at the preview's `404` `gone` (OW-royosa), read by `loadPreview`, the poll and a row click, instead of at `detach()` and `onDisconnect` alone; both orderings here end at that fetch.
+OW-lilami's done-condition carries both orderings as its tests.
+The race this card bounded its fix by -- a listing older than a `create`'s snapshot clearing its selection -- no longer applies, since nothing clears a selection at a listing.
