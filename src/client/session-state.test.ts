@@ -244,6 +244,47 @@ describe("client session state", () => {
 		expect(viewOf(streamed, ref)?.messages).toEqual([userMessage("before"), userMessage("after the re-attach"), userMessage("streamed")]);
 	});
 
+	it("drops a view held when the listing was asked whose handle the listing lacks, touched since or not, and keeps one it never held (OW-pihuko)", () => {
+		const other: SessionRef = { backend: "codex", id: "thread-b" };
+		const listedWith = stateAtSequence(ref, 3);
+		expect(replaceSessionSummaries(listedWith, [], listedWith.sessions).sessions).toEqual({});
+
+		const opened = reduceServerEvent(listedWith, {
+			type: "snapshot",
+			session: other,
+			handle: h(other),
+			seq: 0,
+			messages: [],
+			isStreaming: false,
+			compaction: null,
+			model: null,
+			effort: null,
+			unrestoredModel: null,
+			error: null,
+			errorId: null,
+			notices: [],
+		}).state;
+		expect(Object.keys(replaceSessionSummaries(opened, [], listedWith.sessions).sessions)).toEqual([h(other)]);
+
+		const touched = reduceServerEvent(listedWith, {
+			type: "upsert",
+			session: ref,
+			handle: h(ref),
+			seq: 4,
+			index: 1,
+			message: userMessage("after the listing was asked"),
+		}).state;
+		expect(touched.sessions[h(ref)]).not.toBe(listedWith.sessions[h(ref)]);
+		expect(replaceSessionSummaries(touched, [], listedWith.sessions).sessions).toEqual({});
+
+		// On disk, the same close lists the session detached: its view goes, and
+		// the summary it had does not stay behind it.
+		const detached: SessionSummary = { ...summary(ref), status: "detached" };
+		const relisted = replaceSessionSummaries(touched, [detached], listedWith.sessions);
+		expect(relisted.sessions).toEqual({});
+		expect(relisted.summaries).toEqual([detached]);
+	});
+
 	it("finds a ref's handle through the view carrying it, else the summary carrying it, and none for a preview", () => {
 		const live = stateAtSequence(ref, 1);
 		expect(handleOf(live, ref)).toBe(h(ref));

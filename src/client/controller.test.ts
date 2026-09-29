@@ -2764,6 +2764,30 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
+		// Another client closes S, which has nothing on disk, so the re-list
+		// carries no summary of it at all.
+		it("drops the view of a selected session a listing omits, and sends it nothing (OW-pihuko)", async () => {
+			const api = new FakeApi();
+			api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			expect(paneMode(controller.getView())).toBe("live");
+			api.listSessions.mockResolvedValueOnce([]);
+
+			api.emit({ type: "sessions-changed" });
+			await settle();
+
+			expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
+			expect(paneMode(controller.getView())).not.toBe("live");
+			controller.setDraft("sent to nobody");
+			expect(await controller.submit()).toBe(false);
+			expect(api.prompt).not.toHaveBeenCalled();
+			controller.dispose();
+		});
+
 		// The server answered the attach just before it exited, and the tab handled
 		// the stream's error before the reply (D25 point 3).
 		for (const path of ["select", "create", "forkAndSubmit"] as const) {

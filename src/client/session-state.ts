@@ -102,8 +102,19 @@ function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<stri
 }
 
 /**
- * Replace the disk listing and forget unchanged live views the server now
- * reports as closed.
+ * Replace the disk listing and forget the live views of sessions the server
+ * has let go.
+ *
+ * A view held when the listing was asked for whose handle no listed summary
+ * carries goes first (OW-pihuko), and it is the only drop a session closed
+ * with nothing on disk meets, since it leaves no summary at all. It is the
+ * rule the Emacs helper applies to its attachments (`dropDead` in
+ * emacs/helper.ts, OW-yibijo), stated in both places rather than shared,
+ * since all that would be shared is a set-membership test over what each
+ * client holds. An event since does not keep the view: a held view's
+ * container was in the server's table before the listing read it, and a
+ * handle once gone is never minted again (D24), so a handle the listing
+ * lacks is dead however new its view.
  *
  * A listed summary pairs with a view by ref, not by handle: `list()` gives a
  * summary a handle only for a container still in the server's table, so a
@@ -111,7 +122,8 @@ function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<stri
  * whose view goes. Paired, the view is evicted only if it is the very object
  * that stood when the listing was asked for; a view an event has touched
  * since is newer than the listing, which keeps it and the summary it had
- * (OW-fihuma).
+ * (OW-fihuma). Run after the drop above, it keeps no view the drop removed,
+ * so no summary is kept for a view that is gone.
  */
 export function replaceSessionSummaries(
 	state: ClientState,
@@ -122,6 +134,12 @@ export function replaceSessionSummaries(
 	const currentHandles = handlesByRef(state.sessions);
 	let sessions = state.sessions;
 	let nextSummaries = summaries;
+	const live = new Set(summaries.map((summary) => summary.handle));
+	for (const handle of Object.keys(sessionsWhenListed)) {
+		if (live.has(handle) || sessions[handle] === undefined) continue;
+		if (sessions === state.sessions) sessions = { ...sessions };
+		delete sessions[handle];
+	}
 	for (const [index, summary] of summaries.entries()) {
 		if (summary.status !== "detached") continue;
 		const key = sessionKey(summary.ref);
