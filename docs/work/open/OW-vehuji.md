@@ -1,5 +1,5 @@
 ---
-labels: [deferral, emacs]
+labels: [deferral, emacs, sweep-0929]
 ---
 
 # agentpane-mode's streaming levels outlive a gap in the picker's listings: a sessions/list that fails while a picker stays open leaves them stale, and the next listing marks a turn that ended in the gap, watched or not
@@ -19,3 +19,9 @@ Check how `agentpane--request` reports a failed or timed-out request to its call
 
 Done when an ERT test in `emacs/agentpane-test.el`, using the stub `agentpane-test--listing` under ";;;; The picker's finished-turn mark, against a stub connection", fails a listing between one that reads a session streaming and one that reads it done, and asserts no mark — red before, green after — with `agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker` and `agentpane-test-picker-gone-keeps-the-levels-another-picker-reads` still green.
 Or: measured as not worth it and declined in the `agentpane--listed-streaming` docstring.
+
+## Amended 2026-09-29
+
+A sweep of the open deck for consolidations (read against e1cf2e6) found one more gap in the listing feed this card does not name: a helper that dies over a live server.
+`agentpane--listed-streaming` is cleared only in `agentpane--picker-gone`, so the levels a picker held survive `agentpane--helper-gone` just as they survive a failed `sessions/list`, and the next listing through a new helper marks a turn that ended in between.
+Whatever owner this card settles on for those levels should cover that case too, with its own ERT test.
