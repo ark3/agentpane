@@ -6,7 +6,7 @@ blocked-by: [OW-yibijo]
 # Two edges of agentpane--dropped: a Pi fork's parent keeps it set, and a session/detached that lands before a deferred attach reply reaches no buffer
 
 Found 2026-09-25 by the adversarial read of OW-yibijo, both reasoned from the code, neither reproduced.
-OW-yibijo added `session/detached` (`dropDead` in `src/emacs/helper.ts`) and the buffer-local `agentpane--dropped` in `emacs/agentpane.el`, which makes `agentpane-refetch` attach instead of preview in a buffer the helper told its handle is gone; `agentpane--attached-as` is the only place that clears it.
+OW-yibijo added `session/detached` (`dropDead` in `src/emacs/helper.ts`) and the buffer-local `agentpane--dropped` in `emacs/agentpane.el`, which makes `agentpane-refetch` attach instead of preview in a buffer the helper told its handle is gone; `agentpane--attach-by`, run at the snapshot that attaches the buffer, is the only place that clears it (`agentpane--attached-as` until OW-rebawa, which cleared it at the attach reply).
 Both edges were judged not worth holding OW-yibijo for.
 
 ## The fork parent
