@@ -22,6 +22,7 @@ Case 2 may be judged acceptable, because a close under C cannot know about an al
 
 ## Done when
 
-A test in `src/server/http/session-manager.test.ts` goes red first and green after: close a session holding names A and C, with its dispose held (`holdDispose`), then `attach(A)` with the index `get` held (the held-`SessionIndex` pattern in "starts afresh for an attach that follows a close of a session still in its index lookup"), then `close(A)`, release both; the attach rejects and `isAttached` is false.
+A test in `src/server/http/session-manager.test.ts` goes red first and green after: close a session holding names A and C, with its dispose held (`holdDispose`), then `attach(A)` with the index `get` held (the held-`SessionIndex` pattern in "starts afresh for an attach that follows a close of a session still in its index lookup"), then `close(A)`, release both; the attach rejects, `isAttached(C)` is false and `liveRefs()` is empty.
+`isAttached(A)` alone proves nothing: as of 799eff2 a startup that took `disposing.ref` builds its container under C and never adds A as a name, so A reads detached even when the bug reproduces (amended 2026-09-29 on checking the card against the source).
 Case 2 either gets the same test under an alias or a recorded reason in this card's close note, and case 3 likewise.
 The fix changes who owns the lookup, for instance by keying the startup under every spelling it is known by, rather than adding a second lookup at `close()`.
