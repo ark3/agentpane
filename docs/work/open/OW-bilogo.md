@@ -23,12 +23,30 @@ Proved by probe in the adversarial read, 2026-09-28:
 
 ## The change
 
-Replace the rule deciding what a failed read means rather than adding a case for each of these.
-One candidate, not settled: a failed read never clears the selection, and the pane stays detached-loading and asks again only at the next transition to `connected`, which is what keeps it from looping; the cost is a pane that says nothing while a server keeps answering an error, and whether an error line is owed then is this card's call.
-The hung read needs a bound of its own whatever is chosen; `api.preview` in `src/client/api.ts` takes no signal today.
+Decided by the owner on 2026-09-28.
+
+A failed preview read is never an answer.
+The pane stays detached-loading and the selection stands; nothing in `loadPreview` clears it.
+What keeps a failing server from driving a hot loop is when the read is asked again: only at the next transition of `view.connection` to `connected`, or when the user selects the row again, and never from the failure branch itself.
+With that rule the `streamDrops` counter goes, and the first two orderings above need nothing of their own: the selection stands, and in the second the snapshot makes the pane live when it lands.
+
+A read has a bound: `api.preview` in `src/client/api.ts` takes an abort signal, and `loadPreview` aborts a read that has not settled within a timeout, which then counts as a failed read under the rule above and frees its `previewLoads` key.
+The timeout's value is a first cut, about 10s for a read of local disk, named as a constant beside the other timings in the controller; nothing has measured a slow preview.
+
+A read that failed while the stream is up puts one line in the pane, "Couldn't load the transcript: " followed by the failure's message, above the Attach button, and not in the global error slot, which a background read with no gesture behind it does not own.
+The owner chose the line over silence on 2026-09-28: the empty loading pane is honest while the server is down, and would hide a server answering errors while it is up.
+The line clears when a read for that session succeeds or the selection moves.
+Whether it lives on `ControllerView` or beside the preview state is the implementer's call.
 
 ## Done when
 
-Tests in `src/client/controller.test.ts`, each red first: the three orderings above end with the selection standing (and, for the second, live once the snapshot lands), and a read that never settles does not stop a later `connected` from fetching.
-The `streamDrops` counter is gone, and the test named above is rewritten to the new rule rather than deleted.
-`bun run check` passes.
+Tests in `src/client/controller.test.ts`, each red first:
+
+- A read that fails before the tab hears the stream drop leaves the selection standing, and a read goes out again at the next `connected`.
+- `select` whose attach reply beats its snapshot, with the preview read failing before the snapshot lands: the selection stands, and the pane is live once the snapshot lands.
+- A read that never settles is aborted at the timeout (driven with fake timers), and a later `connected` fetches again.
+- A read that fails with the stream up issues no further read until a `connected` transition or a re-select, and sets the pane's failure line, which a later successful read clears.
+
+The test "asks again for a preview whose read the stream dropped under, even when it fails after the reconnect" is rewritten to the new rule rather than deleted, and the `streamDrops` counter is gone.
+A test on `src/client/App.svelte` shows the failure line over the Attach button.
+`bun run check` passes, and `bun run test:browser` passes, since the line changes what the composer's action row area draws (`AGENTS.md`).

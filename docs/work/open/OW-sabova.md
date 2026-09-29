@@ -18,14 +18,18 @@ Before OW-forinu the reply's own `attached` write covered this ordering.
 
 ## The change
 
-The card's call, between at least these two:
+Decided by the owner on 2026-09-28: fix the coalescing, which is the root, and not the attach.
+Every `sessions-changed` that joins a listing already in flight gets an answer given before the change it announces, not only an attach's: the turn-boundary broadcast (OW-furinu) and another client's close do too; the attach reply's own `status` write hid only the attach's case until OW-forinu retired it.
 
-- A listing asked for while one is in flight is owed a fresh one after it, so a broadcast that joins a stale listing still gets an answer given after it was sent; this fixes the coalescing for every `sessions-changed`, not only an attach's.
-- `detachable` and the stripe read the pane's mode (`paneMode` in `src/client/controller.ts`) for the selected session rather than the row's `status`; this fixes Detach but not the stripe on rows not selected.
-
-Whichever is taken, the listing stays the only writer of `status`: an attach reply writing it again is what OW-wazija closed.
+`refreshSessions` in `src/client/controller.ts` keeps coalescing, and owes one fresh listing: a call that arrives while a listing is in flight marks it, and when that listing lands, exactly one more is asked, whose answer is the one the callers who arrived meanwhile wait for.
+At most one listing is in flight and one owed, however many broadcasts arrive, so a burst cannot pile requests up.
+A `surface` caller that joins keeps owning the status line and error slot for the listing it waits on, as `refreshSurfacing` gives it today.
+The listing stays the only writer of a row's `status`: an attach reply writing it again is what OW-wazija closed.
+Deriving `detachable` in `src/client/App.svelte` from `paneMode` instead of the row's `status` was the card's other option; the owner did not take it, since the fix above covers Detach and the stripe together.
 
 ## Done when
 
-A test in `src/client/controller.test.ts`, red first on `main` as OW-forinu left it: the probed ordering above ends with the session's row reading `attached` (or, under the second option, with an `App.test.ts` test showing Detach enabled over the live view).
+A test in `src/client/controller.test.ts`, red first on `main` as OW-forinu left it, drives the probed ordering above and asserts the session's row ends `attached`, with `api.listSessions` called once more after the in-flight listing lands.
+A second test holds one listing in flight, delivers several `sessions-changed`, and asserts exactly one further listing follows it.
+The existing coalescing tests pass, or are changed and named in the commit message.
 `bun run check` passes.
