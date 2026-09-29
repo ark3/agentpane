@@ -106,7 +106,7 @@ Building the transport first added a `renamed` arm for this, which every client 
 Codex's `ServerRequest` (`resources/codex-protocol/ServerRequest.ts`) is a request *from* the agent *to* the client, carrying a `RequestId`: approval requests, `item/tool/requestUserInput`, MCP elicitation, dynamic tool call.
 The agent blocks until answered.
 
-**agentpane never holds an agent request: the Codex and Pi adapters refuse one the moment it arrives, and name it in a session error; Claude Code sends none under the flags agentpane spawns it with (below).**
+**agentpane never holds an agent request: every adapter refuses one the moment it arrives, and names it in a session error; Claude Code sends none under the flags agentpane spawns it with (below).**
 Decided by the owner on 2026-09-29 (OW-letevu), making final what OW-yikoyo decided provisionally on 2026-09-11.
 It covers approvals, which D7a already avoids by configuration, and questions: Codex's `item/tool/requestUserInput` and MCP elicitation, Pi's `select`, `confirm`, `input` and `editor` dialogs, and Claude Code's `can_use_tool` should it ever arrive.
 
@@ -126,13 +126,16 @@ How each adapter refuses:
 - **Pi.**
   An `extension_ui_request` carrying one of `PI_DIALOG_METHODS` (`src/server/adapters/pi/protocol.ts`) is answered with an `extension_ui_response` carrying `cancelled: true`, the one refusal Pi's dialogs have, and named in "Pi sent a dialog agentpane cannot answer (METHOD); agentpane cancelled it" (OW-yosuzo).
   Pi's fire-and-forget methods expect no reply, so nothing refuses them.
-- **Claude Code has no refusal, and needs none.**
-  `ClaudeReducer` drops a `control_request` silently, so a `can_use_tool` that arrived would stall the turn; but the ask exists only under the undocumented `--permission-prompt-tool stdio`, which the adapter does not pass (its module docblock in `src/server/adapters/claude/adapter.ts`).
-  No refusal is built, because the deny shape was never captured.
+- **Claude Code.**
+  No `control_request` should arrive: the `can_use_tool` ask exists only under the undocumented `--permission-prompt-tool stdio`, which the adapter does not pass (its module docblock in `src/server/adapters/claude/adapter.ts`).
+  One that arrives anyway is refused by `refuseControlRequest` in that file (OW-kihubu).
+  A `can_use_tool` is answered with a success `control_response` carrying `behavior: "deny"` and named in "claude sent a request agentpane cannot answer (can_use_tool); agentpane declined it".
+  Any other subtype is answered with an error `control_response`, the shape the CLI uses to error a request agentpane sent, and named in "claude sent an unsupported request (SUBTYPE); agentpane declined it".
+  As of `claude 2.1.283` each reply, answering a `can_use_tool`, reached the model as an `is_error` tool result and the turn went on to its `result` (`docs/MANUAL_TESTING.md`, OW-kihubu); no other subtype could be provoked, so the error reply is measured on `can_use_tool` alone.
 
 **The error line is the tripwire, and what reopens this.**
 This is exactly as final as usage justifies.
-Any of the three error lines above appearing in the owner's own use is the named condition for reopening D2a; git history and this decision's text before OW-letevu hold the machinery and its reasoning if that day comes.
+Any of the five error lines above appearing in the owner's own use is the named condition for reopening D2a; git history and this decision's text before OW-letevu hold the machinery and its reasoning if that day comes.
 
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
@@ -679,7 +682,7 @@ Three groups, and they are not treated alike.
 
 - **Facts the code already defends against.** That a Codex fork does not inherit `sandbox` (D7a) is one: the adapter passes it explicitly on all three thread-creation paths, so if a future Codex starts inheriting, nothing breaks and the docblock is merely over-explained. These are allowed to rot and are corrected when someone trips on them.
 - **Facts behind a decision already taken.** D15's per-backend fork behaviour, D7a's policy choice. If one flips, a decision may want revisiting, but nothing fails silently and the decision record says what it rested on. These are corrected on contact too.
-- **Facts that license code that does not exist.** These are the only ones defended against time. The shape is always the same: a run showed that some input cannot arrive, so nothing was built to handle it; the backend then changes, the input arrives, and there is no test to go red and no log line, because the missing code is exactly what would have noticed. Agent requests were the instance this was written for — OW-zogogo asked whether any Codex `ServerRequest` kind could still reach agentpane, with OW-bijera unbuilt on the answer of no — until D2a refused every Codex and Pi request at arrival with an error line naming it (OW-letevu).
+- **Facts that license code that does not exist.** These are the only ones defended against time. The shape is always the same: a run showed that some input cannot arrive, so nothing was built to handle it; the backend then changes, the input arrives, and there is no test to go red and no log line, because the missing code is exactly what would have noticed. Agent requests were the instance this was written for — OW-zogogo asked whether any Codex `ServerRequest` kind could still reach agentpane, with OW-bijera unbuilt on the answer of no — until D2a refused every Codex and Pi request at arrival with an error line naming it (OW-letevu), and every Claude Code `control_request` too (OW-kihubu).
 
 For that third group the defence is not documentation, it is a runtime assertion: the impossible input is made loud where it arrives, so a backend upgrade that reopens the hole reports itself the first time it happens instead of presenting as intermittent flakiness months later.
 That assertion exists for Codex `ServerRequest`s as of OW-nujawi: a kind with no entry in `DECLINE_RESPONSES` is answered at arrival with JSON-RPC `-32601` naming the method and raises a session error, so the turn fails in seconds with the kind on screen.

@@ -118,15 +118,15 @@
  *   this way, and only the former prefers `default`: this read never
  *   overwrites a model chosen at start or since, though a turn's `init` does
  *   (above).
- * - No agent request is refused here, unlike Codex and Pi (D2a), because none
- *   can arrive: sbox's claude profile injects `bypassPermissions`, and the
+ * - No agent request is expected here, unlike Codex and Pi (D2a), because
+ *   none can arrive: sbox's claude profile injects `bypassPermissions`, and the
  *   jail is the confinement boundary -- the same rationale DESIGN records for
  *   Codex's `danger-full-access`. The `can_use_tool` ask only exists under the
  *   undocumented `--permission-prompt-tool stdio` flag, which this adapter
- *   does not pass (shape recorded in fixture `permission-request.jsonl`). One
- *   that did arrive would stall the turn, since `ClaudeReducer` drops a
- *   `control_request` silently; no refusal is built because its deny shape
- *   was never captured.
+ *   does not pass (shape recorded in fixture `permission-request.jsonl`).
+ *   Should a `control_request` of any subtype arrive anyway, it is refused at
+ *   arrival like Codex's and Pi's and named in a session error, so a broken
+ *   premise is loud rather than a stalled turn (`refuseControlRequest`).
  */
 
 import { randomUUID } from "node:crypto";
@@ -709,6 +709,10 @@ export class ClaudeAdapter implements BackendAdapter {
 			this.handleControlResponse(event);
 			return;
 		}
+		if (event.type === "control_request") {
+			this.refuseControlRequest(event);
+			return;
+		}
 		if (event.type === "system" && event.subtype === "init") {
 			const sessionId = (event as { session_id?: unknown }).session_id;
 			// `--session-id`/`--resume` make this a confirmation, but the CLI is
@@ -737,6 +741,51 @@ export class ClaudeAdapter implements BackendAdapter {
 		} else {
 			pending.resolve(response?.response);
 		}
+	}
+
+	/**
+	 * agentpane never holds an agent request (D2a): one the CLI sends is
+	 * refused here, in the tick it arrives, and named in a session error.
+	 * None should arrive under the flags this adapter spawns with (module doc),
+	 * so reaching this line means a premise broke. `can_use_tool` gets the
+	 * deny a model reads as a "no"; any other subtype gets the generic error
+	 * reply, the shape the CLI itself uses. Measured live on the home server,
+	 * 2026-09-29, `claude 2.1.283` (docs/MANUAL_TESTING.md, OW-kihubu), each
+	 * answering a `can_use_tool` became an `is_error` tool result the model
+	 * read, and the turn went on to its `result`. `can_use_tool` is the only
+	 * subtype the CLI could be made to send, so the error reply is measured on
+	 * it alone.
+	 */
+	private refuseControlRequest(event: Extract<ClaudeEvent, { type: "control_request" }>): void {
+		const subtype = event.request?.subtype ?? "unknown";
+		const proc = this.requireProc();
+		if (subtype === "can_use_tool") {
+			const deny = {
+				behavior: "deny",
+				message: "agentpane cannot answer can_use_tool; it declined this tool use",
+			};
+			proc.write(
+				JSON.stringify({
+					type: "control_response",
+					response: { subtype: "success", request_id: event.request_id, response: deny },
+				}),
+			);
+			this.emitError(
+				"claude sent a request agentpane cannot answer (can_use_tool); agentpane declined it",
+			);
+			return;
+		}
+		proc.write(
+			JSON.stringify({
+				type: "control_response",
+				response: {
+					subtype: "error",
+					request_id: event.request_id,
+					error: `agentpane cannot answer ${subtype}`,
+				},
+			}),
+		);
+		this.emitError(`claude sent an unsupported request (${subtype}); agentpane declined it`);
 	}
 
 	private sendControl(request: { subtype: string } & Record<string, unknown>): Promise<unknown> {

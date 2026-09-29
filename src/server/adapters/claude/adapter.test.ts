@@ -362,6 +362,46 @@ describe("ClaudeAdapter turns", () => {
 		});
 	});
 
+	it("denies a can_use_tool the CLI sends, in the tick it arrives, and names it (OW-kihubu)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const errors = vi.fn();
+		h.adapter.onError(errors);
+		const ask = readFixture("permission-request").find((event) => event.type === "control_request");
+		if (ask?.type !== "control_request") throw new Error("fixture holds no control_request");
+
+		h.proc().emit(ask);
+
+		expect(h.proc().written.at(-1)).toMatchObject({
+			type: "control_response",
+			response: {
+				subtype: "success",
+				request_id: ask.request_id,
+				response: { behavior: "deny", message: expect.any(String) },
+			},
+		});
+		expect(errors).toHaveBeenCalledWith(
+			"claude sent a request agentpane cannot answer (can_use_tool); agentpane declined it",
+		);
+	});
+
+	it("errors out any other control_request the CLI sends, and names its subtype (OW-kihubu)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const errors = vi.fn();
+		h.adapter.onError(errors);
+
+		h.proc().emit({ type: "control_request", request_id: "cli-1", request: { subtype: "elicitation" } });
+
+		expect(h.proc().written.at(-1)).toEqual({
+			type: "control_response",
+			response: { subtype: "error", request_id: "cli-1", error: expect.any(String) },
+		});
+		expect(errors).toHaveBeenCalledWith(
+			"claude sent an unsupported request (elicitation); agentpane declined it",
+		);
+	});
+
 	it("replays a recorded turn through the live process seam", async () => {
 		const h = harness();
 		await h.adapter.start({ cwd: "/workspace" });
