@@ -64,8 +64,11 @@ export interface AgentpaneApi {
 	listSessions(cwd?: string): Promise<SessionSummary[]>;
 	createSession(body: CreateSessionRequest): Promise<SessionRef>;
 	attach(ref: SessionRef): Promise<LiveSessionSummary>;
-	/** Read-only, non-attaching transcript preview (OW-38): spawns nothing. */
-	preview(ref: SessionRef): Promise<SessionPreviewResponse>;
+	/**
+	 * Read-only, non-attaching transcript preview (OW-38): spawns nothing.
+	 * `signal` aborts the read, which then rejects (OW-bilogo).
+	 */
+	preview(ref: SessionRef, signal?: AbortSignal): Promise<SessionPreviewResponse>;
 	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	abort(ref: SessionRef): Promise<void>;
@@ -145,8 +148,8 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 				return (body as AttachSessionResponse).session;
 			});
 		},
-		preview(ref) {
-			return request(ROUTES.preview(ref), { method: "GET" }, (body) => body as SessionPreviewResponse);
+		preview(ref, signal) {
+			return request(ROUTES.preview(ref), { method: "GET", signal }, (body) => body as SessionPreviewResponse);
 		},
 		prompt(ref, body) {
 			return requestNoContent(ROUTES.prompt(ref), jsonRequest(body));

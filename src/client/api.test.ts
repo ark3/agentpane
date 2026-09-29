@@ -98,6 +98,16 @@ describe("agentpane API", () => {
 		expect(fetch).toHaveBeenCalledWith(ROUTES.preview(ref), { method: "GET" });
 	});
 
+	// The controller bounds its background read by aborting it (OW-bilogo).
+	it("hands a preview's abort signal to the fetch", async () => {
+		const fetch = fetchRecorder(response({ ref, turns: [] }));
+		const api = createAgentpaneApi({ fetch });
+		const signal = new AbortController().signal;
+
+		await api.preview(ref, signal);
+		expect(fetch).toHaveBeenCalledWith(ROUTES.preview(ref), { method: "GET", signal });
+	});
+
 	it("prompts a session with a JSON body", async () => {
 		const fetch = fetchRecorder(new Response(null, { status: 202 }));
 		const api = createAgentpaneApi({ fetch });
