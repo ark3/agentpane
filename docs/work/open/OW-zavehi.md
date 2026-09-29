@@ -21,6 +21,9 @@ So "held, with nothing on disk yet" and "gone" come back as the same answer.
 - `agentpane--dropped` in `emacs/agentpane.el`: set by `agentpane--let-go`, cleared by `agentpane--attach-by` and `agentpane-close-session`, and read in exactly one place, `agentpane-refetch`'s `(or agentpane--attached agentpane--dropped)`, where it makes `g` re-attach instead of preview.
   The browser has no such flag: OW-forinu derives `paneMode`, and a dropped view falls to preview or loading with an explicit Attach.
 
+Since OW-pihuko, a listing that lacks a held view's handle drops the view in `replaceSessionSummaries` in `src/client/session-state.ts`, and a selected session with nothing on disk dropped that way keeps its selection and lands on the empty preview with no sidebar row, where `detach()` and `onDisconnect` would have cleared the selection.
+That is one more path whose outcome this decision sets.
+
 ## The proposal to decide
 
 1. The preview route answers `404 not_found` when the index finds no file and the manager holds nothing under that name.
