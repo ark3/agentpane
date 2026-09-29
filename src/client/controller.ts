@@ -325,10 +325,11 @@ export function createController(
 	let previewHeld = false;
 	/**
 	 * The ref keys `detach()` has a close out for, whose preview `loadPreview`
-	 * leaves to it. The server's `ended` drops the view before the close
-	 * answers (D26), and until then `detach()` has not decided whether its
-	 * no-disk exit clears the selection; a read in between is the one that exit
-	 * promises is never asked. An interim: OW-lilami retires that exit, and this
+	 * leaves to it. The server's `ended` can drop the view before the close
+	 * answers, since the server writes it first and the stream and the reply
+	 * are unordered (D2, D26), and until the close answers `detach()` has not
+	 * decided whether its no-disk exit clears the selection; a read in between
+	 * is the one that exit promises is never asked. An interim: OW-lilami retires that exit, and this
 	 * with it.
 	 */
 	const detaching = new Set<string>();

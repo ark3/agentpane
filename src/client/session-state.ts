@@ -115,7 +115,9 @@ function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<stri
  * has touched since the listing was asked for, or one that did not stand
  * then, is newer than the listing, so a `detached` summary paired with it
  * gives way to the summary the view had (OW-fihuma). That answers a stale
- * listing racing an attach, not an end.
+ * listing racing an attach. A listing that lands between a view's last event
+ * and its `ended` restores the row too, and the re-list the end's
+ * `sessions-changed` asks writes it back.
  */
 export function replaceSessionSummaries(
 	state: ClientState,
