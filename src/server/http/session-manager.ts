@@ -198,8 +198,10 @@ interface PendingStart {
 	 * gains. None leaves while it is live, not even one a failed start takes
 	 * back off its container, so a `close()` under any of them finds it in
 	 * `#attaching` and closes over the rest (OW-yufazo). Its container takes
-	 * each as a name. Retiring it leaves them here, for the close that flagged
-	 * it to read.
+	 * each as a name while the startup is bound to it, save the ones a failed
+	 * start takes back off it and any handed over after that at `#start`'s
+	 * arbitration, which the startup holds alone. Retiring it leaves them
+	 * here, for the close that flagged it to read.
 	 */
 	readonly keys: Set<string>;
 	/** The container it is starting, once there is one: its attach's, or the one `#start` builds. */
@@ -1284,7 +1286,11 @@ export class SessionManager {
 		// The container leaves the table first, with the names that still
 		// resolve to it: they are where the search for startups below begins,
 		// alongside the one called. A name it once had that another container
-		// has since taken is that container's, and so are the startups under it.
+		// has since taken is left out of that start but not out of the closure
+		// below: if a startup it flags holds that name too, the other
+		// container's startup under it is flagged as well. Two containers
+		// answer to one name only when a backend rename and the index disagree
+		// about which conversation it belongs to.
 		const keys = new Set([sessionKey(ref), ...(session ? this.#remove(session) : [])]);
 		// Flag every startup before anything else: an adapter that does not
 		// exist yet cannot be disposed, and this is what stops it being born at
