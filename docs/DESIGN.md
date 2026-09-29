@@ -762,6 +762,7 @@ Every re-establish of the SSE stream asks for one unsurfaced session listing, so
 The owner took this on 2026-09-16 (OW-vukoku).
 Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
 Amended by OW-sabova on 2026-09-29: a first open that lands while the startup listing is still out asks for one listing after it, because every call that arrives mid-listing is owed one; only a first open after the startup listing has landed lists nothing.
+Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` takes for a session with nothing on disk goes, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until D26's cards land it did only after the disposal.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
@@ -1029,7 +1030,7 @@ The one exception it found is the browser's selected session closed by another c
    The server announces no restart and neither client shows one; the owner, on 2026-09-28: every session detached is what they expect after a restart.
    D21's listing at a reconnect stays, and so do the server's opening snapshots, which re-introduce whatever is still live after a drop the server survived.
 4. The Emacs helper exits when its event stream drops or its first open fails, and does not reconnect.
-   agentpane-mode takes any helper's death to mean every buffer it served is detached, whatever the cause: a helper that crashed over a live server is rare, and costs a `g`.
+   agentpane-mode takes any helper's death to mean every buffer it served is detached, whatever the cause: a helper that crashed over a live server is rare, and costs an attach, since under D26 `g` previews a buffer that is not attached.
    A picker open at that moment goes stale until `g`, which the owner accepted.
 5. A sequence gap detaches that one session, in either client, instead of attaching it to recover a snapshot.
 
@@ -1037,7 +1038,7 @@ The one exception it found is the browser's selected session closed by another c
 Per-session reconciliation across an outage: the helper's reopen, its `stream/changed` and agentpane-mode's `reconnecting` mode line (OW-mareju), `dropDead`'s run at a reopen (OW-yibijo), and D21's paragraphs on agentpane-mode's reopen, which read as history once OW-mepufi lands.
 Gap recovery by attach in both clients, which OW-refibu chose for the helper, and with it OW-sugome's `detaching` set.
 OW-mirifa's rule that a buffer whose helper died keeps its attachment as a marker.
-The listing-based dropping at every `sessions-changed` while the stream is up stays in both clients, since another client's close is still a real case, and so do the `agentpane--closing` refusals, which now spare the user a refused request rather than a respawn.
+Another client's close is still a real case, and D26 moves it from the listing-based dropping at every `sessions-changed` onto an `ended` event the server sends where it forgets the handle; the `agentpane--closing` refusals stay, and now spare the user a refused request rather than a respawn.
 
 **Cards.**
 Six, labelled `d25`, filed 2026-09-28: OW-sirofi, the routes; OW-fiheli, a browser stream drop, and OW-lunihe, a browser gap; OW-kakate, a helper's death in agentpane-mode, OW-filuge, a helper gap, and OW-mepufi, the helper's exit, blocked by OW-kakate.
@@ -1071,6 +1072,73 @@ That is OW-mopuyi.
 Built the same day: `agentpane--request` in `emacs/agentpane.el` records each request it sends in `agentpane--requests-out` under its connection, and `agentpane--helper-gone` lets go of the buffers at once and answers every request still there as the death from a zero-delay timer of its own, running each one's failure path and never the path for a request that reached no backend, so the turn-done watch on a handle a served buffer holds is `agentpane--let-go`'s to settle.
 Past a death a request's error handler answers nothing, jsonrpc.el's "Server died" included.
 The answers run one tick after the teardown, so the in-flight flags stay set that tick longer, and a reply jsonrpc.el held back behind a synchronous request is still the answer: as of jsonrpc.el 1.0.29 on Emacs 31.1, measured 2026-09-28, it is handed on from a timer queued as the synchronous request unwinds, after the teardown's timer and before the answers'.
+
+### D26. The server says a handle has ended, and the preview says a ref is gone
+
+The owner took this on 2026-09-29 (OW-zavehi, which absorbed OW-denuse).
+Decided and not yet built, in the sense D24 and D25 are: the prose reads as the design will once the cards named at the end land.
+
+**What it replaces.**
+The server knows the moment a handle ends: `close()` and `#forkOnto` in `src/server/http/session-manager.ts` take the container out of the table and call `broadcaster.forget`, which only drops the handle's sequence counter.
+Nothing under that handle went on the stream, so a client learned of another's close from a later listing: the missing-handle drop in `replaceSessionSummaries` in `src/client/session-state.ts` (OW-pihuko) and its detached-by-ref drop beside it, and `dropDead` in `src/emacs/helper.ts` (OW-yibijo); a client's own close was `detach()` in `src/client/controller.ts` dropping its view once the close answered.
+That inference missed two cases.
+`close()` sent `sessionsChanged()` only after `await disposal.promise`, so for as long as the adapter took to dispose, up to the kill grace, another client still held a live-looking view whose Send met 409 `not_attached`; D21's "once a close has taken the session out of its table" described the intent, not the code.
+And a listing that failed was asked again only at the next `sessions-changed`, so on a quiet server a dead view could stay live indefinitely.
+Separately, the preview answered `[]` for a ref with no file whether the manager held it or not, so "held, with nothing on disk yet" and "gone" were one answer, and each client worked around it: `detach()`'s no-disk exit and `onDisconnect`'s no-disk branch in the browser, and in agentpane-mode the follow-up listing in `agentpane-close-session`.
+agentpane-mode's `agentpane--dropped`, which makes `g` attach a buffer the helper let go of rather than draw the stored transcript over the live one, is the other half of the same question: whether a buffer that is not attached is a preview.
+
+**The decision.**
+
+1. Where `close()` and `#forkOnto` forget a handle, the server sends an `ended` event under it, in the same synchronous run, and `close()` sends its `sessions-changed` there too rather than after the disposal.
+   Another client's close then reaches a connected client at once, which is the first case above gone.
+   `disposeAll()` sends nothing: `app.close()` in `src/server/http/app.ts` closes every stream before it runs, and D25 point 3 already reads the drop as every session detached.
+   A close that finds no container -- a startup still at its index lookup, or a parked fork -- has no handle, and no client holds a view to end.
+   Nothing else takes a container out of the table while a client holds its view: an adapter that fails to start never publishes a snapshot, a crashed one leaves its container in the table, and a rename keeps the handle.
+2. `ended` carries the session and the handle and no `seq`.
+   A `seq` would have to come from the counter `forget` has just dropped, recreating it (the reason `submit`'s docblock gives for sending nothing after a forget); and the helper must act on an `ended` for a handle whose held attach has no view yet, which a sequence check keyed on the view would pass over.
+   So a client applies it whatever the handle's sequence stands at, and the helper handles it before the early return its `onEvent` takes when the reducer's state is unchanged.
+   The per-client stream is ordered and nothing goes out under a handle once its container leaves the table, so `ended` is always the last event under its handle, and a re-attach, which waits out the disposal, comes under a new one.
+3. `ended` carries no on-disk flag.
+   `ManagedSession.onDisk` is a cache: it reads false for a Pi fork or a regular Codex fork whose file is already there, and `#rename` never updates it; the authoritative answer is an index read, which is async and cannot precede the forget.
+   Whether anything is left to show is the preview's to say (point 5).
+4. `ended` is the one owner of "this handle has ended" while a client's stream is up.
+   The shared reducer drops the view on it; the helper sends `session/detached` for an attachment under it, which the Emacs wire already carries, and releases a held attach waiting on a snapshot under it.
+   The listing no longer drops a view, an attachment or a held attach: the missing-handle and detached-by-ref drops in `replaceSessionSummaries`, `dropDead`'s eviction and `detach()`'s local drop go, with no backstop kept, and so does `withoutOtherViewsOf` in the reducer's snapshot arm, which only an end nobody announced could reach.
+   What a listing still does is its own: rows and their `status`, OW-fihuma's summary restore against a stale listing racing an attach, and agentpane-mode's pruning of turn marks for handles a listing lacks (`agentpane--note-turns`).
+   It rests on every client that can hold a view having its stream registered before the events it needs are sent.
+   The browser opens its stream at start; the helper opens its own lazily, and until now sent an attach without waiting for the open, so an attach's snapshot and a close's `ended` could both precede its registration and leave the attach held with nothing to release it.
+   So the helper waits for its stream's open, whose response headers mean the server has registered it, before its first request.
+   Once registered, the stream is all or nothing (D25): a drop detaches everything and ends the helper, and a gap detaches the one session.
+   `ended` carries no `seq`, so it is the one frame whose loss no later event reveals; a malformed frame from the server's own serialiser is a server bug, not a case to defend, and the helper's `onMalformed` comment, which counts on the next event, is corrected rather than guarded.
+   What a stream that was down missed is D25's and D21's: nothing live survives the drop, and the reconnect's listing and opening snapshots rebuild the rest.
+   So the second case above shrinks to a stale row after a failed listing, the same stripe D21 already lets wait for the next listing.
+5. The preview route answers `404` with the code `gone` when the manager holds nothing under that name and then the index finds no file, and a client reads that answer, and no other failure, as gone.
+   `gone` and not `not_found`, which an unmatched route and `UnknownSessionError` also answer, so a route mismatch cannot read as a session ending.
+   The manager is asked first: asked second, a file that appeared during the index read of a session closed in between would read as gone, where asked first the worst case is one stale empty preview.
+   A parked fork counts as held, so no backend's timing for a fork's file can make a held session read as gone; `#disposing` does not count, since a closing session with nothing on disk is going.
+   `SessionIndex.preview` in `src/server/http/deps.ts` answers only turns today, `readSessionPreview` in `src/server/sessions/preview.ts` returns `[]` for a missing file by design, and the route "deliberately never touches `sessions`" (OW-38); the seam gains a distinct answer for no file, and the route consults the manager.
+   It rests on one answer to "does the manager hold this ref", which is OW-kamave's to give, so it waits on that card.
+6. The browser clears the selection on `gone` from any preview read of the selected session: `loadPreview`'s fetch for a detached-loading pane, the self-refresh poll (`refetchPreview`) over a pane already on its preview, and a row click, which reads through `loadPreview` rather than its own fetch.
+   So a dropped view lands on the startup view once the one fetch answers, and so does a previewed session another client closed, or one previewed across a server restart, at the poll's next tick.
+   OW-bilogo's "a failed read is never an answer" stands with that one exception, keyed on `gone` and never on a transport failure.
+   `detach()`'s no-disk exit and `onDisconnect`'s no-disk branch go, and with them D21's exception for the former.
+7. An agentpane-mode buffer is live exactly when attached.
+   `agentpane--dropped` goes, `g` in a buffer that is not attached previews, and a preview answered `gone` kills the buffer as `agentpane-close-session` does today for a session with nothing on disk, its composer text going to the kill ring first; that command's follow-up listing goes.
+   Going live again is a send or an attach-only command, OW-bupivi, which this makes required; the browser already works that way, a dropped view falling to preview with an explicit Attach.
+   A first cut: a buffer holding a name that no longer reaches its session, D21's "Still open" case, is killed at its next `g` where it used to retry an attach that answered 404, though the conversation may live on under the name it went to and is reachable from the picker; OW-tujami carries whether the buffer can learn that name.
+
+**What it amends.**
+D3's list of events, which gains `ended`, and D11's "with the `seq` and session id at the top level", which `ended` keeps but for the `seq`.
+D21's exception for `detach()`'s no-disk exit, its paragraphs on the helper dropping attachments a listing lacks, and its sentence on when the server sends `sessions-changed` at a close, which point 1 makes true.
+D24's "broadcasts nothing under the parent's handle": the fork's container still broadcasts nothing there, and the manager's `ended` for the parent names no fork, so OW-suhoto's rule stands; `docs/WORKSTREAMS.md`'s "all a fork tells other clients is `sessions-changed`" gains `ended` for a Pi fork's parent when that lands.
+D25's sentence keeping the listing-based dropping at every `sessions-changed`: another client's close is still a real case, and `ended` now carries it.
+D25 point 4: a helper that crashed over a live server costs an attach, since `g` previews a buffer that is not attached.
+D25's account of OW-forinu, in which a stream drop "still clears one with nothing on disk", and of OW-rebawa, in which "a listing without the handle" releases a held reply: `gone` and `ended` take those over.
+OW-bilogo's rule at `loadPreview`, by point 6's one exception.
+The docblocks that describe today's behaviour change with the code, each in the card that changes it: `#forkOnto`, `ServerEvent` in `src/shared/protocol.ts`, the preview route, `replaceSessionSummaries` and the reducer's OW-pezazo comment, `setSessionCompaction` and `compact()` ("a gap, a drop or a listing can take it"), `detach()`, `onDisconnect`, `detachGapped`, `loadPreview`, the head of `src/emacs/helper.ts` with its attach and `onMalformed` comments, and in `emacs/agentpane.el` `agentpane--let-go`, `agentpane-refetch` and `agentpane-close-session`.
+
+**Cards.**
+Six, labelled `sweep-0929`, filed 2026-09-29 and listed at OW-zavehi's close: the `ended` event on the HTTP stream and the shared reducer; the browser's listing drops retired, and the helper's with its wait for the open, labelled `emacs`, each blocked by it; the preview's `gone`, blocked by OW-kamave; the browser's selection at `gone`, blocked by it and the browser's card; and agentpane-mode's `agentpane--dropped` retired, labelled `emacs`, blocked by the preview's card, the helper's and OW-bupivi.
 
 ## The backend adapter contract
 
