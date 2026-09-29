@@ -2076,6 +2076,22 @@ describe("teardown racing a startup", () => {
 			expect(sessions.liveRefs()).toEqual([]);
 		});
 
+		it("is stopped by a close under the spelling it asked for, while still waiting out the disposal", async () => {
+			const { closing, releaseDispose, releaseLookup } = await closeHeld();
+			const attaching = sessions.attach(REF);
+			await settle();
+
+			await sessions.close(REF);
+			releaseDispose();
+			releaseLookup();
+			await closing;
+
+			await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
+			expect(pi.created).toHaveLength(1);
+			expect(sessions.isAttached(C)).toBe(false);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+
 		it("is stopped by a close under the spelling it asked for when it joined another attach's startup", async () => {
 			const { closing, releaseDispose, releaseLookup } = await closeHeld();
 			const throughC = sessions.attach(C);
