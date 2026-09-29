@@ -452,7 +452,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// to report against. Dropped, it costs a seq gap where a later event
 				// under its handle detaches that one session, and where none follows,
 				// as none follows an `ended`, an attachment Emacs is never told has
-				// gone.
+				// gone; a lost snapshot forms no view, so an attach held on it waits
+				// for an `ended` or the helper's end.
 				onMalformed() {},
 			});
 		}));
