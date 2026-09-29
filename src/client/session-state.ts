@@ -1,7 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AgentNotice,
-	type AgentRequest,
 	type ServerEvent,
 	type SessionRef,
 	type SessionSummary,
@@ -24,11 +23,10 @@ export interface SessionView {
 	 * dismissal and a prompt name the error by (OW-jokoto).
 	 */
 	errorId: string | null;
-	requests: AgentRequest[];
 	/**
 	 * The backend's non-fatal notices, oldest first (OW-tujiya). Kept apart
 	 * from `error` on purpose: nothing that clears an error clears these. Like
-	 * `error` and `requests`, every `snapshot` carries the server's copy and the
+	 * `error`, every `snapshot` carries the server's copy and the
 	 * snapshot arm takes it (OW-bipume); the Emacs helper reads them from here
 	 * onto its own `session/snapshot`.
 	 */
@@ -157,7 +155,6 @@ function emptySession(ref: SessionRef): SessionView {
 		seq: null,
 		error: null,
 		errorId: null,
-		requests: [],
 		notices: [],
 	};
 }
@@ -299,7 +296,6 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 			seq: event.seq,
 			error: event.error,
 			errorId: event.errorId,
-			requests: [...event.requests],
 			notices: [...event.notices],
 		};
 		return result(
@@ -320,16 +316,16 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 	// on both branches of `attach` (`session-manager.ts`) -- so the `snapshot` arm
 	// above is the one that must create, and does.
 	//
-	// The six arms the adapter drives are not, however, unreachable before that introduction, and what
-	// they drop there is worth naming. `#start` subscribes `onUpdate`, `onRequest`,
-	// `onError`, `onNotice` and `onRequestResolved` before it awaits
+	// The four arms the adapter drives are not, however, unreachable before that introduction, and what
+	// they drop there is worth naming. `#start` subscribes `onUpdate`,
+	// `onError` and `onNotice` before it awaits
 	// `adapter.start(...)`, and the `"fork"` a Pi adapter announces moves it onto a
 	// container of the fork's, under a new handle, naming nothing under the
-	// parent's (`#forkOnto`, D20, D24, OW-suhoto), so all six can fan out under a handle no client holds
+	// parent's (`#forkOnto`, D20, D24, OW-suhoto), so all four can fan out under a handle no client holds
 	// a view of until the fork's hydrate or its attach snapshots it. None of that
 	// is lost:
 	// the snapshot that follows carries `messages`, `isStreaming`, `compaction` and
-	// `model` wholesale, and since OW-bipume the session's `error`, `requests` and
+	// `model` wholesale, and since OW-bipume the session's `error` and
 	// `notices` too, which the server holds for exactly this -- and for the client
 	// that reconnects or connects later, which never saw the event at all. What the
 	// snapshot carries is the only restoring path a client has, which is why the fix
@@ -376,12 +372,6 @@ export function reduceServerEvent(state: ClientState, event: ServerEvent): Reduc
 		case "error-cleared":
 			view.error = null;
 			view.errorId = null;
-			break;
-		case "request":
-			view.requests = [...view.requests, event.request];
-			break;
-		case "request-resolved":
-			view.requests = view.requests.filter((request) => request.requestId !== event.requestId);
 			break;
 		case "notice":
 			view.notices = [...view.notices, event.notice];

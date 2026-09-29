@@ -346,22 +346,6 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		expect(sessions.isAttached(virtualRef)).toBe(true);
 	});
 
-	it("moves a pending request's owner across the rename", async () => {
-		const renaming = new FakeAdapterFactory({ materialiseOnSubmit: REAL });
-		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
-		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
-		await sessions.attach(virtualRef);
-		const request = renaming.forRef(virtualRef)?.emitRequest("approval");
-
-		await sessions.submit(virtualRef, "first");
-
-		// The agent is still blocked on it, so the reply must still find a session.
-		expect(sessions.sessionOfRequest(request?.requestId ?? "")).toEqual({
-			backend: "pi",
-			id: REAL,
-		});
-	});
-
 	it("closes a renamed session under either id", async () => {
 		const renaming = new FakeAdapterFactory({ materialiseOnStart: REAL });
 		sessions = new SessionManager({ index, adapters: { pi: renaming } }, broadcaster);
@@ -797,7 +781,7 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			// The window OW-zovaye's guard missed: the adapter has moved onto the fork
 			// and rewound, and `fork()` has not returned. A snapshot is pulled, not
 			// pushed -- a stream's snapshot of the parent's handle, a new stream's
-			// opening snapshots -- and `onRequest` and `onError` reach the container.
+			// opening snapshots -- and `onError` reaches the container.
 			await sessions.attach(REF);
 			const parentHandle = sessions.summaryOf(REF)?.handle ?? "";
 			const adapter = pi.forRef(REF);
@@ -825,10 +809,9 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 			broadcaster.sendSnapshot(client, parentHandle);
 			broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
 			adapter.emitError("the fork's turn failed");
-			adapter.emitRequest("approval");
 
 			expect(under(REF, events)).toEqual([]);
-			expect(under(moved, events).map((event) => event.type)).toEqual(["snapshot", "error", "request"]);
+			expect(under(moved, events).map((event) => event.type)).toEqual(["snapshot", "error"]);
 			expect(under(moved, events)[0]).toMatchObject({ messages: [userMessage("one")] });
 			hold.resolve();
 			expect(await forking).toEqual(moved);
@@ -1130,29 +1113,6 @@ describe("a container keyed by a handle", () => {
 		expect(pi.created).toHaveLength(1);
 	});
 
-	it("hands a Pi fork the requests its process is blocked on, answerable and retractable there", async () => {
-		await sessions.attach(REF);
-		const adapter = pi.forRef(REF)!;
-		const answered = adapter.emitRequest("approval");
-		const retracted = adapter.emitRequest("approval");
-
-		const forked = await sessions.fork(REF, "e1");
-
-		expect(sessions.sessionOfRequest(answered.requestId)).toEqual(forked);
-		await sessions.reply(forked, answered.requestId, { decision: "accept" });
-		adapter.emitRequestResolved(retracted.requestId);
-		expect(adapter.replies.map((reply) => reply.requestId)).toEqual([answered.requestId]);
-		expect(sessions.sessionOfRequest(answered.requestId)).toBeUndefined();
-		const events: ServerEvent[] = [];
-		const client = broadcaster.addClient((chunk) => {
-			for (const line of chunk.split("\n")) {
-				if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ServerEvent);
-			}
-		});
-		broadcaster.sendOpeningSnapshots(client, sessions.liveHandles());
-		expect(events).toEqual([expect.objectContaining({ type: "snapshot", session: forked, requests: [] })]);
-	});
-
 	it("unsubscribes the adapter a Pi fork took when the fork's container is closed", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
@@ -1387,17 +1347,6 @@ describe("lifecycle", () => {
 			model: "openrouter/deepseek/deepseek-v4.1-flash:high",
 		});
 		expect(renaming.created[1]?.startOptions).toEqual({ cwd: WORKSPACE, resumeId: real.id });
-	});
-
-	it("forgets a session's pending requests when it closes", async () => {
-		const adapter = await sessions.attach(REF);
-		const request = pi.forRef(REF)?.emitRequest("approval");
-		expect(sessions.sessionOfRequest(request?.requestId ?? "")).toEqual(REF);
-
-		await sessions.close(REF);
-
-		expect(sessions.sessionOfRequest(request?.requestId ?? "")).toBeUndefined();
-		expect((adapter as { disposed?: boolean }).disposed).toBe(true);
 	});
 
 	it("disposes everything on shutdown, and only then", async () => {
@@ -2249,10 +2198,10 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 });
 
 /**
- * The server holds each session's error, pending requests and notices, and
- * every snapshot carries them (OW-bipume): the snapshot is the only thing that
- * introduces a session to a client, so a client that was not holding a view
- * when one of the three was fanned out learns of it nowhere else.
+ * The server holds each session's error and notices, and every snapshot
+ * carries them (OW-bipume): the snapshot is the only thing that introduces a
+ * session to a client, so a client that was not holding a view when one of
+ * them was fanned out learns of it nowhere else.
  */
 describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 	const notice = { kind: "configWarning", message: "unknown key", details: null, path: "/c.toml:3:5" };
@@ -2272,22 +2221,20 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 	const snapshots = (events: ServerEvent[]) =>
 		events.filter((event): event is Extract<ServerEvent, { type: "snapshot" }> => event.type === "snapshot");
 
-	it("carries a pending request, the turn error and the notices raised before the client connected", async () => {
+	it("carries the turn error and the notices raised before the client connected", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
-		const request = adapter.emitRequest("approval");
 		adapter.emitError("turn failed");
 		adapter.emitNotice(notice);
 
 		expect(snapshots(connect())).toEqual([
-			expect.objectContaining({ session: REF, error: "turn failed", requests: [request], notices: [notice] }),
+			expect.objectContaining({ session: REF, error: "turn failed", notices: [notice] }),
 		]);
 	});
 
 	it("carries what the adapter raised inside start(), before the session was published", async () => {
 		const raising = new FakeAdapterFactory({
 			onStart: (adapter) => {
-				adapter.emitRequest("approval");
 				adapter.emitError("resume failed halfway");
 				adapter.emitNotice(notice);
 			},
@@ -2297,13 +2244,12 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 
 		await sessions.attach(REF);
 
-		// The client connected before the attach and held no view while the three
+		// The client connected before the attach and held no view while the two
 		// were fanned out; the attach's snapshot is the first it hears of them.
 		expect(snapshots(early)).toEqual([
 			expect.objectContaining({
 				session: REF,
 				error: "resume failed halfway",
-				requests: [expect.objectContaining({ kind: "approval" })],
 				notices: [notice],
 			}),
 		]);
@@ -2327,46 +2273,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(snapshots(connect())[0]?.notices).toEqual([notice, other]);
 	});
 
-	it("drops a request once it is answered", async () => {
-		await sessions.attach(REF);
-		const adapter = pi.forRef(REF)!;
-		const answered = adapter.emitRequest("approval");
-		const pending = adapter.emitRequest("elicitation");
-
-		sessions.clearRequest(answered.requestId);
-
-		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
-	});
-
-	it("retracts a request answered through the reply route on the wire (OW-gusifo)", async () => {
-		await sessions.attach(REF);
-		const request = pi.forRef(REF)!.emitRequest("approval");
-		const events = connect();
-
-		sessions.clearRequest(request.requestId);
-
-		expect(events.filter((event) => event.type === "request-resolved")).toEqual([
-			expect.objectContaining({ session: REF, requestId: request.requestId }),
-		]);
-	});
-
-	it("drops and retracts a request the adapter reports resolved (OW-gusifo)", async () => {
-		await sessions.attach(REF);
-		const adapter = pi.forRef(REF)!;
-		const resolved = adapter.emitRequest("approval");
-		const pending = adapter.emitRequest("elicitation");
-		const events = connect();
-
-		adapter.emitRequestResolved(resolved.requestId);
-
-		expect(events.filter((event) => event.type === "request-resolved")).toEqual([
-			expect.objectContaining({ session: REF, requestId: resolved.requestId }),
-		]);
-		expect(sessions.sessionOfRequest(resolved.requestId)).toBeUndefined();
-		expect(snapshots(connect())[0]?.requests).toEqual([pending]);
-	});
-
-	it("carries no request the Codex adapter declined at arrival, and does carry the error naming it (OW-zisumi)", async () => {
+	it("carries the error naming a request the Codex adapter declined at arrival (OW-zisumi)", async () => {
 		// The real adapter, since what is under test is that its own decline
 		// reaches the table: a `FakeAdapter` would only replay what it was told.
 		const ref: SessionRef = { backend: "codex", id: "thread-declining" };
@@ -2389,8 +2296,9 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 			params: { threadId: ref.id, turnId: "turn-1", itemId: "item-1" },
 		});
 
+		expect(proc.written).toContainEqual({ id: 9, result: { decision: "decline" } });
 		expect(snapshots(connect())).toEqual([
-			expect.objectContaining({ session: ref, requests: [], error: expect.stringContaining("item/fileChange/requestApproval") }),
+			expect.objectContaining({ session: ref, error: expect.stringContaining("item/fileChange/requestApproval") }),
 		]);
 	});
 
@@ -2528,7 +2436,7 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		expect(events.slice(1)).toEqual([]);
 	});
 
-	it("carries all three across a rename", async () => {
+	it("carries both across a rename", async () => {
 		const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";
 		const renaming = new FakeAdapterFactory({
 			materialiseOnSubmit: REAL,
@@ -2538,7 +2446,6 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 		const virtualRef = sessions.createVirtual(WORKSPACE, "pi");
 		await sessions.attach(virtualRef);
 		const adapter = renaming.forRef(virtualRef)!;
-		const request = adapter.emitRequest("approval");
 		adapter.emitNotice(notice);
 		const events = connect();
 
@@ -2546,35 +2453,33 @@ describe("what a snapshot tells a client that arrives late (OW-bipume)", () => {
 
 		// The snapshot the rename broadcasts under the handle, carrying the new ref.
 		expect(snapshots(events).at(-1)).toEqual(
-			expect.objectContaining({ session: { backend: "pi", id: REAL }, error: "turn failed", requests: [request], notices: [notice] }),
+			expect.objectContaining({ session: { backend: "pi", id: REAL }, error: "turn failed", notices: [notice] }),
 		);
 	});
 
 	it("leaves the parent's turn error behind on a fork that moves the container, and keeps what the process holds", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
-		const request = adapter.emitRequest("approval");
 		adapter.emitError("parent turn failed");
 		adapter.emitNotice(notice);
 
 		const forked = await sessions.fork(REF, "e1");
 
 		expect(snapshots(connect())).toEqual([
-			expect.objectContaining({ session: forked, error: null, requests: [request], notices: [notice] }),
+			expect.objectContaining({ session: forked, error: null, notices: [notice] }),
 		]);
 	});
 
 	it("holds nothing for a session re-attached after a close", async () => {
 		await sessions.attach(REF);
 		const adapter = pi.forRef(REF)!;
-		adapter.emitRequest("approval");
 		adapter.emitError("turn failed");
 		adapter.emitNotice(notice);
 
 		await sessions.close(REF);
 		await sessions.attach(REF);
 
-		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: null, requests: [], notices: [] })]);
+		expect(snapshots(connect())).toEqual([expect.objectContaining({ error: null, notices: [] })]);
 	});
 });
 

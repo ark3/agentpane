@@ -13,7 +13,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentNotice, AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, ModelInfo, SessionRef } from "../../shared/protocol.ts";
 
 export interface AdapterState {
 	messages: AgentMessage[];
@@ -199,23 +199,9 @@ export interface BackendAdapter {
 	onRefChanged(cb: (ref: SessionRef, cause: "rename" | "fork") => void): Unsubscribe;
 
 	/**
-	 * Fires when the agent asks the human something and blocks (D2a). The
-	 * adapter is responsible for correlating the eventual reply back to the
-	 * backend's own request id.
+	 * Fires when a turn fails in a way the transcript does not convey, and when
+	 * the adapter refused a request the agent sent, naming its kind (D2a).
 	 */
-	onRequest(cb: (request: AgentRequest) => void): Unsubscribe;
-	/** Answer a pending request. `response` is backend-shaped; null declines. */
-	reply(requestId: string, response: unknown): Promise<void>;
-	/**
-	 * Fires when a request `onRequest` published stops being pending other
-	 * than through `reply` -- the backend resolved it, or the adapter answered
-	 * it itself (OW-gusifo). `requestId` is the id it was published under.
-	 * Optional because only the Codex and Pi adapters fire it; Claude Code's,
-	 * which publishes no requests, leaves it out.
-	 */
-	onRequestResolved?(cb: (requestId: string) => void): Unsubscribe;
-
-	/** Fires when a turn fails in a way the transcript does not convey. */
 	onError(cb: (message: string) => void): Unsubscribe;
 	/**
 	 * Fires when the backend says something non-fatal the human should see

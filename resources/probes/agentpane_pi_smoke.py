@@ -92,31 +92,42 @@ def pi_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def requests_in(
+# The start of the session error the Pi adapter raises for each dialog it
+# cancels at arrival (D2a, `src/server/adapters/pi/process.ts`).
+DIALOG_CANCELLED = "Pi sent a dialog agentpane cannot answer"
+
+
+def dialogs_in(
     events: list[tuple[str, dict[str, Any]]], start: int, end: int
 ) -> dict[str, Any]:
-    """Blocking requests the stream carried between two pinned cuts.
+    """Dialogs Pi raised and agentpane cancelled between two pinned cuts.
+
+    agentpane never holds an agent request (D2a): the Pi adapter cancels each
+    dialog the moment it arrives and names it in a session error, so this counts
+    `error` events whose message starts with `DIALOG_CANCELLED`. Events, not
+    snapshots: a snapshot carries only the last turn error, so a second dialog,
+    or any later error, would hide the first.
 
     Scoped rather than whole-stream because a whole-stream read has to be taken
     at some one moment, and the moment this probe used to take it -- the first
     turn's `idle` -- is before the `--tool-check` prompt is even posted, so the
-    tool turn's requests were structurally unreachable (OW-lapuye).
+    tool turn's dialogs were structurally unreachable (OW-lapuye).
 
-    A limit, not a defect, and not to be "fixed": this filters on
-    `event["type"] == "request"`, and the Pi adapter's only source of that event
-    is an `extension_ui_request` carrying a dialog method
+    A limit, not a defect, and not to be "fixed": the Pi adapter's only source of
+    that error is an `extension_ui_request` carrying a dialog method
     (`src/server/adapters/pi/reducer.ts`, the `extension_ui_request` arm; the
     fire-and-forget methods are dropped there deliberately). An approval
     arriving by any other mechanism is invisible to this field however it is
     scoped, so "empty" will never mean "Pi asked nothing" -- only "no dialog
-    request reached the wire".
+    reached agentpane".
     """
     return {
         "window": {"from_index": start, "to_index": end},
-        "requests": [
-            {"at": stamp, "kind": event.get("request", {}).get("kind")}
+        "dialogs": [
+            {"at": stamp, "message": event.get("message")}
             for stamp, event in events[start:end]
-            if event.get("type") == "request"
+            if event.get("type") == "error"
+            and str(event.get("message", "")).startswith(DIALOG_CANCELLED)
         ],
     }
 
@@ -160,8 +171,8 @@ def parse_args() -> argparse.Namespace:
             "also prompt for a shell tool call and assert a toolCall block reaches the wire. "
             "Off by default because it is the most model-dependent criterion here -- the model "
             "has to choose to call a tool. Verified working; a Pi dialog does not block the "
-            "turn, since agentpane cancels it at arrival (OW-yosuzo), and shows up in "
-            "agent_requests_seen instead."
+            "turn, since agentpane cancels it at arrival (D2a, OW-yosuzo), and the error "
+            "naming it shows up in agent_dialogs_cancelled instead."
         ),
     )
     return parser.parse_args()
@@ -364,15 +375,15 @@ def main() -> int:
             raise RuntimeError("no settled snapshot or status event named the model Pi resolved")
         evidence["checks"]["model"] = {"result": "pass", **model_seen}
 
-        # Any blocking request Pi raised is worth recording either way: whether
-        # these fire at all under the sandbox is an open question (D2a). One
-        # entry per turn, keyed by turn, so a reader can tell which turn raised
+        # Any dialog Pi raised is worth recording either way: whether these fire
+        # at all under the sandbox is an open question, and each one agentpane
+        # cancelled is named in a session error (D2a). One entry per turn, keyed by turn, so a reader can tell which turn raised
         # what; a bare run reports only `first_turn` and says nothing about a
         # tool turn that never happened. The window closes at the cut taken here,
         # the first one after the turn reported idle.
         first_turn_events = stream.snapshot()
-        evidence["agent_requests_seen"] = {
-            "first_turn": requests_in(first_turn_events, first_start, len(first_turn_events)),
+        evidence["agent_dialogs_cancelled"] = {
+            "first_turn": dialogs_in(first_turn_events, first_start, len(first_turn_events)),
         }
 
         if args.tool_check:
@@ -433,7 +444,7 @@ def main() -> int:
             # HANDOFF finding 42 needs and the old whole-stream read could not
             # take.
             tool_turn_events = stream.snapshot()
-            evidence["agent_requests_seen"]["tool_turn"] = requests_in(
+            evidence["agent_dialogs_cancelled"]["tool_turn"] = dialogs_in(
                 tool_turn_events, tool_start, len(tool_turn_events)
             )
 

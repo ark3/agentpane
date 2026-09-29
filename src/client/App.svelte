@@ -303,7 +303,6 @@
 	const detachable = $derived(
 		(selectedSummary?.status === "attached" || selectedSummary?.status === "virtual") &&
 			!streamingNow &&
-			(selectedSession?.requests.length ?? 0) === 0 &&
 			!view.sending &&
 			compaction === null,
 	);
@@ -1387,14 +1386,6 @@
 			     server clears only on a successful model change; a first cut. -->
 			<p class="warning" role="status" aria-label="Unrestored model">
 				This conversation last ran on {selectedSession.unrestoredModel}, which could not be restored; it is running on {selectedModelLabel} instead.
-			</p>
-		{/if}
-
-		{#if selectedSession && selectedSession.requests.length > 0}
-			<p class="warning">
-				The agent is blocked on a request agentpane cannot answer: {selectedSession.requests
-					.map((request) => request.kind)
-					.join(", ")}. There is nothing to act on here; end the session to clear it.
 			</p>
 		{/if}
 	</div>

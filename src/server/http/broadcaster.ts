@@ -23,7 +23,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentNotice, AgentRequest, ServerEvent, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, ServerEvent, SessionRef } from "../../shared/protocol.ts";
 
 /** A connected browser. One per `EventSource`. */
 export interface SseClient {
@@ -53,7 +53,7 @@ export interface Addressed {
 /**
  * State the broadcaster needs to build a snapshot of the session a handle
  * names, supplied by the session manager: the session's current ref, the
- * adapter's state, and the error, requests and notices the manager holds for
+ * adapter's state, and the error and notices the manager holds for
  * it (OW-bipume). Null for a handle the manager holds no live session under.
  */
 export interface SnapshotSource {
@@ -67,7 +67,6 @@ export interface SnapshotSource {
 		unrestoredModel?: string | null;
 		error: string | null;
 		errorId: string | null;
-		requests: AgentRequest[];
 		notices: AgentNotice[];
 	} | null;
 }
@@ -125,7 +124,6 @@ export class Broadcaster {
 			unrestoredModel: state.unrestoredModel ?? null,
 			error: state.error,
 			errorId: state.errorId,
-			requests: state.requests,
 			notices: state.notices,
 		});
 	}
@@ -149,7 +147,6 @@ export class Broadcaster {
 			unrestoredModel: state.unrestoredModel ?? null,
 			error: state.error,
 			errorId: state.errorId,
-			requests: state.requests,
 			notices: state.notices,
 		});
 	}
@@ -167,14 +164,6 @@ export class Broadcaster {
 		unrestoredModel: string | null,
 	): void {
 		this.#fanout({ type: "status", ...this.#address(session), isStreaming, compaction, model, effort, unrestoredModel });
-	}
-
-	request(session: Addressed, request: AgentRequest): void {
-		this.#fanout({ type: "request", ...this.#address(session), request });
-	}
-
-	requestResolved(session: Addressed, requestId: string): void {
-		this.#fanout({ type: "request-resolved", ...this.#address(session), requestId });
 	}
 
 	error(session: Addressed, message: string, errorId: string): void {

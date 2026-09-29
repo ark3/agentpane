@@ -54,10 +54,8 @@ export type CodexEffect =
 	 */
 	| { type: "running-turn"; turnId: string }
 	| { type: "compaction"; compaction: "requesting" | "running" | null }
-	/** A `ServerRequest` -- the turn is blocked until it is answered (D2a, OW-futewo). */
-	| { type: "request"; requestId: RequestId; kind: string; payload: unknown; issuerThreadId?: string | null }
-	/** Codex says a request it sent is no longer pending (`serverRequest/resolved`). */
-	| { type: "request-resolved"; requestId: RequestId }
+	/** A `ServerRequest` -- the turn is blocked until it is answered, which the adapter does at once (D2a). */
+	| { type: "request"; requestId: RequestId; kind: string }
 	| { type: "error"; message: string }
 	/** A warning Codex sent that is neither a failure nor transcript state (OW-tujiya). */
 	| { type: "notice"; notice: AgentNotice };
@@ -292,35 +290,11 @@ export class CodexReducer {
 	handle(msg: CodexServerMessage): CodexEffect[] {
 		if (!isRecord(msg)) return [];
 		if (isCodexResponse(msg)) return []; // the JSON-RPC client owns responses
-		if (isCodexServerRequest(msg)) {
-			const issuerThreadId = this.extractIssuerThreadId(msg.params);
-			return [{ type: "request", requestId: msg.id, kind: msg.method, payload: msg.params, issuerThreadId }];
-		}
+		if (isCodexServerRequest(msg)) return [{ type: "request", requestId: msg.id, kind: msg.method }];
 		return isCodexNotification(msg) ? this.handleNotification(msg) : [];
 	}
 
-	/**
-	 * Extract the `threadId` from a ServerRequest payload and return it only if it
-	 * differs from this reducer's own thread id (i.e., the request originates from a child thread).
-	 */
-	private extractIssuerThreadId(params: unknown): string | null {
-		if (!isRecord(params)) return null;
-		const payloadThreadId = params.threadId;
-		if (typeof payloadThreadId !== "string") return null;
-		// Return the issuer's thread id only if it differs from the reducer's own thread
-		return payloadThreadId !== this.threadId ? payloadThreadId : null;
-	}
-
 	private handleNotification(message: CodexNotification): CodexEffect[] {
-		// Ahead of the thread guard: a subagent thread's request is routed to its
-		// parent's adapter (`CodexConnection.#recipientFor`, OW-futewo), but its
-		// resolution names the child's thread and the guard would drop it. The
-		// wire id is what identifies the request -- JSON-RPC gives the
-		// connection one id space -- and only the adapter that published it
-		// holds a mapping for that id (OW-gusifo).
-		if (message.method === "serverRequest/resolved") {
-			return [{ type: "request-resolved", requestId: message.params.requestId }];
-		}
 		const notificationThreadId = threadIdOf(message);
 		if (this.threadId && notificationThreadId && notificationThreadId !== this.threadId) return [];
 

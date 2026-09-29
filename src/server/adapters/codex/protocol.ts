@@ -105,22 +105,9 @@ export function isCodexNotification(msg: CodexServerMessage): msg is CodexNotifi
 }
 
 /**
- * A typed lookup key for one app-server connection's wire namespace
- * (`0` !== `"0"`).
- *
- * Per connection, not per adapter: a Codex fork shares the parent's app-server
- * (OW-lajehi), so two adapters read one id space. They do not collide on it,
- * because `CodexConnection` routes each blocking request to exactly one of them
- * before either gets to make a key.
- */
-export function wireRequestKey(id: RequestId): string {
-	return JSON.stringify([typeof id, id]);
-}
-
-/**
- * Server requests that block a turn and whose decline shape we know, so
- * `reply(id, null)` can decline rather than erroring the request out.
- * Sourced from `ServerRequest.ts` + the matching `*Response` types.
+ * Server requests that block a turn and whose decline shape we know, so the
+ * adapter's refusal at arrival (D2a) can decline rather than erroring the
+ * request out. Sourced from `ServerRequest.ts` + the matching `*Response` types.
  */
 export const DECLINE_RESPONSES: Readonly<Record<string, unknown>> = {
 	"item/commandExecution/requestApproval": {

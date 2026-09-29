@@ -8,7 +8,6 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	type AgentRequestReply,
 	type ApiError,
 	type AttachSessionResponse,
 	type CreateSessionResponse,
@@ -764,71 +763,6 @@ describe("prompting", () => {
 	});
 });
 
-describe("server-initiated requests (D2a)", () => {
-	it("routes a request out over SSE and the reply back to the right adapter", async () => {
-		await get(ROUTES.session(PI_SESSION));
-		await get(ROUTES.session(CODEX_SESSION));
-		const piAdapter = pi.forRef(PI_SESSION);
-		const codexAdapter = codex.forRef(CODEX_SESSION);
-		const client = await openStream();
-
-		const request = codexAdapter?.emitRequest("item/fileChange/requestApproval", {
-			path: "/tmp/x",
-		});
-		await client.until(() => client.typed("request").length === 1);
-
-		const event = client.typed("request")[0];
-		expect(event?.session).toEqual(CODEX_SESSION);
-		expect(event?.request.kind).toBe("item/fileChange/requestApproval");
-		expect(event?.request.requestId).toBe(request?.requestId);
-
-		const reply: AgentRequestReply = {
-			requestId: request?.requestId ?? "",
-			response: { decision: "approved" },
-		};
-		const response = await post(ROUTES.reply(reply.requestId), reply);
-
-		expect(response.status).toBe(204);
-		expect(codexAdapter?.replies).toEqual([
-			{ requestId: request?.requestId, response: { decision: "approved" } },
-		]);
-		// Correlation is by requestId, not by "the session that happens to be open".
-		expect(piAdapter?.replies).toEqual([]);
-		await client.close();
-	});
-
-	it("carries null through as a decline", async () => {
-		await get(ROUTES.session(PI_SESSION));
-		const adapter = pi.forRef(PI_SESSION);
-		const request = adapter?.emitRequest("elicitation");
-
-		await post(ROUTES.reply(request?.requestId ?? ""), { response: null });
-
-		expect(adapter?.replies).toEqual([{ requestId: request?.requestId, response: null }]);
-	});
-
-	it("404s an unknown or already-answered request instead of hanging the client", async () => {
-		await get(ROUTES.session(PI_SESSION));
-		const request = pi.forRef(PI_SESSION)?.emitRequest("elicitation");
-		const id = request?.requestId ?? "";
-
-		expect((await post(ROUTES.reply(id), { response: 1 })).status).toBe(204);
-		const second = await post(ROUTES.reply(id), { response: 1 });
-		expect(second.status).toBe(404);
-		expect(((await second.json()) as ApiError).error).toBe("unknown_request");
-	});
-
-	it("rejects a body whose requestId contradicts the route", async () => {
-		await get(ROUTES.session(PI_SESSION));
-		const request = pi.forRef(PI_SESSION)?.emitRequest("elicitation");
-		const response = await post(ROUTES.reply(request?.requestId ?? ""), {
-			requestId: "someone-elses",
-			response: {},
-		});
-		expect(response.status).toBe(400);
-	});
-});
-
 describe("backend notices (OW-tujiya)", () => {
 	it("carries a notice out over SSE for its own session, and not as an error", async () => {
 		await get(ROUTES.session(PI_SESSION));
@@ -848,10 +782,9 @@ describe("backend notices (OW-tujiya)", () => {
 });
 
 describe("what a client that connects late is told (OW-bipume)", () => {
-	it("opens on a snapshot carrying the pending request, the turn error and the notices", async () => {
+	it("opens on a snapshot carrying the turn error and the notices", async () => {
 		await get(ROUTES.session(CODEX_SESSION));
 		const adapter = codex.forRef(CODEX_SESSION);
-		const request = adapter?.emitRequest("item/fileChange/requestApproval");
 		adapter?.emitError("turn failed");
 		const notice = { kind: "configWarning", message: "unknown key", details: null, path: null };
 		adapter?.emitNotice(notice);
@@ -860,20 +793,8 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.waitForCount(1);
 
 		expect(client.typed("snapshot")).toEqual([
-			expect.objectContaining({ session: CODEX_SESSION, error: "turn failed", requests: [request], notices: [notice] }),
+			expect.objectContaining({ session: CODEX_SESSION, error: "turn failed", notices: [notice] }),
 		]);
-		await client.close();
-	});
-
-	it("drops an answered request from the next snapshot", async () => {
-		await get(ROUTES.session(PI_SESSION));
-		const request = pi.forRef(PI_SESSION)?.emitRequest("elicitation");
-		expect((await post(ROUTES.reply(request?.requestId ?? ""), { response: null })).status).toBe(204);
-
-		const client = await openStream();
-		await client.waitForCount(1);
-
-		expect(client.typed("snapshot")[0]?.requests).toEqual([]);
 		await client.close();
 	});
 

@@ -10,7 +10,6 @@ import { PiAdapter } from "./process.ts";
 export { LfLineSplitter } from "./framing.ts";
 export { PiAdapter } from "./process.ts";
 export {
-	buildUiReplyCommand,
 	createInitialPiState,
 	type PiReduceResult,
 	type PiReducerState,

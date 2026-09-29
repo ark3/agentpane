@@ -105,13 +105,12 @@ const BANNERS = {
 	unrestoredModel: "harness/retired",
 	error: "The turn ended in an error.",
 	errorId: "e1",
-	requests: [{ requestId: "harness-request", session: REF, kind: "harness/unknownRequest", payload: {} }],
 	notices: [{ kind: "warning", message: "A backend notice.", details: "Its details.", path: "/tmp/agentpane-harness/config.toml" }],
 };
 
 function snapshot(isStreaming: boolean, banners = false): void {
 	seq += 1;
-	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [], ...(banners ? BANNERS : {}) });
+	emit({ type: "snapshot", session: REF, handle: HANDLE, seq, messages: [...messages], isStreaming, compaction: null, model, effort, unrestoredModel: null, error: null, errorId: null, notices: [], ...(banners ? BANNERS : {}) });
 }
 
 function upsert(index: number, message: AgentMessage): void {
@@ -277,7 +276,6 @@ const api: AgentpaneApi = {
 	async fork() {
 		return REF;
 	},
-	async reply() {},
 	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
@@ -300,7 +298,7 @@ export interface FollowHarness {
 	pace(chunks: number, ms: number): void;
 	/** Replace the transcript with `turns` completed user/assistant pairs and snapshot it. */
 	seed(turns: number, withElidedChrome?: boolean, interleavedChrome?: boolean): void;
-	/** Re-snapshot the current transcript carrying the error, a notice, an unrestored model, and a pending request. */
+	/** Re-snapshot the current transcript carrying the error, a notice and an unrestored model. */
 	showBanners(): void;
 	/** Show one running default tool whose summary is either present or absent. */
 	seedAlignmentTool(withSummary: boolean): void;

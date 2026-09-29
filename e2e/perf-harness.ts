@@ -172,7 +172,6 @@ const api: AgentpaneApi = {
 				unrestoredModel: null,
 				error: null,
 				errorId: null,
-				requests: [],
 				notices: [],
 			});
 		});
@@ -212,7 +211,6 @@ const api: AgentpaneApi = {
 	async fork(ref: SessionRef) {
 		return ref;
 	},
-	async reply() {},
 	async dismissError() {},
 	connect(next: EventHandlers): EventConnection {
 		handlers = next;
@@ -335,7 +333,6 @@ const harness: PerfHarness = {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		});
 		await controller!.select(refFor("a"));

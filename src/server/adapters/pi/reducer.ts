@@ -1,6 +1,6 @@
 /**
  * Pure Pi event reducer: RPC notification lines in, `AgentMessage[]` +
- * `isStreaming` out (plus the D2a request/reply side channel).
+ * `isStreaming` out (plus the dialogs D2a refuses at arrival).
  *
  * This is deliberately free of any subprocess/stdio concern -- see
  * `process.ts` for that -- so it can be driven directly by a test over the
@@ -25,11 +25,10 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { AgentRequest, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
+import type { AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
 import {
 	clampThinkingLevel,
 	PI_DIALOG_METHODS,
-	type PiCommand,
 	type PiDialogMethod,
 	type PiNotification,
 	type PiSessionEntry,
@@ -46,8 +45,6 @@ export interface PiReducerState {
 	 * names nothing, as for a model that does not reason.
 	 */
 	readonly effort: string | null;
-	/** requestId -> dialog method, so `reply()` knows how to shape the response. */
-	readonly pendingUiRequests: Readonly<Record<string, PiDialogMethod>>;
 }
 
 export interface PiReduceResult {
@@ -62,14 +59,14 @@ export interface PiReduceResult {
 	 * to decide whether to notify.
 	 */
 	changedIndex?: number;
-	/** Present when this notification is a request the human must answer (D2a). */
-	request?: Pick<AgentRequest, "requestId" | "kind" | "payload">;
+	/** Present when this notification is a dialog blocking Pi until answered, which the adapter refuses (D2a). */
+	request?: { requestId: string; kind: PiDialogMethod };
 	/** Present when this notification signals a failure the transcript itself won't show. */
 	error?: string;
 }
 
 export function createInitialPiState(): PiReducerState {
-	return { messages: [], isStreaming: false, compaction: null, effort: null, pendingUiRequests: {} };
+	return { messages: [], isStreaming: false, compaction: null, effort: null };
 }
 
 export function reducePiNotification(state: PiReducerState, event: PiNotification): PiReduceResult {
@@ -108,23 +105,16 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			return reduceAssistantDelta(state, event.assistantMessageEvent);
 
 		case "extension_ui_request": {
-			const { type: _type, id, method, ...payload } = event;
-			const isDialog = (PI_DIALOG_METHODS as readonly string[]).includes(method);
-			const pendingUiRequests = isDialog
-				? { ...state.pendingUiRequests, [id]: method as PiDialogMethod }
-				: state.pendingUiRequests;
-			const nextState = isDialog ? { ...state, pendingUiRequests } : state;
+			const { id, method } = event;
 			// Only dialog methods (select/confirm/input/editor) block Pi until
-			// answered -- that's the contract `BackendAdapter.onRequest` documents
-			// ("Fires when the agent asks the human something and blocks"). Until a
-			// human can answer one (OW-bijera), the adapter cancels each as soon as
-			// it has published it rather than holding it (D2a, OW-yosuzo). The
-			// fire-and-forget methods (notify/setStatus/setWidget/setTitle/
-			// set_editor_text) are presentation hints with no reply and no home in
-			// the frozen `ServerEvent` union; see this workstream's report for why
-			// they're dropped here rather than forwarded.
-			if (!isDialog) return { state: nextState };
-			return { state: nextState, request: { requestId: id, kind: method, payload } };
+			// answered, and agentpane never holds one: the adapter cancels each
+			// the moment it arrives (D2a, OW-yosuzo). The fire-and-forget methods
+			// (notify/setStatus/setWidget/setTitle/set_editor_text) are
+			// presentation hints with no reply and no home in the frozen
+			// `ServerEvent` union; see this workstream's report for why they're
+			// dropped here rather than forwarded.
+			if (!(PI_DIALOG_METHODS as readonly string[]).includes(method)) return { state };
+			return { state, request: { requestId: id, kind: method as PiDialogMethod } };
 		}
 
 		case "extension_error":
@@ -354,28 +344,4 @@ function reduceAssistantDelta(
 	const messages = state.messages.slice();
 	messages[index] = updated;
 	return { state: { ...state, messages }, changedIndex: index };
-}
-
-// ---------------------------------------------------------------------------
-// Extension UI replies (D2a)
-// ---------------------------------------------------------------------------
-
-/**
- * Build the `extension_ui_response` command for a pending dialog request.
- * `response === null` (or `undefined`) declines/cancels, per
- * `BackendAdapter.reply`'s "null declines".
- */
-export function buildUiReplyCommand(
-	method: PiDialogMethod,
-	requestId: string,
-	response: unknown,
-): Extract<PiCommand, { type: "extension_ui_response" }> {
-	if (response === null || response === undefined) {
-		return { type: "extension_ui_response", id: requestId, cancelled: true };
-	}
-	if (method === "confirm") {
-		return { type: "extension_ui_response", id: requestId, confirmed: Boolean(response) };
-	}
-	// select / input / editor all reply with a string value.
-	return { type: "extension_ui_response", id: requestId, value: String(response) };
 }

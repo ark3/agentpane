@@ -1,6 +1,5 @@
 import {
 	ROUTES,
-	type AgentRequestReply,
 	type ApiError,
 	type AttachSessionResponse,
 	type CreateSessionRequest,
@@ -100,12 +99,6 @@ export interface AgentpaneApi {
 	/** Fork at `entryId`; the ref it answers with is the new conversation, and the original survives. */
 	fork(ref: SessionRef, body: ForkRequest): Promise<SessionRef>;
 	/**
-	 * Answer a server-initiated request (D2a). The browser never calls this
-	 * (OW-bijera); the Emacs helper forwards `requests/reply` through it
-	 * (OW-refibu).
-	 */
-	reply(requestId: string, body: AgentRequestReply): Promise<void>;
-	/**
 	 * Dismiss the session's turn error on the server, so no later snapshot
 	 * brings it back (OW-bipume). `errorId` names the error dismissed, as the
 	 * wire named the one shown; the server keeps a newer one (OW-jokoto).
@@ -186,9 +179,6 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		},
 		fork(ref, body) {
 			return request(ROUTES.fork(ref), jsonRequest(body), (response) => (response as ForkResponse).ref);
-		},
-		reply(requestId, body) {
-			return requestNoContent(ROUTES.reply(requestId), jsonRequest(body));
 		},
 		dismissError(ref, errorId) {
 			const body: DismissErrorRequest = { errorId };

@@ -18,7 +18,6 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import {
-	type AgentRequestReply,
 	type ApiError,
 	type AttachSessionResponse,
 	type BackendId,
@@ -95,12 +94,6 @@ export function createApp(deps: AppDeps): App {
 		if (segments.length === 2 && segments[1] === "edit-draft") {
 			if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
 			return editDraft(request);
-		}
-
-		// /api/requests/:requestId
-		if (segments.length === 3 && segments[1] === "requests") {
-			if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
-			return replyToRequest(request, segments[2] as string);
 		}
 
 		if (segments[1] === "sessions") {
@@ -476,26 +469,6 @@ export function createApp(deps: AppDeps): App {
 		}
 		const body: ModelsResponse = { models };
 		return json(body);
-	}
-
-	// -- server-initiated requests (D2a) -------------------------------------
-
-	async function replyToRequest(request: Request, requestId: string): Promise<Response> {
-		const body = await readJson<AgentRequestReply>(request);
-		if (!body.ok) return body.response;
-		if (body.value.requestId !== undefined && body.value.requestId !== requestId) {
-			return error(400, "bad_request", "requestId in body does not match the route");
-		}
-		const ref = sessions.sessionOfRequest(requestId);
-		if (!ref) {
-			// Either already answered or never ours. Worth distinguishing from a
-			// bad route: an unanswered request hangs the agent's turn, so a client
-			// that gets this should stop waiting rather than retry forever.
-			return error(404, "unknown_request", `no pending request ${requestId}`);
-		}
-		if (!sessions.isAttached(ref)) return error(409, "not_attached", `session ${sessionKey(ref)} is no longer running`);
-		await sessions.reply(ref, requestId, body.value.response ?? null);
-		return noContent();
 	}
 
 	return {

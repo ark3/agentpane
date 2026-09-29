@@ -226,7 +226,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				errorId: view.errorId,
-				requests: view.requests,
 				notices: view.notices,
 			},
 		});
@@ -418,12 +417,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			case "notice":
 				notify({ method: "session/notice", params: { session: view.ref, handle, notice: event.notice } });
 				return;
-			case "request":
-				notify({ method: "session/request", params: { session: view.ref, handle, request: event.request } });
-				return;
-			case "request-resolved":
-				notify({ method: "session/requestResolved", params: { session: view.ref, handle, requestId: event.requestId } });
-				return;
 		}
 	};
 
@@ -567,10 +560,6 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),
 		"sessions/fork": ({ session, handle: _handle, ...body }) => api.fork(session, body),
-		"requests/reply": async (params) => {
-			await api.reply(params.requestId, params);
-			return null;
-		},
 	};
 
 	const respond = async (request: JsonRpcRequest): Promise<void> => {

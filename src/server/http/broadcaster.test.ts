@@ -122,7 +122,7 @@ function oneSession() {
 	const session = { handle: HANDLE, ref: REF };
 	broadcaster.setSnapshotSource((handle) =>
 		handle === session.handle
-			? { ref: session.ref, messages: [], isStreaming: false, compaction: null, model: null, effort: null, error: null, errorId: null, requests: [], notices: [] }
+			? { ref: session.ref, messages: [], isStreaming: false, compaction: null, model: null, effort: null, error: null, errorId: null, notices: [] }
 			: null,
 	);
 	const events: ServerEvent[] = [];
@@ -170,14 +170,11 @@ describe("sequence bookkeeping", () => {
 describe("the handle (D24, OW-suyinu)", () => {
 	it("rides every per-session event beside its ref", () => {
 		const { broadcaster, session, events } = oneSession();
-		const request = { requestId: "r1", session: REF, kind: "approval", payload: {} };
 		const notice = { kind: "warning", message: "careful", details: null, path: null };
 
 		broadcaster.broadcastSnapshot(HANDLE);
 		broadcaster.upsert(session, 0, userMessage("hi"));
 		broadcaster.status(session, true, null, null, null, null);
-		broadcaster.request(session, request);
-		broadcaster.requestResolved(session, "r1");
 		broadcaster.error(session, "boom", "e1");
 		broadcaster.notice(session, notice);
 
@@ -185,8 +182,6 @@ describe("the handle (D24, OW-suyinu)", () => {
 			"snapshot",
 			"upsert",
 			"status",
-			"request",
-			"request-resolved",
 			"error",
 			"notice",
 		]);

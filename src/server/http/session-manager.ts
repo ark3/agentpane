@@ -16,7 +16,6 @@
 
 import type {
 	AgentNotice,
-	AgentRequest,
 	BackendId,
 	ListSessionsQuery,
 	SessionRef,
@@ -127,16 +126,14 @@ interface ManagedSession {
 	lastEffort: string | null;
 	lastUnrestoredModel: string | null;
 	/**
-	 * What the adapter's `onError`, `onRequest` and `onNotice` have said, held
+	 * What the adapter's `onError` and `onNotice` have said, held
 	 * for every snapshot to carry (OW-bipume): a client that was not holding a
 	 * view when the event went out -- one that connects or reconnects later, or
 	 * one the startup window or a fork left without one -- has no other
 	 * way to learn of it. Each follows the lifecycle the client applies to its
 	 * own copy, or a snapshot would resurrect what the client had cleared:
 	 * `error` is cleared at `submit` and `clearError`, each retracting it on
-	 * the wire, which is what drops a client's copy (OW-jopifu, OW-lohubo), a
-	 * request leaves when it stops being pending (`clearRequest`, which
-	 * retracts it on the wire),
+	 * the wire, which is what drops a client's copy (OW-jopifu, OW-lohubo),
 	 * and notices only accumulate -- save that one identical to a notice
 	 * already held is neither held nor fanned out again (OW-piloni). They live
 	 * on the container, so a rename leaves them where they are and a close
@@ -152,7 +149,6 @@ interface ManagedSession {
 	 * was when `error` is cleared, so it names nothing unless `error` is set.
 	 */
 	errorId: string;
-	requests: AgentRequest[];
 	notices: AgentNotice[];
 	createdAt: string;
 	/** What the index told us about this session, kept so attach need not re-walk. */
@@ -228,12 +224,6 @@ export class SessionManager {
 	 * this map with every one of its names, on a close and on a fork alike.
 	 */
 	readonly #names = new Map<string, string>();
-	/**
-	 * requestId -> the handle of the container whose agent is blocked on it
-	 * (D2a). A fork retargets the parent's entries onto the fork's container,
-	 * since the process that is blocked moved with the adapter (`#forkOnto`).
-	 */
-	readonly #pendingRequests = new Map<string, string>();
 	/**
 	 * Fork ref -> what it takes to open that fork, for a fork the session index
 	 * cannot answer for or cannot be opened from. Two backends need it, for
@@ -330,7 +320,6 @@ export class SessionManager {
 				...session.adapter.getState(),
 				error: session.error,
 				errorId: session.error === null ? null : session.errorId,
-				requests: session.requests,
 				notices: session.notices,
 			};
 		});
@@ -372,7 +361,6 @@ export class SessionManager {
 			lastUnrestoredModel: null,
 			error: null,
 			errorId: "",
-			requests: [],
 			notices: [],
 			queue: Promise.resolve(),
 		};
@@ -492,8 +480,8 @@ export class SessionManager {
 
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
-	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
-	 * `setModel`, `setEffort`, `compact` and `reply`. Every route is a concurrent
+	 * has settled (D24, OW-sewewe). Five verbs join: `submit`, `fork`,
+	 * `setModel`, `setEffort` and `compact`. Every route is a concurrent
 	 * `Bun.serve` handler and any number of clients can drive one session, so
 	 * without this two of them overlap on one adapter -- two `setModel`s sharing
 	 * Pi's one `settingModel` flag (OW-woyifu), or an effort checked against the
@@ -508,10 +496,6 @@ export class SessionManager {
 	 * `compact` only once the compaction is done -- `pi 0.84.2`'s response comes
 	 * after `compaction_end` in `resources/fixtures/pi/compact.jsonl` -- so on
 	 * Pi whatever is queued behind a compaction waits for it (OW-jileku).
-	 * `reply` joins safely only while no queued verb waits on a request being
-	 * answered, which holds because every adapter disposes of a request as it
-	 * arrives (OW-yosuzo for Pi); a reply a human gives (OW-bijera) would sit
-	 * behind the very verb waiting for it.
 	 *
 	 * Left out, each for its own reason:
 	 *
@@ -687,14 +671,6 @@ export class SessionManager {
 		return this.#serially(ref, (_session, adapter) => adapter.compact());
 	}
 
-	/** Answer a request the session's agent raised (D2a), then stop holding it. */
-	reply(ref: SessionRef, requestId: string, response: unknown): Promise<void> {
-		return this.#serially(ref, async (_session, adapter) => {
-			await adapter.reply(requestId, response);
-			this.clearRequest(requestId);
-		});
-	}
-
 	/**
 	 * A rename: one conversation took a new id, announced by its adapter through
 	 * `onRefChanged` as it moves and before it emits anything under the new id
@@ -739,8 +715,7 @@ export class SessionManager {
 	 * container the adapter's handlers reach from here on (`#start`'s `owner`).
 	 *
 	 * It takes what belongs to the process: the adapter, the subscriptions that
-	 * reach it, the pending requests it is blocked on (`#pendingRequests`
-	 * agrees), the notices it raised, and the `last*` mirrors the next update is
+	 * reach it, the notices it raised, and the `last*` mirrors the next update is
 	 * measured against, and the queue, which orders the adapter and on which the
 	 * fork verb that fired this is still running. It takes nothing that was
 	 * about the parent's conversation, and starts with no `error` and the
@@ -791,7 +766,6 @@ export class SessionManager {
 		fork.adapter = parent.adapter;
 		fork.queue = parent.queue;
 		fork.subscriptions = parent.subscriptions.splice(0);
-		fork.requests = parent.requests;
 		fork.notices = parent.notices;
 		fork.lastStreaming = parent.lastStreaming;
 		fork.lastCompaction = parent.lastCompaction;
@@ -801,9 +775,6 @@ export class SessionManager {
 		this.#remove(parent);
 		parent.adapter = undefined;
 		this.#add(fork);
-		for (const [requestId, owner] of this.#pendingRequests) {
-			if (owner === parent.handle) this.#pendingRequests.set(requestId, fork.handle);
-		}
 		this.broadcaster.forget(parent.handle);
 		this.broadcaster.sessionsChanged();
 		return fork;
@@ -935,11 +906,6 @@ export class SessionManager {
 				// `start()` resolves: an event raised in that window goes out before
 				// any client holds a view of the session, and the attach's snapshot
 				// that follows is what delivers it (OW-bipume).
-				adapter.onRequest((request) => {
-					this.#pendingRequests.set(request.requestId, owner.handle);
-					owner.requests = [...owner.requests, request];
-					this.broadcaster.request(owner, request);
-				}),
 				adapter.onError((message) => {
 					owner.error = message;
 					owner.errorId = `${this.#handlePrefix}:${++this.#errorsRaised}`;
@@ -961,8 +927,6 @@ export class SessionManager {
 				this.broadcaster.notice(owner, notice);
 			});
 			if (offNotice) bound.subscriptions.push(offNotice);
-			const offResolved = adapter.onRequestResolved?.((requestId) => this.clearRequest(requestId));
-			if (offResolved) bound.subscriptions.push(offResolved);
 			await adapter.start(
 				forkStart?.start ?? {
 					cwd: bound.cwd,
@@ -1100,12 +1064,6 @@ export class SessionManager {
 		}
 	}
 
-	sessionOfRequest(requestId: string): SessionRef | undefined {
-		const handle = this.#pendingRequests.get(requestId);
-		if (!handle) return undefined;
-		return this.#sessions.get(handle)?.ref;
-	}
-
 	/**
 	 * Which turn error the session holds, as its `errorId`, or null when it
 	 * holds none -- including for a session not in the table.
@@ -1113,20 +1071,6 @@ export class SessionManager {
 	errorIdOf(ref: SessionRef): string | null {
 		const session = this.#lookup(ref);
 		return session?.error == null ? null : session.errorId;
-	}
-
-	/**
-	 * The request stopped being pending: answered through the reply route, or
-	 * reported resolved by the adapter. Dropped from what snapshots carry and
-	 * retracted on the wire (OW-gusifo).
-	 */
-	clearRequest(requestId: string): void {
-		const owner = this.#pendingRequests.get(requestId);
-		this.#pendingRequests.delete(requestId);
-		const session = owner === undefined ? undefined : this.#sessions.get(owner);
-		if (!session) return;
-		session.requests = session.requests.filter((request) => request.requestId !== requestId);
-		this.broadcaster.requestResolved(session, requestId);
 	}
 
 	/**
@@ -1173,8 +1117,8 @@ export class SessionManager {
 		const session = this.#lookup(ref);
 		// Before the `!session` return below, which is exactly a fork that is
 		// parked and was never attached: leaving it would let a later attach spawn
-		// a child for a session this call deleted. The same line `#names` and
-		// `#pendingRequests` get further down, for the same reason. Disposing its
+		// a child for a session this call deleted. The same line `#names` gets
+		// further down, for the same reason. Disposing its
 		// adapter is what releases the share a live handle holds -- without it,
 		// closing both the parent and an abandoned fork still leaves the
 		// app-server running with nobody to speak for it. Under every name of
@@ -1208,9 +1152,6 @@ export class SessionManager {
 			return;
 		}
 		const disposalKeys = this.#remove(session);
-		for (const [requestId, owner] of [...this.#pendingRequests]) {
-			if (owner === session.handle) this.#pendingRequests.delete(requestId);
-		}
 		// Before the first await below, and in the same run that took the
 		// container out of the table, so an adapter still moving -- a `submit()`
 		// or `fork()` in flight -- cannot name it, or fork a container out of it,
@@ -1255,7 +1196,6 @@ export class SessionManager {
 		);
 		this.#sessions.clear();
 		this.#names.clear();
-		this.#pendingRequests.clear();
 		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
 		// finds this rather than spawning into a server that is already leaving.

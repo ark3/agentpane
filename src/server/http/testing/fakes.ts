@@ -3,9 +3,8 @@
  *
  * The real Pi and Codex adapters are built in parallel and this workstream must
  * not depend on either, so the transport's harness is a `BackendAdapter` that
- * drives the interesting cases -- streaming upserts, a blocking server-initiated
- * request, a turn that errors -- deterministically, with no subprocess, no
- * filesystem and no clock.
+ * drives the interesting cases -- streaming upserts, a turn that errors --
+ * deterministically, with no subprocess, no filesystem and no clock.
  *
  * Nothing here imports from `../adapters/pi` or `../adapters/codex`; the whole
  * point is that the transport cannot tell the difference.
@@ -15,7 +14,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import type {
 	AgentNotice,
-	AgentRequest,
 	ForkPoint,
 	ListSessionsQuery,
 	ModelInfo,
@@ -176,7 +174,6 @@ export class FakeAdapter implements BackendAdapter {
 	disposals = 0;
 	startOptions?: StartOptions;
 	readonly prompts: { text: string; images?: ImageInput[] }[] = [];
-	readonly replies: { requestId: string; response: unknown }[] = [];
 	readonly forks: string[] = [];
 	aborts = 0;
 	compactions = 0;
@@ -191,12 +188,9 @@ export class FakeAdapter implements BackendAdapter {
 	compaction: "requesting" | "running" | null = null;
 
 	#updates = new Set<(state: AdapterState, change: StateChange) => void>();
-	#requests = new Set<(request: AgentRequest) => void>();
-	#resolved = new Set<(requestId: string) => void>();
 	#errors = new Set<(message: string) => void>();
 	#notices = new Set<(notice: AgentNotice) => void>();
 	#refChanges = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
-	#nextRequestId = 1;
 
 	/** Not stable at construction -- see `materialiseOnStart`/`materialiseOnSubmit`. */
 	get ref(): SessionRef {
@@ -226,8 +220,6 @@ export class FakeAdapter implements BackendAdapter {
 		this.disposed = true;
 		this.disposals++;
 		this.#updates.clear();
-		this.#requests.clear();
-		this.#resolved.clear();
 		this.#errors.clear();
 		this.#notices.clear();
 		this.#refChanges.clear();
@@ -298,16 +290,6 @@ export class FakeAdapter implements BackendAdapter {
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
 		this.#updates.add(cb);
 		return () => this.#updates.delete(cb);
-	}
-
-	onRequest(cb: (request: AgentRequest) => void): Unsubscribe {
-		this.#requests.add(cb);
-		return () => this.#requests.delete(cb);
-	}
-
-	onRequestResolved(cb: (requestId: string) => void): Unsubscribe {
-		this.#resolved.add(cb);
-		return () => this.#resolved.delete(cb);
 	}
 
 	onError(cb: (message: string) => void): Unsubscribe {
@@ -390,33 +372,12 @@ export class FakeAdapter implements BackendAdapter {
 		this.#emit(change);
 	}
 
-	/** The agent blocks until this is answered (D2a). */
-	emitRequest(kind: string, payload: unknown = {}): AgentRequest {
-		const request: AgentRequest = {
-			requestId: `${sessionKey(this.ref)}#${this.#nextRequestId++}`,
-			session: this.ref,
-			kind,
-			payload,
-		};
-		for (const cb of [...this.#requests]) cb(request);
-		return request;
-	}
-
-	/** The request stopped being pending without the reply route (OW-gusifo). */
-	emitRequestResolved(requestId: string): void {
-		for (const cb of [...this.#resolved]) cb(requestId);
-	}
-
 	emitError(message: string): void {
 		for (const cb of [...this.#errors]) cb(message);
 	}
 
 	emitNotice(notice: AgentNotice): void {
 		for (const cb of [...this.#notices]) cb(notice);
-	}
-
-	async reply(requestId: string, response: unknown): Promise<void> {
-		this.replies.push({ requestId, response });
 	}
 
 	#emit(change: StateChange): void {

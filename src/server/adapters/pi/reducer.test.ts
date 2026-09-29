@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AssistantMessage, TextContent, ThinkingContent, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import {
-	buildUiReplyCommand,
 	createInitialPiState,
 	type PiReduceResult,
 	type PiReducerState,
@@ -301,7 +300,7 @@ describe("reducePiNotification: tool-edit fixture (Pi chose bash, not a dedicate
 });
 
 describe("reducePiNotification: extension UI dialog requests (hand-crafted -- no fixture covers this)", () => {
-	it("select: surfaces a request and records the pending method for reply()", () => {
+	it("select: surfaces a dialog for the adapter to cancel, and changes no state", () => {
 		const state = createInitialPiState();
 		const result = reducePiNotification(state, {
 			type: "extension_ui_request",
@@ -310,38 +309,8 @@ describe("reducePiNotification: extension UI dialog requests (hand-crafted -- no
 			title: "Allow dangerous command?",
 			options: ["Allow", "Block"],
 		});
-		expect(result.request).toEqual({
-			requestId: "req-1",
-			kind: "select",
-			payload: { title: "Allow dangerous command?", options: ["Allow", "Block"] },
-		});
-		expect(result.state.pendingUiRequests["req-1"]).toBe("select");
-	});
-
-	it("buildUiReplyCommand: select/input/editor reply with value, confirm replies with confirmed", () => {
-		expect(buildUiReplyCommand("select", "req-1", "Allow")).toEqual({
-			type: "extension_ui_response",
-			id: "req-1",
-			value: "Allow",
-		});
-		expect(buildUiReplyCommand("confirm", "req-2", true)).toEqual({
-			type: "extension_ui_response",
-			id: "req-2",
-			confirmed: true,
-		});
-	});
-
-	it("buildUiReplyCommand: a null response cancels regardless of method", () => {
-		expect(buildUiReplyCommand("select", "req-1", null)).toEqual({
-			type: "extension_ui_response",
-			id: "req-1",
-			cancelled: true,
-		});
-		expect(buildUiReplyCommand("confirm", "req-2", null)).toEqual({
-			type: "extension_ui_response",
-			id: "req-2",
-			cancelled: true,
-		});
+		expect(result.request).toEqual({ requestId: "req-1", kind: "select" });
+		expect(result.state).toBe(state);
 	});
 
 	it("fire-and-forget methods (notify) do not produce a request or mutate state", () => {
@@ -353,7 +322,7 @@ describe("reducePiNotification: extension UI dialog requests (hand-crafted -- no
 			message: "Command blocked by user",
 		});
 		expect(result.request).toBeUndefined();
-		expect(result.state).toBe(state); // no-op: same reference, nothing pending
+		expect(result.state).toBe(state); // no-op: same reference
 	});
 });
 

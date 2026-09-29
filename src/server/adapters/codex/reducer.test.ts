@@ -775,7 +775,7 @@ describe("fileChange and approvals (tool-edit fixture)", () => {
 		expect((result.details as { changes: unknown[] }).changes).toHaveLength(item.changes.length);
 	});
 
-	it("surfaces the blocking approval ServerRequest, then its resolution", () => {
+	it("surfaces the blocking approval ServerRequest under the id Codex chose", () => {
 		const { effects } = replay("tool-edit");
 		const request = effects.find((e) => e.type === "request");
 		expect(request).toBeDefined();
@@ -786,12 +786,7 @@ describe("fileChange and approvals (tool-edit fixture)", () => {
 		expect(recorded).toBeDefined();
 		if (!recorded) throw new Error("fixture has no file-change approval request");
 		expect(request.requestId).toBe(recorded.id);
-		expect(request.payload).toEqual(recorded.params);
 		expect(recorded.params.itemId).toBe(item.id);
-
-		const resolved = effects.find((e) => e.type === "request-resolved");
-		expect(resolved).toBeDefined();
-		expect(effects.indexOf(request)).toBeLessThan(effects.indexOf(resolved as CodexEffect));
 	});
 
 	it("keeps the cumulative turn diff and the token usage", () => {
@@ -1418,18 +1413,16 @@ describe("hydrate over a live stream (OW-dirazu)", () => {
 	});
 });
 
-describe("ServerRequest issuer thread identification (OW-futewo)", () => {
-	it("identifies a child-thread blocking request and sets issuerThreadId", () => {
-		const parentThreadId = "parent-thread-id";
-		const childThreadId = "child-thread-id";
+describe("ServerRequest from another thread (OW-futewo)", () => {
+	it("surfaces a child thread's blocking request, which the thread guard does not drop", () => {
 		const reducer = new CodexReducer({ now: () => 1 });
-		reducer.setIdentity({ threadId: parentThreadId });
+		reducer.setIdentity({ threadId: "parent-thread-id" });
 
 		const childBlockingRequest = unsafeMessage({
 			id: "req-1",
 			method: "item/commandExecution/requestApproval",
 			params: {
-				threadId: childThreadId,
+				threadId: "child-thread-id",
 				turnId: "turn-1",
 				itemId: "item-1",
 				startedAtMs: 1000,
@@ -1437,58 +1430,9 @@ describe("ServerRequest issuer thread identification (OW-futewo)", () => {
 			},
 		});
 
-		const effects = reducer.handle(childBlockingRequest);
-		expect(effects).toHaveLength(1);
-		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
-		expect(requestEffect.type).toBe("request");
-		expect(requestEffect.issuerThreadId).toBe(childThreadId);
-	});
-
-	it("returns null issuerThreadId for a same-thread blocking request", () => {
-		const threadId = "same-thread-id";
-		const reducer = new CodexReducer({ now: () => 1 });
-		reducer.setIdentity({ threadId });
-
-		const sameThreadRequest = unsafeMessage({
-			id: "req-1",
-			method: "item/commandExecution/requestApproval",
-			params: {
-				threadId,
-				turnId: "turn-1",
-				itemId: "item-1",
-				startedAtMs: 1000,
-				command: "echo test",
-			},
-		});
-
-		const effects = reducer.handle(sameThreadRequest);
-		expect(effects).toHaveLength(1);
-		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
-		expect(requestEffect.type).toBe("request");
-		expect(requestEffect.issuerThreadId).toBeNull();
-	});
-
-	it("returns null issuerThreadId for a request with no threadId in payload", () => {
-		const parentThreadId = "parent-thread-id";
-		const reducer = new CodexReducer({ now: () => 1 });
-		reducer.setIdentity({ threadId: parentThreadId });
-
-		const requestNoThreadId = unsafeMessage({
-			id: "req-1",
-			method: "item/commandExecution/requestApproval",
-			params: {
-				turnId: "turn-1",
-				itemId: "item-1",
-				startedAtMs: 1000,
-				command: "echo test",
-			},
-		});
-
-		const effects = reducer.handle(requestNoThreadId);
-		expect(effects).toHaveLength(1);
-		const requestEffect = effects[0] as Extract<CodexEffect, { type: "request" }>;
-		expect(requestEffect.type).toBe("request");
-		expect(requestEffect.issuerThreadId).toBeNull();
+		expect(reducer.handle(childBlockingRequest)).toEqual([
+			{ type: "request", requestId: "req-1", kind: "item/commandExecution/requestApproval" },
+		]);
 	});
 });
 

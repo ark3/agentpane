@@ -187,19 +187,6 @@ describe("agentpane API", () => {
 		});
 	});
 
-	it("answers an agent request with a JSON body and resolves on no content (OW-refibu)", async () => {
-		const fetch = fetchRecorder(new Response(null, { status: 204 }));
-		const api = createAgentpaneApi({ fetch });
-		const body = { requestId: "req-1", response: { decision: "accept" } };
-
-		await expect(api.reply("req-1", body)).resolves.toBeUndefined();
-		expect(fetch).toHaveBeenCalledWith(ROUTES.reply("req-1"), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-		});
-	});
-
 	it("dismisses a session's error by DELETE, naming the error it dismisses (OW-bipume)", async () => {
 		const fetch = fetchRecorder(new Response(null, { status: 204 }));
 		const api = createAgentpaneApi({ fetch });

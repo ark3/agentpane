@@ -1,11 +1,10 @@
 /**
  * The shell-level banners' place in the grid (OW-watajo), in a real browser.
  *
- * The turn error, the backend notices, the unrestored-model warning and the
- * blocked-request warning are read where the conversation is: above it, inside
- * its column, in both the wide and the single-column layout. With no banner
- * showing, the conversation must not pay for their row -- an empty grid track
- * still costs a `gap`. jsdom has no layout, so neither claim can be made there.
+ * The turn error, the backend notices and the unrestored-model warning are
+ * read where the conversation is: above it, inside its column, in both the
+ * wide and the single-column layout. With no banner showing, the conversation
+ * must not pay for their row -- an empty grid track still costs a `gap`. jsdom has no layout, so neither claim can be made there.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -28,7 +27,6 @@ const BANNERS = [
 	["the error", ".shell [role='alert']"],
 	["the backend notices", ".shell [aria-label='Backend notices']"],
 	["the unrestored-model warning", ".shell [aria-label='Unrestored model']"],
-	["the blocked-request warning", ".shell p.warning:has-text('blocked on a request')"],
 ] as const;
 
 async function expectBannersWithConversation(page: Page): Promise<void> {

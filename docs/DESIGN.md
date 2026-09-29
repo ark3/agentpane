@@ -91,7 +91,7 @@ Costs, accepted knowingly:
   Harmless under D3, but write code that assumes it.
 - **Use one multiplexed stream**, with a session id on each event.
   Browsers cap ~6 connections per origin on HTTP/1.1 and an open `EventSource` holds one permanently, so a stream per session would wall at six.
-- Server-initiated requests need correlation glue; see D2a.
+- Server-initiated requests need no correlation glue across the two channels, because no client ever answers one: each adapter refuses a request at arrival (D2a).
 
 If the client ever becomes chatty and needs constantly correlated replies, this is the decision to revisit — a single WebSocket would then be tidier.
 
@@ -107,31 +107,33 @@ Building the transport first added a `renamed` arm for this, which every client 
 Codex's `ServerRequest` (`resources/codex-protocol/ServerRequest.ts`) is a request *from* the agent *to* the client, carrying a `RequestId`: approval requests, `item/tool/requestUserInput`, MCP elicitation, dynamic tool call.
 The agent blocks until answered.
 
-The adapter answers what it can itself.
-What genuinely needs a human goes to the browser over SSE with its id and comes back via a REST reply route; the adapter matches it up and responds to Codex.
+**agentpane never holds an agent request: each adapter refuses one the moment it arrives, and names it in a session error.**
+Decided by the owner on 2026-09-29 (OW-letevu), making final what OW-yikoyo decided provisionally on 2026-09-11.
+It covers approvals, which D7a already avoids by configuration, and questions: Codex's `item/tool/requestUserInput` and MCP elicitation, Pi's `select`, `confirm`, `input` and `editor` dialogs, and Claude Code's `can_use_tool` should it ever arrive.
 
-**And when the browser cannot answer either, the adapter declines rather than holding it.**
-Decided 2026-09-11 (OW-yikoyo).
-The sentence above assumed the browser is a place a request can be answered, and today it is not: the whole of agentpane's response to a pending request is a warning line, because OW-bijera's client half does not exist.
-So a request nothing can answer was being held until the user killed the session, and the user was told that killing it was the remedy.
+Why refuse rather than hold, as OW-yikoyo put it: a request nothing could answer was being held until the user killed the session, and the user was told that killing it was the remedy.
 A turn that carries on from a "no" it can read beats a session that has to be destroyed, and the model can try something else -- which is the case for declining rather than erroring where a decline shape exists, since a JSON-RPC error reads as a broken client rather than a refusal.
 The user is told what arrived in both cases; silently refusing on the agent's behalf is the one outcome ruled out.
-The Codex adapter does this since OW-zisumi: a kind with an entry in `DECLINE_RESPONSES` (`src/server/adapters/codex/protocol.ts`) is published as before, then declined at once through the adapter's own `reply(id, null)`, retracted through `onRequestResolved`, and named in a session error; a kind with no entry is errored out at arrival and never published (OW-nujawi).
-The decline binds Pi's dialog requests too, and the Pi adapter does the same since OW-yosuzo: an `extension_ui_request` carrying one of `PI_DIALOG_METHODS` (`select`, `confirm`, `input`, `editor`; `src/server/adapters/pi/protocol.ts`) is published as before, then cancelled at once through the adapter's own `reply(id, null)` -- an `extension_ui_response` with `cancelled: true`, the one refusal Pi's dialogs have -- retracted through `onRequestResolved`, and named in a session error.
-Pi's fire-and-forget methods expect no reply and are never published, so nothing declines them.
 
-This is provisional and OW-bijera is what revisits it: once a human can answer, holding becomes the right behaviour again for the kinds they can answer.
-It is therefore sequenced *before* bijera rather than after, because declining honestly needs a retraction, which this contract lacked until OW-gusifo -- see the paragraph below.
-The decline goes through `reply` after publishing, rather than replacing the publish, so that the request namespace, the typed reverse mapping and wire-id scoping stay on the live path: what bijera removes is the decline, not machinery it would have to rebuild.
+Why final rather than provisional: since OW-zisumi and OW-yosuzo every request was already refused within the tick it arrived in, so the machinery that published, held and retracted requests ran on every one and never waited; the owner never meets a question in practice; and what questions would really cost, a way to answer each kind in both clients under the Both clients rule in `AGENTS.md`, was never built (OW-bijera).
+D25 constrains any future holding too: a lost connection detaches every session, so a held request could not outlive a disconnect.
+OW-letevu removed that machinery -- the adapter contract's `onRequest`, `onRequestResolved` and `reply`, the server's pending-request table and reply route, the `request` and `request-resolved` events and every snapshot's `requests`, and their counterparts on the Emacs helper's wire and in both clients.
 
-**A request that stops being pending is retracted on the wire, closing what was a gap and never a decision (OW-gusifo).**
-Until then `ServerEvent` carried `request` and nothing that retracted it.
-Since OW-bipume the server holds each session's pending requests and every `snapshot` carries them, so a request answered through agentpane's reply route left clients' views only at the next snapshot, and one Codex reported resolved left nothing at all: the adapter dropped it, the server went on holding it, and every snapshot re-sent it.
-Now a `request-resolved` event carrying the `requestId` retracts a request however it stopped being pending: `SessionManager.clearRequest` broadcasts it after the reply route answers, and does the same for an adapter's `onRequestResolved`, which the Codex adapter fires on `serverRequest/resolved` for a request `reply` had not answered, and on its own decline at arrival (OW-zisumi), and which the Pi adapter fires on its own cancel of a dialog at arrival (OW-yosuzo).
-Until OW-bijera the first finds nothing to act on, since every request the Codex adapter publishes is answered before the next line is read.
-Both clients drop the request on it -- the browser from `view.requests` (`src/client/session-state.ts`), Emacs its warning line through the helper's `session/requestResolved` -- and a client that missed it converges on the next snapshot, whose `requests` no longer hold it.
-A subagent thread's request is routed to its parent's adapter (OW-futewo) while its `serverRequest/resolved` names the child's thread, so the Codex reducer reads that notification ahead of its thread guard and lets the wire id, which only the adapter that published the request maps, decide who acts on it.
-What makes Codex resolve a request without agentpane's answer is unmeasured: auto-approval or another client of the app-server was assumed, but the only `serverRequest/resolved` captured, in `resources/fixtures/codex/tool-edit.jsonl` (`codex-cli 0.147.0`), followed the capture harness's own answer.
+How each adapter refuses:
+
+- **Codex.**
+  A kind with an entry in `DECLINE_RESPONSES` (`src/server/adapters/codex/protocol.ts`) is answered with that decline shape and named in the error "codex sent a request agentpane cannot answer (KIND); agentpane declined it" (OW-zisumi).
+  A kind with no entry is errored out with JSON-RPC `-32601` and named in "codex sent an unsupported request (KIND); agentpane declined it" (OW-nujawi).
+- **Pi.**
+  An `extension_ui_request` carrying one of `PI_DIALOG_METHODS` (`src/server/adapters/pi/protocol.ts`) is answered with an `extension_ui_response` carrying `cancelled: true`, the one refusal Pi's dialogs have, and named in "Pi sent a dialog agentpane cannot answer (METHOD); agentpane cancelled it" (OW-yosuzo).
+  Pi's fire-and-forget methods expect no reply, so nothing refuses them.
+- **Claude Code has no refusal, and needs none.**
+  `ClaudeReducer` drops a `control_request` silently, so a `can_use_tool` that arrived would stall the turn; but the ask exists only under the undocumented `--permission-prompt-tool stdio`, which the adapter does not pass (its module docblock in `src/server/adapters/claude/adapter.ts`).
+  No refusal is built, because the deny shape was never captured.
+
+**The error line is the tripwire, and what reopens this.**
+This is exactly as final as usage justifies.
+Either error line above appearing in the owner's own use is the named condition for reopening D2a; git history and this decision's text before OW-letevu hold the machinery and its reasoning if that day comes.
 
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
@@ -142,7 +144,7 @@ So `approvalPolicy: "never"` demonstrably suppresses that request where one woul
 Those are different facts, and only the `read-only` pair is a suppression result.
 `item/fileChange/requestApproval` is the only approval kind any cell provoked; the command-execution and permissions approvals were not measured.
 Note the older framing here — that sbox's injected `--sandbox danger-full-access` governs this — was wrong: that CLI flag is a no-op for `app-server` (OW-37), and the effective levers are the per-thread sandbox and approval policies, both of which the adapter now sets (D7a).
-`requestUserInput` and MCP elicitation are separate from the approvals and have not been shown to be suppressed by either lever; the attempts to provoke a `requestUserInput` are recorded with the OW-18 run and did not fire, so they still need a path to the human.
+`requestUserInput` and MCP elicitation are separate from the approvals and have not been shown to be suppressed by either lever; the attempts to provoke a `requestUserInput` are recorded with the OW-18 run and did not fire, and one that does is refused at arrival like any other request (above).
 
 ### D3. State protocol: server-authoritative snapshot + tail upsert
 
@@ -414,7 +416,7 @@ This decision reverses that: subprocesses are reclaimed automatically, on two tr
 (This decision was originally read as refusing a by-hand detach control, because managing subprocess lifetime by hand is what it replaces.
 The owner settled on 2026-09-16 that the two are not exclusive, and OW-tewave put a Detach item in the composer's Tools menu: the reaper clears a session's attached stripe fifteen minutes after its last activity, and Detach clears it when the user decides the conversation is done.
 What that item is for is a truthful indicator, not reclamation — the stripe OW-lepoki draws claims a live agent for the life of the server process, and until Detach landed nothing took it down at all.
-Detach starts from the exemption predicate below and departs from it twice: it drops the `virtual` exemption, which guards a session the *reaper* would remove out from under a user who just created it and has nothing to say about a deliberate click, and it adds a fourth condition D12 has no reason to carry — no prompt POST of this client's own in flight, since the turn such a POST starts is not streaming yet.
+Detach starts from the exemption predicate below and departs from it twice: it drops the `virtual` exemption, which guards a session the *reaper* would remove out from under a user who just created it and has nothing to say about a deliberate click, and it adds a third condition D12 has no reason to carry — no prompt POST of this client's own in flight, since the turn such a POST starts is not streaming yet.
 The `DELETE` route it calls was always going to stay: it is useful programmatically and shutdown-adjacent code leans on it.)
 
 **Why this is safe at all.**
@@ -437,9 +439,7 @@ Both are gated by the same **exemption predicate** — the load-bearing part of 
 
 1. **Never evict a streaming turn** (`isStreaming`).
    This is what makes the LRU age of a session you are actively watching irrelevant — it cannot be reaped regardless.
-2. **Never evict a session blocked on a pending request** (D2a).
-   A Codex approval dialog is idle by token-flow but is holding a human hostage; killing it strands the turn.
-3. **Never evict a `virtual`, unmaterialized session.**
+2. **Never evict a `virtual`, unmaterialized session.**
    Before its first turn there is nothing on disk to rehydrate from, whatever id attach gave it (D9) — eviction would be data loss, not detach.
 
 **Two clocks, not one**, because the triggers ask different questions:
@@ -453,7 +453,7 @@ Both are gated by the same **exemption predicate** — the load-bearing part of 
 
 **All-busy is an immediate reject, not a wait.**
 If all 16 are exempt when the 17th attach arrives, the attach fails with an at-capacity error rather than blocking.
-This is deliberately visible: the condition should be rare (idle sessions are always evictable, so it bites only under 16 concurrent streaming-or-blocked turns), and a reject removes the ambiguity between "waiting for a turn to finish" and "just slow to attach."
+This is deliberately visible: the condition should be rare (idle sessions are always evictable, so it bites only under 16 concurrent streaming turns), and a reject removes the ambiguity between "waiting for a turn to finish" and "just slow to attach."
 Free one and retry.
 
 **Bookkeeping constraint (load-bearing).**
@@ -942,7 +942,7 @@ A rename never moves a browser key; three things do.
 A fork, which is another session under another handle, takes the prompt armed on its parent.
 A selection that stays on one ref while its key changes keeps its per-tab state under the new key: a stored session's preview is keyed by its ref until its attach gives it a handle, a detach takes it back to the ref, and a re-attach elsewhere gives it a new handle.
 A snapshot introducing a ref under a new handle drops any other view of that ref, since the server maps a name to one handle.
-What the split between a rename and a fork settled stays in force: a fork's container takes none of the parent's names, broadcasts nothing under the parent's handle, does not take the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and the fork's id as its only name, which takes the adapter, its subscriptions and queue, and the parent's pending requests and notices, and leaves the parent's container out of the table with no adapter.
+What the split between a rename and a fork settled stays in force: a fork's container takes none of the parent's names, broadcasts nothing under the parent's handle, does not take the parent's `stored`, `onDisk` and `error`, and leaves the parent detached (OW-kekoji, OW-suhoto, OW-sehaja); under a handle a Pi fork is a new container with a new handle and the fork's id as its only name, which takes the adapter, its subscriptions and queue, and the parent's notices, and leaves the parent's container out of the table with no adapter.
 Codex and Claude Code forks move no ref and fire nothing on the parent (OW-22, OW-razoki), and a parked fork gets its handle at the attach that builds its container, since until then nothing is emitted for it and `ForkResponse` carries a ref only (OW-lajehi).
 Teardown stops an event-driven rename or fork by unsubscribing: `close()` and `disposeAll()` drop a container's subscriptions in the same synchronous run that takes it out of the table, so no event reaches `#rename` or `#forkOnto` for it afterwards, and the `ManagedSession.torndown` flag that stopped the polled re-key is retired with the polling (OW-yavewa, OW-jimasu, OW-nikogo).
 D13's file is keyed by the backend id and stays so: it names a session on disk, which is an identity a handle does not have.
@@ -1095,9 +1095,6 @@ interface BackendAdapter {
   // state (what the server broadcasts per D3)
   getMessages(): AgentMessage[];
   onUpdate(cb: (state: { messages: AgentMessage[]; isStreaming: boolean }) => void): Unsubscribe;
-
-  // requests the agent initiates (D2a); undefined for backends without them
-  onRequest?(cb: (req: AgentRequest) => Promise<AgentResponse>): Unsubscribe;
 
   // session controls
   setModel(model: ModelRef): Promise<void>;

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
-	type AgentRequest,
 	type SessionRef,
 	type SessionSummary,
 } from "$shared/protocol.ts";
@@ -64,7 +63,6 @@ function stateAtSequence(session: SessionRef, seq: number): ClientState {
 		unrestoredModel: null,
 		error: null,
 		errorId: null,
-		requests: [],
 		notices: [],
 	}).state;
 }
@@ -84,7 +82,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		}).state;
 
@@ -101,7 +98,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		});
 
@@ -126,7 +122,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		});
 
@@ -138,7 +133,6 @@ describe("client session state", () => {
 			model: null,
 			error: null,
 			errorId: null,
-			requests: [],
 		});
 		expect(result.recover).toEqual([]);
 		expect(result.refreshSessions).toBe(false);
@@ -203,7 +197,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		});
 
@@ -233,7 +226,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		}).state;
 		// The re-list lists R attached under h2, so it evicts nothing.
@@ -279,7 +271,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		}).state;
 
@@ -311,7 +302,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		}).state;
 
@@ -392,7 +382,6 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [],
 		}).state;
 		const result = reduceServerEvent(withOther, {
@@ -435,36 +424,6 @@ describe("client session state", () => {
 		expect(clearSessionError(both, h(ref)).sessions[h(ref)]?.notices).toEqual([notice, second]);
 	});
 
-	it("retains a pending request for its session", () => {
-		const request: AgentRequest = {
-			requestId: "request-1",
-			session: ref,
-			kind: "approval",
-			payload: { path: "README.md" },
-		};
-		const result = reduceServerEvent(stateAtSequence(ref, 1), {
-			type: "request",
-			session: ref,
-			handle: h(ref),
-			seq: 2,
-			request,
-		});
-
-		expect(result.state.sessions[h(ref)]?.requests).toEqual([request]);
-	});
-
-	it("drops a request the server retracts, keeping the others (OW-gusifo)", () => {
-		const resolved: AgentRequest = { requestId: "request-1", session: ref, kind: "approval", payload: {} };
-		const pending: AgentRequest = { requestId: "request-2", session: ref, kind: "elicitation", payload: {} };
-		let state = reduceServerEvent(stateAtSequence(ref, 1), { type: "request", session: ref, handle: h(ref), seq: 2, request: resolved }).state;
-		state = reduceServerEvent(state, { type: "request", session: ref, handle: h(ref), seq: 3, request: pending }).state;
-
-		const result = reduceServerEvent(state, { type: "request-resolved", session: ref, handle: h(ref), seq: 4, requestId: "request-1" });
-
-		expect(result.state.sessions[h(ref)]?.requests).toEqual([pending]);
-		expect(result.recover).toEqual([]);
-	});
-
 	it("drops the error the server says it no longer holds (OW-jopifu)", () => {
 		const failed = reduceServerEvent(stateAtSequence(ref, 1), { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed", errorId: "e1" }).state;
 
@@ -490,13 +449,11 @@ describe("client session state", () => {
 		expect(clearSessionError(withError, "no-such-handle")).toBe(withError);
 	});
 
-	it("takes a session's error, requests and notices from a snapshot, replacing what it held (OW-bipume)", () => {
-		const request: AgentRequest = { requestId: "request-1", session: ref, kind: "approval", payload: {} };
+	it("takes a session's error and notices from a snapshot, replacing what it held (OW-bipume)", () => {
 		const held = { kind: "warning", message: "fallback metadata", details: null, path: null };
 		let state = stateAtSequence(ref, 1);
 		state = reduceServerEvent(state, { type: "error", session: ref, handle: h(ref), seq: 2, message: "turn failed", errorId: "e1" }).state;
-		state = reduceServerEvent(state, { type: "request", session: ref, handle: h(ref), seq: 3, request }).state;
-		state = reduceServerEvent(state, { type: "notice", session: ref, handle: h(ref), seq: 4, notice: held }).state;
+		state = reduceServerEvent(state, { type: "notice", session: ref, handle: h(ref), seq: 3, notice: held }).state;
 
 		const later = { kind: "configWarning", message: "unknown key", details: null, path: null };
 		const snapshot = reduceServerEvent(state, {
@@ -512,11 +469,10 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: null,
 			errorId: null,
-			requests: [],
 			notices: [held, later],
 		}).state;
 
-		expect(snapshot.sessions[h(ref)]).toMatchObject({ error: null, errorId: null, requests: [], notices: [held, later] });
+		expect(snapshot.sessions[h(ref)]).toMatchObject({ error: null, errorId: null, notices: [held, later] });
 
 		// And a view the snapshot creates starts from what the server holds.
 		const fresh = reduceServerEvent(stateWithSelected(ref), {
@@ -532,10 +488,9 @@ describe("client session state", () => {
 			unrestoredModel: null,
 			error: "turn failed",
 			errorId: "e1",
-			requests: [request],
 			notices: [held],
 		}).state;
-		expect(fresh.sessions[h(ref)]).toMatchObject({ error: "turn failed", errorId: "e1", requests: [request], notices: [held] });
+		expect(fresh.sessions[h(ref)]).toMatchObject({ error: "turn failed", errorId: "e1", notices: [held] });
 	});
 
 	it("requests a session summary refresh when sessions change", () => {

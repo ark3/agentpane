@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentRequest, SessionRef } from "../../../shared/protocol.ts";
+import type { SessionRef } from "../../../shared/protocol.ts";
 import { CodexConnectionRegistry } from "./connection.ts";
 import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./index.ts";
 import type { CodexProcess } from "./process.ts";
@@ -552,9 +552,7 @@ describe("CodexAdapter lifecycle", () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-disposed" });
 		await adapter.dispose();
 		const updates = vi.fn();
-		const requests = vi.fn();
 		adapter.onUpdate(updates);
-		adapter.onRequest(requests);
 
 		proc.emit({
 			method: "turn/started",
@@ -576,7 +574,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null });
 		expect(updates).not.toHaveBeenCalled();
-		expect(requests).not.toHaveBeenCalled();
+		expect(responses(proc)).toEqual([]);
 	});
 
 	it("ignores buffered pushed messages after startup failure", async () => {
@@ -590,25 +588,21 @@ describe("CodexAdapter lifecycle", () => {
 			}
 		});
 		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		const requests = vi.fn();
-		adapter.onRequest(requests);
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("workspace rejected");
 
 		proc.emit({ id: 10, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(requests).not.toHaveBeenCalled();
+		expect(responses(proc)).toEqual([]);
 	});
 
 	it("ignores synchronous process callbacks until client ownership is installed", async () => {
 		const proc = new SynchronousRegistrationProcess();
 		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		const requests = vi.fn();
-		adapter.onRequest(requests);
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
 		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null });
-		expect(requests).not.toHaveBeenCalled();
+		expect(responses(proc)).toEqual([]);
 		expect(proc.killCount).toBe(1);
 	});
 
@@ -650,7 +644,7 @@ describe("CodexAdapter lifecycle", () => {
 		expect(proc.killCount).toBe(1);
 	});
 
-	it("drops requests received before a failed start before a later retry", async () => {
+	it("answers a request received during a failed start on that start's process, and nothing on a later retry's", async () => {
 		const failed = new AdapterProcess();
 		failed.onWrite((message) => {
 			const id = message["id"];
@@ -667,14 +661,11 @@ describe("CodexAdapter lifecycle", () => {
 		const adapter = new CodexAdapter(VIRTUAL_REF, {
 			spawn: () => processes.shift() ?? replacement,
 		});
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("startup rejected");
-		const staleExternalId = requests[0]?.requestId ?? "";
 		await adapter.start({ cwd: "/workspace" });
-		await adapter.reply(staleExternalId, { decision: "accept" });
 
+		expect(responses(failed)).toEqual([{ id: 4, result: { decision: "decline" } }]);
 		expect(responses(replacement)).toEqual([]);
 	});
 });
@@ -2022,25 +2013,6 @@ describe("CodexAdapter reducer effects", () => {
 		);
 	});
 
-	it("publishes blocking requests with the adopted session ref", async () => {
-		const { adapter, proc } = await startedAdapter({ threadId: "thread-requests" });
-		const requests = vi.fn();
-		adapter.onRequest(requests);
-
-		proc.emit({
-			id: 17,
-			method: "item/fileChange/requestApproval",
-			params: { threadId: "thread-requests", turnId: "turn-1", itemId: "edit-1" },
-		});
-
-		expect(requests).toHaveBeenCalledWith({
-			requestId: expect.not.stringMatching(/^17$/),
-			session: { backend: "codex", id: "thread-requests" },
-			kind: "item/fileChange/requestApproval",
-			payload: { threadId: "thread-requests", turnId: "turn-1", itemId: "edit-1" },
-		});
-	});
-
 	it("publishes reducer errors", async () => {
 		const { adapter, proc } = await startedAdapter();
 		const errors = vi.fn();
@@ -2052,22 +2024,8 @@ describe("CodexAdapter reducer effects", () => {
 	});
 });
 
-describe("CodexAdapter request replies", () => {
-	it("uses a distinct request namespace for a later adapter lifetime of the same thread", async () => {
-		const first = await startedAdapter({ threadId: "thread-reopened" });
-		const second = await startedAdapter({ threadId: "thread-reopened" });
-		const firstRequests: AgentRequest[] = [];
-		const secondRequests: AgentRequest[] = [];
-		first.adapter.onRequest((request) => firstRequests.push(request));
-		second.adapter.onRequest((request) => secondRequests.push(request));
-
-		first.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
-		second.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
-
-		expect(firstRequests[0]?.requestId).not.toBe(secondRequests[0]?.requestId);
-	});
-
-	it("resolves a pre-adoption request through its typed reverse mapping", async () => {
+describe("CodexAdapter requests, refused at arrival (D2a)", () => {
+	it("declines a request that arrives before the thread is adopted, and writes nothing more when Codex resolves it", async () => {
 		const proc = new AdapterProcess();
 		proc.onWrite((message) => {
 			const id = message["id"];
@@ -2086,57 +2044,33 @@ describe("CodexAdapter request replies", () => {
 			}
 		});
 		const adapter = new CodexAdapter(VIRTUAL_REF, { spawn: () => proc });
-		const requests: AgentRequest[] = [];
-		const resolved: string[] = [];
-		adapter.onRequest((request) => requests.push(request));
-		adapter.onRequestResolved((requestId) => resolved.push(requestId));
+		const errors: string[] = [];
+		adapter.onError((message) => errors.push(message));
 
 		await adapter.start({ cwd: "/workspace" });
-		// Declined at arrival (OW-zisumi); Codex's resolution and a late reply
-		// then find nothing pending under the typed wire id.
 		proc.emit({ method: "serverRequest/resolved", params: { requestId: 0 } });
-		await adapter.reply(requests[0]?.requestId ?? "", { decision: "accept" });
 
 		expect(responses(proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
-		expect(resolved).toEqual([requests[0]?.requestId]);
+		expect(errors).toEqual([expect.stringContaining("item/fileChange/requestApproval")]);
 	});
 
-	it("scopes equal wire request ids to their adapter sessions", async () => {
+	it("declines equal wire request ids each on its own adapter's wire", async () => {
 		const first = await startedAdapter({ threadId: "thread-first" });
 		const second = await startedAdapter({ threadId: "thread-second" });
-		const firstRequests: AgentRequest[] = [];
-		const secondRequests: AgentRequest[] = [];
-		const firstResolved: string[] = [];
-		const secondResolved: string[] = [];
-		first.adapter.onRequest((request) => firstRequests.push(request));
-		second.adapter.onRequest((request) => secondRequests.push(request));
-		first.adapter.onRequestResolved((requestId) => firstResolved.push(requestId));
-		second.adapter.onRequestResolved((requestId) => secondResolved.push(requestId));
 
 		first.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
 		second.proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
-		const firstId = firstRequests[0]?.requestId ?? "";
-		const secondId = secondRequests[0]?.requestId ?? "";
 
-		// Each adapter declines its own under its own published id, on its own wire.
-		expect(firstId).not.toBe(secondId);
 		expect(responses(first.proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
 		expect(responses(second.proc)).toEqual([{ id: 0, result: { decision: "decline" } }]);
-		expect(firstResolved).toEqual([firstId]);
-		expect(secondResolved).toEqual([secondId]);
 	});
 
 	it("distinguishes numeric and string wire request ids", async () => {
-		const { adapter, proc } = await startedAdapter({ threadId: "thread-typed-ids" });
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
+		const { proc } = await startedAdapter({ threadId: "thread-typed-ids" });
 
 		proc.emit({ id: 0, method: "item/fileChange/requestApproval", params: {} });
 		proc.emit({ id: "0", method: "item/fileChange/requestApproval", params: {} });
-		const numericId = requests[0]?.requestId ?? "";
-		const stringId = requests[1]?.requestId ?? "";
 
-		expect(numericId).not.toBe(stringId);
 		expect(responses(proc)).toEqual([
 			{ id: 0, result: { decision: "decline" } },
 			{ id: "0", result: { decision: "decline" } },
@@ -2171,9 +2105,7 @@ describe("CodexAdapter request replies", () => {
 
 	it("answers a request kind it has no handler for and names it in an error (OW-nujawi)", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-unknown" });
-		const requests = vi.fn();
 		const errors: string[] = [];
-		adapter.onRequest(requests);
 		adapter.onError((message) => errors.push(message));
 
 		proc.emit({ id: 31, method: "workspace/trust/request", params: { threadId: "thread-unknown" } });
@@ -2182,19 +2114,13 @@ describe("CodexAdapter request replies", () => {
 			{ id: 31, error: { code: -32601, message: expect.stringContaining("workspace/trust/request") } },
 		]);
 		expect(errors).toEqual([expect.stringContaining("workspace/trust/request")]);
-		expect(requests).not.toHaveBeenCalled();
 	});
 
-	it("declines a request it has a decline shape for through reply, names it in an error, and retracts it (OW-zisumi)", async () => {
+	it("declines a request it has a decline shape for at arrival and names its kind in an error (OW-zisumi)", async () => {
 		const threadId = "thread-declining";
 		const { adapter, proc } = await startedAdapter({ threadId });
-		const requests: AgentRequest[] = [];
-		const errors: string[] = [];
-		const resolved: { requestId: string; answered: unknown[] }[] = [];
-		adapter.onRequest((request) => requests.push(request));
-		adapter.onError((message) => errors.push(message));
-		adapter.onRequestResolved((requestId) => resolved.push({ requestId, answered: responses(proc) }));
-		const reply = vi.spyOn(adapter, "reply");
+		const errors: { message: string; answered: unknown[] }[] = [];
+		adapter.onError((message) => errors.push({ message, answered: responses(proc) }));
 
 		proc.emit({
 			id: 41,
@@ -2202,26 +2128,25 @@ describe("CodexAdapter request replies", () => {
 			params: { threadId, turnId: "turn-1", itemId: "item-1", startedAtMs: 1, command: "rm -rf build" },
 		});
 
-		expect(requests).toHaveLength(1);
-		const requestId = requests[0]?.requestId;
-		expect(reply).toHaveBeenCalledExactlyOnceWith(requestId, null);
-		// Retracted once the decline is on the wire, not before.
-		expect(resolved).toEqual([{ requestId, answered: [{ id: 41, result: { decision: "decline" } }] }]);
-		expect(errors).toEqual([expect.stringContaining("item/commandExecution/requestApproval")]);
+		// Named once the decline is on the wire, not before.
+		expect(errors).toEqual([
+			{
+				message: expect.stringContaining("item/commandExecution/requestApproval"),
+				answered: [{ id: 41, result: { decision: "decline" } }],
+			},
+		]);
 	});
 
-	it("identifies a child-thread blocking request and routes it through the parent (OW-futewo)", async () => {
-		const parentThreadId = "parent-thread";
-		const childThreadId = "child-thread";
-		const { adapter, proc } = await startedAdapter({ threadId: parentThreadId });
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
+	it("declines a child-thread blocking request through the parent, under the child's wire id (OW-futewo)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "parent-thread" });
+		const errors: string[] = [];
+		adapter.onError((message) => errors.push(message));
 
 		proc.emit({
 			id: "child-approval-1",
 			method: "item/commandExecution/requestApproval",
 			params: {
-				threadId: childThreadId,
+				threadId: "child-thread",
 				turnId: "turn-1",
 				itemId: "item-1",
 				startedAtMs: 1000,
@@ -2229,80 +2154,10 @@ describe("CodexAdapter request replies", () => {
 			},
 		});
 
-		expect(requests).toHaveLength(1);
-		const request = requests[0];
-		expect(request?.issuerThreadId).toBe(childThreadId);
-		expect(request?.session.id).toBe(parentThreadId);
-		expect(request?.kind).toBe("item/commandExecution/requestApproval");
-
-		// Answered through the parent adapter, under the child's wire id.
 		expect(responses(proc)).toEqual([
 			{ id: "child-approval-1", result: { decision: "decline" } },
 		]);
-	});
-
-	it("reports a request it declined resolved once, under the id it was published with, and not again when Codex resolves it (OW-gusifo)", async () => {
-		const threadId = "resolving-thread";
-		const { adapter, proc } = await startedAdapter({ threadId });
-		const requests: AgentRequest[] = [];
-		const resolved: string[] = [];
-		adapter.onRequest((request) => requests.push(request));
-		adapter.onRequestResolved((requestId) => resolved.push(requestId));
-		proc.emit({ id: 7, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-1" } });
-		proc.emit({ id: 8, method: "item/fileChange/requestApproval", params: { threadId, turnId: "turn-1", itemId: "item-2" } });
-
-		// Codex follows an answer with `serverRequest/resolved` (`tool-edit.jsonl`).
-		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 7 } });
-		proc.emit({ method: "serverRequest/resolved", params: { threadId, requestId: 8 } });
-
-		expect(resolved).toEqual([requests[0]?.requestId, requests[1]?.requestId]);
-	});
-
-	it("reports a child-thread request routed through the parent resolved once, and not again when Codex's notification names the child (OW-gusifo)", async () => {
-		const parentThreadId = "parent-thread";
-		const childThreadId = "child-thread";
-		const { adapter, proc } = await startedAdapter({ threadId: parentThreadId });
-		const requests: AgentRequest[] = [];
-		const resolved: string[] = [];
-		adapter.onRequest((request) => requests.push(request));
-		adapter.onRequestResolved((requestId) => resolved.push(requestId));
-		proc.emit({
-			id: "child-approval-1",
-			method: "item/commandExecution/requestApproval",
-			params: { threadId: childThreadId, turnId: "turn-1", itemId: "item-1", startedAtMs: 1000, command: "echo test" },
-		});
-		expect(resolved).toEqual([requests[0]?.requestId]);
-
-		proc.emit({ method: "serverRequest/resolved", params: { threadId: childThreadId, requestId: "child-approval-1" } });
-
-		expect(requests[0]?.issuerThreadId).toBe(childThreadId);
-		expect(resolved).toEqual([requests[0]?.requestId]);
-	});
-
-	it("does not set issuerThreadId for a same-thread blocking request (OW-futewo)", async () => {
-		const threadId = "same-thread";
-		const { adapter, proc } = await startedAdapter({ threadId });
-		const requests: AgentRequest[] = [];
-		adapter.onRequest((request) => requests.push(request));
-
-		proc.emit({
-			id: "same-approval-1",
-			method: "item/fileChange/requestApproval",
-			params: {
-				threadId,
-				turnId: "turn-1",
-				itemId: "item-1",
-			},
-		});
-
-		expect(requests).toHaveLength(1);
-		const request = requests[0];
-		expect(request?.issuerThreadId).toBeUndefined();
-		expect(request?.session.id).toBe(threadId);
-
-		expect(responses(proc)).toEqual([
-			{ id: "same-approval-1", result: { decision: "decline" } },
-		]);
+		expect(errors).toEqual([expect.stringContaining("item/commandExecution/requestApproval")]);
 	});
 });
 
@@ -2837,12 +2692,12 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		});
 	});
 
-	it("publishes a blocking request once across both adapters, and answers it once", async () => {
+	it("declines a blocking request once across both adapters, in the one it names", async () => {
 		const { proc, parent, borrower, forked } = await forkedPair();
 		await borrower.start(forked.start as { cwd: string; resumeId: string });
-		const seen: { who: string; request: AgentRequest }[] = [];
-		parent.onRequest((request) => seen.push({ who: "parent", request }));
-		borrower.onRequest((request) => seen.push({ who: "fork", request }));
+		const seen: string[] = [];
+		parent.onError(() => seen.push("parent"));
+		borrower.onError(() => seen.push("fork"));
 		const before = responses(proc).length;
 		proc.emit({
 			id: 77,
@@ -2850,17 +2705,16 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			params: { threadId: "thread-parent", turnId: "t", itemId: "i", startedAtMs: 1 },
 		});
 
-		expect(seen).toHaveLength(1);
-		expect(seen[0]?.who).toBe("parent");
-		expect(responses(proc).length - before).toBe(1);
+		expect(seen).toEqual(["parent"]);
+		expect(responses(proc).slice(before)).toEqual([{ id: 77, result: { decision: "decline" } }]);
 	});
 
 	it("routes a request for the fork's own thread to the fork alone", async () => {
 		const { proc, parent, borrower, forked } = await forkedPair();
 		await borrower.start(forked.start as { cwd: string; resumeId: string });
 		const seen: string[] = [];
-		parent.onRequest(() => seen.push("parent"));
-		borrower.onRequest(() => seen.push("fork"));
+		parent.onError(() => seen.push("parent"));
+		borrower.onError(() => seen.push("fork"));
 
 		proc.emit({
 			id: 78,
@@ -2888,8 +2742,10 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 			params: { threadId: "thread-parent", turnId: "t", itemId: "i" },
 		});
 
-		expect(responses(proc).length - before).toBe(1);
-		expect(errors).toHaveLength(1);
+		expect(responses(proc).slice(before)).toEqual([
+			{ id: 79, error: { code: -32601, message: expect.stringContaining("item/tool/requestUserInput") } },
+		]);
+		expect(errors).toEqual([expect.stringContaining("item/tool/requestUserInput")]);
 	});
 
 	it("routes a legacy approval by the `conversationId` it names its thread with", async () => {
@@ -2922,13 +2778,13 @@ describe("CodexAdapter borrowed connection (OW-lajehi)", () => {
 		// any `close()` can land, but `SessionManager` does not subscribe to it
 		// until `start()`. Close the parent while the fork is still parked and
 		// the parked borrower would otherwise become the fallback recipient for a
-		// thread nobody drives (D19's subagent): registered as pending, published
-		// to nobody, answered by nobody -- D2a's silent stall, now pinning the
+		// thread nobody drives (D19's subagent): not started, so it can write no
+		// refusal, and named to nobody -- D2a's silent stall, now pinning the
 		// shared app-server too.
 		const { proc, parent, borrower } = await forkedPair();
 		const seen: string[] = [];
-		parent.onRequest(() => seen.push("parent"));
-		borrower.onRequest(() => seen.push("fork"));
+		parent.onError(() => seen.push("parent"));
+		borrower.onError(() => seen.push("fork"));
 		await parent.dispose();
 		const before = responses(proc).length;
 

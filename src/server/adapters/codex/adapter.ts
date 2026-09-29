@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AgentNotice, AgentRequest, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
 import { codexSessionsRoot } from "../../sessions/index.ts";
 import type {
@@ -27,12 +27,10 @@ import { spawnCodex, type CodexProcess, type CodexSpawner } from "./process.ts";
 import { CodexReducer, type CodexEffect } from "./reducer.ts";
 import {
 	DECLINE_RESPONSES,
-	wireRequestKey,
 	type AskForApproval,
 	type ClientInfo,
 	type CodexServerMessage,
 	type ModelListResponse,
-	type RequestId,
 	type SandboxMode,
 	type ThreadForkResponse,
 	type ThreadResumeResponse,
@@ -202,22 +200,10 @@ export class CodexAdapter implements BackendAdapter {
 	private disposed = false;
 	private disposal: Promise<void> | null = null;
 
-	/** Unique to this adapter lifetime, even when a stored thread is reopened. */
-	private readonly requestNamespace = randomUUID();
-	private nextExternalRequestId = 0;
-	/** Opaque browser id -> the original typed app-server request. */
-	private pendingRequests = new Map<
-		string,
-		{ id: RequestId; kind: string; wireKey: string }
-	>();
-	/** Typed app-server request key -> opaque browser id. */
-	private externalRequestIds = new Map<string, string>();
 	/** Turn ids in transcript order; `fork` needs the *previous* turn (see `fork`). */
 	private turnOrder: string[] = [];
 
 	private updateListeners = new Set<(state: AdapterState, change: StateChange) => void>();
-	private requestListeners = new Set<(request: AgentRequest) => void>();
-	private resolvedListeners = new Set<(requestId: string) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private noticeListeners = new Set<(notice: AgentNotice) => void>();
 	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
@@ -346,7 +332,6 @@ export class CodexAdapter implements BackendAdapter {
 			this.moveTo(started.thread.id);
 			holder.claim(started.thread.id);
 		} catch (error) {
-			this.clearPendingRequests();
 			if (this.ownership === ownership) {
 				ownership.ready = false;
 				this.ownership = null;
@@ -501,11 +486,8 @@ export class CodexAdapter implements BackendAdapter {
 		this.holder = null;
 		this.connection = null;
 		this.updateListeners.clear();
-		this.requestListeners.clear();
-		this.resolvedListeners.clear();
 		this.errorListeners.clear();
 		this.noticeListeners.clear();
-		this.clearPendingRequests();
 		this.turnId = null;
 		this.interruptedTurnId = null;
 		this.turnStartPending = false;
@@ -812,24 +794,6 @@ export class CodexAdapter implements BackendAdapter {
 		return () => this.updateListeners.delete(cb);
 	}
 
-	onRequest(cb: (request: AgentRequest) => void): Unsubscribe {
-		this.requestListeners.add(cb);
-		return () => this.requestListeners.delete(cb);
-	}
-
-	/**
-	 * A published request Codex reported resolved (`serverRequest/resolved`)
-	 * before `reply` answered it (OW-gusifo), or one this adapter declined
-	 * itself at arrival (OW-zisumi). A child thread's request, routed
-	 * here by `CodexConnection.#recipientFor`, counts: the reducer passes the
-	 * notification through whatever thread it names, and only the adapter that
-	 * published the wire id holds a mapping for it.
-	 */
-	onRequestResolved(cb: (requestId: string) => void): Unsubscribe {
-		this.resolvedListeners.add(cb);
-		return () => this.resolvedListeners.delete(cb);
-	}
-
 	onError(cb: (message: string) => void): Unsubscribe {
 		this.errorListeners.add(cb);
 		return () => this.errorListeners.delete(cb);
@@ -868,29 +832,6 @@ export class CodexAdapter implements BackendAdapter {
 		if (threadId === this.currentRef.id) return;
 		this.currentRef = { backend: "codex", id: threadId };
 		for (const listener of [...this.refListeners]) listener(this.currentRef, "rename");
-	}
-
-	/**
-	 * Answer a blocking `ServerRequest` (D2a). `null` declines, using the
-	 * decision shape the method expects -- an approval answered with a JSON-RPC
-	 * error would read as a client failure rather than a "no". Only kinds with
-	 * such a shape are ever pending: `applyEffects` errors the rest out at
-	 * arrival rather than publishing them, and until a human can answer
-	 * (OW-bijera) declines these through here as soon as it has published them.
-	 */
-	async reply(requestId: string, response: unknown): Promise<void> {
-		const client = this.requireClient();
-		const pending = this.pendingRequests.get(requestId);
-		if (!pending) return; // already resolved, or never ours
-		this.pendingRequests.delete(requestId);
-		if (this.externalRequestIds.get(pending.wireKey) === requestId) {
-			this.externalRequestIds.delete(pending.wireKey);
-		}
-		if (response === null || response === undefined) {
-			client.respond(pending.id, DECLINE_RESPONSES[pending.kind]);
-			return;
-		}
-		client.respond(pending.id, response);
 	}
 
 	// -- session controls ---------------------------------------------------
@@ -1019,6 +960,8 @@ export class CodexAdapter implements BackendAdapter {
 					this.emitUpdate("status");
 					break;
 				case "request": {
+					// agentpane never holds an agent request (D2a): it is refused
+					// here, in the tick it arrives, and named in a session error.
 					// A kind with no entry in `DECLINE_RESPONSES` is one nothing here
 					// can answer, and under D7a (`approvalPolicy: "never"`, with no
 					// approval `ServerRequest` observed as of `codex-cli 0.154.0`)
@@ -1039,47 +982,15 @@ export class CodexAdapter implements BackendAdapter {
 						);
 						break;
 					}
-					const wireKey = wireRequestKey(effect.requestId);
-					const previousExternalId = this.externalRequestIds.get(wireKey);
-					if (previousExternalId) this.pendingRequests.delete(previousExternalId);
-					const key = `codex:${this.requestNamespace}:${this.nextExternalRequestId++}`;
-					this.pendingRequests.set(key, { id: effect.requestId, kind: effect.kind, wireKey });
-					this.externalRequestIds.set(wireKey, key);
-					const request: AgentRequest = {
-						requestId: key,
-						session: this.currentRef,
-						kind: effect.kind,
-						payload: effect.payload,
-						...(effect.issuerThreadId ? { issuerThreadId: effect.issuerThreadId } : {}),
-					};
-					for (const listener of [...this.requestListeners]) listener(request);
-					// Nothing can answer it yet -- the browser has no way to (OW-bijera)
-					// -- so it is declined rather than held until the session is killed
-					// (D2a, OW-zisumi), and through `reply`, the path a human's "no"
-					// will take once one can be given. `reply` writes synchronously.
-					void this.reply(key, null);
-					for (const listener of [...this.resolvedListeners]) listener(key);
+					// A kind with a decline shape is answered with it -- an approval
+					// answered with a JSON-RPC error would read as a client failure
+					// rather than a "no" (OW-zisumi).
+					this.requireClient().respond(effect.requestId, DECLINE_RESPONSES[effect.kind]);
 					this.emitError(
-						`codex sent a request agentpane cannot answer yet (${effect.kind}); agentpane declined it`,
+						`codex sent a request agentpane cannot answer (${effect.kind}); agentpane declined it`,
 					);
 					break;
 				}
-				case "request-resolved":
-					// Codex resolved one `reply` has not answered. Drop it so a late
-					// `reply` is a no-op, and tell the server, which holds it too.
-					// What resolves one without us -- auto-approval, another client of
-					// the app-server -- is unmeasured: the only `serverRequest/resolved`
-					// captured, in `tool-edit.jsonl` (`codex-cli 0.147.0`), followed
-					// the capture harness's own answer.
-					{
-						const wireKey = wireRequestKey(effect.requestId);
-						const externalId = this.externalRequestIds.get(wireKey);
-						this.externalRequestIds.delete(wireKey);
-						if (!externalId) break;
-						this.pendingRequests.delete(externalId);
-						for (const listener of [...this.resolvedListeners]) listener(externalId);
-					}
-					break;
 				case "error":
 					this.emitError(effect.message);
 					break;
@@ -1109,11 +1020,6 @@ export class CodexAdapter implements BackendAdapter {
 		);
 	}
 
-	private clearPendingRequests(): void {
-		this.pendingRequests.clear();
-		this.externalRequestIds.clear();
-	}
-
 	private readStoredTurn(threadId: string): Promise<CodexTurnSettings | null> {
 		return readCodexLastTurnSettings(this.options.codexRoot ?? codexSessionsRoot(), threadId);
 	}
@@ -1128,7 +1034,7 @@ export class CodexAdapter implements BackendAdapter {
 	 * Both halves are needed. A borrower holds a live client from the moment
 	 * `adoptConnection` builds it, and its `threadId` is seeded there too, so
 	 * `client`-and-`threadId` alone would let `submit`, `compact`, `abort`,
-	 * `fork`, `listForkPoints` and `reply` write real JSON-RPC for a thread no
+	 * `fork` and `listForkPoints` write real JSON-RPC for a thread no
 	 * `thread/resume` has opened -- past a guard whose message says the opposite.
 	 */
 	private requireClient(): CodexClientView {

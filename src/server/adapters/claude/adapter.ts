@@ -118,12 +118,15 @@
  *   this way, and only the former prefers `default`: this read never
  *   overwrites a model chosen at start or since, though a turn's `init` does
  *   (above).
- * - `onRequest` is inert: sbox's claude profile injects `bypassPermissions`,
- *   and the jail is the confinement boundary -- the same rationale DESIGN
- *   records for Codex's `danger-full-access`. The `can_use_tool` ask only
- *   exists under the undocumented `--permission-prompt-tool stdio` flag, which
- *   this adapter does not pass (shape recorded in fixture
- *   `permission-request.jsonl` for the later item).
+ * - No agent request is refused here, unlike Codex and Pi (D2a), because none
+ *   can arrive: sbox's claude profile injects `bypassPermissions`, and the
+ *   jail is the confinement boundary -- the same rationale DESIGN records for
+ *   Codex's `danger-full-access`. The `can_use_tool` ask only exists under the
+ *   undocumented `--permission-prompt-tool stdio` flag, which this adapter
+ *   does not pass (shape recorded in fixture `permission-request.jsonl`). One
+ *   that did arrive would stall the turn, since `ClaudeReducer` drops a
+ *   `control_request` silently; no refusal is built because its deny shape
+ *   was never captured.
  */
 
 import { randomUUID } from "node:crypto";
@@ -131,7 +134,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type {
-	AgentRequest,
 	AssistantTurn,
 	ForkPoint,
 	ModelInfo,
@@ -236,7 +238,6 @@ export class ClaudeAdapter implements BackendAdapter {
 	private readonly pendingControls = new Map<string, PendingControl>();
 
 	private updateListeners = new Set<(state: AdapterState, change: StateChange) => void>();
-	private requestListeners = new Set<(request: AgentRequest) => void>();
 	private errorListeners = new Set<(message: string) => void>();
 	private refListeners = new Set<(ref: SessionRef, cause: "rename" | "fork") => void>();
 
@@ -346,7 +347,6 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.ownership = null;
 		if (ownership) ownership.live = false;
 		this.updateListeners.clear();
-		this.requestListeners.clear();
 		this.errorListeners.clear();
 		this.refListeners.clear();
 		this.rejectPendingControls(new Error("claude adapter disposed"));
@@ -505,11 +505,6 @@ export class ClaudeAdapter implements BackendAdapter {
 		return () => this.updateListeners.delete(cb);
 	}
 
-	onRequest(cb: (request: AgentRequest) => void): Unsubscribe {
-		this.requestListeners.add(cb);
-		return () => this.requestListeners.delete(cb);
-	}
-
 	onError(cb: (message: string) => void): Unsubscribe {
 		this.errorListeners.add(cb);
 		return () => this.errorListeners.delete(cb);
@@ -519,9 +514,6 @@ export class ClaudeAdapter implements BackendAdapter {
 		this.refListeners.add(cb);
 		return () => this.refListeners.delete(cb);
 	}
-
-	/** Inert: nothing fires `onRequest` under sbox's bypassPermissions (see module doc). */
-	async reply(_requestId: string, _response: unknown): Promise<void> {}
 
 	// -- session controls ---------------------------------------------------
 

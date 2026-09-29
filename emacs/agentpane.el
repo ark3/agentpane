@@ -97,10 +97,10 @@
 ;;     emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 ;;       -f ert-run-tests-batch-and-exit
 ;;
-;; which on Emacs 31.1 (measured 2026-09-27) ends, after one "passed" or
+;; which on Emacs 31.1 (measured 2026-09-29) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 186 tests, 183 results as expected, 0 unexpected, 3 skipped
+;;     Ran 216 tests, 213 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -685,15 +685,12 @@ gapped, and the buffer lets go of it too; see `agentpane--let-go'."
                                  (agentpane--transcript-header agentpane--session)
                                  (plist-get params :notices)
                                  (plist-get params :error)
-                                 (plist-get params :requests)
                                  (plist-get params :errorId)))))
             ('session/node (agentpane--record (plist-get params :node)))
             ('session/status (agentpane--set-status params))
             ('session/error (agentpane--hold-error (plist-get params :message)
                                                    (plist-get params :errorId)))
             ('session/errorCleared (agentpane--hold-error nil))
-            ('session/request (agentpane--upsert (list :request (plist-get params :request))))
-            ('session/requestResolved (agentpane--drop-request (plist-get params :requestId)))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
             ('session/detached (agentpane--let-go)))))))))
 
@@ -1548,8 +1545,7 @@ consecutive assistant turns run together the way they do there; a user turn
 is the one raised surface, a tinted box with an accent bar down its left
 edge, with a blank line on either side.  Neither carries a role label.
 NODE may instead be `(:error MESSAGE)', the turn error `agentpane--error'
-holds, drawn as a warning line, `(:request REQUEST)', a `session/request'
-drawn as a warning line naming its kind and id, or `(:notice NOTICE)', a
+holds, drawn as a warning line, or `(:notice NOTICE)', a
 `session/notice' drawn there too, as its message with its details and
 path, if any, on the lines below, in `agentpane-notice' so it does not read
 as an error.  A
@@ -1562,12 +1558,6 @@ prompt region below the nodes takes typing."
      ((plist-member node :error)
       (insert (propertize (concat "⚠ " (plist-get node :error)) 'face 'agentpane-warning)
               "\n"))
-     ((plist-member node :request)
-      (let ((request (plist-get node :request)))
-        (insert (propertize (format "⚠ the agent sent a %s request (%s) that nothing in Emacs answers yet"
-                                    (plist-get request :kind) (plist-get request :requestId))
-                            'face 'agentpane-warning)
-                "\n")))
      ((plist-member node :notice)
       (let ((notice (plist-get node :notice)))
         (insert (propertize
@@ -1644,15 +1634,14 @@ label between two rules, naming the context size it folded when above 0."
           (add-face-text-property body-start (point) 'agentpane-user-box t))))
     (when userp (insert "\n"))))
 
-(defun agentpane--draw (nodes &optional header notices error requests error-id)
+(defun agentpane--draw (nodes &optional header notices error error-id)
   "Draw NODES, a sequence of node plists, as this buffer's ewoc under HEADER.
 Replaces every node the buffer held and leaves the prompt region below them
 as it was; expanded folds survive the redraw, since they are keyed by node
-index and part ordinal rather than by position.  ERROR, NOTICES and
-REQUESTS, the turn error, notices and pending requests a `session/snapshot'
-carries, are drawn after NODES in that order, as an `(:error MESSAGE)'
-node, `(:notice NOTICE)' nodes and `(:request REQUEST)' nodes, so a
-snapshot keeps what the server still holds for the session, including what
+index and part ordinal rather than by position.  ERROR and NOTICES, the
+turn error and notices a `session/snapshot' carries, are drawn after NODES
+in that order, as an `(:error MESSAGE)' node and `(:notice NOTICE)' nodes,
+so a snapshot keeps what the server still holds for the session, including what
 arrived before this buffer was attached (OW-bipume).  ERROR, nil or not,
 becomes the error the buffer holds, `agentpane--error', and ERROR-ID, the
 snapshot's `errorId', what it names that error by, `agentpane--error-id'.
@@ -1681,8 +1670,6 @@ them.  Point goes to the first node."
        (ewoc-enter-last agentpane--ewoc (list :error error)))
      (seq-doseq (notice notices)
        (ewoc-enter-last agentpane--ewoc (list :notice notice)))
-     (seq-doseq (request requests)
-       (ewoc-enter-last agentpane--ewoc (list :request request)))
      (goto-char (point-min))
      (when (ewoc-nth agentpane--ewoc 0)
        (ewoc-goto-node agentpane--ewoc (ewoc-nth agentpane--ewoc 0)))))
@@ -1700,8 +1687,8 @@ them.  Point goes to the first node."
 (defun agentpane--upsert (node)
   "Redraw the drawn node whose index is NODE's in place, or append NODE.
 A node's `index' is its place in the session's flat message array, so the
-match is by that and never by position; a `(:request REQUEST)' or a
-`(:notice NOTICE)' has no index and always appends.  The turn error is
+match is by that and never by position; a `(:notice NOTICE)' has no
+index and always appends.  The turn error is
 never upserted; see `agentpane--hold-error'.  Text after the
 redrawn node, the prompt region included, moves with it, and so does a
 point there: at the end of the buffer before, at the end after.
@@ -1775,17 +1762,6 @@ where it arrived, so the buffer draws at most one; see `agentpane--error'."
      (when message
        (ewoc-enter-last agentpane--ewoc (list :error message)))))
   (agentpane--show-reading-tail))
-
-(defun agentpane--drop-request (request-id)
-  "Drop the `(:request REQUEST)' node drawn for REQUEST-ID, if there is one.
-The request is no longer pending, and the line saying the agent is
-blocked on it would say what is not so (OW-gusifo)."
-  (agentpane--above-prompt
-   (lambda ()
-     (ewoc-filter agentpane--ewoc
-                  (lambda (node)
-                    (not (equal request-id
-                                (plist-get (plist-get node :request) :requestId))))))))
 
 (defun agentpane--above-prompt (redraw)
   "Call REDRAW, which changes only the read-only text above the prompt region.
@@ -2886,8 +2862,8 @@ attached, for there is nothing of its own to close -- a session
 `agentpane-new-session' creates is attached at once, so the browser's
 virtual one is an attached buffer here; one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
-\(OW-japuzo); one with a prompt or a fork in flight, both of which the
-browser's `sending' covers; and one with a request pending.  Compacting
+\(OW-japuzo); and one with a prompt or a fork in flight, both of which the
+browser's `sending' covers.  Compacting
 counts from the moment `agentpane-compact' sends, as the browser's
 `compact' marks it from the click, not from the first status that
 carries it.  Refused too, beyond the browser's predicate, with an attach
@@ -2946,10 +2922,7 @@ it was."
      ((or agentpane--streaming (plist-get agentpane--status :compaction))
       (user-error "This session is running a turn; close it once the turn ends"))
      ((or agentpane--sending agentpane--forking agentpane--attaching)
-      (user-error "A request to this session is in flight; close it once it answers"))
-     ((and agentpane--ewoc
-           (ewoc-collect agentpane--ewoc (lambda (data) (plist-member data :request))))
-      (user-error "This session is waiting on a request; close it once that is resolved")))
+      (user-error "A request to this session is in flight; close it once it answers")))
     (let ((ref (agentpane--ref agentpane--session)))
       (setq agentpane--closing t)
       (agentpane--request

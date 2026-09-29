@@ -111,31 +111,6 @@ export interface SessionSummary {
 /** The summary of a session the server holds, which always carries its handle: what an attach answers. */
 export type LiveSessionSummary = SessionSummary & { handle: string };
 
-// ---------------------------------------------------------------------------
-// Server-initiated requests (D2a)
-// ---------------------------------------------------------------------------
-
-/**
- * The agent is asking the human something and is blocked until answered.
- * Codex sends these as `ServerRequest`; see resources/fixtures/codex/tool-edit.jsonl
- * for a real `item/fileChange/requestApproval`. An unanswered one hangs the turn.
- *
- * `kind` is the backend's own method name, deliberately not normalised -- the
- * renderer dispatches on it and falls back to a generic prompt for unknown kinds,
- * the same principle as D5's default tool card.
- *
- * `issuerThreadId` names the Codex thread that issued this request when it differs
- * from `session.id` -- i.e., when a spawned child's blocking request is routed
- * through its parent adapter (D2a, OW-futewo).
- */
-export interface AgentRequest {
-	requestId: string;
-	session: SessionRef;
-	kind: string;
-	payload: unknown;
-	issuerThreadId?: string | null;
-}
-
 /**
  * Something the backend wants the human to know that is not a failure and not
  * transcript state (OW-tujiya): Codex's `warning`, `guardianWarning`,
@@ -144,23 +119,16 @@ export interface AgentRequest {
  * a warning or error event type, so a rollout is not known to reveal one after
  * the fact.
  *
- * `kind` is the backend's own method name, not normalised, as for
- * `AgentRequest`. `message` is the one line to show; `details` is the
- * backend's further guidance, and `path` the file the notice is about, with
- * `:LINE:COLUMN` appended where the backend named a place in it -- each null
- * when the backend sent none.
+ * `kind` is the backend's own method name, not normalised. `message` is the
+ * one line to show; `details` is the backend's further guidance, and `path`
+ * the file the notice is about, with `:LINE:COLUMN` appended where the
+ * backend named a place in it -- each null when the backend sent none.
  */
 export interface AgentNotice {
 	kind: string;
 	message: string;
 	details: string | null;
 	path: string | null;
-}
-
-export interface AgentRequestReply {
-	requestId: string;
-	/** Backend-shaped response body, or null to decline/cancel. */
-	response: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,14 +179,13 @@ export type ServerEvent =
 			 */
 			unrestoredModel: string | null;
 			/**
-			 * What the `error`, `request` and `notice` events below have told the
+			 * What the `error` and `notice` events below have told the
 			 * session's clients so far, as the server still holds it (OW-bipume):
 			 * the last turn error, null once the server clears it, which
-			 * `error-cleared` says; every request still pending,
-			 * oldest first; and every notice, oldest first. Here because
+			 * `error-cleared` says; and every notice, oldest first. Here because
 			 * a snapshot is the only thing that introduces a session to a client,
 			 * so one that connects, reconnects or first attaches after the event
-			 * went out learns of it nowhere else. A client takes all three from
+			 * went out learns of it nowhere else. A client takes both from
 			 * here, replacing what it held.
 			 */
 			error: string | null;
@@ -228,7 +195,6 @@ export type ServerEvent =
 			 * error by when it dismisses it or prompts over it (OW-jokoto).
 			 */
 			errorId: string | null;
-			requests: AgentRequest[];
 			notices: AgentNotice[];
 	  }
 	| {
@@ -245,20 +211,6 @@ export type ServerEvent =
 			message: PaneMessage;
 	  }
 	| { type: "status"; session: SessionRef; handle: string; seq: number; isStreaming: boolean; compaction: "requesting" | "running" | null; model: string | null; effort: string | null; unrestoredModel: string | null }
-	| { type: "request"; session: SessionRef; handle: string; seq: number; request: AgentRequest }
-	| {
-			/**
-			 * The request `requestId` names is no longer pending, however it
-			 * stopped being so -- answered through `ROUTES.reply`, or resolved or
-			 * declined without it (OW-gusifo). Drop it. A client that missed this
-			 * converges on the next snapshot, whose `requests` no longer holds it.
-			 */
-			type: "request-resolved";
-			session: SessionRef;
-			handle: string;
-			seq: number;
-			requestId: string;
-	  }
 	| {
 			/**
 			 * A turn ended in an error the transcript alone would not convey.
@@ -280,9 +232,9 @@ export type ServerEvent =
 			/**
 			 * The server no longer holds the session's turn error: a prompt was
 			 * admitted over it, or a client dismissed it (`ROUTES.error`)
-			 * (OW-jopifu). Drop it. What `request-resolved` is to a request, and
-			 * what lets a client learn an error went without a snapshot, which
-			 * no longer arrives at every prompt (OW-yirosu). Carries no message:
+			 * (OW-jopifu). Drop it. What lets a client learn an error went
+			 * without a snapshot, which no longer arrives at every prompt
+			 * (OW-yirosu). Carries no message:
 			 * the stream is ordered, so the error a client holds from it when
 			 * this arrives is the one the server cleared, and a newer one comes
 			 * after it.
@@ -524,7 +476,6 @@ export const ROUTES = {
 	 * is cleared; a newer one stays. 204 whether or not anything was cleared.
 	 */
 	error: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/error`,
-	reply: (requestId: string) => `/api/requests/${encodeURIComponent(requestId)}`,
 } as const;
 
 export const DEFAULT_PORT = 4173;

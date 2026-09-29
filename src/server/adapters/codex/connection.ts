@@ -109,10 +109,9 @@ export class CodexConnection {
 
 	#deliver(msg: CodexServerMessage): void {
 		if (isCodexServerRequest(msg)) {
-			// A blocking request has ONE wire id and needs ONE answer. Published to
-			// every holder it would draw the approval twice, and whichever session
-			// replied second would write a second JSON-RPC response for that id
-			// (D2a, OW-lajehi).
+			// A blocking request has ONE wire id and needs ONE answer. Delivered to
+			// every holder, each adapter would refuse it at arrival and write its
+			// own JSON-RPC response for that id (D2a, OW-lajehi).
 			this.#recipientFor(threadIdOfParams(msg.params))?.handlers.onMessage(msg);
 			return;
 		}
@@ -143,13 +142,15 @@ export class CodexConnection {
 	 *
 	 * A thread some holder is driving is answered by that holder. A thread
 	 * NOBODY is driving is a spawned subagent's (D19), and D19 requires its
-	 * approval to surface in the session that spawned it -- but nothing in
-	 * `CommandExecutionRequestApprovalParams`, `FileChangeRequestApprovalParams`
+	 * approval to surface in the session that spawned it, which since D2a
+	 * refuses every request at arrival means the error line naming it -- but
+	 * nothing in `CommandExecutionRequestApprovalParams`,
+	 * `FileChangeRequestApprovalParams`
 	 * or `McpServerElicitationRequestParams` names the parent thread, so which
 	 * session that is cannot be read off the wire. The connection's first holder
 	 * answers instead: it is deterministic, it is the session that spawned the
-	 * connection, and being wrong costs only attribution -- the reply carries the
-	 * wire id, so it still unblocks the right child.
+	 * connection, and being wrong costs only attribution -- the refusal carries
+	 * the wire id, so it still unblocks the right child.
 	 *
 	 * Guessing by "whoever is mid-turn" was considered and declined: a fork and
 	 * its parent can stream at once, so it needs a tie-break anyway and would
@@ -161,9 +162,10 @@ export class CodexConnection {
 	 * Only an `answerable` holder is ever a candidate, for the fork's own thread
 	 * as much as for the fallback. A holder joins at fork time -- that is what
 	 * takes the share early enough to survive a `close()` on the parent -- but
-	 * nothing has subscribed to it until it is started, so a parked borrower
-	 * publishes to zero listeners and answers nothing. Handing it a blocking
-	 * request is D2a's silent stall, and it would pin this connection with it.
+	 * its adapter is not started until it is attached, so a parked borrower
+	 * cannot write the refusal and nothing has subscribed to hear the error
+	 * naming it. Handing it a blocking request is D2a's silent stall, and it
+	 * would pin this connection with it.
 	 */
 	#recipientFor(threadId: string | null): CodexConnectionHolder | undefined {
 		const answerable = this.#holders.filter((holder) => holder.answerable);
@@ -185,9 +187,9 @@ export class CodexConnectionHolder implements CodexClientView {
 	/** The thread this holder drives, once it is known. Set before it can matter. */
 	threadId: string | null = null;
 	/**
-	 * Whether this holder's adapter can actually field a blocking request: it has
-	 * been started, so whoever attached it has subscribed, and it has not been
-	 * disposed. False for the whole of the window between a fork minting a
+	 * Whether this holder's adapter can actually refuse a blocking request: it
+	 * has been started, so whoever attached it has subscribed, and it has not
+	 * been disposed. False for the whole of the window between a fork minting a
 	 * borrower and that borrower being attached -- see `#recipientFor`.
 	 */
 	answerable = false;

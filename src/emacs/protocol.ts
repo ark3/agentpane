@@ -28,7 +28,12 @@
  * longer says a buffer is attached, only the `session/snapshot` that
  * answers the attach does; the reply goes out after that snapshot, or once
  * none will; and `askedFor` rides every snapshot that answers an attach,
- * one for each, whatever ref it names.
+ * one for each, whatever ref it names. OW-letevu raised it an eleventh,
+ * retiring the request that answered an agent request, the two
+ * notifications that published and retracted one, and `session/snapshot`'s
+ * `requests`: agentpane never holds an agent request (D2a), so there is
+ * nothing pending to carry or answer, and the refusal reaches Emacs as a
+ * `session/error` naming the request's kind.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -221,7 +226,6 @@
  *   model lists none or is not yet known.
  * - `sessions/forkPoints` -- `{ session }` -> array of `{ id, text, index }`.
  * - `sessions/fork` -- `{ session, entryId }` -> the fork's ref.
- * - `requests/reply` -- `{ requestId, response }` -> `null`.
  *
  * Errors: a request the server refused answers with the HTTP status as
  * `code`, the server's text as `message`, and `{ status, error, detail }` as
@@ -235,21 +239,18 @@
  * that attaches it:
  *
  * - `session/snapshot` -- `{ session, handle, nodes, isStreaming, compaction,
- *   model, effort, unrestoredModel, error, errorId, requests, notices }`.
+ *   model, effort, unrestoredModel, error, errorId, notices }`.
  *   Replaces everything the buffer holds; also how a session first appears
- *   after `sessions/attach`, and how a missed event is healed. `error`,
- *   `requests` and `notices` are what the server holds for the session, and
- *   what `session/error`, `session/request` and `session/notice` below have
- *   said, whether or not Emacs was attached to hear them (OW-bipume): `error`
- *   (string or `null`) the last turn error, `null` again once the server
- *   clears it, which
+ *   after `sessions/attach`, and how a missed event is healed. `error` and
+ *   `notices` are what the server holds for the session, and what
+ *   `session/error` and `session/notice` below have said, whether or not
+ *   Emacs was attached to hear them (OW-bipume): `error` (string or `null`)
+ *   the last turn error, `null` again once the server clears it, which
  *   `session/errorCleared` says, with `errorId` (string, or `null` exactly
- *   when `error` is) naming it as `session/error` does; `requests` (array,
- *   always, possibly empty) every request still pending, oldest first, each
- *   the `request` a `session/request` carried; and `notices` (array, always,
- *   possibly empty) every notice, oldest first, each the `notice` a
- *   `session/notice` carried.
- *   The buffer draws all three after `nodes`, since a snapshot replaces
+ *   when `error` is) naming it as `session/error` does; and `notices`
+ *   (array, always, possibly empty) every notice, oldest first, each the
+ *   `notice` a `session/notice` carried.
+ *   The buffer draws both after `nodes`, since a snapshot replaces
  *   everything the buffer holds and would otherwise wipe them.
  *   `askedFor` (a ref, only on a snapshot that answers a `sessions/attach`,
  *   one such snapshot for each attach it answers) is the ref that attach
@@ -283,17 +284,6 @@
  *   snapshot sent before the clear on the one ordered stream, so a line such
  *   a snapshot drew again goes with it; one Emacs never drew is nothing to
  *   drop.
- * - `session/request` -- `{ session, handle, request }`. The agent is blocked on a
- *   request nothing in Emacs answers yet: `request` is the HTTP API's
- *   `AgentRequest` unchanged -- `requestId`, `session`, `kind` (string, the
- *   backend's own method name) and `payload` -- and `issuerThreadId` where a
- *   Codex subagent issued it. Every later `session/snapshot` carries it
- *   again, in `requests`, until it stops being pending, which
- *   `session/requestResolved` says.
- * - `session/requestResolved` -- `{ session, handle, requestId }`. The request a
- *   `session/request` carried under `requestId` is no longer pending --
- *   answered, or resolved or declined without an answer (OW-gusifo). Drop
- *   its line; one Emacs never drew is nothing to drop.
  * - `session/notice` -- `{ session, handle, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
@@ -323,8 +313,6 @@
 
 import type {
 	AgentNotice,
-	AgentRequest,
-	AgentRequestReply,
 	BackendId,
 	CreateSessionRequest,
 	DismissErrorRequest,
@@ -358,7 +346,6 @@ export interface HelperRequests {
 	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };
 	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
-	"requests/reply": { params: AgentRequestReply; result: null };
 }
 
 export interface SessionStatusParams {
@@ -378,7 +365,6 @@ export type HelperNotification =
 				nodes: TranscriptNode[];
 				error: string | null;
 				errorId: string | null;
-				requests: AgentRequest[];
 				notices: AgentNotice[];
 				askedFor?: SessionRef;
 			};
@@ -387,8 +373,6 @@ export type HelperNotification =
 	| { method: "session/status"; params: SessionStatusParams }
 	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string; errorId: string } }
 	| { method: "session/errorCleared"; params: { session: SessionRef; handle?: string } }
-	| { method: "session/request"; params: { session: SessionRef; handle?: string; request: AgentRequest } }
-	| { method: "session/requestResolved"; params: { session: SessionRef; handle?: string; requestId: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
 	| { method: "session/detached"; params: { session: SessionRef; handle: string } }
 	| { method: "sessions/changed"; params?: undefined };
