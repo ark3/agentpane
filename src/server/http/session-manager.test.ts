@@ -2153,6 +2153,55 @@ describe("teardown racing a startup", () => {
 		expect(sessions.liveRefs()).toEqual([]);
 	});
 
+	it("leaves another attach's startup under the canonical name when a failed start reaps its adapter (OW-yufazo)", async () => {
+		// REF canonicalises to C. The attach under C is still in its index
+		// lookup when REF's start fails, so the name is that attach's to be
+		// found by, not the failed one's.
+		const C: SessionRef = { backend: "pi", id: "/home/u/.pi/agent/sessions/c.jsonl" };
+		const summary = storedSession(C, WORKSPACE);
+		const lookupOfC = deferred();
+		const canonicalizingIndex: SessionIndex = {
+			list: async () => [summary],
+			get: async (ref) => {
+				if (sessionKey(ref) === sessionKey(C)) await lookupOfC.promise;
+				return summary;
+			},
+			preview: async () => [],
+		};
+		const disposing = deferred();
+		const releaseDispose = deferred();
+		const create = pi.create.bind(pi);
+		pi.create = (ref) => {
+			const adapter = create(ref);
+			if (pi.created.length === 1) {
+				adapter.start = async () => {
+					throw new Error("start failed");
+				};
+				const dispose = adapter.dispose.bind(adapter);
+				adapter.dispose = async () => {
+					disposing.resolve();
+					await releaseDispose.promise;
+					await dispose();
+				};
+			}
+			return adapter;
+		};
+		sessions = new SessionManager({ index: canonicalizingIndex, adapters: { pi } }, broadcaster);
+
+		const throughRef = sessions.attach(REF);
+		const throughC = sessions.attach(C);
+		await disposing.promise;
+		const closing = sessions.close(C);
+		lookupOfC.resolve();
+		releaseDispose.resolve();
+		await closing;
+
+		await expect(throughRef).rejects.toThrow("start failed");
+		await expect(throughC).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(pi.created).toHaveLength(1);
+		expect(sessions.liveRefs()).toEqual([]);
+	});
+
 	it("starts afresh for an attach that follows a close of a session whose start outlives its disposal", async () => {
 		// The fake's `dispose()` does not release `holdStart`, so the closed
 		// startup is still unsettled when the next attach arrives.

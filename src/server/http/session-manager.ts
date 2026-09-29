@@ -547,8 +547,9 @@ export class SessionManager {
 		}
 		const winner = container.starting;
 		if (!winner || winner === pending) return undefined;
-		for (const key of pending.keys) this.#hold(winner, key);
+		// Retired first, so the keys it frees are the winner's to take (`#hold`).
 		this.#retire(pending);
+		for (const key of pending.keys) this.#hold(winner, key);
 		return winner.promise;
 	}
 
@@ -573,9 +574,15 @@ export class SessionManager {
 	/**
 	 * Hold a live startup under one more spelling (`PendingStart.keys`), which
 	 * becomes a name of its container too once it has one, so a `close()` under
-	 * it reaches the startup by either route.
+	 * it reaches the startup by either route. Not one another live startup
+	 * holds: a failed start reaping its adapter would otherwise take the index's
+	 * canonical ref from the attach still looking it up, and a `close()` under
+	 * it would retire the failure and leave that attach in no table, free to
+	 * publish (OW-yufazo).
 	 */
 	#hold(pending: PendingStart, key: string): void {
+		const holder = this.#attaching.get(key);
+		if (holder && holder !== pending) return;
 		pending.keys.add(key);
 		this.#attaching.set(key, pending);
 		if (pending.session) this.#addName(pending.session, key);
