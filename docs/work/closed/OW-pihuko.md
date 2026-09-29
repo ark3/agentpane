@@ -1,5 +1,6 @@
 ---
 labels: [defect, sweep-0929]
+closed: done
 ---
 
 # The browser keeps a live view of a session another client closed with nothing on disk, because its listing drops only rows marked detached and a closed no-disk session has no row at all
@@ -28,3 +29,19 @@ A selected session this evicts falls to its preview, where the preview read answ
 A red-first test in `src/client/controller.test.ts`, sibling of the OW-zivamo test: S attached and selected with nothing on disk, a re-list that omits S entirely, and the assertions that S's view is gone, the pane is not `live`, and `submit` issues no `api.prompt`.
 A unit test in `src/client/session-state.test.ts` that a view absent from `sessionsWhenListed` survives a listing that lacks it.
 `bun run check` passes.
+
+## Close note
+
+Built: `replaceSessionSummaries` in `src/client/session-state.ts` now drops every view held when the listing was asked for (`sessionsWhenListed`) whose handle no listed summary carries, before the existing detached-by-ref pairing.
+It is the Emacs helper's `dropDead` rule, stated twice rather than shared; the docblock says why.
+
+It departs from the card on one point: the card said OW-fihuma's "touched since is newer" rule still holds, and the drop does not honour it.
+An adversarial reader showed, and review confirmed in `#container`, `#add` and the snapshot source in `src/server/http/session-manager.ts`, that a held view's container was in the table before `list()` read it and a handle is never minted twice (D24), so a missing handle is dead however new its view.
+Keeping touched views let a Compact or Dismiss click in the window leave a dead pane live with no listing owed.
+Running the drop first also stops the pairing loop restoring an `attached` summary for a view the drop removed.
+
+Verified: the controller test "drops the view of a selected session a listing omits, and sends it nothing (OW-pihuko)" and a unit test in `src/client/session-state.test.ts` (held view dropped; unheld view kept; touched held view dropped; and the detached listing keeps its listed summary) were each shown red first, against the unfixed code, the freshness guard and the old loop order respectively.
+`bun run check` green: 54 files, 1503 tests.
+
+Filed OW-denuse, the sibling question of whether the server announces a handle's end on the stream instead, which D25 had decided against; it carries the two cases the listing inference still misses, the disposal window before `close()` sends `sessions-changed` and a failed listing nothing re-asks.
+Amended OW-zavehi: a selected no-disk session this drop evicts keeps its selection and lands on the empty preview, one more path that decision sets.
