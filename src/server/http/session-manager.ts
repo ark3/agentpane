@@ -112,11 +112,13 @@ interface ManagedSession {
 	 */
 	adapter?: BackendAdapter;
 	/**
-	 * The startup in flight for this container, from the moment the container
-	 * exists until the startup is retired (`#retire`). On the container
-	 * rather than keyed by a name, so an attach or a `close()` under any name it
-	 * has -- one a rename inside `start()` added a moment ago included -- finds
-	 * the one startup.
+	 * The startup building this container, from the moment it is bound to it
+	 * (`#bind`) until it is retired (`#retire`): the inverse of
+	 * `PendingStart.session`, and nothing more. An attach under any name the
+	 * container has joins it here, `#handOver` hands it another startup's
+	 * spellings, and `#addName` holds it under each name the container gains.
+	 * `close()` never reads it: `#attaching` holds this startup under every
+	 * name the container has, and is where a close looks (OW-kamave).
 	 */
 	starting?: PendingStart;
 	/** Last state we broadcast, so we can tell a status flip from a message change. */
@@ -188,12 +190,16 @@ interface ManagedSession {
 interface PendingStart {
 	promise: Promise<ManagedSession>;
 	/**
-	 * Every spelling `#attaching` holds it under (`#hold`): each an attach asked
-	 * for, whether it began this startup or joined it, the spelling it resolved
-	 * that to -- the closed container's ref, for an attach that waited out a
-	 * close -- and every name its container had once a failed start takes that
-	 * container out of the table. A `close()` under any of them has one lookup
-	 * to find it by, and the container takes each as a name (OW-yufazo).
+	 * Every name it answers to, from its attach until it is retired, and the one
+	 * record of them (OW-kamave): each spelling an attach asked for, whether it
+	 * began this startup or joined it; the spelling it resolved that to -- the
+	 * closed container's ref, for an attach that waited out a close; and, once
+	 * it is bound to a container (`#bind`), every name that container has or
+	 * gains. None leaves while it is live, not even one a failed start takes
+	 * back off its container, so a `close()` under any of them finds it in
+	 * `#attaching` and closes over the rest (OW-yufazo). Its container takes
+	 * each as a name. Retiring it leaves them here, for the close that flagged
+	 * it to read.
 	 */
 	readonly keys: Set<string>;
 	/** The container it is starting, once there is one: its attach's, or the one `#start` builds. */
@@ -263,8 +269,10 @@ export class SessionManager {
 	 * abandoned fork (OW-puduro) and this is the smallest thing that can be spent.
 	 *
 	 * An entry ends four ways: the attach that opens the fork consumes it,
-	 * `close()` on that ref discards it, `disposeAll()` drops the lot, and a
-	 * *handle* is taken by the startup that claims its adapter. That last one is
+	 * `close()` on that ref -- or on any name the startup opening it answers
+	 * to, a failed one included (OW-kamave) -- discards it, `disposeAll()`
+	 * drops the lot, and a *handle* is taken by the startup that claims its
+	 * adapter. That last one is
 	 * the difference between the two shapes: a recipe stays parked until the
 	 * start succeeds, and a failed attach KEEPS it deliberately, because
 	 * `#start`'s failure path unregisters the container too and the recipe is
@@ -290,27 +298,28 @@ export class SessionManager {
 	/** What makes this manager's handles and error ids its own; see `#container`. */
 	readonly #handlePrefix = crypto.randomUUID();
 	/**
-	 * Every startup in flight, under every spelling it is known by
-	 * (`PendingStart.keys`), from its attach until it is retired (`#retire`):
-	 * what `disposeAll()` walks to reach an adapter that is still starting, and
-	 * what collapses two attaches on one spelling -- or finds the startup for a
-	 * `close()` on it -- while no container is in the table for it: the wait
-	 * for a close's disposal, a stored session's index lookup, and the reaping
-	 * of a start that failed.
+	 * Name -> every startup in flight held under it (`PendingStart.keys`), from
+	 * its attach until it is retired (`#retire`): the one index `close()` asks
+	 * for startups (OW-kamave). More than one can hold a name -- an attach still
+	 * in its index lookup under the spelling it asked for, and the startup of a
+	 * container that has come to answer to that spelling meanwhile -- and
+	 * nothing refuses a hold. It is what `disposeAll()` walks to reach an
+	 * adapter that is still starting, and what collapses two attaches on one
+	 * spelling while no container is in the table for it: the wait for a
+	 * close's disposal, a stored session's index lookup, and the reaping of a
+	 * start that failed. The earliest holder is the one joined.
 	 * A startup a close has flagged is retired from here at once, and
 	 * `disposeAll()` reaches it through that close's `#disposing` entry.
-	 * While its container is in the table the startup is on it as well
-	 * (`ManagedSession.starting`), and that is how an attach or close under any
-	 * of its names finds it.
 	 */
-	readonly #attaching = new Map<string, PendingStart>();
+	readonly #attaching = new Map<string, Set<PendingStart>>();
 	/**
 	 * Guards against replacing an adapter before its predecessor has finished
-	 * disposing. Keyed by every name the closed container had -- or, for a
-	 * startup closed with no container in the table, every spelling it was held
-	 * under -- so a stale client id cannot bypass the guard; by name and not by
-	 * handle, since what it holds back is an attach, which arrives with a name
-	 * after the container and its handle are gone. Every disposal `close()` starts is one entry here,
+	 * disposing. Keyed by every name the close reached -- each the closed
+	 * container still answered to, and each every startup it stopped was held
+	 * under (OW-kamave) -- so a stale client id cannot bypass the guard; by
+	 * name and not by handle, since what it holds back is an attach, which
+	 * arrives with a name after the container and its handle are gone. Every
+	 * disposal `close()` starts is one entry here,
 	 * registered before its first await, so `disposeAll()` waits on these too.
 	 */
 	readonly #disposing = new Map<string, PendingDisposal>();
@@ -408,10 +417,15 @@ export class SessionManager {
 		return removed;
 	}
 
-	/** One more name for a container, resolving to it while it is in the table. */
+	/**
+	 * One more name for a container, resolving to it while it is in the table,
+	 * and held from the same moment by the startup building it, if one is
+	 * (`#bind`, OW-kamave).
+	 */
 	#addName(session: ManagedSession, name: string): void {
 		session.names.add(name);
 		if (this.#sessions.get(session.handle) === session) this.#names.set(name, session.handle);
+		if (session.starting) this.#holdKey(session.starting, name);
 	}
 
 	/**
@@ -476,12 +490,13 @@ export class SessionManager {
 
 		// Two concurrent attaches collapse into one startup: the container's,
 		// whichever of its names each caller said, and while a stored session has
-		// no container yet, the one under the spelling asked for. Either way the
-		// startup is held under what this caller asked for too, which differs
-		// from what it resolved to after waiting out a close: a `close()` under
-		// that spelling must find it (OW-yufazo).
+		// no container yet, the earliest held under the spelling asked for.
+		// Either way the startup is held under what this caller asked for too,
+		// which differs from what it resolved to after waiting out a close: a
+		// `close()` under that spelling must find it (OW-yufazo).
 		const key = sessionKey(effectiveRef);
-		const inFlight = existing ? existing.starting : this.#attaching.get(key);
+		const [earliest] = this.#attaching.get(key) ?? [];
+		const inFlight = existing ? existing.starting : earliest;
 		if (inFlight) {
 			this.#hold(inFlight, requested);
 			return (await inFlight.promise).adapter as BackendAdapter;
@@ -489,7 +504,6 @@ export class SessionManager {
 
 		const pending: PendingStart = {
 			keys: new Set(),
-			session: existing,
 			torndown: false,
 			// Deferred by one microtask so this record is registered below -- and
 			// so reachable by close()/disposeAll() -- before `#start` can spawn
@@ -506,7 +520,7 @@ export class SessionManager {
 		};
 		this.#hold(pending, key);
 		this.#hold(pending, requested);
-		if (existing) existing.starting = pending;
+		if (existing) this.#bind(pending, existing);
 		const session = await pending.promise;
 		this.broadcaster.sessionsChanged();
 		this.broadcaster.broadcastSnapshot(session.handle);
@@ -526,9 +540,7 @@ export class SessionManager {
 		if (!existing) return this.#start(ref, undefined, pending);
 		const handed = this.#handOver(pending, existing);
 		if (handed) return handed;
-		existing.starting = pending;
-		pending.session = existing;
-		for (const key of pending.keys) this.#addName(existing, key);
+		this.#bind(pending, existing);
 		return this.#start(ref, existing, pending);
 	}
 
@@ -547,7 +559,6 @@ export class SessionManager {
 		}
 		const winner = container.starting;
 		if (!winner || winner === pending) return undefined;
-		// Retired first, so the keys it frees are the winner's to take (`#hold`).
 		this.#retire(pending);
 		for (const key of pending.keys) this.#hold(winner, key);
 		return winner.promise;
@@ -560,32 +571,49 @@ export class SessionManager {
 	 * container or hands its keys to another startup still in flight, once it
 	 * has failed and reaped what it spawned, or when
 	 * teardown flags it. From here nothing joins it, so an attach that finds no
-	 * container starts afresh. A handle a fork starts from is not this
+	 * container starts afresh. It keeps its `keys`, which a close that flagged
+	 * it closes over. A handle a fork starts from is not this
 	 * function's: it leaves `#pendingForks` at the claim (`#start`), since from
 	 * there its adapter is the startup's.
 	 */
 	#retire(pending: PendingStart): void {
 		for (const key of pending.keys) {
-			if (this.#attaching.get(key) === pending) this.#attaching.delete(key);
+			const held = this.#attaching.get(key);
+			if (held?.delete(pending) && held.size === 0) this.#attaching.delete(key);
 		}
 		if (pending.session?.starting === pending) pending.session.starting = undefined;
 	}
 
 	/**
-	 * Hold a live startup under one more spelling (`PendingStart.keys`), which
-	 * becomes a name of its container too once it has one, so a `close()` under
-	 * it reaches the startup by either route. Not one another live startup
-	 * holds: a failed start reaping its adapter would otherwise take the index's
-	 * canonical ref from the attach still looking it up, and a `close()` under
-	 * it would retire the failure and leave that attach in no table, free to
-	 * publish (OW-yufazo).
+	 * Hold a live startup under one more name, which becomes one of its
+	 * container's too once it has one (`#addName`). Beside any other startup
+	 * held under it: nothing refuses a hold, since `close()` stops every startup
+	 * under a name, and one refused would be one a close could miss (OW-kamave).
 	 */
 	#hold(pending: PendingStart, key: string): void {
-		const holder = this.#attaching.get(key);
-		if (holder && holder !== pending) return;
-		pending.keys.add(key);
-		this.#attaching.set(key, pending);
+		this.#holdKey(pending, key);
 		if (pending.session) this.#addName(pending.session, key);
+	}
+
+	/** Record `key` on both sides, `PendingStart.keys` and `#attaching`, and nothing else. */
+	#holdKey(pending: PendingStart, key: string): void {
+		pending.keys.add(key);
+		const held = this.#attaching.get(key);
+		if (held) held.add(pending);
+		else this.#attaching.set(key, new Set([pending]));
+	}
+
+	/**
+	 * Make `pending` the startup building `session`: each name it holds becomes
+	 * one of the container's, and it is held under every name the container
+	 * has, which `#addName` keeps true for each the container gains until the
+	 * startup is retired (OW-kamave).
+	 */
+	#bind(pending: PendingStart, session: ManagedSession): void {
+		session.starting = pending;
+		pending.session = session;
+		for (const key of pending.keys) this.#addName(session, key);
+		for (const name of session.names) this.#holdKey(pending, name);
 	}
 
 	/**
@@ -949,7 +977,7 @@ export class SessionManager {
 			// Arbitrate on that container before building one: a second would put
 			// two adapters on one file. Whichever attach wins, every spelling this
 			// startup was held under becomes one more name on it (OW-fumegi,
-			// `#handOver`).
+			// `#handOver`, and `#bind` at the claim below).
 			const canonicalSession = this.#lookup(summary.ref);
 			const handed = canonicalSession && this.#handOver(pending, canonicalSession);
 			if (handed) return handed;
@@ -961,7 +989,6 @@ export class SessionManager {
 				createdAt: summary.createdAt ?? this.#now(),
 				stored: summary,
 			});
-			for (const key of pending.keys) session.names.add(key);
 		}
 		const factory = this.#adapters[session.ref.backend];
 		if (!factory) throw new UnknownBackendError(session.ref.backend);
@@ -973,9 +1000,10 @@ export class SessionManager {
 		if (pending.torndown) throw new UnknownSessionError(ref);
 		if (!existing) {
 			// No await separates the arbitration above from this claim, so no
-			// competing startup can have claimed any of these names since.
-			session.starting = pending;
-			pending.session = session;
+			// competing startup can have claimed any of these names since. An
+			// attach still in its index lookup under one of them can hold it too,
+			// and a `close()` under it stops both (OW-kamave).
+			this.#bind(pending, session);
 			this.#add(session);
 		}
 
@@ -1070,11 +1098,12 @@ export class SessionManager {
 			for (const off of bound.subscriptions.splice(0)) off();
 			// The container is about to stop answering for the names this start
 			// gave it, a rename's and the index's canonical ref among them, while
-			// the adapter below is still being reaped. Held under each until
-			// retired, an attach under any of them joins the failure rather than
-			// spawning beside that adapter, and a `close()` finds it (OW-yufazo).
-			// Unless teardown flagged it: that retired it already.
-			if (!pending.torndown) for (const name of bound.names) this.#hold(pending, name);
+			// the adapter below is still being reaped. The startup does not: it
+			// has been held under each since the container gained it, and keeps
+			// them until retired, so an attach under any of them joins a startup
+			// already held there -- this failure, unless an earlier one holds the
+			// name too -- rather than beginning one beside that adapter, and a
+			// `close()` finds it (OW-yufazo, OW-kamave).
 			if (existing) {
 				for (const name of [...bound.names]) {
 					if (namesBeforeStart.has(name)) continue;
@@ -1236,32 +1265,47 @@ export class SessionManager {
 		// a startup it could still join, or a parked adapter already gone with
 		// nothing yet holding the attach back.
 		const session = this.#lookup(ref);
-		// Flag the startup before anything else: an adapter that does not exist
-		// yet cannot be disposed, and this is what stops it being born at all.
-		// The container's, reached by any name it has; with none, the one held
-		// under this spelling (`PendingStart.keys`) -- mid-index-lookup, or
-		// reaping an adapter whose start failed. Retired with it, so an attach
-		// from here starts afresh rather than joining a startup that can only
-		// fail.
-		const pending = session ? session.starting : this.#attaching.get(sessionKey(ref));
-		if (pending) {
+		// The container leaves the table first, with the names that still
+		// resolve to it: they are where the search for startups below begins,
+		// alongside the one called. A name it once had that another container
+		// has since taken is that container's, and so are the startups under it.
+		const keys = new Set([sessionKey(ref), ...(session ? this.#remove(session) : [])]);
+		// Flag every startup before anything else: an adapter that does not
+		// exist yet cannot be disposed, and this is what stops it being born at
+		// all. `#attaching` is the one index of them (OW-kamave): every startup
+		// held under any name in `keys` -- the container's own, which is held
+		// under all of its names, among them -- and, closing over each, under
+		// every name it answers to in turn. That reaches an attach still in its
+		// index lookup under a spelling the container has come to answer to, and
+		// a startup reaping an adapter whose start failed under the names it
+		// took back off its container. A Set's iteration visits what is added to
+		// it on the way. Retired with the flag, so an attach from here starts
+		// afresh rather than joining a startup that can only fail.
+		const flagged = new Set<PendingStart>();
+		for (const key of keys) {
+			for (const pending of this.#attaching.get(key) ?? []) {
+				flagged.add(pending);
+				for (const held of pending.keys) keys.add(held);
+			}
+		}
+		for (const pending of flagged) {
 			pending.torndown = true;
 			this.#retire(pending);
 		}
 		// A fork that is parked and was never attached, which has no container:
 		// leaving it would let a later attach spawn a child for a session this
-		// call deleted. The same line `#names` gets below, for the same reason.
+		// call deleted. The same line `#names` gets above, for the same reason.
 		// Disposing its adapter is what releases the share a live handle holds
 		// -- without it, closing both the parent and an abandoned fork still
 		// leaves the app-server running with nobody to speak for it. Under every
-		// name of the container, not only the one called: a fork whose start
-		// renamed it -- OW-hojefo's Codex first-message fork, parked under a
-		// `virtual:` ref -- is closed under its new name while its entry sits
-		// under the old, and an entry left there would start the fork a second
-		// time.
-		const parkedKeys = new Set([sessionKey(ref), ...(session?.names ?? [])]);
+		// name in `keys`, not only the one called: a fork whose start renamed it
+		// -- OW-hojefo's Codex first-message fork, parked under a `virtual:` ref
+		// -- is closed under its new name while its entry sits under the old,
+		// and an entry left there would start the fork a second time. Once a
+		// failed start has taken that fork's container out of the table, only
+		// its startup still answers to both (OW-kamave).
 		const parkedAdapters: BackendAdapter[] = [];
-		for (const key of parkedKeys) {
+		for (const key of keys) {
 			const parked = this.#pendingForks.get(key);
 			if (!parked) continue;
 			this.#pendingForks.delete(key);
@@ -1271,11 +1315,8 @@ export class SessionManager {
 		// second close of a session whose first is still disposing lands here,
 		// and must not replace that disposal under this name with one that
 		// settles at once.
-		if (!session && !pending?.adapter && parkedAdapters.length === 0) return;
-		// With no container, what holds an attach back is the spelling asked for
-		// -- the parked fork's own ref -- and every spelling the startup was held
-		// under, which it has just stopped answering to by being retired.
-		const disposalKeys = session ? this.#remove(session) : new Set([sessionKey(ref), ...(pending?.keys ?? [])]);
+		const spawned = [...flagged].some((pending) => pending.adapter);
+		if (!session && !spawned && parkedAdapters.length === 0) return;
 		if (session) {
 			// Before the first await below, and in the same run that took the
 			// container out of the table, so an adapter still moving -- a `submit()`
@@ -1297,22 +1338,27 @@ export class SessionManager {
 		// outlived its kill -- DESIGN's third open question, which needs a live
 		// spawn to settle and has no honest answer from in here. A parked
 		// adapter is part of the same disposal, so an attach on its thread waits
-		// for it as it would for the container's.
+		// for it as it would for the container's. A container with a startup in
+		// flight has no adapter published, and a startup is retired in the run
+		// that publishes one, so each adapter here is reached by one route; a
+		// startup's failure path reaping its own shares that one (`#terminate`).
+		const [startedOn] = [...flagged].flatMap((pending) => (pending.session ? [pending.session] : []));
 		const disposal: PendingDisposal = {
-			ref: session?.ref ?? pending?.session?.ref ?? ref,
+			ref: session?.ref ?? startedOn?.ref ?? ref,
 			promise: Promise.resolve().then(async () => {
 				await Promise.all([
-					pending ? this.#terminate(pending) : Promise.resolve(session?.adapter?.dispose()).catch(() => {}),
+					...[...flagged].map((pending) => this.#terminate(pending)),
+					Promise.resolve(session?.adapter?.dispose()).catch(() => {}),
 					...parkedAdapters.map((adapter) => Promise.resolve(adapter.dispose()).catch(() => {})),
 				]);
 			}),
 		};
-		for (const disposalKey of disposalKeys) this.#disposing.set(disposalKey, disposal);
+		for (const key of keys) this.#disposing.set(key, disposal);
 		try {
 			await disposal.promise;
 		} finally {
-			for (const disposalKey of disposalKeys) {
-				if (this.#disposing.get(disposalKey) === disposal) this.#disposing.delete(disposalKey);
+			for (const key of keys) {
+				if (this.#disposing.get(key) === disposal) this.#disposing.delete(key);
 			}
 		}
 	}
@@ -1322,7 +1368,8 @@ export class SessionManager {
 		// so anything that starts after this point is in neither of them.
 		this.#shuttingDown = true;
 		const sessions = [...this.#sessions.values()];
-		const starting = [...new Set(this.#attaching.values())];
+		// One startup can be held under many names, and one name hold many startups.
+		const starting = [...new Set([...this.#attaching.values()].flatMap((held) => [...held]))];
 		// What a `close()` still in flight is letting go of -- a container it
 		// took out of the table, a startup it retired, a parked handle -- which
 		// none of the tables here reach any more. One disposal sits under every
