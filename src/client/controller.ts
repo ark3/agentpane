@@ -319,8 +319,8 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
-	/** Sessions, by ref key, whose preview `loadPreview` has out. */
-	const previewLoads = new Set<string>();
+	/** The preview reads `loadPreview` has out, by ref key, each with what aborts it and its bound. */
+	const previewLoads = new Map<string, { abort: AbortController; timeout: ReturnType<typeof setTimeout> }>();
 	/** Whether the `previewFailure` on the view holds `loadPreview` back until the next `connected`. */
 	let previewHeld = false;
 	const listeners = new Set<(next: ControllerView) => void>();
@@ -379,34 +379,53 @@ export function createController(
 	 * A read that has not settled within `PREVIEW_READ_TIMEOUT_MS` is aborted
 	 * and counts as failed: one that hung would keep its key in `previewLoads`
 	 * for good, and nothing would ever ask for that session's preview again.
+	 *
+	 * A read still out at a `connected` is abandoned there (`abandonPreviewLoads`)
+	 * rather than waited on: it was asked before the outage, so its key would
+	 * turn away the fresh read that transition owes, and its failure -- landing
+	 * with the stream up -- would hold the pane on a healthy server. An
+	 * abandoned read neither opens a preview nor holds nor writes a line.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;
 		if (selected === null || view.connection !== "connected" || previewHeld || paneMode(view) !== "loading") return;
 		const key = sessionKey(selected);
 		if (previewLoads.has(key)) return;
-		previewLoads.add(key);
 		const abort = new AbortController();
 		const timeout = setTimeout(
 			() => abort.abort(new Error(`No answer within ${PREVIEW_READ_TIMEOUT_MS / 1000}s.`)),
 			PREVIEW_READ_TIMEOUT_MS,
 		);
+		const read = { abort, timeout };
+		previewLoads.set(key, read);
+		// False once the read is abandoned, which already let go of its key.
+		const settle = (): boolean => {
+			if (previewLoads.get(key) !== read) return false;
+			clearTimeout(timeout);
+			previewLoads.delete(key);
+			return true;
+		};
 		const loading = () =>
 			!disposed && view.state.selected !== null && sessionKey(view.state.selected) === key && paneMode(view) === "loading";
 		api.preview(selected, abort.signal).then(
 			(response) => {
-				clearTimeout(timeout);
-				previewLoads.delete(key);
-				if (loading()) openPreview({ ref: selected, turns: response.turns });
+				if (settle() && loading()) openPreview({ ref: selected, turns: response.turns });
 			},
 			(error: unknown) => {
-				clearTimeout(timeout);
-				previewLoads.delete(key);
-				if (!loading() || view.connection !== "connected") return;
+				if (!settle() || !loading() || view.connection !== "connected") return;
 				previewHeld = true;
 				publish({ previewFailure: { ref: selected, message: errorMessage(error) } });
 			},
 		);
+	}
+
+	/** Let go of every preview read still out -- see `loadPreview`. */
+	function abandonPreviewLoads(): void {
+		for (const { abort, timeout } of previewLoads.values()) {
+			clearTimeout(timeout);
+			abort.abort();
+		}
+		previewLoads.clear();
 	}
 
 	function errorMessage(error: unknown): string {
@@ -882,8 +901,10 @@ export function createController(
 		 * line nor the error slot.
 		 */
 		onOpen() {
-			// The transition a held preview read waits for (`loadPreview`).
+			// The transition a held preview read waits for, and which asks a
+			// fresh one in place of any still out (`loadPreview`).
 			previewHeld = false;
+			abandonPreviewLoads();
 			publish({ connection: "connected" });
 			if (opened || !listedOk) void refreshSessions(false);
 			opened = true;
@@ -965,6 +986,7 @@ export function createController(
 			if (disposed) return;
 			disposed = true;
 			stopPoll();
+			abandonPreviewLoads();
 			clearTimeout(fatalRetryTimer);
 			connection?.close();
 			listeners.clear();

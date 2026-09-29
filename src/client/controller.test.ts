@@ -2859,11 +2859,10 @@ describe("client controller", () => {
 		});
 
 		// The read was out when the stream dropped, and fails only after the
-		// reconnect, whose `connected` found its key still out. A failed read is
-		// never an answer, so the session stays selected; and like any failure
-		// with the stream up it is asked again only at the next `connected`
-		// (OW-bilogo), never from the failure itself.
-		it("keeps the selection for a preview whose read the stream dropped under and that fails after the reconnect, and asks again at the next connected (OW-forinu, OW-bilogo)", async () => {
+		// reconnect. The reconnect's `connected` abandons it and asks a fresh
+		// read (OW-bilogo): one asked before the outage is not what the
+		// transition waits on, so its failure neither holds nor writes a line.
+		it("asks a fresh preview at the reconnect when a read the stream dropped under is still out, and ignores that read's failure (OW-forinu, OW-bilogo)", async () => {
 			const api = new FakeApi();
 			const turns = [previewAssistant("stored")];
 			const controller = createController(api);
@@ -2873,29 +2872,105 @@ describe("client controller", () => {
 			api.emit(snapshotOf(ref));
 			await settle();
 			const outage = deferred<SessionPreviewResponse>();
+			const fresh = deferred<SessionPreviewResponse>();
 			api.preview.mockClear();
 			api.preview.mockReturnValueOnce(outage.promise);
-			api.preview.mockResolvedValue({ ref, turns });
+			api.preview.mockReturnValueOnce(fresh.promise);
 
 			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 			expect(api.preview).toHaveBeenCalledOnce();
 			api.drop();
 			api.open();
+
+			expect(api.preview).toHaveBeenCalledTimes(2);
+			expect(api.preview.mock.calls[0]?.[1]?.aborted).toBe(true);
 			outage.reject(new TypeError("Failed to fetch"));
 			await settle();
 
 			expect(controller.getView().state.selected).toEqual(ref);
 			expect(paneMode(controller.getView())).toBe("loading");
-			expect(api.preview).toHaveBeenCalledOnce();
+			expect(controller.getView().previewFailure).toBeNull();
 
-			api.drop();
-			api.open();
+			fresh.resolve({ ref, turns });
 			await settle();
 
 			expect(api.preview).toHaveBeenCalledTimes(2);
 			expect(paneMode(controller.getView())).toBe("preview");
 			expect(controller.getView().preview).toEqual({ ref, turns });
+			expect(controller.getView().previewFailure).toBeNull();
 			controller.dispose();
+		});
+
+		// The abandoned read answers after all, while the fresh one is still out:
+		// what it read predates the outage, so it opens nothing.
+		it("opens nothing from a read the reconnect abandoned, even one that succeeds late (OW-bilogo)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("fresh")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const outage = deferred<SessionPreviewResponse>();
+			const fresh = deferred<SessionPreviewResponse>();
+			api.preview.mockClear();
+			api.preview.mockReturnValueOnce(outage.promise);
+			api.preview.mockReturnValueOnce(fresh.promise);
+
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			api.drop();
+			api.open();
+			outage.resolve({ ref, turns: [previewAssistant("stale")] });
+			await settle();
+
+			expect(paneMode(controller.getView())).toBe("loading");
+
+			fresh.resolve({ ref, turns });
+			await settle();
+
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
+		});
+
+		// The realistic form: the read hangs, the stream drops and comes back
+		// well inside its bound, and the bound then aborts it.
+		it("does not hold on the timeout of a hung read the reconnect abandoned (OW-bilogo)", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				const turns = [previewAssistant("stored")];
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				await controller.select(ref);
+				api.emit(snapshotOf(ref));
+				await vi.advanceTimersByTimeAsync(0);
+				api.preview.mockClear();
+				// A read that settles only when it is aborted, as `fetch` does.
+				api.preview.mockImplementationOnce((_session, signal) =>
+					new Promise((_resolve, reject) => {
+						signal?.addEventListener("abort", () => reject(signal.reason));
+					}));
+				api.preview.mockResolvedValue({ ref, turns });
+
+				api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+				await vi.advanceTimersByTimeAsync(2_000);
+				api.drop();
+				await vi.advanceTimersByTimeAsync(1_000);
+				api.open();
+				await vi.advanceTimersByTimeAsync(600_000);
+
+				// `loadPreview`'s reads, which alone carry a signal: the preview's
+				// own poll re-reads it through the 600s as well.
+				expect(api.preview.mock.calls.filter(([, signal]) => signal !== undefined)).toHaveLength(2);
+				expect(paneMode(controller.getView())).toBe("preview");
+				expect(controller.getView().preview).toEqual({ ref, turns });
+				expect(controller.getView().previewFailure).toBeNull();
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		// The server exits with the read out, and the read fails before the tab
