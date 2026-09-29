@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, d25]
+closed: done
 ---
 
 # agentpane-mode clears a buffer's in-flight flags only from each request's own error handler, which jsonrpc.el skips or runs too early at a helper's death; the teardown should answer every request the dead helper had out
@@ -34,3 +35,16 @@ ERT tests in `emacs/agentpane-test.el`, each through a real process connection a
 - OW-zedawo's case 2: a prompt sent, a `session/status` with `isStreaming t` under its handle, then the helper dies with the reply held; the turn-done indicator is raised.
 
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`, and `bun run check` if anything under `src/` changes.
+
+## Close note
+
+Done 2026-09-28, landed as 63193be.
+`agentpane--request` in `emacs/agentpane.el` records each request in `agentpane--requests-out` under its connection. `agentpane--helper-gone` forgets the connection and lets go of the served buffers at once, then answers every request still recorded, oldest first, from a zero-delay timer of its own (`agentpane--answer-deaths`), running its FAILED and never its UNSENT.
+A request's error handler past the death answers nothing, "Server died" included.
+The one-tick delay is deliberate: a reply jsonrpc.el held back behind a synchronous request (an anxious continuation) is handed on from a timer queued between the teardown and the answers, so it is still the answer (Emacs 31.1, jsonrpc.el 1.0.29, measured 2026-09-28). The first cut answered inside the teardown and dropped that reply, which left an admitted prompt holding its draft.
+Verified by three new ERT tests through real processes, each red on the old code: `agentpane-test-death-answers-a-prompt-behind-a-synchronous-request` and `agentpane-test-death-answers-an-attach-behind-a-synchronous-request` (OW-laluso's ordering), and `agentpane-test-death-ends-a-turn-seen-streaming` (OW-zedawo case 2).
+`agentpane-test-late-error-reply-fails-once` now asserts unsents 0. `agentpane-test--heard-out` also waits for the connection's recorded requests to drain.
+Full ERT suite green: 218 tests, 3 skipped. Nothing under `src/` changed.
+OW-reyayi's two cases keep today's outcome: a close in flight still ends dropped, and `agentpane-shutdown` still raises turn-done for a turn seen streaming.
+The adversarial read found a narrow reclassification, a refusal read at the death answered as the death, filed as OW-bonuhi.
+It also noted that one FAILED signalling would strand the requests after it in the loop. No FAILED signals today, so no guard was added.
