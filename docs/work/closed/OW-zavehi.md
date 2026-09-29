@@ -1,5 +1,6 @@
 ---
 labels: [question, sweep-0929]
+closed: done
 ---
 
 # Decide how both clients learn that a session or its handle has ended, since the server knows the moment it happens and each client instead infers it from listings and an empty preview
@@ -87,3 +88,17 @@ The fork-on-disk measurement is not needed: D26 point 5 counts a parked fork as 
 Those records: a regular Codex fork's rollout was on disk when `fork` returned on `codex-cli 0.148.0`, `0.154.0` and `0.156.0` (`docs/MANUAL_TESTING.md`, "Settling the fork's returned ref (OW-pifowo, OW-22)", OW-lajehi and OW-sayaju); a Pi fork's moved file was on disk at return on `pi 0.85.1` (OW-gajesu); a Claude Code fork and a Codex first-message fork send the CLI nothing at `fork` (`ClaudeAdapter.fork`, and `CodexAdapter.fork` since OW-hojefo), so neither has a file then, by construction.
 OW-bilogo's docblock rule at `loadPreview` is amended by D26 point 6 in `docs/DESIGN.md` and changes in the code with OW-lilami, which makes the exception; a docblock that described the exception before the code made it would be false at the site.
 Also, the preview's answer is `404` with the code `gone`, not `not_found`, which an unmatched route also answers (D26 point 5).
+
+## Close note
+
+Decided by the owner on 2026-09-29 and recorded as D26 in `docs/DESIGN.md`: proposal A, with B's preview answer folded in as the owner of a separate fact.
+The one owner of "this handle has ended" while a client's stream is up is an `ended` event the server sends, with no `seq` and no on-disk flag, where `close()` and `#forkOnto` forget the handle; `close()`'s `sessions-changed` moves to the same run.
+The listing no longer drops views, attachments or held attaches in either client, with no backstop kept: D25 made the stream all or nothing, and the Emacs helper now waits for its stream's open before a request that needs its events, which an adversarial read showed it did not.
+The one owner of "this ref has nothing to show" is the preview route, answering `404` with the code `gone` (not `not_found`, which an unmatched route also answers) when the manager holds nothing under the name, parked forks and startups in flight included, and then the index finds no file.
+The browser clears its selection on `gone` from any preview read; agentpane-mode's `agentpane--dropped` goes, `g` previews a buffer that is not attached, and `gone` kills the buffer.
+Case 1 (a close elsewhere reading live through the disposal) is gone by the event's timing; case 2 (a failed listing) shrinks to a stale row until the next listing.
+Amended D21's detach exception, D25's listing sentence and decision 4, and named in D26 the rest that change with the code, OW-bilogo's docblock rule among them (changed with the code in OW-lilami, which makes its exception).
+The fork-on-disk measurement was not taken, by the owner's agreement: counting parked forks as held makes it non-load-bearing, and the existing records are cited in this card's last amendment.
+Two adversarial reads, one at D26 and one at the cards, found four defects in the design and a dozen in the cards; all were fixed before commit.
+Filed, labelled `sweep-0929`: OW-sodohi, OW-vebeno, OW-likopo, OW-royosa (blocked by OW-kamave), OW-lilami and OW-vugefa (blocked by OW-bupivi too).
+Closed moot into them: OW-lejape, OW-tuyewo, OW-wabiju, OW-vetebu; amended: OW-reyayi, OW-tujami, OW-kafupo, OW-bupivi, OW-savafi, OW-puzome, OW-pezelo, OW-kamave.
