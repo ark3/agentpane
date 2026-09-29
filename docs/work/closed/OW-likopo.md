@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, sweep-0929]
 blocked-by: [OW-sodohi]
+closed: done
 ---
 
 # The Emacs helper learns a handle ended from a listing and sends an attach before its stream is registered, where D26 has it act on the ended event and wait for the open
@@ -35,3 +36,19 @@ Tests in `src/emacs/helper.test.ts`, red first, with the fake event source and `
 - a listing that lacks an attachment's handle, with no `ended`, sends no `session/detached`.
 `dropDead`'s eviction is gone from the code.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Built in `src/emacs/helper.ts`: `runHelper` now acts on the server's unsequenced `ended` (`end()`), sending `session/detached` for an attachment under the handle and releasing a held attach waiting on a snapshot under it, handled before `onEvent`'s return on an unchanged reducer state.
+`dropDead` is gone: a `sessions-changed` now only produces `sessions/changed`, and no listing drops an attachment or a held attach.
+`sessions/list` and `sessions/attach` await a memoised `openStream()` promise that settles on `onOpen` before their REST call; a first open that fails never settles it and the helper exits as D25 point 4 says (what that request is answered with stays OW-pezelo's).
+Confirmed at the source that `onOpen` implies registration: `openEventStream` in `src/server/http/app.ts` calls `addClient` in the `ReadableStream`'s `start()`, which runs synchronously before the `Response` exists.
+
+The adversarial read found one defect this made common: a Pi fork's parent `ended` lands before the `sessions/fork` reply, so the parent buffer was left `agentpane--dropped` and `g` re-attached it, respawning Pi on the old branch.
+`agentpane--fork-at`'s Pi branch in `emacs/agentpane.el` now clears `agentpane--dropped` as `agentpane-close-session` does, with ERT test `agentpane-test-pi-fork-parent-detached-before-the-reply-previews`.
+Its other non-regression finding, an attach abandoned by a detach while the open is pending still sends its REST attach, went into OW-wukako as an amendment.
+
+Records updated: `src/emacs/protocol.ts` (frozen-interface history, `sessions/list`, `sessions/attach`, `session/detached`, `sessions/changed`), the helper's docblocks and `onMalformed` comment (corrected, not guarded), docstrings in `emacs/agentpane.el` and `emacs/agentpane-test.el`, and D21's and D25's helper-listing paragraphs in `docs/DESIGN.md`, now history.
+
+Verified: four new or rewritten tests in `src/emacs/helper.test.ts` (ended detaches while a listing would fail; ended releases a held attach; first attach and a concurrent list send nothing until `onOpen`, via the fake source's new `holding`/`openHeld()`; a listing lacking the handle with no `ended` detaches nothing) fail against the pre-change `helper.ts` and pass after; the new ERT test failed first on `agentpane--dropped` being `t`.
+`bun run check` passed (1517 tests) and the ERT suite passed (217 run, 0 unexpected, 3 skipped).
