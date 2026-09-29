@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # `close()` can dispose an adapter twice when a start publishes while it awaits a parked fork's dispose
@@ -20,3 +21,10 @@ Judged not worth blocking on: no incident, and whether a second `dispose()` does
 
 Done when a test in `src/server/http/session-manager.test.ts` holds a parked Codex fork's attach mid-start (`FakeAdapterFactory` `holdStart`, `forkMode: "codex"`, `sharedChild`), closes the fork's ref, lets the start publish during the parked dispose, and asserts the adapter's dispose count is one -- red first against the current `close()`.
 The same test, or a sibling, asserts the held attach does not answer as attached for the closed ref and that `isAttached` is false once `close()` has been called.
+
+## Close note
+
+Superseded by OW-bulanu (landed 2026-09-29).
+`close()` now does all of its synchronous work before its first await, and folds a parked fork's disposal into the one `#disposing` entry it registers, including when there is no container; a parked handle leaves `#pendingForks` at the claim, so it is never disposed by two routes.
+Both sequences this card covered are pinned, each red on the previous `main`: "refuses the attach of a fork closed while it was starting, and disposes its adapter once" (attach already in flight) and "spawns nothing on a closed fork's thread while its parked adapter is still being disposed" (attach after close began).
+The D25 decision 1 sentence naming this card as an exception is removed from `docs/DESIGN.md`.

@@ -1,5 +1,6 @@
 ---
 labels: [defect, sweep-0929]
+closed: done
 ---
 
 # SessionManager retires a startup at three different moments by three writers, so close() and an attach racing it each see a startup that is neither live nor gone
@@ -75,3 +76,19 @@ Tests in `src/server/http/session-manager.test.ts`, each shown red at HEAD first
 The mechanism replaced is gone: `#attaching` and `container.starting` are cleared only in the one retirement function, and `attach`'s `finally` no longer deletes from `#attaching`.
 Then OW-14, OW-ganapi, OW-vodinu and OW-13 close `--moot` citing this card, and the D25 exception sentence is gone.
 OW-33 and OW-34 both evict through `close()`; note on each that this landed.
+
+## Close note
+
+Landed 2026-09-29 on `main` in two commits: "server: retire a startup from every record at the one moment it stops being live (OW-bulanu)" and "server: have disposeAll() wait on every close still disposing (OW-bulanu)".
+
+What was built, in `src/server/http/session-manager.ts`:
+- `#retire(pending)` is the only place a startup leaves `#attaching` and `ManagedSession.starting`; `PendingStart` carries the `key` its attach used and the `session` it starts. It runs at publish, on the arbitration loser's two early returns, at failure (a `.catch` on the startup promise, after the failure path has reaped its adapter, so an attach during reaping joins the failure rather than spawning beside it), and at teardown in `close()` and `disposeAll()`. `attach`'s `finally` delete and both `bound.starting = undefined` sites are gone.
+- A parked fork handle leaves `#pendingForks` at the claim where it becomes `pending.adapter`; a recipe still stays parked through a failed start.
+- `close()` does all synchronous work before its first await and registers one `#disposing` entry that also disposes parked handles, including when there is no container (keyed by the requested spelling). With no container and nothing to dispose it registers nothing, so a second DELETE cannot overwrite the first close's disposal; a test pins that.
+- `disposeAll()` also waits on every in-flight `#disposing` entry. This fixed a regression the first commit introduced, found by the adversarial read: a startup that `close()` had retired was no longer reached by shutdown, which could `process.exit` during its SIGTERM-to-SIGKILL escalation. The same gap already existed on the old `main` for a published session mid-close, and the fix closes it too.
+- The canonical-name arbitration is untouched. The deeper version, creating the container before the index lookup, was rejected by the cold read: it leaves the loser's container in `#sessions` (a duplicate `list()` row that `close(B)` never removes) and inverts the "No await separates the arbitration above from this claim" invariant.
+
+How it was verified: ten new tests in `src/server/http/session-manager.test.ts`. The card's five, plus the published-session shutdown wait and the holdStart close-then-reattach case, were each red against the previous `main`'s source. The retired-startup shutdown wait was red on the intermediate commit. The second-close and recipe-stays-parked tests were shown red by breaking the guard and the claim condition respectively. `bun run check` passed: 1499 tests, svelte-check clean.
+Docs: D25 decision 1's OW-vodinu exception sentence is removed, and the `docs/DESIGN.md` paragraph on `#attaching` now says what `disposeAll()` waits on.
+OW-14, OW-ganapi, OW-vodinu and OW-13 closed moot citing this card, and OW-33 and OW-34 carry a note that it landed.
+Filed OW-yufazo for a pre-existing miss the adversarial read found: a `close()` under a different spelling from its attach's key misses a startup still in its index lookup.

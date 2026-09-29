@@ -1,0 +1,27 @@
+---
+labels: [defect]
+---
+
+# A close() under a different spelling from the one its attach was keyed by misses a startup still in its index lookup, so the startup publishes after the DELETE succeeded
+
+Found 2026-09-29 by OW-bulanu's adversarial read, by reading `src/server/http/session-manager.ts` at 799eff2; nothing was run.
+It was already on `main` before OW-bulanu, which did not claim to fix it.
+In service of the rule that a `close()` that returned leaves no startup under any of the session's names on its way to publishing.
+
+## The mechanism
+
+`attach` keys its `PendingStart` in `#attaching` by `sessionKey(effectiveRef)`, and `effectiveRef` becomes `disposing.ref` (the closed container's canonical ref) when the attach first waited on a `#disposing` entry.
+`close(ref)` with no container finds its startup only by `this.#attaching.get(sessionKey(ref))`, the spelling it was called with.
+So:
+1. `attach(A)` arrives while a close of the container that had names A and C is disposing, waits, and is keyed under C; while its index lookup runs, `close(A)` finds no container and nothing under A, takes the early return (`if (!session && !pending?.adapter && parkedAdapters.length === 0) return;`), and the startup goes on to publish.
+2. The same miss under an unseen alias: `attach(alias)` is keyed under the alias until the lookup canonicalises it, so a `close(C)` in that window finds nothing.
+3. During a failed start's reaping, after `#start`'s failure path has run `#remove(bound)`, a close under the canonical name or a name a rename inside `start()` added finds neither container nor record; nothing leaks, since the failure path disposes its own adapter, but no `#disposing` entry holds back an attach under that name.
+
+Case 1 matters most: the DELETE answered for a session that then comes back attached.
+Case 2 may be judged acceptable, because a close under C cannot know about an alias nobody has resolved yet; decide that in this card and record the reason rather than silently fixing only case 1.
+
+## Done when
+
+A test in `src/server/http/session-manager.test.ts` goes red first and green after: close a session holding names A and C, with its dispose held (`holdDispose`), then `attach(A)` with the index `get` held (the held-`SessionIndex` pattern in "starts afresh for an attach that follows a close of a session still in its index lookup"), then `close(A)`, release both; the attach rejects and `isAttached` is false.
+Case 2 either gets the same test under an alias or a recorded reason in this card's close note, and case 3 likewise.
+The fix changes who owns the lookup, for instance by keying the startup under every spelling it is known by, rather than adding a second lookup at `close()`.

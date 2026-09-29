@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: moot
 ---
 
 # An attach after `close()` of a starting session can await the torn-down startup and fail instead of starting afresh
@@ -14,3 +15,8 @@ If `close(K)` lands during a start whose `adapter.start()` does not settle promp
 Judged not worth blocking on: every real adapter's `start()` rejects promptly once its child is killed, as far as anyone has observed, so the window is as long as a kill.
 
 Done when a test holds a start open past its disposal (`FakeAdapterFactory` `holdStart`), closes it, attaches the same ref, and the attach resolves with a new adapter -- red first -- or when a measurement on all three backends shows `start()` settling at dispose and this card closes `--moot` with that evidence.
+
+## Close note
+
+Duplicate of OW-14, and both are superseded by OW-bulanu (landed 2026-09-29): `close()` now retires the startup it flags from `#attaching` and `container.starting` before its first await, through the single `#retire`, so an attach after it starts afresh.
+This card's own done-condition is met by "starts afresh for an attach that follows a close of a session whose start outlives its disposal" in `src/server/http/session-manager.test.ts`: `holdStart` holds the start past its disposal, and the re-attach resolves with a new adapter; on the previous `main` it rejected `UnknownSessionError`.
