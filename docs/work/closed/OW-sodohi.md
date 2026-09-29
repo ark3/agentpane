@@ -1,5 +1,6 @@
 ---
 labels: [change, sweep-0929]
+closed: done
 ---
 
 # The server sends nothing under a handle it lets go, so add an unsequenced ended event where close() and #forkOnto forget it, and move close()'s sessions-changed to the same run
@@ -49,3 +50,19 @@ Tests red first, then green:
 - in `src/client/session-state.test.ts`, `ended` drops the view under its handle whether its handle's last `seq` was contiguous or not, and leaves other views alone;
 - in `src/client/controller.test.ts`, a `detach()` of a session with nothing on disk whose `ended` lands before the close answers never issues a preview read.
 `bun run check` passes.
+
+## Close note
+
+Built as the card asked, landed on main in three commits (server+client+tests, docs, stale comments).
+`ServerEvent` in `src/shared/protocol.ts` gains `ended` (session, handle, no seq); `Broadcaster.ended` sends it without touching `#seq`.
+`close()` sends `ended` and `sessions-changed` in the synchronous run where it forgets the handle, no longer after the disposal; a close that finds no container sends neither, and one that finds a container still starting does send `ended` under a handle no snapshot went out for, which every consumer ignores (D26 point 1 keys on "no container").
+`#forkOnto` sends `ended` for the parent's handle between `forget` and `sessionsChanged`; `disposeAll()` sends nothing, with a comment saying why.
+`reduceServerEvent` drops the view on `ended` before its seq check and returns the state unchanged for a handle with no view.
+The browser interim is a `detaching` set of ref keys in `src/client/controller.ts` that gates `loadPreview` while `detach()`'s close is out, released before `detach()` publishes; OW-lilami retires it with the no-disk exit.
+Known cost of that interim, found by the adversarial read and left: it also holds an on-disk session's pane on detached-loading until the close answers (bounded by the kill grace), and an Attach clicked during a no-disk close still lands on the empty preview once its attach fails -- `gone` in OW-lilami settles that.
+Beyond the card, each justified at review: the controller skips `refreshForkPoints` on `ended` (a dropped streaming view read as a turn ending and fired a fork-points read that could only 409), and `src/emacs/helper.ts` returns early on `ended` after the reducer so it does not fall into a switch whose `state.sessions[handle]!` is false; the helper's attachment still goes through `dropDead` on the following `sessions-changed` until OW-likopo.
+`SseTestClient#accept` skips `ended` like `sessions-changed`.
+Tests, each seen red before the fix: close writes `ended` then `sessions-changed` while `holdDispose` holds the disposal; a parked-fork close writes neither (passed before, pins it); a Pi fork writes exactly `["ended"]` under the parent's handle (the three fork tests the card named, plus three more session-manager tests that now see the parent's or a starting container's `ended`); the reducer drops views at seq 3 and 7 and leaves a third alone; controller `detach()` of a no-disk session whose `ended` lands first never reads a preview; no fork-points read on `ended`; the broadcaster's `ended` leaves `seqOf` at 0.
+The vertical-slice OW-suhoto test now asserts the onlooker keeps the parent selected with no live view.
+Docs: D3 lists `ended`, D11 says it alone carries no seq, D21's D26 note says "until OW-sodohi", `docs/WORKSTREAMS.md`'s fork sentence gains the parent's `ended` on Pi; comments made false by `ended` in `dropDead`, `replaceSessionSummaries`, `setSessionCompaction` and `compact()` corrected.
+`bun run check` (1518 tests) and `bun run test:browser` (26) pass on main.
