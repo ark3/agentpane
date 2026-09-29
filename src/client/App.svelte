@@ -1444,6 +1444,13 @@
 
 	{#if detachedPane}
 		<div class="prompt attach">
+			<!-- A background read of this pane's preview failed with the stream up
+			     (OW-bilogo). Here and not in the error slot, which no gesture
+			     behind that read owns; the controller drops it once a read
+			     succeeds or the selection moves. -->
+			{#if view.previewFailure}
+				<p class="warning" role="status">Couldn't load the transcript: {view.previewFailure.message}</p>
+			{/if}
 			<button type="button" onclick={() => void attachSelected()}>Attach</button>
 		</div>
 	{:else}

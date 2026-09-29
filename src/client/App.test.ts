@@ -1052,6 +1052,23 @@ describe("App", () => {
 		expect(controller.selected).toEqual([piSession]);
 	});
 
+	// A background read that failed with the stream up (OW-bilogo): the pane
+	// says so where the user is looking, and the error slot stays out of it.
+	it("draws a failed preview read's line above the loading pane's Attach button, not in the error slot", async () => {
+		const controller = new FakeController(view({
+			state: state({ selected: piSession, summaries: [summary(piSession, "Stored")] }),
+			previewFailure: { ref: piSession, message: "server said no" },
+		}));
+		render(App, { props: { controller } });
+		await tick();
+
+		const attach = screen.getByRole("button", { name: "Attach" });
+		const line = screen.getByText("Couldn't load the transcript: server said no");
+		expect(line.parentElement).toBe(attach.parentElement);
+		expect(line.compareDocumentPosition(attach) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
 	it("renders a preview through the same transcript DOM as an attached session", async () => {
 		// The point of mapping preview turns to messages (OW-50): one renderer,
 		// so the two paths cannot drift. Same content in, same DOM out.
