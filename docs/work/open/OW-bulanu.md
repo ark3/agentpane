@@ -35,6 +35,14 @@ A deeper version would create the container before the index lookup and retire `
 
 D25 decision 1 in `docs/DESIGN.md` names OW-vodinu as one of its known exceptions; that sentence goes in the same change.
 
+## Before the implementer
+
+Dispatch a cold-read reader before any implementer, on top of the usual check of this card against the source, and amend this card with what it finds before dispatching the change.
+This card came from a sweep's reading and nothing in it was run, and OW-letevu (closed 2026-09-29) has since removed the request cleanup from `close()` and `disposeAll()`, so the ground under it has moved.
+The reader answers two questions, each from the code:
+1. Does one retirement point still cover every writer of whether a startup is live — every site that sets or clears `container.starting`, adds to or deletes from `#attaching`, sets `PendingStart.torndown`, or disposes an adapter — as the code stands after OW-letevu, or has a writer been missed or gone?
+2. Does the proposed shape stay clear of the canonical-name arbitration in `#start` (OW-fumegi), and, if the deeper version is still on the table, what exactly breaks in that arbitration if the container is created before the index lookup?
+
 ## Done when
 
 Tests in `src/server/http/session-manager.test.ts` that fail before the change and pass after:
