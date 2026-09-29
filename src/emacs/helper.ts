@@ -347,7 +347,14 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * `sessions/close` is out. The buffer comes back on `g`. An attach whose
 	 * snapshot is still on its way when the gap lands needs nothing here:
 	 * that snapshot forms the view again and goes out as its first
-	 * notification. One whose snapshot arrived before the gap needs nothing
+	 * notification, unless the reply lands before it and finds that a
+	 * snapshot under the handle came since the attach went out -- one from
+	 * elsewhere, another client's attach or an opening snapshot, ahead of
+	 * the server handling this attach -- which the reply takes for this
+	 * attach's own, taken by the gap: it goes out with nothing recorded, and
+	 * the snapshot that follows answers nothing. That takes a lost or
+	 * malformed frame for the gap, and leaves the buffer not attached, which
+	 * point 5 accepts. One whose snapshot arrived before the gap needs nothing
 	 * either: sent, that snapshot attached the buffer, which the
 	 * `session/detached` here lets go of before the reply; not sent, since
 	 * it named another ref than the attach asked for, it recorded nothing,
@@ -496,8 +503,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// answered by now is answered here, by the view the reducer holds
 				// under the reply's handle: the session was live, or its snapshot
 				// came under another ref than the one asked for. With no view, a
-				// snapshot under the handle since the attach went out means a gap
-				// took it (`detachGapped`, OW-tifiva), and nothing is recorded; else
+				// snapshot under the handle since the attach went out is taken for
+				// this attach's own, which a gap took (`detachGapped`, OW-tifiva),
+				// and nothing is recorded -- though it may have been one from
+				// elsewhere, and this attach's own still on its way, which
+				// `detachGapped` names; else
 				// the snapshot is on its way, and the reply waits for it, so that it
 				// never reaches Emacs ahead of the snapshot that attaches the buffer.
 				// The wait ends with that snapshot (`introduce`), a detach of the

@@ -172,13 +172,18 @@
  *   from the `session/snapshot` that answers the attach, carrying
  *   `askedFor`, and only then (OW-rebawa). The reply goes out after that
  *   snapshot, waiting for it where it is still on its way, so a reply
- *   that arrives with no snapshot having answered its attach means none
- *   will: a `seq` gap took the session's view after its snapshot came (for
- *   the ref asked for, that snapshot and a `session/detached` both went
- *   out first; for another ref, neither did), a `sessions/detach` of the
- *   asked-for ref landed while the attach was in flight, the session's
- *   handle left the listing before its snapshot came, or the helper is
- *   exiting.
+ *   that arrives with no snapshot having answered its attach means the
+ *   helper expects none: a `seq` gap took the session's view after a
+ *   snapshot under its handle came (for the ref asked for, that snapshot
+ *   and a `session/detached` both went out first; for another ref,
+ *   neither did), a `sessions/detach` of the asked-for ref landed while
+ *   the attach was in flight, the session's handle left the listing
+ *   before its snapshot came, or the helper is exiting. The first can
+ *   misjudge: a snapshot from elsewhere under the handle, ahead of the
+ *   server handling this attach, then a gap, then the reply, leaves this
+ *   attach's own snapshot to arrive after the reply and answer nothing.
+ *   That takes a lost or malformed frame, and the session ends not
+ *   attached, as after any gap (D25).
  *   Opens the event stream if it is not open yet, as `sessions/list` does,
  *   and from here on the per-session notifications below flow for this
  *   session.
@@ -203,8 +208,9 @@
  *   session goes on running on the server. Sent when Emacs stops showing a
  *   session. With `handle`, the notifications under that handle stop,
  *   whatever ref `session` is; without, those for the session last named
- *   `session` to Emacs; and either way an attach of `session` no snapshot
- *   has answered yet, in flight or answered under another ref.
+ *   `session` to Emacs; and either way every attach of `session`, from
+ *   whichever buffer, that no snapshot has answered and whose reply has
+ *   not gone out yet: its reply goes out, and nothing answers it.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the

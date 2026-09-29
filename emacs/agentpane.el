@@ -2573,12 +2573,18 @@ changes nothing.  A buffer that never sent one holds nothing in the
 helper, and its ref may be a live buffer's too: a preview of the ref a
 live buffer's session was since renamed onto, left beside it rather than
 merged (D24).  Sent from there, the detach silenced the live one.
-One case stays: a buffer holding no handle, whose attach no snapshot
+Three cases stay.  A buffer holding no handle, whose attach no snapshot
 answered -- it failed outright, with an error, a timeout or a quit --
 and whose ref another buffer's session was since renamed onto, silences
 that one when killed, the helper having last named that session by the
 ref.  One whose attach a snapshot answered absorbed that other buffer
-\(`agentpane--attach-by'), and detaches by the handle.
+\(`agentpane--attach-by'), and detaches by the handle -- unless it was
+killed after the helper sent that snapshot and before Emacs handled it:
+holding no handle, it detaches by the ref, which drops the attachment
+the snapshot recorded.  And a detach by the ref gives up every attach of
+that ref still waiting in the helper, another buffer's on the same ref
+too -- a preview beside a buffer renamed onto its ref -- whose reply then
+comes with no snapshot.
 
 Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that

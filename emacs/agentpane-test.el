@@ -1506,6 +1506,22 @@ sends nothing more: the snapshot that merges is this buffer's own."
         (should-not (buffer-live-p holder))
         (should-not sent)))))
 
+(ert-deftest agentpane-test-attach-now-with-no-snapshot-signals ()
+  "A synchronous attach whose reply comes with no snapshot having attached
+the buffer -- which the helper sends only once it expects none
+\(`sessions/attach' in src/emacs/helper.ts) -- signals, and leaves the
+buffer unattached, so `agentpane-new-session' and the model and effort
+pickers read nothing from a session this buffer does not hold (OW-rebawa)."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (cl-letf (((symbol-function 'jsonrpc-request)
+                 (lambda (&rest _) (list :ref ref :handle "h1"))))
+        (agentpane-test--with-session ref
+          (should (equal (cadr (should-error (agentpane--attach-now) :type 'user-error))
+                         "The attach answered, but the session did not attach"))
+          (should-not (agentpane--attached-p))
+          (should-not agentpane--handle))))))
+
 (ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-drafts ()
   "When an attach reply merges the buffer holding its handle into the one
 that attached, the other's prompt-region draft follows the survivor's own,
