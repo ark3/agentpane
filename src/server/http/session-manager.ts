@@ -981,6 +981,21 @@ export class SessionManager {
 			const canonicalSession = this.#lookup(summary.ref);
 			const handed = canonicalSession && this.#handOver(pending, canonicalSession);
 			if (handed) return handed;
+			// A startup that has claimed a container and still answers to the
+			// file's name stands in for that container when the table no longer
+			// has it under the name: a start that failed, reaping its adapter
+			// after its container left the table or dropped the name. This one
+			// joins its outcome, as `#handOver` joins a winner's, rather than
+			// spawning beside that adapter (OW-kamave). Its keys are held there
+			// alone, not made names of that container. A rival still in its own
+			// lookup has claimed nothing, and arbitrates for itself when it gets
+			// here.
+			for (const rival of this.#attaching.get(sessionKey(summary.ref)) ?? []) {
+				if (rival === pending || !rival.session) continue;
+				this.#retire(pending);
+				for (const key of pending.keys) this.#holdKey(rival, key);
+				return rival.promise;
+			}
 			session = this.#container(summary.ref, {
 				cwd: summary.cwd,
 				virtual: false,
@@ -1100,10 +1115,11 @@ export class SessionManager {
 			// gave it, a rename's and the index's canonical ref among them, while
 			// the adapter below is still being reaped. The startup does not: it
 			// has been held under each since the container gained it, and keeps
-			// them until retired, so an attach under any of them joins a startup
-			// already held there -- this failure, unless an earlier one holds the
-			// name too -- rather than beginning one beside that adapter, and a
-			// `close()` finds it (OW-yufazo, OW-kamave).
+			// them until retired, so a `close()` under any of them finds it. An
+			// attach under one joins the earliest startup held there: this one,
+			// or one still in its index lookup, which joins this one in turn at
+			// `#start`'s arbitration once the lookup names this file. Either way
+			// nothing spawns beside that adapter (OW-yufazo, OW-kamave).
 			if (existing) {
 				for (const name of [...bound.names]) {
 					if (namesBeforeStart.has(name)) continue;

@@ -2479,6 +2479,49 @@ describe("teardown racing a startup", () => {
 			return { factory, disposing: disposing.promise, releaseDispose: () => release.resolve() };
 		}
 
+		it("joins the failure when the attach was still in its index lookup as the failed start claimed the file", async () => {
+			const lookupOfC = deferred();
+			const { factory, disposing, releaseDispose } = failingFirst();
+			sessions = new SessionManager({ index: canonicalisingToC(lookupOfC.promise), adapters: { pi: factory } }, broadcaster);
+
+			const throughC = sessions.attach(C);
+			await settle();
+			const throughRef = sessions.attach(REF);
+			await disposing;
+			lookupOfC.resolve();
+			await settle();
+			await settle();
+
+			expect(factory.created).toHaveLength(1);
+			expect(factory.created[0]?.disposed).toBe(false);
+
+			releaseDispose();
+			await expect(throughRef).rejects.toThrow("start failed");
+			await expect(throughC).rejects.toThrow();
+			expect(factory.created).toHaveLength(1);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+
+		it("joins the failure when the attach arrives under a spelling the index canonicalises to the failed file", async () => {
+			const { factory, disposing, releaseDispose } = failingFirst();
+			sessions = new SessionManager({ index: canonicalisingToC(), adapters: { pi: factory } }, broadcaster);
+
+			const throughC = sessions.attach(C);
+			await disposing;
+			const throughRef = sessions.attach(REF);
+			await settle();
+			await settle();
+
+			expect(factory.created).toHaveLength(1);
+			expect(factory.created[0]?.disposed).toBe(false);
+
+			releaseDispose();
+			await expect(throughC).rejects.toThrow("start failed");
+			await expect(throughRef).rejects.toThrow();
+			expect(factory.created).toHaveLength(1);
+			expect(sessions.liveRefs()).toEqual([]);
+		});
+
 		it("joins the failure when the attach arrives under the canonical name a failed alias's start claimed", async () => {
 			// C was never asked for: the failed startup holds it only because its
 			// container was named by it (`#bind`).
