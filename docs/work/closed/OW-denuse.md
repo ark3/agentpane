@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: moot
 ---
 
 # Decide whether the server says on the stream that a handle has ended, retiring the listing both clients read to infer it
@@ -34,3 +35,8 @@ Whatever the answer, the Emacs parity rule in `AGENTS.md` ("Both clients") gover
 
 The decision is recorded in `docs/DESIGN.md`, as an amendment to D25 or a new decision, and, if it adopts the event, its implementation cards are filed -- one carrying the event onto both wires and one per client blocked by it, the Emacs one labelled `emacs`.
 Whichever way it goes, the record says what becomes of cases 1 and 2 above.
+
+## Close note
+
+Folded into OW-zavehi on 2026-09-29, at the owner's choice to decide both in one session: this card asked whether the server says on the stream that a handle has ended, and OW-zavehi asked how a client learns a selected session is gone, which are one question about who owns "this session or handle has ended".
+OW-zavehi now carries this card's proposal (the per-handle terminal event, as its proposal A), the three cases the listing inference misses, and the D25 sentence it would amend.

@@ -1,11 +1,38 @@
 ---
-labels: [defect]
+labels: [question, sweep-0929]
 ---
 
-# Two records answer which startup a name belongs to -- a container's starting and #attaching -- so a close under a name that both hold stops only one startup and the other publishes after the DELETE
+# Decide who owns a startup's identity while it is in flight, since three cards in a row have patched SessionManager's name-keyed records and each review found the next case
 
 Found 2026-09-29 by the adversarial read of OW-yufazo's fix, by probe scripts run against both that fix and the `main` before it; every case below was reproduced on both, and none was introduced by OW-yufazo.
 In service of the rule OW-yufazo served: a `close()` that returned leaves no startup under any of the session's names on its way to publishing.
+
+## Reframed 2026-09-29, before anyone executed it
+
+The owner reframed this card after reviewing OW-bulanu and OW-yufazo.
+Its diagnosis below stands; what changed is the question it asks.
+
+This is the third card in a row on one piece of state: OW-bulanu gave a startup one retirement point (`#retire`), OW-yufazo then added multi-key holds (`PendingStart.keys`, `#hold`), `#afterDisposal` and a no-displace guard in `#hold`, and its adversarial read filed this card with three more cases already on the `main` before it.
+`src/server/http/session-manager.ts` grew from 1291 lines to 1429 across those two cards, and now answers "which startup is this name's" from five overlapping records: `#sessions`, `#names` with `ManagedSession.starting`, `#attaching`, `#disposing` and `#pendingForks`.
+Each fix was correct and tested, and each left a guard at the site whose read named the next case; that is the pattern the `sweep-0929` stream exists to end, so this card must not be worked as the fourth patch.
+
+The root is visible in the cases below: `#start` arbitrates on the container (`#lookup`, then `#handOver`) only after its index lookup, so until then a startup has no identity anyone else can find, only the spellings it was asked under.
+So the question is not only which record owns name → startups, as the original "Done when" put it, but what a startup in flight *is* from the first attach to publish or failure, and which one owner answers for it — its names, its disposal, and a close under any of them.
+
+OW-bulanu's cold read rejected one answer, creating the container before the index lookup, and the reasons are recorded in OW-bulanu's "What the cold read found": the loser's container left in `#sessions` as a duplicate `list()` row, waiters bound to startups that have validated nothing, a `cwd` nobody knows before the lookup, and the inversion of the "No await separates the arbitration above from this claim" invariant in `#start`.
+Any design this card chooses answers each of those, whether or not it resembles that one.
+
+## Before any implementer
+
+Dispatch a cold-read reader first, asked to map every writer and reader of the five records above as the code stands, and to say which of them would remain under the owner it proposes.
+Amend this card with its map before choosing.
+
+## Done when (replaces the original below)
+
+The decision is recorded in `docs/DESIGN.md`, as an amendment to D24 or a new decision, naming the one owner of a startup in flight, the records it retires, and how it answers OW-bulanu's four objections.
+The three cases below are tests in `src/server/http/session-manager.test.ts` that go red first and green after, with the assertions the original "Done when" names; the tests OW-bulanu and OW-yufazo added keep passing without edits to their assertions.
+The `#hold` no-displace guard is gone, and so is every other guard the new owner makes redundant, each named in the close note.
+If the change is too large for one card, this card closes on the decision and files the implementation cards, labelled `sweep-0929`.
 
 ## The ownership problem
 
@@ -25,7 +52,7 @@ OW-yufazo made `#hold` refuse to displace another live startup rather than chang
 3. A parked fork recipe survives a close under the renamed name after a failed fork start.
    A fork is parked in `#pendingForks` under `forkRef`, its start renames it to T and fails, and `close(T)` lands during the reaping: `parkedKeys` in `close()` is `sessionKey(ref)` plus `session.names`, and with no container that misses `forkRef`, so a later `attach(forkRef)` forks the parent again, contradicting the `#pendingForks` docblock's "`close()` on that ref discards it".
 
-## Done when
+## Done when (original, superseded by the reframed one above)
 
 Each case above is a test in `src/server/http/session-manager.test.ts` that goes red first and green after, asserting that the close stops every startup under the name (the attach rejects, one adapter was created, `liveRefs()` is empty) or, for case 3, that `attach(forkRef)` after the close does not fork again.
 The fix makes one record own name → startups, so that `close()` consults a single place that can hold more than one startup per name, and the `#hold` no-displace guard OW-yufazo added is gone.
