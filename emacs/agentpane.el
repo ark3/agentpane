@@ -651,21 +651,19 @@ ref as below; else nil.  A `session/detached' is only ever about the
 buffer holding its handle: no buffer holding the ref alone ever held it.
 Only a snapshot attaches the buffer it finds (`agentpane--attach-by'),
 and the helper sends nothing under a handle before the snapshot that
-introduces it (`isAttached' in src/emacs/helper.ts).
+introduces it (`introduce' in src/emacs/helper.ts).
 
-By the ref, a buffer holding no handle, which for a snapshot is one whose
-attach it answers, since the helper sends nothing for a session no
-buffer asked to attach.  The attach's snapshot and its reply are
-unordered (D2), and the reply binds nothing, so the snapshot finds the
-buffer that asked by a ref.  An attach answered under the ref it asked
-for is found by `session'.  One answered under another ref is found by
-the `askedFor' its snapshot carries, the ref that attach asked for
-\(`sessions/attach' in src/emacs/helper.ts): only in a buffer that sent an
-attach and holds no handle, and ahead of the match by the handle, since
-another buffer may hold that handle, which the one that asked then
-absorbs (`agentpane--attach-by'), and ahead of the match by `session',
-which a buffer only previewing the new ref, an attached buffer's session
-having been renamed onto it, would win.
+The snapshot that answers an attach carries `askedFor', the ref that
+attach asked for, whether or not the snapshot names another
+\(`sessions/attach' in src/emacs/helper.ts), and is about a buffer holding
+that ref that sent an attach and holds no handle: the one that asked,
+since the reply binds nothing.  That comes ahead of the match by the
+handle, since another buffer may hold the handle -- one whose session
+was renamed onto that ref, or one that attached an alias of it -- which
+the one that asked then absorbs (`agentpane--attach-by'), and ahead of
+the match by `session', which a buffer only previewing a ref an attached
+buffer's session was renamed onto would win.  By the ref alone, a buffer
+holding no handle.
 
 A snapshot also moves a buffer from one handle to another by the ref,
 where the buffer holds a handle: the snapshot that answers the buffer's
@@ -707,8 +705,7 @@ request as an \"anxious continuation\" while the helper died, and handed
 on after its teardown, to bind the buffer to no helper or to the next one
 \(OW-kifuhi).  So the helper's notifications alone say it (OW-rebawa).
 Where another buffer holds HANDLE, this one, found by the `askedFor' of
-an attach answered under another ref than it asked for, absorbs it; see
-`agentpane--absorb'."
+the attach the snapshot answers, absorbs it; see `agentpane--absorb'."
   (let ((other (and handle (agentpane--buffer-holding handle))))
     (when (and other (not (eq other (current-buffer))))
       (agentpane--absorb other)))
@@ -2460,11 +2457,13 @@ From here on the helper sends this session's notifications, starting with a
 nothing, and calls THEN only where that snapshot has attached the buffer
 by then, and FAILED otherwise, saying so, so the waiters act on whether
 the helper feeds the buffer rather than on the reply (OW-rebawa).  The
-helper sends the snapshot it holds before the reply; one it did not hold
-yet reaches the buffer after it, and attaches it then, with the waiters
-already failed.  An attach whose snapshot never reaches the buffer -- a
-`seq' gap took it (OW-tifiva), or the helper died (OW-kifuhi) -- ends
-not attached, and a `g' attaches again.
+helper writes the reply only after the snapshot that answers the attach,
+or once none will (`sessions/attach' in src/emacs/helper.ts), and
+jsonrpc.el may hand the reply on later than it came but never earlier, so
+at the reply the buffer is attached exactly when the helper holds an
+attachment for it.  An attach whose snapshot never reaches the buffer --
+a `seq' gap took it (OW-tifiva), the session went before its snapshot
+came, or the helper died (OW-kifuhi) -- ends not attached.
 
 One attach at a time per buffer: while one is in flight nothing is sent,
 and THEN or FAILED waits on that one's answer instead.  Two in flight
@@ -2485,8 +2484,8 @@ signalled instead; see `agentpane--closing'."
                         (lambda (_)
                           (let ((attached (agentpane--attached-p)))
                             (unless attached
-                              (message "agentpane: the attach answered, but nothing attached \
-this buffer; g attaches again"))
+                              (message "agentpane: the attach answered, but the session \
+did not attach"))
                             (agentpane--attach-answered attached)))
                         t
                         (lambda () (agentpane--attach-answered nil))
@@ -2513,9 +2512,9 @@ session's live adapter; see `agentpane-new-session'.  It blocks Emacs for
 up to `agentpane--spawn-timeout', and a timeout, an error or a quit
 signals, leaving the buffer unattached.  So does a reply by which no
 snapshot has attached the buffer, since only a snapshot does
-\(`agentpane--attach-by'): the helper sends the snapshot it holds before
-the reply, and a notification that arrives while this waits is handled
-at once.
+\(`agentpane--attach-by'): the helper writes the reply after the snapshot
+that answers the attach, and a notification that arrives while this
+waits is handled at once.
 
 While an asynchronous attach is in flight it refuses, and sends nothing:
 a second attach beside that one is what `agentpane--attach' exists to
@@ -2532,7 +2531,7 @@ close is in flight; see `agentpane--closing'."
                    (list :session (agentpane--ref agentpane--session))
                    :timeout agentpane--spawn-timeout)
   (unless (agentpane--attached-p)
-    (user-error "The attach answered, but nothing attached this buffer; g attaches again")))
+    (user-error "The attach answered, but the session did not attach")))
 
 (defun agentpane--attached-then (fn &optional failed)
   "Call FN in this buffer once its session is attached, attaching it first
@@ -2561,11 +2560,11 @@ running, as closing a browser tab does.
 It carries the handle this buffer holds, and the helper stops what it
 sends under that handle, whatever ref the buffer last heard (OW-wedeli).
 One from a buffer holding no handle names only its ref, and the helper
-stops whatever it last named to Emacs by that ref, and an attach of that
-ref it answered under another ref whose snapshot carrying `askedFor' it
-has not yet sent -- once sent, that snapshot gave this buffer the handle,
-unless the buffer was killed before handling it, and then the helper
-goes on sending under that handle.  So it is sent only from a buffer that
+stops whatever it last named to Emacs by that ref, and gives up any
+attach of that ref no snapshot has answered yet -- once sent, that
+snapshot gave this buffer the handle, unless the buffer was killed before
+handling it, and then the helper goes on sending under that handle.  So
+it is sent only from a buffer that
 has sent an attach, whatever this buffer believes of that attach: one
 that failed here -- timed out, or quit in `agentpane-new-session' -- may
 still have succeeded in the helper, which
@@ -2574,9 +2573,12 @@ changes nothing.  A buffer that never sent one holds nothing in the
 helper, and its ref may be a live buffer's too: a preview of the ref a
 live buffer's session was since renamed onto, left beside it rather than
 merged (D24).  Sent from there, the detach silenced the live one.
-One case stays: a buffer whose attach failed here but succeeded in the
-helper, under a handle another buffer holds, still silences that one when
-killed, which takes two buffers on one session and a timeout or a quit.
+One case stays: a buffer holding no handle, whose attach no snapshot
+answered -- it failed outright, with an error, a timeout or a quit --
+and whose ref another buffer's session was since renamed onto, silences
+that one when killed, the helper having last named that session by the
+ref.  One whose attach a snapshot answered absorbed that other buffer
+\(`agentpane--attach-by'), and detaches by the handle.
 
 Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that

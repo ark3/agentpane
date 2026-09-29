@@ -112,6 +112,14 @@ function fetchFor(routes: Record<string, Route>) {
 	return { fetch: fetch as unknown as typeof globalThis.fetch, calls };
 }
 
+/**
+ * Let the helper take what was just sent and answer what it can: an attach
+ * whose reply the fake fetch gives at once is then waiting for its snapshot,
+ * which the server broadcasts before it answers (OW-rebawa), and which a
+ * test emits next.
+ */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
 /** Whether `promise` settles within 50ms, so a helper that never exits fails its test rather than timing it out. */
 function settled(promise: Promise<unknown>): Promise<"resolved" | "pending"> {
 	return Promise.race([promise.then(() => "resolved" as const), new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 50))]);
@@ -257,13 +265,13 @@ describe("notifications", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex } });
-		await io.until(1);
-		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: summary(codex) });
+		await tick();
 		expect(streamsOpenAtAttach).toBe(1);
 		expect(calls).toHaveLength(1);
 
 		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: messages.slice(0, tail), isStreaming: true, compaction: null, model: "m", effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
+		expect(io.out[1]).toEqual({ jsonrpc: "2.0", id: 1, result: summary(codex) });
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		const partial = { ...final, content: [{ type: "text", text: "par" }], stopReason: "pending" } as PaneMessage;
 		source.emit({ type: "upsert", session: codex, handle: h(codex), seq: 2, index: tail, message: partial });
@@ -284,7 +292,7 @@ describe("notifications", () => {
 	it("detaches a session whose seq gaps, attaching nothing, and says nothing more under it until Emacs attaches it again (OW-filuge)", async () => {
 		const { io, source, calls } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
 
@@ -302,7 +310,7 @@ describe("notifications", () => {
 
 		// `g`: the attach broadcasts a snapshot, which forms the view again.
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(4);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(5);
 		expect(io.notifications()[2]).toMatchObject({ method: "session/snapshot", params: { session: pi, handle: h(pi), isStreaming: true } });
@@ -314,18 +322,108 @@ describe("notifications", () => {
 		let attaches = 0;
 		const { io, source } = start({ [`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(attaches++ === 0 ? pi : renamed, h(pi)) }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "status", session: renamed, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(3);
 
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(4);
+		await tick();
 		source.emit({ type: "snapshot", session: renamed, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(5);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.slice(2).map((message) => message["method"] ?? message["id"])).toEqual(["session/detached", 2, "session/snapshot"]);
-		expect(io.out[4]).toMatchObject({ params: { session: renamed, handle: h(pi), isStreaming: true, askedFor: pi } });
+		expect(io.out.slice(1).map((message) => message["method"] ?? message["id"])).toEqual(["session/detached", 1, "session/snapshot", 2]);
+		expect(io.out[3]).toMatchObject({ params: { session: renamed, handle: h(pi), isStreaming: true, askedFor: pi } });
+	});
+
+	// The server broadcasts an attach's snapshot before it answers, but the
+	// stream and the REST response are unordered (D2): on the fake adapters
+	// the reply reached a client first in about half the attaches, or more. Emacs takes the reply to mean the attach is over, attached or
+	// not, so the reply waits for the snapshot still on its way (OW-rebawa).
+	it("holds the reply of an attach that lands ahead of its snapshot until the snapshot, and writes it after (OW-rebawa)", async () => {
+		const { io, source } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(2);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), askedFor: pi } });
+	});
+
+	it("holds the reply of an attach answered under another ref ahead of its snapshot until the snapshot, and writes it after (OW-rebawa)", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(2);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
+		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), askedFor: alias } });
+	});
+
+	it("tags the snapshot that answers an attach with the ref it asked for, the same ref as the session's included, so it reaches the buffer that asked and not one already holding the handle (OW-rebawa)", async () => {
+		// X attached a `virtual` id, and its session was renamed onto pi; P,
+		// previewing pi, attaches it. Untagged, the snapshot answering P went by
+		// its handle to X, and P never attached.
+		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			...attachRoutes(virtual),
+			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, h(virtual)) }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
+		await tick();
+		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(3);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await io.until(5);
+		expect(io.out.slice(3).map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 2]);
+		expect(io.out[3]).toMatchObject({ params: { session: pi, handle: h(virtual), askedFor: pi } });
+	});
+
+	it("answers each attach waiting on one handle with a snapshot of its own, tagged with the ref it asked for, before their replies (OW-rebawa)", async () => {
+		// A attaches an alias and B the session's own ref; both replies reach
+		// the helper before the snapshot. Each buffer is sent the snapshot that
+		// attaches it, and agentpane-mode merges them.
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }),
+			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi) }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await io.until(4);
+		await tick();
+		expect(io.out.slice(0, 2).map((message) => (message["params"] as { askedFor?: SessionRef }).askedFor)).toEqual([alias, pi]);
+		expect(new Set(io.out.slice(2).map((message) => message["id"]))).toEqual(new Set([1, 2]));
+		expect(io.out).toHaveLength(4);
+	});
+
+	it("releases a reply waiting for a snapshot under a handle the listing no longer has, attaching nothing (OW-rebawa)", async () => {
+		const { io, source } = start({ ...attachRoutes(pi), [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		source.emit({ type: "sessions-changed" });
+		await io.until(2);
+		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await tick();
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["sessions/changed", 1]);
+	});
+
+	it("releases a reply waiting for a snapshot when the stream drops (OW-rebawa)", async () => {
+		const { io, source, done } = start(attachRoutes(pi));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		expect(io.out).toEqual([]);
+		source.opens[0]!.onDisconnect(true);
+		expect(await settled(done)).toBe("resolved");
+		await tick();
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1]);
 	});
 
 	it("records no attachment for an attach answered under another ref whose snapshot a gap took before the reply (OW-tifiva)", async () => {
@@ -344,7 +442,7 @@ describe("notifications", () => {
 			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		source.emit({ type: "sessions-changed" });
 		await io.until(2);
@@ -362,7 +460,7 @@ describe("notifications", () => {
 			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(3);
+		await tick();
 		source.emit({ type: "sessions-changed" });
 		await io.until(4);
 		await new Promise((resolve) => setTimeout(resolve, 5));
@@ -373,33 +471,33 @@ describe("notifications", () => {
 		// A buffer killed and opened again: the detach drops the attachment
 		// and leaves the reducer's view, and the attach's own snapshot is still
 		// on its way when the reply lands. The reply attaches nothing in Emacs,
-		// so the snapshot that does must go before it.
+		// so the snapshot that does goes before it, tagged with the ref asked
+		// for, rather than the reply waiting on one that the view already is.
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: h(pi) } });
 		await io.until(3);
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/attach", params: { session: pi } });
-		await io.until(5);
+		await tick();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.slice(3).map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 3]);
-		expect(io.out[3]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true } });
-		expect(io.out[3]!["params"]).not.toHaveProperty("askedFor");
+		expect(io.out[3]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true, askedFor: pi } });
 	});
 
 	it("says nothing for a session Emacs never attached, and nothing more after sessions/close", async () => {
 		const { io, source } = start({ ...attachRoutes(pi), [`DELETE ${ROUTES.session(pi)}`]: noContent });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "status", session: codex, handle: h(codex), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
 		expect(io.notifications()).toEqual([
-			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] } },
+			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), askedFor: pi, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] } },
 		]);
 
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi } });
@@ -421,9 +519,12 @@ describe("notifications", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: codex } });
-		await io.until(1);
+		await tick();
+		// The reply waits for the attach's snapshot, and the detach ends that wait.
+		expect(io.out).toEqual([]);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: codex } });
 		await io.until(2);
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: summary(codex) });
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
 		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 
@@ -443,7 +544,7 @@ describe("notifications", () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(3);
@@ -456,7 +557,7 @@ describe("notifications", () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(3);
@@ -473,7 +574,7 @@ describe("notifications", () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(3);
@@ -490,11 +591,11 @@ describe("notifications", () => {
 			[`GET ${ROUTES.session(pi)}`]: () => (++attaches === 1 ? json({ session: summary(pi) }) : json({ error: "boom" }, 500)),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(3);
+		await tick();
 		expect(io.response(2)!["error"]).toBeDefined();
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(4);
@@ -515,7 +616,7 @@ describe("notifications", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(2);
+		await tick();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
 		expect(io.out[0]).toMatchObject({ params: { session: pi, handle: h(pi), isStreaming: true, askedFor: alias } });
@@ -529,26 +630,27 @@ describe("notifications", () => {
 		expect(io.out.slice(2).filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
 	});
 
-	it("tags the late snapshot of an attach answered under another ref when none had arrived by the reply, and nothing after it", async () => {
+	it("holds the reply of an attach answered under another ref until the snapshot none had sent by then, which it tags, and tags nothing after it", async () => {
 		// Until a snapshot introduces the view the reducer holds nothing under
 		// the handle, and forwards nothing: every other event for a view it does
 		// not hold leaves the state as it was. So the first thing sent under the
-		// handle is that snapshot.
+		// handle is that snapshot, and the reply follows it.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(1);
-		expect(io.out[0]).toMatchObject({ id: 1, result: { ref: pi, handle: h(pi) } });
+		await tick();
+		expect(io.out).toEqual([]);
 
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await tick();
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(4);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.map((message) => [message["method"] ?? message["id"], (message["params"] as { askedFor?: SessionRef } | undefined)?.askedFor])).toEqual([
-			[1, undefined],
 			["session/snapshot", alias],
+			[1, undefined],
 			["session/status", undefined],
 			["session/snapshot", undefined],
 		]);
@@ -557,32 +659,35 @@ describe("notifications", () => {
 	it("drops only the alias's own wait on a detach by that alias, so an attach of the canonical ref to the same handle is still fed", async () => {
 		// B attaches the canonical ref and A an alias of the same session; both
 		// replies land before the session's snapshot, and A is killed before it.
-		// A's wait, moved onto the handle by its reply, goes with it, and the
-		// snapshot answers B's by its ref, untagged.
+		// A's wait goes with it, its reply released, and the snapshot answers
+		// B's alone, tagged with B's ref.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }),
 			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi) }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias } });
-		await io.until(2);
+		await tick();
+		expect(io.out).toEqual([]);
 		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias } });
-		await io.until(3);
+		await io.until(2);
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
+		await tick();
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(5);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, 2, 3, "session/snapshot", "session/status"]);
-		expect(io.notifications().filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
+		expect(new Set(io.out.slice(0, 2).map((message) => message["id"]))).toEqual(new Set([2, 3]));
+		expect(io.out.slice(2).map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1, "session/status"]);
+		expect(io.notifications().map((message) => (message["params"] as { askedFor?: SessionRef }).askedFor)).toEqual([pi, undefined]);
 	});
 
 	it("stops on a sessions/detach by the ref asked for, from a buffer killed before the snapshot that would have named the handle", async () => {
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({ [`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi) }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(1);
+		await tick();
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: alias } });
 		await io.until(2);
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
@@ -600,16 +705,17 @@ describe("notifications", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(3);
+		await tick();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/snapshot", 1]);
-		expect(io.notifications().filter((message) => "askedFor" in (message["params"] as object))).toEqual([]);
+		// The first answered the attach, by the ref it asked for, and carries it.
+		expect(io.notifications().map((message) => (message["params"] as { askedFor?: SessionRef }).askedFor)).toEqual([virtual, undefined]);
 	});
 
 	it("passes status, error and an agent request through", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: "running", model: "m", effort: "low", unrestoredModel: null });
 		source.emit({ type: "error", session: pi, handle: h(pi), seq: 3, message: "boom", errorId: "e1" });
@@ -629,7 +735,7 @@ describe("notifications", () => {
 	it("passes a request's retraction through as session/requestResolved (OW-gusifo)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "request", session: pi, handle: h(pi), seq: 2, request: { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} } });
 		source.emit({ type: "request-resolved", session: pi, handle: h(pi), seq: 3, requestId: "r1" });
@@ -641,7 +747,7 @@ describe("notifications", () => {
 	it("passes the server's clear of the turn error through as session/errorCleared (OW-jopifu)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "error", session: pi, handle: h(pi), seq: 2, message: "boom", errorId: "e1" });
 		source.emit({ type: "error-cleared", session: pi, handle: h(pi), seq: 3 });
@@ -653,7 +759,7 @@ describe("notifications", () => {
 	it("passes a notice through as session/notice, not session/error (OW-tujiya)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		const notice = { kind: "configWarning", message: "unknown key", details: "see the docs", path: "/c.toml:3:5" };
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "notice", session: pi, handle: h(pi), seq: 2, notice });
@@ -665,7 +771,7 @@ describe("notifications", () => {
 	it("carries the notices the server's snapshot holds on every later session/snapshot (OW-tujiya, OW-bipume)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		const notice = { kind: "warning", message: "fallback metadata", details: null, path: null };
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "notice", session: pi, handle: h(pi), seq: 2, notice });
@@ -680,7 +786,7 @@ describe("notifications", () => {
 	it("carries the error, pending requests and notices the server's snapshot holds onto session/snapshot (OW-bipume)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		const request = { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} };
 		const notice = { kind: "configWarning", message: "unknown key", details: null, path: null };
 		// Raised before Emacs attached: no `error`, `request` or `notice` event reached it.
@@ -690,14 +796,14 @@ describe("notifications", () => {
 		expect(io.notifications()[0]).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", requests: [request], notices: [notice] },
+			params: { session: pi, handle: h(pi), askedFor: pi, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: "turn failed", errorId: "e1", requests: [request], notices: [notice] },
 		});
 	});
 
 	it("carries the recorded model a resume could not restore on session/snapshot, and its clearing on session/status (OW-jitoni)", async () => {
 		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded", error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: null });
 		await io.until(3);
@@ -705,7 +811,7 @@ describe("notifications", () => {
 		expect(snapshot).toEqual({
 			jsonrpc: "2.0",
 			method: "session/snapshot",
-			params: { session: pi, handle: h(pi), nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded", error: null, errorId: null, requests: [], notices: [] },
+			params: { session: pi, handle: h(pi), askedFor: pi, nodes: [], isStreaming: false, compaction: null, model: "p/fallback", effort: null, unrestoredModel: "p/recorded", error: null, errorId: null, requests: [], notices: [] },
 		});
 		expect(status).toEqual({
 			jsonrpc: "2.0",
@@ -796,7 +902,7 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [summary(renamed, "h2")] }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
@@ -830,7 +936,7 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
@@ -838,7 +944,7 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 		await vi.waitFor(() => expect(calls.filter((call) => call.url === ROUTES.sessions)).toHaveLength(1));
 		// The buffer's own `g`, answered under h3 before the listing lands.
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await io.until(4);
+		await tick();
 		source.emit(snapshot(pi, "h3", 0));
 		await io.until(5);
 		release();
@@ -869,7 +975,7 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
@@ -904,7 +1010,7 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
@@ -942,7 +1048,7 @@ describe("the node throttle (OW-jeruye)", () => {
 		});
 		const { io, source } = started;
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [user], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(2);
 		rendered.length = 0;
@@ -1050,7 +1156,7 @@ describe("the node throttle (OW-jeruye)", () => {
 		const { io, source } = start({ ...attachRoutes(pi), ...attachRoutes(codex) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: codex } });
-		await io.until(2);
+		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 1, messages: [user], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		source.emit({ type: "snapshot", session: codex, handle: h(codex), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		await io.until(4);
@@ -1128,7 +1234,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({ [`GET ${ROUTES.session(virtual)}`]: () => json({ session: { ...summary(virtual), handle } }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual } });
-		await io.until(1);
+		await tick();
 		const request = { requestId: "r1", session: pi, kind: "item/fileChange/requestApproval", payload: {} };
 		source.emit(snapshotOf(virtual, 1));
 		source.emit(snapshotOf(pi, 0));
@@ -1166,7 +1272,7 @@ describe("the handle (D24, OW-suyinu)", () => {
 			},
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
-		await io.until(2);
+		await tick();
 		await new Promise((resolve) => setTimeout(resolve, 5));
 
 		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", 1]);
@@ -1195,7 +1301,7 @@ describe("shutdown", () => {
 	it("closes the stream and resolves when the input ends", async () => {
 		const { io, source, done } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await io.until(1);
+		await tick();
 		io.end();
 		await done;
 		expect(source.closed).toEqual([0]);

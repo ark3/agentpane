@@ -26,8 +26,9 @@
  * event stream drops or its first open fails (D25 point 4), and reopens
  * nothing. OW-rebawa raised it a tenth: the reply to `sessions/attach` no
  * longer says a buffer is attached, only the `session/snapshot` that
- * introduces the attachment does, and `askedFor` rides that snapshot also
- * where another attachment already holds the handle.
+ * answers the attach does; the reply goes out after that snapshot, or once
+ * none will; and `askedFor` rides every snapshot that answers an attach,
+ * one for each, whatever ref it names.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -168,16 +169,16 @@
  *   route answers, carrying the session's `handle`. Its `ref` is
  *   authoritative and may differ from the one asked for. The reply ends
  *   the request and says nothing about attachment: the session is attached
- *   from the `session/snapshot` that introduces it, and only then
- *   (OW-rebawa). That snapshot goes out before the reply wherever the
- *   helper holds the session's view by then, and else when the view
- *   arrives, after the reply. Where the reply's `ref` differs from the one
- *   asked for, it carries `askedFor`, whether or not another attachment
- *   already holds the handle; not when the stream already carried the
- *   asked-for ref under that handle, nor when a `sessions/detach` for it
- *   landed while the attach was in flight. An attach whose snapshot a `seq`
- *   gap took before the reply is answered with no snapshot at all, and
- *   nothing is attached.
+ *   from the `session/snapshot` that answers the attach, carrying
+ *   `askedFor`, and only then (OW-rebawa). The reply goes out after that
+ *   snapshot, waiting for it where it is still on its way, so a reply
+ *   that arrives with no snapshot having answered its attach means none
+ *   will: a `seq` gap took the session's view after its snapshot came (for
+ *   the ref asked for, that snapshot and a `session/detached` both went
+ *   out first; for another ref, neither did), a `sessions/detach` of the
+ *   asked-for ref landed while the attach was in flight, the session's
+ *   handle left the listing before its snapshot came, or the helper is
+ *   exiting.
  *   Opens the event stream if it is not open yet, as `sessions/list` does,
  *   and from here on the per-session notifications below flow for this
  *   session.
@@ -244,11 +245,13 @@
  *   `session/notice` carried.
  *   The buffer draws all three after `nodes`, since a snapshot replaces
  *   everything the buffer holds and would otherwise wipe them.
- *   `askedFor` (a ref, only on the one snapshot `sessions/attach` above
- *   says carries it) is the ref that attach asked for, where its reply
- *   named another. It is request correlation, not identity: it says which
- *   waiting attach this handle answers, so the receiver can bind the handle
- *   to what sent that attach, and is the only thing that does, the reply
+ *   `askedFor` (a ref, only on a snapshot that answers a `sessions/attach`,
+ *   one such snapshot for each attach it answers) is the ref that attach
+ *   asked for, whether or not the snapshot names another. It is request
+ *   correlation, not identity: it says which waiting attach this snapshot
+ *   answers, so the receiver can bind the handle to what sent that attach
+ *   -- which may hold another ref, or the ref of a session another buffer
+ *   holds under that handle -- and is the only thing that does, the reply
  *   binding nothing (OW-rebawa). Nor could the receiver rely on handling
  *   the reply first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the reply to
  *   an asynchronous request that arrives while a synchronous one is
