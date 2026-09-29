@@ -36,9 +36,8 @@ It is intent, not orders: where it names a specific file or type, that is verifi
 ```
 Browser (SPA, Svelte 5 + Vite)
    │  REST:  static bundle, commands (prompt/abort/fork/set-model),
-   │         queries (sessions, models, fork points), request replies
-   │  SSE:   one multiplexed stream — transcript snapshots, tail upserts,
-   │         server-initiated requests
+   │         queries (sessions, models, fork points)
+   │  SSE:   one multiplexed stream — transcript snapshots, tail upserts
    ▼
 One server process (Bun)
    ├── SessionIndex:    walks the Pi, Codex, and Claude Code session stores
@@ -107,7 +106,7 @@ Building the transport first added a `renamed` arm for this, which every client 
 Codex's `ServerRequest` (`resources/codex-protocol/ServerRequest.ts`) is a request *from* the agent *to* the client, carrying a `RequestId`: approval requests, `item/tool/requestUserInput`, MCP elicitation, dynamic tool call.
 The agent blocks until answered.
 
-**agentpane never holds an agent request: each adapter refuses one the moment it arrives, and names it in a session error.**
+**agentpane never holds an agent request: the Codex and Pi adapters refuse one the moment it arrives, and name it in a session error; Claude Code's is never sent one (below).**
 Decided by the owner on 2026-09-29 (OW-letevu), making final what OW-yikoyo decided provisionally on 2026-09-11.
 It covers approvals, which D7a already avoids by configuration, and questions: Codex's `item/tool/requestUserInput` and MCP elicitation, Pi's `select`, `confirm`, `input` and `editor` dialogs, and Claude Code's `can_use_tool` should it ever arrive.
 
@@ -133,7 +132,7 @@ How each adapter refuses:
 
 **The error line is the tripwire, and what reopens this.**
 This is exactly as final as usage justifies.
-Either error line above appearing in the owner's own use is the named condition for reopening D2a; git history and this decision's text before OW-letevu hold the machinery and its reasoning if that day comes.
+Any of the three error lines above appearing in the owner's own use is the named condition for reopening D2a; git history and this decision's text before OW-letevu hold the machinery and its reasoning if that day comes.
 
 **These requests are real, not theoretical.**
 The `tool-edit` fixture in `resources/fixtures/codex/` contains a live `item/fileChange/requestApproval`, answered by the capture harness, followed by `serverRequest/resolved`.
@@ -684,7 +683,7 @@ Three groups, and they are not treated alike.
 
 For that third group the defence is not documentation, it is a runtime assertion: the impossible input is made loud where it arrives, so a backend upgrade that reopens the hole reports itself the first time it happens instead of presenting as intermittent flakiness months later.
 That assertion exists for Codex `ServerRequest`s as of OW-nujawi: a kind with no entry in `DECLINE_RESPONSES` is answered at arrival with JSON-RPC `-32601` naming the method and raises a session error, so the turn fails in seconds with the kind on screen.
-A kind that does have a decline shape is declined at arrival and named in a session error too (OW-zisumi), so since OW-letevu every `ServerRequest` is loud where it arrives (D2a).
+A kind that does have a decline shape is declined at arrival and named in a session error too (OW-zisumi), so every `ServerRequest` is loud where it arrives (D2a).
 
 Two supporting practices follow, and neither is a promise to re-verify everything.
 
@@ -953,7 +952,7 @@ The routes in `src/server/http/app.ts` reach the adapter directly for set-model,
 The browser guards itself with `pendingModelSets` and `sending` (OW-nasofa, OW-kelede); Emacs re-derived the same guards a week later (OW-yoyiya, OW-yibimi) and has none for set-model, which is OW-woyifu's whole cause; and OW-zayefe was fixed by sequencing two requests in `emacs/agentpane.el`.
 The model-and-effort pair is mirrored in three layers, each with an in-flight flag of its own: the Pi adapter's `chosenModel`, `chosenEffort` and `settingModel`, the container's `last*` mirrors, and the controller's pending sets.
 
-The change, OW-sewewe: one queue per managed session, a promise chain on the container, through which `setModel`, `setEffort`, `compact`, `fork`, `reply` and `submit` run one at a time, with the routes calling the manager for all of them.
+The change, OW-sewewe: one queue per managed session, a promise chain on the container, through which `setModel`, `setEffort`, `compact`, `fork` and `submit` run one at a time -- and `reply`, until OW-letevu retired it -- with the routes calling the manager for all of them.
 It orders admission only.
 `submit` resolves when the backend admits the turn, so nothing queued waits behind a running turn, D16 stands, a mid-turn prompt steering on Pi and Codex and rejected on Claude Code, and holding a prompt until a turn ends, which OW-rifezo declined, is not reintroduced.
 The guards the adapters own stay: Claude Code's `turnActive`, Codex's `interruptedTurnId` (OW-pefawi) and compaction guard, Pi's `settingModel`, each closing a window that ends on a backend event a queue of requests cannot see; with one `setModel` at a time Pi's boolean is exactly sufficient, which OW-woyifu says a counter alone would not be.

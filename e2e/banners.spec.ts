@@ -4,7 +4,8 @@
  * The turn error, the backend notices and the unrestored-model warning are
  * read where the conversation is: above it, inside its column, in both the
  * wide and the single-column layout. With no banner showing, the conversation
- * must not pay for their row -- an empty grid track still costs a `gap`. jsdom has no layout, so neither claim can be made there.
+ * must not pay for their row -- an empty grid track still costs a `gap`.
+ * jsdom has no layout, so neither claim can be made there.
  */
 import { expect, test, type Page } from "@playwright/test";
 

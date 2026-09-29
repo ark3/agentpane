@@ -2863,10 +2863,10 @@ attached, for there is nothing of its own to close -- a session
 virtual one is an attached buffer here; one streaming or compacting,
 since a kill mid-turn loses the reply, on Claude Code all of it
 \(OW-japuzo); and one with a prompt or a fork in flight, both of which the
-browser's `sending' covers.  Compacting
-counts from the moment `agentpane-compact' sends, as the browser's
-`compact' marks it from the click, not from the first status that
-carries it.  Refused too, beyond the browser's predicate, with an attach
+browser's `sending' covers.  Compacting counts from the moment
+`agentpane-compact' sends, as the browser's `compact' marks it from the
+click, not from the first status that carries it.  Refused too, beyond
+the browser's predicate, with an attach
 in flight, whose answer would count the buffer attached to what was
 closed.  That clause stays: an attach sent before the close is an
 ordering the close in flight does not cover.  And refused with a close

@@ -375,12 +375,13 @@ def main() -> int:
             raise RuntimeError("no settled snapshot or status event named the model Pi resolved")
         evidence["checks"]["model"] = {"result": "pass", **model_seen}
 
-        # Any dialog Pi raised is worth recording either way: whether these fire
-        # at all under the sandbox is an open question, and each one agentpane
-        # cancelled is named in a session error (D2a). One entry per turn, keyed by turn, so a reader can tell which turn raised
-        # what; a bare run reports only `first_turn` and says nothing about a
-        # tool turn that never happened. The window closes at the cut taken here,
-        # the first one after the turn reported idle.
+        # Any dialog Pi raised is worth recording either way: whether these
+        # fire at all under the sandbox is an open question, and each one
+        # agentpane cancelled is named in a session error (D2a). One entry per
+        # turn, keyed by turn, so a reader can tell which turn raised what; a
+        # bare run reports only `first_turn` and says nothing about a tool turn
+        # that never happened. The window closes at the cut taken here, the
+        # first one after the turn reported idle.
         first_turn_events = stream.snapshot()
         evidence["agent_dialogs_cancelled"] = {
             "first_turn": dialogs_in(first_turn_events, first_start, len(first_turn_events)),
