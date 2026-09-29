@@ -288,11 +288,14 @@ export function createController(
 	const pendingModelSets = new Set<string>();
 	const pendingEffortSets = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
+	/** The one listing owed to callers that arrived while `refreshInFlight` was out -- see `refreshSessions`. */
+	let refreshOwed: Promise<void> | undefined;
+	/** Whether the owed listing surfaces: a press joined it. */
+	let owedSurfacing = false;
 	/** Whether the event stream has ever been up: every open after the first is a reconnect. */
 	let opened = false;
 	/** Whether any listing has ever landed. `refreshSessions` swallows its failures, so success is not the default. */
 	let listedOk = false;
-	let refreshSurfacing = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
@@ -512,18 +515,52 @@ export function createController(
 	// over the `"attaching"` or `"submitting"` of the very operation that caused
 	// the broadcast -- which defeated `submit`'s one-prompt-at-a-time guard
 	// (OW-nasofa) outright.
-	async function refreshSessions(surface: boolean): Promise<void> {
-		if (refreshInFlight) {
-			// A press that joins a listing already in flight still owns the error
-			// slot; silence is only for the listings nobody asked for. Without this
-			// a Refresh during a broadcast re-list -- likely, since turns broadcast
-			// -- would report nothing at all when the listing fails.
-			if (surface) refreshSurfacing = true;
-			return refreshInFlight;
+	//
+	// A call that arrives while a listing is out is owed a fresh one, and does
+	// not join the answer already coming (OW-sabova). That answer may have been
+	// given before the change the call is about: the attach whose broadcast
+	// arrives mid-listing, a turn boundary's broadcast (OW-furinu), another
+	// client's close. Joining it left the row wherever the older answer put it
+	// -- and since the listing is the only writer of a row's `status`
+	// (OW-wazija), an attach made under a listing in flight read `detached` on
+	// a live pane, stripe off and Detach disabled, until some later listing.
+	// So the listing in flight runs out, and then exactly one more is asked,
+	// whose landing is what every caller that arrived meanwhile waits on. At
+	// most one is out and one owed however many broadcasts arrive, so a burst
+	// costs one extra listing and cannot pile requests up.
+	//
+	// A press that arrives meanwhile owns the status line and the error slot of
+	// the owed listing, the one it waits on; silence is only for the listings
+	// nobody asked for. Without that, a Refresh during a broadcast re-list --
+	// likely, since turns broadcast -- would report nothing at all when its
+	// listing fails.
+	//
+	// The owed listing refreshes the preview on screen too, as every listing
+	// does (OW-76): a press waiting on it expects the transcript to move with
+	// the sidebar, and the read the listing in flight started is exactly as old
+	// as that listing's answer.
+	function refreshSessions(surface: boolean): Promise<void> {
+		// The owed listing is checked first: between the listing in flight
+		// landing and the owed one being asked, `refreshInFlight` may already be
+		// clear, and a caller there still wants the owed answer, not a third.
+		if (refreshOwed === undefined && refreshInFlight === undefined) return listSessions(surface);
+		if (surface) owedSurfacing = true;
+		if (refreshOwed === undefined) {
+			const askOwed = (): Promise<void> => {
+				refreshOwed = undefined;
+				const owedSurfaces = owedSurfacing;
+				owedSurfacing = false;
+				return disposed ? Promise.resolve() : listSessions(owedSurfaces);
+			};
+			refreshOwed = refreshInFlight!.then(askOwed, askOwed);
 		}
-		refreshSurfacing = surface;
+		return refreshOwed;
+	}
+
+	/** One listing, and the preview refresh beside it; `refreshSessions` decides when one is asked. */
+	function listSessions(surface: boolean): Promise<void> {
 		const request = (async () => {
-			if (refreshSurfacing) publish({ busy: "listing", error: null });
+			if (surface) publish({ busy: "listing", error: null });
 			// Refresh has to move the transcript too, not just the sidebar (OW-76):
 			// before this, pressing it left a stale preview under a freshened list.
 			// Concurrent with the listing -- two independent reads -- and awaited so
@@ -537,9 +574,9 @@ export function createController(
 					listedOk = true;
 				}
 			} catch (error: unknown) {
-				if (!disposed && refreshSurfacing) publish({ error: errorMessage(error) });
+				if (!disposed && surface) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && refreshSurfacing && view.busy === "listing") publish({ busy: "idle" });
+				if (!disposed && surface && view.busy === "listing") publish({ busy: "idle" });
 			}
 			await previewRefresh;
 		})();
@@ -777,9 +814,13 @@ export function createController(
 		 *
 		 * Not on the first open, whose listing `start()` already owns.
 		 * `EventSource` fires `onopen` on the initial connect as well as on every
-		 * re-establish, and `refreshInFlight` coalesces only listings that
-		 * overlap, so an open landing after the startup listing resolves would
-		 * list a second time for nothing.
+		 * re-establish, and nothing coalesces with a listing that has already
+		 * landed, so an open after the startup listing resolves would list a
+		 * second time. A first open that lands while `listedOk` is still false
+		 * does ask, and if the startup listing is still out it is owed a fresh
+		 * one after it (OW-sabova): that listing was asked before the stream
+		 * was up, so a change whose broadcast fell before the open may postdate
+		 * its answer.
 		 *
 		 * `listedOk` and not the open count, because the predicate is that a
 		 * listing has *landed*: `refreshSessions` swallows its own failure and

@@ -638,16 +638,19 @@ describe("client controller", () => {
 		const controller = createController(api);
 		await controller.start();
 		const listed = deferred<SessionSummary[]>();
-		api.listSessions.mockReturnValueOnce(listed.promise);
+		api.listSessions.mockReturnValueOnce(listed.promise).mockRejectedValueOnce(new Error("list is down"));
 		api.emit({ type: "sessions-changed" });
 
-		// The press joins the silent listing rather than starting its own, so this
-		// is the only thing that can report the failure to the user.
+		// The press waits on the listing owed after the silent one (OW-sabova)
+		// rather than starting its own, so this is the only thing that can report
+		// that listing's failure to the user. The silent one's stays silent.
 		const pressed = controller.refreshSessions();
-		listed.reject(new Error("list is down"));
+		listed.reject(new Error("silent listing failed"));
 		await pressed;
 
+		expect(api.listSessions).toHaveBeenCalledTimes(3);
 		expect(controller.getView().error).toBe("list is down");
+		expect(controller.getView().busy).toBe("idle");
 		controller.dispose();
 	});
 
@@ -972,21 +975,64 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	it("coalesces concurrent session-list refreshes", async () => {
+	// A broadcast that joins a listing already out is owed a fresh one, since the
+	// answer it joined may predate the change it announces -- but a burst of them
+	// owes exactly one, however long it is (OW-sabova).
+	it("coalesces a burst of session-list refreshes into one owed listing", async () => {
 		const api = new FakeApi();
 		const listed = deferred<SessionSummary[]>();
+		const owed = deferred<SessionSummary[]>();
 		const controller = createController(api);
 		await controller.start();
 		api.listSessions.mockClear();
-		api.listSessions.mockImplementationOnce(() => listed.promise);
+		api.listSessions.mockReturnValueOnce(listed.promise).mockReturnValueOnce(owed.promise);
 
+		api.emit({ type: "sessions-changed" });
+		api.emit({ type: "sessions-changed" });
 		api.emit({ type: "sessions-changed" });
 		api.emit({ type: "sessions-changed" });
 
 		expect(api.listSessions).toHaveBeenCalledTimes(1);
 		listed.resolve([summary(attachedRef)]);
-		await listed.promise;
+		await settle();
 		expect(controller.getView().state.summaries).toEqual([summary(attachedRef)]);
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+
+		owed.resolve([summary(ref)]);
+		await settle();
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		controller.dispose();
+	});
+
+	// The attach reply leaves the row's `status` to the listing (OW-wazija), and
+	// the attach's own broadcast is what brings that listing. When a listing is
+	// already out as the user attaches, the broadcast joins it, and its answer --
+	// given before the attach -- says `detached`; the current row carries that
+	// too, so only a listing asked after this one can light the row (OW-sabova).
+	it("lights the row of a session attached while a listing was in flight (OW-sabova)", async () => {
+		const api = new FakeApi();
+		const detached = { ...summary(ref), status: "detached" as const };
+		api.listSessions.mockResolvedValueOnce([detached]);
+		const controller = createController(api);
+		await controller.start();
+		api.open();
+		const listed = deferred<SessionSummary[]>();
+		api.listSessions.mockReturnValueOnce(listed.promise);
+		api.emit({ type: "sessions-changed" });
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		api.emit({ type: "sessions-changed" });
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		listed.resolve([detached]);
+		await settle();
+
+		expect(api.listSessions).toHaveBeenCalledTimes(3);
+		expect(paneMode(controller.getView())).toBe("live");
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
+		controller.dispose();
 	});
 
 	it("forgets a cached live session when a fresh listing reports it detached", async () => {
@@ -1364,17 +1410,17 @@ describe("client controller", () => {
 
 	// The first open is `start()`'s own listing arriving by another door: the
 	// native `EventSource` fires `onopen` on the initial connect as well as on
-	// every re-establish, and `refreshInFlight` only coalesces listings that
-	// overlap -- an open landing after the startup listing resolves would list a
-	// second time (OW-vukoku).
+	// every re-establish, and nothing coalesces with a listing that has already
+	// landed -- an open after the startup listing resolves would list a second
+	// time (OW-vukoku).
 	it("does not list a second time on the first open", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
 		// Load-bearing, not decoration: it drains `refreshInFlight`, so the open
-		// below lands after the startup listing rather than inside it. Without it
-		// an ungated `onOpen` would be coalesced and this would pass for the wrong
-		// reason.
+		// below lands after the startup listing rather than inside it, where it
+		// would be owed a fresh listing (OW-sabova) and this would test that
+		// instead.
 		await settle();
 		expect(api.listSessions).toHaveBeenCalledOnce();
 
@@ -1382,6 +1428,28 @@ describe("client controller", () => {
 		await settle();
 
 		expect(api.listSessions).toHaveBeenCalledOnce();
+		controller.dispose();
+	});
+
+	// A first open inside the startup listing is not covered by it: that listing
+	// was asked before the stream was up, so a change whose broadcast fell
+	// before the open may postdate its answer, and the open is owed a fresh one
+	// like any caller that arrives while a listing is out (OW-sabova).
+	it("lists once more after the startup listing when the first open lands inside it", async () => {
+		const api = new FakeApi();
+		const listed = deferred<SessionSummary[]>();
+		api.listSessions.mockReturnValueOnce(listed.promise);
+		const controller = createController(api);
+		const starting = controller.start();
+
+		api.open();
+		expect(api.listSessions).toHaveBeenCalledOnce();
+		listed.resolve([]);
+		await starting;
+		await settle();
+
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		controller.dispose();
 	});
 
@@ -1588,16 +1656,18 @@ describe("client controller", () => {
 		await controller.select(ref);
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		api.listSessions.mockClear();
-		api.listSessions.mockReturnValueOnce(listed.promise);
+		// The second broadcast is owed a listing of its own (OW-sabova), held so
+		// that what is asserted below is the first listing's landing alone.
+		const owed = deferred<SessionSummary[]>();
+		api.listSessions.mockReturnValueOnce(listed.promise).mockReturnValueOnce(owed.promise);
 
 		api.emit({ type: "sessions-changed" });
 		api.emit({ type: "sessions-changed" });
 		api.emit({ type: "snapshot", session: ref, handle: h(ref), seq: 2, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, requests: [], notices: [] });
 		const detached = { ...summary(ref), status: "detached" as const, isStreaming: false };
 		listed.resolve([detached]);
-		await vi.waitFor(() => expect(controller.getView().state.summaries).toEqual([summary(ref)]));
+		await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
 
-		expect(api.listSessions).toHaveBeenCalledTimes(1);
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		expect(controller.getView().state.sessions[h(ref)]?.seq).toBe(2);
 	});

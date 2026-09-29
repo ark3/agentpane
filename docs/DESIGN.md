@@ -800,8 +800,9 @@ The exit is chosen by the summary's `onDisk`, not by the id: attach replaces the
 A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 
 Not on the first open, which is the whole of the mechanism's subtlety.
-`EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions`'s only guard is `refreshInFlight`, which coalesces listings that overlap and not ones that follow each other.
+`EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions` coalesces only calls that arrive while a listing is out -- which since OW-sabova it owes one fresh listing after that one -- and not listings that follow each other.
 An open landing after the startup listing resolved would therefore list a second time for nothing.
+A first open landing while the startup listing is still out does list once more after it, and that one is owed: the startup listing was asked before the stream was up, so a change whose broadcast fell before the open may postdate its answer.
 The predicate is that a listing has *landed*, not that an open has been counted: `refreshSessions` swallows its own failure and resolves, so a page that loads while the server is away -- listing rejected, connect failing, `EventSource` retrying -- gets its first `onopen` of all when the server returns, and that is the open where the sidebar is emptiest and the skip costs most.
 Two booleans in the controller's closure, then: the stream has been up, and a listing has landed.
 
