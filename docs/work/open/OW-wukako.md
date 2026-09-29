@@ -34,3 +34,10 @@ OW-zavehi may retire `agentpane--dropped` and change what `g` does on an unattac
 Tests in `src/emacs/helper.test.ts`, red first: two buffers attach the same ref, one detaches by handle, and the other's attach is answered and bound; and, if the echo is taken, an attach answered after another client closed the container under that ref binds the new handle, not the dead one.
 An ERT test in `emacs/agentpane-test.el` for the two-buffer case at the Emacs end.
 Then OW-jofodu closes `--moot`, and OW-savafi closes `--moot` or is amended to its guard, each citing this card.
+
+## Amended 2026-09-29 by OW-likopo
+
+Since OW-likopo, `sessions/attach` in `runHelper` (`src/emacs/helper.ts`) enters its `Attaching` record, then awaits `openStream()` before `api.attach`.
+A `sessions/detach` of the asked-for ref that lands while that first open is pending abandons the attach through `forget`, but the handler still sends the REST attach once the open settles, which spawns the session nobody is waiting on; the reply then goes out with nothing recorded.
+This is not a regression: before OW-likopo that REST call had already gone out.
+It is the same attach-to-request matching this card owns, so whatever token replaces the ref match should also let an attach abandoned during the open send no REST call; add that case to the helper test above, holding the open with the fake source's `holding` flag and `openHeld()`.
