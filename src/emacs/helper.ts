@@ -287,8 +287,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * Drop each attachment whose handle the server no longer holds, and tell
 	 * Emacs so. Run on every `sessions-changed`, which the server sends once
 	 * a close has taken the session out of its table, as well as at each
-	 * attach and each turn's start and end, since nothing says a handle died:
-	 * a close by another client leaves one that no event will ever come under
+	 * attach and each turn's start and end, since the helper does not yet act
+	 * on the `ended` the server sends where a handle dies (D26, OW-likopo): a
+	 * close by another client leaves one that no event will ever come under
 	 * again. The buffer still counts itself attached, so a prompt from it
 	 * sends no attach, and the prompt route refuses it, since only an attach
 	 * starts a session (D25). The unfiltered listing puts `handle` on every

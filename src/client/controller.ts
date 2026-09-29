@@ -1358,7 +1358,7 @@ export function createController(
 					// Threshold compaction is why this is narrow rather than
 					// unconditional: it enters at "running", never "requesting", so
 					// only a click-shaped mark is in scope here. The view itself may be
-					// gone by now -- a gap, a drop or a listing can take it while the
+					// gone by now -- a gap, a drop, an `ended` or a listing can take it while the
 					// request is out -- and then there is no mark left to clear.
 					const current = view.state.sessions[handle]?.compaction;
 					const state = current === "requesting"

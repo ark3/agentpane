@@ -106,8 +106,9 @@ function handlesByRef(sessions: Readonly<Record<string, SessionView>>): Map<stri
  * has let go.
  *
  * A view held when the listing was asked for whose handle no listed summary
- * carries goes first (OW-pihuko), and it is the only drop a session closed
- * with nothing on disk meets, since it leaves no summary at all. It is the
+ * carries goes first (OW-pihuko), and besides the server's `ended` (D26) it
+ * is the only drop a session closed with nothing on disk meets, since it
+ * leaves no summary at all. It is the
  * rule the Emacs helper applies to its attachments (`dropDead` in
  * emacs/helper.ts, OW-yibijo), stated in both places rather than shared,
  * since all that would be shared is a set-membership test over what each
@@ -279,7 +280,7 @@ export function clearSessionError(state: ClientState, handle: string): ClientSta
  * OW-forinu, so a view stands at the click; a click on a preview or between
  * an attach reply and its snapshot, which this once had to skip, is refused
  * before it gets here. A view gone by the time a failed request comes back
- * to clear its mark -- a gap, a drop or a listing can take it meanwhile -- is
+ * to clear its mark -- a gap, a drop, an `ended` or a listing can take it meanwhile -- is
  * caught by that caller, which reads the mark through the view first, so no
  * caller reaches the check today; it stays as this function's own contract.
  */
