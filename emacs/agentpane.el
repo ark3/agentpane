@@ -1977,10 +1977,10 @@ still need to tell it to stop.")
 
 (defvar-local agentpane--dropped nil
   "Non-nil once the helper detached the handle this buffer held, by a
-`session/detached', until a snapshot attaches it again: the
-helper's listing, asked at a `sessions-changed', lacked the handle, a
-close elsewhere having let go of it (OW-yibijo), or the session's `seq'
-gapped (D25, OW-filuge).
+`session/detached', until a snapshot attaches it again: the server
+let go of the handle and said so with an `ended' under it, a close
+elsewhere or a Pi fork (D26), or the session's `seq' gapped (D25,
+OW-filuge).
 A helper that exits leaves each buffer it served so too (D25); see
 `agentpane--let-go'.  The buffer then holds no handle and is not
 attached, and keeps its ref and what it drew, so `agentpane-refetch'

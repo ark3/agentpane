@@ -1169,8 +1169,8 @@ and what follows under the new handle reaches it."
 under the handle \"h1\" through a helper that counts as running, its
 transcript drawn by a snapshot under that handle, streaming on the model
 \"luna\", as the node at index 3, a tool call running \"sleep 60\",
-after the helper has said `session/detached' for that handle: its
-listing at a `sessions-changed' lacked it (OW-yibijo).  Every request is
+after the helper has said `session/detached' for that handle: the
+server's `ended' under it said it let go of it (D26).  Every request is
 answered as `agentpane-test--forking' answers it, and the model's
 `models/list' is never answered."
   (declare (indent 0))
@@ -3433,9 +3433,10 @@ the browser lands on the read-only preview.  A kill after that sends no
 (ert-deftest agentpane-test-close-session-detached-meanwhile-previews ()
   "A `session/detached' for the handle while the close is out -- the
 server has let go of the session before its subprocess is disposed of,
-and a listing the helper asks meanwhile lacks it -- leaves the buffer not
-dropped once the close answers, so it previews the stored transcript
-rather than attaching again the session just closed."
+and its `ended' reached the helper ahead of the close's answer --
+leaves the buffer not dropped once the close answers, so it previews
+the stored transcript rather than attaching again the session just
+closed."
   (agentpane-test--closing
     (setq listed (vector (list :ref ref :onDisk t))
           hold '(sessions/close))
