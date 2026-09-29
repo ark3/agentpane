@@ -145,12 +145,12 @@ export class CodexConnection {
 	 * approval to surface in the session that spawned it, which since D2a
 	 * refuses every request at arrival means the error line naming it -- but
 	 * nothing in `CommandExecutionRequestApprovalParams`,
-	 * `FileChangeRequestApprovalParams`
-	 * or `McpServerElicitationRequestParams` names the parent thread, so which
-	 * session that is cannot be read off the wire. The connection's first holder
-	 * answers instead: it is deterministic, it is the session that spawned the
-	 * connection, and being wrong costs only attribution -- the refusal carries
-	 * the wire id, so it still unblocks the right child.
+	 * `FileChangeRequestApprovalParams` or `McpServerElicitationRequestParams`
+	 * names the parent thread, so which session that is cannot be read off the
+	 * wire. The connection's first holder answers instead: it is deterministic,
+	 * it is the session that spawned the connection, and being wrong costs only
+	 * attribution -- the refusal carries the wire id, so it still unblocks the
+	 * right child.
 	 *
 	 * Guessing by "whoever is mid-turn" was considered and declined: a fork and
 	 * its parent can stream at once, so it needs a tie-break anyway and would
