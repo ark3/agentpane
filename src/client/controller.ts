@@ -529,11 +529,16 @@ export function createController(
 	// most one is out and one owed however many broadcasts arrive, so a burst
 	// costs one extra listing and cannot pile requests up.
 	//
-	// A press that arrives meanwhile owns the status line and the error slot of
-	// the owed listing, the one it waits on; silence is only for the listings
-	// nobody asked for. Without that, a Refresh during a broadcast re-list --
-	// likely, since turns broadcast -- would report nothing at all when its
-	// listing fails.
+	// A press that arrives meanwhile owns what a joining press owned before
+	// OW-sabova, and no more: the owed listing's failure, which it reports,
+	// and its idle, if `busy` still reads `"listing"`; silence is only for the
+	// listings nobody asked for. Without that, a Refresh during a broadcast
+	// re-list -- likely, since turns broadcast -- would report nothing at all
+	// when its listing fails. It does not get the owed listing's start: that
+	// comes after the press, possibly after a gesture made in between, and a
+	// `busy: "listing", error: null` there would wipe an attach's unread error
+	// or write over its `"attaching"` -- the clobbering the paragraph above
+	// forbids. Only a press that asks a listing itself announces it.
 	//
 	// The owed listing refreshes the preview on screen too, as every listing
 	// does (OW-76): a press waiting on it expects the transcript to move with
@@ -550,17 +555,21 @@ export function createController(
 				refreshOwed = undefined;
 				const owedSurfaces = owedSurfacing;
 				owedSurfacing = false;
-				return disposed ? Promise.resolve() : listSessions(owedSurfaces);
+				return disposed ? Promise.resolve() : listSessions(owedSurfaces, true);
 			};
 			refreshOwed = refreshInFlight!.then(askOwed, askOwed);
 		}
 		return refreshOwed;
 	}
 
-	/** One listing, and the preview refresh beside it; `refreshSessions` decides when one is asked. */
-	function listSessions(surface: boolean): Promise<void> {
+	/**
+	 * One listing, and the preview refresh beside it; `refreshSessions` decides
+	 * when one is asked. `owed` is the listing callers joined, whose start no
+	 * surfacing caller announces.
+	 */
+	function listSessions(surface: boolean, owed = false): Promise<void> {
 		const request = (async () => {
-			if (surface) publish({ busy: "listing", error: null });
+			if (surface && !owed) publish({ busy: "listing", error: null });
 			// Refresh has to move the transcript too, not just the sidebar (OW-76):
 			// before this, pressing it left a stale preview under a freshened list.
 			// Concurrent with the listing -- two independent reads -- and awaited so
@@ -816,11 +825,9 @@ export function createController(
 		 * `EventSource` fires `onopen` on the initial connect as well as on every
 		 * re-establish, and nothing coalesces with a listing that has already
 		 * landed, so an open after the startup listing resolves would list a
-		 * second time. A first open that lands while `listedOk` is still false
-		 * does ask, and if the startup listing is still out it is owed a fresh
-		 * one after it (OW-sabova): that listing was asked before the stream
-		 * was up, so a change whose broadcast fell before the open may postdate
-		 * its answer.
+		 * second time. A first open that lands while the startup listing is
+		 * still out lists once more after it, because every call that arrives
+		 * mid-listing is owed one (OW-sabova).
 		 *
 		 * `listedOk` and not the open count, because the predicate is that a
 		 * listing has *landed*: `refreshSessions` swallows its own failure and

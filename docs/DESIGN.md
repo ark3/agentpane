@@ -759,6 +759,7 @@ That set is an affordance and may be briefly stale; nothing is decided on it.
 Every re-establish of the SSE stream asks for one unsurfaced session listing, so state that moved while the connection was down heals without a gesture.
 The owner took this on 2026-09-16 (OW-vukoku).
 Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
+Amended by OW-sabova on 2026-09-29: a first open that lands while the startup listing is still out asks for one listing after it, because every call that arrives mid-listing is owed one; only a first open after the startup listing has landed lists nothing.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
@@ -801,8 +802,8 @@ A stripe that lies can wait for the stream; a clickable phantom cannot, least of
 
 Not on the first open, which is the whole of the mechanism's subtlety.
 `EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions` coalesces only calls that arrive while a listing is out -- which since OW-sabova it owes one fresh listing after that one -- and not listings that follow each other.
-An open landing after the startup listing resolved would therefore list a second time for nothing.
-A first open landing while the startup listing is still out does list once more after it, and that one is owed: the startup listing was asked before the stream was up, so a change whose broadcast fell before the open may postdate its answer.
+An open landing after the startup listing resolved would therefore list a second time.
+A first open landing while the startup listing is still out does list once more after it, because every call that arrives mid-listing is owed one (OW-sabova).
 The predicate is that a listing has *landed*, not that an open has been counted: `refreshSessions` swallows its own failure and resolves, so a page that loads while the server is away -- listing rejected, connect failing, `EventSource` retrying -- gets its first `onopen` of all when the server returns, and that is the open where the sidebar is emptiest and the skip costs most.
 Two booleans in the controller's closure, then: the stream has been up, and a listing has landed.
 

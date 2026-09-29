@@ -644,15 +644,60 @@ describe("client controller", () => {
 		// The press waits on the listing owed after the silent one (OW-sabova)
 		// rather than starting its own, so this is the only thing that can report
 		// that listing's failure to the user. The silent one's stays silent.
+		const errors: (string | null)[] = [];
+		controller.subscribe((next) => errors.push(next.error));
 		const pressed = controller.refreshSessions();
 		listed.reject(new Error("silent listing failed"));
 		await pressed;
 
 		expect(api.listSessions).toHaveBeenCalledTimes(3);
+		expect(errors).not.toContain("silent listing failed");
 		expect(controller.getView().error).toBe("list is down");
 		expect(controller.getView().busy).toBe("idle");
 		controller.dispose();
 	});
+
+	// A press that joins owns what it owned before OW-sabova and no more: the
+	// owed listing's failure and its idle, never a `busy: "listing"` or cleared
+	// error at the owed listing's start, which comes after the press and so
+	// possibly after a gesture the user made in between (OW-nasofa).
+	for (const attach of ["pending", "failed"] as const) {
+		it(`leaves an attach made after a joining Refresh its ${attach === "pending" ? "busy" : "error"} when the owed listing starts (OW-sabova)`, async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			const listed = deferred<SessionSummary[]>();
+			const owed = deferred<SessionSummary[]>();
+			api.listSessions.mockReturnValueOnce(listed.promise).mockReturnValueOnce(owed.promise);
+			const attached = deferred<LiveSessionSummary>();
+			api.attach.mockReturnValueOnce(attached.promise);
+			api.emit({ type: "sessions-changed" });
+
+			const pressed = controller.refreshSessions();
+			const selecting = controller.select(ref);
+			if (attach === "failed") {
+				attached.reject(new Error("attach failed"));
+				await selecting;
+			}
+			listed.resolve([summary(ref)]);
+			await settle();
+
+			expect(api.listSessions).toHaveBeenCalledTimes(3);
+			expect(controller.getView()).toMatchObject(
+				attach === "pending" ? { busy: "attaching" } : { busy: "idle", error: "attach failed" },
+			);
+			if (attach === "pending") {
+				attached.resolve(summary(ref));
+				await selecting;
+				expect(controller.getView().busy).toBe("idle");
+			}
+			owed.resolve([summary(ref)]);
+			await pressed;
+			expect(controller.getView().busy).toBe("idle");
+			if (attach === "failed") expect(controller.getView().error).toBe("attach failed");
+			controller.dispose();
+		});
+	}
 
 	it("keeps a draft typed while the prompt is in flight", async () => {
 		const api = new FakeApi();
@@ -1431,10 +1476,8 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A first open inside the startup listing is not covered by it: that listing
-	// was asked before the stream was up, so a change whose broadcast fell
-	// before the open may postdate its answer, and the open is owed a fresh one
-	// like any caller that arrives while a listing is out (OW-sabova).
+	// A first open inside the startup listing is owed one listing after it, like
+	// every call that arrives while a listing is out (OW-sabova).
 	it("lists once more after the startup listing when the first open lands inside it", async () => {
 		const api = new FakeApi();
 		const listed = deferred<SessionSummary[]>();
