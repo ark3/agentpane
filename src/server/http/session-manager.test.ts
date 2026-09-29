@@ -57,6 +57,11 @@ function naming(ref: SessionRef, events: ServerEvent[]): ServerEvent[] {
 	return events.filter((event) => "session" in event && sessionKey(event.session) === sessionKey(ref));
 }
 
+/** Let queued microtasks drain, so `start()` has actually been entered. */
+async function settle(): Promise<void> {
+	for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
 describe("attach", () => {
 	it("spawns once even when two attaches race", async () => {
 		const [a, b] = await Promise.all([sessions.attach(REF), sessions.attach(REF)]);
@@ -1307,6 +1312,110 @@ describe("a fork that shares the parent's subprocess (OW-lajehi)", () => {
 		expect(child.holders).toBe(0);
 		expect(child.kills).toBe(1);
 	});
+
+	/**
+	 * The adapter the parent's `fork()` builds, which the factory never sees.
+	 * Read once the fork has been taken.
+	 */
+	function capturingForks(): () => FakeAdapter {
+		const parent = codex.created[0];
+		if (!parent) throw new Error("no parent adapter");
+		const fork = parent.fork.bind(parent);
+		let built: FakeAdapter | undefined;
+		parent.fork = async (entryId) => {
+			const forked = await fork(entryId);
+			built = forked.adapter as FakeAdapter;
+			return forked;
+		};
+		return () => {
+			if (!built) throw new Error("no fork adapter");
+			return built;
+		};
+	}
+
+	/** Hold `adapter.dispose()` open until the returned release is called. */
+	function holdDispose(adapter: FakeAdapter): () => void {
+		const held = deferred();
+		const dispose = adapter.dispose.bind(adapter);
+		adapter.dispose = async () => {
+			await held.promise;
+			await dispose();
+		};
+		return () => held.resolve();
+	}
+
+	it("refuses the attach of a fork closed while it was starting, and disposes its adapter once", async () => {
+		const gate = deferred();
+		codex = new FakeAdapterFactory({
+			forkMode: "shared",
+			sharedChild: child,
+			forkOptions: { holdStart: gate.promise },
+		});
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(parentRef);
+		const forkAdapter = capturingForks();
+		const forked = await sessions.fork(parentRef, "e1");
+		const release = holdDispose(forkAdapter());
+
+		const attaching = sessions.attach(forked);
+		await settle();
+		const closing = sessions.close(forked);
+		// The fork's start completes while the close is still disposing.
+		gate.resolve();
+		for (let i = 0; i < 4; i++) await settle();
+		release();
+		await closing;
+
+		await expect(attaching).rejects.toBeInstanceOf(UnknownSessionError);
+		expect(sessions.isAttached(forked)).toBe(false);
+		expect(forkAdapter().disposals).toBe(1);
+	});
+
+	it("spawns nothing on a closed fork's thread while its parked adapter is still being disposed", async () => {
+		// The fork is on disk, as Codex's is, so an attach that finds no parked
+		// entry can resume it through the index on an adapter of its own.
+		index.summaries.push(storedSession(forkRef, WORKSPACE));
+		await sessions.attach(parentRef);
+		const forkAdapter = capturingForks();
+		const forked = await sessions.fork(parentRef, "e1");
+		const release = holdDispose(forkAdapter());
+
+		const closing = sessions.close(forked);
+		const attaching = sessions.attach(forked);
+		await settle();
+		await settle();
+
+		expect(codex.created).toHaveLength(1);
+
+		release();
+		await closing;
+		const reopened = await attaching;
+		expect(codex.created).toHaveLength(2);
+		expect(reopened).toBe(codex.created[1]);
+		expect(forkAdapter().disposals).toBe(1);
+	});
+
+	it("disposes a starting fork's adapter once when shutdown lands during its attach", async () => {
+		const gate = deferred();
+		codex = new FakeAdapterFactory({
+			forkMode: "shared",
+			sharedChild: child,
+			forkOptions: { holdStart: gate.promise },
+		});
+		sessions = new SessionManager({ index, adapters: { codex } }, broadcaster);
+		await sessions.attach(parentRef);
+		const forkAdapter = capturingForks();
+		const forked = await sessions.fork(parentRef, "e1");
+
+		const attaching = sessions.attach(forked);
+		await settle();
+		await sessions.disposeAll();
+		gate.resolve();
+		await expect(attaching).rejects.toThrow();
+
+		expect(forkAdapter().disposals).toBe(1);
+		expect(child.holders).toBe(0);
+	});
 });
 
 describe("lifecycle", () => {
@@ -1414,6 +1523,32 @@ describe("lifecycle", () => {
 		expect(first.disposed).toBe(true);
 		expect(pi.created).toHaveLength(2);
 		expect(aliasAdapter).toBe(canonicalAdapter);
+	});
+
+	it("keeps a closing adapter's replacement waiting through a second close of the same session", async () => {
+		// Two clients can each send the DELETE. The second finds nothing in the
+		// table and has nothing to let go of, and must leave the first's
+		// disposal holding the attach back.
+		await sessions.attach(REF);
+		const first = pi.created[0];
+		if (!first) throw new Error("no adapter");
+		const gate = deferred();
+		const dispose = first.dispose.bind(first);
+		first.dispose = async () => {
+			await gate.promise;
+			await dispose();
+		};
+
+		const closing = sessions.close(REF);
+		await sessions.close(REF);
+		const attaching = sessions.attach(REF);
+		await settle();
+
+		expect(pi.created).toHaveLength(1);
+
+		gate.resolve();
+		await closing;
+		expect(await attaching).toBe(pi.created[1]);
 	});
 
 	it("canonicalizes unseen aliases before replacing a session that is still disposing", async () => {
@@ -1625,11 +1760,6 @@ describe("teardown racing a startup", () => {
 	// round trip inside `start()` -- Codex's `initialize`, Pi's `get_state` --
 	// so this window is milliseconds wide on every single attach.
 
-	/** Let queued microtasks drain, so `start()` has actually been entered. */
-	async function settle(): Promise<void> {
-		for (let i = 0; i < 4; i++) await Promise.resolve();
-	}
-
 	it("disposes an adapter that was still starting when its session closed", async () => {
 		const gate = deferred();
 		const slow = new FakeAdapterFactory({ holdStart: gate.promise });
@@ -1770,6 +1900,48 @@ describe("teardown racing a startup", () => {
 		expect(flaky.created[0]?.disposals).toBe(1);
 		expect(sessions.isAttached(ref)).toBe(false);
 		expect(sessions.liveRefs()).toEqual([]);
+	});
+
+	it("starts afresh for an attach that follows a close of a session still in its index lookup", async () => {
+		const lookup = deferred();
+		const held: SessionIndex = {
+			list: (query) => index.list(query),
+			get: async (ref) => {
+				await lookup.promise;
+				return index.get(ref);
+			},
+			preview: (ref) => index.preview(ref),
+		};
+		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
+
+		const first = sessions.attach(REF);
+		await settle();
+		const closing = sessions.close(REF);
+		const second = sessions.attach(REF);
+		lookup.resolve();
+		await closing;
+
+		await expect(first).rejects.toBeInstanceOf(UnknownSessionError);
+		const adapter = await second;
+		expect(pi.created).toEqual([adapter]);
+		expect(sessions.isAttached(REF)).toBe(true);
+	});
+
+	it("disposes an adapter once when shutdown lands between its publication and its attach's return", async () => {
+		// `attach` announces the list change once `#start` has published the
+		// adapter and before it returns, so a client that shuts the server down
+		// on hearing it lands in exactly that window.
+		let shutdown: Promise<void> | undefined;
+		broadcaster.addClient((chunk) => {
+			if (!shutdown && chunk.includes('"type":"sessions-changed"')) shutdown = sessions.disposeAll();
+		});
+
+		await sessions.attach(REF);
+		expect(shutdown).toBeDefined();
+		await shutdown;
+
+		expect(pi.created).toHaveLength(1);
+		expect(pi.created[0]?.disposals).toBe(1);
 	});
 });
 

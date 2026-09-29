@@ -113,7 +113,7 @@ interface ManagedSession {
 	adapter?: BackendAdapter;
 	/**
 	 * The startup in flight for this container, from the moment the container
-	 * exists until `#start` publishes the adapter or gives up. On the container
+	 * exists until the startup is retired (`#retire`). On the container
 	 * rather than keyed by a name, so an attach or a `close()` under any name it
 	 * has -- one a rename inside `start()` added a moment ago included -- finds
 	 * the one startup.
@@ -187,6 +187,10 @@ interface ManagedSession {
  */
 interface PendingStart {
 	promise: Promise<ManagedSession>;
+	/** The spelling its attach asked for, which `#attaching` holds it under. */
+	readonly key: string;
+	/** The container it is starting, once there is one: its attach's, or the one `#start` builds. */
+	session?: ManagedSession;
 	/** Assigned the instant the adapter exists, with no `await` in between. */
 	adapter?: BackendAdapter;
 	/** Set by `close()`/`disposeAll()`. A startup that outlives it must not register. */
@@ -253,12 +257,15 @@ export class SessionManager {
 	 *
 	 * An entry ends four ways: the attach that opens the fork consumes it,
 	 * `close()` on that ref discards it, `disposeAll()` drops the lot, and a
-	 * failed attach on a *handle* discards it. That last one is the difference
-	 * between the two shapes: a failed attach on a recipe KEEPS it deliberately,
-	 * because `#start`'s failure path unregisters the container too and the
-	 * recipe is the whole of what a retry has left to work from -- but a handle
-	 * is single-use, its adapter has been disposed by the reaping, and leaving it
-	 * parked would hand a retry a dead adapter and a released share.
+	 * *handle* is taken by the startup that claims its adapter. That last one is
+	 * the difference between the two shapes: a recipe stays parked until the
+	 * start succeeds, and a failed attach KEEPS it deliberately, because
+	 * `#start`'s failure path unregisters the container too and the recipe is
+	 * the whole of what a retry has left to work from -- but a handle is
+	 * single-use. From the claim its adapter is the startup's
+	 * (`PendingStart.adapter`), which teardown and the failure path's reaping
+	 * both dispose through that one record, and a retry after a failure finds
+	 * no dead adapter and released share parked for it.
 	 *
 	 * Keyed by the fork's backend key, and holding no container: a parked fork
 	 * gets its container, and with it the handle the manager mints (D24), at
@@ -277,12 +284,13 @@ export class SessionManager {
 	readonly #handlePrefix = crypto.randomUUID();
 	/**
 	 * Every startup in flight, under the key its attach asked for, from that
-	 * attach until it settles: what `disposeAll()` walks to reach an adapter
-	 * that is still starting, and what collapses two attaches on one spelling
-	 * -- or finds the startup for a `close()` on it -- while no container
-	 * exists yet, which for a stored session is the index lookup. Once a
-	 * container exists the startup is on it as well (`ManagedSession.starting`),
-	 * and that is how an attach or close under any of its names finds it.
+	 * attach until it is retired (`#retire`): what `disposeAll()` walks to reach
+	 * an adapter that is still starting, and what collapses two attaches on one
+	 * spelling -- or finds the startup for a `close()` on it -- while no
+	 * container exists yet, which for a stored session is the index lookup.
+	 * Once a container exists the startup is on it as well
+	 * (`ManagedSession.starting`), and that is how an attach or close under any
+	 * of its names finds it.
 	 */
 	readonly #attaching = new Map<string, PendingStart>();
 	/**
@@ -460,22 +468,42 @@ export class SessionManager {
 		if (inFlight) return (await inFlight.promise).adapter as BackendAdapter;
 
 		const pending: PendingStart = {
+			key,
+			session: existing,
 			torndown: false,
 			// Deferred by one microtask so this record is registered below -- and
 			// so reachable by close()/disposeAll() -- before `#start` can spawn
 			// anything. A startup teardown cannot see is a startup it cannot stop.
-			promise: Promise.resolve().then(() => this.#start(effectiveRef, existing, pending)),
+			// A startup that fails is retired once `#start` has reaped what it
+			// spawned, so an attach arriving while it does joins the failure
+			// rather than spawning beside the adapter still being disposed.
+			promise: Promise.resolve()
+				.then(() => this.#start(effectiveRef, existing, pending))
+				.catch((err: unknown) => {
+					this.#retire(pending);
+					throw err;
+				}),
 		};
 		this.#attaching.set(key, pending);
 		if (existing) existing.starting = pending;
-		try {
-			const session = await pending.promise;
-			this.broadcaster.sessionsChanged();
-			this.broadcaster.broadcastSnapshot(session.handle);
-			return session.adapter as BackendAdapter;
-		} finally {
-			if (this.#attaching.get(key) === pending) this.#attaching.delete(key);
-		}
+		const session = await pending.promise;
+		this.broadcaster.sessionsChanged();
+		this.broadcaster.broadcastSnapshot(session.handle);
+		return session.adapter as BackendAdapter;
+	}
+
+	/**
+	 * Retire a startup from every record that says it is live -- `#attaching`
+	 * and its container's `starting` -- at the one moment it stops being live:
+	 * when `#start` publishes its adapter or hands back another startup's
+	 * container, once it has failed and reaped what it spawned, or when
+	 * teardown flags it. From here nothing joins it, so an attach that finds no
+	 * container starts afresh. A handle a fork starts from is retired earlier,
+	 * at the claim (`#start`), since from there the adapter is this record's.
+	 */
+	#retire(pending: PendingStart): void {
+		if (this.#attaching.get(pending.key) === pending) this.#attaching.delete(pending.key);
+		if (pending.session?.starting === pending) pending.session.starting = undefined;
 	}
 
 	/**
@@ -839,12 +867,14 @@ export class SessionManager {
 			const canonicalSession = this.#lookup(summary.ref);
 			if (canonicalSession?.adapter) {
 				this.#addName(canonicalSession, requestedKey);
+				this.#retire(pending);
 				return canonicalSession;
 			}
 			if (canonicalSession?.starting && canonicalSession.starting !== pending) {
 				const winner = await canonicalSession.starting.promise;
 				if (pending.torndown) throw new UnknownSessionError(ref);
 				this.#addName(winner, requestedKey);
+				this.#retire(pending);
 				return winner;
 			}
 			session = this.#container(summary.ref, {
@@ -869,6 +899,7 @@ export class SessionManager {
 			// No await separates the arbitration above from this claim, so no
 			// competing startup can have claimed any of these names since.
 			session.starting = pending;
+			pending.session = session;
 			this.#add(session);
 		}
 
@@ -894,6 +925,11 @@ export class SessionManager {
 			// fork whose rollout the index cannot answer for.
 			adapter = forkStart?.adapter ?? factory.create(bound.ref);
 			pending.adapter = adapter;
+			// A handle is single-use, and from here its adapter is this startup's:
+			// left parked, `close()` and `disposeAll()` would reach it down a
+			// second route. A recipe stays parked until the start succeeds -- see
+			// `#pendingForks`.
+			if (forkStart?.adapter) this.#pendingForks.delete(sessionKey(ref));
 			// Subscribe *before* start(): a backend can emit its first state during
 			// startup and we would otherwise miss it.
 			bound.subscriptions.push(
@@ -964,12 +1000,6 @@ export class SessionManager {
 			} else {
 				this.#remove(bound);
 			}
-			if (bound.starting === pending) bound.starting = undefined;
-			// A handle is single-use: `#terminate` below disposes its adapter, which
-			// releases the share it was holding, so the parked entry is no longer
-			// anything a retry could start. A recipe stays parked -- see
-			// `#pendingForks`.
-			if (forkStart?.adapter) this.#pendingForks.delete(sessionKey(ref));
 			// The adapter spawns before it decides it has started -- PiAdapter
 			// spawns, then round-trips a readiness probe -- so a rejection can
 			// leave a live sandboxed agent behind. Nothing else will ever reap it.
@@ -979,14 +1009,16 @@ export class SessionManager {
 
 		// Publish the adapter and retire the startup in one synchronous run: from
 		// here a `close()` under any of the container's names finds the adapter
-		// on it and disposes it, where until now it found the startup.
+		// on it and disposes it, and `disposeAll()` finds it in the table, where
+		// until now each found the startup.
 		bound.adapter = adapter;
-		bound.starting = undefined;
+		this.#retire(pending);
 		// Consumed: the fork has its own child and its own container, so nothing
 		// reaches it through the recipe again -- and must not, or a `close()`
 		// followed by an attach on a spelling a rename left behind would fork
 		// the PARENT a second time. Deliberately after `start()` resolved: the
-		// failure path above leaves the entry parked for a retry.
+		// failure path above leaves a recipe parked for a retry. A handle went
+		// at the claim.
 		this.#pendingForks.delete(sessionKey(ref));
 		const initialState = adapter.getState();
 		bound.lastStreaming = initialState.isStreaming;
@@ -1114,18 +1146,34 @@ export class SessionManager {
 	 * evicted.
 	 */
 	async close(ref: SessionRef): Promise<void> {
+		// Everything up to the first await below is one synchronous run, so an
+		// attach cannot land between its steps and find the session half-closed:
+		// a startup it could still join, or a parked adapter already gone with
+		// nothing yet holding the attach back.
 		const session = this.#lookup(ref);
-		// Before the `!session` return below, which is exactly a fork that is
-		// parked and was never attached: leaving it would let a later attach spawn
-		// a child for a session this call deleted. The same line `#names` gets
-		// further down, for the same reason. Disposing its
-		// adapter is what releases the share a live handle holds -- without it,
-		// closing both the parent and an abandoned fork still leaves the
-		// app-server running with nobody to speak for it. Under every name of
-		// the container, not only the one called: a fork whose start renamed it
-		// -- OW-hojefo's Codex first-message fork, parked under a `virtual:` ref
-		// -- is closed under its new name while its entry sits under the old,
-		// and an entry left there would start the fork a second time.
+		// Flag the startup before anything else: an adapter that does not exist
+		// yet cannot be disposed, and this is what stops it being born at all.
+		// The container's, reached by any name it has; with none, the one a
+		// stored session's attach is holding under this spelling -- mid-index-
+		// lookup, or reaping an adapter whose start failed. Retired with it, so
+		// an attach from here starts afresh rather than joining a startup that
+		// can only fail.
+		const pending = session ? session.starting : this.#attaching.get(sessionKey(ref));
+		if (pending) {
+			pending.torndown = true;
+			this.#retire(pending);
+		}
+		// A fork that is parked and was never attached, which has no container:
+		// leaving it would let a later attach spawn a child for a session this
+		// call deleted. The same line `#names` gets below, for the same reason.
+		// Disposing its adapter is what releases the share a live handle holds
+		// -- without it, closing both the parent and an abandoned fork still
+		// leaves the app-server running with nobody to speak for it. Under every
+		// name of the container, not only the one called: a fork whose start
+		// renamed it -- OW-hojefo's Codex first-message fork, parked under a
+		// `virtual:` ref -- is closed under its new name while its entry sits
+		// under the old, and an entry left there would start the fork a second
+		// time.
 		const parkedKeys = new Set([sessionKey(ref), ...(session?.names ?? [])]);
 		const parkedAdapters: BackendAdapter[] = [];
 		for (const key of parkedKeys) {
@@ -1134,41 +1182,37 @@ export class SessionManager {
 			this.#pendingForks.delete(key);
 			if (parked.adapter) parkedAdapters.push(parked.adapter);
 		}
-		// Awaited only when there is a handle to release, as before: with none,
-		// nothing here may yield before the container leaves the table below.
-		if (parkedAdapters.length > 0) {
-			await Promise.all(parkedAdapters.map((adapter) => Promise.resolve(adapter.dispose()).catch(() => {})));
+		// With no container and nothing to let go of, nothing is registered: a
+		// second close of a session whose first is still disposing lands here,
+		// and must not replace that disposal under this name with one that
+		// settles at once.
+		if (!session && !pending?.adapter && parkedAdapters.length === 0) return;
+		// With no container, the spelling asked for is the one name to hold an
+		// attach back under: the parked fork's own ref, or the startup's.
+		const disposalKeys = session ? this.#remove(session) : [sessionKey(ref)];
+		if (session) {
+			// Before the first await below, and in the same run that took the
+			// container out of the table, so an adapter still moving -- a `submit()`
+			// or `fork()` in flight -- cannot name it, or fork a container out of it,
+			// behind us (`ManagedSession.subscriptions`).
+			for (const off of session.subscriptions.splice(0)) off();
+			this.broadcaster.forget(session.handle);
 		}
-		// Flag the startup before anything else: an adapter that does not exist
-		// yet cannot be disposed, and this is what stops it being born at all.
-		// The container's, reached by any name it has; with none, the one a
-		// stored session's attach is holding under this spelling.
-		const pending = session ? session.starting : this.#attaching.get(sessionKey(ref));
-		if (pending) pending.torndown = true;
-		if (!session) {
-			// Nothing in the table, but a startup for this ref may be on its way to
-			// spawning one -- the stored-session path is mid-index-lookup here.
-			if (pending) await this.#terminate(pending);
-			return;
-		}
-		const disposalKeys = this.#remove(session);
-		// Before the first await below, and in the same run that took the
-		// container out of the table, so an adapter still moving -- a `submit()`
-		// or `fork()` in flight -- cannot name it, or fork a container out of it,
-		// behind us (`ManagedSession.subscriptions`).
-		for (const off of session.subscriptions.splice(0)) off();
-		this.broadcaster.forget(session.handle);
 		// Swallowed deliberately. By this point the session is out of the table
 		// and unsubscribed, so it *is* closed as far as the caller is concerned;
 		// failing the DELETE would tell the browser to retry a close that has
 		// already happened. What a throw here can still mean is a subprocess that
 		// outlived its kill -- DESIGN's third open question, which needs a live
-		// spawn to settle and has no honest answer from in here.
+		// spawn to settle and has no honest answer from in here. A parked
+		// adapter is part of the same disposal, so an attach on its thread waits
+		// for it as it would for the container's.
 		const disposal: PendingDisposal = {
-			ref: session.ref,
+			ref: session?.ref ?? ref,
 			promise: Promise.resolve().then(async () => {
-				if (pending) await this.#terminate(pending);
-				else await Promise.resolve(session.adapter?.dispose()).catch(() => {});
+				await Promise.all([
+					pending ? this.#terminate(pending) : Promise.resolve(session?.adapter?.dispose()).catch(() => {}),
+					...parkedAdapters.map((adapter) => Promise.resolve(adapter.dispose()).catch(() => {})),
+				]);
 			}),
 		};
 		for (const disposalKey of disposalKeys) this.#disposing.set(disposalKey, disposal);
@@ -1179,7 +1223,7 @@ export class SessionManager {
 				if (this.#disposing.get(disposalKey) === disposal) this.#disposing.delete(disposalKey);
 			}
 		}
-		this.broadcaster.sessionsChanged();
+		if (session) this.broadcaster.sessionsChanged();
 	}
 
 	async disposeAll(): Promise<void> {
@@ -1199,7 +1243,10 @@ export class SessionManager {
 		this.#pendingForks.clear();
 		// Before the first await, so a startup still short of creating its adapter
 		// finds this rather than spawning into a server that is already leaving.
-		for (const pending of starting) pending.torndown = true;
+		for (const pending of starting) {
+			pending.torndown = true;
+			this.#retire(pending);
+		}
 		// In parallel and settled, not sequential and awaited: every session left
 		// undisposed is a sandboxed agent still holding its workspace, so one
 		// adapter that cannot die must not spare the rest.
@@ -1215,7 +1262,10 @@ export class SessionManager {
 			}),
 			// Adapters mid-`start()` are not in the table above: they own a child
 			// and their `ManagedSession.adapter` is still undefined. Resolving
-			// without reaping them is exactly how shutdown orphans an agent.
+			// without reaping them is exactly how shutdown orphans an agent. Each
+			// adapter is reached by one route alone: a startup is retired in the
+			// run that publishes its adapter to the table, and a parked handle
+			// leaves the parked forks at the claim that makes it a startup's.
 			...starting.map((pending) => this.#terminate(pending)),
 			...parkedForks.map((adapter) => adapter.dispose()),
 		]);

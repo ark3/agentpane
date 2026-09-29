@@ -1016,7 +1016,6 @@ The one exception it found is the browser's selected session closed by another c
 1. Only the attach route, the `GET` of `ROUTES.session`, spawns.
    Every other session route acts on an attached session or refuses, as `compact`, `abort` and `reply` already did.
    `close()` takes the container out of the table before its first await, so a request arriving after a close has begun is refused and nothing respawns, with no guard of its own.
-   The exception is a close that first disposes parked-fork adapters, which awaits before the container leaves the table; OW-vodinu records it.
    Requests do not carry the handle they were sent for: the one ordering that leaves, a stale request landing on a deliberate re-attach made after the close, respawns nothing, and was judged not worth a wire field.
 2. D12's transparent re-attach is withdrawn, and OW-35 is declined.
    A reaper or cap, if one is ever built, evicts as a visible close, as Detach does: the session goes back to a preview and the user attaches it again when they want it.
