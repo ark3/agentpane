@@ -20,8 +20,9 @@
  * attached it, and nothing is attached on its behalf (`detachGapped` below).
  *
  * One stream, filtered. It opens lazily at the first `sessions/list` or
- * `sessions/attach`, before that request's REST call, and it stays open
- * until the helper exits. At
+ * `sessions/attach`, and it stays open until the helper exits. Each of
+ * those requests waits for the open before its own REST call, a second
+ * sent while the first open is pending too (`openStream` below, D26). At
  * the listing so the picker hears `sessions/changed` before anything is
  * attached, and a listing change after the stream is up is not lost between
  * the list and the open (OW-nufafi); at the attach, since a buffer may
@@ -40,9 +41,9 @@
  * out only after the snapshot that answers its attach, or once none ever
  * will, so the buffer reads at the reply whether it is attached
  * (`Attaching` below). An attachment never moves to another handle: one whose
- * handle the server let go of is dropped at the next `sessions-changed`,
- * and Emacs told (`dropDead` below, OW-yibijo). `sessions/changed` is
- * unfiltered.
+ * handle the server let go of is dropped at the `ended` the server sends
+ * under it, and Emacs told (`end` below, D26); a listing drops nothing.
+ * `sessions/changed` is unfiltered.
  *
  * Every per-session notification carries the session's `handle` (D24,
  * OW-suyinu), taken from the raw event being answered, or from the attach
@@ -96,9 +97,9 @@
  * past it (OW-kofuda). A held node whose rendering throws is skipped and the
  * rest still go out (OW-vejeka): the send runs from the timer, where a throw
  * ends the process (measured on Bun 1.4.0), and from every other write,
- * where it would answer a request that succeeded with an error, drop the
- * event stream from `onEvent`, or end the process from `dropDead`; and
- * either way the nodes held behind it would be lost.
+ * where it would answer a request that succeeded with an error, or drop the
+ * event stream from `onEvent`; and either way the nodes held behind it
+ * would be lost.
  */
 
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
@@ -284,57 +285,28 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	/**
-	 * Drop each attachment whose handle the server no longer holds, and tell
-	 * Emacs so. Run on every `sessions-changed`, which the server sends once
-	 * a close has taken the session out of its table, as well as at each
-	 * attach and each turn's start and end, since the helper does not yet act
-	 * on the `ended` the server sends where a handle dies (D26, OW-likopo): a
-	 * close by another client leaves one that no event will ever come under
-	 * again. The buffer still counts itself attached, so a prompt from it
-	 * sends no attach, and the prompt route refuses it, since only an attach
-	 * starts a session (D25). The unfiltered listing puts `handle` on every
-	 * session the server holds (`SessionManager.list` in
-	 * src/server/http/session-manager.ts), and a handle is never minted twice
-	 * (D24), so one it lacks is gone for good.
-	 * Where the session went is not worked out here: another name may reach
-	 * it, or none, and only the server's `#names` knows. The buffer holding
-	 * the handle lets go of it, and its own next attach, by the ref it holds,
-	 * finds the session wherever it is now, the route answering the current
-	 * handle and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
+	 * The server let go of `handle` (D26): a close, by any client, or on Pi a
+	 * fork moving the process onto a conversation of its own, and nothing
+	 * comes under it again. The attachment under it goes and Emacs is told:
+	 * a buffer left counting itself attached would send a prompt with no
+	 * attach before it, which the prompt route refuses (D25). The buffer lets
+	 * go of the handle, and its own next attach, by the ref it holds, finds
+	 * the session wherever it is now, the route answering the current handle
+	 * and ref (`agentpane--notified-buffer` in emacs/agentpane.el).
 	 * Re-attaching here instead would respawn the session the other client
-	 * closed.
-	 *
-	 * Only a handle held when the listing was asked for can be dropped by its
-	 * answer: one an attach answered meanwhile the listing may predate. And
-	 * only while still held: a detach meanwhile has already told Emacs. Every
-	 * event asks a listing of its own, none coalesced, since one in flight may
-	 * predate the close that sent a later event; passes that overlap are
-	 * safe, since a handle once gone is never minted again (D24) and each
-	 * drops only what it held when it asked. A failed listing drops nothing,
-	 * and the next `sessions-changed` asks again.
-	 *
-	 * An attach whose reply is held for a snapshot under a handle the listing
-	 * lacks is abandoned the same way, on the same terms: the session went
-	 * between the attach and its snapshot, which will not come, and its
-	 * reply goes out with nothing recorded.
+	 * closed. An attach whose reply waits on a snapshot under the handle is
+	 * abandoned, since that snapshot will not come, and its reply goes out
+	 * with nothing recorded. Such an attach has no view in the reducer yet,
+	 * which is why `onEvent` comes here before its return on a state the
+	 * reducer left unchanged.
 	 */
-	const dropDead = async (): Promise<void> => {
-		const held = [...attached.keys()];
-		const holding = [...attaching].filter((attach) => attach.release !== undefined);
-		if (held.length === 0 && holding.length === 0) return;
-		let live: Set<string | undefined>;
-		try {
-			live = new Set((await api.listSessions()).map((summary) => summary.handle));
-		} catch {
-			return;
-		}
-		for (const handle of held) {
-			const session = attached.get(handle);
-			if (stopped || session === undefined || live.has(handle)) continue;
+	const end = (handle: string): void => {
+		const session = attached.get(handle);
+		if (session !== undefined) {
 			drop(handle);
 			notify({ method: "session/detached", params: { session, handle } });
 		}
-		for (const attach of holding) if (!attach.done && !live.has(attach.handle)) abandon(attach);
+		for (const attach of attaching) if (!attach.done && attach.handle === handle) abandon(attach);
 	};
 
 	/**
@@ -342,7 +314,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * view goes, so no later event under the handle is applied to it, or gaps
 	 * against it again, until a snapshot forms it afresh; and where Emacs
 	 * attached it, the attachment goes and Emacs is told, as for a handle the
-	 * server let go (`dropDead`). Nothing is attached on Emacs's behalf: an
+	 * server let go (`end`). Nothing is attached on Emacs's behalf: an
 	 * attach is what spawns, and one here would spawn again a session whose
 	 * `sessions/close` is out. The buffer comes back on `g`. An attach whose
 	 * snapshot is still on its way when the gap lands needs nothing here:
@@ -383,16 +355,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			for (const { handle } of result.recover) detachGapped(handle);
 			return;
 		}
-		if (event.type === "sessions-changed") {
-			void dropDead();
+		if (event.type === "sessions-changed") return;
+		if (event.type === "ended") {
+			end(event.handle);
 			return;
 		}
 
 		if (state === before) return;
-		// The reducer has dropped the view; the attachment under the handle, and
-		// telling Emacs, are left to the listing `close()` and `#forkOnto` send
-		// with it (`dropDead`) until OW-likopo makes this their owner (D26).
-		if (event.type === "ended") return;
 
 		if (event.type === "snapshot") {
 			introduce(event);
@@ -448,33 +417,49 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		connection = null;
 	};
 
-	const openStream = (): void => {
-		if (stopped || connection) return;
-		connection = api.connect({
-			onEvent,
-			onOpen() {},
-			// A drop, or a failed first open, ends the helper (D25 point 4):
-			// cancelling the input ends the read loop below as its end would,
-			// and under `main.ts` the process with it, Emacs's end of stdin
-			// still open (bun 1.4.0, measured 2026-09-28). A node the throttle
-			// holds goes out first, since no timer will send it after the exit.
-			onDisconnect() {
-				closeStream();
-				if (stopped) return;
-				flushNodes();
-				stopped = true;
-				void reader.cancel();
-			},
-			// The server frames its own JSON; a frame that fails to parse has no
-			// session to report against, and dropping it costs at most a seq gap,
-			// which the next event detaches that one session for.
-			onMalformed() {},
-		});
-	};
+	/**
+	 * Open the stream, once, and settle when it has opened (D26 point 4).
+	 * The events GET and a request's own are separate connections, so a
+	 * request sent before the server registered this client could have what
+	 * it waits on -- an attach's snapshot, a close's `ended` -- broadcast to
+	 * every client but this one. The open reports once the response headers
+	 * arrive (`sse.ts`), and the server registers the client in the stream's
+	 * `start()` (`openEventStream` in src/server/http/app.ts), which runs
+	 * inside `new ReadableStream(...)`, before the `Response` exists: so an
+	 * open means registered. A first open that fails never settles, and the
+	 * helper ends (`onDisconnect`).
+	 */
+	let opened: Promise<void> | undefined;
+	const openStream = (): Promise<void> =>
+		(opened ??= new Promise<void>((resolve) => {
+			connection = api.connect({
+				onEvent,
+				onOpen: resolve,
+				// A drop, or a failed first open, ends the helper (D25 point 4):
+				// cancelling the input ends the read loop below as its end would,
+				// and under `main.ts` the process with it, Emacs's end of stdin
+				// still open (bun 1.4.0, measured 2026-09-28). A node the throttle
+				// holds goes out first, since no timer will send it after the exit.
+				onDisconnect() {
+					closeStream();
+					if (stopped) return;
+					flushNodes();
+					stopped = true;
+					void reader.cancel();
+				},
+				// The server frames its own JSON, so a frame that fails to parse is a
+				// server bug, not a case to defend (D26 point 4). It has no session
+				// to report against. Dropped, it costs a seq gap where a later event
+				// under its handle detaches that one session, and where none follows,
+				// as none follows an `ended`, an attachment Emacs is never told has
+				// gone.
+				onMalformed() {},
+			});
+		}));
 
 	const handlers: Handlers = {
-		"sessions/list": (params) => {
-			openStream();
+		"sessions/list": async (params) => {
+			await openStream();
 			return api.listSessions(params?.cwd);
 		},
 		"sessions/preview": async ({ session }) => {
@@ -485,10 +470,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		"sessions/create": (params) => api.createSession(params),
 		"models/list": ({ backend }) => api.listModels(backend),
 		"sessions/attach": async ({ session }) => {
-			openStream();
 			const attach: Attaching = { asked: session, seen: new Set(), done: false };
 			attaching.add(attach);
 			try {
+				await openStream();
 				const summary = await api.attach(session);
 				// The server writes the attach's snapshot to every connected stream
 				// before it answers (`SessionManager.attach` in
@@ -509,11 +494,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// the snapshot is on its way, and the reply waits for it, so that it
 				// never reaches Emacs ahead of the snapshot that attaches the buffer.
 				// The wait ends with that snapshot (`introduce`), a detach of the
-				// asked-for ref (`forget`), a listing without the handle
-				// (`dropDead`), or the helper's end. It is entered before the REST
-				// call, not only once the stream has opened: a stream that opens
-				// after the snapshot was broadcast gets the session's opening
-				// snapshot instead.
+				// asked-for ref (`forget`), an `ended` under the handle (`end`), or
+				// the helper's end. The attach is entered before the stream's open,
+				// so a detach while the open is pending ends it too; and its REST
+				// call waits for the open, so that the snapshot it broadcasts, and
+				// any `ended` under its handle, reach this client (`openStream`).
 				if (!attach.done) {
 					const view = state.sessions[summary.handle];
 					if (view) answer(attach, view, summary.handle);

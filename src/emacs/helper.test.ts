@@ -75,20 +75,29 @@ function stdio() {
 /**
  * The server's event stream, scripted: every open captures the handlers so the test can push events.
  * While `failing` is above zero an open fails instead, as `sse.ts` reports one, and counts it down.
+ * While `holding` is set an open reports nothing until `openHeld()`, as one whose response headers are slow.
  */
 function eventSource() {
 	const opens: EventHandlers[] = [];
 	const closed: number[] = [];
+	const held: (() => void)[] = [];
 	const source = {
 		opens,
 		closed,
 		failing: 0,
+		holding: false,
 		openEvents: (_url: string, handlers: EventHandlers) => {
 			const index = opens.push(handlers) - 1;
 			const fails = source.failing > 0;
 			if (fails) source.failing -= 1;
-			queueMicrotask(() => (fails ? handlers.onDisconnect(true) : handlers.onOpen()));
+			const report = () => (fails ? handlers.onDisconnect(true) : handlers.onOpen());
+			if (source.holding) held.push(report);
+			else queueMicrotask(report);
 			return { close: () => void closed.push(index) };
+		},
+		/** Report every open `holding` held. */
+		openHeld() {
+			for (const report of held.splice(0)) report();
 		},
 		emit(event: ServerEvent) {
 			opens.at(-1)!.onEvent(event);
@@ -398,15 +407,15 @@ describe("notifications", () => {
 		expect(io.out).toHaveLength(4);
 	});
 
-	it("releases a reply waiting for a snapshot under a handle the listing no longer has, attaching nothing (OW-rebawa)", async () => {
-		const { io, source } = start({ ...attachRoutes(pi), [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+	it("releases a reply waiting for a snapshot under a handle that ended, attaching nothing (OW-rebawa, D26)", async () => {
+		const { io, source } = start(attachRoutes(pi));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
 		await tick();
-		source.emit({ type: "sessions-changed" });
-		await io.until(2);
-		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		expect(io.out).toEqual([]);
+		source.emit({ type: "ended", session: pi, handle: h(pi) });
+		await io.until(1);
 		await tick();
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["sessions/changed", 1]);
+		expect(io.out).toEqual([{ jsonrpc: "2.0", id: 1, result: summary(pi) }]);
 	});
 
 	it("releases a reply waiting for a snapshot when the stream drops (OW-rebawa)", async () => {
@@ -424,8 +433,8 @@ describe("notifications", () => {
 		// The snapshot under the new ref matches no pending attach, which waits
 		// under the ref it asked for, and the gap takes the view it formed; the
 		// reply then has no snapshot to forward. An attachment recorded there
-		// would be one Emacs was never told of: the listing that lacks the
-		// handle would then say `session/detached` for it.
+		// would be one Emacs was never told of: the `ended` under the handle
+		// would then say `session/detached` for it.
 		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start({
 			[`GET ${ROUTES.session(alias)}`]: () => {
@@ -433,15 +442,14 @@ describe("notifications", () => {
 				source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 				return json({ session: summary(pi) });
 			},
-			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: alias } });
 		await tick();
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
-		source.emit({ type: "sessions-changed" });
-		await io.until(2);
+		source.emit({ type: "ended", session: pi, handle: h(pi) });
+		await io.until(1);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1, "sessions/changed"]);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual([1]);
 	});
 
 	it("sends an attach's reply after the session/detached of the gap that took its snapshot, and records nothing at the reply (OW-tifiva)", async () => {
@@ -451,14 +459,13 @@ describe("notifications", () => {
 				source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 				return json({ session: summary(pi) });
 			},
-			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }),
 		});
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
 		await tick();
-		source.emit({ type: "sessions-changed" });
-		await io.until(4);
+		source.emit({ type: "ended", session: pi, handle: h(pi) });
+		await io.until(3);
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/detached", 1, "sessions/changed"]);
+		expect(io.out.map((message) => message["method"] ?? message["id"])).toEqual(["session/snapshot", "session/detached", 1]);
 	});
 
 	it("sends the view it holds as the snapshot of an attach whose reply lands ahead of it, before the reply (OW-rebawa)", async () => {
@@ -811,6 +818,24 @@ describe("notifications", () => {
 		expect(io.notifications()).toEqual([{ jsonrpc: "2.0", method: "sessions/changed" }]);
 	});
 
+	// The events GET and the attach GET are separate connections: an attach
+	// sent before the server registered the stream could have its snapshot,
+	// and a close's `ended`, broadcast to every client but this one (D26).
+	it("sends the first attach's request only once its stream has opened, and a listing asked while that open is pending too (D26)", async () => {
+		const { io, source, calls } = start({ ...attachRoutes(pi), [`GET ${ROUTES.sessions}`]: () => json({ sessions: [summary(pi)] }) });
+		source.holding = true;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/list" });
+		await tick();
+		expect(source.opens).toHaveLength(1);
+		expect(calls).toEqual([]);
+
+		source.openHeld();
+		await io.until(1);
+		expect(new Set(calls.map((call) => `${call.method} ${call.url}`))).toEqual(new Set([`GET ${ROUTES.session(pi)}`, `GET ${ROUTES.sessions}`]));
+		expect(source.opens).toHaveLength(1);
+	});
+
 	it("exits when the stream it opened for sessions/list drops, and opens it no more (D25)", async () => {
 		const { io, source, done } = start({ [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
@@ -834,11 +859,9 @@ describe("notifications", () => {
 	});
 });
 
-// Nothing tells the helper a handle died, and only the server's `#names`
-// knows where a session went; the listing after a sessions-changed says
-// which handles are still held, and a buffer told its handle is gone finds
-// its session by its ref at its next attach.
-describe("the listing after a sessions-changed (OW-yibijo)", () => {
+// The server says a handle has ended, under it, where it lets go of it
+// (D26); the listing says only which sessions there are, and drops nothing.
+describe("a handle's end (D26, OW-likopo)", () => {
 	const snapshot = (session: SessionRef, handle: string, seq = 1): ServerEvent => ({
 		type: "snapshot",
 		session,
@@ -867,11 +890,36 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 	});
 	const methods = (io: ReturnType<typeof stdio>) =>
 		io.notifications().map((message) => [message["method"], (message["params"] as { handle?: string } | undefined)?.handle]);
-	const lookups = (calls: { url: string }[]) => calls.filter((call) => call.url.endsWith("/live"));
 
-	it("tells Emacs an attachment whose handle the listing lacks is detached, and says nothing more under it", async () => {
-		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+	// A close by another client: the buffer still counts itself attached, so
+	// a prompt from it sends no attach, and the prompt route refuses it.
+	it("tells Emacs an attachment whose handle ended is detached, though a listing would fail, and says nothing more under it", async () => {
 		const { io, source, calls } = start({
+			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
+			[`GET ${ROUTES.sessions}`]: () => json({ error: "boom" }, 500),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		source.emit(snapshot(pi, "h1"));
+		await io.until(2);
+
+		source.emit({ type: "ended", session: pi, handle: "h1" });
+		source.emit({ type: "sessions-changed" });
+		await io.until(4);
+		source.emit(status(pi, "h1", 2));
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(methods(io)).toEqual([
+			["session/snapshot", "h1"],
+			["session/detached", "h1"],
+			["sessions/changed", undefined],
+		]);
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
+		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`]);
+	});
+
+	it("sends no session/detached for an attachment whose handle a listing lacks, with no ended, and goes on forwarding it", async () => {
+		const renamed: SessionRef = { backend: "pi", id: "/tmp/renamed.jsonl" };
+		const { io, source } = start({
 			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
 			[`GET ${ROUTES.sessions}`]: () => json({ sessions: [summary(renamed, "h2")] }),
 		});
@@ -880,123 +928,16 @@ describe("the listing after a sessions-changed (OW-yibijo)", () => {
 		source.emit(snapshot(pi, "h1"));
 		await io.until(2);
 
-		// Closed by another client, and attached there again under h2 by
-		// another name: the listing holds the session, under a handle this
-		// attachment never held.
-		source.emit(snapshot(renamed, "h2", 0));
 		source.emit({ type: "sessions-changed" });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/list" });
 		await io.until(4);
+		await new Promise((resolve) => setTimeout(resolve, 5));
 		source.emit(status(pi, "h1", 2));
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(methods(io)).toEqual([
-			["session/snapshot", "h1"],
-			["sessions/changed", undefined],
-			["session/detached", "h1"],
-		]);
-		expect(io.notifications()[2]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
-		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`, `GET ${ROUTES.sessions}`]);
-		expect(lookups(calls)).toEqual([]);
-	});
-
-	it("drops no attachment an attach answered while the listing was in flight, whose handle the listing predates", async () => {
-		let attaches = 0;
-		let release!: () => void;
-		const held = new Promise<void>((resolve) => (release = resolve));
-		const { io, source, calls } = start({
-			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, ++attaches === 1 ? "h1" : "h3") }),
-			[`GET ${ROUTES.sessions}`]: async () => {
-				await held;
-				return json({ sessions: [] });
-			},
-		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await tick();
-		source.emit(snapshot(pi, "h1"));
-		await io.until(2);
-
-		source.emit({ type: "sessions-changed" });
-		await vi.waitFor(() => expect(calls.filter((call) => call.url === ROUTES.sessions)).toHaveLength(1));
-		// The buffer's own `g`, answered under h3 before the listing lands.
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
-		await tick();
-		source.emit(snapshot(pi, "h3", 0));
 		await io.until(5);
-		release();
-		await io.until(6);
-		source.emit(status(pi, "h3", 1));
-		await io.until(7);
 		expect(methods(io)).toEqual([
 			["session/snapshot", "h1"],
 			["sessions/changed", undefined],
-			["session/snapshot", "h3"],
-			["session/detached", "h1"],
-			["session/status", "h3"],
-		]);
-		expect(lookups(calls)).toEqual([]);
-	});
-
-	// A close by another client with the stream up: the buffer still counts
-	// itself attached, so a prompt from it sends no attach, and the prompt
-	// route's own attach mints a handle whose snapshot the helper would drop.
-	it("tells Emacs an attachment is detached when the listing after a sessions-changed lacks its handle, listing again for every event", async () => {
-		const answers: (() => void)[] = [];
-		const { io, source, calls } = start({
-			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
-			[`GET ${ROUTES.sessions}`]: async () => {
-				const sessions = answers.length === 0 ? [summary(pi, "h1")] : [];
-				await new Promise<void>((resolve) => answers.push(resolve));
-				return json({ sessions });
-			},
-		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await tick();
-		source.emit(snapshot(pi, "h1"));
-		await io.until(2);
-
-		// The first listing is asked before the close and still holds h1; the
-		// close's own sessions-changed asks a second, which lacks it.
-		source.emit({ type: "sessions-changed" });
-		await vi.waitFor(() => expect(answers).toHaveLength(1));
-		source.emit({ type: "sessions-changed" });
-		await vi.waitFor(() => expect(answers).toHaveLength(2));
-		answers[1]!();
-		await io.until(5);
-		answers[0]!();
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(methods(io)).toEqual([
-			["session/snapshot", "h1"],
-			["sessions/changed", undefined],
-			["sessions/changed", undefined],
-			["session/detached", "h1"],
-		]);
-		expect(calls.filter((call) => call.url === ROUTES.sessions)).toHaveLength(2);
-		expect(source.opens).toHaveLength(1);
-	});
-
-	it("tells Emacs nothing of an attachment it detached while the listing was in flight", async () => {
-		let release!: () => void;
-		const held = new Promise<void>((resolve) => (release = resolve));
-		const { io, source } = start({
-			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
-			[`GET ${ROUTES.sessions}`]: async () => {
-				await held;
-				return json({ sessions: [] });
-			},
-		});
-		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi } });
-		await tick();
-		source.emit(snapshot(pi, "h1"));
-		await io.until(2);
-
-		source.emit({ type: "sessions-changed" });
-		await io.until(3);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, handle: "h1" } });
-		await io.until(4);
-		release();
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(methods(io)).toEqual([
-			["session/snapshot", "h1"],
-			["sessions/changed", undefined],
+			["session/status", "h1"],
 		]);
 	});
 });

@@ -33,7 +33,11 @@
  * notifications that published and retracted one, and `session/snapshot`'s
  * `requests`: agentpane never holds an agent request (D2a), so there is
  * nothing pending to carry or answer, and the refusal reaches Emacs as a
- * `session/error` naming the request's kind.
+ * `session/error` naming the request's kind. OW-likopo raised it a twelfth,
+ * under D26: `session/detached` for a handle the server let go of follows
+ * the server's own `ended` under it, where it followed a listing the helper
+ * asked at each `sessions/changed`; and `sessions/list` and
+ * `sessions/attach` wait for the event stream's open before their own call.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -159,8 +163,9 @@
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
  *   `status`, `isStreaming`, `onDisk`, and `handle` for a session the server
  *   holds, virtual or attached). Opens the event stream if it is not open
- *   yet, before the listing is asked, and from here on `sessions/changed`
- *   flows, whether or not anything is attached.
+ *   yet, and waits for it to have opened before the listing is asked, and
+ *   from here on `sessions/changed` flows, whether or not anything is
+ *   attached.
  * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
  *   stored transcript; spawns nothing and opens no stream.
  * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
@@ -182,16 +187,17 @@
  *   snapshot under its handle came (for the ref asked for, that snapshot
  *   and a `session/detached` both went out first; for another ref,
  *   neither did), a `sessions/detach` of the asked-for ref landed while
- *   the attach was in flight, the session's handle left the listing
+ *   the attach was in flight, the server ended the session's handle
  *   before its snapshot came, or the helper is exiting. The first can
  *   misjudge: a snapshot from elsewhere under the handle, ahead of the
  *   server handling this attach, then a gap, then the reply, leaves this
  *   attach's own snapshot to arrive after the reply and answer nothing.
  *   That takes a lost or malformed frame, and the session ends not
  *   attached, as after any gap (D25).
- *   Opens the event stream if it is not open yet, as `sessions/list` does,
- *   and from here on the per-session notifications below flow for this
- *   session.
+ *   Opens the event stream if it is not open yet, and waits for it to have
+ *   opened before the attach is sent, as `sessions/list` does, so the
+ *   snapshot that answers it reaches the helper; from here on the
+ *   per-session notifications below flow for this session.
  * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
  *   `null`. `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read
@@ -294,17 +300,19 @@
  *   again, in `notices`.
  * - `session/detached` -- `{ session, handle }`. Nothing more comes under
  *   `handle`, and the helper has dropped the attachment: either the server
- *   no longer holds it, the helper's own listing, asked at each
- *   `sessions/changed` it sends, having lacked it -- a close by another
- *   client (OW-yibijo) -- or the session's `seq` gapped,
+ *   let go of the handle and said so with an `ended` under it -- a close,
+ *   by another client or this one, or on Pi a fork moving the process onto
+ *   a conversation of its own (D26) -- or the session's `seq` gapped,
  *   and the helper detaches that one session rather than attach it again
  *   (D25 point 5, OW-filuge). `session` is the ref it last named the
  *   session by. The buffer holding `handle` lets go of it and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever
  *   handle and ref the session has now, if any, as a first attach is.
- * - `sessions/changed` -- no `params`. Refetch the listing. Any
- *   `session/detached` the helper's own listing brings follows it.
+ * - `sessions/changed` -- no `params`. Refetch the listing. A listing
+ *   detaches nothing: where the server lets go of a handle Emacs attached,
+ *   the `session/detached` for it goes out ahead of the `sessions/changed`
+ *   the same close or fork sends.
  *
  * No notification says the event stream dropped. When it does, or its first
  * open fails, the helper exits (D25 point 4, OW-mepufi), and Emacs sees its
