@@ -63,6 +63,17 @@ export interface ControllerView {
 	 */
 	preview: { ref: SessionRef; turns: SessionPreviewTurn[] } | null;
 	/**
+	 * Why the last read of the selected session's preview failed, which the
+	 * detached-loading pane shows above its Attach button (OW-bilogo). Only
+	 * `loadPreview` writes it, and only for a read that failed with the stream
+	 * up. Never the error slot: no gesture stands behind that read.
+	 *
+	 * It belongs to that session's loading pane, so `publish` drops it once the
+	 * pane leaves that mode -- a read succeeding, a snapshot -- or the selection
+	 * leaves the session.
+	 */
+	previewFailure: { ref: SessionRef; message: string } | null;
+	/**
 	 * Transcript indices the *selected* session can be forked at, as of the last
 	 * `GET fork-points` (OW-roveze), or null while nobody has been told yet.
 	 * Whether a user message is offered an Edit control at all reads this.
@@ -248,6 +259,14 @@ export interface AgentpaneController {
 const FATAL_STREAM_RETRY_MS = 5_000;
 
 /**
+ * How long `loadPreview` lets a preview read run before aborting it
+ * (OW-bilogo), which then counts as a failed read. A first cut nothing has
+ * measured: the server answers it from local disk, so ten seconds is far past
+ * any answer it would give.
+ */
+const PREVIEW_READ_TIMEOUT_MS = 10_000;
+
+/**
  * `isVisible` is *injected* rather than read from `document` because this module
  * has no DOM dependency and must not acquire one (OW-76): the timer and the
  * refresh live here, where they can be driven by a fake api, while the
@@ -270,6 +289,7 @@ export function createController(
 		modelSetting: false,
 		effortSetting: false,
 		preview: null,
+		previewFailure: null,
 		forkIndices: null,
 	};
 	let connection: EventConnection | undefined;
@@ -301,14 +321,15 @@ export function createController(
 	const forkPointsInFlight = new Set<string>();
 	/** Sessions, by ref key, whose preview `loadPreview` has out. */
 	const previewLoads = new Set<string>();
-	/** How many times the stream has dropped: a read out across one was cut by the outage. */
-	let streamDrops = 0;
+	/** Whether the `previewFailure` on the view holds `loadPreview` back until the next `connected`. */
+	let previewHeld = false;
 	const listeners = new Set<(next: ControllerView) => void>();
 
 	/**
 	 * The controller's one chokepoint, so the pane's mode is settled here and
 	 * no path that adds or drops a view can forget it (OW-forinu): a stored
-	 * preview the mode no longer shows is dropped before anyone sees it, and a
+	 * preview the mode no longer shows is dropped before anyone sees it, and so
+	 * is a preview failure no longer on its loading pane (OW-bilogo), and a
 	 * detached-loading pane gets its preview fetched.
 	 */
 	function publish(next: Partial<ControllerView>): void {
@@ -316,6 +337,11 @@ export function createController(
 		view = { ...view, ...next };
 		const mode = paneMode(view);
 		if (view.preview !== null && mode !== "preview") view = { ...view, preview: null };
+		const failure = view.previewFailure;
+		if (failure !== null && (mode !== "loading" || sessionKey(view.state.selected!) !== sessionKey(failure.ref))) {
+			view = { ...view, previewFailure: null };
+			previewHeld = false;
+		}
 		for (const listener of listeners) listener(view);
 		if (mode === "loading") loadPreview();
 	}
@@ -334,35 +360,51 @@ export function createController(
 	 * still names that session and the pane there is still loading: a click
 	 * elsewhere has moved on, and a view that came back meanwhile outranks it.
 	 *
-	 * A failed read falls to the startup view, reporting nothing, rather than
-	 * trying again, which against a server answering an error would be a hot
-	 * loop: the selection goes and nothing is loading any more. The exception is
-	 * a read the stream dropped under, which is the outage and not an answer.
-	 * That one is asked again, once per drop, which waits for `connected`: the
-	 * reconnect may have published before the read failed, while its key was
-	 * still out, so nothing else would ask. A read that fails as the server
-	 * exits but before the tab has heard the stream drop cannot be told from an
-	 * answer, and still falls to the startup view.
+	 * A failed read is never an answer (OW-bilogo): the pane stays loading and
+	 * the selection stands. A failure cannot be told from the outage that
+	 * caused it -- the read can fail as the server exits, before the tab hears
+	 * the stream drop -- and an attach whose reply beats its snapshot (D2) has
+	 * its selection to keep whatever the read found, since the snapshot makes
+	 * the pane live when it lands.
+	 *
+	 * What keeps a server answering errors from a hot loop is when the read is
+	 * asked again: at the next `connected`, which releases `previewHeld`, or
+	 * when the user clicks the row, whose `preview()` reads it itself -- never
+	 * from the failure, and never from the publishes that merely find the pane
+	 * still loading. A failure with the stream down needs no hold, as nothing
+	 * asks until `connected`; with it up, it holds and puts its message on the
+	 * pane, which the empty pane would otherwise hide from a user who has a
+	 * server to ask.
+	 *
+	 * A read that has not settled within `PREVIEW_READ_TIMEOUT_MS` is aborted
+	 * and counts as failed: one that hung would keep its key in `previewLoads`
+	 * for good, and nothing would ever ask for that session's preview again.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;
-		if (selected === null || view.connection !== "connected" || paneMode(view) !== "loading") return;
+		if (selected === null || view.connection !== "connected" || previewHeld || paneMode(view) !== "loading") return;
 		const key = sessionKey(selected);
 		if (previewLoads.has(key)) return;
 		previewLoads.add(key);
-		const drops = streamDrops;
+		const abort = new AbortController();
+		const timeout = setTimeout(
+			() => abort.abort(new Error(`No answer within ${PREVIEW_READ_TIMEOUT_MS / 1000}s.`)),
+			PREVIEW_READ_TIMEOUT_MS,
+		);
 		const loading = () =>
 			!disposed && view.state.selected !== null && sessionKey(view.state.selected) === key && paneMode(view) === "loading";
-		api.preview(selected).then(
+		api.preview(selected, abort.signal).then(
 			(response) => {
+				clearTimeout(timeout);
 				previewLoads.delete(key);
 				if (loading()) openPreview({ ref: selected, turns: response.turns });
 			},
-			() => {
+			(error: unknown) => {
+				clearTimeout(timeout);
 				previewLoads.delete(key);
-				if (!loading()) return;
-				if (drops !== streamDrops || view.connection !== "connected") loadPreview();
-				else publish({ state: { ...view.state, selected: null } });
+				if (!loading() || view.connection !== "connected") return;
+				previewHeld = true;
+				publish({ previewFailure: { ref: selected, message: errorMessage(error) } });
 			},
 		);
 	}
@@ -840,6 +882,8 @@ export function createController(
 		 * line nor the error slot.
 		 */
 		onOpen() {
+			// The transition a held preview read waits for (`loadPreview`).
+			previewHeld = false;
 			publish({ connection: "connected" });
 			if (opened || !listedOk) void refreshSessions(false);
 			opened = true;
@@ -883,7 +927,6 @@ export function createController(
 		 * a rename moved the ref during the outage (`followRef`).
 		 */
 		onDisconnect(fatal: boolean) {
-			streamDrops += 1;
 			const selected = view.state.selected;
 			let kept = true;
 			const summaries: SessionSummary[] = [];

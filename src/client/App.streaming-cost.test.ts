@@ -165,6 +165,7 @@ function initialView(selectedTurns: number): ControllerView {
 		modelSetting: false,
 		effortSetting: false,
 		preview: null,
+		previewFailure: null,
 		forkIndices: null,
 	};
 }

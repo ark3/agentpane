@@ -172,6 +172,7 @@ async function mounted(): Promise<PublishingController> {
 		modelSetting: false,
 		effortSetting: false,
 		preview: null,
+		previewFailure: null,
 		forkIndices: null,
 	});
 	render(App, { props: { controller } });

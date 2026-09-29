@@ -77,6 +77,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		modelSetting: false,
 		effortSetting: false,
 		preview: null,
+		previewFailure: null,
 		forkIndices: null,
 		...overrides,
 	};

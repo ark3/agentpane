@@ -95,7 +95,7 @@ class FakeApi implements AgentpaneApi {
 	readonly createSession = vi.fn(async (_body: { cwd: string; backend: BackendId }) => ref);
 	readonly attach = vi.fn(async (session: SessionRef) => summary(session));
 	readonly preview = vi.fn(
-		async (session: SessionRef): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
+		async (session: SessionRef, _signal?: AbortSignal): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
 	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
@@ -792,7 +792,7 @@ describe("client controller", () => {
 		await settle();
 
 		expect(api.attach).not.toHaveBeenCalled();
-		expect(api.preview).toHaveBeenCalledWith(ref);
+		expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 		expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 		expect(controller.getView().state.selected).toEqual(ref);
 		expect(controller.getView().preview).toEqual({ ref, turns: [] });
@@ -815,14 +815,16 @@ describe("client controller", () => {
 		api.emit({ type: "status", session: renamed, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
-		expect(api.preview).toHaveBeenCalledWith(renamed);
-		expect(api.preview).not.toHaveBeenCalledWith(ref);
+		expect(api.preview).toHaveBeenCalledWith(renamed, expect.any(AbortSignal));
+		expect(api.preview.mock.calls.map(([session]) => session)).not.toContainEqual(ref);
 		expect(controller.getView().state.selected).toEqual(renamed);
 		expect(controller.getView().preview).toEqual({ ref: renamed, turns: [] });
 		controller.dispose();
 	});
 
-	it("leaves a gapped selection on the startup view when its preview cannot be read (OW-lunihe)", async () => {
+	// A failed read is never an answer (OW-bilogo): the selection stands, and
+	// the failure is the pane's to show.
+	it("keeps a gapped selection detached-loading when its preview cannot be read, reporting it on the pane (OW-lunihe, OW-bilogo)", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
 		await controller.start();
@@ -835,9 +837,10 @@ describe("client controller", () => {
 		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await settle();
 
-		expect(controller.getView().state.selected).toBeNull();
-		expect(controller.getView().preview).toBeNull();
-		// Nobody asked for that preview, so its failure is nobody's to read.
+		expect(controller.getView().state.selected).toEqual(ref);
+		expect(paneMode(controller.getView())).toBe("loading");
+		expect(controller.getView().previewFailure).toEqual({ ref, message: "preview failed" });
+		// Nobody asked for that preview, so the error slot is not its to write.
 		expect(controller.getView().error).toBeNull();
 		controller.dispose();
 	});
@@ -1125,7 +1128,7 @@ describe("client controller", () => {
 			await settle();
 
 			expect(api.close).toHaveBeenCalledWith(ref);
-			expect(api.preview).toHaveBeenCalledWith(ref);
+			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 			if (relistFirst) {
 				api.emit({ type: "sessions-changed" });
 				await settle();
@@ -1634,7 +1637,7 @@ describe("client controller", () => {
 		await controller.detach();
 		await settle();
 
-		expect(api.preview).toHaveBeenCalledWith(createdRef);
+		expect(api.preview).toHaveBeenCalledWith(createdRef, expect.any(AbortSignal));
 		expect(controller.getView().state.selected).toEqual(createdRef);
 		controller.dispose();
 	});
@@ -1657,7 +1660,7 @@ describe("client controller", () => {
 		await detaching;
 
 		expect(controller.getView().state.selected).toEqual(attachedRef);
-		expect(api.preview).not.toHaveBeenCalledWith(ref);
+		expect(api.preview.mock.calls.map(([session]) => session)).not.toContainEqual(ref);
 		controller.dispose();
 	});
 
@@ -2755,7 +2758,7 @@ describe("client controller", () => {
 
 			expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 			expect(paneMode(controller.getView())).toBe("preview");
-			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref);
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref, expect.any(AbortSignal));
 			expect(controller.getView().preview).toEqual({ ref, turns });
 			controller.setDraft("sent to nobody");
 			expect(await controller.submit()).toBe(false);
@@ -2829,7 +2832,7 @@ describe("client controller", () => {
 
 			expect(controller.getView().state.selected).toEqual(ref);
 			expect(paneMode(controller.getView())).toBe("loading");
-			expect(api.preview).toHaveBeenCalledWith(ref);
+			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 			controller.setDraft("sent to nobody");
 			expect(await controller.submit()).toBe(false);
 			expect(api.prompt).not.toHaveBeenCalled();
@@ -2856,9 +2859,11 @@ describe("client controller", () => {
 		});
 
 		// The read was out when the stream dropped, and fails only after the
-		// reconnect: that is the outage, not the server's answer, so it is asked
-		// again rather than taken as a reason to leave the session.
-		it("asks again for a preview whose read the stream dropped under, even when it fails after the reconnect (OW-forinu)", async () => {
+		// reconnect, whose `connected` found its key still out. A failed read is
+		// never an answer, so the session stays selected; and like any failure
+		// with the stream up it is asked again only at the next `connected`
+		// (OW-bilogo), never from the failure itself.
+		it("keeps the selection for a preview whose read the stream dropped under and that fails after the reconnect, and asks again at the next connected (OW-forinu, OW-bilogo)", async () => {
 			const api = new FakeApi();
 			const turns = [previewAssistant("stored")];
 			const controller = createController(api);
@@ -2880,9 +2885,182 @@ describe("client controller", () => {
 			await settle();
 
 			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("loading");
+			expect(api.preview).toHaveBeenCalledOnce();
+
+			api.drop();
+			api.open();
+			await settle();
+
 			expect(api.preview).toHaveBeenCalledTimes(2);
 			expect(paneMode(controller.getView())).toBe("preview");
 			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
+		});
+
+		// The server exits with the read out, and the read fails before the tab
+		// hears the stream drop, so the stream still reads `connected`.
+		it("keeps the selection for a preview read that fails before the drop is heard, and asks again at the next connected (OW-bilogo)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.preview.mockClear();
+			api.preview.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+			api.preview.mockResolvedValue({ ref, turns });
+
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			await settle();
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("loading");
+			expect(api.preview).toHaveBeenCalledOnce();
+
+			api.drop();
+			await settle();
+			expect(api.preview).toHaveBeenCalledOnce();
+			api.open();
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledTimes(2);
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			expect(controller.getView().previewFailure).toBeNull();
+			controller.dispose();
+		});
+
+		// Stream up, the attach reply beats its snapshot (D2), and the preview
+		// read the detached-loading pane asks meanwhile fails first.
+		it("keeps an attach's selection when the preview read under its reply fails before the snapshot, and goes live at the snapshot (OW-bilogo)", async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await settle();
+			api.preview.mockRejectedValue(new Error("preview failed"));
+
+			await controller.select(ref);
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("loading");
+
+			api.emit(snapshotOf(ref));
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(paneMode(controller.getView())).toBe("live");
+			controller.dispose();
+		});
+
+		// A read that never settles would hold its key in `previewLoads` for
+		// good, and nothing would ever ask for that session's preview again.
+		it("aborts a preview read that has not settled within its bound, and asks again at the next connected (OW-bilogo)", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				const turns = [previewAssistant("stored")];
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				await controller.select(ref);
+				api.emit(snapshotOf(ref));
+				await vi.advanceTimersByTimeAsync(0);
+				api.preview.mockClear();
+				const signals: Array<AbortSignal | undefined> = [];
+				// A read that settles only when it is aborted, as `fetch` does.
+				api.preview.mockImplementationOnce((_session, signal) => {
+					signals.push(signal);
+					return new Promise((_resolve, reject) => {
+						signal?.addEventListener("abort", () => reject(signal.reason));
+					});
+				});
+				api.preview.mockResolvedValue({ ref, turns });
+
+				api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+				await vi.advanceTimersByTimeAsync(9_999);
+				expect(signals[0]?.aborted).toBe(false);
+				await vi.advanceTimersByTimeAsync(1);
+
+				expect(signals[0]?.aborted).toBe(true);
+				expect(controller.getView().state.selected).toEqual(ref);
+				expect(paneMode(controller.getView())).toBe("loading");
+				expect(api.preview).toHaveBeenCalledOnce();
+
+				api.drop();
+				api.open();
+				await vi.advanceTimersByTimeAsync(0);
+
+				expect(api.preview).toHaveBeenCalledTimes(2);
+				expect(paneMode(controller.getView())).toBe("preview");
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// A server answering errors with the stream up: the failure branch never
+		// asks again, and nor does any publish that merely finds the pane
+		// loading -- a listing, a keystroke -- or the read would loop hot.
+		it("asks no further preview after a failed read with the stream up until the row is selected again, showing the failure on the pane until a read succeeds (OW-bilogo)", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.preview.mockClear();
+			api.preview.mockRejectedValueOnce(new Error("preview failed"));
+
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			await settle();
+
+			expect(controller.getView().previewFailure).toEqual({ ref, message: "preview failed" });
+			expect(controller.getView().error).toBeNull();
+
+			api.emit({ type: "sessions-changed" });
+			controller.setDraft("unrelated");
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledOnce();
+			expect(paneMode(controller.getView())).toBe("loading");
+
+			api.preview.mockResolvedValue({ ref, turns });
+			await controller.preview(ref);
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledTimes(2);
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(controller.getView().previewFailure).toBeNull();
+			controller.dispose();
+		});
+
+		// The stream is down, so the empty loading pane already says what is
+		// going on; a line there would only repeat the outage.
+		it("sets no failure line for a preview read that fails while the stream is down (OW-bilogo)", async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const outage = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValueOnce(outage.promise);
+
+			api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+			api.drop();
+			outage.reject(new TypeError("Failed to fetch"));
+			await settle();
+
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(controller.getView().previewFailure).toBeNull();
 			controller.dispose();
 		});
 
@@ -2910,7 +3088,7 @@ describe("client controller", () => {
 			api.open();
 			await settle();
 
-			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref);
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref, expect.any(AbortSignal));
 			expect(paneMode(controller.getView())).toBe("preview");
 			expect(controller.getView().preview).toEqual({ ref, turns });
 			controller.dispose();
