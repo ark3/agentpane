@@ -4870,11 +4870,14 @@ drives."
 (defun agentpane-test--heard-out (connection)
   "Let Emacs handle what CONNECTION's dead process left: wait until its
 sentinel has run and it has been torn down, which is after the messages
-it wrote last (`agentpane--helper-exited')."
+it wrote last (`agentpane--helper-exited'), and every request it had out
+has been answered, which the teardown's own zero-delay timer does last
+\(`agentpane--helper-gone')."
   (should (agentpane-test--wait-for
            (lambda ()
              (and (process-get (jsonrpc--process connection) 'jsonrpc-sentinel-cleanup-started)
-                  (not (eq connection agentpane--connection))))
+                  (not (eq connection agentpane--connection))
+                  (not (assq connection agentpane--requests-out))))
            (+ (float-time) 10))))
 
 (defun agentpane-test--end-helper (connection)
@@ -5227,9 +5230,13 @@ attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
   (agentpane-test--snapshot-then-death nil))
 
 (ert-deftest agentpane-test-late-error-reply-fails-once ()
-  "An error reply a dead helper wrote, handled after its sentinel has
-failed the request as the helper's death, does not fail it again
-\(OW-bukupu)."
+  "An error reply a dead helper wrote, handled once the helper reads as
+dead, does not fail the request a second time: the teardown answers it
+once, as the helper's death, which runs FAILED alone, as a timeout does,
+and not UNSENT, a death not saying the request reached no backend; the
+teardown decides a prompt's turn-done watch itself (OW-bukupu,
+OW-mopuyi).  Until OW-mopuyi jsonrpc.el's \"Server died\" answered it,
+read as unsent."
   (let ((failures 0)
         (unsents 0))
     (agentpane-test--outliving
@@ -5243,7 +5250,7 @@ failed the request as the helper's death, does not fail it again
         (agentpane-test--dead-unheard process)
         (agentpane-test--heard-out dead)
         (should (= failures 1))
-        (should (= unsents 1))))))
+        (should (= unsents 0))))))
 
 (ert-deftest agentpane-test-late-success-reply-answers-once ()
   "A prompt's answer a helper wrote as it exited, while Emacs was busy, is
@@ -5288,8 +5295,9 @@ request with id 1 with a null result, then exits 0.3s later."
 as an \"anxious continuation\", while the helper died is the prompt's one
 answer, though it runs after the helper's teardown: the sentinel fails
 only the requests it still waits on, and the synchronous one's end hands
-on the held answer after the teardown's timer (Emacs 31.1, jsonrpc.el
-1.0.29, measured 2026-09-28; OW-bukupu)."
+on the held answer from a timer queued after the teardown's but before
+the one the teardown answers the helper's requests from (Emacs 31.1,
+jsonrpc.el 1.0.29, measured 2026-09-28; OW-bukupu, OW-mopuyi)."
   (let ((agentpane--connection nil)
         (answers 0)
         (failures 0)
@@ -5303,11 +5311,87 @@ on the held answer after the teardown's timer (Emacs 31.1, jsonrpc.el
         (let ((dead agentpane--connection))
           (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
           (agentpane-test--heard-out dead)
-          (should (agentpane-test--wait-for (lambda () (> (+ answers failures) 0))
-                                            (+ (float-time) 5)))
           (with-current-buffer (jsonrpc-events-buffer dead)
-            (should (string-search "anxious continuation" (buffer-string))))
+            (should (string-search "anxious continuation to 1 running now" (buffer-string))))
+          ;; Let the held answer, handed on from a timer, run.
+          (accept-process-output nil 0.1)
           (should (equal (list answers failures unsents) '(1 0 0))))))))
+
+(defun agentpane-test--behind-a-synchronous-request (send)
+  "Call SEND in a transcript buffer for the session `ref', attached under
+the handle \"h1\" through a helper that answers nothing and exits 0.6s
+after it starts, then send a synchronous request through that helper,
+which its death ends, and let Emacs handle the death.  SEND's request is
+the older of the two outstanding at the death: the order OW-laluso found
+jsonrpc.el's sentinel thrown out of its walk in, newest first, by the
+synchronous one's error handler before it reached the older request's
+\(Emacs 31.1, jsonrpc.el 1.0.29).  SEND is called with a function that counts a
+failure, and this returns the failures counted once the teardown has run
+and Emacs has waited a beat more."
+  (let ((agentpane--connection nil)
+        (failures 0))
+    (agentpane-test--watching
+      (agentpane-test--with-session '(:backend "codex" :id "t1")
+        (cl-letf (((symbol-function 'agentpane--start-helper)
+                   (lambda () (agentpane-test--writes-then-dies nil)))
+                  ((symbol-function 'message) #'ignore))
+          (let ((dead (agentpane--connection)))
+            (funcall send (lambda () (cl-incf failures)))
+            (should-error (jsonrpc-request dead 'models/list nil :timeout 5))
+            (agentpane-test--heard-out dead)
+            (accept-process-output nil 0.1)
+            (should-not agentpane--sending)
+            (should-not agentpane--attaching)
+            (should-not agentpane--turn-watches)
+            failures))))))
+
+(ert-deftest agentpane-test-death-answers-a-prompt-behind-a-synchronous-request ()
+  "A prompt still out when its helper dies, with a synchronous request sent
+after it, fails exactly once and frees the buffer to send again, though
+jsonrpc.el's sentinel never reaches it: the teardown answers every
+request the dead helper had out (OW-laluso, OW-mopuyi)."
+  (should (= 1 (agentpane-test--behind-a-synchronous-request
+                (lambda (failed)
+                  (setq agentpane--attached agentpane--connection
+                        agentpane--handle "h1")
+                  (agentpane--send-prompt "hello" #'ignore nil failed)
+                  (should agentpane--sending))))))
+
+(ert-deftest agentpane-test-death-answers-an-attach-behind-a-synchronous-request ()
+  "An attach still out when its helper dies, with a synchronous request
+sent after it, fails its waiter exactly once and ends the wait, though
+jsonrpc.el's sentinel never reaches it (OW-laluso, OW-mopuyi)."
+  (should (= 1 (agentpane-test--behind-a-synchronous-request
+                (lambda (failed)
+                  (agentpane--attach nil failed)
+                  (should agentpane--attaching))))))
+
+(ert-deftest agentpane-test-death-ends-a-turn-seen-streaming ()
+  "A prompt whose reply the helper never writes, after a status under the
+buffer's handle said the turn streams, ends that turn at the helper's
+death and raises the turn-done indicator for the buffer no window shows,
+as an aborted turn does: the teardown decides the watch, and the death
+no longer reads as a prompt that reached no backend, which abandoned the
+watch before the teardown could end it (OW-zedawo, OW-mopuyi)."
+  (agentpane-test--watching
+    (agentpane-test--outliving
+        (list (list :jsonrpc "2.0" :method "session/status"
+                    :params (list :session ref :handle "h1" :isStreaming t)))
+      (let ((dead (agentpane--connection)))
+        (setq agentpane--attached dead
+              agentpane--handle "h1")
+        (goto-char (point-max))
+        (insert "hello")
+        (agentpane-send)
+        (should (assoc "h1" agentpane--turn-watches))
+        (agentpane-test--heard-out dead)
+        (should (agentpane-test--turn-done-p))
+        (should (memq (current-buffer) agentpane--turns-done))
+        (should-not agentpane--turn-watches)
+        (should-not agentpane--sending)
+        (should agentpane--dropped)
+        (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                       "hello"))))))
 
 ;; OW-kifuhi: the reply to an attach, held back as an anxious continuation
 ;; behind a synchronous request still out when the helper died, is handed on

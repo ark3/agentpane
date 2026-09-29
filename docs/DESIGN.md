@@ -1064,6 +1064,9 @@ The synchronous requests were suspected and are not the cause: each of the four 
 A buffer's in-flight flags were cleared only by each request's own failure path, which jsonrpc.el at a helper's death skips (OW-laluso) or runs before the teardown could see a turn had streamed (OW-zedawo).
 The teardown answers every request the dead helper had out and settles each served buffer, per point 4; per-request handlers own every failure that is not a death.
 That is OW-mopuyi.
+Built the same day: `agentpane--request` in `emacs/agentpane.el` records each request it sends in `agentpane--requests-out` under its connection, and `agentpane--helper-gone` lets go of the buffers at once and answers every request still there as the death from a zero-delay timer of its own, running each one's failure path and never the path for a request that reached no backend, so the turn-done watch on a handle a served buffer holds is `agentpane--let-go`'s to settle.
+Past a death a request's error handler answers nothing, jsonrpc.el's "Server died" included.
+The answers run one tick after the teardown, so the in-flight flags stay set that tick longer, and a reply jsonrpc.el held back behind a synchronous request is still the answer: as of jsonrpc.el 1.0.29 on Emacs 31.1, measured 2026-09-28, it is handed on from a timer queued as the synchronous request unwinds, after the teardown's timer and before the answers'.
 
 ## The backend adapter contract
 
