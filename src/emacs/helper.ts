@@ -50,7 +50,8 @@
  * reply's summary for what `sessions/attach` says itself. Requests accept one
  * beside `session`, and send it nowhere; `sessions/detach` and
  * `sessions/close` stop the attachment under it, and without one the
- * attachment Emacs was last told that ref for (`forget` below).
+ * attachment the snapshot answering the attach their `token` names
+ * recorded, if it still stands (`forget` below, OW-linowe).
  * agentpane-mode's detach carries its buffer's handle, and one without is
  * sent only from a buffer that sent an attach. No notification says a
  * rename: agentpane-mode keys its buffers by the handle (OW-danifa) and
@@ -110,7 +111,7 @@
 import { ApiClientError, createAgentpaneApi, type ApiOptions } from "$client/api.ts";
 import { previewMessages } from "$client/preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "$client/session-state.ts";
-import { sessionKey, type ServerEvent, type SessionRef } from "$shared/protocol.ts";
+import type { ServerEvent, SessionRef } from "$shared/protocol.ts";
 import { FrameDecoder, encodeFrame } from "./framing.ts";
 import { locateUpsert, projectTarget, projectTranscript, type Render, type UpsertTarget } from "./nodes.ts";
 import type { HelperNotification, HelperRequests, TranscriptNode } from "./protocol.ts";
@@ -214,6 +215,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const attached = new Map<string, SessionRef>();
 	/** Every `sessions/attach` not yet replied to; see `Attaching`. */
 	const attaching = new Set<Attaching>();
+	/** Token of each attach a snapshot answered -> the handle of the attachment that answer recorded, while it stands; see `forget`. */
+	const answered = new Map<number, string>();
 	let connection: ReturnType<typeof api.connect> | null = null;
 	let stopped = false;
 	const reader = options.input.getReader();
@@ -277,6 +280,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const answer = (attach: Attaching, view: SessionView, handle: string): void => {
 		attach.done = true;
 		attached.set(handle, view.ref);
+		answered.set(attach.token, handle);
 		notifySnapshot(view, handle, attach.token);
 		attach.release?.();
 	};
@@ -323,9 +327,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		for (const attach of answers) answer(attach, view, handle);
 	};
 
-	/** Stop telling Emacs anything under `held`. */
+	/** Stop telling Emacs anything under `held`, and forget every token whose answer recorded it. */
 	const drop = (held: string): void => {
 		attached.delete(held);
+		for (const [token, handle] of answered) if (handle === held) answered.delete(token);
 		for (const [key, node] of waiting) if (node.handle === held) waiting.delete(key);
 	};
 
@@ -444,28 +449,37 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	};
 
 	/**
-	 * Stop telling Emacs about the session `session` names. With a `handle`,
-	 * the attachment under that handle goes, whatever ref Emacs names it by,
-	 * which may be one from before a rename it has not heard (OW-wedeli).
-	 * With a `token` naming an attach no snapshot has answered, that attach
-	 * is abandoned, its reply released if held, so no snapshot answers it
-	 * later: agentpane-mode sends the token of the last attach its buffer
-	 * sent, held handle or not (`agentpane--detach`). Nothing else is: until
-	 * OW-wukako every such attach of the ref was, another buffer's on the
-	 * same ref included, so a buffer killed while holding the handle, or a
-	 * close carrying it, left the attach in flight beside it not attached
-	 * (OW-jofodu). Without a handle, the attachment goes by the ref Emacs was
-	 * last told, as it must for a buffer killed after the snapshot that
-	 * answered its attach went out and before Emacs handled it -- unless the
-	 * token named an attach still waiting, since then nothing was recorded
-	 * for the buffer that sent it, and the attachment by that ref is
-	 * another buffer's.
+	 * Stop telling Emacs about a session, for a `sessions/detach` or
+	 * `sessions/close`. With a `token` naming an attach no snapshot has
+	 * answered, that attach is abandoned, its reply released if held, so no
+	 * snapshot answers it later: agentpane-mode sends the token of the last
+	 * attach its buffer sent, held handle or not (`agentpane--detach`).
+	 * Nothing else is: until OW-wukako every such attach of the ref was,
+	 * another buffer's on the same ref included, so a buffer killed while
+	 * holding the handle, or a close carrying it, left the attach in flight
+	 * beside it not attached (OW-jofodu). With a `handle`, the attachment
+	 * under that handle goes, whatever ref Emacs names it by, which may be
+	 * one from before a rename it has not heard (OW-wedeli). Without one, the
+	 * attachment the token's answer recorded goes, if it still stands
+	 * (`answered`), as it must for a buffer killed after the snapshot that
+	 * answered its attach went out and before Emacs handled it; and nothing
+	 * else. A token's record goes with the attachment (`drop`), so the token
+	 * of a buffer the helper let go of -- a gap or an `ended` -- drops
+	 * nothing, nor does one no snapshot answered. Until OW-linowe the
+	 * attachment went by the ref Emacs was last told, unless the token gave
+	 * up an attach, and either buffer, killed, silenced another attached on
+	 * that ref since: one on the same ref after the let-go, one whose
+	 * session was renamed onto the ref of the failed attach. What stays is
+	 * shared by handle: a buffer killed before handling the snapshot that
+	 * answered its attach drops the attachment under that handle, which
+	 * another buffer may hold too, one that snapshot would have merged into
+	 * it (`agentpane--attach-by` in emacs/agentpane.el).
 	 */
-	const forget = (session: SessionRef, handle: string | undefined, token: number | undefined): void => {
+	const forget = (handle: string | undefined, token: number | undefined): void => {
 		const pending = [...attaching].find((attach) => !attach.done && attach.token === token);
 		if (pending) abandon(pending);
-		if (handle !== undefined) drop(handle);
-		else if (!pending) for (const [held, told] of attached) if (sessionKey(told) === sessionKey(session)) drop(held);
+		const held = handle ?? (token === undefined ? undefined : answered.get(token));
+		if (held !== undefined) drop(held);
 	};
 
 	const closeStream = (): void => {
@@ -609,7 +623,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/close": async ({ session, handle, token }) => {
 			await api.close(session);
-			forget(session, handle, token);
+			forget(handle, token);
 			return null;
 		},
 		"sessions/dismissError": async ({ session, errorId }) => {
@@ -618,8 +632,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
-		"sessions/detach": async ({ session, handle, token }) => {
-			forget(session, handle, token);
+		"sessions/detach": async ({ handle, token }) => {
+			forget(handle, token);
 			return null;
 		},
 		"sessions/setModel": async ({ session, model }) => {

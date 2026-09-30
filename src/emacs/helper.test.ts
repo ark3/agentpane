@@ -512,7 +512,7 @@ describe("notifications", () => {
 			{ jsonrpc: "2.0", method: "session/snapshot", params: { session: pi, handle: h(pi), token: 1, nodes: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] } },
 		]);
 
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, token: 1 } });
 		await io.until(3);
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 2, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await new Promise((resolve) => setTimeout(resolve, 5));
@@ -565,7 +565,7 @@ describe("notifications", () => {
 		expect(io.notifications()[1]).toMatchObject({ params: { session: pi, handle: h(virtual), isStreaming: true } });
 	});
 
-	it("stops on a sessions/detach by the ref a snapshot under the handle told Emacs", async () => {
+	it("stops on a sessions/detach carrying the token of the attach a snapshot answered, whatever ref it names (OW-linowe)", async () => {
 		const virtual: SessionRef = { backend: "pi", id: "virtual-1" };
 		const { io, source } = start(attachRoutes(virtual));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: virtual, token: 1 } });
@@ -573,7 +573,7 @@ describe("notifications", () => {
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		await io.until(3);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, token: 1 } });
 		await io.until(4);
 		source.emit({ type: "status", session: pi, handle: h(virtual), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1077,6 +1077,40 @@ describe("the attach token (OW-wukako)", () => {
 		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: summary(pi, "h1") });
 	});
 
+	// X attached h1 and was let go of it, keeping its last token; Y attaches
+	// the same ref, under h1 again after a gap, which leaves the handle live on
+	// the server, or under h2 after an `ended`; then X is killed. Until
+	// OW-linowe a detach whose token gave up nothing dropped by the ref, and
+	// Y heard nothing more.
+	it.each([
+		["gapped", "h1"],
+		["ended", "h2"],
+	])("keeps the attachment another buffer holds when a buffer %s off its handle detaches carrying its last token and no handle (OW-linowe)", async (cause, next) => {
+		const { io, source } = start({ [`GET ${ROUTES.session(pi)}`]: answering({ summary: summary(pi, "h1") }, { summary: summary(pi, next) }) });
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		await tick();
+		source.emit(snapshot(pi, "h1"));
+		await io.until(2);
+		if (cause === "gapped") source.emit({ type: "status", session: pi, handle: "h1", seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		else source.emit({ type: "ended", session: pi, handle: "h1" });
+		await io.until(3);
+
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi, token: 2 } });
+		await tick();
+		source.emit(snapshot(pi, next));
+		await io.until(5);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: pi, token: 1 } });
+		await io.until(6);
+		source.emit(status(pi, next));
+		await io.until(7);
+		expect(told(io)).toEqual([
+			["session/snapshot", "h1", 1],
+			["session/detached", "h1", undefined],
+			["session/snapshot", next, 2],
+			["session/status", next, undefined],
+		]);
+	});
+
 	// The server's attach waits out the close's disposal and spawns afresh.
 	it("keeps an attach sent while a close of its ref is out, answered under the handle the server minted after it (OW-jofodu)", async () => {
 		const close = held();
@@ -1300,10 +1334,10 @@ describe("the node throttle (OW-jeruye)", () => {
 		]);
 	});
 
-	it("never sends a node held for a session closed by its ref alone, only the reply", async () => {
+	it("never sends a node held for a session closed by its attach's token and no handle, only the reply", async () => {
 		const { io, upsert, since } = await streaming({ [`DELETE ${ROUTES.session(pi)}`]: noContent });
 		upsert(1, said("a"));
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/close", params: { session: pi, token: 1 } });
 		await settle();
 		vi.advanceTimersByTime(250);
 		expect(since()).toEqual([2]);

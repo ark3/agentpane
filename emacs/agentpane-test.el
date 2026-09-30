@@ -984,8 +984,8 @@ transcript and its composer as they were."
 only previews is left beside that preview, not merged: two buffers on one
 ref, deliberately, since only the live one holds the handle, and the
 preview, which never sent an attach, sends no `sessions/detach' when
-killed, which by that ref alone would stop the helper feeding the live
-one.  The snapshot under the ref both hold, sent before the reply, is not
+killed, which by that ref alone stopped the helper feeding the live one
+until OW-linowe.  The snapshot under the ref both hold, sent before the reply, is not
 the preview's to take: it carries the token of the live one's attach.  The live
 one draws it, stays attached, and hears the session under its handle."
   (let ((alias '(:backend "claude" :id "pending-1"))

@@ -2083,7 +2083,9 @@ session; see `agentpane--attach-token'.
 `agentpane--notified-buffer' binds the snapshot carrying it to this
 buffer, and `agentpane--detach' and `agentpane-close-session' send it, so
 the helper gives up that attach if it is still waiting on it, and no
-other (OW-wukako).
+other (OW-wukako), and, without a handle beside it, stops the attachment
+that attach's snapshot recorded, if it still stands, and no other
+\(OW-linowe).
 A record of the request, not of an attachment, which is why it is not
 `agentpane--attached': the helper may hold this attach with no snapshot
 having answered it, whatever this buffer believes of it, or have
@@ -2808,32 +2810,31 @@ already holding a handle, and one killed then must still give up its own
 attach.  Until OW-wukako the helper gave up every attach of the ref
 instead, so a buffer killed while holding the handle left another
 buffer's attach of the same ref in flight beside it not attached
-\(OW-jofodu).  One from a buffer holding no handle stops, besides, what
-the helper last named to Emacs by the ref -- unless its token gave up an
-attach, which had recorded nothing for this buffer -- since the snapshot
-that answered its attach gave this buffer the handle once handled, and a
-buffer killed after the helper sent that snapshot and before handling it
-left the helper sending under that handle.  So it is sent only from a
-buffer that has sent an attach, whatever this buffer believes of that
-attach: one that failed here -- timed out, or quit in
+\(OW-jofodu).  One from a buffer holding no handle stops, besides, the
+attachment the snapshot answering that attach recorded, if the helper
+still holds it, since that snapshot gave this buffer the handle once
+handled, and a buffer killed after the helper sent it and before
+handling it left the helper sending under that handle.  So it is sent
+only from a buffer that has sent an attach, whatever this buffer believes
+of that attach: one that failed here -- timed out, or quit in
 `agentpane-new-session' -- may still have succeeded in the helper, which
-then holds the session, and a detach of a session it does not hold
-changes nothing.  A buffer that never sent one holds nothing in the
-helper, and its ref may be a live buffer's too: a preview of the ref a
-live buffer's session was since renamed onto, left beside it rather than
-merged (D24).  Sent from there, the detach silenced the live one.
-Three cases stay, each a detach by the ref from a buffer holding no handle
-whose token gave up nothing (OW-linowe).  One the helper let go of -- a
-gap or an `ended' -- keeps its last token, which names no waiting attach,
-so killed it silences another buffer attached on the ref since.  One whose attach no snapshot answered --
-it failed outright, with an error, a timeout or a quit, and the helper
-too is done with it -- and whose ref another buffer's session was since
-renamed onto, silences that one when killed, the helper having last
-named that session by the ref.  And one killed after the helper sent the
-snapshot answering its attach and before Emacs handled it, which drops
-the attachment that snapshot recorded, silences as well another buffer
-holding that handle, which the snapshot would have merged into this one
-\(`agentpane--attach-by').
+then holds the session.  The helper forgets the token's attachment
+wherever the attachment goes, so from a buffer it let go of -- a gap or
+an `ended' -- the detach stops nothing, nor from one whose attach no
+snapshot answered, which failed outright.  Until OW-linowe the helper
+stopped instead what it had last named to Emacs by the ref, unless the
+token gave up an attach, and either of those, killed, silenced another
+buffer attached on that ref since: one on the same ref after the let-go,
+one whose session was renamed onto the ref of the failed attach.  A
+buffer that never sent one holds nothing in the helper, and sends
+nothing; by the ref, the detach silenced a live buffer whose session was
+since renamed onto its ref, the preview left beside it rather than
+merged (D24).
+One case stays, shared by handle (OW-linowe): a buffer killed after the
+helper sent the snapshot answering its attach and before Emacs handled
+it stops the attachment that snapshot recorded, and so silences as well
+another buffer holding that handle, which the snapshot would have merged
+into this one (`agentpane--attach-by').
 
 Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that
