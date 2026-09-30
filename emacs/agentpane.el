@@ -3889,9 +3889,9 @@ which every window's mode line draws by default, so it is in view
 wherever the user is working, as a tab's favicon is; its help echo names
 the buffers.  A `message' would be gone at the next keystroke, and a
 desktop notification needs a GUI, which the home server has not.
-Nothing moves a watch to a fork: the browser's `watchMove' follows the
-prompt it sends onto the fork, and here a fork sends nothing and opens in
-a buffer of its own (`agentpane-fork'), so a turn running on the parent
+Nothing moves a watch to a fork: the browser arms its own on the fork
+its prompt goes to, and here a fork sends nothing and opens in a buffer
+of its own (`agentpane-fork'), so a turn running on the parent
 stays the parent's, and ends there, on Codex and Claude Code, which keep
 it running.  A Pi fork stops it, the loss deliberate, and the abort it
 sends first, for a parent reading streaming, ends the parent's watch

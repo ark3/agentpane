@@ -473,16 +473,18 @@
 	}
 
 	/**
-	 * Move this tab's own per-session state -- follow, remembered scroll, the
-	 * badge's turn watch -- from one session key to another.
+	 * Move this tab's own per-session state -- follow, remembered scroll -- from
+	 * one session key to another.
 	 *
 	 * A rename moves nothing: it leaves the handle alone. Two things still move
 	 * a key. A fork, which on every backend is another session under another
-	 * handle (D24), so the prompt `send()` armed on the parent has to follow it
-	 * onto the fork (OW-hezidi, OW-suhoto); orphaning it on the parent strands
+	 * handle (D24), so the follow `send()` armed on the parent has to move onto
+	 * the fork (OW-hezidi, OW-suhoto); orphaning it on the parent strands
 	 * follow mode mid-turn, which is what OW-27 was. And a selection that stays
 	 * on one ref while its key moves, as a stored session's does from its ref to
-	 * the handle its attach gives it -- see the switch effect below.
+	 * the handle its attach gives it -- see the switch effect below, which moves
+	 * the badge's turn watch as well. A fork's watch never needs moving: `send()`
+	 * arms it on the fork itself (OW-koledi).
 	 */
 	function rekeySession(fromKey: string, toKey: string): void {
 		if (fromKey === toKey) return;
@@ -497,7 +499,6 @@
 			pendingFollow.set(toKey, pending);
 		}
 		if (lastScrollKey === fromKey) lastScrollKey = toKey;
-		turnWatch = watchMove(turnWatch, fromKey, toKey);
 		sessionTurnMarks = moveSessionTurnMarks(sessionTurnMarks, fromKey, toKey);
 	}
 
@@ -824,7 +825,8 @@
 	 * than inside the controller, which owns no DOM and no window focus, and
 	 * beside `armFollow` because these two call sites are the app's only submit
 	 * path: a session that streams without passing through them is one this tab
-	 * did not ask for and must not be badged for.
+	 * did not ask for and must not be badged for. A fork's is the one watch
+	 * armed elsewhere, in `send()`, on the fork's own handle (OW-koledi).
 	 */
 	function armBadge(): void {
 		const ref = view.state.selected;
@@ -865,6 +867,7 @@
 		lastScrollRef = ref;
 		if (key === lastScrollKey) return;
 		if (sameRef && key !== null && lastScrollKey !== null) {
+			turnWatch = watchMove(turnWatch, lastScrollKey, key);
 			rekeySession(lastScrollKey, key);
 			return;
 		}
@@ -1203,29 +1206,39 @@
 		// is still outstanding (OW-kelede).
 		if (view.sending) return;
 		armFollow(edit?.index);
-		armBadge();
-		// Both arms above are keyed on the session's handle, which a rename
-		// landing while the request is in flight (D9) leaves alone, so this is
-		// still where the arming sits when the request settles (OW-kimaya).
+		// Arming follow is keyed on the session's handle, which a rename landing
+		// while the request is in flight (D9) leaves alone, so this is still
+		// where the arming sits when the request settles (OW-kimaya).
 		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
+			armBadge();
 			void controller.submit().then((sent) => {
 				if (!sent && armedKey) disarmSubmit(armedKey);
 			});
 			return;
 		}
-		void controller.forkAndSubmit(edit.index, edit.images).then((landed) => {
+		// A fork's badge is armed on the fork itself, as soon as its handle is
+		// known and before its prompt goes out, never on the parent: a parent
+		// still streaming ends its own turn during the fork -- Pi's abort ends
+		// it, Codex and Claude Code may simply finish it -- and a watch on the
+		// parent took that end for the fork's (OW-koledi).
+		let forkKey: string | null = null;
+		void controller.forkAndSubmit(edit.index, edit.images, (handle) => {
+			forkKey = handle;
+			turnWatch = watchSubmit(turnWatch, handle);
+		}).then((landed) => {
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
-				// be badged about.
-				if (armedKey) disarmSubmit(armedKey);
+				// be badged about -- and a fork nothing prompted is no exception.
+				if (armedKey) pendingFollow.delete(armedKey);
+				if (forkKey) turnWatch = watchAbandon(turnWatch, forkKey);
 				return;
 			}
 			// A fork is another session under another handle on every backend
 			// (D24) -- on Pi, whose live process moved onto a new file, exactly as
 			// much as on Codex, which hands back a ref nothing was renamed to --
-			// so this is where the follow and badge armed above move onto the
-			// fork the prompt landed on (OW-suhoto). Its handle, as the attach
+			// so this is where the follow armed above moves onto the fork the
+			// prompt landed on (OW-suhoto). Its handle, as the attach
 			// replied with it: not its ref, which its first prompt may already
 			// have renamed (OW-kimaya), and never `state.selected`, which a click
 			// mid-fork moves and the controller honours, so reading the selection

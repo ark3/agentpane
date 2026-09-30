@@ -194,10 +194,16 @@ export interface AgentpaneController {
 	 * offers no Edit control on such a message at all, so reaching here means the
 	 * transcript moved under the affordance.
 	 *
+	 * `onAttached` hears the fork's handle the moment its attach replies, before
+	 * the prompt goes out: the fork's turn streams under that handle while the
+	 * prompt's POST is still in flight, so a caller that waited for this to
+	 * resolve would start watching the fork after its turn had begun, or ended
+	 * (OW-koledi).
+	 *
 	 * Resolves to **the attach reply of the session the prompt landed on**, or
 	 * null if it never landed. Not a boolean, because the caller has per-tab
-	 * state keyed on the session it armed before the fork -- scroll, follow, the
-	 * badge -- and has to move it onto the fork; reading `state.selected` back
+	 * state keyed on the session it armed before the fork -- scroll and follow --
+	 * and has to move it onto the fork; reading `state.selected` back
 	 * instead would move it onto whatever the user clicked mid-fork (OW-mifuki).
 	 * And carrying the fork's handle, not only its ref, because the fork's first
 	 * prompt can rename it before this resolves -- Claude Code renames at `init`,
@@ -217,7 +223,11 @@ export interface AgentpaneController {
 	 * the mark under it would leave a composer that says nothing about where it
 	 * is about to send.
 	 */
-	forkAndSubmit(index: number, images?: PromptRequest["images"]): Promise<LiveSessionSummary | null>;
+	forkAndSubmit(
+		index: number,
+		images?: PromptRequest["images"],
+		onAttached?: (handle: string) => void,
+	): Promise<LiveSessionSummary | null>;
 	/** Stop the selected session's turn; no-op unless its pane is live (OW-forinu). */
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op unless its pane is live (OW-forinu). */
@@ -1269,7 +1279,7 @@ export function createController(
 				if (!disposed && busyIs("editing-externally")) publish({ busy: "idle" });
 			}
 		},
-		async forkAndSubmit(index, images) {
+		async forkAndSubmit(index, images, onAttached) {
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
@@ -1375,6 +1385,7 @@ export function createController(
 				// Abandons the fork as well; see the note at `api.fork` for why that
 				// is deliberate.
 				if (disposed) return null;
+				onAttached?.(attached.handle);
 				// The attach is one more window for a click, and it gets the same
 				// answer: the attach still lands, it just does not move the user --
 				// unless that click landed on the fork's own row, whose selection

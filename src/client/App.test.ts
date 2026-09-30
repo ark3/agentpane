@@ -221,8 +221,9 @@ class FakeController implements AgentpaneController {
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's move onto the fork's handle. */
 	onForkAndSubmit: ((index: number) => void) | null = null;
 
-	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[]) {
+	async forkAndSubmit(index: number, images?: { mimeType: string; base64: string }[], onAttached?: (handle: string) => void) {
 		this.forked.push({ index, images });
+		if (this.forkResult) onAttached?.(this.forkResult.handle);
 		this.onForkAndSubmit?.(index);
 		return this.forkResult;
 	}
@@ -2731,11 +2732,11 @@ describe("App", () => {
 
 	/**
 	 * The badge marks turns this viewer started, and a fork is one of them. The
-	 * arming is laid down on the parent before the fork exists, so it has to move
-	 * onto the fork -- and onto the *fork*, not onto whatever `state.selected`
-	 * happens to be when the fork resolves. A click mid-fork moves the selection
-	 * and the controller now honours it, so the session `forkAndSubmit` hands back
-	 * is the only thing that names the right one (OW-mifuki).
+	 * arming goes on the *fork*, not on whatever `state.selected` happens to be
+	 * while the fork is out. A click mid-fork moves the selection and the
+	 * controller now honours it, so the handle `forkAndSubmit` hands over from
+	 * the fork's attach is the only thing that names the right one (OW-mifuki,
+	 * OW-koledi).
 	 */
 	it("badges the fork it landed on, not a session clicked mid-fork (OW-mifuki)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
@@ -2849,6 +2850,155 @@ describe("App", () => {
 
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
 			expect(forks).toBe(1);
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * Forked from a parent whose turn this tab did not start, the parent's turn
+	 * ends during the fork: on Pi the fork's own abort ends it, and on Codex it
+	 * may simply finish. That end is not this tab's to be told about; the fork's
+	 * is, and its turn streams while its prompt is still in flight (OW-koledi).
+	 */
+	it.each(["pi", "codex"] as const)("badges the fork's turn and not the streaming %s parent's that ends mid-fork (OW-koledi)", async (backend) => {
+		const parentRef: SessionRef = { backend, id: "parent" };
+		const forkRef: SessionRef = { backend, id: "fork" };
+		let resolveAbort = () => {};
+		let resolveFork = (_ref: SessionRef) => {};
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(parentRef)],
+			createSession: async () => parentRef,
+			attach: async (ref) => {
+				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", false));
+				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			// The fork's turn starts under its own handle before the POST returns.
+			prompt: async () => emit(status(forkRef, "h-fork", 2, true)),
+			editDraft: async (body) => ({ text: body.text }),
+			// Pi's `forkAndSubmit` stops the parent's turn before it forks.
+			abort: () => new Promise<void>((resolve) => {
+				resolveAbort = resolve;
+			}),
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: () => new Promise<SessionRef>((resolve) => {
+				resolveFork = resolve;
+			}),
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			emit(snapshot(parentRef, "h-parent", true));
+			await controller.select(parentRef);
+			await tick();
+
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			// On Pi this is the abort's doing; Codex's parent turn survives the fork
+			// and may simply finish while it is out.
+			emit(status(parentRef, "h-parent", 2, false));
+			await tick();
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+
+			resolveAbort();
+			await tick();
+			// Pi's fork moves the live process off the parent's handle (D26 point 1).
+			if (backend === "pi") emit({ type: "ended", session: parentRef, handle: "h-parent" });
+			resolveFork(forkRef);
+			await tick();
+			await tick();
+			expect(controller.getView().state.sessions["h-fork"]?.isStreaming).toBe(true);
+			emit(status(forkRef, "h-fork", 3, false));
+			await tick();
+
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	it("drops the watch armed on a fork whose prompt failed, so a turn there from elsewhere raises nothing (OW-koledi)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "fork" };
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session: forkRef, handle: "h-fork", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(codexSession)],
+			createSession: async () => codexSession,
+			attach: async (ref) => {
+				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
+				emit(snapshot(ref, handle));
+				return { ...summary(ref), handle };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {
+				throw new Error("prompt refused");
+			},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: async () => forkRef,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			await controller.select(codexSession);
+			await tick();
+
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			await tick();
+			expect(screen.getByText("prompt refused")).toBeInTheDocument();
+
+			// Another client prompts the fork this tab attached and never prompted.
+			emit(status(2, true));
+			await tick();
+			emit(status(3, false));
+			await tick();
+
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
 		} finally {
 			document.hasFocus = hasFocus;
 		}

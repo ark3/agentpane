@@ -88,17 +88,17 @@ describe("the turn-done watch", () => {
 	});
 
 	// Keys are handles (D24), which a rename leaves alone, so a rename is
-	// nothing this watch sees. What still moves a key is a fork: another
-	// session under another handle, which the prompt `send()` armed on the
-	// parent lands on (OW-suhoto).
-	it("follows a submit from the fork's parent onto the fork it landed on (D24)", () => {
-		let watch = watchSubmit(emptyTurnWatch(), "h-parent");
-		watch = watchSessions(watch, new Map([["h-parent", true]]), UNFOCUSED);
-		watch = watchMove(watch, "h-parent", "h-fork");
-		expect([...watch.waiting.keys()]).toEqual(["h-fork"]);
+	// nothing this watch sees. What still moves a key is a selection that stays
+	// on one ref while a re-attach gives it a new handle (OW-kimaya). A fork
+	// moves nothing: its watch is armed on the fork's own handle (OW-koledi).
+	it("follows a submit onto the new handle its session's ref was given (OW-kimaya)", () => {
+		let watch = watchSubmit(emptyTurnWatch(), "h-1");
+		watch = watchSessions(watch, new Map([["h-1", true]]), UNFOCUSED);
+		watch = watchMove(watch, "h-1", "h-2");
+		expect([...watch.waiting.keys()]).toEqual(["h-2"]);
 		// The move carries the "has streamed" bit with it, so the turn's own
-		// status:false under the fork's handle still reads as done.
-		watch = watchSessions(watch, new Map([["h-parent", false], ["h-fork", false]]), UNFOCUSED);
+		// status:false under the new handle still reads as done.
+		watch = watchSessions(watch, new Map([["h-2", false]]), UNFOCUSED);
 		expect(watch.badged).toBe(true);
 	});
 

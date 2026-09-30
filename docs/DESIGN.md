@@ -657,7 +657,7 @@ It surfaced later in the sidebar as a near-duplicate of its parent, because ever
 
 A click is navigation, not a retraction.
 Nothing in the UI presents it as a cancel, and a user who wanted to call the fork off has no reason to believe that clicking elsewhere is how.
-So the fork completes and the prompt lands; the fork streams in the background and badges when it finishes, which is the mechanism that already exists for a session that streams while the user is looking elsewhere (OW-mifuki's arming, moved from the parent's handle onto the handle of the fork the prompt landed on, D24).
+So the fork completes and the prompt lands; the fork streams in the background and badges when it finishes, which is the mechanism that already exists for a session that streams while the user is looking elsewhere (OW-mifuki's arming, on the handle of the fork the prompt landed on, D24, and since OW-koledi laid there when the fork's attach replies rather than moved from the parent's).
 
 The two alternatives were priced on OW-miyemo and declined.
 *Leave the orphan* is what was happening already and is what this decision replaces.
@@ -1054,6 +1054,7 @@ The one exception it found is the browser's selected session closed by another c
    The handle stays live on the server and the turn may go on unheard, as at a deliberate shutdown.
    The owner decided on 2026-09-30 that a gap gets the same treatment in both clients: it raises nothing and drops the turn-done watch on that handle, `streamed` or not.
    The case given up is a turn the gap cut off, re-attached from the same buffer or tab while still running, and ended with nothing showing it; it needs a gap, which this decision already reads as something gone wrong, then a re-attach mid-turn, and costs one missed indicator, which was judged not worth the state that kept the watch for it (OW-bepudu for agentpane-mode, OW-jadoda for the browser).
+   The owner decided on 2026-09-30 to give up the browser's fork window the same way: a gap on the fork's handle while its prompt is pending, or on the parent during the fork, needs a gap, read here as something gone wrong, inside a fork's short window, and costs one spurious or missed badge, which was judged not worth new state (OW-koledi).
 
 **What this retires.**
 Per-session reconciliation across an outage: the helper's reopen, its `stream/changed` and agentpane-mode's `reconnecting` mode line (OW-mareju), `dropDead`'s run at a reopen (OW-yibijo), and D21's paragraphs on agentpane-mode's reopen, which read as history once OW-mepufi lands.

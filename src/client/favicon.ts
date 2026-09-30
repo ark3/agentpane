@@ -62,10 +62,13 @@ export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
 }
 
 /**
- * Move a watch from the session a fork was taken from to the fork the prompt
- * landed on, which is another session under another handle (D24). A rename
- * needs nothing: it leaves the handle alone. Without this the watch is
- * orphaned on the parent and the badge misses the one turn it was armed for.
+ * Move a watch with a selection whose key moved while it stayed on one ref, as
+ * a stored session's does from its ref to the handle its attach gives it, or a
+ * ref's does when a re-attach elsewhere mints it a new handle (OW-kimaya).
+ * Without this the watch is orphaned under the old key. A rename needs
+ * nothing: it leaves the handle alone. Nor does a fork, another session under
+ * another handle (D24): `App.svelte` arms the fork's own watch the moment the
+ * controller knows its handle, and leaves the parent's alone (OW-koledi).
  */
 export function watchMove(watch: TurnWatch, from: string, to: string): TurnWatch {
 	const sawStreaming = watch.waiting.get(from);
@@ -106,11 +109,11 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * the controller tells `App.svelte`, which calls `watchAbandon` (OW-jadoda).
  * A stream drop leaves it waiting: where the server survived the drop, the
  * reconnect's opening snapshot re-forms the view under the same handle, and a
- * turn ending there badges. An `ended` leaves it waiting too, and must: on Pi
- * a fork's `ended` comes under the parent's handle while the fork is in flight
- * (`#forkOnto`, D26 point 1), and the watch left on the parent is the one
- * `watchMove` carries onto the fork. After a plain close nothing re-forms
- * under that handle (D26), so the watch is never acted on again.
+ * turn ending there badges. An `ended` leaves it waiting too, and nothing
+ * re-forms under that handle (D26), so the watch is never acted on again. That
+ * includes the `ended` a Pi fork sends under the parent's handle while the fork
+ * is in flight (`#forkOnto`, D26 point 1): the fork's watch was never on the
+ * parent (OW-koledi).
  */
 export function watchSessions(
 	watch: TurnWatch,
@@ -123,8 +126,9 @@ export function watchSessions(
 		const isStreaming = streaming.get(key);
 		// A session the client has no view of yet: the submit's own POST can
 		// resolve before the first SSE event for it arrives (D2). Keep waiting;
-		// a gap ended the watch on its handle (see above), except one `watchMove`
-		// carried onto a fork's handle after the gap took its view (OW-koledi).
+		// a gap ended the watch on its handle (see above), and one that came in a
+		// fork's window, before the fork's watch was armed, is accepted (D25
+		// point 5).
 		if (isStreaming === undefined) continue;
 		if (isStreaming === sawStreaming) continue;
 		waiting ??= new Map(watch.waiting);
