@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # The Emacs helper records one token per attachment, so a detach still drops a handle another buffer's attach was answered under, and an attachment whose answering buffer is gone is never dropped; since agentpane-mode lets one buffer hold a handle, the latest answer under a handle should own it
@@ -53,3 +54,12 @@ Case 4 is agentpane-mode's alone, and the OW-linowe implementer's suggestion, th
 The owner set a stopping rule for this chain (OW-wukako, OW-linowe, this card) on 2026-09-30: whatever ordering this card's adversarial read finds that the rule leaves, it is named in the `forget` docblock and the `agentpane--detach` docstring and accepted, not filed as another card.
 
 This amends the "Done when" above: the red-first helper tests are for cases 1 and 2, and for case 3 only if it is settled; the ERT test for case 4 stands; `answered` is gone, replaced by whatever the helper keeps per handle; and what remains is named, not required to be nothing.
+
+## Close note
+
+Built as per-handle claims rather than the amendment's "latest token owns the handle" rule, which regresses a case the old `answered` got right (A holds H; B's attach answered under H; B killed before handling it: B's detach must not drop H, and A's later detach must), so the latest token cannot stand for the holder.
+The helper (`src/emacs/helper.ts`) keeps `claims`, handle -> every token answered under it not yet released; `forget(tokens)` gives up any still waiting and releases each claim, dropping the attachment when its handle's last claim goes; the handle on a detach stops nothing. `answered` is gone.
+Wire: `sessions/detach` and `sessions/close` carry `tokens: number[]` in place of `token` (protocol counter raised a sixteenth, `src/emacs/protocol.ts`). agentpane-mode keeps `agentpane--attach-earlier` beside `agentpane--attach-sent` and sends both (`agentpane--tokens-sent`); `agentpane--absorb` hands the absorbed buffer's tokens to the survivor; a close forgets only the tokens it carried. Case 3 is settled by that list. Case 4: a tagged snapshot whose token no buffer holds binds only the handle's holder, never by ref (`agentpane--notified-buffer`).
+Verified: helper tests for cases 1, 2 (one it.each) and 3, each red against 2dd0bb3 (checked by the dispatching session with the old helper restored), plus two guards (the converse, and merge + refetch); ERT tests for case 4, kill after merge + refetch, and a merge during an in-flight close, each red first. `bun run check` 1582 passing; ERT 239 run, 0 unexpected, 3 skipped as before.
+What remains, accepted under the owner's stopping rule and named in the `forget` docblock (the fuller statement), with `agentpane--detach`, `agentpane--notified-buffer`, `agentpane-fork` and `sessions/detach` pointing there: a handle holding claims and no buffer (killed-before-handling, a given-up attach answered, a claimant moved off it), whose untagged snapshots still bind by ref and whose other notifications still reach a handle-less preview by the `_` arm's ref fallback; and a Pi fork parent whose `g` refetch is in flight at `f`, whose tagged snapshot written between the fork reply and the helper reading the detach binds it to a handle that detach drops.
+Commits: a3846e6, e99de7c.
