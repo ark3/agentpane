@@ -29,7 +29,12 @@ Cards whose stale premises another `sweep-0929` card already carries are not rep
 - OW-7: real, but in client code (`Transcript.svelte` and `toolState` in `src/client/render/types.ts`), not the Codex reducer it names.
 - OW-luzipe: its blocker OW-lisaye is closed; the same "O(1) per token" wording also sits in `SessionManager`'s `#onUpdate` docblock, which its doc fix should cover.
 
+## Dead code
+
+- `#handOver` in `src/server/http/session-manager.ts`: OW-kamave's adversarial read reported that its `winner === pending` check (in `if (!winner || winner === pending) return undefined;`) can never fire, and that it predates OW-kamave; not filed as its own card.
+  Confirm at the source why no path hands a startup over to itself, then remove the conjunct with a sentence in the close note saying why, or record here why it is needed after all.
+
 ## Done when
 
 Each card listed is closed with a note giving the evidence, or rewritten so its body matches the code, having been checked at the source first.
-Nothing here changes code.
+Nothing here changes code except the dead check above, whose removal keeps `bun run check` passing.
