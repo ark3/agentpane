@@ -36,3 +36,12 @@ Re-read what Emacs shows before starting; the account above of "The operation wa
 
 OW-likopo makes the helper wait for its stream's `onOpen` before its first REST call (D26 point 4 in `docs/DESIGN.md`), so with no server listening the request that opened the helper sends no fetch at all, and the abort this card describes has nothing to abort.
 What the request is answered with when the first open fails is still this card's question; re-read the path once OW-likopo lands.
+
+## Amended 2026-09-29 as OW-hiliti landed
+
+OW-hiliti made two changes that bear on this card.
+First, `respond` in `src/emacs/helper.ts` now writes no reply for a request the helper's own teardown aborted (`inFlight.signal.aborted`), so a request whose fetch the teardown aborts is answered in Emacs by the death, "agentpane: METHOD failed: the helper exited", and never with "The operation was aborted."
+Second, `agentpane--request` in `emacs/agentpane.el` now shows the message of any error reply the helper writes before it dies, and runs UNSENT only for an HTTP refusal, one whose `data` carries `status`.
+So an error reply that says the server could not be reached now does reach the echo area.
+Whatever shape it takes, decide whether it should carry a `status`: without one, a prompt keeps its watch, as for any outcome not known.
+The helper-level tests to extend are the two "writes no reply for it (OW-hiliti)" cases under "shutdown" in `src/emacs/helper.test.ts`.
