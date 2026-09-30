@@ -60,12 +60,17 @@
  * answers an attach, which must reach the buffer that asked: that buffer
  * holds no handle yet, and may hold another ref than the snapshot names,
  * or the ref of a session another buffer holds under that handle, and the
- * reply binds nothing. So each snapshot that answers an attach carries
- * `askedFor`, the ref the attach asked for, one such snapshot for each
- * attach it answers, and agentpane-mode binds it to the buffer that asked,
- * which takes the handle from it and absorbs a buffer already holding the
- * handle (`introduce` below, `agentpane--notified-buffer` and
- * `agentpane--attach-by` in emacs/agentpane.el). The hand-rolled
+ * reply binds nothing. So agentpane-mode mints a token for each attach it
+ * sends, and each snapshot that answers an attach carries that attach's
+ * `token`, one such snapshot for each attach it answers, and agentpane-mode
+ * binds it to the buffer that sent it, which takes the handle from it and
+ * absorbs a buffer already holding the handle (`introduce` below,
+ * `agentpane--notified-buffer` and `agentpane--attach-by` in
+ * emacs/agentpane.el). The helper keeps each attach it waits on by that
+ * token, and a detach or close gives up only the attach whose token it
+ * carries: until OW-wukako both went by the ref asked for, which another
+ * buffer's attach, or a snapshot under a handle the server had since let
+ * go of, could share (OW-jofodu, OW-savafi). The hand-rolled
  * reader in `sse.ts` does not retry, and neither does the helper: when the
  * stream drops, or its first open fails, the helper exits (D25 point 4).
  * Agentpane is local-only, so a drop means the server went away, and there
@@ -131,14 +136,14 @@ interface JsonRpcRequest {
 const NODE_INTERVAL_MS = 250;
 
 /**
- * A `sessions/attach` not yet replied to (OW-rebawa): the ref it asked
- * for; the handle its reply named, once the reply waits on a snapshot
- * under it; every handle a snapshot came under since it went out; whether
- * a snapshot answered it or it was given up on; and, while its reply
- * waits, the function that sends it on.
+ * A `sessions/attach` not yet replied to (OW-rebawa): the token
+ * agentpane-mode minted for it (OW-wukako); the handle its reply named,
+ * once the reply waits on a snapshot under it; every handle a snapshot came
+ * under since it went out; whether a snapshot answered it or it was given
+ * up on; and, while its reply waits, the function that sends it on.
  */
 interface Attaching {
-	asked: SessionRef;
+	token: number;
 	handle?: string;
 	seen: Set<string>;
 	done: boolean;
@@ -253,13 +258,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		unrestoredModel: view.unrestoredModel ?? null,
 	});
 
-	/** Send `view` as a snapshot under `handle`, answering an attach of `asked` if given. */
-	const notifySnapshot = (view: SessionView, handle: string, asked?: SessionRef): void => {
+	/** Send `view` as a snapshot under `handle`, answering the attach that sent `token` if given. */
+	const notifySnapshot = (view: SessionView, handle: string, token?: number): void => {
 		notify({
 			method: "session/snapshot",
 			params: {
 				...statusOf(view, handle),
-				...(asked ? { askedFor: asked } : {}),
+				...(token === undefined ? {} : { token }),
 				nodes: projectTranscript(view.messages, view.isStreaming, render),
 				error: view.error,
 				errorId: view.errorId,
@@ -272,7 +277,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const answer = (attach: Attaching, view: SessionView, handle: string): void => {
 		attach.done = true;
 		attached.set(handle, view.ref);
-		notifySnapshot(view, handle, attach.asked);
+		notifySnapshot(view, handle, attach.token);
 		attach.release?.();
 	};
 
@@ -288,22 +293,26 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * under the handle: nothing but a snapshot introduces an attachment
 	 * (OW-rebawa), since only a snapshot tells Emacs the buffer is attached,
 	 * and any other event under a handle Emacs has not been sent one for
-	 * would reach a buffer that holds nothing for it. It answers an attach
-	 * waiting on its handle, whose reply named it, and one whose reply has
-	 * not come by the ref it asked for; each gets a snapshot of its own
-	 * carrying that ref as `askedFor`, so one attaching an alias and one the
+	 * would reach a buffer that holds nothing for it. It answers each attach
+	 * waiting on its handle, whose reply named it, with a snapshot of its own
+	 * carrying that attach's `token`, so one attaching an alias and one the
 	 * session's own ref, both waiting on it, each reach their own buffer,
-	 * which agentpane-mode then merges. Every attach waiting notes the
-	 * handle, so a reply that finds no view under it can tell a snapshot a
-	 * gap took (`detachGapped`) from one still on its way.
+	 * which agentpane-mode then merges. An attach whose reply has not come is
+	 * answered by nothing here, whatever ref the snapshot names: until
+	 * OW-wukako one was answered by the ref it asked for, and a snapshot
+	 * under an older handle for that ref -- another client's attach, or an
+	 * opening snapshot -- answered it ahead of the reply naming the handle
+	 * the server had since minted, whose own snapshot and events then went
+	 * nowhere (OW-savafi). The reply answers it from the view under the
+	 * handle it names, so a snapshot that beats the reply costs nothing.
+	 * Every attach waiting notes the handle, so a reply that finds no view
+	 * under it can tell a snapshot a gap took (`detachGapped`) from one
+	 * still on its way.
 	 */
 	const introduce = (event: Extract<ServerEvent, { type: "snapshot" }>): void => {
 		const { handle } = event;
-		const key = sessionKey(event.session);
 		const view = state.sessions[handle]!;
-		const answers = [...attaching].filter(
-			(attach) => !attach.done && (attach.handle === undefined ? sessionKey(attach.asked) === key : attach.handle === handle),
-		);
+		const answers = [...attaching].filter((attach) => !attach.done && attach.handle === handle);
 		for (const attach of attaching) attach.seen.add(handle);
 		if (answers.length === 0) {
 			if (!attached.has(handle)) return;
@@ -363,14 +372,17 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * attach's own, taken by the gap: it goes out with nothing recorded, and
 	 * the snapshot that follows answers nothing. That takes a lost or
 	 * malformed frame for the gap, and leaves the buffer not attached, which
-	 * point 5 accepts. One whose snapshot arrived before the gap needs nothing
-	 * either: sent, that snapshot attached the buffer, which the
-	 * `session/detached` here lets go of before the reply; not sent, since
-	 * it named another ref than the attach asked for, it recorded nothing,
-	 * and the reply, finding no view under a handle a snapshot came under
-	 * since the attach went out, sends nothing and records nothing either,
-	 * rather than wait for a snapshot that will not come (OW-tifiva).
-	 * Either way the attach ends with the buffer not attached.
+	 * point 5 accepts. One whose snapshot arrived before the gap, and before
+	 * its reply, needs nothing either: no snapshot answers an attach ahead of
+	 * its reply (`introduce`), so that one recorded nothing, and the reply,
+	 * finding no view under a handle a snapshot came under since the attach
+	 * went out, sends nothing and records nothing either, rather than wait
+	 * for a snapshot that will not come (OW-tifiva). Either way the attach
+	 * ends with the buffer not attached. Since OW-wukako both reach an attach
+	 * of the session's own ref as they always reached one of an alias, the
+	 * misjudgment with them: until then a snapshot for the ref an attach
+	 * asked for answered it on arrival, reply or no, and only one naming
+	 * another ref was left for the reply to judge.
 	 */
 	const detachGapped = (handle: string): void => {
 		const sessions = { ...state.sessions };
@@ -435,18 +447,25 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * Stop telling Emacs about the session `session` names. With a `handle`,
 	 * the attachment under that handle goes, whatever ref Emacs names it by,
 	 * which may be one from before a rename it has not heard (OW-wedeli).
-	 * Without one, it goes by the ref Emacs was last told, as it must for a
-	 * buffer whose attach never answered it: agentpane-mode sends that only
-	 * from a buffer that sent an attach (`agentpane--detach`). Either way an
-	 * attach of that ref no snapshot has answered is abandoned, its reply
-	 * released if held, so no snapshot answers it later; that leaves any
-	 * attachment another buffer holds under its handle alone.
+	 * With a `token` naming an attach no snapshot has answered, that attach
+	 * is abandoned, its reply released if held, so no snapshot answers it
+	 * later: agentpane-mode sends the token of the last attach its buffer
+	 * sent, held handle or not (`agentpane--detach`). Nothing else is: until
+	 * OW-wukako every such attach of the ref was, another buffer's on the
+	 * same ref included, so a buffer killed while holding the handle, or a
+	 * close carrying it, left the attach in flight beside it not attached
+	 * (OW-jofodu). Without a handle, the attachment goes by the ref Emacs was
+	 * last told, as it must for a buffer killed after the snapshot that
+	 * answered its attach went out and before Emacs handled it -- unless the
+	 * token named an attach still waiting, since then nothing was recorded
+	 * for the buffer that sent it, and the attachment by that ref is
+	 * another buffer's.
 	 */
-	const forget = (session: SessionRef, handle: string | undefined): void => {
-		const key = sessionKey(session);
-		for (const attach of attaching) if (!attach.done && sessionKey(attach.asked) === key) abandon(attach);
+	const forget = (session: SessionRef, handle: string | undefined, token: number | undefined): void => {
+		const pending = [...attaching].find((attach) => !attach.done && attach.token === token);
+		if (pending) abandon(pending);
 		if (handle !== undefined) drop(handle);
-		else for (const [held, told] of attached) if (sessionKey(told) === key) drop(held);
+		else if (!pending) for (const [held, told] of attached) if (sessionKey(told) === sessionKey(session)) drop(held);
 	};
 
 	const closeStream = (): void => {
@@ -526,11 +545,15 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		"sessions/create": (params) => api.createSession(params),
 		"models/list": ({ backend }) => api.listModels(backend),
-		"sessions/attach": async ({ session }) => {
-			const attach: Attaching = { asked: session, seen: new Set(), done: false };
+		"sessions/attach": async ({ session, token }) => {
+			const attach: Attaching = { token, seen: new Set(), done: false };
 			attaching.add(attach);
 			try {
 				await openStream();
+				// Given up on while the open was pending: sent now, the attach would
+				// spawn a session nobody waits on (OW-wukako). The error carries no
+				// `data.status`, which would say the server refused it.
+				if (attach.done) throw new Error("the attach was given up before it was sent");
 				const summary = await api.attach(session);
 				// The server writes the attach's snapshot to every connected stream
 				// before it answers (`SessionManager.attach` in
@@ -542,7 +565,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// attaches in two runs, 2026-09-28. An attach no snapshot has
 				// answered by now is answered here, by the view the reducer holds
 				// under the reply's handle: the session was live, or its snapshot
-				// came under another ref than the one asked for. With no view, a
+				// came before the reply, which no snapshot answers ahead of
+				// (`introduce`). With no view, a
 				// snapshot under the handle since the attach went out is taken for
 				// this attach's own, which a gap took (`detachGapped`, OW-tifiva),
 				// and nothing is recorded -- though it may have been one from
@@ -550,12 +574,13 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// `detachGapped` names; else
 				// the snapshot is on its way, and the reply waits for it, so that it
 				// never reaches Emacs ahead of the snapshot that attaches the buffer.
-				// The wait ends with that snapshot (`introduce`), a detach of the
-				// asked-for ref (`forget`), an `ended` under the handle (`end`), or
-				// the helper's end. The attach is entered before the stream's open,
-				// so a detach while the open is pending ends it too; and its REST
-				// call waits for the open, so that the snapshot it broadcasts, and
-				// any `ended` under its handle, reach this client (`openStream`).
+				// The wait ends with that snapshot (`introduce`), a detach or close
+				// carrying this attach's token (`forget`), an `ended` under the
+				// handle (`end`), or the helper's end. The attach is entered before
+				// the stream's open, so such a detach while the open is pending ends
+				// it too, and no REST call follows; and its REST call waits for the
+				// open, so that the snapshot it broadcasts, and any `ended` under
+				// its handle, reach this client (`openStream`).
 				if (!attach.done) {
 					const view = state.sessions[summary.handle];
 					if (view) answer(attach, view, summary.handle);
@@ -582,9 +607,9 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			await api.compact(session);
 			return null;
 		},
-		"sessions/close": async ({ session, handle }) => {
+		"sessions/close": async ({ session, handle, token }) => {
 			await api.close(session);
-			forget(session, handle);
+			forget(session, handle, token);
 			return null;
 		},
 		"sessions/dismissError": async ({ session, errorId }) => {
@@ -593,8 +618,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		// Emacs no longer shows the session, and nothing more: unlike `close`,
 		// the session goes on running on the server.
-		"sessions/detach": async ({ session, handle }) => {
-			forget(session, handle);
+		"sessions/detach": async ({ session, handle, token }) => {
+			forget(session, handle, token);
 			return null;
 		},
 		"sessions/setModel": async ({ session, model }) => {

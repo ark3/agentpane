@@ -40,7 +40,14 @@
  * `sessions/attach` wait for the event stream's open before their own call.
  * OW-kutome raised it a thirteenth, for `session/detached`'s `cause`, which
  * tells the server letting go of the handle from a `seq` gap, since only
- * the first says a turn running under it is over.
+ * the first says a turn running under it is over. OW-wukako raised it a
+ * fourteenth, correlating an attach by a token rather than by the ref it
+ * asked for: `sessions/attach` carries a `token` agentpane-mode mints, the
+ * snapshot that answers it carries that `token` where it carried
+ * `askedFor`, and `sessions/detach` and `sessions/close` carry one too,
+ * giving up that attach alone where they gave up every attach of the ref;
+ * no snapshot answers an attach before its reply names the handle; and an
+ * attach given up on while the stream's open is pending is never sent.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -181,29 +188,40 @@
  *   when the model or its backend offers none -- and then there is no effort
  *   to choose; `defaultEffort` (string or `null`) is what the backend runs it
  *   at when none is chosen.
- * - `sessions/attach` -- `{ session }` -> the `SessionSummary` the attach
- *   route answers, carrying the session's `handle`. Its `ref` is
- *   authoritative and may differ from the one asked for. The reply ends
- *   the request and says nothing about attachment: the session is attached
- *   from the `session/snapshot` that answers the attach, carrying
- *   `askedFor`, and only then (OW-rebawa). The reply goes out after that
- *   snapshot, waiting for it where it is still on its way, so a reply
- *   that arrives with no snapshot having answered its attach means the
- *   helper expects none: a `seq` gap took the session's view after a
- *   snapshot under its handle came (for the ref asked for, that snapshot
- *   and a `session/detached` both went out first; for another ref,
- *   neither did), a `sessions/detach` of the asked-for ref landed while
- *   the attach was in flight, the server ended the session's handle
+ * - `sessions/attach` -- `{ session, token }` -> the `SessionSummary` the
+ *   attach route answers, carrying the session's `handle`. `token`
+ *   (integer, always) names this attach: agentpane-mode mints it, no two
+ *   attaches it sends carry the same one, and the helper sends it nowhere
+ *   but back, on the snapshot that answers this attach, and holds it to
+ *   match a `sessions/detach` or `sessions/close` carrying it (OW-wukako).
+ *   The reply's `ref` is authoritative and may differ from the one asked
+ *   for. The reply ends the request and says nothing about attachment:
+ *   the session is attached from the `session/snapshot` that answers the
+ *   attach, carrying its `token`, and only then (OW-rebawa). That is a
+ *   snapshot under the handle the reply names, sent no earlier than the
+ *   reply arrives, from the view the helper holds under that handle or,
+ *   where it holds none yet, from the next snapshot to come under it; one
+ *   that came under another handle, the same ref or not, answers nothing.
+ *   The reply goes out after that snapshot, waiting for it where it is
+ *   still on its way, so a reply that arrives with no snapshot having
+ *   answered its attach means the helper expects none: a `seq` gap took
+ *   the session's view after a snapshot under its handle came, and
+ *   neither that snapshot nor a `session/detached` went out, a
+ *   `sessions/detach` or `sessions/close` carrying this attach's `token`
+ *   landed while it was in flight, the server ended the session's handle
  *   before its snapshot came, or the helper is exiting. The first can
- *   misjudge: a snapshot from elsewhere under the handle, ahead of the
- *   server handling this attach, then a gap, then the reply, leaves this
- *   attach's own snapshot to arrive after the reply and answer nothing.
- *   That takes a lost or malformed frame, and the session ends not
- *   attached, as after any gap (D25).
+ *   misjudge, whatever ref the attach asked for: a snapshot from
+ *   elsewhere under the handle, ahead of the server handling this attach,
+ *   then a gap, then the reply, leaves this attach's own snapshot to
+ *   arrive after the reply and answer nothing. That takes a lost or
+ *   malformed frame, and the session ends not attached, as after any gap
+ *   (D25).
  *   Opens the event stream if it is not open yet, and waits for it to have
  *   opened before the attach is sent, as `sessions/list` does, so the
  *   snapshot that answers it reaches the helper; from here on the
- *   per-session notifications below flow for this session.
+ *   per-session notifications below flow for this session. One given up
+ *   on while that open is pending is not sent at all, and answers a
+ *   `-32603` error with no `data`: the server never saw it.
  * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
  *   `null`. `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read
@@ -212,22 +230,26 @@
  *   raised after the send, that attach's start among them, stays
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
- * - `sessions/abort`, `sessions/compact`, `sessions/close` -- `{ session }`
- *   -> `null`. `close` kills the subprocess and stops this session's
- *   notifications, as `sessions/detach` below says which.
+ * - `sessions/abort`, `sessions/compact` -- `{ session }` -> `null`.
+ * - `sessions/close` -- `{ session, handle?, token? }` -> `null`. Kills the
+ *   subprocess, then stops this session's notifications and gives up the
+ *   attach `token` names, as `sessions/detach` below says.
  * - `sessions/dismissError` -- `{ session, errorId }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
  *   but only while `errorId` (string) still names the error the server
  *   holds: a newer one survives the dismissal of the one Emacs was showing
  *   (OW-desufa), even one with the same text (OW-jokoto).
- * - `sessions/detach` -- `{ session, handle? }` -> `null`. Stops this
- *   session's notifications and does nothing else: no HTTP call, and the
- *   session goes on running on the server. Sent when Emacs stops showing a
- *   session. With `handle`, the notifications under that handle stop,
- *   whatever ref `session` is; without, those for the session last named
- *   `session` to Emacs; and either way every attach of `session`, from
- *   whichever buffer, that no snapshot has answered and whose reply has
- *   not gone out yet: its reply goes out, and nothing answers it.
+ * - `sessions/detach` -- `{ session, handle?, token? }` -> `null`. Stops
+ *   this session's notifications and does nothing else: no HTTP call, and
+ *   the session goes on running on the server. Sent when Emacs stops
+ *   showing a session. With `token` (integer) naming a `sessions/attach`
+ *   that no snapshot has answered and whose reply has not gone out yet,
+ *   that attach is given up: its reply goes out, and nothing answers it.
+ *   No other attach is, another of the same ref included; a token naming
+ *   none gives up nothing. With `handle`, the notifications under that
+ *   handle stop, whatever ref `session` is; without, those for the session
+ *   last named `session` to Emacs, unless `token` gave up an attach, which
+ *   had recorded nothing for the sender to stop.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -268,14 +290,17 @@
  *   `notice` a `session/notice` carried.
  *   The buffer draws both after `nodes`, since a snapshot replaces
  *   everything the buffer holds and would otherwise wipe them.
- *   `askedFor` (a ref, only on a snapshot that answers a `sessions/attach`,
- *   one such snapshot for each attach it answers) is the ref that attach
- *   asked for, whether or not the snapshot names another. It is request
- *   correlation, not identity: it says which waiting attach this snapshot
- *   answers, so the receiver can bind the handle to what sent that attach
- *   -- which may hold another ref, or the ref of a session another buffer
- *   holds under that handle -- and is the only thing that does, the reply
- *   binding nothing (OW-rebawa). Nor could the receiver rely on handling
+ *   `token` (integer, only on a snapshot that answers a
+ *   `sessions/attach`, one such snapshot for each attach it answers) is
+ *   the `token` that attach carried, whatever ref it asked for and the
+ *   snapshot names (OW-wukako). It is request correlation, not identity:
+ *   it says which waiting attach this snapshot answers, so the receiver can
+ *   bind the handle to what sent that attach -- which may hold another
+ *   ref, the ref of a session another buffer holds under that handle, or
+ *   a handle of its own already -- and is the only thing that does, the
+ *   reply binding nothing (OW-rebawa). Until OW-wukako it was `askedFor`,
+ *   the ref asked for, which two attaches of one ref shared. Nor could the
+ *   receiver rely on handling
  *   the reply first -- as of jsonrpc.el 1.0.29 on Emacs 31.1, the reply to
  *   an asynchronous request that arrives while a synchronous one is
  *   outstanding runs only once that one returns, while notifications are
@@ -357,13 +382,13 @@ export interface HelperRequests {
 	"sessions/preview": { params: SessionParams; result: TranscriptNode[] };
 	"sessions/create": { params: CreateSessionRequest; result: SessionRef };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
-	"sessions/attach": { params: SessionParams; result: SessionSummary };
+	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
 	"sessions/prompt": { params: SessionParams & PromptRequest; result: null };
 	"sessions/abort": { params: SessionParams; result: null };
 	"sessions/compact": { params: SessionParams; result: null };
-	"sessions/close": { params: SessionParams; result: null };
+	"sessions/close": { params: SessionParams & { token?: number }; result: null };
 	"sessions/dismissError": { params: SessionParams & DismissErrorRequest; result: null };
-	"sessions/detach": { params: SessionParams; result: null };
+	"sessions/detach": { params: SessionParams & { token?: number }; result: null };
 	"sessions/setModel": { params: SessionParams & { model: string }; result: null };
 	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };
@@ -388,7 +413,7 @@ export type HelperNotification =
 				error: string | null;
 				errorId: string | null;
 				notices: AgentNotice[];
-				askedFor?: SessionRef;
+				token?: number;
 			};
 	  }
 	| { method: "session/node"; params: { session: SessionRef; handle?: string; node: TranscriptNode } }
