@@ -39,8 +39,6 @@ class FakeStdin extends EventEmitter {
 		return true;
 	}
 	end(): void {
-		// Node raises ERR_STREAM_ALREADY_FINISHED on a second end(); a teardown
-		// that can happen twice must not reach this twice.
 		this.endCalls++;
 		this.destroyed = true;
 	}
