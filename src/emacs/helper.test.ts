@@ -243,6 +243,15 @@ describe("requests", () => {
 		});
 	});
 
+	it("answers a preview of a gone session with an error whose data carries gone (D26)", async () => {
+		const { io } = start({
+			[`GET ${ROUTES.preview(codex)}`]: () => json({ error: "gone", detail: "no such session" }, 404),
+		});
+		io.send({ jsonrpc: "2.0", id: 6, method: "sessions/preview", params: { session: codex } });
+		await io.until(1);
+		expect(io.response(6)!["error"]).toMatchObject({ code: 404, data: { status: 404, error: "gone" } });
+	});
+
 	it("answers an unknown method with -32601 and any other failure with -32603", async () => {
 		const { io } = start({});
 		io.send({ jsonrpc: "2.0", id: 4, method: "sessions/dance", params: {} });

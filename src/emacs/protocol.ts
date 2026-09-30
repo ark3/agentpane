@@ -167,7 +167,10 @@
  *   from here on `sessions/changed` flows, whether or not anything is
  *   attached.
  * - `sessions/preview` -- `{ session }` -> array of nodes, read from the
- *   stored transcript; spawns nothing and opens no stream.
+ *   stored transcript; spawns nothing and opens no stream. A session the
+ *   server does not hold and no file backs answers an error whose `data`
+ *   carries `error: "gone"` (D26 point 5); one it holds with nothing on
+ *   disk yet answers no nodes.
  * - `sessions/create` -- `{ cwd, backend, model? }` -> the new ref.
  * - `models/list` -- `{ backend }` -> array of `{ id, label, efforts,
  *   defaultEffort }`, the HTTP listing unchanged. `efforts` is an array of
