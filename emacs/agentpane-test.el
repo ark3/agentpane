@@ -4816,10 +4816,37 @@ from elsewhere under the handle a re-attach answers raises nothing
       (funcall status nil)
       (should-not (agentpane-test--turn-done-p)))))
 
+(defun agentpane-test--detached-mid-turn (cause)
+  "Submit a turn from a buffer no window shows, see it stream, then
+deliver a `session/detached' for its handle with CAUSE, as the helper
+sends it.  Return whether the indicator is raised, and whether a watch
+on that handle still stands, as a cons."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (funcall submit)
+      (funcall status t)
+      (agentpane--on-notification nil 'session/detached
+                                  (list :session ref :handle "h1" :cause cause))
+      (cons (and (agentpane-test--turn-done-p) t)
+            (and (assoc "h1" agentpane--turn-watches) t)))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-by-a-gap ()
+  "A `session/detached' for a `seq' gap ends the watch on the handle
+raising nothing: the handle stays live on the server and the turn goes
+on, unheard here, as the browser's `detachGapped' deletes the view the
+favicon would read (OW-kutome)."
+  (should (equal (agentpane-test--detached-mid-turn "gapped") '(nil . nil))))
+
+(ert-deftest agentpane-test-turn-done-raised-when-the-server-lets-go ()
+  "A `session/detached' for the server's `ended' under the handle ends a
+turn seen streaming as an aborted one does, raising the indicator, and
+the watch goes with the handle (D26, OW-kutome)."
+  (should (equal (agentpane-test--detached-mid-turn "ended") '(t . nil))))
+
 (defun agentpane-test--reattach-after-helper-death (late)
   "Submit a turn, see it stream, let the helper exit, which raises the
-indicator for that turn, as a `session/detached' does, and clear it; then
-prompt again through a new helper, whose attach answers under the same
+indicator for that turn, as a `session/detached' for the server's `ended'
+does, and clear it; then prompt again through a new helper, whose attach answers under the same
 handle and whose snapshot, handled before the attach's reply, as the
 helper writes them, says the first turn is over.  When LATE, a status
 the helper wrote after the snapshot, still idle, is handled before the
@@ -4864,7 +4891,7 @@ whether its end, unseen, raises the indicator."
 
 (ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
   "A helper that exits ends the watch on every handle it carried as a
-`session/detached' does, and each buffer attached through it reads as
+`session/detached' for the server's `ended' does, and each buffer attached through it reads as
 not streaming, so a turn seen streaming ends there as an aborted one does
 (D25): after a crash mid-turn the re-attach's snapshot raises nothing more
 for the turn it finds over, whether the next prompt's attach reply is

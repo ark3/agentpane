@@ -38,6 +38,9 @@
  * the server's own `ended` under it, where it followed a listing the helper
  * asked at each `sessions/changed`; and `sessions/list` and
  * `sessions/attach` wait for the event stream's open before their own call.
+ * OW-kutome raised it a thirteenth, for `session/detached`'s `cause`, which
+ * tells the server letting go of the handle from a `seq` gap, since only
+ * the first ends the turn running under it.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -305,14 +308,16 @@
  *   with `:LINE:COLUMN` where the backend named a place in it). Only the
  *   Codex adapter produces any. Every later `session/snapshot` carries it
  *   again, in `notices`.
- * - `session/detached` -- `{ session, handle }`. Nothing more comes under
- *   `handle`, and the helper has dropped the attachment: either the server
- *   let go of the handle and said so with an `ended` under it -- a close,
- *   by another client or this one, or on Pi a fork moving the process onto
- *   a conversation of its own (D26) -- or the session's `seq` gapped,
- *   and the helper detaches that one session rather than attach it again
- *   (D25 point 5, OW-filuge). `session` is the ref it last named the
- *   session by. The buffer holding `handle` lets go of it and counts
+ * - `session/detached` -- `{ session, handle, cause }`. Nothing more comes
+ *   under `handle`, and the helper has dropped the attachment: either the
+ *   server let go of the handle and said so with an `ended` under it -- a
+ *   close, by another client or this one, or on Pi a fork moving the
+ *   process onto a conversation of its own (D26) -- and `cause` is
+ *   `"ended"`, or the session's `seq` gapped, and the helper detaches that
+ *   one session rather than attach it again (D25 point 5, OW-filuge), and
+ *   `cause` is `"gapped"`: the handle stays live on the server, and a turn
+ *   running under it goes on unheard. `session` is the ref it last named
+ *   the session by. The buffer holding `handle` lets go of it and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever
  *   handle and ref the session has now, if any, as a first attach is.
@@ -391,7 +396,7 @@ export type HelperNotification =
 	| { method: "session/error"; params: { session: SessionRef; handle?: string; message: string; errorId: string } }
 	| { method: "session/errorCleared"; params: { session: SessionRef; handle?: string } }
 	| { method: "session/notice"; params: { session: SessionRef; handle?: string; notice: AgentNotice } }
-	| { method: "session/detached"; params: { session: SessionRef; handle: string } }
+	| { method: "session/detached"; params: { session: SessionRef; handle: string; cause: "ended" | "gapped" } }
 	| { method: "sessions/changed"; params?: undefined };
 
 export interface TranscriptNode {

@@ -324,7 +324,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		const session = attached.get(handle);
 		if (session !== undefined) {
 			drop(handle);
-			notify({ method: "session/detached", params: { session, handle } });
+			notify({ method: "session/detached", params: { session, handle, cause: "ended" } });
 		}
 		for (const attach of attaching) if (!attach.done && attach.handle === handle) abandon(attach);
 	};
@@ -363,7 +363,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		const session = attached.get(handle);
 		if (session === undefined) return;
 		drop(handle);
-		notify({ method: "session/detached", params: { session, handle } });
+		notify({ method: "session/detached", params: { session, handle, cause: "gapped" } });
 	};
 
 	const onEvent = (event: ServerEvent): void => {

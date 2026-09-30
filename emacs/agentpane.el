@@ -731,7 +731,8 @@ recorded, draws what is recorded first, so it finds the buffer as it
 would have had each node been drawn on arrival.
 A `session/detached' says the helper sends nothing more under the handle
 the buffer holds, the server having let go of it or its `seq' having
-gapped, and the buffer lets go of it too; see `agentpane--let-go'."
+gapped, as its `cause' says, and the buffer lets go of it too; see
+`agentpane--let-go'."
   (cond
    ((eq method 'sessions/changed)
     (agentpane--revert-pickers))
@@ -760,16 +761,18 @@ gapped, and the buffer lets go of it too; see `agentpane--let-go'."
                                                    (plist-get params :errorId)))
             ('session/errorCleared (agentpane--hold-error nil))
             ('session/notice (agentpane--upsert (list :notice (plist-get params :notice))))
-            ('session/detached (agentpane--let-go)))))))))
+            ('session/detached
+             (agentpane--let-go (equal (plist-get params :cause) "gapped"))))))))))
 
-(defun agentpane--let-go ()
+(defun agentpane--let-go (&optional gapped)
   "Let go of the handle this buffer holds, which will say nothing more to
-it: the server let go of it, or its `seq' gapped (`session/detached'), or
-the helper it was attached through is gone (`agentpane--helper-gone'),
-which D25 takes to mean the same.  The buffer holds no handle and is not
-attached, and keeps its ref and what it drew.  Not attached, it is a
-preview (D26): `agentpane-refetch' previews it, and a send or
-`agentpane-attach' attaches it again, a first attach of whatever handle
+it: the server let go of it, or its `seq' gapped, when GAPPED is
+non-nil (`session/detached'), or the helper it was attached through is
+gone (`agentpane--helper-gone'), which D25 takes to mean the server let
+go of it.  The buffer holds no handle and is not attached, and keeps its
+ref and what it drew.  Not attached, it is a preview (D26):
+`agentpane-refetch' previews it, and a send or `agentpane-attach'
+attaches it again, a first attach of whatever handle
 answers, which `agentpane--notified-buffer' binds to this buffer by its
 `askedFor', and into which `agentpane--attach-by' merges a buffer
 already holding that handle.  Until OW-vugefa it was marked dropped
@@ -777,8 +780,10 @@ instead, and `g' attached it again rather than draw the stored
 transcript over the live one it still showed.  It reads as the status
 that ends a turn leaves it, nothing streaming or compacting, since
 nothing will say so under that handle.  The turn-done watch on that
-handle is folded that status, then ends with the handle; see
-`agentpane--watch-turn'."
+handle is folded that status, then ends with the handle; at a gap, which
+leaves the handle live on the server and the turn going on unheard, it
+ends first, raising nothing; see `agentpane--watch-turn'."
+  (when gapped (agentpane--watch-forget agentpane--handle))
   (agentpane--read-idle)
   (agentpane--watch-forget agentpane--handle)
   (setq agentpane--handle nil
@@ -3716,16 +3721,19 @@ buffer moves to another handle only by attaching again, which answers
 under another only when the server has let go of the old one, and that
 one is never minted again.  A prompt arms only once its own attach has
 answered, under the handle that attach answered.
-A `session/detached' folds the not-streaming status it leaves the buffer
-reading, so a turn seen streaming ends there as an aborted one does, and
-a watch still `sent' is dropped, which only keeps the list short; so
-does a helper's exit, for every handle it carried, which D25 takes to
-mean the same (`agentpane--helper-gone'), a prompt still out at that
-exit leaving its watch to it (OW-zedawo, OW-mopuyi).
+A `session/detached' for the server's `ended' folds the not-streaming
+status it leaves the buffer reading, so a turn seen streaming ends there
+as an aborted one does, and a watch still `sent' is dropped, which only
+keeps the list short; so does a helper's exit, for every handle it
+carried, which D25 takes to mean the same (`agentpane--helper-gone'), a
+prompt still out at that exit leaving its watch to it (OW-zedawo,
+OW-mopuyi).
 Where the handle stays live and this Emacs stops hearing it, keying
 alone is not enough, and the watch ends raising nothing: at a detach
 this Emacs sends (`agentpane--detach'), from a killed buffer or a Pi
-fork's parent, the turn going on unheard on the server.
+fork's parent, and at a `session/detached' for a `seq' gap (D25 point 5),
+the turn going on unheard on the server, as the browser's `detachGapped'
+deletes the view its favicon would read (OW-kutome).
 
 Elsewhere, the favicon's unfocused window, is here a buffer that no
 window shows (`agentpane--shown-p'): Emacs's own focus says nothing about

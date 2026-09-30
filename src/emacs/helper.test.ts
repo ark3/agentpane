@@ -310,7 +310,7 @@ describe("notifications", () => {
 
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await io.until(3);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: h(pi) } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: h(pi), cause: "gapped" } });
 		// A later event under the handle finds no view to gap against again.
 		source.emit({ type: "status", session: pi, handle: h(pi), seq: 4, isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null });
 		// A gap in a view Emacs never attached is told nothing.
@@ -945,7 +945,7 @@ describe("a handle's end (D26, OW-likopo)", () => {
 			["session/detached", "h1"],
 			["sessions/changed", undefined],
 		]);
-		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1" } });
+		expect(io.notifications()[1]).toEqual({ jsonrpc: "2.0", method: "session/detached", params: { session: pi, handle: "h1", cause: "ended" } });
 		expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${ROUTES.session(pi)}`]);
 	});
 
