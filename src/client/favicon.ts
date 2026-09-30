@@ -106,9 +106,11 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * the controller tells `App.svelte`, which calls `watchAbandon` (OW-jadoda).
  * A stream drop leaves it waiting: where the server survived the drop, the
  * reconnect's opening snapshot re-forms the view under the same handle, and a
- * turn ending there badges. An `ended` leaves it waiting too, but `ended` is
- * the last event under its handle (D26), so nothing re-forms there and the
- * watch is never read again.
+ * turn ending there badges. An `ended` leaves it waiting too, and must: on Pi
+ * a fork's `ended` comes under the parent's handle while the fork is in flight
+ * (`#forkOnto`, D26 point 1), and the watch left on the parent is the one
+ * `watchMove` carries onto the fork. After a plain close nothing re-forms
+ * under that handle (D26), so the watch is never acted on again.
  */
 export function watchSessions(
 	watch: TurnWatch,
@@ -121,7 +123,8 @@ export function watchSessions(
 		const isStreaming = streaming.get(key);
 		// A session the client has no view of yet: the submit's own POST can
 		// resolve before the first SSE event for it arrives (D2). Keep waiting;
-		// a watch whose view a gap dropped is gone by now (see above).
+		// a gap ended the watch on its handle (see above), except one `watchMove`
+		// carried onto a fork's handle after the gap took its view (OW-koledi).
 		if (isStreaming === undefined) continue;
 		if (isStreaming === sawStreaming) continue;
 		waiting ??= new Map(watch.waiting);
