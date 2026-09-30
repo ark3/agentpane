@@ -5071,6 +5071,31 @@ OW-nuzoto)."
       (should-not (agentpane-test--turn-done-p))
       (should-not (assoc "h1" agentpane--turn-watches)))))
 
+(ert-deftest agentpane-test-shutdown-drops-a-watch-a-gap-kept ()
+  "`agentpane-shutdown' drops the `streamed' watch a gap kept, though the
+gap left its buffer attached to nothing, so a re-attach after the helper
+restarts raises nothing for that turn (D25 point 4, OW-nuzoto)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (funcall submit)
+      (funcall status t)
+      (agentpane--on-notification nil 'session/detached
+                                  (list :session ref :handle "h1" :cause "gapped"))
+      (should (assoc "h1" agentpane--turn-watches))
+      (setq agentpane--connection nil)
+      (cl-letf (((symbol-function 'agentpane--start-helper)
+                 (lambda ()
+                   (make-process :name "agentpane-test helper"
+                                 :command '("cat")
+                                 :connection-type 'pipe
+                                 :noquery t))))
+        (agentpane--connection))
+      (agentpane-shutdown)
+      (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
+                                        (+ (float-time) 10)))
+      (should-not (assoc "h1" agentpane--turn-watches))
+      (should-not (agentpane-test--turn-done-p)))))
+
 (defun agentpane-test--reattach-after-helper-death (late)
   "Submit a turn, see it stream, let the helper exit, which raises the
 indicator for that turn, as a `session/detached' for the server's `ended'
