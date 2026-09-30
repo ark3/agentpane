@@ -320,7 +320,7 @@ describe("notifications", () => {
 		expect(calls).toHaveLength(1);
 		expect(io.notifications()).toHaveLength(2);
 
-		// `g`: the attach broadcasts a snapshot, which forms the view again.
+		// `a` or a send: the attach broadcasts a snapshot, which forms the view again.
 		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
 		await tick();
 		source.emit({ type: "snapshot", session: pi, handle: h(pi), seq: 0, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });

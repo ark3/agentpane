@@ -316,7 +316,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * attached it, the attachment goes and Emacs is told, as for a handle the
 	 * server let go (`end`). Nothing is attached on Emacs's behalf: an
 	 * attach is what spawns, and one here would spawn again a session whose
-	 * `sessions/close` is out. The buffer comes back on `g`. An attach whose
+	 * `sessions/close` is out. The buffer comes back by a send or `a`, `g`
+	 * previewing it (D26). An attach whose
 	 * snapshot is still on its way when the gap lands needs nothing here:
 	 * that snapshot forms the view again and goes out as its first
 	 * notification, unless the reply lands before it and finds that a
