@@ -240,7 +240,11 @@
  * `code`, the server's text as `message`, and `{ status, error, detail }` as
  * `data`, `error` and `detail` being the HTTP body's own fields, so a
  * mid-turn prompt rejection reads in Emacs as it does in the browser. Any
- * other failure is `-32603` with its message; an unknown method is `-32601`.
+ * other failure is `-32603` with its message and no `data`, and says nothing
+ * of whether the server acted on the request; an unknown method is
+ * `-32601`. A request the helper's own teardown aborts, at the end of its
+ * input or a drop of the event stream, gets no reply at all (`runHelper` in
+ * helper.ts): Emacs answers it as the helper's death (OW-hiliti).
  *
  * Notifications, by `method`, with `params`; each names the session it is
  * about, and none arrives for a session Emacs has not attached, except

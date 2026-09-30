@@ -163,18 +163,23 @@ interface HeldNode {
  *
  * A request the abort ends gets no reply (OW-hiliti). The abort is the
  * helper's own, and says nothing of whether the request reached the
- * backend: a prompt may have been admitted, its turn streaming, when the
- * stream dropped. agentpane-mode answers a request its dead helper never
- * replied to as the death, and leaves a prompt's turn-done watch for its
- * teardown to settle (OW-zedawo), where it takes any reply the helper wrote
- * as the request's answer, and an error reply as a refusal that abandons
- * that watch (`agentpane--request` in emacs/agentpane.el). Until OW-hiliti
- * the abort's error went back as a -32603 reply, and a turn seen streaming
- * lost its turn-done indicator at every drop Emacs was busy through. The
- * test is whether the abort has run when the request fails, so one that
- * failed on its own in the same instant goes unanswered too, and reads as
- * the death it all but was. Writing nothing keeps nothing open: the
- * process ends as soon as it did.
+ * backend, so agentpane-mode answers such a request as the helper's death,
+ * and the echo area says the helper exited rather than that the operation
+ * was aborted. That is all the silence still decides: agentpane-mode takes
+ * only a refusal carrying the server's HTTP status as saying a request
+ * reached no backend, and reads any other error reply, this helper's own
+ * -32603 among them, as an outcome unknown, leaving a prompt's turn-done
+ * watch for its teardown to settle (`agentpane--request` in
+ * emacs/agentpane.el, OW-zedawo). The -32603 cannot all be silenced here:
+ * with the server killed and a prompt in flight, the socket's error reached
+ * `respond` before the drop had aborted anything in all 32 runs of
+ * `resources/probes/emacs_helper_server_death_probe.el` (bun 1.4.0,
+ * measured 2026-09-29; docs/MANUAL_TESTING.md, OW-hiliti). The test is
+ * whether the abort has run when the request fails, so one that failed on
+ * its own in the same instant goes unanswered too, and reads as the death
+ * it all but was. Writing nothing keeps nothing open: with a prompt in
+ * flight, the helper exited 0.029s to 0.030s after its stdin closed, as
+ * fast as OW-kofuda measured (bun 1.4.0, measured 2026-09-29).
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;

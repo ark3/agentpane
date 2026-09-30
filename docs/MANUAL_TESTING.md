@@ -2331,10 +2331,11 @@ A Python driver started `bun run src/emacs/main.ts http://127.0.0.1:<port>` agai
 At 1b9cb66 the helper was still running 30s after the close, as in the first run, and the driver killed it by its pid.
 With the fix it exited with code 0, in 0.033s, 0.065s and 0.034s over three runs.
 The aborted request is still answered, since closing stdin leaves stdout open: the one frame on the helper's stdout was `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"The operation was aborted."}}`.
-That reply was retired on 2026-09-29: the helper now writes none for a request its teardown aborts, since agentpane-mode read it as a refusal (see "A request the helper's teardown aborts gets no reply (OW-hiliti)" below).
+That reply was retired on 2026-09-29: the helper now writes none for a request its teardown aborts, since agentpane-mode read it as a refusal (see "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)" below).
 Through `agentpane-shutdown`, with the same stand-in on port 4173 and the same attach sent by `jsonrpc-async-request` from `--batch` 2.5s after the helper started, `agentpane-shutdown` was called 1s later.
 At 1b9cb66 it printed the sentinel warning, the attach's error callback got `(:code -1 :message "Server died")`, and the process ended at status `signal`, code 9, after 0.607s.
 With the fix there was no warning, the error callback got `(:code -32603 :message "The operation was aborted.")`, and the process ended at status `exit`, code 0; `agentpane-shutdown` returned after 0.303s, which is `jsonrpc-shutdown`'s own 0.3s `accept-process-output` wait rather than the helper's exit.
+As of 2026-09-29 (`bun 1.4.0`, jsonrpc.el 1.0.29), the helper writing no reply for a request its teardown aborts (OW-hiliti), that callback gets `(:code -1 :message "Server died")` instead, as measured by the OW-hiliti review.
 In both, `process-attributes` found no such pid afterwards.
 The vitest case `aborts a request still waiting on the server when the input ends` in `src/emacs/helper.test.ts` holds the abort; it failed against 1b9cb66, the fetch's signal reading `undefined`.
 
@@ -3746,11 +3747,21 @@ In every run `notes.txt` still read `hello fixture`, exactly one `can_use_tool` 
 So both shapes are a "no" the model reads and the turn carries on from, and the deny reads more cleanly.
 No other CLI-initiated subtype could be provoked, so the error reply was measured on `can_use_tool` alone.
 
-## A request the helper's teardown aborts gets no reply (OW-hiliti)
+## A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)
 
 Measured on the home server 2026-09-29, Emacs 31.1 in `--batch` with jsonrpc.el 1.0.29, `bun 1.4.0`, on `card/OW-hiliti`.
-The probe, kept in `/tmp/hiliti-probe/` and not checked in, ran the real `runHelper` under `bun run` with a stand-in `fetch` that answered every `GET` with the JSON body `[]` and held every `POST` open until its signal fired, and an event stream that opened at once and dropped 500 ms later.
-An ert case in the same directory listed sessions to open the stream, sent a prompt from a buffer attached under the handle `h1`, handled a `session/status` under `h1` reading streaming, so the prompt's turn-done watch read `streamed`, and then waited without yielding until the helper had exited, so the helper's last messages, its sentinel and its teardown were all handled afterwards.
-At 18020e0, which took an error reply a dying helper wrote as the request's answer, the helper's abort of the in-flight `POST` went back as a -32603 reply, which ran the prompt's reached-no-backend path, abandoned the watch, and left the turn-done indicator down in 3 runs of 3; at 637eada, which ignored an error reply once the helper read as dead, it was raised in 3 of 3; those six runs are the OW-hiliti review's.
-With the helper writing no reply for a request its teardown aborted, the prompt was answered by the teardown alone, the echo area read `[jsonrpc] Server exited with status 0` and `agentpane: sessions/prompt failed: the helper exited`, and the indicator was raised in 3 runs of 3, run by the implementer.
-The vitest cases `aborts a request still waiting on the server when the input ends, and writes no reply for it` and `... when the stream drops, ...` in `src/emacs/helper.test.ts` hold it; both failed against 18020e0 with the `AbortError` reply they now forbid.
+Two probes, checked in under `resources/probes/` with how to run them in its `README.md`, send a prompt from a buffer attached under the handle `h1`, have a `session/status` under `h1` read streaming, so the prompt's turn-done watch reads `streamed`, and count the runs in which the helper's teardown then raised the turn-done indicator, which OW-zedawo says it must.
+
+`emacs_helper_drop_probe.el` drives the real `runHelper` through a stand-in whose `fetch` holds every `POST` open until its signal fires and whose event stream drops 500 ms after it opens.
+Its `busy` case waits without yielding until the helper has exited, so the helper's last messages, its sentinel and its teardown are all handled afterwards; its `idle` case lets Emacs handle each as it comes.
+In the OW-hiliti review's runs of the same scenario, busy was raised 3 of 3 at 637eada and lost 3 of 3 at 18020e0, which read the helper's -32603 abort reply as a refusal; idle was lost 3 of 3 at both, 637eada having always read a live helper's error reply so, and raised 3 of 3 at b845288, where the helper stopped writing that reply.
+With the checked-in probe after the fix both cases were raised 3 of 3, twice over; with the fix's Emacs half reverted to b845288 and the helper's no-reply disabled, both were lost 3 of 3, and with only the no-reply disabled both were still raised, the echo area reading `sessions/prompt failed: The operation was aborted.` where it otherwise reads `the helper exited`.
+
+`emacs_helper_server_death_probe.el` drives the real helper, `bun run src/emacs/main.ts`, over a stand-in Bun server that holds the prompt's `POST` open and is SIGKILLed 0.3 s after the prompt goes out.
+There the socket's error reaches the helper before the stream's drop has aborted anything, and the helper writes it back as `-32603` "The socket connection was closed unexpectedly. ..." with no `data`.
+In the review's runs the indicator was raised 0 of 8 on `main` and 1 of 8 at b845288; the checked-in probe at b845288 raised it 2 of 8, every lost run showing that socket error.
+After the fix, which runs a prompt's reached-no-backend path only for an error whose `data` carries the server's HTTP status, it was raised 32 of 32 over four runs of eight, the echo area showing the socket error in every one.
+
+The vitest cases `aborts a request still waiting on the server when the input ends, and writes no reply for it` and `... when the stream drops, ...` in `src/emacs/helper.test.ts` hold the helper's half; both failed against 18020e0 with the `AbortError` reply they now forbid.
+The ert cases `agentpane-test-transport-error-before-a-death-keeps-the-watch` and `agentpane-test-error-reply-before-a-death-abandons-the-watch` hold the reading, the first with a `-32603` carrying no `data` and the second with a 409 carrying `status`.
+With a prompt in flight against the server stand-in, the helper exited 0.029 s to 0.030 s after its stdin closed, in three runs, writing no reply for the prompt.

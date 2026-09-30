@@ -2277,11 +2277,13 @@ A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
 ANSWER with t to deliver the reply, with `reply' to deliver the reply
 alone, as the helper does for an attach no snapshot will answer, with
-nil to fail the request as `agentpane--request' reports an error,
-running the request's UNSENT and then its FAILED, or with a plist, the
+nil to fail the request as `agentpane--request' fails one on an error
+that carries no `data', running its FAILED alone, or with a plist, the
 error's `data', to fail it so and then run its ERRED with that plist, as
 `agentpane--request' does for an error the helper answered with that
-`data'.  ERRED runs with nil for a failure by nil.  Either way the answer runs in the buffer that sent the
+`data', running its UNSENT first when the plist carries an HTTP `status',
+as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
+failure by nil.  Either way the answer runs in the buffer that sent the
 request.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
@@ -2319,7 +2321,8 @@ request.  Every buffer BODY made is killed afterwards."
                                    (with-current-buffer from
                                      (if (and ok (atom ok))
                                          (funcall callback reply)
-                                       (when unsent (funcall unsent))
+                                       (when (and unsent (plist-get ok :status))
+                                         (funcall unsent))
                                        (when failed (funcall failed))
                                        (when erred (funcall erred ok)))))))
                     (if (memq method hold)
@@ -4592,7 +4595,7 @@ then ends unseen raises nothing (OW-lohavi)."
   (agentpane-test--submitting
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) nil)
+    (funcall (cdr (pop held)) '(:status 409 :error "turn_active"))
     (funcall status t)
     (funcall status nil)
     (should-not (agentpane-test--turn-done-p))))
@@ -4605,7 +4608,7 @@ prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
     (funcall status t)
     (setq hold '(sessions/prompt))
     (funcall submit)
-    (funcall (cdr (pop held)) nil)
+    (funcall (cdr (pop held)) '(:status 409 :error "turn_active"))
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
 
@@ -4790,7 +4793,9 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                 (funcall (plist-get (cdr (assq 'sessions/attach calls)) :success-fn)
                          (list :ref canonical :handle "h1"))
                 (should-not (buffer-live-p holder))
-                (funcall (plist-get prompt :error-fn) '(:message "Refused")))
+                (funcall (plist-get prompt :error-fn)
+                         '(:code 409 :message "Refused"
+                           :data (:status 409 :error "turn_active" :detail "Refused"))))
               (funcall status t)
               (funcall status nil)
               (should-not (agentpane-test--turn-done-p)))))))))
@@ -5440,6 +5445,43 @@ there, raising the indicator."
         (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                        "hello"))))))
 
+(ert-deftest agentpane-test-transport-error-before-a-death-keeps-the-watch ()
+  "A prompt the helper answers, just before it exits, with an error that
+carries no HTTP status -- its own -32603, as when the server was killed
+with the prompt's POST in flight and the socket's error reached the
+helper before the stream's drop -- keeps the turn-done watch it armed,
+since nothing says whether the server had admitted it: after a status
+under the buffer's handle said the turn streams, the teardown ends that
+turn and raises the indicator for the buffer no window shows, as
+`agentpane-test-death-ends-a-turn-seen-streaming' does for a prompt
+never answered, and the helper's message is still shown (OW-zedawo,
+OW-hiliti).  Read as a refusal, as it was until OW-hiliti's third cut,
+it abandoned the watch, and the indicator was lost at 7 of 8 server
+deaths (bun 1.4.0, Emacs 31.1, measured 2026-09-29)."
+  (agentpane-test--watching
+    (agentpane-test--outliving
+        (list (list :jsonrpc "2.0" :method "session/status"
+                    :params (list :session ref :handle "h1" :isStreaming t))
+              (list :jsonrpc "2.0" :id 1
+                    :error (list :code -32603
+                                 :message "The socket connection was closed unexpectedly.")))
+      (agentpane-test--noting
+        (let ((dead (agentpane--connection)))
+          (setq agentpane--attached dead
+                agentpane--handle "h1")
+          (goto-char (point-max))
+          (insert "hello")
+          (agentpane-send)
+          (should (assoc "h1" agentpane--turn-watches))
+          (agentpane-test--heard-out dead)
+          (should (agentpane-test--turn-done-p))
+          (should (memq (current-buffer) agentpane--turns-done))
+          (should-not agentpane--turn-watches)
+          (should-not agentpane--sending)
+          (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                         "hello"))
+          (should (agentpane-test--said-p "sessions/prompt failed: The socket connection" said)))))))
+
 (ert-deftest agentpane-test-fork-answered-as-its-helper-dies-is-shown ()
   "A fork whose reply is among the last messages a dying helper wrote
 opens the fork's buffer and shows it, not attached, so a `g' can bring it
@@ -5724,8 +5766,10 @@ reply is handed on (OW-tifiva), as in wire order
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
 fail HOW -- `timeout', `reply-exit' (handling its reply signals), `error'
-\(the helper answers an error) or `send-exit' (sending it signals) -- then
-run a turn that ends unseen, and return whether the indicator is raised."
+\(the helper answers with the server's refusal, an HTTP error carrying its
+status), `transport' (the helper answers with an error of its own, which
+carries none) or `send-exit' (sending it signals) -- then run a turn that
+ends unseen, and return whether the indicator is raised."
   (let ((request (symbol-function 'agentpane--request))
         (calls nil))
     (agentpane-test--submitting
@@ -5744,7 +5788,11 @@ run a turn that ends unseen, and return whether the indicator is raised."
             (let ((prompt (cdr (assq 'sessions/prompt calls))))
               (pcase how
                 ('timeout (funcall (plist-get prompt :timeout-fn)))
-                ('error (funcall (plist-get prompt :error-fn) '(:message "Refused")))
+                ('error (funcall (plist-get prompt :error-fn)
+                                 '(:code 409 :message "Refused"
+                                   :data (:status 409 :error "turn_active" :detail "Refused"))))
+                ('transport (funcall (plist-get prompt :error-fn)
+                                     '(:code -32603 :message "fetch failed")))
                 ('reply-exit (should-error (funcall (plist-get prompt :success-fn) nil))))))
           (should-not agentpane--sending)
           (funcall status t)
@@ -5752,12 +5800,15 @@ run a turn that ends unseen, and return whether the indicator is raised."
           (agentpane-test--turn-done-p))))))
 
 (ert-deftest agentpane-test-turn-done-kept-for-a-prompt-that-timed-out ()
-  "A prompt whose reply outlasts its timeout, or whose reply's handling
-signals, may have been admitted, so its watch stands and the turn's end
-raises the indicator; one the helper answers with an error, or that never
-went out, abandons it, as the browser's `watchAbandon' does (OW-dunahe)."
+  "A prompt whose reply outlasts its timeout, whose reply's handling
+signals, or that the helper answers with an error of its own, carrying no
+HTTP status, may have been admitted, so its watch stands and the turn's
+end raises the indicator; one the server refused, or that never went
+out, abandons it, as the browser's `watchAbandon' does (OW-dunahe,
+OW-hiliti)."
   (should (agentpane-test--prompt-failing 'timeout))
   (should (agentpane-test--prompt-failing 'reply-exit))
+  (should (agentpane-test--prompt-failing 'transport))
   (should-not (agentpane-test--prompt-failing 'error))
   (should-not (agentpane-test--prompt-failing 'send-exit)))
 

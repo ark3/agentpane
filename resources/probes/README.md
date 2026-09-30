@@ -391,6 +391,42 @@ Costs tokens: one long Codex turn on `gpt-5.6-luna` per `--item`, two for `conte
 Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25.
 What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", and "What a Codex listing holds of a running turn, by item kind".
 
+## `emacs_helper_drop_probe.el`
+
+Proves: **a prompt in flight when the Emacs helper's event stream drops keeps its turn-done watch for the helper's teardown**, which ends a turn seen streaming and raises the indicator (OW-zedawo, OW-hiliti).
+It drives the real `runHelper` through `emacs_helper_drop_stand_in.ts`, whose `fetch` holds every `POST` open until its signal fires and whose event stream drops 500 ms after it opens.
+Its `busy` case waits without yielding until the helper has exited, so the helper's last messages, its sentinel and its teardown are all handled afterwards; its `idle` case lets Emacs handle each as it comes.
+
+```bash
+emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
+  -l resources/probes/emacs_helper_drop_probe.el \
+  --eval '(ert-run-tests-batch-and-exit "agentpane-probe-")'
+```
+
+Run from the repository root; `PROBE_RUNS` sets the runs per case (3).
+Each case prints `RAISED k of n` and each run's echo-area messages, and passes only when every run raised.
+No live model calls, no network beyond the loopback pipe.
+
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29.
+What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)".
+
+## `emacs_helper_server_death_probe.el`
+
+Proves: **a prompt in flight when the agentpane server is killed keeps its turn-done watch for the helper's teardown** (OW-hiliti), though the helper, `bun run src/emacs/main.ts`, may answer the prompt first with the socket's error, a `-32603` carrying no `data`.
+The server is `emacs_helper_server_death_server.ts`, a stand-in on a free loopback port that holds the prompt's `POST` open and is SIGKILLed 0.3 s after the prompt goes out.
+
+```bash
+emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
+  -l resources/probes/emacs_helper_server_death_probe.el \
+  --eval '(ert-run-tests-batch-and-exit "agentpane-probe-")'
+```
+
+Run from the repository root; `PROBE_RUNS` sets the runs (8).
+It prints `RAISED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised.
+
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29.
+What it showed is the same `docs/MANUAL_TESTING.md` section.
+
 ## Why these live here
 
 A fresh agent building this project has none of the validation conversation's

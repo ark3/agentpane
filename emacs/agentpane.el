@@ -533,15 +533,19 @@ CALLBACK exits non-locally -- the helper failing to start, or a reply's
 handling failing partway -- so a flag that FAILED clears never outlives the
 request that set it.
 UNSENT, when given, runs with no arguments when the request reached no
-backend -- the helper answered it with an error, sending it exited
-non-locally, or it was sent nowhere, its helper having exited -- before
-FAILED, and whether or not this buffer is still
-live: for state the request set outside the buffer, which a buffer
-killed meanwhile must not strand, as a prompt's turn-done watch is
-\(`agentpane--send-prompt').  A timeout, the helper's death, and a
-non-local exit running CALLBACK, run FAILED alone, the request having
-perhaps been carried out; at a death the teardown settles a prompt's
-watch itself (`agentpane--helper-gone').
+backend -- the server refused it, the helper answering with an error
+whose `data' carries the HTTP `status' (`toRpcError' in
+src/emacs/helper.ts), sending it exited non-locally, or it was sent
+nowhere, its helper having exited -- before FAILED, and whether or not
+this buffer is still live: for state the request set outside the
+buffer, which a buffer killed meanwhile must not strand, as a prompt's
+turn-done watch is (`agentpane--send-prompt').  A timeout, the helper's
+death, and a non-local exit running CALLBACK run FAILED alone, the
+request having perhaps been carried out; so, with ERRED, does an error
+reply carrying no status -- the helper's own -32603, a failure of the
+request's transport or its abort, or its -32601 -- which says nothing
+of whether the server acted on it (OW-hiliti).  At a death the teardown
+settles a prompt's watch itself (`agentpane--helper-gone').
 ERRED, when given, runs after FAILED with the `data' of the error the
 helper answered with, where CALLBACK would have run with a result: in
 this buffer, if it is still live and, unless ALWAYS, has sent no later
@@ -576,19 +580,20 @@ wrote before it died, which the sentinel finds queued (see
 `agentpane--helper-exited'), and answers from another one tick later, so
 a reply among them is the answer: a prompt the backend admitted clears
 its draft.  So is an error reply among them, as from a live helper,
-running UNSENT, FAILED and ERRED and showing the helper's own message: a
-prompt so refused abandons its watch, and the teardown raises nothing
-for a turn from elsewhere it had seen streaming (OW-hiliti).  Until
-OW-hiliti the error handler answered nothing once the helper read as
-dead, so such a request failed as the death, running FAILED alone, and
-the reason the helper gave, a server it could not reach, say, was never
-shown.  An error reply is always one the helper meant: it writes none
-for a request its own teardown aborts (`runHelper' in
-src/emacs/helper.ts), since the abort says nothing of whether the
-request reached the backend.  Its -32603 reply for one, read as a
-refusal, abandoned the watch of a prompt whose turn was streaming when
-the server's stream dropped, and the teardown raised nothing (bun 1.4.0,
-Emacs 31.1, measured 2026-09-29; OW-zedawo, OW-hiliti).
+running FAILED and ERRED, and UNSENT for the server's refusal, and
+showing the helper's own message: a prompt so refused abandons its
+watch, and the teardown raises nothing for a turn from elsewhere it had
+seen streaming (OW-hiliti).  Until OW-hiliti the error handler answered
+nothing once the helper read as dead, so such a request failed as the
+death, running FAILED alone, and the reason the helper gave was never
+shown.  Only the status tells a refusal from the rest: with the server
+killed and a prompt in flight, the helper answered with the socket's
+error, a -32603 carrying no `data', and read as a refusal it abandoned
+the watch of a prompt whose turn was streaming, so the teardown raised
+nothing, in 7 runs of 8 (bun 1.4.0, Emacs 31.1, measured 2026-09-29;
+OW-zedawo, OW-hiliti).  The helper writes no reply at all for a request
+its own teardown aborts (`runHelper'), so the echo area names the
+helper's exit rather than the abort.
 A reply jsonrpc.el held back, as an \"anxious continuation\", behind a
 synchronous request still out when the helper died, is no pending
 request to the sentinel, and is handed on from a timer queued as the
@@ -639,7 +644,9 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
          (fail (lambda (error)
                  (when (funcall answer)
                    (message "agentpane: %s failed: %s" method (plist-get error :message))
-                   (when unsent (funcall unsent))
+                   ;; Only the server's refusal says it reached no backend.
+                   (when (and unsent (plist-get (plist-get error :data) :status))
+                     (funcall unsent))
                    (agentpane--failed buffer failed)
                    (when (and erred (buffer-live-p buffer))
                      (with-current-buffer buffer
@@ -2819,17 +2826,22 @@ snapshot, is newer than the prompt, and admitting it must not clear it.
 
 The prompt arms the turn-done watch on the session's handle as it goes
 out, after any attach, so under the handle that attach answered; see
-`agentpane--watch-submit'.  A prompt the helper answers with an error,
-even one it wrote as it died (OW-hiliti), abandons the watch it armed,
-as the browser's `watchAbandon' does for a refused or failed POST:
-refused, the prompt started nothing, and the next turn on the session is
-not one this Emacs asked for.  So does one that never went out, sending
-it having exited non-locally, or its helper having exited before the
-teardown (`agentpane--request').  The watch is abandoned even when a merge
-has killed this buffer before the answer (`agentpane--absorb'), as
-UNSENT in `agentpane--request' runs whether or not the buffer lives: the
-watch is on the handle, which the survivor holds, and left standing it
-raised the indicator for the next turn from elsewhere to end there.
+`agentpane--watch-submit'.  A prompt the server refuses, the helper
+answering with an error whose `data' carries the HTTP status, even one
+it wrote as it died, abandons the watch it armed, as the browser's
+`watchAbandon' does for a refused POST: refused, the prompt started
+nothing, and the next turn on the session is not one this Emacs asked
+for.  So does one that never went out, sending it having exited
+non-locally, or its helper having exited before the teardown
+\(`agentpane--request').  The watch is abandoned even when a merge has
+killed this buffer before the answer (`agentpane--absorb'), as UNSENT in
+`agentpane--request' runs whether or not the buffer lives: the watch is
+on the handle, which the survivor holds, and left standing it raised the
+indicator for the next turn from elsewhere to end there.  One the helper
+answers with an error of its own, carrying no status -- the socket's
+error when the server was killed with the prompt in flight, say -- keeps
+its watch, as a timed-out one does below, since nothing says the server
+had not admitted it (OW-hiliti).
 One still out when its helper dies keeps its watch for the teardown to
 settle, a death not saying the prompt reached no backend: a turn seen
 streaming then ends as an aborted one does (`agentpane--helper-gone').
