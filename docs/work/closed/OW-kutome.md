@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, sweep-0929]
+closed: done
 ---
 
 # agentpane--let-go reads every way of losing a handle as the turn ending, so a sequence gap or a deliberate agentpane-shutdown raises turn-done for a turn that goes on
@@ -24,3 +25,22 @@ What a deliberate shutdown should raise is OW-reyayi's question; if that card is
 ERT tests in `emacs/agentpane-test.el`, red first: a `session/detached` for a gap mid-turn raises no turn-done indicator; one for a server let-go after a turn seen streaming still raises it, as today.
 A test in `src/emacs/helper.test.ts` that the gap's notification carries the gap cause.
 Then OW-puzome closes `--moot` citing this card, and OW-reyayi is amended to say its case 2 now has a mechanism and only the decision remains.
+
+## Close note
+
+Built: `session/detached` carries `cause: "ended" | "gapped"` (`src/emacs/protocol.ts`, the thirteenth raise of the frozen interface), which `end` and `detachGapped` fill in `src/emacs/helper.ts`.
+`agentpane--let-go` in `emacs/agentpane.el` takes `&optional gapped`, and at a gap it ends the turn-done watch before the buffer reads idle, so a turn the gap stops this Emacs hearing raises nothing, as the browser raises no favicon.
+The server's `ended` and a helper's death keep the old order, so they still raise the indicator for a turn seen streaming.
+OW-reyayi is still open, so `agentpane-shutdown` is unchanged and still raises, and no shutdown cause was plumbed.
+
+Verified:
+- `agentpane-test-turn-done-not-raised-by-a-gap` fails against the code from before this card and passes after.
+- `agentpane-test-turn-done-raised-when-the-server-lets-go` pins the unchanged `ended` path; it was seen red by forcing forget-first for every cause.
+- Both `session/detached` assertions in `src/emacs/helper.test.ts` now pin `cause` and went red first.
+- `bun run check` passed: 1558 tests.
+- ERT: 226 run, 223 passed, 3 skipped.
+
+The adversarial read found that the fix is an ordering flag at the site.
+It misses a re-attach under the same live handle, where the browser's watch survives the gap and raises at the turn's end, and a gap revealed by the turn's own final status; both are filed as OW-homogu.
+Its doc findings (a gap *may* leave a turn running, and helper-gone's comparison names the `ended` kind) and the two OW-tifiva tests that now send `cause "gapped"` landed with the change.
+OW-puzome closed moot against this card, and OW-reyayi was amended: case 2 has a mechanism, and only the decision remains.
