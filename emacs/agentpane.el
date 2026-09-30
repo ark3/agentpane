@@ -506,7 +506,7 @@ timed.  60s is what `agentpane-new-session''s synchronous attach already
 allowed, where waiting blocks Emacs; here it blocks nothing, and a hung
 helper costs only a minute before a refused second send is accepted again.")
 
-(defun agentpane--request (method params callback &optional always failed timeout unsent)
+(defun agentpane--request (method params callback &optional always failed timeout unsent erred)
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
@@ -530,6 +530,14 @@ killed meanwhile must not strand, as a prompt's turn-done watch is
 non-local exit running CALLBACK, run FAILED alone, the request having
 perhaps been carried out; at a death the teardown settles a prompt's
 watch itself (`agentpane--helper-gone').
+ERRED, when given, runs after FAILED with the `data' of the error the
+helper answered with, where CALLBACK would have run with a result: in
+this buffer, if it is still live and, unless ALWAYS, has sent no later
+request since.  That `data' is the HTTP error's `status', `error' and
+`detail' (`toRpcError' in src/emacs/helper.ts), nil for an error the
+helper raised itself, so a caller can tell one error code from another,
+as `agentpane-refetch' tells a preview's `gone' (D26); a timeout, the
+helper's death and a non-local exit carry none and run no ERRED.
 
 Each request has one answer, the first of its reply, its timeout and its
 helper's death; whatever comes after is dropped.  The death is the
@@ -583,6 +591,7 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
   (let* ((buffer (current-buffer))
          (answered nil)
          entry
+         id
          (answer (lambda ()
                    (unless answered
                      (setq answered t
@@ -592,9 +601,12 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                  (when (funcall answer)
                    (message "agentpane: %s failed: %s" method (plist-get error :message))
                    (when unsent (funcall unsent))
-                   (agentpane--failed buffer failed))))
-         connection
-         id)
+                   (agentpane--failed buffer failed)
+                   (when (and erred (buffer-live-p buffer))
+                     (with-current-buffer buffer
+                       (when (or always (eql id agentpane--latest-request))
+                         (funcall erred (plist-get error :data))))))))
+         connection)
     (setq id (car (agentpane--failing
                    (lambda ()
                      (when (funcall answer)

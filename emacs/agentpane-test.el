@@ -2273,11 +2273,12 @@ will.
 A request whose method BODY has put in `hold' is not answered
 at once: (METHOD . ANSWER) is appended to `held' instead, and BODY calls
 ANSWER with t to deliver the reply, with `reply' to deliver the reply
-alone, as the helper does for an attach no snapshot will answer, or with
-nil to fail the
-request as
-`agentpane--request' reports an error, running the request's UNSENT and
-then its FAILED.  Either way the answer runs in the buffer that sent the
+alone, as the helper does for an attach no snapshot will answer, with
+nil to fail the request as `agentpane--request' reports an error,
+running the request's UNSENT and then its FAILED, or with a plist, the
+error's `data', to fail it so and then run its ERRED with that plist, as
+`agentpane--request' does for an error the helper answered with that
+`data'.  ERRED runs with nil for a failure by nil.  Either way the answer runs in the buffer that sent the
 request.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
@@ -2294,7 +2295,7 @@ request.  Every buffer BODY made is killed afterwards."
                   (cl-pushnew (current-buffer) snapshotted)
                   (apply attach-by args)))
                ((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed _timeout unsent)
+                (lambda (method params callback &optional _always failed _timeout unsent erred)
                   (push (cons method params) sent)
                   (when (eq method 'sessions/attach)
                     (setq snapshotted (delq (current-buffer) snapshotted)))
@@ -2315,10 +2316,11 @@ request.  Every buffer BODY made is killed afterwards."
                                             :askedFor (plist-get params :session)
                                             :nodes agentpane-test--nodes)))
                                    (with-current-buffer from
-                                     (if ok
+                                     (if (and ok (atom ok))
                                          (funcall callback reply)
                                        (when unsent (funcall unsent))
-                                       (when failed (funcall failed)))))))
+                                       (when failed (funcall failed))
+                                       (when erred (funcall erred ok)))))))
                     (if (memq method hold)
                         (setq held (append held (list (cons method answer))))
                       (funcall answer t)))))
