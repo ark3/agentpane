@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane-send and agentpane-compact re-attach a Pi fork's parent that the server has let go while the fork is in flight, because the fork refusal sits in each command rather than in agentpane--attach
@@ -50,3 +51,16 @@ An ERT test in `emacs/agentpane-test.el` reproduces the probe above: a Pi buffer
 It is red before the change and green after.
 `agentpane-attach`'s own `agentpane--forking` check is gone, and `agentpane-test-attach-during-a-fork-sends-nothing`'s refusal assertion still passes through the moved guard.
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Landed in c297ed5.
+The fork refusal now lives in `agentpane--refuse-forking`, called by `agentpane--attach` and `agentpane--attach-now` beside `agentpane--refuse-closing`, so every `sessions/attach` Emacs sends is refused while this buffer's fork is in flight; `agentpane--attached-then` is untouched, so an attached Codex or Claude Code parent can still be prompted through its fork.
+`agentpane-attach`'s own `agentpane--forking` check is gone; `agentpane-test-attach-during-a-fork-sends-nothing` passes through the moved guard, and fails with the guard stubbed out.
+Kept: the checks in `agentpane-fork`, `agentpane-edit`, `agentpane-edit-last` and `agentpane--send-edit`, which on an attached buffer go to the fork points without attaching and so are what enforces one fork at a time (OW-kelede); and `agentpane-refetch`'s branch, which messages rather than signals.
+`agentpane-set-model` and `agentpane-set-effort` confirmed held off by `agentpane--check-gate`, since a fork needs an indexed node; the refusal in `agentpane--attach-now` is therefore unreachable from them today, and stands so that both places `sessions/attach` is sent are guarded.
+New test `agentpane-test-send-and-compact-during-a-pi-fork-send-nothing`: red against the previous `agentpane.el` ("did not signal an error" at `agentpane-send`), green after; suite 232 run, 0 unexpected, 3 skipped.
+Docstrings restated: `agentpane-fork`'s refetch reason (the fork's reply detaches the parent from the helper by handle or by ref whichever is handled first, so a respawn runs with nothing listening), the matching test docstring, and `agentpane--watch-submit`'s snapshot/reply clause.
+The adversarial read found no live missed path: only the attach route resumes a session server-side (`sessionRoute` in `src/server/http/app.ts`).
+It noted a latent per-ref gap, a second transcript buffer on the parent's ref passing the per-buffer guard, which it could not construct for Pi since `agentpane--transcript-buffer` reuses by handle then ref; not filed.
+It also noted a transient over-refusal: a Codex or Claude Code parent let go mid-fork by some other cause cannot re-attach by send until the fork answers, as `agentpane-attach` already behaved.
