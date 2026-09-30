@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs, sweep-0929]
 blocked-by: [OW-hiliti]
+closed: done
 ---
 
 # When the Emacs helper exits because its first stream open failed, the request that opened it is answered "The operation was aborted." instead of saying the server is unreachable
@@ -58,3 +59,12 @@ The stale mentions of the fetch being aborted in the comments this path touches 
 
 The `status` question is decided: the reply carries no `status`.
 In `agentpane--request`, `data.status` means the server's HTTP refusal, and no server answered here; and no caller of `sessions/list` or `sessions/attach` passes UNSENT (`agentpane--attach`, `agentpane--attach-now`, and the picker's refetch), so a `status` would change nothing today and would plant a field that lies.
+
+## Close note
+
+Landed on main in f8e944b and df6dafc.
+With no server listening, a failed first open of the helper's event stream now rejects the promise `sessions/list` and `sessions/attach` wait on (`openStream` in `src/emacs/helper.ts`), so each is answered `-32603` "could not reach the agentpane server" with no `data` — no `status`, since no server refused anything and `status` is what runs UNSENT in `agentpane--request` — before the helper exits as D25 point 4 has it.
+The input is cancelled from a timer after the rejection so the replies are written before the teardown's abort silences `respond`; without it bun 1.4.0 wrote neither reply, 3 of 3.
+Verified: the vitest case "answers each request waiting on a first open that fails ..." in `src/emacs/helper.test.ts` was red against the old code; `resources/probes/emacs_helper_no_server_probe.py`, checked in, answered 0 of 3 at b9d50e0 and 3 of 3 after, and is the only check that sees the timer, since node passes without it; `bun run check` passes.
+The adversarial read found jsonrpc's "Server exited with status 0" now lands after the reason in an interactive Emacs, filed as OW-fakefe, and that the timer is a timing check at the site, filed as OW-rugeba to move `respond`'s silence to its cause.
+Evidence in `docs/MANUAL_TESTING.md`, "With no server listening, the helper answers the requests waiting on its first open before it exits (OW-pezelo)".
