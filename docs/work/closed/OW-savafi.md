@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-rebawa]
+closed: moot
 ---
 
 # The Emacs helper answers an attach by ref with a snapshot of an older container under that ref, so when another client closes it and the attach spawns a new one, the buffer is fed the dead handle until the next listing
@@ -38,3 +39,10 @@ A test in `src/emacs/helper.test.ts`, red first, drives the ordering above with 
 Under D26 (`docs/DESIGN.md`, point 4) the heal comes sooner and by another route: OW-likopo has the helper send `session/detached` for H1 at the server's `ended`, sent where the close forgets H1, rather than at the next `sessions-changed`'s listing, and under OW-vugefa a buffer so let go of previews on `g`.
 The race itself stands: `ended` for H1 and the reply naming H2 travel on unordered channels (D2), so the reply can still land first and run the waiters against H1.
 Re-read the ordering against `main` once OW-likopo lands; `dropDead` is gone then.
+
+## Close note
+
+Superseded by OW-wukako (2026-09-30, 0da9e24), without the server echo the card once expected and without the reply-time guard this card suggested.
+`introduce` in src/emacs/helper.ts no longer answers an attach before its reply: an attach is answered only under the handle its reply names, from the view the reducer holds there or the snapshot still on its way, so a snapshot under an older handle for the same ref answers nothing.
+This card's ordering is a vitest case in src/emacs/helper.test.ts under "the attach token (OW-wukako)", run with H2's snapshot both before and after the reply, red against the old helper.
+Why no server echo was taken is recorded in D25 in docs/DESIGN.md, in the paragraph beginning "The helper matched an attach to its answering snapshot".

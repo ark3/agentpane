@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # The Emacs helper keeps a pending attach by ref, so a detach from one buffer drops the wait of another buffer's attach of the same ref
@@ -30,3 +31,10 @@ OW-danifa's close note records why a detach without a handle still goes by ref.
 A test in `src/emacs/helper.test.ts`, red first against the helper as OW-danifa left it: attach R and receive its snapshot under H, send a second `sessions/attach` for R and hold its REST reply, send `sessions/detach` for R carrying H, release the reply, and a later event under H reaches Emacs.
 A second test in the same file, red first too: attach R under H, send `sessions/close` for R carrying H and hold its REST reply, send `sessions/attach` for R, release the close and then the attach's reply under a fresh handle, and a later event under that fresh handle reaches Emacs.
 `bun run check` green.
+
+## Close note
+
+Superseded by OW-wukako (2026-09-30, 0da9e24), which carried this card's flaw with OW-savafi's.
+agentpane-mode now mints a token per attach and sends it on the attach and on every sessions/detach and sessions/close; `forget` in src/emacs/helper.ts gives up only the attach that token names, and a handle alone gives up none.
+Both of this card's done-condition cases are vitest cases in src/emacs/helper.test.ts under "the attach token (OW-wukako)" (a detach by handle while another buffer's attach of the ref is held, and a close carrying the handle racing a new attach), each shown red against the pre-OW-wukako helper by the adversarial read.
+What remains of the by-ref match -- a detach without a handle whose token names no waiting attach -- is OW-linowe.

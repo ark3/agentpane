@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, sweep-0929]
+closed: done
 ---
 
 # The Emacs helper matches an attach to its reply and snapshot by ref, not by request, so a detach from one buffer abandons another's attach and an attach can be fed an older container's dead handle
@@ -62,3 +63,12 @@ The change is therefore:
 The done condition's echo test becomes a test of the ordering in OW-savafi's body, without the echo: a snapshot under H1 for ref R arrives before the reply naming H2, and the attach binds H2 and receives its events, red first.
 OW-savafi then closes `--moot` citing this card, and so does OW-jofodu.
 The decision is recorded in D25 in `docs/DESIGN.md`.
+
+## Close note
+
+Built 2026-09-30 in 0da9e24, with review fixes in 5d1d3cb.
+Decision: no server echo. The attach's REST reply already names the handle the attach landed on, so dropping `introduce`'s early answer by ref settled OW-savafi with no wire field; the echo alone would have told the gap misjudgment D25 admits apart from a lost-frame gap, at the cost of a list-valued field on the HTTP snapshot (concurrent attaches collapse onto one startup in `SessionManager.attach`) and a helper/server skew hazard. Recorded in D25, docs/DESIGN.md, "The helper matched an attach to its answering snapshot".
+What changed: agentpane-mode mints a per-attach integer token (`agentpane--attach-token`, held in `agentpane--attach-sent`) and sends it on sessions/attach from `agentpane--attach` and `agentpane--attach-now`, and on sessions/detach and sessions/close whether or not the buffer holds a handle. The helper keys `Attaching` by it, tags the answering snapshot with `token` in place of `askedFor`, `forget` gives up only the attach its token names, `introduce` answers an attach only under its reply's handle, and an attach given up while the stream's open is pending sends no REST attach and answers a -32603 with no data.status. `agentpane--notified-buffer` binds a tagged snapshot to the buffer whose `agentpane--attach-sent` is that token. src/emacs/protocol.ts raised a fourteenth time.
+Verified: seven vitest cases in src/emacs/helper.test.ts under "the attach token (OW-wukako)" (two-buffer detach by handle with and without the killer's token, a mid-attach kill by token, a close racing a re-attach, OW-savafi's ordering with H2's snapshot before and after the reply, an attach given up during the open), all red against the old helper as re-run by the adversarial reader; ERT `agentpane-test-kill-of-a-buffer-holding-the-handle-leaves-anothers-attach-of-its-ref`, red against the old agentpane.el; `bun run check` (1568 tests) and ERT (237, 234 as expected, 3 skipped) green.
+The implementer added one exception past the card: a detach without a handle whose token gave up a waiting attach skips the by-ref attachment drop, tested. The adversarial read judged it a guard at the site that misses a let-go buffer's stale token, which predates this card; filed as OW-linowe to replace the by-ref drop.
+OW-jofodu and OW-savafi closed --moot citing this card.
