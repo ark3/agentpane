@@ -1,5 +1,6 @@
 ---
 labels: [unverified, sweep-0929]
+closed: done
 ---
 
 # D21 skips the listing at a first open that lands after the startup listing, but a change made between that listing's live read and the stream's registration reaches the tab by neither
@@ -29,3 +30,14 @@ It proposes a third way to close the window, beside the two above: the server se
 The listing then always follows registration, and `start()`'s own listing, the `opened` and `listedOk` booleans gating it in `src/client/controller.ts`, and D21's "Not on the first open" paragraph all go, for the same number of requests.
 The Emacs helper opens the same stream; say in the close note what the change means for it.
 Which of the three to take is this card's call.
+
+## Close note
+
+Took the first of the card's three ways: every open of the event stream lists, the first included, in `handlers.onOpen` in `src/client/controller.ts`, and the `opened` and `listedOk` booleans that gated it are gone.
+It closes the window without a server change because `openEventStream` in `src/server/http/app.ts` registers the client with `broadcaster.addClient` inside the `ReadableStream`'s `start`, before the `Response` exists, so by `onopen` the tab is registered and a listing asked there reads the live overlay after registration.
+The third way (the server sends `sessions-changed` after the opening snapshots) was passed over as a wire change to both clients for a window the browser can close alone.
+`start()` keeps its surfaced listing, which paints the sidebar without waiting on the stream and reports a server that is away, so a page load costs one more `GET /api/sessions`; a first open landing mid-listing costs the same one, as OW-sabova's owed listing.
+D21 in `docs/DESIGN.md` is retitled "..., and so does the first open", carries an "Amended by OW-dajove" line, and its "Not on the first open" paragraph is rewritten: the "would list a second time" claim and the two-booleans sentence are gone.
+Emacs helper: unchanged and never had the window; its `sessions/list` handler in `src/emacs/helper.ts` awaits `openStream()` before `api.listSessions`, and that is its only listing, asked only when Emacs asks.
+Verified: the renamed test in `src/client/controller.test.ts`, "lists again on a first open that lands after the startup listing, and shows what that listing answers", failed against the old gate (1 listing, not 2) and passes now; "lights the row of a session attached while a listing was in flight (OW-sabova)" and the detach-before-first-turn test were adjusted for the extra startup listing; `bun run check` passed (1582 tests).
+Not covered by any test: the server-side ordering itself, that a client is registered by the time `onopen` fires; it rests on reading `openEventStream`.
