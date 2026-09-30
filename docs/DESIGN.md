@@ -1303,7 +1303,8 @@ stdio crosses the bwrap boundary transparently (proven), so the adapter reads th
 
 ### What the wrapper chain does to process events
 
-Three subprocess facts, each verified while building the Pi adapter and each capable of producing a bug that looks like something else entirely:
+Five subprocess facts, each capable of producing a bug that looks like something else entirely; the first three were verified while building the Pi adapter.
+All three backends' children run in one shell, `ChildProcessShell` in `src/server/adapters/child-process.ts`, which is where these are kept (OW-sozopu).
 
 - **A failed spawn emits `error` and `close`, never `exit`.**
   Verified against `node:child_process`: a missing executable gives `error` (ENOENT) then `close` with code `-2`, and no `exit` event at all.
@@ -1318,6 +1319,15 @@ Three subprocess facts, each verified while building the Pi adapter and each cap
   The spawned process is `direnv`, which execs `sbox`, which runs `bwrap`, which runs the agent.
   A signal to the child *does* reach it, **verified live on Pi and Codex**: `direnv` and the `sbox` wrapper exec into the chain rather than surviving beside it, so the server's own child is the `bwrap` chain.
   Re-provable with `resources/probes/agentpane_{codex,pi}_smoke.py`.
+- **The child's stdin needs an `error` listener.**
+  A write landing after the agent stopped reading goes into a pipe with no reader, and the EPIPE arrives as an `error` event on stdin; unheard, it is an uncaught exception that takes the server down.
+  Measured 2026-09-30 with a child that closed its own stdin and kept running: under Bun 1.4.0, writes of 1000 and 4000 bytes survived while 8000 and 65536 bytes exited 1 with `EPIPE: broken pipe, send`, and under Node 26.8.1 a six-byte write did the same.
+  So on the runtime the server uses, a long prompt or an image is enough.
+  Heard, it is part of the death report, beside the exit status rather than in place of it: EPIPE is a symptom of the death, not its cause.
+- **A child that outlives SIGKILL is given up on, not waited for.**
+  The kill escalation is SIGTERM, a bounded grace, SIGKILL, a second bounded grace.
+  A child not closed `KILL_GRACE_MS` after SIGKILL gets a synthetic exit report naming it, and teardown resolves anyway, because a shutdown that hangs forever is its own failure.
+  That report does not wait for stdio to drain, so on this path alone "`close` fires strictly after stdio drains" does not hold; a `close` arriving after it is not reported again.
 
 ## Testing strategy
 
