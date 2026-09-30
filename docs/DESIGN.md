@@ -803,7 +803,7 @@ The reconnect re-list subsumes it for a stored session -- a detach with the stre
 
 It stays on the exit `detach()` takes for a session with nothing on disk, because the row such a detach leaves behind is a different kind of wrong.
 A detached stored session lists with an untrue `status` and is otherwise real: the transcript is on disk and a click reaches it.
-A detached session with nothing on disk is gone everywhere -- no file, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and `readSessionPreview` answers its ref with an empty-but-non-null transcript, so a click strands the user on precisely the screen OW-vasubu exists to keep them off.
+A detached session with nothing on disk is gone everywhere -- no file, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and until OW-royosa `readSessionPreview` answered its ref with an empty-but-non-null transcript, so a click stranded the user on precisely the screen OW-vasubu exists to keep them off; the preview route now answers it `gone` (D26 point 5), which the browser does not read yet.
 The exit is chosen by the summary's `onDisk`, not by the id: attach replaces the `virtual:` id before any prompt (D9, as corrected by OW-bohodu) and a fork never has one, so a session created here and detached before its first turn, and a fork detached before its first turn ended, take this exit too (OW-wedupe).
 A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 
