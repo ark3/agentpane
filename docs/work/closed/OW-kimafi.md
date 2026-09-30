@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # Work chained off a dead helper's last messages is refused with "Error running timer" noise in the echo area, leaving a picker stale or a new fork buffer unshown
@@ -30,3 +31,10 @@ D25's "What the run found, and the two ownership changes it asked for" in `docs/
 The owner agreed on 2026-09-28 how it should read: a refused chained request is dropped quietly, with no "Error running timer", and a picker left stale waits for `g`, as D25 point 4 already accepts.
 The one thing kept from the user-facing list above: a fork buffer created in that window is still shown, detached, so `g` can bring it back rather than it staying hidden.
 Write the done condition's "chosen treatment of the stale picker" as: nothing refetches it.
+
+## Close note
+
+Superseded by OW-hiliti, which landed 2026-09-29, and nothing is left over.
+`agentpane--request` no longer lets `agentpane--connection`'s refusal signal: a request made through a helper that has exited, before its teardown, is sent nowhere, runs UNSENT at once, and is answered by the teardown as the death with one "failed: the helper exited" line, so no "Error running timer" appears.
+The owner's 2026-09-28 treatment holds: nothing refetches a stale picker, and a fork buffer made in that window is shown, detached.
+Tests, each red first: `agentpane-test-last-node-drawn-past-a-refused-refetch` (sessions/changed then session/node, with a sessions buffer open: no timer error, no request sent, the node drawn) and `agentpane-test-fork-answered-as-its-helper-dies-is-shown`.

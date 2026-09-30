@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs]
+closed: moot
 ---
 
 # agentpane-mode ignores an error reply a helper wrote just before dying and answers the request as the death, so a refused prompt's turn-done watch survives and the teardown can raise the indicator for a turn from elsewhere
@@ -26,3 +27,9 @@ The cost is a spurious red dot, which clears when a window shows the buffer.
 This card is picked up only if the spurious indicator is seen in use, or if the case turns out to be wider than the reader found.
 The fix would let a request's answer tell an error reply from the death: a refusal runs UNSENT whether or not the helper is still alive.
 The check is an ERT test through a real process connection, red first, that drives the ordering above and asserts no turn-done indicator.
+
+## Close note
+
+Superseded by OW-hiliti, which landed 2026-09-29.
+An error reply the helper writes before it dies is now the request's answer, and a refusal (an error whose `data` carries the HTTP `status`) runs UNSENT, so a refused prompt abandons its turn-done watch and the teardown raises nothing for a turn from elsewhere.
+`agentpane-test-error-reply-before-a-death-abandons-the-watch` in `emacs/agentpane-test.el` drives this card's ordering and was red first; `agentpane-test-late-error-reply-fails-once` now asserts UNSENT once and FAILED once.
