@@ -1091,23 +1091,26 @@ describe("client controller", () => {
 	it("lights the row of a session attached while a listing was in flight (OW-sabova)", async () => {
 		const api = new FakeApi();
 		const detached = { ...summary(ref), status: "detached" as const };
-		api.listSessions.mockResolvedValueOnce([detached]);
+		// The startup listing's and the first open's (OW-dajove).
+		api.listSessions.mockResolvedValueOnce([detached]).mockResolvedValueOnce([detached]);
 		const controller = createController(api);
 		await controller.start();
 		api.open();
+		await settle();
+		api.listSessions.mockClear();
 		const listed = deferred<SessionSummary[]>();
 		api.listSessions.mockReturnValueOnce(listed.promise);
 		api.emit({ type: "sessions-changed" });
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		expect(api.listSessions).toHaveBeenCalledTimes(1);
 
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
 		api.emit({ type: "sessions-changed" });
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		expect(api.listSessions).toHaveBeenCalledTimes(1);
 		listed.resolve([detached]);
 		await settle();
 
-		expect(api.listSessions).toHaveBeenCalledTimes(3);
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		expect(paneMode(controller.getView())).toBe("live");
 		expect(controller.getView().state.summaries).toEqual([summary(ref)]);
 		controller.dispose();
@@ -1506,26 +1509,29 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The first open is `start()`'s own listing arriving by another door: the
-	// native `EventSource` fires `onopen` on the initial connect as well as on
-	// every re-establish, and nothing coalesces with a listing that has already
-	// landed -- an open after the startup listing resolves would list a second
-	// time (OW-vukoku).
-	it("does not list a second time on the first open", async () => {
+	// The startup listing's live read can precede the stream's registration on
+	// the server, so a change between them -- another client attaching this
+	// session -- reaches the tab through neither the listing nor a broadcast.
+	// The first open lands after registration (`openEventStream`), so its own
+	// listing reads that change, and what it answers is what the sidebar shows
+	// (OW-dajove).
+	it("lists again on a first open that lands after the startup listing, and shows what that listing answers", async () => {
 		const api = new FakeApi();
+		api.listSessions.mockResolvedValueOnce([{ ...summary(ref), status: "detached" }]);
 		const controller = createController(api);
 		await controller.start();
 		// Load-bearing, not decoration: it drains `refreshInFlight`, so the open
 		// below lands after the startup listing rather than inside it, where it
-		// would be owed a fresh listing (OW-sabova) and this would test that
-		// instead.
+		// would be owed a listing (OW-sabova) and this would test that instead.
 		await settle();
 		expect(api.listSessions).toHaveBeenCalledOnce();
+		expect(controller.getView().state.summaries[0]?.status).toBe("detached");
 
 		api.open();
 		await settle();
 
-		expect(api.listSessions).toHaveBeenCalledOnce();
+		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		expect(controller.getView().state.summaries[0]?.status).toBe("attached");
 		controller.dispose();
 	});
 
@@ -1549,12 +1555,12 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// The gate is "a listing has already covered this open", and a startup
-	// listing that failed covered nothing: `refreshSessions` swallows the
-	// rejection and resolves, so counting opens alone would skip the re-list on
-	// the one open where the sidebar is emptiest -- the page loaded, the server
-	// was away for both the listing and the connect, and the first `onopen` of
-	// all is the server coming back (OW-vukoku).
+	// A startup listing that failed leaves the sidebar empty, and
+	// `refreshSessions` swallows the rejection, so nothing retries it: the page
+	// loaded while the server was away for both the listing and the connect,
+	// and the first `onopen` of all is the server coming back. That open's
+	// listing is what fills the sidebar (OW-vukoku), as every open's is
+	// (OW-dajove).
 	it("lists on the first open when the startup listing failed", async () => {
 		const api = new FakeApi();
 		api.listSessions.mockRejectedValueOnce(new Error("offline"));
@@ -1627,6 +1633,7 @@ describe("client controller", () => {
 		await settle();
 		api.preview.mockClear();
 		api.preview.mockRejectedValue(gone());
+		api.listSessions.mockClear();
 
 		await controller.detach();
 		await settle();
@@ -1643,7 +1650,7 @@ describe("client controller", () => {
 		expect(detachedView.previewFailure).toBeNull();
 		expect(detachedView.state.sessions[h(createdRef)]).toBeUndefined();
 		// No listing of its own: the row goes at the next one (D26).
-		expect(api.listSessions).toHaveBeenCalledOnce();
+		expect(api.listSessions).not.toHaveBeenCalled();
 		controller.dispose();
 	});
 

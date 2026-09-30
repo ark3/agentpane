@@ -359,10 +359,6 @@ export function createController(
 	let refreshOwed: Promise<void> | undefined;
 	/** Whether the owed listing surfaces: a press joined it. */
 	let owedSurfacing = false;
-	/** Whether the event stream has ever been up: every open after the first is a reconnect. */
-	let opened = false;
-	/** Whether any listing has ever landed. `refreshSessions` swallows its failures, so success is not the default. */
-	let listedOk = false;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
@@ -768,7 +764,6 @@ export function createController(
 				const summaries = await api.listSessions(undefined);
 				if (!disposed) {
 					publish({ state: replaceSessionSummaries(view.state, summaries, sessionsWhenListed) });
-					listedOk = true;
 				}
 			} catch (error: unknown) {
 				if (!disposed && surface) publish({ error: errorMessage(error) });
@@ -1037,20 +1032,27 @@ export function createController(
 		 * attached until the user pressed Refresh, and that was one visible case
 		 * of a general loss.
 		 *
-		 * Not on the first open, whose listing `start()` already owns.
-		 * `EventSource` fires `onopen` on the initial connect as well as on every
-		 * re-establish, and nothing coalesces with a listing that has already
-		 * landed, so an open after the startup listing resolves would list a
-		 * second time. A first open that lands while the startup listing is
-		 * still out lists once more after it, because every call that arrives
-		 * mid-listing is owed one (OW-sabova).
+		 * The first open lists too (OW-dajove). `EventSource` fires `onopen` on
+		 * the initial connect as well as on every re-establish, and the startup
+		 * listing does not cover that open: `list()` in the session manager reads
+		 * the live overlay only after its index read, and a slow stream request
+		 * lets that read precede this tab's registration, so a change in between
+		 * -- another client attaching a session -- reaches the tab through
+		 * neither the listing nor a broadcast. The tab would hold a live view of
+		 * that session from the opening snapshots under a row reading
+		 * `detached`, and nothing would re-list. `openEventStream` registers the
+		 * client with `addClient` inside the stream's `start`, before the
+		 * response exists, so by the time `onopen` fires the tab is registered
+		 * and a listing asked here reads live state after it.
 		 *
-		 * `listedOk` and not the open count, because the predicate is that a
-		 * listing has *landed*: `refreshSessions` swallows its own failure and
-		 * resolves, so a page that loaded while the server was away gets its
-		 * first `onopen` ever when the server returns -- with an empty sidebar
-		 * under a `connected` indicator, the one open where skipping the re-list
-		 * costs the most.
+		 * The cost is one more `GET /api/sessions` per page load, since
+		 * `start()` keeps its own listing to paint the sidebar without waiting
+		 * on the stream and to report a server that is away. A first open that
+		 * lands while that listing is still out costs the same one, asked after
+		 * it rather than beside it: it is owed the listing every call arriving
+		 * mid-listing is owed (OW-sabova). The same listing heals a page
+		 * whose startup listing failed, whose first `onopen` ever is the server
+		 * coming back.
 		 *
 		 * `false`: nobody asked for this listing, so it owns neither the status
 		 * line nor the error slot.
@@ -1061,8 +1063,7 @@ export function createController(
 			previewHeld = false;
 			abandonPreviewLoads();
 			publish({ connection: "connected" });
-			if (opened || !listedOk) void refreshSessions(false);
-			opened = true;
+			void refreshSessions(false);
 		},
 		/**
 		 * A `fatal` disconnect is a source at `CLOSED`: the browser has stopped

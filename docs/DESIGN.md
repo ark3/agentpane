@@ -758,13 +758,14 @@ Knowing the set at render time costs a round trip the old client did not make: t
 That set is an affordance and may be briefly stale; nothing is decided on it.
 `forkAndSubmit` refetches at submit and resolves by index, refusing rather than falling back — so the worst a stale affordance can produce is a refusal, never a fork somewhere the user did not point.
 
-### D21. A re-established event stream asks for a session listing, and the first open does not
+### D21. A re-established event stream asks for a session listing, and so does the first open
 
 Every re-establish of the SSE stream asks for one unsurfaced session listing, so state that moved while the connection was down heals without a gesture.
 The owner took this on 2026-09-16 (OW-vukoku).
 Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
 Amended by OW-sabova on 2026-09-29: a first open that lands while the startup listing is still out asks for one listing after it, because every call that arrives mid-listing is owed one; only a first open after the startup listing has landed lists nothing.
 Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` took for a session with nothing on disk went with OW-lilami, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until OW-sodohi it did only after the disposal.
+Amended by OW-dajove on 2026-09-30: every open of the stream lists, the first included, since a startup listing whose live read preceded the tab's registration missed any change in between; this supersedes OW-sabova's amendment above, whose owed listing still answers a first open landing mid-listing.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
@@ -809,14 +810,17 @@ That exit was chosen by the summary's `onDisk`, not by the id: attach replaces t
 A stripe that lies could wait for the stream; a clickable phantom could not, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
 Since OW-royosa the preview route answers that ref `gone` (D26 point 5), and since OW-lilami the browser reads it: the phantom's click, like the detached-loading pane the detach leaves, lands on the startup view (D26 point 6), so the row is as harmless as a lying stripe and waits for the next listing like one, and `detach()` asks no listing and reads no `onDisk`.
 
-Not on the first open, which is the whole of the mechanism's subtlety.
-`EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions` coalesces only calls that arrive while a listing is out -- which since OW-sabova it owes one fresh listing after that one -- and not listings that follow each other.
-An open landing after the startup listing resolved would therefore list a second time.
-A first open landing while the startup listing is still out does list once more after it, because every call that arrives mid-listing is owed one (OW-sabova).
-The predicate is that a listing has *landed*, not that an open has been counted: `refreshSessions` swallows its own failure and resolves, so a page that loads while the server is away -- listing rejected, connect failing, `EventSource` retrying -- gets its first `onopen` of all when the server returns, and that is the open where the sidebar is emptiest and the skip costs most.
-Two booleans in the controller's closure, then: the stream has been up, and a listing has landed.
+The first open lists too, since OW-dajove.
+`EventSource` fires `onopen` on the initial connect as well as on every re-establish, and until OW-dajove the controller skipped that first open once the startup listing had landed, taking a listing there for a repeat of the one `controller.start()` had just asked.
+It was not a repeat: `start()` asks its listing beside `api.connect`, and `list()` in `src/server/http/session-manager.ts` reads the live overlay only after awaiting its index read, so on a slow stream request the startup listing's live read could precede the tab's registration with the broadcaster.
+A change in between -- another client attaching a session -- then reached the tab through neither the listing nor a broadcast, leaving it a live view of that session from the opening snapshots under a row reading `detached`, and nothing re-listed.
+`openEventStream` registers the client with `broadcaster.addClient` inside the `ReadableStream`'s `start`, before the `Response` exists, so by the time `onopen` fires the tab is registered, and a listing asked there reads live state after registration; that closes the window without a server change.
+`start()` keeps its own listing, which paints the sidebar without waiting on the stream and reports a failure on a page loaded while the server is away, so a page load now costs one listing more than it did.
+A first open landing while the startup listing is still out asks nothing beside it and costs the same one: it is owed one listing after it, like every call that arrives mid-listing (OW-sabova).
+The open's listing is also what heals a page whose startup listing failed -- `refreshSessions` swallows its own failure, and the first `onopen` of all is the server coming back, to the emptiest sidebar -- which the gate before OW-dajove had to single out and every open now covers.
+The Emacs helper never had the window: it lists only when Emacs sends `sessions/list`, and waits for its stream to open before asking that listing (OW-nufafi).
 
-The cost is one `GET /api/sessions` per reconnect, and what that costs today is not measured here.
+The cost is one `GET /api/sessions` per open -- each reconnect, and since OW-dajove one more per page load -- and what that costs today is not measured here.
 The route was timed at 0.16-0.24s warm over 1001 stored sessions on 2026-08-14, against a running production server whose machine that record does not name (`docs/MANUAL_TESTING.md`, "Observed preview and listing timing").
 Behind it is OW-23, which separates the walk from the read: enumerating 583 Codex and 390 Pi files across 28 workspaces took ~0.01s and reading the first line of all 973 of them ~0.27s, in Python, on the work laptop on 2026-08-10 (`docs/HANDOFF.md`, finding 19) -- and the shipped parsers read further than the first line, so that figure understates the read rather than describing it.
 Both predate the Claude Code store joining the enumeration, so neither describes the current route and nothing has re-measured it.
