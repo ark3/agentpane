@@ -1,6 +1,7 @@
 ---
 labels: [change, sweep-0929]
 blocked-by: [OW-royosa, OW-vebeno]
+closed: done
 ---
 
 # The browser clears a selection with nothing on disk only at detach() and a stream drop, and a gone session reached any other way strands an empty preview; clear it on the preview's gone instead
@@ -40,3 +41,14 @@ Tests in `src/client/controller.test.ts`, red first:
 A read failing with any status other than `gone`, or with no response, still keeps the selection, as OW-bilogo's tests already pin.
 `detach()`'s no-disk exit and `onDisconnect`'s no-disk branch are gone from the code.
 `bun run check` passes, and so does `bun run test:browser`.
+
+## Close note
+
+Built 2026-09-29 in `src/client/controller.ts` (commits "client: clear the selection on the preview's gone…" and its docs and emacs-docstring siblings, all tagged OW-lilami).
+A preview read answered `404` `gone` (`isGone`: `ApiClientError`, status 404, code `gone`, nothing else) clears the selection to the startup view from `loadPreview`, the poll (`refetchPreview`) and a row click (`preview()`); every other failure keeps OW-bilogo's rule.
+`detach()`'s no-disk exit, `onDisconnect`'s no-disk branch and the `detaching` set are gone; a drop keeps every row and the selection, and a no-disk row stands until the next listing.
+A click now shares the background read (`readPreview`, one `previewLoads` entry, abort and bound, one `landPreview` handler), so it asks one read and reports once: on the pane when the click is on the selected detached-loading row, otherwise in the error slot.
+Ownership, settled over two adversarial reads that proved regressions in earlier cuts: each read is owned by the intent it was asked under or the click's that joined it; `gone` and failures land only while that intent stands; a background read's preview lands whenever the pane still waits on that session; no background read is asked while a click's read owned by the current intent is out (else it borrows the click's intent and its `gone` clears the selection before the click lands); at `connected` every read of the detached-loading pane's session is abandoned, a click's included, and a click's read of another row is kept (else the startup auto-select, asked before the first open, was lost).
+Verified: new tests in `src/client/controller.test.ts` under "a preview answered gone", each seen red first against the pre-change code or by mutation (OW-lejape's two orderings, the poll's gone, OW-tuyewo's one-read/one-place, detach with `onDisk: true` answered gone, non-gone 404/500, moved-on, click across `connected`, borrowed intent, failed attach); `bun run check` 1556 tests and `bun run test:browser` 26 passed on `main`.
+DESIGN.md: D21's no-disk exit and D25's OW-forinu sentence put in the past; D26 point 6 records the ownership rules.
+Left: a click on a gone row (and `openSession`'s Codex child link, which is the same click) lands on the startup view even from a live selection, as this card asked; a click on the selected loading row that fails fast while the stream is down holds the pane until `connected`, which releases it.
