@@ -117,9 +117,9 @@ export class ChildProcessShell {
 		});
 
 		// A write landing after the child died but before `close` goes into a
-		// pipe with no reader, and EPIPE arrives here. Unheard, it is an uncaught
-		// exception that takes the server down (Node 26.8.1, OW-sozopu); heard,
-		// it is the death report's reason.
+		// pipe with no reader, and EPIPE arrives here. Unheard, it was an uncaught
+		// exception under Node 26.8.1, though Bun 1.4.0 surfaced nothing in the
+		// same repro (OW-sozopu); heard, it is the death report's reason.
 		child.stdin.on("error", (error: Error) => {
 			this.stdinError = error;
 		});
