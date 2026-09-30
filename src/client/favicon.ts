@@ -53,6 +53,10 @@ export function watchSubmit(watch: TurnWatch, key: string): TurnWatch {
  * A seq gap ends a watch the same way, streamed or not (D25 point 5,
  * OW-jadoda): this tab stopped hearing the turn, and a later snapshot under the
  * same handle cannot say whether the turn it shows ending is that one.
+ *
+ * So does a Pi fork's abort of the parent's turn, just before it goes out
+ * (OW-rihanu): the user stopped that turn by forking it, and its end is not
+ * news.
  */
 export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
 	if (!watch.waiting.has(key)) return watch;
@@ -68,7 +72,8 @@ export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
  * Without this the watch is orphaned under the old key. A rename needs
  * nothing: it leaves the handle alone. Nor does a fork, another session under
  * another handle (D24): `App.svelte` arms the fork's own watch the moment the
- * controller knows its handle, and leaves the parent's alone (OW-koledi).
+ * controller knows its handle, and leaves the parent's alone (OW-koledi)
+ * unless a Pi fork stops the parent's turn, which abandons it (OW-rihanu).
  */
 export function watchMove(watch: TurnWatch, from: string, to: string): TurnWatch {
 	const sawStreaming = watch.waiting.get(from);
@@ -101,7 +106,9 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * An aborted or errored turn counts as done: both arrive as the same
  * `status:false`, and you asked for something and it stopped. First cut,
  * 2026-08-18 -- revisit from use if a dot for a turn you cancelled yourself
- * reads as noise.
+ * reads as noise. The one abort that raises nothing is the one
+ * `forkAndSubmit` sends ahead of a Pi fork, whose watch `App.svelte` abandons
+ * before it goes out (OW-rihanu).
  *
  * A session missing from `streaming` keeps its watch waiting, because a view
  * that has not formed yet looks exactly like one that went away. Of the three
@@ -113,7 +120,8 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * re-forms under that handle (D26), so the watch is never acted on again. That
  * includes the `ended` a Pi fork sends under the parent's handle while the fork
  * is in flight (`#forkOnto`, D26 point 1): the fork's watch was never on the
- * parent (OW-koledi).
+ * parent (OW-koledi), and one on a parent turn the fork stopped was abandoned
+ * at the fork's abort (OW-rihanu).
  */
 export function watchSessions(
 	watch: TurnWatch,

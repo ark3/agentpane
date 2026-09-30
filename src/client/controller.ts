@@ -200,6 +200,14 @@ export interface AgentpaneController {
 	 * resolve would start watching the fork after its turn had begun, or ended
 	 * (OW-koledi).
 	 *
+	 * `onAbort` hears the parent's handle just before a Pi fork stops the
+	 * parent's running turn, and only then: the turn it ends was stopped on
+	 * purpose, so a caller watching it must stop before the abort's
+	 * `status:false` can reach it (OW-rihanu). Told here rather than decided by
+	 * the caller, because this is where the abort is decided, and a fork that
+	 * bails before it leaves a turn that was never stopped. An abort that fails
+	 * leaves that turn running unwatched, as agentpane-mode's does.
+	 *
 	 * Resolves to **the attach reply of the session the prompt landed on**, or
 	 * null if it never landed. Not a boolean, because the caller has per-tab
 	 * state keyed on the session it forked -- the row's turn marks -- and
@@ -228,6 +236,7 @@ export interface AgentpaneController {
 		index: number,
 		images?: PromptRequest["images"],
 		onAttached?: (handle: string) => void,
+		onAbort?: (handle: string) => void,
 	): Promise<LiveSessionSummary | null>;
 	/** Stop the selected session's turn; no-op unless its pane is live (OW-forinu). */
 	abort(): Promise<void>;
@@ -1281,7 +1290,7 @@ export function createController(
 				if (!disposed && busyIs("editing-externally")) publish({ busy: "idle" });
 			}
 		},
-		async forkAndSubmit(index, images, onAttached) {
+		async forkAndSubmit(index, images, onAttached, onAbort) {
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
@@ -1347,7 +1356,10 @@ export function createController(
 				// turn is over, so a stop mid-turn destroys the entire reply rather
 				// than racing it (home server, 2026-09-11, `claude 2.1.268`;
 				// OW-japuzo).
-				if (selected.backend === "pi" && handle !== undefined && view.state.sessions[handle]?.isStreaming) await api.abort(selected);
+				if (selected.backend === "pi" && handle !== undefined && view.state.sessions[handle]?.isStreaming) {
+					onAbort?.(handle);
+					await api.abort(selected);
+				}
 				if (disposed) return null;
 				const points = await api.forkPoints(selected);
 				if (disposed) return null;

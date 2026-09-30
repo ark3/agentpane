@@ -1231,11 +1231,21 @@
 		// arms from the edited message's index, not the transcript's length: the
 		// fork's transcript is the parent's truncated just before that message,
 		// so the parent's length would sit past its end and never arm (OW-hezidi).
+		//
+		// A watch this tab's own earlier submit armed on the parent is left
+		// alone, except where the fork stops that turn: Pi's abort ends it on
+		// purpose, and a dot for it would announce a turn the user just stopped,
+		// which agentpane-mode drops at the same point (OW-dunahe). The controller
+		// says when, because it alone decides whether the abort goes out, and
+		// says it before the abort does, so its `status:false` finds no watch
+		// (OW-rihanu).
 		let forkKey: string | null = null;
 		void controller.forkAndSubmit(edit.index, edit.images, (handle) => {
 			forkKey = handle;
 			pendingFollow.set(handle, edit.index);
 			turnWatch = watchSubmit(turnWatch, handle);
+		}, (handle) => {
+			turnWatch = watchAbandon(turnWatch, handle);
 		}).then((landed) => {
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
