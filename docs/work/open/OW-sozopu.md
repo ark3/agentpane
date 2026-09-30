@@ -44,3 +44,14 @@ A sweep of the open deck for consolidations (read against e1cf2e6) found two mor
 
 Done also requires: a test that a child not closed within the escalation's deadline after SIGKILL is reported (through `onError` or a rejected `dispose()`, recorded in the docblock which), and a test that a spawn failure's internal error carries the original as `cause`.
 Then OW-16 and OW-10 close `--moot` citing this card.
+
+## Amended 2026-09-30
+
+Checked against 73f7123 before dispatch; the defect, the missing `start()` guard and the three escalation copies all hold as written.
+Two corrections:
+- Pi's splitter is `LfLineSplitter` in `src/server/adapters/pi/framing.ts`, returning lines rather than taking an emit callback, so `rg -n 'class LineSplitter' src/server` already returns two, not three.
+  The check is `rg -n 'class \w*LineSplitter' src/server` returning one definition.
+- `codex/process.test.ts` imports `LineSplitter` from `./process.ts` and `pi/framing.test.ts` imports `LfLineSplitter` from `./framing.ts`, and Pi's `FakeStdin` in `pi/process.test.ts` has no `on` method.
+  "Without edits to their assertions" means the `expect` lines; import paths and the fakes' plumbing may change to follow the shell.
+
+The smaller repeats named under "Why it is one card with the duplication" (`ZERO_USAGE`/`emptyUsage`, `isRecord`, `idFromFilename`, the Claude store root) are not child-process plumbing, which the card scopes itself to, and are not in the done-condition; they are OW-tijilo's.
