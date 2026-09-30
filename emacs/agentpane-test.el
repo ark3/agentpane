@@ -1190,13 +1190,14 @@ answered as `agentpane-test--forking' answers it, and the model's
              (setq sent nil)
              ,@body))))))
 
-(ert-deftest agentpane-test-detached-lets-go-of-the-handle-and-g-attaches-again ()
+(ert-deftest agentpane-test-detached-lets-go-of-the-handle-and-g-previews ()
   "A `session/detached' for the handle a buffer holds leaves it holding no
 handle and not attached, with its ref and the transcript it drew, and
 reading as not streaming, as the status that ends a turn leaves it: the
 mode line names the model and no streaming, and the tail's running tool
-call is drawn `ok'.  A `g' then attaches its ref again rather than
-previewing the stored transcript over the live one it drew."
+call is drawn `ok'.  Not attached, it is a preview (D26), so a `g' then
+sends `sessions/preview' for its ref, where until OW-vugefa it attached
+again."
   (agentpane-test--detached
     (with-current-buffer buffer
       (should-not agentpane--handle)
@@ -1207,10 +1208,10 @@ previewing the stored transcript over the live one it drew."
       (should (equal mode-line-process " [luna]"))
       (should (string-search "✓ Bash" (agentpane-test--line-at "sleep 60")))
       (agentpane-refetch)
-      (should (equal sent `((sessions/attach :session ,ref)))))))
+      (should (equal sent `((sessions/preview :session ,ref)))))))
 
 (ert-deftest agentpane-test-detached-buffer-takes-the-handle-its-reattach-answers-under-a-new-ref ()
-  "The attach a `g' sends from a buffer told its handle is gone, answered
+  "The attach `a' sends from a buffer told its handle is gone, answered
 under a new handle and a ref the buffer never heard -- a rename it missed
 -- binds that buffer to the new handle by the snapshot's `askedFor', and
 the snapshot redraws it, before the reply lands and after."
@@ -1218,7 +1219,7 @@ the snapshot redraws it, before the reply lands and after."
     (let ((renamed '(:backend "claude" :id "real-2")))
       (setq hold '(sessions/attach)
             attached (list :ref renamed :handle "h2"))
-      (with-current-buffer buffer (agentpane-refetch))
+      (with-current-buffer buffer (agentpane-attach))
       (agentpane--on-notification
        agentpane--connection 'session/snapshot
        (list :session renamed :handle "h2" :askedFor ref
@@ -1235,8 +1236,8 @@ the snapshot redraws it, before the reply lands and after."
 (ert-deftest agentpane-test-detached-for-a-handle-no-buffer-holds-touches-no-buffer ()
   "A `session/detached' goes only to the buffer holding its handle: one
 for a handle no buffer holds leaves a buffer only previewing its ref, and
-one awaiting an attach of its ref, as they were, so the preview's `g'
-still previews."
+one awaiting an attach of its ref, as they were, neither read idle by a
+let-go, so the preview's `g' still previews."
   (let ((previewed '(:backend "claude" :id "real-1"))
         (awaited '(:backend "claude" :id "real-2")))
     (agentpane-test--with-helper
@@ -1250,10 +1251,10 @@ still previews."
           (agentpane--on-notification nil 'session/detached
                                       (list :session awaited :handle "h9"))
           (with-current-buffer attaching
-            (should-not agentpane--dropped)
+            (should-not agentpane--status)
             (should agentpane--attaching))
           (with-current-buffer preview
-            (should-not agentpane--dropped)
+            (should-not agentpane--status)
             (setq sent nil)
             (agentpane-refetch)
             (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
@@ -1262,8 +1263,8 @@ still previews."
   "An attach whose snapshot the helper sent and then detached, a `seq' gap
 having landed between that snapshot and the reply, ends with the reply
 handled last, in wire order, as the helper writes them: the buffer is
-not attached, holds no handle and is dropped, so a `g' attaches again,
-and a prompt waiting on the attach is not sent (OW-tifiva).  Bound by
+not attached and holds no handle, so a `g' previews it (D26), and a
+prompt waiting on the attach is not sent (OW-tifiva).  Bound by
 the reply, the buffer counted itself attached to a handle the helper
 said nothing more under."
   (let ((ref '(:backend "claude" :id "real-1")))
@@ -1285,10 +1286,13 @@ said nothing more under."
           (with-current-buffer buffer
             (should-not (agentpane--attached-p))
             (should-not agentpane--handle)
-            (should agentpane--dropped)
             (should-not agentpane--attaching)
             (should-not agentpane--sending))
-          (should-not (assq 'sessions/prompt sent)))))))
+          (should-not (assq 'sessions/prompt sent))
+          (with-current-buffer buffer
+            (setq sent nil)
+            (agentpane-refetch)
+            (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
 
 (ert-deftest agentpane-test-attach-reply-with-no-snapshot-fails-its-waiters ()
   "An attach whose reply comes with no snapshot having attached the buffer
@@ -1314,7 +1318,6 @@ it nothing for."
           (with-current-buffer buffer
             (should-not (agentpane--attached-p))
             (should-not agentpane--handle)
-            (should-not agentpane--dropped)
             (should-not agentpane--attaching)
             (should-not agentpane--sending)
             (setq sent nil)
@@ -2260,7 +2263,7 @@ shows.  A session with no nodes never shows it."
 `sessions/forkPoints', FORKED for `sessions/fork', a summary of the ref
 asked for for `sessions/attach', unless BODY has put a summary of its own
 in `attached', the fixed nodes for `sessions/preview', and for
-`sessions/list' whatever BODY has put in `listed', nil unless it has.
+`sessions/list' nil.
 Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
 onto `said'.  The reply to an attach is preceded, as the helper precedes
 it, by the `session/snapshot' that attaches the buffer, through
@@ -2286,7 +2289,6 @@ request.  Every buffer BODY made is killed afterwards."
          (hold nil)
          (held nil)
          (attached nil)
-         (listed nil)
          (snapshotted nil)
          (attach-by (symbol-function 'agentpane--attach-by))
          (buffers (buffer-list)))
@@ -2304,8 +2306,7 @@ request.  Every buffer BODY made is killed afterwards."
                                   ('sessions/forkPoints ,points)
                                   ('sessions/fork ,forked)
                                   ('sessions/attach (or attached (list :ref (plist-get params :session))))
-                                  ('sessions/preview agentpane-test--nodes)
-                                  ('sessions/list listed)))
+                                  ('sessions/preview agentpane-test--nodes)))
                          (answer (lambda (ok)
                                    (when (and (eq ok t) (eq method 'sessions/attach)
                                               (not (memq from snapshotted)))
@@ -2461,8 +2462,9 @@ holds, and the fork's buffer holds the handle its own attach answered."
   "A `session/detached' for a Pi fork's parent that lands before the
 `sessions/fork' reply -- the server's `ended' for the parent's handle
 goes out inside the fork, ahead of its answer (D26) -- leaves the parent
-not dropped once the reply lands, so `g' previews it rather than
-attaching its old branch again.  The reply's detach then names the ref
+not attached once the reply lands, so `g' previews it rather than
+attaching its old branch again, the edge OW-wabiju found when a flag
+marked such a buffer to attach at `g'.  The reply's detach then names the ref
 alone, the handle gone, which the helper, holding nothing under that ref
 any longer, takes as a no-op."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
@@ -2483,7 +2485,6 @@ any longer, takes as a no-op."
           (funcall (cdr (pop held)) t)
           (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref)))
           (with-current-buffer buffer
-            (should-not agentpane--dropped)
             (should-not (agentpane--attached-p))
             (setq sent nil)
             (agentpane-refetch)
@@ -3165,7 +3166,7 @@ what drops it: the server owns the error (OW-lohubo)."
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
-          ;; Drawn while attached, and dropped since, so the send attaches.
+          ;; Drawn while attached, and let go of since, so the send attaches.
           (funcall snapshot ref)
           (agentpane--on-notification agentpane--connection 'session/detached
                                       (list :session ref :handle "h1"))
@@ -3468,6 +3469,81 @@ does not stop the transcript buffer from being killed."
         (kill-buffer buffer)
         (should-not (buffer-live-p buffer))))))
 
+;;;; A preview answered `gone'
+
+(ert-deftest agentpane-test-preview-gone-kills-the-buffer-keeping-its-text ()
+  "A `sessions/preview' answered with an error whose `data' carries
+`error: \"gone\"' (D26) kills the buffer it previews into, whichever path
+sent it -- `g' in a buffer not attached, or opening the session's row
+from the picker, into a buffer not yet drawn -- the prompt region's text
+going to the head of the kill ring first, as a close's preview does.
+One answered with any other error leaves the buffer and its text."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq hold '(sessions/preview))
+        (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+          (with-current-buffer buffer
+            (agentpane--draw agentpane-test--nodes)
+            (goto-char (point-max))
+            (insert "half a thought")
+            (agentpane-refetch))
+          (should (equal sent `((sessions/preview :session ,ref))))
+          (funcall (cdr (pop held)) '(:status 500 :error "internal"))
+          (should (buffer-live-p buffer))
+          (should-not kill-ring)
+          (with-current-buffer buffer (agentpane-refetch))
+          (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+          (should-not (buffer-live-p buffer))
+          (should (equal (car kill-ring) "half a thought")))
+        (setq sent nil)
+        (save-window-excursion (agentpane-show-transcript (list :ref ref)))
+        (let ((buffer (agentpane--buffer-for ref)))
+          (should buffer)
+          (should (equal sent `((sessions/preview :session ,ref))))
+          (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+          (should-not (buffer-live-p buffer))
+          (should (equal (car kill-ring) "half a thought")))))))
+
+(ert-deftest agentpane-test-preview-gone-kills-only-as-the-latest-request ()
+  "Through `agentpane--request' itself: a preview the helper answers with
+an error other than `gone' leaves the buffer, the echo area saying the
+preview failed; one answered `gone' after the buffer has sent a later
+request kills nothing, the later request's answer being the one it
+wants, as a superseded preview's nodes are not drawn; and the latest
+one's `gone', carried in the error's `data', kills it."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (agentpane--connection 'connection)
+        (sent nil)
+        (ids 0)
+        (said nil)
+        (gone '(:code 404 :message "No such session" :data (:status 404 :error "gone"))))
+    (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_) t))
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (_connection method _params &rest args)
+                 (push (cons method (plist-get args :error-fn)) sent)
+                 (list (cl-incf ids))))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (push (apply #'format format-string args) said))))
+      (agentpane-test--with-session ref
+        (agentpane-refetch)
+        (funcall (cdr (pop sent))
+                 '(:code 500 :message "Boom" :data (:status 500 :error "internal")))
+        (should (buffer-live-p buffer))
+        (should (seq-some (lambda (text) (string-search "sessions/preview failed" text)) said))
+        (agentpane-refetch)
+        (let ((superseded (cdr (pop sent))))
+          (agentpane-refetch)
+          (funcall superseded gone)
+          (should (buffer-live-p buffer))
+          (funcall (cdr (pop sent)) gone)
+          (should-not (buffer-live-p buffer)))))))
+
 ;;;; Closing a session, against a stub connection
 
 (defmacro agentpane-test--closing (&rest body)
@@ -3496,22 +3572,20 @@ on the model \"luna\".  Every request is answered as
   "`agentpane-close-session' on an idle attached session sends
 `sessions/close' under the buffer's handle, as the browser's Tools Detach
 sends its DELETE, and once it answers leaves the buffer holding no handle
-and unattached, the turn-done watch on the handle ended, and, the listing
-saying the session is on disk, redrawn from its `sessions/preview', as
-the browser lands on the read-only preview.  A kill after that sends no
+and unattached, the turn-done watch on the handle ended, and redrawn from
+its `sessions/preview', as the browser lands on the read-only preview,
+asking no `sessions/list' first (D26).  A kill after that sends no
 `sessions/detach' for a session the helper no longer holds."
   (agentpane-test--closing
-    (setq listed (vector (list :ref '(:backend "codex" :id "other") :onDisk :json-false)
-                         (list :ref ref :onDisk t)))
     (push (cons "h1" 'sent) agentpane--turn-watches)
     (with-current-buffer buffer
       (agentpane-close-session)
       (should (equal (reverse sent)
                      `((sessions/close :session ,ref :handle "h1")
-                       (sessions/list)
                        (sessions/preview :session ,ref))))
       (should-not agentpane--handle)
       (should-not (agentpane--attached-p))
+      (should-not agentpane--closing)
       (should-not (assoc "h1" agentpane--turn-watches))
       (should (equal (agentpane-test--indices)
                      (mapcar (lambda (node) (plist-get node :index)) agentpane-test--nodes)))
@@ -3523,41 +3597,38 @@ the browser lands on the read-only preview.  A kill after that sends no
   "A `session/detached' for the handle while the close is out -- the
 server has let go of the session before its subprocess is disposed of,
 and its `ended' reached the helper ahead of the close's answer --
-leaves the buffer not dropped once the close answers, so it previews
-the stored transcript rather than attaching again the session just
-closed."
+still leaves the buffer previewing the stored transcript once the close
+answers, rather than attaching again the session just closed."
   (agentpane-test--closing
-    (setq listed (vector (list :ref ref :onDisk t))
-          hold '(sessions/close))
+    (setq hold '(sessions/close))
     (with-current-buffer buffer
       (agentpane-close-session)
       (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
       (funcall (cdr (pop held)) t)
-      (should-not agentpane--dropped)
       (should (equal (reverse sent)
                      `((sessions/close :session ,ref :handle "h1")
-                       (sessions/list)
                        (sessions/preview :session ,ref)))))))
 
-(ert-deftest agentpane-test-close-session-with-nothing-on-disk-kills-the-buffer ()
-  "A session the listing after the close does not carry, or carries as not
-on disk -- one created or forked and never prompted -- has no transcript to
-preview, and `sessions/preview' would answer its ref with an empty one
-that a send could only attach in vain (OW-vasubu).  So the buffer goes, as
-the browser lands on its startup view, and its kill sends no
+(ert-deftest agentpane-test-close-session-whose-preview-is-gone-kills-the-buffer ()
+  "A session with nothing on disk after the close -- one created or forked
+and never prompted -- has nothing to preview, and the preview after the
+close answers `gone' (D26), which kills the buffer, as the browser lands
+on its startup view, where until OW-vugefa a listing asked after the
+close said so, and a listing that failed left the buffer holding a ref
+it could only attach in vain (OW-vetebu).  The kill sends no
 `sessions/detach'."
-  (dolist (listing (list [] (vector (list :ref '(:backend "codex" :id "t1") :onDisk :json-false))))
-    (agentpane-test--closing
-      (setq listed listing)
-      (with-current-buffer buffer
-        (agentpane-close-session))
-      (should-not (buffer-live-p buffer))
-      (should (equal (reverse sent)
-                     `((sessions/close :session ,ref :handle "h1")
-                       (sessions/list)))))))
+  (agentpane-test--closing
+    (setq hold '(sessions/preview))
+    (with-current-buffer buffer
+      (agentpane-close-session))
+    (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+    (should-not (buffer-live-p buffer))
+    (should (equal (reverse sent)
+                   `((sessions/close :session ,ref :handle "h1")
+                     (sessions/preview :session ,ref))))))
 
-(ert-deftest agentpane-test-close-session-with-nothing-on-disk-keeps-the-draft ()
-  "The kill of a buffer whose session is not on disk after the close puts
+(ert-deftest agentpane-test-close-session-whose-preview-is-gone-keeps-the-draft ()
+  "The kill of a buffer whose preview after the close answers `gone' puts
 what the user typed in its prompt region on the kill ring, the echo area
 saying so, as the browser's draft survives its Detach (OW-watawe).  An
 empty region puts nothing there."
@@ -3566,20 +3637,24 @@ empty region puts nothing there."
         (interprogram-cut-function nil)
         (interprogram-paste-function nil))
     (agentpane-test--closing
+      (setq hold '(sessions/preview))
       (with-current-buffer buffer
         (agentpane-close-session))
+      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
       (should-not (buffer-live-p buffer))
       (should-not kill-ring))
     (agentpane-test--closing
+      (setq hold '(sessions/preview))
       (with-current-buffer buffer
         (goto-char (point-max))
         (insert "half a thought")
         (agentpane-close-session))
+      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("half a thought")))
       (should (seq-some (lambda (text) (string-search "kill ring" text)) said)))))
 
-(ert-deftest agentpane-test-close-session-with-nothing-on-disk-keeps-an-edit ()
+(ert-deftest agentpane-test-close-session-whose-preview-is-gone-keeps-an-edit ()
   "With an edit open (`agentpane-edit'), as on a fork closed before its
 first turn, the kill puts both the edit's text, the user's changes and
 all, and the draft the edit displaced on the kill ring, the draft last,
@@ -3589,6 +3664,7 @@ so that `yank' brings back what the user was writing (OW-watawe)."
         (interprogram-cut-function nil)
         (interprogram-paste-function nil))
     (agentpane-test--closing
+      (setq hold '(sessions/preview))
       (with-current-buffer buffer
         (goto-char (point-max))
         (insert "my draft")
@@ -3596,51 +3672,34 @@ so that `yank' brings back what the user was writing (OW-watawe)."
         (goto-char (point-max))
         (insert " now")
         (agentpane-close-session))
+      (funcall (cdr (pop held)) '(:status 404 :error "gone"))
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("my draft" "Fix the bug now"))))))
 
-(ert-deftest agentpane-test-close-session-listing-out-reaches-nothing ()
-  "The close stays in flight until the listing after it has answered: a
-send in between, to a session with nothing on disk, would attach in vain,
-and a listing then saying so would kill the buffer and the text with it
-(OW-watawe).  So `C-RET' there signals a user error and sends nothing,
-and the text it would have sent survives the kill on the kill ring."
-  (let ((kill-ring nil)
-        (kill-ring-yank-pointer nil)
-        (interprogram-cut-function nil)
-        (interprogram-paste-function nil))
-    (agentpane-test--closing
-      (setq hold '(sessions/list))
-      (with-current-buffer buffer
-        (agentpane-close-session)
-        (goto-char (point-max))
-        (insert "hello")
-        (setq sent nil)
-        (should-error (agentpane-send) :type 'user-error)
-        (should-not sent)
-        (should-not agentpane--sending)
-        (should-not agentpane--attaching)
-        (funcall (cdr (pop held)) t))
-      (should-not (buffer-live-p buffer))
-      (should (equal kill-ring '("hello"))))))
-
-(ert-deftest agentpane-test-close-session-listing-that-fails-frees-the-buffer ()
-  "A listing after the close that fails ends the close in flight, so the
-buffer, holding no handle, previews its session again at `g' rather than
-refusing everything for good."
+(ert-deftest agentpane-test-close-session-whose-preview-fails-keeps-the-buffer ()
+  "A preview after the close that fails other than `gone' leaves the
+buffer as it is, holding no handle and no close in flight, so it
+previews its session again at `g' rather than refusing everything for
+good; its prompt region keeps its text."
   (agentpane-test--closing
-    (setq hold '(sessions/list))
+    (setq hold '(sessions/preview))
     (with-current-buffer buffer
+      (goto-char (point-max))
+      (insert "hello")
       (agentpane-close-session)
-      (funcall (cdr (pop held)) nil)
+      (funcall (cdr (pop held)) '(:status 500 :error "internal")))
+    (should (buffer-live-p buffer))
+    (with-current-buffer buffer
       (should-not agentpane--closing)
+      (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                     "hello"))
       (setq sent nil)
       (agentpane-refetch)
       (should (equal sent `((sessions/preview :session ,ref)))))))
 
 (ert-deftest agentpane-test-close-session-that-fails-leaves-the-buffer-attached ()
   "A `sessions/close' that fails leaves the buffer attached under its handle,
-asking for no listing, as the browser's Detach leaves its live view."
+previewing nothing, as the browser's Detach leaves its live view."
   (agentpane-test--closing
     (setq hold '(sessions/close))
     (with-current-buffer buffer
@@ -3674,8 +3733,7 @@ The close, released, still lands on the preview."
                             t)
                       (list (lambda () (agentpane-close-session)) t)))
     (agentpane-test--closing
-      (setq listed (vector (list :ref ref :onDisk t))
-            hold '(sessions/close))
+      (setq hold '(sessions/close))
       (with-current-buffer buffer
         (agentpane--on-notification
          agentpane--connection 'session/snapshot
@@ -3695,9 +3753,7 @@ The close, released, still lands on the preview."
         (should-not agentpane--forking)
         (funcall (cdr (pop held)) t)
         (should-not held)
-        (should (equal (reverse sent)
-                       `((sessions/list)
-                         (sessions/preview :session ,ref))))))))
+        (should (equal sent `((sessions/preview :session ,ref))))))))
 
 (ert-deftest agentpane-test-close-session-that-fails-frees-the-buffer ()
   "A `sessions/close' that fails ends the close in flight, so the buffer,
@@ -3772,8 +3828,7 @@ browser refuses it from the click (`compact' in src/client/controller.ts).
 The request answering is admission, not completion, and still refuses; a
 status then carrying no compaction, or the request failing, frees it."
   (agentpane-test--closing
-    (setq listed (vector (list :ref ref :onDisk t))
-          hold '(sessions/compact))
+    (setq hold '(sessions/compact))
     (with-current-buffer buffer
       (agentpane-compact)
       (setq sent nil)
@@ -3787,8 +3842,7 @@ status then carrying no compaction, or the request failing, frees it."
       (agentpane-close-session)
       (should (assq 'sessions/close sent))))
   (agentpane-test--closing
-    (setq listed (vector (list :ref ref :onDisk t))
-          hold '(sessions/compact))
+    (setq hold '(sessions/compact))
     (with-current-buffer buffer
       (agentpane-compact)
       (setq sent nil)
@@ -4751,7 +4805,7 @@ from elsewhere under the handle a re-attach answers raises nothing
       (funcall submit)
       (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
       (setq attached (list :ref ref :handle "h2"))
-      (agentpane-refetch)
+      (agentpane-attach)
       (should (equal agentpane--handle "h2"))
       (funcall status t)
       (funcall status nil)
@@ -4817,10 +4871,10 @@ prompt's own turn raises the indicator when it ends (OW-dunahe)."
 (ert-deftest agentpane-test-helper-death-detaches-every-buffer-it-served ()
   "A helper that exits leaves each buffer attached through it as a
 `session/detached' for its handle leaves it: holding no handle, not
-attached, dropped, with its ref and the transcript it drew, and reading
-as not streaming, the tail's running tool call drawn `ok' (D25).  So
-`agentpane-close-session' refuses it and a `g' attaches its ref again,
-as each does for a buffer told its handle is gone."
+attached, with its ref and the transcript it drew, and reading as not
+streaming, the tail's running tool call drawn `ok' (D25).  So
+`agentpane-close-session' refuses it and a `g' previews its ref, as each
+does for a buffer told its handle is gone (D26)."
   (let ((agentpane--connection nil)
         (refs '((:backend "claude" :id "real-1") (:backend "codex" :id "t1"))))
     (agentpane-test--forking nil nil
@@ -4856,7 +4910,6 @@ as each does for a buffer told its handle is gone."
              (with-current-buffer buffer
                (should-not agentpane--handle)
                (should-not agentpane--attached)
-               (should agentpane--dropped)
                (should (agentpane--same-ref-p (agentpane--ref agentpane--session) ref))
                (should (equal (agentpane-test--indices) '(3)))
                (should-not agentpane--streaming)
@@ -4865,9 +4918,8 @@ as each does for a buffer told its handle is gone."
                (setq sent nil)
                (should-error (agentpane-close-session) :type 'user-error)
                (should-not sent)
-               (setq attached nil)
                (agentpane-refetch)
-               (should (equal sent `((sessions/attach :session ,ref))))))
+               (should (equal sent `((sessions/preview :session ,ref))))))
            buffers refs))))))
 
 (defun agentpane-test--last-words (messages &optional prompted linger)
@@ -5010,7 +5062,6 @@ handle ends with it (OW-bukupu, as
         (should-not agentpane--streaming)
         (should (agentpane-test--turn-done-p))
         (should-not agentpane--turn-watches)
-        (should agentpane--dropped)
         (should-not agentpane--handle)))))
 
 (defun agentpane-test--late-attach-reply (before-sentinel)
@@ -5042,8 +5093,7 @@ end let go of, attached to nothing (OW-bukupu)."
       (should-not agentpane--connection)
       (should-not agentpane--attached)
       (should-not agentpane--attaching)
-      (should-not agentpane--handle)
-      (should agentpane--dropped))))
+      (should-not agentpane--handle))))
 
 (ert-deftest agentpane-test-late-attach-reply-attaches-nothing ()
   "An attach reply a dead helper wrote binds the buffer to no replacement,
@@ -5099,7 +5149,6 @@ helper's handle to it again, reading streaming (OW-bukupu)."
           (agentpane-test--dead-unheard process)
           (should (agentpane-test--wait-for (lambda () heard) (+ (float-time) 10)))
           (agentpane-test--heard-out dead)
-          (should agentpane--dropped)
           (should-not agentpane--attached)
           (should-not agentpane--handle)
           (should-not agentpane--streaming))))))
@@ -5123,7 +5172,6 @@ of after it, holding no handle (OW-bukupu)."
       (should (agentpane-test--wait-for (lambda () (null agentpane--recorded))
                                         (+ (float-time) 10)))
       (should (string-search "Final words." (buffer-string)))
-      (should agentpane--dropped)
       (should-not agentpane--attached)
       (should-not agentpane--handle))))
 
@@ -5155,7 +5203,6 @@ node after a `sessions/changed' is its order at a drop."
                                                 (+ (float-time) 10)))
               (should (string-search "Final words." (buffer-string)))
               (should-not agentpane--connection)
-              (should agentpane--dropped)
               (should-not agentpane--handle))))
       (kill-buffer picker))))
 
@@ -5241,8 +5288,7 @@ and going out through a replacement for a buffer holding no handle
   "Attach a buffer through a helper that writes the attach's snapshot,
 under the handle \"h1\" and streaming, then the attach reply when REPLY,
 and exits while Emacs is busy, and let Emacs handle what it left.  The
-buffer must end let go of, holding no handle, idle and dropped, so a `g'
-attaches it again (OW-bukupu)."
+buffer must end let go of, holding no handle and idle (OW-bukupu)."
   (agentpane-test--watching
     (agentpane-test--outliving
         (append
@@ -5258,7 +5304,6 @@ attaches it again (OW-bukupu)."
         (agentpane-test--heard-out dead)
         (should-not agentpane--handle)
         (should-not agentpane--attached)
-        (should agentpane--dropped)
         (should-not agentpane--streaming)))))
 
 (ert-deftest agentpane-test-snapshot-before-a-death-is-let-go ()
@@ -5429,7 +5474,6 @@ watch before the teardown could end it (OW-zedawo, OW-mopuyi)."
         (should (memq (current-buffer) agentpane--turns-done))
         (should-not agentpane--turn-watches)
         (should-not agentpane--sending)
-        (should agentpane--dropped)
         (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
                        "hello"))))))
 
@@ -5445,7 +5489,7 @@ watch before the teardown could end it (OW-zedawo, OW-mopuyi)."
 attaches the helper answers, each after its snapshot, as the helper
 writes them, while a synchronous request is out, and then dies without
 answering that request.  Each buffer must end not attached, holding no
-handle, dropped and free to send again, and no prompt may go out, through
+handle and free to send again, and no prompt may go out, through
 that helper or any started after it (OW-kifuhi)."
   (let* ((agentpane--connection nil)
          (refs (seq-take '((:backend "codex" :id "t1") (:backend "codex" :id "t2")) count))
@@ -5502,7 +5546,6 @@ that helper or any started after it (OW-kifuhi)."
                 (with-current-buffer buffer
                   (should-not (agentpane--attached-p))
                   (should-not agentpane--handle)
-                  (should agentpane--dropped)
                   (should-not agentpane--sending)))
               (should-not (memq 'sessions/prompt calls)))
           (agentpane-test--end-helper agentpane--connection)
@@ -5522,8 +5565,8 @@ the second to no helper the first one's waiter started (OW-kifuhi)."
 (ert-deftest agentpane-test-attach-reply-held-after-its-detached-attaches-nothing ()
   "An attach whose snapshot the helper sent and then detached, the reply
 coming last and held back as an anxious continuation behind a synchronous
-request, leaves the buffer not attached, holding no handle and dropped
-once the reply is handed on (OW-tifiva), as in wire order
+request, leaves the buffer not attached and holding no handle once the
+reply is handed on (OW-tifiva), as in wire order
 \(`agentpane-test-attach-reply-after-its-detached-attaches-nothing')."
   (agentpane-test--outliving
       (list (list :jsonrpc "2.0" :method "session/snapshot"
@@ -5541,8 +5584,7 @@ once the reply is handed on (OW-tifiva), as in wire order
     (with-current-buffer (jsonrpc-events-buffer agentpane--connection)
       (should (string-search "anxious continuation" (buffer-string))))
     (should-not (agentpane--attached-p))
-    (should-not agentpane--handle)
-    (should agentpane--dropped)))
+    (should-not agentpane--handle)))
 
 (defun agentpane-test--prompt-failing (how)
   "Send a prompt through `agentpane--request' over a stub jsonrpc, have it
