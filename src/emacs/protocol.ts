@@ -52,7 +52,12 @@
  * with no `handle` stops the attachment the snapshot answering its
  * `token`'s attach created, if that snapshot created one, where it stopped
  * whatever the helper had last named to Emacs by `session`, which another
- * buffer attached to that ref since could hold.
+ * buffer attached to that ref since could hold. OW-nowihu raised it a
+ * sixteenth: `sessions/detach` and `sessions/close` carry `tokens`, every
+ * attach their buffer sent and every one a buffer it absorbed sent, where
+ * they carried one `token`, and stop the attachment under a handle once
+ * every token answered under it is released, where the handle stopped it,
+ * or without one the token whose answer created it.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -163,7 +168,7 @@
  * Every per-session notification below carries it, absent only where the
  * server sent none, and every request that takes a `session` accepts one
  * beside it and sends it nowhere, `sessions/detach` and `sessions/close`
- * resolving the session by it; `compaction` is `"requesting"`, `"running"` or `null`;
+ * included (OW-nowihu); `compaction` is `"requesting"`, `"running"` or `null`;
  * `model` is a string or `null`; so is `effort`, the reasoning effort the
  * session's next turn runs at, `null` when the backend reports none; and so
  * is `unrestoredModel`, the model the session's store last recorded when the
@@ -198,7 +203,8 @@
  *   (integer, always) names this attach: agentpane-mode mints it, no two
  *   attaches it sends carry the same one, and the helper sends it nowhere
  *   but back, on the snapshot that answers this attach, and holds it to
- *   match a `sessions/detach` or `sessions/close` carrying it (OW-wukako).
+ *   match a `sessions/detach` or `sessions/close` carrying it among its
+ *   `tokens` (OW-wukako, OW-nowihu).
  *   The reply's `ref` is authoritative and may differ from the one asked
  *   for. The reply ends the request and says nothing about attachment:
  *   the session is attached from the `session/snapshot` that answers the
@@ -212,7 +218,7 @@
  *   answered its attach means the helper expects none: a `seq` gap took
  *   the session's view after a snapshot under its handle came, and
  *   neither that snapshot nor a `session/detached` went out, a
- *   `sessions/detach` or `sessions/close` carrying this attach's `token`
+ *   `sessions/detach` or `sessions/close` carrying this attach's token
  *   landed while it was in flight, the server ended the session's handle
  *   before its snapshot came, or the helper is exiting. The first can
  *   misjudge, whatever ref the attach asked for: a snapshot from
@@ -236,28 +242,34 @@
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
  * - `sessions/abort`, `sessions/compact` -- `{ session }` -> `null`.
- * - `sessions/close` -- `{ session, handle?, token? }` -> `null`. Kills the
- *   subprocess, then stops this session's notifications and gives up the
- *   attach `token` names, as `sessions/detach` below says.
+ * - `sessions/close` -- `{ session, handle?, tokens? }` -> `null`. Kills the
+ *   subprocess, then gives up and releases the attaches `tokens` names, as
+ *   `sessions/detach` below says; the server's `ended` for the handle
+ *   stops this session's notifications whatever claims still stand.
  * - `sessions/dismissError` -- `{ session, errorId }` -> `null`. Clears the
  *   session's turn error, so later `session/snapshot`s carry `error: null`,
  *   but only while `errorId` (string) still names the error the server
  *   holds: a newer one survives the dismissal of the one Emacs was showing
  *   (OW-desufa), even one with the same text (OW-jokoto).
- * - `sessions/detach` -- `{ session, handle?, token? }` -> `null`. Stops
- *   this session's notifications and does nothing else: no HTTP call, and
- *   the session goes on running on the server. Sent when Emacs stops
- *   showing a session. With `token` (integer) naming a `sessions/attach`
- *   that no snapshot has answered and whose reply has not gone out yet,
- *   that attach is given up: its reply goes out, and nothing answers it.
- *   No other attach is, another of the same ref included; a token naming
- *   none gives up nothing. With `handle`, the notifications under that
- *   handle stop, whatever ref `session` is; without, those under the
- *   handle of the snapshot that answered the attach `token` names, if
- *   nothing was attached under that handle before it, and unless they
- *   have stopped since, by a detach, a close or a `session/detached`; and
- *   with neither, none. `session` picks out no notifications
- *   (OW-linowe).
+ * - `sessions/detach` -- `{ session, handle?, tokens? }` -> `null`. Stops
+ *   showing a session, and does nothing else: no HTTP call, and the
+ *   session goes on running on the server. Sent when Emacs stops showing a
+ *   session. `tokens` (array of integers, absent meaning none) names every
+ *   `sessions/attach` the buffer sent since it last closed a session and
+ *   every one a buffer it absorbed sent. Each that no snapshot has
+ *   answered and whose reply has not gone out yet is given up: its reply
+ *   goes out, and nothing answers it. No other attach is, another of the
+ *   same ref included. Each answered under a handle releases its claim
+ *   there, and the notifications under a handle stop once every attach
+ *   answered under it is released, whichever buffer releases last
+ *   (OW-nowihu). A claim goes with the handle's notifications, so a token
+ *   answered under a handle whose notifications stopped since -- a
+ *   detach, a close or a `session/detached` -- releases nothing. `handle`
+ *   and `session` pick out no notifications. Until OW-nowihu `token` named
+ *   one attach, and `handle` stopped the notifications under it, or
+ *   without one the handle of the snapshot answering that attach, if
+ *   nothing was attached under it before (OW-linowe). What stays is named
+ *   at `forget` in helper.ts.
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
@@ -394,9 +406,9 @@ export interface HelperRequests {
 	"sessions/prompt": { params: SessionParams & PromptRequest; result: null };
 	"sessions/abort": { params: SessionParams; result: null };
 	"sessions/compact": { params: SessionParams; result: null };
-	"sessions/close": { params: SessionParams & { token?: number }; result: null };
+	"sessions/close": { params: SessionParams & { tokens?: number[] }; result: null };
 	"sessions/dismissError": { params: SessionParams & DismissErrorRequest; result: null };
-	"sessions/detach": { params: SessionParams & { token?: number }; result: null };
+	"sessions/detach": { params: SessionParams & { tokens?: number[] }; result: null };
 	"sessions/setModel": { params: SessionParams & { model: string }; result: null };
 	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };

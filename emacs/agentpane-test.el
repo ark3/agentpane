@@ -1083,8 +1083,8 @@ finds the buffer by its `token', the reply having given it nothing."
   "An attach answered under another ref whose reply fails in Emacs -- a
 timeout, or a quit in `agentpane-new-session' -- after the helper took the
 attach still holds the handle and ref its tagged snapshot gave it: it is
-drawn, hears what follows under the handle, and its detach names the
-handle, which is what stops the helper sending for it."
+drawn, hears what follows under the handle, and its detach carries the
+attach's token, which is what stops the helper sending for it (OW-nowihu)."
   (let ((asked '(:backend "claude" :id "virtual:1"))
         (ref '(:backend "claude" :id "real-2"))
         (agentpane--connection 'connection))
@@ -1108,7 +1108,7 @@ handle, which is what stops the helper sending for it."
             (should agentpane--streaming))
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref :handle "h1" :token 1)))))))))
+          (should (equal sent `((sessions/detach :session ,ref :handle "h1" :tokens [1])))))))))
 
 (ert-deftest agentpane-test-attach-under-a-new-ref-hears-what-follows-its-snapshot-before-its-reply ()
   "What follows the tagged snapshot of an attach answered under another
@@ -1259,6 +1259,41 @@ let-go, so the preview's `g' still previews."
             (agentpane-refetch)
             (should (equal (mapcar #'car sent) '(sessions/preview)))))))))
 
+(ert-deftest agentpane-test-snapshot-whose-token-no-buffer-holds-binds-only-its-handles-holder ()
+  "A `session/snapshot' carrying a `token' no buffer holds -- one answering
+a buffer killed before handling it, or an attach its buffer gave up and
+has sent another since -- binds no buffer by its ref: neither one only
+previewing the ref, which sent no attach, nor one holding the ref under
+another handle.  Either would count itself attached where the helper
+drops the attachment once that token's buffer releases it (OW-nowihu).
+One holding the snapshot's handle draws it."
+  (agentpane-test--with-helper
+    (agentpane-test--forking nil nil
+      (let ((previewed '(:backend "claude" :id "a"))
+            (elsewhere '(:backend "claude" :id "b"))
+            (held '(:backend "claude" :id "c")))
+        (let ((preview (agentpane--transcript-buffer (list :ref previewed)))
+              (other (agentpane--transcript-buffer (list :ref elsewhere)))
+              (holder (agentpane--transcript-buffer (list :ref held))))
+          (with-current-buffer other (setq agentpane--handle "h0"))
+          (with-current-buffer holder (setq agentpane--handle "h2"))
+          (agentpane--on-notification agentpane--connection 'session/snapshot
+                                      (list :session previewed :handle "h1" :token 9 :nodes []))
+          (agentpane--on-notification agentpane--connection 'session/snapshot
+                                      (list :session elsewhere :handle "h3" :token 9 :nodes []))
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :session held :handle "h2" :token 9
+                 :nodes (vector (agentpane-test--assistant 3 "<p>Live.</p>"))))
+          (with-current-buffer preview
+            (should-not agentpane--handle)
+            (should-not (agentpane--attached-p)))
+          (with-current-buffer other
+            (should (equal agentpane--handle "h0")))
+          (with-current-buffer holder
+            (should (equal agentpane--handle "h2"))
+            (should (equal (agentpane-test--indices) '(3)))))))))
+
 (ert-deftest agentpane-test-attach-reply-after-its-detached-attaches-nothing ()
   "An attach whose snapshot the helper sent and then detached, a `seq' gap
 having landed between that snapshot and the reply, ends with the reply
@@ -1397,8 +1432,8 @@ failed (OW-rebawa)."
 
 (ert-deftest agentpane-test-kill-of-a-buffer-holding-the-handle-leaves-anothers-attach-of-its-ref ()
   "A buffer holding a handle, killed while another buffer's attach of the
-same ref is in flight, detaches by its handle and the token of its own
-last attach, never the other's, so the helper gives up only its own
+same ref is in flight, detaches by the token of its own last attach,
+never the other's, so the helper gives up only its own
 \(OW-jofodu); and the snapshot answering the other's attach, carrying
 that attach's token, binds that buffer, not a third only previewing the
 ref.  Until OW-wukako the helper gave up every attach of the ref, the
@@ -1422,7 +1457,7 @@ other's included, whose reply then came with no snapshot."
             (should-not (eql mine theirs))
             (setq sent nil)
             (kill-buffer holder)
-            (should (equal sent `((sessions/detach :session ,ref :handle "h1" :token ,mine)))))
+            (should (equal sent `((sessions/detach :session ,ref :handle "h1" :tokens ,(vector mine))))))
           (funcall (cdr (pop held)) t)
           (with-current-buffer attaching
             (should (agentpane--attached-p))
@@ -2491,7 +2526,7 @@ since the compact route answers only for an attached session."
           (should (equal (mapcar #'car (reverse sent))
                          '(sessions/forkPoints sessions/fork sessions/detach
                            sessions/attach)))
-          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref :token 7)))
+          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref :tokens [7])))
           (setq sent nil)
           (with-current-buffer buffer (agentpane-compact))
           (should (equal (reverse sent)
@@ -2518,9 +2553,11 @@ transcript under the fork's ref, never the parent's (OW-zovaye)."
             (should-not (agentpane--attached-p))
             (should (equal (agentpane-test--indices) '(0 1)))))))))
 
-(ert-deftest agentpane-test-pi-fork-detaches-the-parent-by-its-handle ()
-  "A Pi fork detaches its parent from the helper by the handle the parent
-holds, and the fork's buffer holds the handle its own attach answered."
+(ert-deftest agentpane-test-pi-fork-detaches-the-parent-by-every-token-it-sent ()
+  "A Pi fork detaches its parent from the helper by the token of every
+attach the parent sent, its last and those before it, naming beside them
+the handle the parent holds, which stops nothing on its own (OW-nowihu);
+and the fork's buffer holds the handle its own attach answered."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -2530,11 +2567,13 @@ holds, and the fork's buffer holds the handle its own attach answered."
         (agentpane-test--with-session ref
           (setq agentpane--attached agentpane--connection
                 agentpane--handle "h1"
+                agentpane--attach-sent 7
+                agentpane--attach-earlier '(5 3)
                 attached (list :ref forked :handle "h2"))
           (agentpane-test--goto-index 0)
           (agentpane-fork)
           (should (equal (assq 'sessions/detach sent)
-                         `(sessions/detach :session ,ref :handle "h1")))
+                         `(sessions/detach :session ,ref :handle "h1" :tokens [7 5 3])))
           (should (equal (buffer-local-value 'agentpane--handle (agentpane--buffer-for forked))
                          "h2")))))))
 
@@ -2564,7 +2603,7 @@ attach with that token, takes as a no-op."
           (agentpane-fork)
           (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
           (funcall (cdr (pop held)) t)
-          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref :token 7)))
+          (should (equal (assq 'sessions/detach sent) `(sessions/detach :session ,ref :tokens [7])))
           (with-current-buffer buffer
             (should-not (agentpane--attached-p))
             (setq sent nil)
@@ -2825,7 +2864,7 @@ The fork's reply then sends only its own detach and the fork's attach."
                            "Carry on")))
           (funcall (cdr (pop held)) t)
           (should (equal (reverse sent)
-                         `((sessions/detach :session ,ref :token 7)
+                         `((sessions/detach :session ,ref :tokens [7])
                            (sessions/attach :session ,forked :token 1)))))))))
 
 ;;;; Editing an earlier message, against a stub connection
@@ -3556,13 +3595,13 @@ handlers clear a buffer's attaching flag."
           (agentpane--attach)
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref :token 1)))))
+          (should (equal sent `((sessions/detach :session ,ref :tokens [1])))))
         (agentpane-test--with-session ref
           (setq hold '(sessions/attach))
           (agentpane--attach)
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref :token 2)))))
+          (should (equal sent `((sessions/detach :session ,ref :tokens [2])))))
         (setq held nil)
         (agentpane-test--with-session ref
           (setq hold '(sessions/attach))
@@ -3570,13 +3609,35 @@ handlers clear a buffer's attaching flag."
           (funcall (cdr (pop held)) nil)
           (setq sent nil)
           (kill-buffer buffer)
-          (should (equal sent `((sessions/detach :session ,ref :token 3)))))
+          (should (equal sent `((sessions/detach :session ,ref :tokens [3])))))
         (agentpane-test--with-session ref
           (setq agentpane--attaching t)
           (setq sent nil)
           (let ((agentpane--connection nil))
             (kill-buffer buffer))
           (should-not sent))))))
+
+(ert-deftest agentpane-test-kill-after-a-merge-and-a-refetch-releases-every-token ()
+  "A buffer that absorbed another and was then refetched, killed, detaches
+carrying the token of every attach either sent, newest first: its `g''s,
+its own that merged, and the absorbed buffer's, which that buffer, killed
+without detaching, never released.  The helper holds the attachment
+until every token answered under its handle is released (OW-nowihu)."
+  (let ((canonical '(:backend "claude" :id "real-2"))
+        (alias '(:backend "claude" :id "pending-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (setq attached (list :ref canonical :handle "h1"))
+        (let ((holder (agentpane--transcript-buffer (list :ref canonical)))
+              (previewing (agentpane--transcript-buffer (list :ref alias))))
+          (with-current-buffer holder (agentpane--attach))
+          (with-current-buffer previewing (agentpane--attach))
+          (should-not (buffer-live-p holder))
+          (with-current-buffer previewing (agentpane-refetch))
+          (setq sent nil)
+          (kill-buffer previewing)
+          (should (equal sent `((sessions/detach :session ,canonical :handle "h1"
+                                                 :tokens [3 2 1])))))))))
 
 (ert-deftest agentpane-test-kill-completes-when-the-detach-signals ()
   "A detach that signals, as a send to a pipe that has just broken does,
@@ -3703,7 +3764,7 @@ asking no `sessions/list' first (D26).  A kill after that sends no
     (with-current-buffer buffer
       (agentpane-close-session)
       (should (equal (reverse sent)
-                     `((sessions/close :session ,ref :handle "h1" :token 1)
+                     `((sessions/close :session ,ref :handle "h1" :tokens [1])
                        (sessions/preview :session ,ref))))
       (should-not agentpane--handle)
       (should-not (agentpane--attached-p))
@@ -3728,7 +3789,7 @@ answers, rather than attaching again the session just closed."
       (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
       (funcall (cdr (pop held)) t)
       (should (equal (reverse sent)
-                     `((sessions/close :session ,ref :handle "h1" :token 1)
+                     `((sessions/close :session ,ref :handle "h1" :tokens [1])
                        (sessions/preview :session ,ref)))))))
 
 (ert-deftest agentpane-test-close-session-whose-preview-is-gone-kills-the-buffer ()
@@ -3746,7 +3807,7 @@ it could only attach in vain (OW-vetebu).  The kill sends no
     (funcall (cdr (pop held)) '(:status 404 :error "gone"))
     (should-not (buffer-live-p buffer))
     (should (equal (reverse sent)
-                   `((sessions/close :session ,ref :handle "h1" :token 1)
+                   `((sessions/close :session ,ref :handle "h1" :tokens [1])
                      (sessions/preview :session ,ref))))))
 
 (ert-deftest agentpane-test-close-session-whose-preview-is-gone-keeps-the-draft ()

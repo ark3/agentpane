@@ -829,9 +829,9 @@ another status and that holds no handle, so no watch reads it; see
   "The transcript buffer the notification METHOD, with PARAMS, is about.
 The buffer holding the notification's handle, save a snapshot's that
 sent the attach it answers, found by its `token', as below; failing
-that, one found by its ref as below; else nil.  A `session/detached' is
-only ever about the buffer holding its handle: no buffer holding the ref
-alone ever held it.
+that, save for a snapshot carrying a `token', one found by its ref as
+below; else nil.  A `session/detached' is only ever about the buffer
+holding its handle: no buffer holding the ref alone ever held it.
 Only a snapshot attaches the buffer it finds (`agentpane--attach-by'),
 and the helper sends nothing under a handle before the snapshot that
 introduces it (`introduce' in src/emacs/helper.ts).
@@ -849,18 +849,31 @@ onto would win.  Until OW-wukako it carried `askedFor', the ref asked
 for, bound to a buffer holding that ref that had sent an attach and held
 no handle, which two buffers attaching one ref both were.
 
-Failing that, a snapshot moves a buffer from one handle to another by the
-ref, where the buffer holds a handle, and failing that, it goes to a
-buffer holding the ref and no handle.  Each was how the snapshot
-answering a buffer's own attach found it, before the token: the first
-under a handle the server minted after the buffer's own, and the second
-one the buffer had no handle for.  They serve now only a snapshot whose
-`token' no buffer holds -- that of an attach this buffer gave up waiting
-for and has sent another since, or a killed buffer's -- and the helper's
-untagged snapshots, which it sends only under a handle it has already
-told a buffer of.  The first comes before the second, which may find a
-buffer only previewing a stored session that an attached buffer was
-since renamed onto, which the helper never fed."
+A snapshot whose `token' no buffer holds -- that of an attach its buffer
+gave up waiting for and has sent another since, or a killed buffer's --
+goes to the buffer holding its handle, if any, and to no other
+\(OW-nowihu).  The helper holds the attachment under the handle only
+until the buffer that sent that token, or the one that absorbed it,
+releases it (`agentpane--detach'), so a buffer it bound by the ref,
+which holds no such token, would count itself attached and be fed only
+until then.  Until OW-nowihu it went on to the ref fallbacks below,
+and could bind a buffer only previewing the ref, which never sent an
+attach.
+
+Failing the handle, an untagged snapshot moves a buffer from one handle
+to another by the ref, where the buffer holds a handle, and failing
+that, it goes to a buffer holding the ref and no handle.  Each was how
+the snapshot answering a buffer's own attach found it, before the token:
+the first under a handle the server minted after the buffer's own, and
+the second one the buffer had no handle for.  They serve now only the
+helper's untagged snapshots, which it sends only under a handle it has
+already told a buffer of.  The first comes before the second, which may
+find a buffer only previewing a stored session that an attached buffer
+was since renamed onto, which the helper never fed.  What stays: where
+the buffer told of the handle was killed before handling that snapshot,
+an untagged one after it finds no holder and binds a buffer by the ref,
+which holds no token the helper answered under the handle, and hears
+nothing once the killed buffer's detach releases it."
   (let ((handle (plist-get params :handle))
         (ref (plist-get params :session))
         (token (plist-get params :token)))
@@ -872,8 +885,9 @@ since renamed onto, which the helper never fed."
                                   (eql (buffer-local-value 'agentpane--attach-sent buffer) token))
                                 (buffer-list)))
            (and handle (agentpane--buffer-holding handle))
-           (agentpane--buffer-for ref (lambda () agentpane--handle))
-           (agentpane--buffer-for ref (lambda () (not agentpane--handle)))))
+           (and (not token)
+                (or (agentpane--buffer-for ref (lambda () agentpane--handle))
+                    (agentpane--buffer-for ref (lambda () (not agentpane--handle)))))))
       (_
        (or (and handle (agentpane--buffer-holding handle))
            (agentpane--buffer-for ref (lambda () (not agentpane--handle))))))))
@@ -2081,11 +2095,10 @@ helper's handle, reading as streaming, neither attached nor let go of
 became of it, or nil if it has sent none since it last closed its
 session; see `agentpane--attach-token'.
 `agentpane--notified-buffer' binds the snapshot carrying it to this
-buffer, and `agentpane--detach' and `agentpane-close-session' send it, so
-the helper gives up that attach if it is still waiting on it, and no
-other (OW-wukako), and, without a handle beside it, stops the attachment
-that attach's snapshot recorded, if it still stands, and no other
-\(OW-linowe).
+buffer, and `agentpane--detach' and `agentpane-close-session' send it,
+with `agentpane--attach-earlier', so the helper gives up that attach if
+it is still waiting on it, and no other's (OW-wukako), and releases the
+attachment that attach's snapshot claimed (OW-nowihu).
 A record of the request, not of an attachment, which is why it is not
 `agentpane--attached': the helper may hold this attach with no snapshot
 having answered it, whatever this buffer believes of it, or have
@@ -2093,6 +2106,24 @@ answered it with a snapshot this buffer was killed before handling, so a
 buffer attached to nothing may still need to tell it to stop.  Until
 OW-wukako it was only non-nil, and the helper matched the attach by the
 ref it asked for, another buffer's attach of that ref included.")
+
+(defvar-local agentpane--attach-earlier nil
+  "The `token' of every `sessions/attach' this buffer sent before
+`agentpane--attach-sent', and of every one a buffer it absorbed sent,
+newest first, since it last closed its session (OW-nowihu).
+The helper holds an attachment for as long as any token answered under
+its handle is unreleased, and only this buffer can release these: an
+absorbed buffer never detaches (`agentpane--absorb'), and an attach
+this buffer gave up waiting for, a `g' on an attached buffer among
+them, may still be answered.  So `agentpane--detach' and
+`agentpane-close-session' send them all; see `agentpane--tokens-sent'.")
+
+(defun agentpane--tokens-sent ()
+  "The `token' of every attach this buffer's detach or close releases,
+newest first: `agentpane--attach-sent' and `agentpane--attach-earlier'."
+  (if agentpane--attach-sent
+      (cons agentpane--attach-sent agentpane--attach-earlier)
+    agentpane--attach-earlier))
 
 (defvar agentpane--attach-tokens 0
   "The last `token' `agentpane--attach-token' minted.")
@@ -2104,6 +2135,13 @@ snapshot that answers that attach (`sessions/attach' in
 src/emacs/protocol.ts); it need be unique only among the attaches one
 helper sees, which a count over this Emacs's life more than covers."
   (setq agentpane--attach-tokens (1+ agentpane--attach-tokens)))
+
+(defun agentpane--attach-send-token ()
+  "Mint the `token' of the attach this buffer is sending, keeping the one
+it sent before in `agentpane--attach-earlier', and return it."
+  (when agentpane--attach-sent
+    (push agentpane--attach-sent agentpane--attach-earlier))
+  (setq agentpane--attach-sent (agentpane--attach-token)))
 
 (defvar-local agentpane--attaching nil
   "While a `sessions/attach' this buffer sent has not answered, the callers
@@ -2511,6 +2549,9 @@ buffer's draft, and the text of an edit's send goes on the kill ring
 with the dropped edit, OTHER's region holding it until the send answers.
 A window that showed OTHER shows this one, and OTHER's kill sends no
 `sessions/detach', which would silence the session this one now holds.
+This one takes OTHER's attach tokens instead (`agentpane--attach-earlier'),
+so its own detach releases the claims OTHER's attaches hold on the
+handle, which nothing else would (OW-nowihu).
 What OTHER drew goes with it, and the snapshot that merges is drawn
 here.
 A composer taken as this buffer's own is renamed after this buffer; one
@@ -2562,6 +2603,9 @@ its text is on the kill ring" (buffer-name other)))
       (set-window-buffer window buffer))
     (when (and (memq other agentpane--turns-done) (not (agentpane--shown-p buffer)))
       (cl-pushnew buffer agentpane--turns-done))
+    (setq agentpane--attach-earlier
+          (append agentpane--attach-earlier
+                  (with-current-buffer other (agentpane--tokens-sent))))
     (with-current-buffer other
       (remove-hook 'kill-buffer-hook #'agentpane--detach t))
     (kill-buffer other)))
@@ -2717,8 +2761,8 @@ and a user error signalled instead; see `agentpane--closing' and
   (if agentpane--attaching
       (setq agentpane--attaching
             (append agentpane--attaching (list (cons then failed))))
-    (setq agentpane--attaching (list (cons then failed))
-          agentpane--attach-sent (agentpane--attach-token))
+    (setq agentpane--attaching (list (cons then failed)))
+    (agentpane--attach-send-token)
     (agentpane--request 'sessions/attach
                         (list :session (agentpane--ref agentpane--session)
                               :token agentpane--attach-sent)
@@ -2769,7 +2813,7 @@ close is in flight, or a fork; see `agentpane--closing' and
     (user-error "This session is still attaching; try again once it has"))
   (agentpane--refuse-closing)
   (agentpane--refuse-forking)
-  (setq agentpane--attach-sent (agentpane--attach-token))
+  (agentpane--attach-send-token)
   (jsonrpc-request (agentpane--connection) 'sessions/attach
                    (list :session (agentpane--ref agentpane--session)
                          :token agentpane--attach-sent)
@@ -2801,38 +2845,52 @@ on the server and lets go of its agent (`SessionManager.close' in
 src/server/http/session-manager.ts): killing a buffer leaves the session
 running, as closing a browser tab does.
 
-It carries the handle this buffer holds, and the helper stops what it
-sends under that handle, whatever ref the buffer last heard (OW-wedeli).
-It carries too the `token' of the last attach this buffer sent, held
-handle or not, and the helper gives up that attach if no snapshot has
-answered it yet, and no other: `agentpane-refetch' attaches a buffer
-already holding a handle, and one killed then must still give up its own
-attach.  Until OW-wukako the helper gave up every attach of the ref
-instead, so a buffer killed while holding the handle left another
+It carries the `token' of every attach this buffer sent since it last
+closed its session, and of every one a buffer it absorbed sent
+\(`agentpane--tokens-sent'), and the helper gives up each such attach no
+snapshot has answered yet, and no other: `agentpane-refetch' attaches a
+buffer already holding a handle, and one killed then must still give up
+its own attach.  Until OW-wukako the helper gave up every attach of the
+ref instead, so a buffer killed while holding the handle left another
 buffer's attach of the same ref in flight beside it not attached
-\(OW-jofodu).  One from a buffer holding no handle stops, besides, the
-attachment the snapshot answering that attach created, if it created
-one and the helper still holds it, since that snapshot gave this buffer
-the handle once handled, and a buffer killed after the helper sent it
-and before handling it left the helper sending under that handle.  So it is sent
-only from a buffer that has sent an attach, whatever this buffer believes
-of that attach: one that failed here -- timed out, or quit in
-`agentpane-new-session' -- may still have succeeded in the helper, which
-then holds the session.  The helper forgets the token's attachment
-wherever the attachment goes, so from a buffer it let go of -- a gap or
-an `ended' -- the detach stops nothing, nor from one whose attach no
-snapshot answered, which failed outright.  Until OW-linowe the helper
-stopped instead what it had last named to Emacs by the ref, unless the
-token gave up an attach, and either of those, killed, silenced another
-buffer attached on that ref since: one on the same ref after the let-go,
-one whose session was renamed onto the ref of the failed attach.  A
-buffer that never sent one and holds no handle sends nothing; by the
-ref, the detach silenced a live buffer whose session was since renamed
-onto its ref, the preview left beside it rather than merged (D24).
-One case stays (OW-linowe): a buffer killed before handling a snapshot
-whose answer created the attachment still stops it, silencing another
-buffer whose attach was answered under the same handle after it, whether
-or not Emacs has handled the other's snapshot.
+\(OW-jofodu).  Each token answered under a handle releases its claim
+there, and the helper stops what it sends under the handle once every
+token answered under it is released (OW-nowihu): at most one buffer
+holds a handle, the one whose attach a snapshot answers absorbing any
+other and taking its tokens (`agentpane--absorb'), so a claim still
+standing is a buffer that holds the handle or will once it handles the
+snapshot on its way, or an attach of a buffer still to release it.  The
+handle it carries beside them stops nothing.  So it is sent from any
+buffer that has sent an attach, whatever this buffer believes of it: one
+that failed here -- timed out, or quit in `agentpane-new-session' -- may
+still have succeeded in the helper, and one whose snapshot this buffer
+was killed before handling left the helper sending under that handle.
+The helper forgets a claim wherever the attachment goes, so from a
+buffer it let go of -- a gap or an `ended' -- the detach stops nothing,
+nor from one whose attach no snapshot answered, which failed outright.
+Until OW-nowihu it carried only the last token, and the handle stopped
+the attachment under it, and without one the token stopped the
+attachment its answer had created: either way a buffer killed after
+another's attach was answered under the handle -- holding it, or before
+handling the answer that created the attachment -- silenced the other,
+which then bound the handle; and a buffer killed with an attach it gave
+up answered, and a later one waiting, left that attachment standing with
+no buffer.  Until OW-linowe the helper stopped instead what it had last
+named to Emacs by the ref, unless the token gave up an attach, and
+either of those, killed, silenced another buffer attached on that ref
+since: one on the same ref after the let-go, one whose session was
+renamed onto the ref of the failed attach.  A buffer that has sent no
+attach sends nothing; by the ref, the detach silenced a live buffer whose
+session was since renamed onto its ref, the preview left beside it
+rather than merged (D24).
+What stays (OW-nowihu): a buffer bound to a handle by its ref holds no
+claim there, and hears nothing once the claims are released; that
+happens only for an untagged snapshot under a handle no buffer holds,
+the buffer told of it having been killed before handling its snapshot
+\(`agentpane--notified-buffer').  And an attach this buffer gave up
+waiting for, answered while no other buffer holds its handle, has a
+snapshot that binds no buffer, and the helper holds that attachment until
+this buffer is killed or closes its session.
 
 Never sent without a running helper, so a kill never starts one, as
 `agentpane--connection' would.  An error sending it, such as a pipe that
@@ -2849,14 +2907,13 @@ fork's parent it ends a watch not yet seen streaming, which the abort
 before the fork did not reach; see `agentpane--watch-turn'."
   (agentpane--watch-forget agentpane--handle)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection)
-             (or agentpane--handle agentpane--attach-sent))
+             (agentpane--tokens-sent))
     (condition-case err
         (agentpane--request 'sessions/detach
                             (append (list :session (agentpane--ref agentpane--session))
                                     (and agentpane--handle
                                          (list :handle agentpane--handle))
-                                    (and agentpane--attach-sent
-                                         (list :token agentpane--attach-sent)))
+                                    (list :tokens (vconcat (agentpane--tokens-sent))))
                             #'ignore t)
       (error (message "agentpane: sessions/detach failed: %s" (error-message-string err))))))
 
@@ -3093,10 +3150,12 @@ in flight, whose answer would count the buffer attached to what was
 closed.  That clause stays: an attach sent before the close is an
 ordering the close in flight does not cover.  And refused with a close
 already in flight.
-The close carries the handle, and the `token' of this buffer's last
-attach, as `agentpane--detach' does: none is in flight here, but one
-this buffer gave up waiting for may still be in the helper, whose
-snapshot would otherwise bind the buffer again after the close.
+The close carries the handle, and the `token' of every attach this
+buffer sent or took from a buffer it absorbed, as `agentpane--detach'
+does: none is in flight here, but one this buffer gave up waiting for
+may still be in the helper, whose snapshot would otherwise bind the
+buffer again after the close, and each answered under a handle is a
+claim the helper holds that handle's attachment for (OW-nowihu).
 
 The close in flight is state the buffer owns, `agentpane--closing', set
 as the close goes out and cleared when it answers or fails.  Meanwhile
@@ -3154,12 +3213,14 @@ it was."
       (agentpane--request
        'sessions/close (append (list :session ref)
                                (and agentpane--handle (list :handle agentpane--handle))
-                               (and agentpane--attach-sent (list :token agentpane--attach-sent)))
+                               (and (agentpane--tokens-sent)
+                                    (list :tokens (vconcat (agentpane--tokens-sent)))))
        (lambda (_)
          (agentpane--watch-forget agentpane--handle)
          (setq agentpane--handle nil
                agentpane--attached nil
                agentpane--attach-sent nil
+               agentpane--attach-earlier nil
                agentpane--closing nil)
          (agentpane-refetch))
        t
@@ -3346,8 +3407,8 @@ on the attached parent a refetch attaches again, and an attach reaching
 the server after `#forkOnto' has let go of a Pi parent resumes the
 parent's old branch.  Whichever of that attach's snapshot and the fork's
 reply is handled first, the reply detaches the parent from the helper,
-by the handle the snapshot gave it or else by its ref, which drops every
-attachment under that ref, so the respawn runs with nothing listening.
+releasing that attach's token with every other the parent sent, so the
+respawn runs with nothing listening (OW-nowihu).
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
