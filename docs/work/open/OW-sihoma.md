@@ -26,3 +26,5 @@ Its proposal is that the kill hook owns the composer: kill it with its text on t
 That is a proposal, not a decision; the remedies listed above stay open.
 
 Done also requires OW-futuve's test: kill a transcript with a composer open, open a new transcript in the same project and its composer, and assert the new composer's name carries no `<N>` of its own.
+
+Amended 2026-09-29 by OW-vugefa's close: a preview answered `gone` now kills its transcript through `agentpane--gone` in `emacs/agentpane.el`, which puts only the prompt region's text and an edit's draft on the kill ring, so `g` and a picker row now reach this state as well as `agentpane-close-session`.
