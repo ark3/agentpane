@@ -910,7 +910,7 @@ What each backend needs from agentpane under this decision:
 ### D24. A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate merges history with the live stream
 
 The owner took this on 2026-09-24, after asking whether the race defects the deck keeps filing point at a flaw in the architecture.
-Decided and not yet built, in the sense D12 is: the prose reads as the design will once the seven cards named at the end land, and each amendment to an earlier decision says so where it stands.
+Built: the seven cards named at the end all closed `--done` by 2026-09-25, so the prose describes the code as it stands, and each amendment to an earlier decision says so where it stands.
 
 **What the deck showed.**
 Of the 69 cards closed between 2026-09-22 and 2026-09-24, 8 were timing or ordering defects; 34 were the model-and-effort restore stream D23 records, and most of the rest were wire gaps and `codex-cli 0.156.0` moving.
@@ -1014,7 +1014,7 @@ The open cards that close under them: OW-woyifu under OW-sewewe, OW-zudase under
 ### D25. Only an attach starts an agent, and a client that loses its connection holds nothing live
 
 The owner took this on 2026-09-28, after asking whether the close races the deck kept filing had a root rather than more edge cases.
-Decided and not yet built, in the sense D12 and D24 are: the prose reads as the design will once the cards named at the end land.
+Built: the cards named at the end, and the three its follow-up filed, all closed `--done` on 2026-09-28, so the prose describes the code as it stands.
 
 **What the deck showed.**
 OW-dakeyi, closed 2026-09-28, made a close in flight state of the agentpane-mode buffer that refuses every attach and live request.
@@ -1091,7 +1091,7 @@ The answers run one tick after the teardown, so the in-flight flags stay set tha
 ### D26. The server says a handle has ended, and the preview says a ref is gone
 
 The owner took this on 2026-09-29 (OW-zavehi, which absorbed OW-denuse).
-Decided and not yet built, in the sense D24 and D25 are: the prose reads as the design will once the cards named at the end land.
+Built: the six cards named at the end all closed `--done` on 2026-09-29, the last with OW-vugefa, so the prose describes the code as it stands.
 
 **What it replaces.**
 The server knows the moment a handle ends: `close()` and `#forkOnto` in `src/server/http/session-manager.ts` take the container out of the table and call `broadcaster.forget`, which only drops the handle's sequence counter.
