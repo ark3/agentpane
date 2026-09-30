@@ -48,5 +48,5 @@ Restate that clause too; its conclusion still holds.
 
 An ERT test in `emacs/agentpane-test.el` reproduces the probe above: a Pi buffer attached, a fork held, `session/detached` delivered for the parent's handle, then `agentpane-send` with a draft and `agentpane-compact` each refused with nothing sent.
 It is red before the change and green after.
-`agentpane-attach`'s own `agentpane--forking` check is gone, and `agentpane-test-attach-on-a-preview-attaches-and-goes-to-the-prompt`'s refusal assertion still passes through the moved guard.
+`agentpane-attach`'s own `agentpane--forking` check is gone, and `agentpane-test-attach-during-a-fork-sends-nothing`'s refusal assertion still passes through the moved guard.
 The suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
