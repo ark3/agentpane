@@ -15,6 +15,8 @@ When Emacs handles each message as it comes, as an interactive session does, tha
 Measured 6 runs of 6, Emacs 31.1 batch, bun 1.4.0; see `docs/MANUAL_TESTING.md`, "With no server listening, the helper answers the requests waiting on its first open before it exits (OW-pezelo)".
 Before OW-pezelo the echo area ended on agentpane's "the helper exited", which `agentpane--answer-deaths` writes two zero-delay timers after the sentinel, so this ordering is new with it, though the jsonrpc line itself is not.
 The same holds for any error reply a dying helper writes, such as the socket error OW-hiliti measured with the server killed mid-prompt.
+OW-nuzoto (2026-09-30) removed the timer that held the input's cancel back and left the echo area as it was on a shutdown or a stream drop, but added two more such replies: a call to the server attempted once the helper's `stopped` is set is answered "the agentpane helper is exiting", and a request whose call fails on its own as the teardown aborts it now gets its own error rather than silence.
+Both are rare, and both are dying-helper error replies of exactly this kind.
 
 ## Done when
 
