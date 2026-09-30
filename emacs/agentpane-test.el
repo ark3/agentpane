@@ -1621,6 +1621,25 @@ it, both sending to the survivor, killing the survivor kills both
       (kill-buffer previewing)
       (should-not (seq-some #'buffer-live-p composers)))))
 
+(ert-deftest agentpane-test-chained-merge-carries-a-secondary-composer ()
+  "A composer a merge left beside the survivor's own, sending to it,
+follows that buffer into the next merge that absorbs it, as its own
+composer does, rather than going with its kill (OW-sihoma)."
+  (agentpane-test--merging
+    (let ((composers (mapcar (lambda (transcript)
+                               (with-current-buffer transcript
+                                 (save-current-buffer (agentpane-prompt))
+                                 agentpane--composer))
+                             (list holder previewing)))
+          (third (agentpane--transcript-buffer
+                  (list :ref '(:backend "claude" :id "real-3") :cwd "/tmp/x/sandbox"))))
+      (with-current-buffer previewing (agentpane--attach))
+      (with-current-buffer third (agentpane--absorb previewing))
+      (should-not (buffer-live-p previewing))
+      (dolist (composer composers)
+        (should (buffer-live-p composer))
+        (should (eq (buffer-local-value 'agentpane--composer-transcript composer) third))))))
+
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
 same distance from the end, and that of any other window where it was."
@@ -3694,12 +3713,13 @@ so that `yank' brings back what the user was writing (OW-watawe)."
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("my draft" "Fix the bug now"))))))
 
-(ert-deftest agentpane-test-close-session-whose-preview-is-gone-keeps-the-composer ()
+(ert-deftest agentpane-test-close-session-whose-preview-is-gone-kills-the-composer-keeping-its-text ()
   "The kill of a buffer whose preview after the close answers `gone' kills
 its composer too, the composer's text going on the kill ring before the
 prompt region's, so that `yank' brings back the region's and `yank-pop'
 the composer's, the echo area saying why the buffer went and that its
-text is on the kill ring (OW-sihoma)."
+text is on the kill ring, as it does when only the composer held any
+(OW-sihoma)."
   (let ((kill-ring nil)
         (kill-ring-yank-pointer nil)
         (interprogram-cut-function nil)
@@ -3718,6 +3738,19 @@ text is on the kill ring (OW-sihoma)."
         (should-not (buffer-live-p buffer))
         (should-not (buffer-live-p composer))
         (should (equal kill-ring '("half a thought" "composed")))
+        (should (string-search "is gone" (car said)))
+        (should (string-search "kill ring" (car said)))))
+    (setq kill-ring nil)
+    (agentpane-test--closing
+      (setq hold '(sessions/preview))
+      (let ((composer (with-current-buffer buffer
+                        (save-current-buffer (agentpane-prompt))
+                        agentpane--composer)))
+        (with-current-buffer composer (insert "composed"))
+        (with-current-buffer buffer (agentpane-close-session))
+        (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+        (should-not (buffer-live-p composer))
+        (should (equal kill-ring '("composed")))
         (should (string-search "is gone" (car said)))
         (should (string-search "kill ring" (car said)))))))
 
@@ -4013,23 +4046,27 @@ moved inside the stars and ` prompt' before the closing one."
 
 (ert-deftest agentpane-test-transcript-kill-takes-its-composer ()
   "Killing a transcript kills its composer, which could send nowhere, the
-composer's text going on the kill ring first, the echo area saying so.
-An empty composer goes and puts nothing there (OW-sihoma)."
+composer's text going on the kill ring first, the echo area saying so,
+and the window `agentpane-prompt' made for it goes too.  An empty
+composer goes and puts nothing there (OW-sihoma)."
   (let ((kill-ring nil)
         (kill-ring-yank-pointer nil)
         (interprogram-cut-function nil)
         (interprogram-paste-function nil))
     (agentpane-test--forking nil nil
       (dolist (text '("" "half a thought"))
-        (let* ((transcript (agentpane--transcript-buffer
+        (let* ((windows (length (window-list)))
+               (transcript (agentpane--transcript-buffer
                             (list :ref '(:backend "claude" :id "c1") :cwd "/tmp/x/sandbox")))
                (composer (with-current-buffer transcript
                            (save-current-buffer (agentpane-prompt))
                            agentpane--composer)))
           (with-current-buffer composer (insert text))
           (setq said nil)
+          (should (= (length (window-list)) (1+ windows)))
           (kill-buffer transcript)
           (should-not (buffer-live-p composer))
+          (should (= (length (window-list)) windows))
           (if (string-empty-p text)
               (should-not kill-ring)
             (should (equal (current-kill 0) text))

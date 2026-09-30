@@ -2434,8 +2434,10 @@ This one survives because it is the one that asked: its attach's reply,
 handled after the snapshot that merges, calls its waiters, a prompt among
 them, in this buffer.  OTHER's prompt-region draft follows this one's
 own, and its composer, if any, sends here from then on, and is this
-buffer's composer if it has none.  Should this buffer have a prompt in
-flight, its answer then leaves the sent text in place rather than
+buffer's composer if it has none.  So does any composer an earlier merge
+left beside OTHER's own, sending to OTHER, which would otherwise go with
+OTHER's kill (`agentpane--kill-composers').  Should this buffer have a
+prompt in flight, its answer then leaves the sent text in place rather than
 clearing it, as it does whenever the region changed after the send.
 An edit OTHER holds (`agentpane-edit') is dropped, and its prompt region,
 the message's text with whatever the user changed in it, goes on the
@@ -2496,14 +2498,15 @@ its text is on the kill ring" (buffer-name other)))
           (goto-char (point-max))
           (unless (= (point) agentpane--prompt-start) (insert "\n"))
           (insert draft))))
-    (when (buffer-live-p composer)
-      (with-current-buffer composer
-        (setq agentpane--composer-transcript buffer))
-      (unless (buffer-live-p agentpane--composer)
-        (setq agentpane--composer composer)
-        (let ((name (agentpane--composer-name)))
-          (with-current-buffer composer
-            (rename-buffer name t)))))
+    (dolist (each (buffer-list))
+      (when (eq (buffer-local-value 'agentpane--composer-transcript each) other)
+        (with-current-buffer each
+          (setq agentpane--composer-transcript buffer))))
+    (when (and (buffer-live-p composer) (not (buffer-live-p agentpane--composer)))
+      (setq agentpane--composer composer)
+      (let ((name (agentpane--composer-name)))
+        (with-current-buffer composer
+          (rename-buffer name t))))
     (dolist (window (get-buffer-window-list other nil t))
       (set-window-buffer window buffer))
     (when (and (memq other agentpane--turns-done) (not (agentpane--shown-p buffer)))
@@ -3651,12 +3654,17 @@ composer could send nowhere, every command in it answering that it is
 not an agentpane buffer, and it kept its name, so the next transcript in
 the project had a composer named with a `<N>' of its own.  The kill ring
 rather than asking, as `agentpane--gone' keeps a prompt region's text.
-Every composer sending here rather than this buffer's own: one that
-`agentpane--absorb' took over has been sending to the survivor since, so
-the kill of the buffer it came from leaves it alone, while the survivor
-may hold it beside a composer of its own.  The echo area says the text
-is on the kill ring; `agentpane--gone', which runs this before its kill
-so that the text it keeps goes on the kill ring after, says so itself."
+Every composer sending here rather than this buffer's own: every one
+that sent to a buffer `agentpane--absorb' merged away sends to the
+survivor from then on, so that kill leaves it alone, while the survivor
+may hold it beside a composer of its own.
+A window showing a composer is quit, as `agentpane-composer-discard'
+quits its own, so that the one `agentpane-prompt' made goes rather than
+staying to show some other buffer; `kill-buffer-quit-windows' does that
+through `quit-restore-window' without that function's own kill.
+The echo area says the text is on the kill ring; `agentpane--gone',
+which runs this before its kill so that the text it keeps goes on the
+kill ring after, says so itself."
   (let ((transcript (current-buffer))
         kept)
     (dolist (composer (buffer-list))
@@ -3666,7 +3674,8 @@ so that the text it keeps goes on the kill ring after, says so itself."
           (unless (string-empty-p text)
             (kill-new text)
             (setq kept t)))
-        (kill-buffer composer)))
+        (let ((kill-buffer-quit-windows t))
+          (kill-buffer composer))))
     (when kept
       (message "agentpane: the composer of %s was killed with it; \
 its text is on the kill ring" (buffer-name transcript)))
