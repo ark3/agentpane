@@ -18,8 +18,9 @@ Buffer B is attached to R under H2.
 Killing A sends `sessions/detach {session: R, token: T}`; T's attach is long done and gone from `attaching`, so `forget` drops by ref, drops H2, and B hears nothing more until it re-attaches.
 Before OW-wukako the detach carried no token and did the same.
 
-The same by-ref drop is the first of the "Two cases stay" in the `agentpane--detach` docstring (a buffer whose attach failed outright, killed after another buffer's session was renamed onto its ref).
-The second -- a buffer killed after the helper sent the snapshot answering its attach and before Emacs handled it, while another buffer holds that handle -- is shared by handle and is not in scope unless the fix settles it for free.
+Since 5d1d3cb the `agentpane--detach` docstring says "Three cases stay" and names this case first.
+The same by-ref drop is its second (a buffer whose attach failed outright, killed after another buffer's session was renamed onto its ref).
+The third -- a buffer killed after the helper sent the snapshot answering its attach and before Emacs handled it, while another buffer holds that handle -- is shared by handle and is not in scope unless the fix settles it for free.
 
 ## The direction
 
@@ -33,5 +34,5 @@ Two related orderings the same reader rated plausible, read and not run, which a
 ## Done when
 
 A test in `src/emacs/helper.test.ts`, red first: attach R from token 1 and receive its snapshot under H1; a gapped or `ended` let-go of H1; attach R from token 2 answered under H2; `sessions/detach {session: R, token: 1}`; a later event under H2 still reaches Emacs.
-The `forget` docblock and the `agentpane--detach` docstring's "Two cases stay" paragraph describe what remains, and the by-ref loop in `forget` and its `!pending` exception are gone.
+The `forget` docblock and the `agentpane--detach` docstring's "Three cases stay" paragraph describe what remains, and the by-ref loop in `forget` and its `!pending` exception are gone.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
