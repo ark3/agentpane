@@ -1757,6 +1757,8 @@ describe("PiAdapter teardown", () => {
 		await expect(submitted).rejects.toThrow(/before responding/);
 		expect(h.errors).toHaveLength(1);
 		expect(h.errors[0]).toContain("EPIPE");
+		// EPIPE is a symptom of the death, not its cause: the exit status stays.
+		expect(h.errors[0]).toContain("code=1");
 	});
 
 	it("reports a death once, even if close somehow arrives twice", async () => {

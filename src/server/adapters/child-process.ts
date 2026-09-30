@@ -236,10 +236,15 @@ export class ChildProcessShell {
 		if (this.spawnError) {
 			const reason = `Failed to spawn ${this.labels.name} (${this.command}): ${this.spawnError.message}`;
 			this.settle(code, signal, reason, this.spawnError);
-		} else if (this.stdinError) {
-			this.settle(code, signal, `${this.labels.stdin} stdin failed: ${this.stdinError.message}`, this.stdinError);
+			return;
+		}
+		const exited = `${this.labels.process} exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
+		// A stdin EPIPE is a symptom of the death, not its cause, so the exit
+		// status stays in the report beside it.
+		if (this.stdinError) {
+			this.settle(code, signal, `${this.labels.stdin} stdin failed: ${this.stdinError.message}; ${exited}`, this.stdinError);
 		} else {
-			this.settle(code, signal, `${this.labels.process} exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+			this.settle(code, signal, exited);
 		}
 	}
 
