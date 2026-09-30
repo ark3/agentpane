@@ -160,6 +160,21 @@ interface HeldNode {
  * the read loop, so without the abort a server that never answers holds its
  * socket, and Bun's event loop and the process with it, open past the end of
  * `input` (OW-kofuda). No api method passes a signal of its own.
+ *
+ * A request the abort ends gets no reply (OW-hiliti). The abort is the
+ * helper's own, and says nothing of whether the request reached the
+ * backend: a prompt may have been admitted, its turn streaming, when the
+ * stream dropped. agentpane-mode answers a request its dead helper never
+ * replied to as the death, and leaves a prompt's turn-done watch for its
+ * teardown to settle (OW-zedawo), where it takes any reply the helper wrote
+ * as the request's answer, and an error reply as a refusal that abandons
+ * that watch (`agentpane--request` in emacs/agentpane.el). Until OW-hiliti
+ * the abort's error went back as a -32603 reply, and a turn seen streaming
+ * lost its turn-done indicator at every drop Emacs was busy through. The
+ * test is whether the abort has run when the request fails, so one that
+ * failed on its own in the same instant goes unanswered too, and reads as
+ * the death it all but was. Writing nothing keeps nothing open: the
+ * process ends as soon as it did.
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;
@@ -566,6 +581,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			const result = await handler(request.params);
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));
 		} catch (error: unknown) {
+			// Aborted by this helper's teardown: no reply; see `runHelper`.
+			if (inFlight.signal.aborted) return;
 			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(error) }));
 		}
 	};

@@ -2331,6 +2331,7 @@ A Python driver started `bun run src/emacs/main.ts http://127.0.0.1:<port>` agai
 At 1b9cb66 the helper was still running 30s after the close, as in the first run, and the driver killed it by its pid.
 With the fix it exited with code 0, in 0.033s, 0.065s and 0.034s over three runs.
 The aborted request is still answered, since closing stdin leaves stdout open: the one frame on the helper's stdout was `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"The operation was aborted."}}`.
+That reply was retired on 2026-09-29: the helper now writes none for a request its teardown aborts, since agentpane-mode read it as a refusal (see "A request the helper's teardown aborts gets no reply (OW-hiliti)" below).
 Through `agentpane-shutdown`, with the same stand-in on port 4173 and the same attach sent by `jsonrpc-async-request` from `--batch` 2.5s after the helper started, `agentpane-shutdown` was called 1s later.
 At 1b9cb66 it printed the sentinel warning, the attach's error callback got `(:code -1 :message "Server died")`, and the process ended at status `signal`, code 9, after 0.607s.
 With the fix there was no warning, the error callback got `(:code -32603 :message "The operation was aborted.")`, and the process ended at status `exit`, code 0; `agentpane-shutdown` returned after 0.303s, which is `jsonrpc-shutdown`'s own 0.3s `accept-process-output` wait rather than the helper's exit.
@@ -3744,3 +3745,12 @@ The `tool_result` had `is_error: true` and content exactly the `message`, with n
 In every run `notes.txt` still read `hello fixture`, exactly one `can_use_tool` arrived, the CLI wrote no `control_response` of its own, and the process exited 0 once stdin closed.
 So both shapes are a "no" the model reads and the turn carries on from, and the deny reads more cleanly.
 No other CLI-initiated subtype could be provoked, so the error reply was measured on `can_use_tool` alone.
+
+## A request the helper's teardown aborts gets no reply (OW-hiliti)
+
+Measured on the home server 2026-09-29, Emacs 31.1 in `--batch` with jsonrpc.el 1.0.29, `bun 1.4.0`, on `card/OW-hiliti`.
+The probe, kept in `/tmp/hiliti-probe/` and not checked in, ran the real `runHelper` under `bun run` with a stand-in `fetch` that answered every `GET` with the JSON body `[]` and held every `POST` open until its signal fired, and an event stream that opened at once and dropped 500 ms later.
+An ert case in the same directory listed sessions to open the stream, sent a prompt from a buffer attached under the handle `h1`, handled a `session/status` under `h1` reading streaming, so the prompt's turn-done watch read `streamed`, and then waited without yielding until the helper had exited, so the helper's last messages, its sentinel and its teardown were all handled afterwards.
+At 18020e0, which took an error reply a dying helper wrote as the request's answer, the helper's abort of the in-flight `POST` went back as a -32603 reply, which ran the prompt's reached-no-backend path, abandoned the watch, and left the turn-done indicator down in 3 runs of 3; at 637eada, which ignored an error reply once the helper read as dead, it was raised in 3 of 3; those six runs are the OW-hiliti review's.
+With the helper writing no reply for a request its teardown aborted, the prompt was answered by the teardown alone, the echo area read `[jsonrpc] Server exited with status 0` and `agentpane: sessions/prompt failed: the helper exited`, and the indicator was raised in 3 runs of 3, run by the implementer.
+The vitest cases `aborts a request still waiting on the server when the input ends, and writes no reply for it` and `... when the stream drops, ...` in `src/emacs/helper.test.ts` hold it; both failed against 18020e0 with the `AbortError` reply they now forbid.

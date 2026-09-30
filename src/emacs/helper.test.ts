@@ -1226,16 +1226,18 @@ describe("shutdown", () => {
 		stop = null;
 	});
 
-	it("aborts a request still waiting on the server when the input ends, and answers it with the abort", async () => {
-		// A server that never answers: the call settles only if its signal fires.
+	/** Routes whose listing never answers: the call settles only if its signal fires, and each signal is kept. */
+	const unanswered = (signals: (AbortSignal | null | undefined)[]): Record<string, Route> => ({
+		[`GET ${ROUTES.sessions}`]: (_url, init) =>
+			new Promise<Response>((_resolve, reject) => {
+				signals.push(init?.signal);
+				init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+			}),
+	});
+
+	it("aborts a request still waiting on the server when the input ends, and writes no reply for it (OW-hiliti)", async () => {
 		const signals: (AbortSignal | null | undefined)[] = [];
-		const { io, calls, done } = start({
-			[`GET ${ROUTES.sessions}`]: (_url, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					signals.push(init?.signal);
-					init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
-				}),
-		});
+		const { io, calls, done } = start(unanswered(signals));
 		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
 		await vi.waitFor(() => expect(calls).toHaveLength(1));
 		io.end();
@@ -1243,7 +1245,20 @@ describe("shutdown", () => {
 		stop = null;
 		expect(signals).toHaveLength(1);
 		expect(signals[0]?.aborted).toBe(true);
-		await io.until(1);
-		expect(io.response(1)!["error"]).toMatchObject({ code: -32603 });
+		await tick();
+		expect(io.response(1)).toBeUndefined();
+	});
+
+	it("aborts a request still waiting on the server when the stream drops, and writes no reply for it (OW-hiliti)", async () => {
+		const signals: (AbortSignal | null | undefined)[] = [];
+		const { io, source, calls, done } = start(unanswered(signals));
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await vi.waitFor(() => expect(calls).toHaveLength(1));
+		source.opens[0]!.onDisconnect(true);
+		expect(await settled(done)).toBe("resolved");
+		stop = null;
+		expect(signals[0]?.aborted).toBe(true);
+		await tick();
+		expect(io.response(1)).toBeUndefined();
 	});
 });
