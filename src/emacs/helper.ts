@@ -449,41 +449,73 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/**
 	 * Stop telling Emacs about a session, for a `sessions/detach` or
 	 * `sessions/close`, by the `tokens` it carries: agentpane-mode sends the
-	 * token of every attach its buffer sent since it last closed a session,
-	 * and of every one a buffer it absorbed sent (`agentpane--detach` and
-	 * `agentpane--absorb` in emacs/agentpane.el). Each attach they name that
-	 * no snapshot has answered is abandoned, its reply released if held, so
-	 * no snapshot answers it later, and no other attach is: until OW-wukako
-	 * every attach of the ref was, another buffer's on the same ref included,
-	 * so a buffer killed while holding the handle, or a close carrying it,
-	 * left the attach in flight beside it not attached (OW-jofodu). Each
-	 * token answered under a handle releases its claim there (`claims`), and
-	 * the attachment goes with its handle's last claim. At most one buffer
-	 * holds a handle -- the one whose attach a snapshot answers absorbs any
-	 * other, taking its tokens -- so each claim is a buffer that holds the
-	 * handle, will once it handles the snapshot on its way, or was killed
-	 * before handling it and releases it by its own detach; or an attach its
-	 * buffer gave up waiting for, which that buffer releases with the rest.
-	 * `handle` stops nothing, and the attachment goes whichever buffer
-	 * released last, the one whose answer created it or not. Until OW-nowihu
-	 * the handle stopped the attachment under it, and without one the token
-	 * stopped the attachment its own answer had created, and either way a
-	 * buffer killed after another's answer under the handle went out --
-	 * holding the handle, or before handling the answer that created the
-	 * attachment -- silenced the other, which then bound the handle; and a
-	 * buffer killed with an attach it gave up answered and a later one
-	 * waiting left the first's attachment standing with no buffer, since its
-	 * detach named only the later. Until OW-linowe the attachment went by the
-	 * ref Emacs was last told, unless the token gave up an attach. A claim
-	 * goes with the attachment (`drop`), so the tokens of a buffer the helper
-	 * let go of -- a gap or an `ended` -- release nothing. What stays: a
-	 * buffer bound to the handle by the ref, which agentpane-mode does only
-	 * for an untagged snapshot under a handle no buffer holds -- one whose
-	 * tagged snapshot reached a buffer killed before handling it -- holds no
-	 * claim, and hears nothing once that buffer's detach lands; and an
-	 * attach a buffer gave up waiting for, answered while no other buffer
-	 * holds its handle, keeps the attachment standing with no buffer until
-	 * the buffer that sent it detaches or closes.
+	 * token of every attach its buffer sent, and of every one a buffer it
+	 * absorbed sent, save those a close of its already released
+	 * (`agentpane--detach` and `agentpane--absorb` in emacs/agentpane.el); a
+	 * token released twice releases nothing the second time. Each attach
+	 * they name that no snapshot has answered is abandoned, its reply
+	 * released if held, so no snapshot answers it later, and no other attach
+	 * is: until OW-wukako every attach of the ref was, another buffer's on
+	 * the same ref included, so a buffer killed while holding the handle, or
+	 * a close carrying it, left the attach in flight beside it not attached
+	 * (OW-jofodu). Each token answered under a handle releases its claim
+	 * there (`claims`), and the attachment goes with its handle's last claim,
+	 * whichever buffer released it; `handle` stops nothing.
+	 *
+	 * At most one buffer holds a handle -- the one whose attach a snapshot
+	 * answers absorbs any other, taking its tokens -- so a claim is one of:
+	 * a buffer that holds the handle, or will once it handles the snapshot
+	 * on its way; one killed before handling it, which releases the claim
+	 * by its own detach; an attach its buffer gave up waiting for, which
+	 * that buffer releases with the rest; an attach an absorbed buffer had
+	 * in flight, whose snapshot matches no buffer's latest attach and goes
+	 * only to the handle's holder, if any, the absorbing buffer releasing
+	 * it; or a buffer since moved off the handle -- by an untagged snapshot
+	 * under another handle for its ref, or by its own later attach answered
+	 * under another handle -- whose claim stays until it detaches. The last
+	 * two need two live handles for one ref.
+	 *
+	 * Until OW-nowihu the handle stopped the attachment under it, and
+	 * without one the token stopped the attachment its own answer had
+	 * created, and either way a buffer killed after another's answer under
+	 * the handle went out -- holding the handle, or before handling the
+	 * answer that created the attachment -- silenced the other, which then
+	 * bound the handle; and a buffer killed with an attach it gave up
+	 * answered and a later one waiting left the first's attachment standing
+	 * with no buffer, since its detach named only the later. Until OW-linowe
+	 * the attachment went by the ref Emacs was last told, unless the token
+	 * gave up an attach. A claim goes with the attachment (`drop`), so the
+	 * tokens of a buffer the helper let go of -- a gap or an `ended` --
+	 * release nothing.
+	 *
+	 * What stays, accepted (OW-nowihu):
+	 *
+	 * - A handle holding claims and no buffer. The buffer told of it was
+	 *   killed before handling its snapshot; or the attach answered was one
+	 *   its buffer gave up, whose tagged snapshot binds only the handle's
+	 *   holder (`agentpane--notified-buffer`); or every claimant moved off
+	 *   it. Until the last claim is released the helper goes on sending
+	 *   under the handle, and agentpane-mode routes it by the ref: an
+	 *   untagged snapshot binds a buffer holding the ref under another
+	 *   handle or under none -- the buffer that gave the attach up, or a
+	 *   preview that never attached -- and every other notification reaches
+	 *   a buffer holding the ref and no handle, so a preview shows it,
+	 *   streaming and all. The untagged snapshot can come from the server's
+	 *   own, or from the snapshot for the giving-up buffer's later attach
+	 *   reaching the helper before that attach's reply, which `introduce`
+	 *   sends untagged under the handle already attached. A buffer so bound
+	 *   holds no claim, unless it is the one that gave the attach up, and
+	 *   hears nothing once the claims are released; an attach given up and
+	 *   answered keeps the attachment until its buffer is killed or closes
+	 *   its session.
+	 * - A Pi fork's parent with a refetch in flight: `agentpane-fork` reads
+	 *   `agentpane--attached-p` before `agentpane--attaching`, so `g` then
+	 *   `f` forks with the refetch's attach out. Should it reach the server
+	 *   after the fork let the parent's container go, it respawns the parent
+	 *   under a new handle; should its tagged snapshot be written after the
+	 *   fork's reply and before this reads the parent's detach, it binds the
+	 *   parent by its token, and the parent counts itself attached, while
+	 *   the detach releases that token and drops the attachment.
 	 */
 	const forget = (tokens: readonly number[] = []): void => {
 		for (const token of tokens) {

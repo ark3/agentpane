@@ -255,10 +255,11 @@
  *   showing a session, and does nothing else: no HTTP call, and the
  *   session goes on running on the server. Sent when Emacs stops showing a
  *   session. `tokens` (array of integers, absent meaning none) names every
- *   `sessions/attach` the buffer sent since it last closed a session and
- *   every one a buffer it absorbed sent. Each that no snapshot has
- *   answered and whose reply has not gone out yet is given up: its reply
- *   goes out, and nothing answers it. No other attach is, another of the
+ *   `sessions/attach` the buffer sent and every one a buffer it absorbed
+ *   sent, save those a `sessions/close` of its already carried; one
+ *   carried twice releases nothing the second time. Each that no snapshot
+ *   has answered and whose reply has not gone out yet is given up: its
+ *   reply goes out, and nothing answers it. No other attach is, another of the
  *   same ref included. Each answered under a handle releases its claim
  *   there, and the notifications under a handle stop once every attach
  *   answered under it is released, whichever buffer releases last

@@ -2583,10 +2583,10 @@ and the fork's buffer holds the handle its own attach answered."
 goes out inside the fork, ahead of its answer (D26) -- leaves the parent
 not attached once the reply lands, so `g' previews it rather than
 attaching its old branch again, the edge OW-wabiju found when a flag
-marked such a buffer to attach at `g'.  The reply's detach then names the ref
-and the token of the parent's last attach alone, the handle gone, which
-the helper, holding nothing under that ref any longer and waiting on no
-attach with that token, takes as a no-op."
+marked such a buffer to attach at `g'.  The reply's detach then carries
+the parent's attach tokens alone, the handle gone, which the helper,
+holding no claim for them any longer and waiting on no attach with any
+of them, takes as a no-op (OW-nowihu)."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -3775,6 +3775,30 @@ asking no `sessions/list' first (D26).  A kill after that sends no
       (setq sent nil)
       (kill-buffer buffer)
       (should-not sent))))
+
+(ert-deftest agentpane-test-close-session-keeps-the-tokens-a-merge-meanwhile-took ()
+  "A merge while the close is out -- an attach this buffer gave up
+answered under a handle another buffer holds, which this one absorbs --
+leaves the absorbed buffer's tokens, which the close did not carry, for
+this buffer's detach to release; the close drops only those it carried
+\(OW-nowihu)."
+  (agentpane-test--closing
+    (setq hold '(sessions/close))
+    (let ((other (agentpane--transcript-buffer
+                  (list :ref '(:backend "claude" :id "other")))))
+      (with-current-buffer other
+        (setq agentpane--handle "h9"
+              agentpane--attach-sent 4))
+      (with-current-buffer buffer
+        (agentpane-close-session)
+        (agentpane--on-notification
+         agentpane--connection 'session/snapshot
+         (list :session ref :handle "h9" :token 1 :nodes []))
+        (should-not (buffer-live-p other))
+        (funcall (cdr (pop held)) t)
+        (setq sent nil)
+        (kill-buffer buffer)
+        (should (equal sent `((sessions/detach :session ,ref :tokens [4]))))))))
 
 (ert-deftest agentpane-test-close-session-detached-meanwhile-previews ()
   "A `session/detached' for the handle while the close is out -- the
