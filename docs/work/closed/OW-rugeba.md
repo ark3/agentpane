@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: moot
 ---
 
 # The Emacs helper's respond goes silent by when a request failed, not by why, so a failed first open cancels its input from a timer to let the replies win the race
@@ -27,3 +28,8 @@ This gives up OW-hiliti's choice that a request failing on its own "in the same 
 
 The `setTimeout` around `reader.cancel()` in `onDisconnect` is gone, and the input is cancelled at once on a failed first open as on a drop.
 `resources/probes/emacs_helper_no_server_probe.py` still answers 3 of 3, the two OW-hiliti probes still pass (`resources/probes/README.md`), a vitest case shows a request read after `stopped` sends no fetch or is answered, and `bun run check` passes.
+
+## Close note
+
+Folded into OW-nuzoto on 2026-09-30, which carries this card's change whole: `respond` silent only for a failure the teardown's own abort caused, and `onDisconnect` cancelling the input at once on both paths, giving up OW-hiliti's same-instant silence.
+Its done-condition carries this card's vitest case and probes.

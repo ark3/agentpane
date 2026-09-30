@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # At a seq gap agentpane-mode forgets the turn-done watch, so a re-attach under the same live handle never raises the indicator for the turn the gap interrupted, where the browser's watch survives the gap
@@ -44,3 +45,8 @@ An ERT test in `emacs/agentpane-test.el`, red first, drives case A: submit from 
 `agentpane-test-turn-done-not-raised-by-a-gap` still passes: nothing is raised at the gap itself.
 The docstrings of `agentpane--let-go` and `agentpane--watch-turn` say what the gap does to the watch.
 `bun run check` and the ERT suite pass.
+
+## Close note
+
+Folded into OW-nuzoto on 2026-09-30, which makes agentpane-mode's let-go read its cause instead of an ordering flag: a gap keeps a `streamed` watch, so this card's case A raises the indicator at the re-attached turn's end, and its case B follows from the same watch.
+Its done-condition carries this card's ERT test for case A.

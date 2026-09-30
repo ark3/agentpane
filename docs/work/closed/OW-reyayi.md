@@ -1,5 +1,6 @@
 ---
 labels: [question, emacs]
+closed: moot
 ---
 
 # Should agentpane-mode's helper death drop a buffer whose close was in flight, and raise turn-done at a deliberate agentpane-shutdown, where D25 reasoned only about a crash?
@@ -44,3 +45,9 @@ Case 2 now has a mechanism, and only the decision remains.
 `agentpane--helper-gone` calls it with no argument, so a deliberate `agentpane-shutdown` still raises the indicator, as before OW-kutome.
 A decision to raise nothing at a shutdown would have `agentpane-shutdown` mark the teardown as its own cause and `agentpane--helper-gone` pass that on to `agentpane--let-go`.
 OW-homogu may replace that argument with a different mechanism before this card's decision is built, and the change card should be written against whatever `agentpane--let-go` takes then.
+
+## Close note
+
+Case 1 was settled by D26 (OW-vugefa), as the 2026-09-29 amendment records.
+Case 2 was decided by the owner on 2026-09-30: a deliberate `agentpane-shutdown` over a live server is not the server letting go, so it raises no turn-done indicator and drops the watch, `streamed` or not; a re-attach after a restart that finds the turn still running raises nothing, a case judged unlikely and cheap to lose.
+OW-nuzoto builds that and records it in D25 point 4, so no separate change card is filed.
