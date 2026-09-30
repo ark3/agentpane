@@ -3765,3 +3765,17 @@ After the fix, which runs a prompt's reached-no-backend path only for an error w
 The vitest cases `aborts a request still waiting on the server when the input ends, and writes no reply for it` and `... when the stream drops, ...` in `src/emacs/helper.test.ts` hold the helper's half; both failed against 18020e0 with the `AbortError` reply they now forbid.
 The ert cases `agentpane-test-transport-error-before-a-death-keeps-the-watch` and `agentpane-test-error-reply-before-a-death-abandons-the-watch` hold the reading, the first with a `-32603` carrying no `data` and the second with a 409 carrying `status`.
 With a prompt in flight against the server stand-in, the helper exited 0.029 s to 0.030 s after its stdin closed, in three runs, writing no reply for the prompt.
+
+## With no server listening, the helper answers the requests waiting on its first open before it exits (OW-pezelo)
+
+Measured on the home server 2026-09-29, `bun 1.4.0`, Emacs 31.1 in `--batch` with jsonrpc.el 1.0.29, on `card/OW-pezelo`.
+`resources/probes/emacs_helper_no_server_probe.py` runs `bun run src/emacs/main.ts http://127.0.0.1:1` with stdin held open and sends a `sessions/list` and a `sessions/attach`.
+At b9d50e0, before the fix, the helper exited 0 within 0.03 s writing no reply, 3 runs of 3, and agentpane-mode answered each request as the death, "the helper exited".
+With the fix both replies were `-32603` "could not reach the agentpane server" with no `data`, and the helper exited 0 within 0.02 s, 3 of 3.
+With the fix's `setTimeout` around the input's `reader.cancel()` replaced by an immediate cancel, neither reply was written, 3 of 3; the adversarial read reproduced that with a plain JS `ReadableStream` as input too, while under node both replies were written, which is why the vitest case cannot see the timer.
+
+What Emacs shows, from the adversarial read's batch probe driving `agentpane--request 'sessions/list` through the real helper at that URL, 6 runs of 6.
+When Emacs handles each message as it comes, as an interactive session does, the reply is handled first, "agentpane: sessions/list failed: could not reach the agentpane server", and jsonrpc's sentinel then writes "[jsonrpc] Server exited with status 0" over it, so the reason survives only in `*Messages*`.
+When both arrive together the sentinel runs first and the reason is left showing.
+Before the fix both cases ended on agentpane's "the helper exited", which `agentpane--answer-deaths` writes two zero-delay timers after the sentinel.
+The synchronous `agentpane--attach-now` now signals `jsonrpc-error` -32603 with the reason, where it signalled -1 "Server died".

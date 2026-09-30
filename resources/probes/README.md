@@ -432,3 +432,20 @@ What it showed is the same `docs/MANUAL_TESTING.md` section.
 A fresh agent building this project has none of the validation conversation's
 context. Re-running these is the fastest way to re-establish ground truth
 before trusting the `AgentMessage` mapping in `docs/DESIGN.md`.
+
+## `emacs_helper_no_server_probe.py`
+
+Proves: **with no server listening, the Emacs helper answers each `sessions/list` and `sessions/attach` waiting on its first stream open that the server could not be reached, with no `data`, before it exits** (OW-pezelo).
+It runs the real helper, `bun run src/emacs/main.ts`, against `http://127.0.0.1:1` with its stdin held open, as Emacs holds it.
+The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not the timer that orders the replies before the input's cancel: under node the replies win that race either way, and under Bun they lose it without the timer.
+
+```bash
+python3 resources/probes/emacs_helper_no_server_probe.py
+```
+
+Run from the repository root; `PROBE_RUNS` sets the runs (3).
+Each run prints the helper's exit and its replies, and the probe prints `ANSWERED k of n` and passes only when every run answered both.
+No live model calls, no network beyond loopback.
+
+Verified with: `bun 1.4.0` on the home server, 2026-09-29.
+What it showed is the `docs/MANUAL_TESTING.md` section on OW-pezelo.

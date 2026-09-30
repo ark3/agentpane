@@ -471,7 +471,11 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// are chains of microtasks from the rejection, all run before the
 				// timer that cancels the input, so each is written before the
 				// teardown's abort would silence it (`respond`), and before
-				// `runHelper` resolves.
+				// `runHelper` resolves. Cancelled at once instead, the input's end
+				// won the race under Bun and neither reply was written, in 3 runs
+				// of 3 (bun 1.4.0, measured 2026-09-29), though under node the
+				// replies won and the vitest case passes either way: only
+				// `resources/probes/emacs_helper_no_server_probe.py` sees it.
 				onDisconnect() {
 					closeStream();
 					if (stopped) return;
