@@ -45,3 +45,16 @@ Second, `agentpane--request` in `emacs/agentpane.el` now shows the message of an
 So an error reply that says the server could not be reached now does reach the echo area.
 Whatever shape it takes, decide whether it should carry a `status`: without one, a prompt keeps its watch, as for any outcome not known.
 The helper-level tests to extend are the two "writes no reply for it (OW-hiliti)" cases under "shutdown" in `src/emacs/helper.test.ts`.
+
+## Amended 2026-09-29 at execution
+
+Checked against the source after OW-likopo and OW-hiliti both closed.
+`openStream` in `src/emacs/helper.ts` now returns a promise that settles only on `onOpen`, and `sessions/list` and `sessions/attach` await it before their REST call; a first open that fails calls `onDisconnect`, which ends the read loop, and the promise never settles.
+So with no server listening the request that opened the helper sends no fetch, its handler never settles, `respond` writes nothing, and Emacs answers it as the death: "agentpane: sessions/list failed: the helper exited" (the `requests-out` entry in `agentpane--request`, `emacs/agentpane.el`).
+The abort this card was filed about is gone; the defect it names is not, since nothing the user sees still says the server could not be reached.
+
+The done-condition, restated against that path: a test in `src/emacs/helper.test.ts`, red first, fails the first open (the fake `openEvents` calls `onDisconnect` without `onOpen`) and asserts that `sessions/list`, and separately `sessions/attach`, get an error reply whose message says the server could not be reached, written before `runHelper` resolves; the helper still exits as OW-mepufi and OW-hiliti measured, and `bun run check` passes.
+The stale mentions of the fetch being aborted in the comments this path touches go with it.
+
+The `status` question is decided: the reply carries no `status`.
+In `agentpane--request`, `data.status` means the server's HTTP refusal, and no server answered here; and no caller of `sessions/list` or `sessions/attach` passes UNSENT (`agentpane--attach`, `agentpane--attach-now`, and the picker's refetch), so a `status` would change nothing today and would plant a field that lies.
