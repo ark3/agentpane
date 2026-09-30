@@ -1085,7 +1085,9 @@ A buffer's in-flight flags were cleared only by each request's own failure path,
 The teardown answers every request the dead helper had out and settles each served buffer, per point 4; per-request handlers own every failure that is not a death.
 That is OW-mopuyi.
 Built the same day: `agentpane--request` in `emacs/agentpane.el` records each request it sends in `agentpane--requests-out` under its connection, and `agentpane--helper-gone` lets go of the buffers at once and answers every request still there as the death from a zero-delay timer of its own, running each one's failure path and never the path for a request that reached no backend, so the turn-done watch on a handle a served buffer holds is `agentpane--let-go`'s to settle.
-Past a death a request's error handler answers nothing, jsonrpc.el's "Server died" included.
+The "Server died" jsonrpc.el's sentinel gives every pending request answers nothing: as of jsonrpc.el 1.0.29 it carries the code -1, which the helper never writes (`toRpcError` in `src/emacs/helper.ts`).
+An error reply the helper wrote before it died is the request's answer, as one from a live helper is, so a prompt it refused abandons its turn-done watch and the helper's reason reaches the echo area; that is OW-hiliti, built 2026-09-29, and until then the error handler answered nothing once the helper read as dead, that reply included.
+A request made through a helper that has exited, before its teardown, is sent nowhere and recorded for the teardown to answer as the death, rather than refused with an error that signalled out of the jsonrpc.el timer running the handler that chained it.
 The answers run one tick after the teardown, so the in-flight flags stay set that tick longer, and a reply jsonrpc.el held back behind a synchronous request is still the answer: as of jsonrpc.el 1.0.29 on Emacs 31.1, measured 2026-09-28, it is handed on from a timer queued as the synchronous request unwinds, after the teardown's timer and before the answers'.
 
 ### D26. The server says a handle has ended, and the preview says a ref is gone
