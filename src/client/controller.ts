@@ -1402,10 +1402,11 @@ export function createController(
 			// still read live until it lands.
 			//
 			// A session with nothing on disk has nothing to preview and no row to go
-			// back to: `readSessionPreview` answers its ref with an
-			// empty-but-*non-null* transcript rather than an error, which is enough
+			// back to: until OW-royosa the preview route answered its ref with an
+			// empty-but-*non-null* transcript rather than an error, which was enough
 			// to put the pane on its preview, whose one control is an Attach that can
-			// only 404 on a ref the session manager no longer holds (OW-vasubu). Land
+			// only 404 on a ref the session manager no longer holds (OW-vasubu); it
+			// now answers `gone` (D26 point 5), which nothing here reads yet. Land
 			// on the startup view instead -- selection cleared -- which is where
 			// every user starts anyway, so a view the `ended` has yet to drop
 			// never leaves a detached-loading pane asking for that preview; the
