@@ -764,7 +764,7 @@ Every re-establish of the SSE stream asks for one unsurfaced session listing, so
 The owner took this on 2026-09-16 (OW-vukoku).
 Amended by D25 on 2026-09-28: a client whose stream drops now holds nothing live, a gap detaches its session, and the Emacs helper exits rather than reopening, so the paragraphs below on agentpane-mode's reopen and on reconciling live views across an outage describe what D25's cards retire; the listing at a reconnect stands.
 Amended by OW-sabova on 2026-09-29: a first open that lands while the startup listing is still out asks for one listing after it, because every call that arrives mid-listing is owed one; only a first open after the startup listing has landed lists nothing.
-Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` takes for a session with nothing on disk goes, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until OW-sodohi it did only after the disposal.
+Amended by D26 on 2026-09-29: a handle's end reaches a connected client as an `ended` event rather than through the listing, so the paragraphs below on the helper dropping attachments a listing lacks describe what D26's cards retire; the exit `detach()` took for a session with nothing on disk went with OW-lilami, a preview answering `404` with the code `gone` for a gone ref taking its place; and the server sends `sessions-changed` at a close where it forgets the handle, which until OW-sodohi it did only after the disposal.
 
 Reconnection before this healed transcripts and nothing else.
 `openEventStream` sends opening snapshots only for the sessions holding a live adapter, and a `snapshot` carries `{ session, seq, messages, isStreaming, compaction, model }` -- no `status`, no `updatedAt`, no `cwd`, no `preview`.
@@ -801,11 +801,12 @@ What it replaces is OW-lejahi, landed one commit earlier and narrower: `detach()
 That was one visible instance of a general loss.
 The reconnect re-list subsumes it for a stored session -- a detach with the stream up rides the `sessions-changed` the close broadcasts, and a detach with it down heals at the next open -- so that call came out of the ordinary path with this decision.
 
-It stays on the exit `detach()` takes for a session with nothing on disk, because the row such a detach leaves behind is a different kind of wrong.
+Until OW-lilami it stayed on the exit `detach()` took for a session with nothing on disk, because the row such a detach leaves behind was taken for a different kind of wrong.
 A detached stored session lists with an untrue `status` and is otherwise real: the transcript is on disk and a click reaches it.
-A detached session with nothing on disk is gone everywhere -- no file, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and until OW-royosa `readSessionPreview` answered its ref with an empty-but-non-null transcript, so a click stranded the user on precisely the screen OW-vasubu exists to keep them off; the preview route now answers it `gone` (D26 point 5), which the browser does not read yet.
-The exit is chosen by the summary's `onDisk`, not by the id: attach replaces the `virtual:` id before any prompt (D9, as corrected by OW-bohodu) and a fork never has one, so a session created here and detached before its first turn, and a fork detached before its first turn ended, take this exit too (OW-wedupe).
-A stripe that lies can wait for the stream; a clickable phantom cannot, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
+A detached session with nothing on disk is gone everywhere -- no file, dropped from the manager's table -- while its row still stands in `summaries` and still renders, and until OW-royosa `readSessionPreview` answered its ref with an empty-but-non-null transcript, so a click stranded the user on precisely the screen OW-vasubu exists to keep them off.
+That exit was chosen by the summary's `onDisk`, not by the id: attach replaces the `virtual:` id before any prompt (D9, as corrected by OW-bohodu) and a fork never has one, so a session created here and detached before its first turn, and a fork detached before its first turn ended, took it too (OW-wedupe).
+A stripe that lies could wait for the stream; a clickable phantom could not, least of all for a stream that may never come back up -- which is OW-dekuri, where a fatally closed `EventSource` fires no further `onopen` at all.
+Since OW-royosa the preview route answers that ref `gone` (D26 point 5), and since OW-lilami the browser reads it: the phantom's click, like the detached-loading pane the detach leaves, lands on the startup view (D26 point 6), so the row is as harmless as a lying stripe and waits for the next listing like one, and `detach()` asks no listing and reads no `onDisk`.
 
 Not on the first open, which is the whole of the mechanism's subtlety.
 `EventSource` fires `onopen` on the initial connect as well as on every re-establish, `controller.start()` already lists there, and `refreshSessions` coalesces only calls that arrive while a listing is out -- which since OW-sabova it owes one fresh listing after that one -- and not listings that follow each other.
@@ -1068,7 +1069,7 @@ The pane's mode is derived instead, by a fixed precedence: live when the tab hol
 One place fetches the preview, once the stream is up, and the listing alone owns a row's `status`.
 That is OW-forinu.
 Built the same day: `paneMode` in `src/client/controller.ts` is the derivation, `publish` fetches the detached-loading pane's preview, and an attach reply keeps the listed row's `status`, a row no listing has named yet reading `detached`.
-A stream drop now keeps a selection whose transcript is on disk, on the detached-loading pane, and still clears one with nothing on disk.
+A stream drop now keeps a selection whose transcript is on disk, on the detached-loading pane, and until OW-lilami still cleared one with nothing on disk; since then it keeps that one too, with its row, and the preview's `gone` clears it once a server answers (D26 point 6).
 
 agentpane-mode bound a buffer to a handle on two channels, the attach reply and the helper's snapshot, so a reply that landed after a gap or behind a synchronous request rebound a buffer the helper no longer fed (OW-tifiva, OW-kifuhi).
 The helper's notifications alone say a buffer is attached: from a snapshot under its handle until a `session/detached` or the helper's death; the reply only ends the request.
@@ -1135,6 +1136,12 @@ agentpane-mode's `agentpane--dropped`, which makes `g` attach a buffer the helpe
    So a dropped view lands on the startup view once the one fetch answers, and so does a previewed session another client closed, or one previewed across a server restart, at the poll's next tick.
    OW-bilogo's "a failed read is never an answer" stands with that one exception, keyed on `gone` and never on a transport failure.
    `detach()`'s no-disk exit and `onDisconnect`'s no-disk branch go, and with them D21's exception for the former.
+   A drop keeps a row with nothing on disk, reading detached like every other, for the reconnect's listing to drop, as a detach leaves it for the next one.
+   A click's failure that is not `gone` shows once: on the detached-loading pane when the row clicked is the selection, holding it whatever the stream reads until the next `connected` or click, and otherwise in the error slot, since no pane of that session is on screen to carry it.
+   A read's `gone` or failure lands only while the selection intent it was asked under stands, a click making a read it shares its own, and no background read is asked while a click's read owned by the current intent is out, so a click on another row leaves the selection's detached-loading pane clearing nothing until that click lands.
+   A background read's preview lands whenever the pane still waits on that session, whatever the intent, since it is that session's transcript and a later click replaces it.
+   At a `connected` every read of the detached-loading pane's session is abandoned, a click's included, since the fresh read that transition owes answers the click too; a click's read of another row is kept, since nothing else would ask it again.
+   Built by OW-lilami: `isGone`, `readPreview`, `landPreview` and `loadPreview` in `src/client/controller.ts`.
 7. An agentpane-mode buffer is live exactly when attached.
    `agentpane--dropped` goes, `g` in a buffer that is not attached previews, and a preview answered `gone` kills the buffer as `agentpane-close-session` does today for a session with nothing on disk, its composer text going to the kill ring first; that command's follow-up listing goes.
    Going live again is a send or an attach-only command, OW-bupivi, which this makes required; the browser already works that way, a dropped view falling to preview with an explicit Attach.
