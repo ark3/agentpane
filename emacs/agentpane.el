@@ -402,11 +402,12 @@ handle to it again."
 (defun agentpane--helper-gone (connection)
   "Tear down CONNECTION, the helper's, which has exited: forget it, and
 leave each transcript buffer attached through it, by a snapshot it sent
-\(`agentpane--attached'), as a `session/detached' for its handle
-would, through `agentpane--let-go': any helper's death is
-taken to mean every buffer it served is detached, whatever the cause, a
-helper that crashed over a live server being rare and costing an
-attach (D25), since `g' previews a buffer not attached (D26).
+\(`agentpane--attached'), as a `session/detached' for the server's
+`ended' under its handle would, through `agentpane--let-go': any
+helper's death is taken to mean every buffer it served is detached,
+whatever the cause, a helper that crashed over a live server being rare
+and costing an attach (D25), since `g' previews a buffer not attached
+\(D26).
 Run from its sentinel, behind what the helper wrote last; see
 `agentpane--helper-exited'.  Only this forgets a connection, and no
 helper starts before it has (`agentpane--connection'), so every buffer
@@ -781,8 +782,8 @@ transcript over the live one it still showed.  It reads as the status
 that ends a turn leaves it, nothing streaming or compacting, since
 nothing will say so under that handle.  The turn-done watch on that
 handle is folded that status, then ends with the handle; at a gap, which
-leaves the handle live on the server and the turn going on unheard, it
-ends first, raising nothing; see `agentpane--watch-turn'."
+leaves the handle live on the server and any turn under it going on
+unheard, it ends first, raising nothing; see `agentpane--watch-turn'."
   (when gapped (agentpane--watch-forget agentpane--handle))
   (agentpane--read-idle)
   (agentpane--watch-forget agentpane--handle)

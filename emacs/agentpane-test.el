@@ -1281,7 +1281,7 @@ said nothing more under."
           (agentpane--on-notification agentpane--connection 'session/snapshot
                                       (list :session ref :handle "h1" :nodes []))
           (agentpane--on-notification agentpane--connection 'session/detached
-                                      (list :session ref :handle "h1"))
+                                      (list :session ref :handle "h1" :cause "gapped"))
           (funcall (cdr (pop held)) t)
           (with-current-buffer buffer
             (should-not (agentpane--attached-p))
@@ -4846,12 +4846,12 @@ the watch goes with the handle (D26, OW-kutome)."
 (defun agentpane-test--reattach-after-helper-death (late)
   "Submit a turn, see it stream, let the helper exit, which raises the
 indicator for that turn, as a `session/detached' for the server's `ended'
-does, and clear it; then prompt again through a new helper, whose attach answers under the same
-handle and whose snapshot, handled before the attach's reply, as the
-helper writes them, says the first turn is over.  When LATE, a status
-the helper wrote after the snapshot, still idle, is handled before the
-reply, as when jsonrpc.el holds the reply back behind a synchronous
-request.
+does, and clear it; then prompt again through a new helper, whose attach
+answers under the same handle and whose snapshot, handled before the
+attach's reply, as the helper writes them, says the first turn is over.
+When LATE, a status the helper wrote after the snapshot, still idle, is
+handled before the reply, as when jsonrpc.el holds the reply back behind
+a synchronous request.
 Nothing more is raised before the second prompt's turn streams; return
 whether its end, unseen, raises the indicator."
   (agentpane-test--submitting
@@ -4891,12 +4891,13 @@ whether its end, unseen, raises the indicator."
 
 (ert-deftest agentpane-test-turn-done-watch-ends-with-the-helper ()
   "A helper that exits ends the watch on every handle it carried as a
-`session/detached' for the server's `ended' does, and each buffer attached through it reads as
-not streaming, so a turn seen streaming ends there as an aborted one does
-(D25): after a crash mid-turn the re-attach's snapshot raises nothing more
-for the turn it finds over, whether the next prompt's attach reply is
-handled right after that snapshot or after what followed it, and that
-prompt's own turn raises the indicator when it ends (OW-dunahe)."
+`session/detached' for the server's `ended' does, and each buffer
+attached through it reads as not streaming, so a turn seen streaming ends
+there as an aborted one does (D25): after a crash mid-turn the
+re-attach's snapshot raises nothing more for the turn it finds over,
+whether the next prompt's attach reply is handled right after that
+snapshot or after what followed it, and that prompt's own turn raises the
+indicator when it ends (OW-dunahe)."
   (should (agentpane-test--reattach-after-helper-death nil))
   (should (agentpane-test--reattach-after-helper-death t)))
 
@@ -5777,7 +5778,7 @@ reply is handed on (OW-tifiva), as in wire order
                   :params (list :session ref :handle "h1" :isStreaming :false
                                 :nodes (vector)))
             (list :jsonrpc "2.0" :method "session/detached"
-                  :params (list :session ref :handle "h1"))
+                  :params (list :session ref :handle "h1" :cause "gapped"))
             (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1"))
             (list :jsonrpc "2.0" :id 2 :result (vector)))
     (setq linger t)

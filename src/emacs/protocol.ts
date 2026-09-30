@@ -40,7 +40,7 @@
  * `sessions/attach` wait for the event stream's open before their own call.
  * OW-kutome raised it a thirteenth, for `session/detached`'s `cause`, which
  * tells the server letting go of the handle from a `seq` gap, since only
- * the first ends the turn running under it.
+ * the first says a turn running under it is over.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -316,7 +316,7 @@
  *   `"ended"`, or the session's `seq` gapped, and the helper detaches that
  *   one session rather than attach it again (D25 point 5, OW-filuge), and
  *   `cause` is `"gapped"`: the handle stays live on the server, and a turn
- *   running under it goes on unheard. `session` is the ref it last named
+ *   running under it may go on unheard. `session` is the ref it last named
  *   the session by. The buffer holding `handle` lets go of it and counts
  *   itself detached and not streaming, keeping its ref and what it drew;
  *   its next `sessions/attach`, by that ref, is answered under whatever
