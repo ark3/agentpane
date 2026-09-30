@@ -19,7 +19,7 @@ on what it found; read it there for the current decision.
                              deleted `replaceProcess` on 2026-09-13, so this
                              cell now reproduces nothing agentpane does. It
                              reproduces that kill -- SIGTERM, grace, SIGKILL,
-                             matching `ChildClaudeProcess.kill()` -- and hashes
+                             matching `ChildProcessShell.kill()` -- and hashes
                              the parent's store file at three points: after the
                              priming turn, immediately before the kill, and
                              after the child is gone. If Claude Code flushes
@@ -133,7 +133,7 @@ SAMPLE_MARKS = (40, 80, 120, 160)
 # knob whose help text says not to turn it is not configurability.
 MODEL = "haiku"
 
-# Matches ChildClaudeProcess.kill() in claude/process.ts.
+# Matches ChildProcessShell.kill() in src/server/adapters/child-process.ts.
 TERMINATE_GRACE_S = 2.0
 KILL_GRACE_S = 1.0
 

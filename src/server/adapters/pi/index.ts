@@ -7,7 +7,6 @@ import type { SessionRef } from "../../../shared/protocol.ts";
 import type { AdapterFactory, BackendAdapter } from "../types.ts";
 import { PiAdapter } from "./process.ts";
 
-export { LfLineSplitter } from "./framing.ts";
 export { PiAdapter } from "./process.ts";
 export {
 	createInitialPiState,

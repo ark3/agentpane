@@ -1,11 +1,14 @@
 /**
- * Pi RPC framing: strict JSONL with LF (`\n`) as the only record delimiter.
+ * The framing every backend's stdout uses: strict JSONL with LF (`\n`) as the
+ * only record delimiter. Pi's RPC, Codex's app-server and Claude Code's
+ * stream-json all read through this one splitter (`child-process.ts`).
  *
  * Deliberately not `node:readline`. `readline` also splits on U+2028 (LINE
  * SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR), which are valid unescaped
  * characters inside a JSON string -- a model response that happens to
- * contain one would get its line torn in half and fail to parse. See
- * rpc.md's "Framing" section and HANDOFF's "Environment gotchas".
+ * contain one would get its line torn in half and fail to parse. See Pi's
+ * rpc.md "Framing" section and HANDOFF's "Environment gotchas"; the same
+ * hazard applies to any JSON-lines transport.
  *
  * This is pure and synchronous on purpose: it takes decoded string chunks
  * in and hands complete lines back out, with no I/O of its own, so it can

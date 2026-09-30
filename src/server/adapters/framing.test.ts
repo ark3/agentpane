@@ -57,3 +57,50 @@ describe("LfLineSplitter", () => {
 		expect(lines).toEqual(['{"a":1}', "", '{"b":2}']);
 	});
 });
+
+describe("LfLineSplitter, the cases Codex's own splitter was pinned by", () => {
+	it("uses LF as the only record delimiter, preserving U+2028 and U+2029 inside JSON", () => {
+		const splitter = new LfLineSplitter();
+		const lines: string[] = [];
+		const lineSeparator = String.fromCharCode(0x2028);
+		const paragraphSeparator = String.fromCharCode(0x2029);
+		const text = `before${lineSeparator}middle${paragraphSeparator}after`;
+		const payload = JSON.stringify({ method: "item/agentMessage/delta", params: { delta: text } });
+
+		lines.push(...splitter.push(`${payload}\n`));
+
+		expect(lines).toEqual([payload]);
+		expect(JSON.parse(lines[0] as string).params.delta).toBe(text);
+	});
+
+	it("buffers partial chunks and emits each completed LF-delimited line", () => {
+		const splitter = new LfLineSplitter();
+		const lines: string[] = [];
+
+		lines.push(...splitter.push('{"id":1,"res'));
+		expect(lines).toEqual([]);
+		lines.push(...splitter.push('ult":true}\n{"id":2,"result":false}\n'));
+
+		expect(lines).toEqual(['{"id":1,"result":true}', '{"id":2,"result":false}']);
+	});
+
+	it("flushes a final unterminated line exactly once", () => {
+		const splitter = new LfLineSplitter();
+		const lines: string[] = [];
+		lines.push(...splitter.push('{"id":1,"result":true}\n{"id":2,"result":false}'));
+
+		lines.push(...splitter.flush());
+		lines.push(...splitter.flush());
+
+		expect(lines).toEqual(['{"id":1,"result":true}', '{"id":2,"result":false}']);
+	});
+
+	it("preserves a whitespace-only LF frame for protocol validation", () => {
+		const splitter = new LfLineSplitter();
+		const lines: string[] = [];
+
+		lines.push(...splitter.push(" \t\n"));
+
+		expect(lines).toEqual([" \t"]);
+	});
+});

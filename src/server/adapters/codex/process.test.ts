@@ -6,7 +6,7 @@ const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawn: childProcess.spawn }));
 
 import { CodexClient } from "./jsonrpc.ts";
-import { LineSplitter, spawnCodex } from "./process.ts";
+import { spawnCodex } from "./process.ts";
 
 class FakeReadable extends EventEmitter {
 	encoding: string | undefined;
@@ -56,53 +56,6 @@ function spawnHarness(options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
 
 beforeEach(() => {
 	childProcess.spawn.mockReset();
-});
-
-describe("LineSplitter", () => {
-	it("uses LF as the only record delimiter, preserving U+2028 and U+2029 inside JSON", () => {
-		const splitter = new LineSplitter();
-		const lines: string[] = [];
-		const lineSeparator = String.fromCharCode(0x2028);
-		const paragraphSeparator = String.fromCharCode(0x2029);
-		const text = `before${lineSeparator}middle${paragraphSeparator}after`;
-		const payload = JSON.stringify({ method: "item/agentMessage/delta", params: { delta: text } });
-
-		splitter.push(`${payload}\n`, (line) => lines.push(line));
-
-		expect(lines).toEqual([payload]);
-		expect(JSON.parse(lines[0] as string).params.delta).toBe(text);
-	});
-
-	it("buffers partial chunks and emits each completed LF-delimited line", () => {
-		const splitter = new LineSplitter();
-		const lines: string[] = [];
-
-		splitter.push('{"id":1,"res', (line) => lines.push(line));
-		expect(lines).toEqual([]);
-		splitter.push('ult":true}\n{"id":2,"result":false}\n', (line) => lines.push(line));
-
-		expect(lines).toEqual(['{"id":1,"result":true}', '{"id":2,"result":false}']);
-	});
-
-	it("flushes a final unterminated line exactly once", () => {
-		const splitter = new LineSplitter();
-		const lines: string[] = [];
-		splitter.push('{"id":1,"result":true}\n{"id":2,"result":false}', (line) => lines.push(line));
-
-		splitter.flush((line) => lines.push(line));
-		splitter.flush((line) => lines.push(line));
-
-		expect(lines).toEqual(['{"id":1,"result":true}', '{"id":2,"result":false}']);
-	});
-
-	it("preserves a whitespace-only LF frame for protocol validation", () => {
-		const splitter = new LineSplitter();
-		const lines: string[] = [];
-
-		splitter.push(" \t\n", (line) => lines.push(line));
-
-		expect(lines).toEqual([" \t"]);
-	});
 });
 
 describe("spawnCodex", () => {

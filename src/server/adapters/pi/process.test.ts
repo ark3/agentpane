@@ -1691,10 +1691,10 @@ describe("PiAdapter teardown", () => {
 
 			const disposing = h.adapter.dispose();
 			await Promise.resolve();
-			expect(h.child.signals).toEqual([undefined]);
+			expect(h.child.signals).toEqual(["SIGTERM"]);
 
 			await vi.advanceTimersByTimeAsync(2_000);
-			expect(h.child.signals).toEqual([undefined, "SIGKILL"]);
+			expect(h.child.signals).toEqual(["SIGTERM", "SIGKILL"]);
 
 			// A child that outlives SIGKILL must not hang shutdown forever.
 			await vi.advanceTimersByTimeAsync(1_000);
