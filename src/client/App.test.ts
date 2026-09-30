@@ -2784,9 +2784,10 @@ describe("App", () => {
 	 * Driven by the real controller, not the fake: the re-entrancy rule lives in
 	 * `forkAndSubmit`, and what makes the second press safe is that the composer
 	 * never reaches the controller with it at all (OW-kelede). Reaching it and
-	 * being *refused* would not do -- a refusal resolves null, `send()` reads that
-	 * as "nothing was sent" and disarms, and on this path the key it disarms is
-	 * still the first press's, which is live and about to stream.
+	 * being *refused* would now be harmless on this path, though not on the
+	 * plain one: a refusal resolves null and `send()` disarms, but a fork arms
+	 * its follow and badge only when its attach replies, which a refused press
+	 * never reaches, so it has no key to disarm (OW-vitefo).
 	 */
 	it("keeps the first fork's follow and badge when send is pressed twice in edit mode (OW-kelede)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-fork" };
@@ -3331,6 +3332,11 @@ describe("App", () => {
 		emit(snapshot(parentRef, "h-parent", 1, [user("first draft"), assistant([{ type: "text", text: "an ans" }])], true));
 		await controller.select(parentRef);
 		await tick();
+		// The reader has scrolled the parent, so it has a remembered position of
+		// its own -- which must stay the parent's, and never land on the fork over
+		// the fork's own follow.
+		el.scrollTop = 10;
+		await fireEvent.scroll(el);
 
 		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
 		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });

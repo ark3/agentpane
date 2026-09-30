@@ -1194,16 +1194,19 @@
 		const edit = editing;
 		// A second Ctrl/Cmd-Enter while the first send is still in flight is
 		// refused by the controller and issues nothing (OW-nasofa on the plain
-		// path, OW-kelede on the fork), so returning here rather than arming for
-		// it is not just tidier: the disarm below would fire on that refusal and
-		// take down the *first* send's arming, which is live and about to stream.
-		// Both paths, and off the controller's own `sending` flag rather than
-		// `busy` -- which an abort or an attach clears while the POST it described
-		// is still outstanding (OW-kelede).
+		// path, OW-kelede on the fork). On the plain path returning here rather
+		// than arming for it is not just tidier: the disarm below would fire on
+		// that refusal and take down the *first* send's arming, which is live and
+		// about to stream. The fork path arms nothing until the fork's attach
+		// replies, which a refused press never reaches, so there it has nothing to
+		// disarm (OW-vitefo). Both paths, and off the controller's own `sending`
+		// flag rather than `busy` -- which an abort or an attach clears while the
+		// POST it described is still outstanding (OW-kelede).
 		if (view.sending) return;
-		// Arming follow is keyed on the session's handle, which a rename landing
-		// while the request is in flight (D9) leaves alone, so this is still
-		// where the arming sits when the request settles (OW-kimaya).
+		// The selected session's handle, which a rename landing while the request
+		// is in flight (D9) leaves alone, so it still names that session when the
+		// request settles (OW-kimaya): where the plain path armed its follow and
+		// badge, and the parent a fork carries its row's turn marks from.
 		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
 			armFollow();
