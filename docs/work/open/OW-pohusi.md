@@ -12,7 +12,7 @@ In service of D25's promise that a server going away still ends a turn this clie
 `controller.submit` in `src/client/controller.ts` returns `false` from its `catch` for any throw from `api.prompt`: a server refusal (an `ApiClientError` carrying the HTTP status), and equally a fetch that rejects in transport, the socket closing mid-request when the server dies.
 `send` in `src/client/App.svelte` then calls `disarmSubmit`, whose docblock says "The submit those two armed never reached the backend (OW-mifuki)", and `watchAbandon` in `src/client/favicon.ts` takes down the badge watch and the pending follow.
 A transport failure does not say the prompt never reached the backend: OW-hiliti measured, with a real server SIGKILLed while a prompt was in flight, that the socket's error was what the client saw in all 32 runs, whether or not the turn had been admitted (`resources/probes/emacs_helper_server_death_probe.el`; `docs/MANUAL_TESTING.md`, "only a refusal abandons a prompt's watch").
-The `forkAndSubmit` path (`landed` false, also calling `disarmSubmit`) needs the same reading.
+The `forkAndSubmit` path needs the same reading: since OW-koledi its `landed` false no longer calls `disarmSubmit` but deletes the parent's pending follow and `watchAbandon`s the watch `send` armed on the fork's handle in `forkAndSubmit`'s `onAttached` callback, and a transport failure of the fork's prompt POST takes both down just the same.
 
 ## What Emacs now does
 
