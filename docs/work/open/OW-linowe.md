@@ -1,5 +1,5 @@
 ---
-labels: [defect, emacs]
+labels: [defect, emacs, sweep-0929]
 ---
 
 # A detach without a handle still drops the Emacs helper's attachments by ref, so killing a buffer the helper let go of silences another buffer attached on that ref; the helper should record which handle each token's answer bound, and drop only that
