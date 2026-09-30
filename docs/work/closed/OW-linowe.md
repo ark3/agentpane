@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, sweep-0929]
+closed: done
 ---
 
 # A detach without a handle still drops the Emacs helper's attachments by ref, so killing a buffer the helper let go of silences another buffer attached on that ref; the helper should record which handle each token's answer bound, and drop only that
@@ -36,3 +37,18 @@ Two related orderings the same reader rated plausible, read and not run, which a
 A test in `src/emacs/helper.test.ts`, red first: attach R from token 1 and receive its snapshot under H1; a gapped or `ended` let-go of H1; attach R from token 2 answered under H2; `sessions/detach {session: R, token: 1}`; a later event under H2 still reaches Emacs.
 The `forget` docblock and the `agentpane--detach` docstring's "Three cases stay" paragraph describe what remains, and the by-ref loop in `forget` and its `!pending` exception are gone.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Landed on main as ffa0ee9 and 06c45ef.
+`forget` in `src/emacs/helper.ts` no longer drops by ref: the by-ref loop and its `!pending` exception are gone.
+A new `answered` map records, per token, the handle of the attachment its answering snapshot created (only where `attached` did not already hold that handle); `drop`, and so `end` and `detachGapped`, clears every token pointing at the dropped handle; a detach or close with no handle drops only `answered.get(token)`.
+So a let-go buffer's token (gap or `ended`) drops nothing, and neither does a failed attach's, which settles the docstring's second case for free.
+
+The second commit came from the adversarial read, which reproduced a regression in the first: Y holds h1; X previews an alias, attaches, and its answer lands under h1; X is killed before Emacs handles that snapshot. The old by-ref drop matched nothing there, but the first commit dropped h1 and silenced Y. Hence "only where the answer created the attachment".
+
+Verified: helper.test.ts gained an `it.each` (gapped/ended) for the card's ordering, red against main's helper (2 failed), and an alias-ordering test red against the first commit; the gapped variant reuses h1, so it also pins the clearing in `drop`. The pre-existing detach/close tests that sent only a ref (a request agentpane-mode never sends) now carry the token; the renamed one names the alias ref and fails on the old helper. `bun run check` (1573 tests) and the ERT suite (236, 0 unexpected) pass on main.
+
+What remains, named in the `forget` docblock and the `agentpane--detach` "One case stays" paragraph: a buffer killed before handling a snapshot whose answer created the attachment still drops it, silencing another buffer whose attach was answered under that handle after it.
+The two orderings the card asked about: neither is settled. A snapshot tagged with a token no buffer holds still falls through `agentpane--notified-buffer`'s ref fallbacks, and a detach by handle H still drops H after another buffer's tagged snapshot under H went out.
+Both, the remaining case, and a superseded-token leak the reader found are carried by OW-nowihu, which replaces `answered` with per-handle holder tracking.
