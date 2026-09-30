@@ -1284,4 +1284,34 @@ describe("shutdown", () => {
 		await tick();
 		expect(io.response(1)).toBeUndefined();
 	});
+
+	// A chunk the input delivered before the teardown cancelled it is still
+	// read. Sent, its call would be aborted and its reply silenced, and Emacs
+	// would take a request that may have reached a backend for the helper's
+	// death (OW-nuzoto).
+	it.each([
+		["its stream drops", true],
+		["its first open fails", false],
+	])("sends nowhere a request read after %s, and answers it (OW-nuzoto)", async (_case, opens) => {
+		const signals: (AbortSignal | null | undefined)[] = [];
+		const { io, source, calls, done } = start({
+			...unanswered(signals),
+			[`POST ${ROUTES.prompt(pi)}`]: (url, init) => unanswered(signals)[`GET ${ROUTES.sessions}`]!(url, init),
+		});
+		source.failing = opens ? 0 : 1;
+		source.holding = !opens;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		if (opens) await vi.waitFor(() => expect(calls).toHaveLength(1));
+		else await tick();
+
+		// In one synchronous run: the chunk is delivered, then the teardown begins.
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, text: "hello" } });
+		if (opens) source.opens[0]!.onDisconnect(true);
+		else source.openHeld();
+		expect(await settled(done)).toBe("resolved");
+		stop = null;
+		await tick();
+		expect(calls.map((call) => call.url)).not.toContain(ROUTES.prompt(pi));
+		expect(io.response(2)).toHaveProperty("error");
+	});
 });

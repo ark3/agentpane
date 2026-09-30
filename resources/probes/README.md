@@ -407,7 +407,7 @@ Run from the repository root; `PROBE_RUNS` sets the runs per case (3).
 Each case prints `RAISED k of n` and each run's echo-area messages, and passes only when every run raised.
 No live model calls, no network beyond the loopback pipe.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29.
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30.
 What it showed is `docs/MANUAL_TESTING.md`, "A request the helper's teardown aborts gets no reply, and only a refusal abandons a prompt's watch (OW-hiliti)".
 
 ## `emacs_helper_server_death_probe.el`
@@ -424,7 +424,7 @@ emacs --batch -L emacs -l ert -l agentpane -l agentpane-test \
 Run from the repository root; `PROBE_RUNS` sets the runs (8).
 It prints `RAISED k of n`, with each run's result and the prompt's failure message, and passes only when every run raised.
 
-Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29.
+Verified with: Emacs 31.1, jsonrpc.el 1.0.29, `bun 1.4.0` on the home server, 2026-09-29; again after OW-nuzoto, 2026-09-30.
 What it showed is the same `docs/MANUAL_TESTING.md` section.
 
 ## Why these live here
@@ -437,7 +437,8 @@ before trusting the `AgentMessage` mapping in `docs/DESIGN.md`.
 
 Proves: **with no server listening, the Emacs helper answers each `sessions/list` and `sessions/attach` waiting on its first stream open that the server could not be reached, with no `data`, before it exits** (OW-pezelo).
 It runs the real helper, `bun run src/emacs/main.ts`, against `http://127.0.0.1:1` with its stdin held open, as Emacs holds it.
-The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not the timer that orders the replies before the input's cancel: under node the replies win that race either way, and under Bun they lose it without the timer.
+The vitest case in `src/emacs/helper.test.ts` holds the helper's rejection but not its race with the input's cancel: under node the replies win that race, and under Bun they lose it to the teardown's abort.
+Since OW-nuzoto they are written anyway, the helper being silent only for a failure its abort caused, and the input is cancelled at once, where until then a timer held the cancel back so that the replies won; this probe is the only check that they are still written under Bun.
 
 ```bash
 python3 resources/probes/emacs_helper_no_server_probe.py
@@ -447,5 +448,5 @@ Run from the repository root; `PROBE_RUNS` sets the runs (3).
 Each run prints the helper's exit and its replies, and the probe prints `ANSWERED k of n` and passes only when every run answered both.
 No live model calls, no network beyond loopback.
 
-Verified with: `bun 1.4.0` on the home server, 2026-09-29.
-What it showed is the `docs/MANUAL_TESTING.md` section on OW-pezelo.
+Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30.
+What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto.

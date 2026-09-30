@@ -175,17 +175,29 @@ interface HeldNode {
  * `respond` before the drop had aborted anything in all 32 runs of
  * `resources/probes/emacs_helper_server_death_probe.el` (bun 1.4.0,
  * measured 2026-09-29; docs/MANUAL_TESTING.md, OW-hiliti). The test is
- * whether the abort has run when the request fails, so one that failed on
- * its own in the same instant goes unanswered too, and reads as the death
- * it all but was. Writing nothing keeps nothing open: with a prompt in
- * flight, the helper exited 0.029s to 0.030s after its stdin closed, as
- * fast as OW-kofuda measured (bun 1.4.0, measured 2026-09-29).
+ * what failed the request, not when (OW-nuzoto): only a failure the abort
+ * caused, the signal's own reason or an `AbortError` once it has fired,
+ * goes unanswered, so one that failed on its own in the same instant gets
+ * its own error, which agentpane-mode reads as an outcome unknown too.
+ * Until OW-nuzoto the test was whether the abort had run, and such a
+ * request went unanswered. A request read once the teardown has begun, from
+ * a chunk the input delivered before it was cancelled, calls nothing and
+ * is answered that the helper is exiting: sent, its call would be aborted
+ * and its reply silenced, though it might have reached a backend. Writing
+ * nothing keeps nothing open: with a prompt in flight, the helper exited
+ * 0.029s to 0.030s after its stdin closed, as fast as OW-kofuda measured
+ * (bun 1.4.0, measured 2026-09-29).
  */
 export async function runHelper(options: HelperOptions): Promise<void> {
 	const { render } = options;
 	const inFlight = new AbortController();
 	const fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
-		options.fetch(input, { ...init, signal: inFlight.signal })) as typeof globalThis.fetch;
+		stopped
+			? Promise.reject(new Error("the agentpane helper is exiting"))
+			: options.fetch(input, { ...init, signal: inFlight.signal })) as typeof globalThis.fetch;
+	/** Whether `error` is the teardown's own abort of a call, the one failure `respond` answers nothing for. */
+	const abortedHere = (error: unknown): boolean =>
+		inFlight.signal.aborted && (error === inFlight.signal.reason || (error instanceof Error && error.name === "AbortError"));
 	const api = createAgentpaneApi({ fetch, openEvents: options.openEvents });
 
 	let state: ClientState = initialClientState();
@@ -468,25 +480,24 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 				// A failed first open is where a server that is not running shows,
 				// so each request waiting on it answers that (OW-pezelo), with no
 				// `data.status`, which would say a server refused it. Those replies
-				// are chains of microtasks from the rejection, all run before the
-				// timer that cancels the input, so each is written before the
-				// teardown's abort would silence it (`respond`), and before
-				// `runHelper` resolves. Cancelled at once instead, the input's end
-				// won the race under Bun and neither reply was written, in 3 runs
-				// of 3 (bun 1.4.0, measured 2026-09-29), though under node the
-				// replies won and the vitest case passes either way: only
+				// are chains of microtasks from the rejection, and under Bun the
+				// input's end outruns them to the teardown's abort: with `respond`
+				// silent whenever the abort had run, neither was written, in 3 runs
+				// of 3 (bun 1.4.0, measured 2026-09-29 and again 2026-09-30). They
+				// are written because `respond` is silent only for a failure the
+				// abort caused, which this is not, whenever it lands: both, in 3
+				// runs of 3, the input cancelled at once (bun 1.4.0, measured
+				// 2026-09-30; OW-nuzoto). Until OW-nuzoto a timer held the cancel
+				// back so that the replies won. Under node they win anyway, and the
+				// vitest case passes either way: only
 				// `resources/probes/emacs_helper_no_server_probe.py` sees it.
 				onDisconnect() {
 					closeStream();
 					if (stopped) return;
 					flushNodes();
 					stopped = true;
-					if (open) {
-						void reader.cancel();
-						return;
-					}
-					reject(new Error("could not reach the agentpane server"));
-					setTimeout(() => void reader.cancel());
+					if (!open) reject(new Error("could not reach the agentpane server"));
+					void reader.cancel();
 				},
 				// The server frames its own JSON, so a frame that fails to parse is a
 				// server bug, not a case to defend (D26 point 4). It has no session
@@ -607,7 +618,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			write(encodeFrame({ jsonrpc: "2.0", id, result }));
 		} catch (error: unknown) {
 			// Aborted by this helper's teardown: no reply; see `runHelper`.
-			if (inFlight.signal.aborted) return;
+			if (abortedHere(error)) return;
 			write(encodeFrame({ jsonrpc: "2.0", id, error: toRpcError(error) }));
 		}
 	};

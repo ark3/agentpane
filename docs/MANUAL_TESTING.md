@@ -3773,9 +3773,18 @@ Measured on the home server 2026-09-29, `bun 1.4.0`, Emacs 31.1 in `--batch` wit
 At b9d50e0, before the fix, the helper exited 0 within 0.03 s writing no reply, 3 runs of 3, and agentpane-mode answered each request as the death, "the helper exited".
 With the fix both replies were `-32603` "could not reach the agentpane server" with no `data`, and the helper exited 0 within 0.02 s, 3 of 3.
 With the fix's `setTimeout` around the input's `reader.cancel()` replaced by an immediate cancel, neither reply was written, 3 of 3; the adversarial read reproduced that with a plain JS `ReadableStream` as input too, while under node both replies were written, which is why the vitest case cannot see the timer.
+That timer was retired on 2026-09-30 by OW-nuzoto, which keeps the replies written by what silences a reply rather than by when the input is cancelled; see the section below.
 
 What Emacs shows, from the adversarial read's batch probe driving `agentpane--request 'sessions/list` through the real helper at that URL, 6 runs of 6.
 When Emacs handles each message as it comes, as an interactive session does, the reply is handled first, "agentpane: sessions/list failed: could not reach the agentpane server", and jsonrpc's sentinel then writes "[jsonrpc] Server exited with status 0" over it, so the reason survives only in `*Messages*`.
 When both arrive together the sentinel runs first and the reason is left showing.
 Before the fix both cases ended on agentpane's "the helper exited", which `agentpane--answer-deaths` writes two zero-delay timers after the sentinel.
 The synchronous `agentpane--attach-now` now signals `jsonrpc-error` -32603 with the reason, where it signalled -1 "Server died".
+
+## Without the timer, the helper still answers the requests waiting on its first open (OW-nuzoto)
+
+Measured on the home server 2026-09-30, `bun 1.4.0`, Emacs 31.1 in `--batch` with jsonrpc.el 1.0.29, on `card/OW-nuzoto`.
+OW-nuzoto made `respond` in `src/emacs/helper.ts` silent only for a failure the teardown's abort caused -- the signal's own reason, or an `AbortError` once it has fired -- where until then it was silent for any failure once the abort had run, and it made `onDisconnect` cancel the input at once on both paths, dropping OW-pezelo's `setTimeout`.
+With both changes, `resources/probes/emacs_helper_no_server_probe.py` answered both requests, `-32603` "could not reach the agentpane server" with no `data`, and the helper exited 0 within 0.02 s, 3 of 3.
+With the immediate cancel kept and only `respond`'s old test restored, `if (inFlight.signal.aborted) return;`, neither reply was written, 3 of 3, as OW-pezelo measured of the immediate cancel: under Bun the input's end still reaches the abort before the replies fail, and it is the silence's test, not the order, that now lets them through.
+The two OW-hiliti probes still pass after the change: `emacs_helper_drop_probe.el` raised 3 of 3 in both its `busy` and `idle` cases, the echo area reading `[jsonrpc] Server exited with status 0` then `agentpane: sessions/prompt failed: the helper exited`, as before; `emacs_helper_server_death_probe.el` raised 8 of 8, each run's prompt failing with the socket's error.
