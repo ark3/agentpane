@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs, sweep-0929]
+closed: done
 ---
 
 # A composer buffer outlives the transcript it sends to, and a send from it then fails with 'Not an agentpane transcript or composer buffer'
@@ -28,3 +29,13 @@ That is a proposal, not a decision; the remedies listed above stay open.
 Done also requires OW-futuve's test: kill a transcript with a composer open, open a new transcript in the same project and its composer, and assert the new composer's name carries no `<N>` of its own.
 
 Amended 2026-09-29 by OW-vugefa's close: a preview answered `gone` now kills its transcript through `agentpane--gone` in `emacs/agentpane.el`, which puts only the prompt region's text and an edit's draft on the kill ring, so `g` and a picker row now reach this state as well as `agentpane-close-session`.
+
+## Close note
+
+Chose the remedy the 2026-09-29 sweep proposed: the transcript's kill owns its composers.
+`agentpane--kill-composers`, added to the transcript's buffer-local `kill-buffer-hook` in `agentpane-transcript-mode`, kills every buffer whose `agentpane--composer-transcript` is the transcript going, putting any non-empty text on the kill ring first and saying so in the echo area; it binds `kill-buffer-quit-windows` so the window `agentpane-prompt` made goes too, as `agentpane-composer-discard` quits its own.
+Ownership is read from the composer's back-pointer, not a flag: `agentpane--absorb` now repoints every composer sending to the buffer it merges away, not only that buffer's own, so a merge hands them over live, a chained merge included (the adversarial read found the secondary composer of an earlier merge dying at the next one).
+`agentpane--gone` runs the function before pushing its own texts, so `yank` still brings back the draft and the composer's text sits one `yank-pop` beyond them.
+Kill rather than a better error or rebinding because OW-futuve's folded-in done-condition needs the composer's name freed, which only the kill gives.
+Verified by five ERT tests in `emacs/agentpane-test.el` -- `agentpane-test-transcript-kill-takes-its-composer` (text and empty, and the window count back to before `agentpane-prompt`), `agentpane-test-composer-name-free-after-its-transcript-dies` (OW-futuve's), `agentpane-test-close-session-whose-preview-is-gone-kills-the-composer-keeping-its-text`, `agentpane-test-merged-transcript-kill-takes-both-composers`, and `agentpane-test-chained-merge-carries-a-secondary-composer` -- each red with the fix stubbed out and green after; full suite 231 run, 0 unexpected, 3 skipped (interactive-only).
+Accepted and left: a composer whose send is in flight when its transcript dies puts the sent text on the kill ring too, as the prompt region already does on the `gone` path; and a transcript switched to another major mode by hand still strands its composer while it lives, which predates this card and only `M-x` reaches.
