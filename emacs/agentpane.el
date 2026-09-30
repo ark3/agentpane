@@ -404,13 +404,12 @@ handle to it again."
 leave each transcript buffer attached through it, by a snapshot it sent
 \(`agentpane--attached'), detached, through `agentpane--let-go'.  A
 helper `agentpane-shutdown' stopped, which marks its process so, is let
-go of as `shutdown', and every turn-done watch then standing is dropped
-too, a `streamed' one a gap kept on a buffer attached to nothing among
-them: there is one helper, so each is on a turn the server keeps running
-unheard (D25 point 4).  Any other helper's death, whatever the cause, is
-let go of as the server's `ended' under each handle would be, a helper
-that crashed over a live server being rare and costing an attach (D25),
-since `g' previews a buffer not attached (D26).
+go of as `shutdown', which drops the turn-done watch on each handle a
+buffer attached through it holds, since the server keeps that turn
+running unheard (D25 point 4).  Any other helper's death, whatever the
+cause, is let go of as the server's `ended' under each handle would be,
+a helper that crashed over a live server being rare and costing an
+attach (D25), since `g' previews a buffer not attached (D26).
 Run from its sentinel, behind what the helper wrote last; see
 `agentpane--helper-exited'.  Only this forgets a connection, and no
 helper starts before it has (`agentpane--connection'), so every buffer
@@ -440,12 +439,10 @@ No request's UNSENT runs at the death, so the turn-done watch on every
 handle a buffer attached through CONNECTION still holds is settled by
 `agentpane--let-go': a turn seen streaming ends as an aborted one does
 and raises the indicator, and a watch still `sent' ends raising nothing
-\(OW-zedawo); after `agentpane-shutdown', every watch ends raising
-nothing, whichever buffer it was on (OW-nuzoto).  Otherwise a watch on a
-handle a snapshot has since moved its buffer off is left standing, and is
-never read again, since the server never mints a handle twice
-\(`agentpane--watch-turn'); and a `streamed' one a gap kept is left
-standing for a re-attach under its handle.
+\(OW-zedawo); after `agentpane-shutdown', every such watch ends raising
+nothing (OW-nuzoto).  At any death a watch on a handle a snapshot has
+since moved its buffer off is left standing, and is never read again,
+since the server never mints a handle twice (`agentpane--watch-turn').
 Requests sent some other way are not in that record, and set no flag
 for it to clear: the synchronous `jsonrpc-request's of
 `agentpane--attach-now', `agentpane-new-session' and the model and
@@ -460,8 +457,7 @@ which only names a default effort."
     (dolist (buffer (buffer-list))
       (when (eq (buffer-local-value 'agentpane--attached buffer) connection)
         (with-current-buffer buffer
-          (agentpane--let-go cause))))
-    (when (eq cause 'shutdown) (agentpane--watch-forget-every)))
+          (agentpane--let-go cause)))))
   (run-at-time 0 nil #'agentpane--answer-deaths connection))
 
 (defun agentpane--answer-deaths (connection)
@@ -488,9 +484,8 @@ so the helper is forgotten once this returns (Emacs 31.1, jsonrpc.el
 The process is marked first as one this stopped, so the teardown lets
 each buffer go as `shutdown' rather than as the server letting go
 \(`agentpane--let-go'): the server keeps a turn running when a client's
-stream closes, so nothing is raised for it.  Every turn-done watch is
-dropped, one a gap kept on a buffer no longer attached included
-\(`agentpane--helper-gone'; D25 point 4, OW-nuzoto)."
+stream closes, so nothing is raised for it and its turn-done watch is
+dropped (D25 point 4, OW-nuzoto)."
   (interactive)
   (when (and agentpane--connection (jsonrpc-running-p agentpane--connection))
     (process-put (jsonrpc--process agentpane--connection) 'agentpane-shutdown t)
@@ -805,18 +800,16 @@ that status into no watch.
 The turn-done watch on that handle is settled by CAUSE alone (OW-nuzoto;
 see `agentpane--watch-turn').  At `ended' the turn is over: one seen
 streaming ends as an aborted one does, raising the indicator, and a
-watch still `sent' is dropped.  At `gapped' the handle stays live on
-the server and the turn may go on: nothing is raised, a `streamed' watch
-stays for a re-attach under the same handle to end, and a `sent' one is
-dropped (OW-dunahe).  At `shutdown' the server keeps the turn running
-unheard: nothing is raised and the watch is dropped (D25 point 4)."
+watch still `sent' is dropped.  At `gapped' and at `shutdown' the handle
+stays live on the server and the turn may go on unheard: nothing is
+raised and the watch is dropped, `streamed' or not (D25 points 4 and 5,
+OW-bepudu)."
   (let ((handle agentpane--handle))
     (pcase cause
       ('ended
        (agentpane--watch-turn nil)
        (agentpane--watch-forget handle))
-      ('gapped (agentpane--watch-forget-sent handle))
-      ('shutdown (agentpane--watch-forget handle))))
+      ((or 'gapped 'shutdown) (agentpane--watch-forget handle))))
   (setq agentpane--handle nil
         agentpane--attached nil)
   (agentpane--read-idle))
@@ -3877,20 +3870,13 @@ every handle it carried, which D25 takes to mean the same
 watch to it (OW-zedawo, OW-mopuyi).
 Where the handle stays live and this Emacs stops hearing it, keying
 alone is not enough.  At a detach this Emacs sends (`agentpane--detach'),
-from a killed buffer or a Pi fork's parent, and at `agentpane-shutdown'
-\(D25 point 4), the turn going on unheard on the server, the watch ends
-raising nothing.  At a `session/detached' for a `seq' gap (D25 point 5)
-nothing is raised either, and a watch still `sent' is dropped, since a
-turn from elsewhere under that handle could not be told from its own
-\(OW-dunahe); but a `streamed' one stays, and after a re-attach under
-the same handle the next status that is not streaming ends it, raising
-the indicator.  That is the end of the turn it watched only if no other
-client started a turn under the handle meanwhile: the watch cannot tell
-its own turn from a later one, as the browser's cannot either.
-The browser's `detachGapped' deletes the view its favicon would read,
-and its `watchSessions' skips a watch with no view and keeps it, `sent'
-or `streamed'; dropping a `sent' one here is a deliberate difference
-\(OW-kutome, OW-homogu, OW-dunahe).
+from a killed buffer or a Pi fork's parent, at `agentpane-shutdown' (D25
+point 4), and at a `session/detached' for a `seq' gap (D25 point 5), the
+turn going on unheard on the server, the watch ends raising nothing,
+`streamed' or not.  Until OW-bepudu a gap kept a `streamed' watch for a
+re-attach under the same handle to end; the owner gave that turn's
+indicator up on 2026-09-30, for both clients, the case needing a gap and
+then a re-attach mid-turn.
 
 Elsewhere, the favicon's unfocused window, is here a buffer that no
 window shows (`agentpane--shown-p'): Emacs's own focus says nothing about
@@ -3984,21 +3970,6 @@ one that has since ended, drops nothing."
 hears nothing more under it.  See `agentpane--watch-turn'."
   (when handle
     (setq agentpane--turn-watches (assoc-delete-all handle agentpane--turn-watches))))
-
-(defun agentpane--watch-forget-every ()
-  "End every turn-done watch, raising nothing: `agentpane-shutdown' stopped
-the one helper, and this Emacs hears no turn any of them waits on; see
-`agentpane--helper-gone'."
-  (setq agentpane--turn-watches nil))
-
-(defun agentpane--watch-forget-sent (handle)
-  "End the turn-done watch on HANDLE if its turn was not yet seen
-streaming, raising nothing, and leave a `streamed' one standing: at a
-gap, a turn from elsewhere under HANDLE could not be told from the one
-this Emacs submitted (OW-dunahe).  See `agentpane--let-go'."
-  (let ((watch (assoc handle agentpane--turn-watches)))
-    (when (eq (cdr watch) 'sent)
-      (setq agentpane--turn-watches (delq watch agentpane--turn-watches)))))
 
 (defun agentpane--turn-done-lighter ()
   "The turn-done indicator, while `agentpane--turns-done' names a buffer."

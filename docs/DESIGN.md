@@ -1051,6 +1051,9 @@ The one exception it found is the browser's selected session closed by another c
    The owner decided on 2026-09-30 that it raises nothing and drops the watch, `streamed` or not; a re-attach after a restart that finds the turn still running then raises nothing either, a case judged unlikely and cheap to lose (OW-nuzoto).
    A picker open at that moment goes stale until `g`, which the owner accepted.
 5. A sequence gap detaches that one session, in either client, instead of attaching it to recover a snapshot.
+   The handle stays live on the server and the turn may go on unheard, as at a deliberate shutdown.
+   The owner decided on 2026-09-30 that a gap gets the same treatment in both clients: it raises nothing and drops the turn-done watch on that handle, `streamed` or not.
+   The case given up is a turn the gap cut off, re-attached from the same buffer or tab while still running, and ended with nothing showing it; it needs a gap, which this decision already reads as something gone wrong, then a re-attach mid-turn, and costs one missed indicator, which was judged not worth the state that kept the watch for it (OW-bepudu for agentpane-mode, OW-jadoda for the browser).
 
 **What this retires.**
 Per-session reconciliation across an outage: the helper's reopen, its `stream/changed` and agentpane-mode's `reconnecting` mode line (OW-mareju), `dropDead`'s run at a reopen (OW-yibijo), and D21's paragraphs on agentpane-mode's reopen, which read as history once OW-mepufi lands.
