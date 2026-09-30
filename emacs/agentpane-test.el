@@ -2621,6 +2621,34 @@ the buffer to attach again."
           (agentpane-fork)
           (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach))))))))
 
+(ert-deftest agentpane-test-attach-on-a-preview-attaches-and-goes-to-the-prompt ()
+  "`agentpane-attach' on a previewed buffer sends `sessions/attach' and
+nothing else, and once the buffer is attached moves point, in the buffer
+and in a window showing it that is not selected, to the end of the prompt
+region.  Pressed again on the attached buffer it sends nothing, and while
+a fork is in flight it is refused and sends nothing."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (let ((window (split-window)))
+            (set-window-buffer window buffer)
+            (agentpane-test--goto-index 0)
+            (set-window-point window (point))
+            (agentpane-attach)
+            (should (equal sent `((sessions/attach :session ,ref))))
+            (should (agentpane--attached-p))
+            (should (= (point) (point-max)))
+            (should (= (window-point window) (point-max))))
+          (setq sent nil)
+          (agentpane-test--goto-index 0)
+          (agentpane-attach)
+          (should-not sent)
+          (should (= (point) (point-max)))
+          (setq agentpane--forking t)
+          (should-error (agentpane-attach) :type 'user-error)
+          (should-not sent))))))
+
 (ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
   "A refetch while a Pi fork is in flight says so and sends nothing, so no
 re-attach of the parent can answer after the fork's reply has counted the

@@ -32,8 +32,10 @@
 ;; says its session is streaming; a red one, that a turn ended while no
 ;; window showed its transcript, until one does.  In a transcript buffer
 ;; `n' and `p' step between nodes, `TAB' toggles the fold at point, `g'
-;; refetches, `f' forks at the user message at point into a buffer of its
-;; own -- on a previewed transcript it attaches first, and forks at the
+;; refetches, `a' attaches a previewed transcript, sending nothing, and
+;; moves point to the prompt region, as the browser's Attach does, `f'
+;; forks at the user message at point into a buffer of its own -- on a
+;; previewed transcript it attaches first, and forks at the
 ;; next press -- `e' takes the user message at point back into the prompt
 ;; region to edit, as the browser's pencil does, so that `C-RET' forks at
 ;; that message and sends the edited text and the message's images into
@@ -100,7 +102,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-29) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 216 tests, 213 results as expected, 0 unexpected, 3 skipped
+;;     Ran 218 tests, 215 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2045,6 +2047,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "TAB") #'agentpane-toggle)
     (define-key map (kbd "<tab>") #'agentpane-toggle)
     (define-key map (kbd "g") #'agentpane-refetch)
+    (define-key map (kbd "a") #'agentpane-attach)
     (define-key map (kbd "f") #'agentpane-fork)
     (define-key map (kbd "e") #'agentpane-edit)
     (define-key map (kbd "C-c C-e") #'agentpane-edit-last)
@@ -2796,6 +2799,25 @@ handling exits non-locally was admitted, and keeps its watch too."
       (when (equal (buffer-substring-no-properties beg (point-max)) text)
         (delete-region beg (point-max))))))
 
+(defun agentpane-attach ()
+  "Attach this buffer's session, sending it nothing, and once attached move
+point to the end of the prompt region, as the browser's Attach button opens
+a previewed session and focuses the prompt.  An attached buffer attaches
+nothing and only moves point; one still attaching moves it once that
+attach answers (`agentpane--attached-then').  Refused while a fork is in
+flight, as `agentpane-fork' and `agentpane-edit' are: a Pi fork's parent
+the server has already detached would be attached again, spawning its old
+branch, which the fork's reply then detaches."
+  (interactive)
+  (with-current-buffer (agentpane--transcript)
+    (when agentpane--forking
+      (user-error "A fork of this session is already in flight"))
+    (agentpane--attached-then
+     (lambda ()
+       (goto-char (point-max))
+       (dolist (window (get-buffer-window-list nil nil t))
+         (set-window-point window (point-max)))))))
+
 (defun agentpane-send ()
   "Send the prompt region's text as a prompt, and clear the region once sent.
 The first prompt on a previewed session attaches it."
@@ -3161,9 +3183,9 @@ preview drops the `custom_message' entries and roles such as
 source), and nothing makes the Claude Code store and live projections
 agree (OW-gekiki).  So trusting the index could fork at another message.
 Refusing, as the browser does by offering no Edit on a preview, would
-leave no way to fork a session only previewed short of sending it a
-prompt, since there is no command that only attaches.  Attaching redraws
-the buffer from the live transcript through the attach's snapshot, so the
+cost the user an `agentpane-attach' before pressing `f'; attaching here
+takes that step in place.  Attaching redraws the buffer from the live
+transcript through the attach's snapshot, so the
 index at point becomes a live one, and the second press lets the user
 confirm the message after that redraw, which may have moved it.  The
 attach's reply and its snapshot are unordered (D2), so the message can
