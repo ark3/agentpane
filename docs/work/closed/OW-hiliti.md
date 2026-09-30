@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs, sweep-0929]
+closed: done
 ---
 
 # agentpane-mode answers a request around its helper's death by the death, not by what the helper wrote, so a refused prompt keeps its turn-done watch, a server-unreachable reason never shows, and chained work errors from a timer
@@ -53,3 +54,15 @@ The second adversarial read found the helper's no-reply check misses a server de
 So what decides UNSENT is Emacs's reading of the error, not the helper's silence: only an HTTP refusal, an error whose `data` carries the server's `status` (`toRpcError`'s `ApiClientError` branch), says the request reached no backend; any other error leaves the outcome unknown, as a timeout does, and runs FAILED and ERRED without UNSENT.
 The helper's no-reply for a request its teardown aborted stays, for what the echo area says: the death's "the helper exited" rather than an abort.
 Added to "Done when": an ERT test, red first, that a `-32603` error reply with no `data`, written after a status under the handle read streaming and before the helper exits, leaves the watch for the teardown, which raises the indicator.
+
+## Close note
+
+Built 2026-09-29 in four commits on main (emacs: ... (OW-hiliti)), after two adversarial reads that each changed the rule.
+What a request around its helper's death is answered by, now:
+- An error reply the helper wrote, even as it died, is the request's answer and its message is shown; jsonrpc.el's "Server died" (code -1, jsonrpc.el 1.0.29) is not, and the teardown answers only what is still out.
+- Only an HTTP refusal, an error whose `data` carries `status` (`toRpcError`'s `ApiClientError` branch), runs UNSENT and so abandons a prompt's watch; any other error reply leaves the outcome unknown, as a timeout does.
+- The helper (`respond` in `src/emacs/helper.ts`) writes no reply for a request its own teardown aborted, so the echo area names the helper's exit, not an abort; `src/emacs/protocol.ts` states it.
+- A request made through a helper that has exited, before its teardown, is sent nowhere, runs UNSENT at once, and is answered by the teardown as the death: `agentpane--connection` no longer signals from a jsonrpc.el timer on `agentpane--request`'s path (its synchronous callers keep the error).
+Why the rule grew: the first cut's reader found the helper wrote "The operation was aborted." for every request it aborted, which read as a refusal lost the indicator for a turn this Emacs sent (3 of 3 busy drops), and a gap prompt kept a watch the teardown raised; the second reader found a server SIGKILL's socket error beats the abort, losing it 7 of 8, which is why the refusal test is the `status` and not the helper's silence.
+Verified: new and changed ERT and vitest cases each red first (listed in the commits); ERT 224 run, 0 unexpected; `bun run check` 1557 passed; probes checked in as `resources/probes/emacs_helper_drop_probe.el` and `emacs_helper_server_death_probe.el`, raising the indicator 3/3 busy, 3/3 idle and 32/32 on server death (`docs/MANUAL_TESTING.md`, "only a refusal abandons a prompt's watch"); D25 in `docs/DESIGN.md` updated.
+OW-bonuhi and OW-kimafi closed moot; OW-pezelo amended; OW-pohusi (browser parity) and OW-visegi (ERT leak) filed.
