@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, sweep-0929]
+closed: done
 ---
 
 # agentpane-mode's let-go and the helper's teardown decide what a detach does by ordering and a timer, where each should read its cause: the server let go, a gap, or a deliberate shutdown
@@ -48,3 +49,24 @@ The docstrings of `agentpane--let-go`, `agentpane--watch-turn` (whose "a watch o
 - `bun run check` and the ERT suite (`emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`) pass.
 
 OW-fakefe, jsonrpc's exit line overwriting the reason in the echo area, is the same moment but a separate fix, and stays its own card; if this card changes what the teardown writes, say so in OW-fakefe.
+
+## Close note
+
+Landed 2026-09-30 as c6e5d95, 9ffe743, df399ac and e307ab3.
+
+Emacs: `agentpane--let-go` takes a cause symbol — `ended`, `gapped` or `shutdown` — and settles the turn-done watch by it; the gapped ordering is gone.
+`ended` (a `session/detached` for the server's end, or any helper death not started by `agentpane-shutdown`) ends a streamed watch raising the indicator and drops a sent one, unchanged.
+`gapped` raises nothing, keeps a `streamed` watch (new `agentpane--watch-forget-sent`) so a re-attach under the same handle raises at the turn's end, and drops a `sent` one (OW-dunahe).
+`agentpane-shutdown` marks the helper's process (`process-put … 'agentpane-shutdown`), `agentpane--helper-gone` reads the mark and lets go as `shutdown`, and then drops every watch (`agentpane--watch-forget-every`), a gap-kept one on an unattached buffer included — the adversarial read found that watch surviving the shutdown otherwise.
+The fabricated idle status now runs after the handle is cleared, so it is display-only.
+D25 point 4 in docs/DESIGN.md records the owner's shutdown decision.
+
+Helper: `respond` is silent only for a failure the teardown's abort caused (`abortedHere`: the signal's reason, or an `AbortError` once it fired); the `setTimeout` around `reader.cancel()` in `onDisconnect` is gone, the input cancelled at once on both paths.
+Measured under bun 1.4.0 that the old whenever-aborted check was what the timer worked around: cancel at once with the old check answered 0 of 3 no-server probes, with the new check 3 of 3.
+The wrapped fetch refuses any call attempted once `stopped` is set, answered "the agentpane helper is exiting".
+
+Verified: new ERT tests `agentpane-test-turn-done-raised-after-a-gap-and-a-reattach`, `-not-raised-by-a-shutdown`, `-not-raised-after-a-gap-before-streaming` and `agentpane-test-shutdown-drops-a-watch-a-gap-kept`, and vitest cases for the post-`stopped` refusal and for `abortedHere`, each shown red first (the before-streaming one against a mutant, since it guards existing behaviour).
+`agentpane-test-turn-done-not-raised-by-a-gap` now expects the streamed watch kept ('(nil . t)), which is this card's decision.
+All three probes pass (no-server 3/3, drop busy and idle 3/3 each, server death 8/8; Emacs 31.1, bun 1.4.0), recorded in docs/MANUAL_TESTING.md; `bun run check` 1561/1561 and ERT 0 unexpected on main.
+
+Left: a gap-kept watch outlives a kill of its buffer, filed as OW-wufiro; OW-fakefe notes the two new rare dying-helper replies.
