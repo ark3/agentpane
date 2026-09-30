@@ -2614,6 +2614,27 @@ exits non-locally.  Otherwise return nil."
     (when failed (funcall failed))
     (user-error "This session is closing")))
 
+(defun agentpane--refuse-forking (&optional failed)
+  "Signal a user error, sending nothing, while a fork this buffer began is
+in flight (`agentpane--forking'), calling FAILED first, if given, as
+`agentpane--refuse-closing' does and for its reason.  Otherwise return nil.
+
+It guards an attach, never a command on a buffer already attached, as a
+Codex or Claude Code parent stays through its fork.  A Pi fork's parent
+the server lets go of inside the fork, broadcasting `ended' for its handle
+ahead of the fork's reply (`#forkOnto' in
+src/server/http/session-manager.ts), is left not attached by the
+`session/detached' the helper passes on (`agentpane--let-go'), and an
+attach sent then makes the server resume the parent's old branch from the
+index, a process the fork's reply orphans when it detaches the parent
+\(`agentpane--fork-at').  So it sits in the attach every command reaches,
+rather than in each command: until OW-nuhayu only `agentpane-attach',
+the fork commands, `agentpane-refetch' and `agentpane-close-session'
+refused, and `agentpane-send' and `agentpane-compact' attached."
+  (when agentpane--forking
+    (when failed (funcall failed))
+    (user-error "A fork of this session is already in flight")))
+
 (defun agentpane--attach (&optional then failed)
   "Attach this buffer's session through `sessions/attach', then call THEN,
 or FAILED if the attach fails.
@@ -2637,9 +2658,11 @@ answered separately, and the first to fail ended the wait while the other
 was still out, so a refetch then sent a preview that could draw the
 stored transcript over the live one the other's snapshot drew (OW-yibimi).
 
-None while a close is in flight: FAILED is called and a user error
-signalled instead; see `agentpane--closing'."
+None while a close is in flight, nor while a fork is: FAILED is called
+and a user error signalled instead; see `agentpane--closing' and
+`agentpane--refuse-forking'."
   (agentpane--refuse-closing failed)
+  (agentpane--refuse-forking failed)
   (if agentpane--attaching
       (setq agentpane--attaching
             (append agentpane--attaching (list (cons then failed))))
@@ -2688,10 +2711,12 @@ prevent, and waiting for it here would block Emacs on a reply that may
 take the whole timeout.  `agentpane-set-model' reaches this with a first
 prompt's attach out; asked again once that has answered, it finds the
 session attached and needs no attach at all.  It refuses too while a
-close is in flight; see `agentpane--closing'."
+close is in flight, or a fork; see `agentpane--closing' and
+`agentpane--refuse-forking'."
   (when agentpane--attaching
     (user-error "This session is still attaching; try again once it has"))
   (agentpane--refuse-closing)
+  (agentpane--refuse-forking)
   (setq agentpane--attach-sent t)
   (jsonrpc-request (agentpane--connection) 'sessions/attach
                    (list :session (agentpane--ref agentpane--session))
@@ -2915,13 +2940,12 @@ window, which may be reading history, as `agentpane-fork' shows its fork
 in the window the press came from.  An attach that fails moves nothing.
 An attached buffer attaches nothing and only moves point; one still
 attaching moves it once that attach answers (`agentpane--attached-then').
-Refused while a fork is in flight, as `agentpane-fork' and `agentpane-edit'
-are: a Pi fork's parent the server has already detached would be attached
-again, spawning its old branch, which the fork's reply then detaches."
+One not attached is refused while a fork is in flight, as every attach
+is: a Pi fork's parent the server has already let go of would be attached
+again, spawning its old branch, which the fork's reply then detaches; see
+`agentpane--refuse-forking'."
   (interactive)
   (with-current-buffer (agentpane--transcript)
-    (when agentpane--forking
-      (user-error "A fork of this session is already in flight"))
     (let ((window (get-buffer-window)))
       (agentpane--attached-then
        (lambda ()
@@ -3253,9 +3277,13 @@ A detached buffer usually shows the store's projection instead, which for
 Pi can omit messages the live one keeps, but nothing here trusts an index
 from it: a fork from it attaches and forks nothing, and a send attaches
 and redraws.  While the fork is in flight `agentpane-refetch' sends
-nothing: on the attached parent it would attach again, and a reply to
-that landing after the fork's would count the parent attached, the
-server having detached it.
+nothing, and nothing attaches this buffer (`agentpane--refuse-forking'):
+on the attached parent a refetch attaches again, and an attach reaching
+the server after `#forkOnto' has let go of a Pi parent resumes the
+parent's old branch.  Whichever of that attach's snapshot and the fork's
+reply is handled first, the reply detaches the parent from the helper,
+by the handle the snapshot gave it or else by its ref, which drops every
+attachment under that ref, so the respawn runs with nothing listening.
 
 One fork at a time per buffer, as the browser allows one send at a time
 \(OW-kelede): a second press while one is in flight sends nothing.  The fork
@@ -3833,9 +3861,14 @@ browser's `watchSessions' reads the level at the publish that follows its
 submit.  A session streaming then is running a turn the server takes
 this prompt into, as a Codex steer, and no fresh `streaming' follows, so
 that turn becomes this prompt's and its end raises the indicator.  So too
-a turn a previewed buffer's attach finds running, whichever of the
-attach's snapshot and its reply is handled first (D2): either the level
-is folded here, or the snapshot's status folds it after.
+a turn a previewed buffer's attach finds running: the prompt, and this
+with it, goes out only once that attach's snapshot has attached the
+buffer, the helper writing the attach's reply after the snapshot that
+answers it (`sessions/attach' in src/emacs/helper.ts) and
+`agentpane--attach' calling THEN only where a snapshot has attached the
+buffer, so the level folded here is the one that snapshot, or a status
+since, left.  Until OW-rebawa the reply could be handled first (D2), and
+the snapshot's status folded the level after.
 A watch already armed on the handle is joined, not armed again, so a
 handle has one watch at most.  Two, from a second prompt accepted into a
 running turn, as a Codex steer, both read `streamed'; the turn's end

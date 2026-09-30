@@ -2718,8 +2718,9 @@ spawn the parent's old branch again."
 
 (ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
   "A refetch while a Pi fork is in flight says so and sends nothing, so no
-re-attach of the parent can answer after the fork's reply has counted the
-parent detached."
+re-attach of the parent can reach the server after it has let go of the
+parent and respawn the parent's old branch, which the fork's reply leaves
+running with nothing listening; see `agentpane-fork'."
   (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
         (forked '(:backend "pi" :id "/s/fork.jsonl")))
     (agentpane-test--with-helper
@@ -2742,6 +2743,46 @@ parent detached."
           (should (equal (mapcar #'car (reverse sent))
                          '(sessions/forkPoints sessions/fork sessions/detach
                            sessions/attach))))))))
+
+(ert-deftest agentpane-test-send-and-compact-during-a-pi-fork-send-nothing ()
+  "`agentpane-send' and `agentpane-compact' on a Pi fork's parent the
+helper has let go of while the fork is in flight -- the server's `ended'
+for the parent's handle goes out inside the fork, ahead of its reply
+\(D26) -- are refused and send nothing, the draft and the status left as
+they were and the buffer not left sending.  Each would attach the
+parent's ref, respawning its old branch, which the fork's reply then
+detaches, leaving that process running with nothing listening (OW-nuhayu).
+The fork's reply then sends only its own detach and the fork's attach."
+  (let ((ref '(:backend "pi" :id "/s/parent.jsonl"))
+        (forked '(:backend "pi" :id "/s/fork.jsonl")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking
+          [(:id "entry-0" :text "Fix the bug" :index 0)]
+          forked
+        (agentpane-test--with-session ref
+          (setq agentpane--attached agentpane--connection
+                agentpane--attach-sent t
+                agentpane--handle "h1"
+                hold '(sessions/fork))
+          (agentpane-test--goto-index 0)
+          (agentpane-fork)
+          (agentpane--on-notification nil 'session/detached (list :session ref :handle "h1"))
+          (setq sent nil)
+          (with-current-buffer buffer
+            (should-not (agentpane--attached-p))
+            (goto-char (point-max))
+            (insert "Carry on")
+            (should-error (agentpane-send) :type 'user-error)
+            (should-error (agentpane-compact) :type 'user-error)
+            (should-not sent)
+            (should-not agentpane--sending)
+            (should-not (plist-get agentpane--status :compaction))
+            (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
+                           "Carry on")))
+          (funcall (cdr (pop held)) t)
+          (should (equal (reverse sent)
+                         `((sessions/detach :session ,ref)
+                           (sessions/attach :session ,forked)))))))))
 
 ;;;; Editing an earlier message, against a stub connection
 
