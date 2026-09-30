@@ -1,5 +1,6 @@
 ---
 labels: [change, sweep-0929]
+closed: done
 ---
 
 # Pi's child stdin has no `error` listener, and the three process shells are the same hundred lines, which is how the fix landed in two of them
@@ -55,3 +56,22 @@ Two corrections:
   "Without edits to their assertions" means the `expect` lines; import paths and the fakes' plumbing may change to follow the shell.
 
 The smaller repeats named under "Why it is one card with the duplication" (`ZERO_USAGE`/`emptyUsage`, `isRecord`, `idFromFilename`, the Claude store root) are not child-process plumbing, which the card scopes itself to, and are not in the done-condition; they are OW-tijilo's.
+
+## Close note
+
+Built: one process shell, `ChildProcessShell` in `src/server/adapters/child-process.ts`, owning spawn-error capture, the stderr tail, stdout framing, the stdin `error` listener, `close`, and the SIGTERM/SIGKILL escalation, parameterised by the line handler.
+`spawnCodex` and `spawnClaude` return it behind the unchanged `CodexProcess`/`ClaudeProcess` seams, and `PiAdapter` wraps its injected `PiSpawn` child in it (`PiChild` is now an alias of the shell's `ChildLike`).
+The one LF splitter is `LfLineSplitter` in `src/server/adapters/framing.ts`, moved from `pi/framing.ts` with its not-`readline` rationale.
+`PiAdapter.start()` rejects after `dispose()` or a second start, as Codex's and Claude's do.
+
+Measured along the way (2026-09-30), now in DESIGN's "What the wrapper chain does to process events": with no stdin `error` listener, a write into a pipe whose reader closed crashes Bun 1.4.0 once it passes a few KB (1000 and 4000 bytes survived, 8000 and 65536 exited 1 with an uncaught EPIPE) and Node 26.8.1 on any write — so Pi's missing listener could take the server down on a long prompt.
+Also retired: the Pi `dispose()` docblock's claim that a second `stdin.end()` raises ERR_STREAM_ALREADY_FINISHED; neither runtime threw or emitted on it.
+
+Absorbed OW-16 (a child outliving SIGKILL now fires `onExit` once with a "did not close" error) and OW-10 (spawn and stdin errors kept as `cause`), both closed moot.
+The adversarial read caught that a stdin EPIPE had displaced Pi's exit code in the death report; the report now carries both.
+
+Verified: new tests shown red before their fix — Pi stdin EPIPE reported through `onError` with the exit code, `start()` after `dispose()` rejects without spawning, the post-SIGKILL survivor is reported, spawn-failure cause kept; `rg -n 'class \w*LineSplitter' src/server` returns one; `bun run check` green on main (1587 tests).
+One existing assertion changed: Pi's escalation test expected `kill()` with no signal and now expects `"SIGTERM"`, which Codex's test pinned; the effect is the same. Codex's four `LineSplitter` tests moved to `framing.test.ts` with their `expect` lines unchanged.
+
+Left: OW-tozuyo (the survivor report reaches nobody), OW-pazuwi (a command written before an EPIPE waits on a `close` that a still-running child never sends), OW-tijilo (the small repeated helpers outside child-process plumbing).
+The "already started" guard in `PiAdapter.start()` has no test; no caller starts an adapter twice.
