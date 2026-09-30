@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Forking from a parent that is itself streaming may badge the browser tab for the parent's turn and leave the fork's own turn unwatched, because the badge watch sits on the parent's handle until the fork's prompt resolves
@@ -49,3 +50,22 @@ This replaces the "Done when" above:
 - The comment beside `if (isStreaming === undefined) continue;` in `watchSessions` (`src/client/favicon.ts`), which names this card as the exception, says instead that a gap in a fork's window is accepted (D25 point 5).
 - D25 point 5 in `docs/DESIGN.md` names the fork-window gap among what the decision gives up.
 - `bun run check` passes.
+
+## Close note
+
+Landed 2026-09-30 on `main` as 75a8a92 "client: arm a fork's badge on the fork when its attach replies, never on the parent (OW-koledi)" and 92be214 "client: pin a fork's watch before its prompt and a parent's own watch through the fork (OW-koledi)".
+
+The streaming-parent case was real, not unreachable.
+The test "badges the fork's turn and not the streaming %s parent's that ends mid-fork (OW-koledi)" in `src/client/App.test.ts`, run for a Pi and a Codex parent through the real controller, failed on both against the unchanged `App.svelte` and `controller.ts`, at the parent's turn's end: expected '/favicon-badged.svg' to be '/favicon.svg'. The session re-ran that red itself.
+
+The fix moves the watch to its owner: `forkAndSubmit` takes an `onAttached(handle)` callback fired when the fork's attach replies, before `api.prompt`, and `send()` arms `watchSubmit` there on the fork's handle and never on the parent; a fork that does not land abandons that watch and the parent's pending follow.
+`rekeySession` no longer moves the badge watch, so a watch this tab already held on the parent stays the parent's; the switch effect calls `watchMove` itself for the same-ref key move, its only other caller.
+OW-jadoda's `subscribeGaps` signal stays.
+
+Pinned, each shown red under a targeted revert: arming at resolution instead of at the attach (a fork whose whole turn runs while its prompt POST is out), `watchMove` back in `rekeySession` (a parent's own Codex turn badges at its end through a fork taken mid-turn), and the failed-prompt abandon (a fork nothing prompted raises nothing for another client's turn).
+The comment beside `if (isStreaming === undefined) continue;` in `watchSessions` and D25 point 5 in `docs/DESIGN.md` now name what the fork window still gives up: once the watch is on the fork, a gap on the parent no longer touches it, and a gap after the attach reply is caught like any other, so the residue is a gap on the fork's handle before its attach replies, which the watch armed at that reply outlives (one spurious badge, read at the code, not run).
+`bun run check` passed on `main` at 92be214: 54 files, 1578 tests.
+An adversarial read found no regression; its two test gaps and the D25 wording were fixed in 92be214.
+
+Filed from the work: OW-vitefo (follow mode has the same parent-keyed defect, reproduced by the implementer) and OW-rihanu (the browser badges a Pi Stop-and-fork's aborted parent turn this tab submitted, where agentpane-mode does not).
+OW-pohusi amended for the fork path's new failure handling.
