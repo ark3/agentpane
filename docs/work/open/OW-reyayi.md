@@ -36,3 +36,11 @@ OW-zavehi's decision, D26 in `docs/DESIGN.md`, point 7, retires `agentpane--drop
 That settles case 1: a buffer whose close was in flight when the helper died no longer respawns the closed session on `g`; it previews, and a session with nothing on disk answers `gone` and the buffer is killed.
 D25 point 4 now reads "costs an attach".
 Only case 2, the turn-done indicator at a deliberate `agentpane-shutdown`, is left for this card to decide.
+
+## Amended 2026-09-30 under OW-kutome
+
+Case 2 now has a mechanism, and only the decision remains.
+`agentpane--let-go` in `emacs/agentpane.el` takes `&optional gapped`, which ends the turn-done watch before the buffer reads idle, so nothing is raised; `session/detached` passes it for a `seq` gap (`cause: "gapped"` in `src/emacs/protocol.ts`).
+`agentpane--helper-gone` calls it with no argument, so a deliberate `agentpane-shutdown` still raises the indicator, as before OW-kutome.
+A decision to raise nothing at a shutdown would have `agentpane-shutdown` mark the teardown as its own cause and `agentpane--helper-gone` pass that on to `agentpane--let-go`.
+OW-homogu may replace that argument with a different mechanism before this card's decision is built, and the change card should be written against whatever `agentpane--let-go` takes then.

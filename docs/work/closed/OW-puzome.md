@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: moot
 ---
 
 # A sequence gap mid-turn raises agentpane-mode's turn-done indicator though the turn goes on, where the browser's favicon raises nothing
@@ -32,3 +33,9 @@ The `agentpane--watch-turn` and `agentpane--let-go` docstrings name the gap amon
 
 OW-likopo retires `dropDead`'s eviction: the helper sends `session/detached` for a handle the server let go at the server's `ended` event instead (D26 point 4 in `docs/DESIGN.md`).
 Read "`dropDead`'s form" in the done-condition as the form sent at `ended`; that is the server-side let-go, which must still raise the indicator.
+
+## Close note
+
+Superseded by OW-kutome, which built this card's fix: `session/detached` now carries `cause: "ended" | "gapped"`, and at a gap `agentpane--let-go` ends the turn-done watch before the buffer reads idle, so nothing is raised.
+This card's done-condition is carried there: `agentpane-test-turn-done-not-raised-by-a-gap` in `emacs/agentpane-test.el` (shown red against the old code), the `ended` form still raising (`agentpane-test-turn-done-raised-when-the-server-lets-go`), the gap and `ended` forms pinned in `src/emacs/helper.test.ts`, and the `agentpane--watch-turn` and `agentpane--let-go` docstrings naming the gap.
+The case that fix misses, a re-attach under the same live handle, is OW-homogu.
