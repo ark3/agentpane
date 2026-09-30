@@ -2622,32 +2622,59 @@ the buffer to attach again."
           (should (equal (mapcar #'car sent) '(sessions/attach sessions/attach))))))))
 
 (ert-deftest agentpane-test-attach-on-a-preview-attaches-and-goes-to-the-prompt ()
-  "`agentpane-attach' on a previewed buffer sends `sessions/attach' and
-nothing else, and once the buffer is attached moves point, in the buffer
-and in a window showing it that is not selected, to the end of the prompt
-region.  Pressed again on the attached buffer it sends nothing, and while
-a fork is in flight it is refused and sends nothing."
+  "`agentpane-attach' on a previewed buffer holding a draft sends
+`sessions/attach' and nothing else, and moves nothing until the buffer is
+attached, nor at all when the attach fails.  Once attached, point goes to
+the end of the prompt region, past the draft, in the buffer and in the
+window the press came from, even when another window is selected by
+then, while a second window showing the buffer keeps its point.  Pressed
+again on the attached buffer it sends nothing and moves point there."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
         (agentpane-test--with-session ref
-          (let ((window (split-window)))
-            (set-window-buffer window buffer)
-            (agentpane-test--goto-index 0)
-            (set-window-point window (point))
-            (agentpane-attach)
-            (should (equal sent `((sessions/attach :session ,ref))))
-            (should (agentpane--attached-p))
-            (should (= (point) (point-max)))
-            (should (= (window-point window) (point-max))))
-          (setq sent nil)
-          (agentpane-test--goto-index 0)
-          (agentpane-attach)
-          (should-not sent)
-          (should (= (point) (point-max)))
-          (setq agentpane--forking t)
-          (should-error (agentpane-attach) :type 'user-error)
-          (should-not sent))))))
+          (save-excursion (goto-char (point-max)) (insert "A draft"))
+          (let ((pressed (selected-window)))
+            (set-window-buffer pressed buffer)
+            (let ((other (split-window pressed))
+                  (before (progn (agentpane-test--goto-index 0) (point))))
+              (set-window-buffer other buffer)
+              (set-window-point other (point-min))
+              (setq hold '(sessions/attach))
+              (agentpane-attach)
+              (should (equal sent `((sessions/attach :session ,ref))))
+              (should (= (point) before))
+              (funcall (cdr (pop held)) nil)
+              (should-not (agentpane--attached-p))
+              (should (= (point) before))
+              (should (= (window-point other) (point-min)))
+              (agentpane-attach)
+              (should (= (point) before))
+              (let ((elsewhere (split-window pressed)))
+                (set-window-buffer elsewhere (get-buffer-create " *agentpane-test elsewhere*"))
+                (with-selected-window elsewhere
+                  (funcall (cdr (pop held)) t)
+                  (with-current-buffer buffer
+                    (should (agentpane--attached-p))
+                    (should (= (point) (point-max))))))
+              (should (= (window-point pressed) (point-max)))
+              (should (= (window-point other) (point-min)))
+              (setq sent nil)
+              (agentpane-test--goto-index 0)
+              (agentpane-attach)
+              (should-not sent)
+              (should (= (point) (point-max))))))))))
+
+(ert-deftest agentpane-test-attach-during-a-fork-sends-nothing ()
+  "`agentpane-attach' on a buffer let go of while a fork of it is in
+flight, as a Pi fork's parent is once the server's `ended' has come and
+before the fork's reply, is refused and sends nothing: its attach would
+spawn the parent's old branch again."
+  (agentpane-test--detached
+    (with-current-buffer buffer
+      (setq agentpane--forking t)
+      (should-error (agentpane-attach) :type 'user-error)
+      (should-not sent))))
 
 (ert-deftest agentpane-test-refetch-during-a-fork-sends-nothing ()
   "A refetch while a Pi fork is in flight says so and sends nothing, so no

@@ -35,14 +35,14 @@
 ;; refetches, `a' attaches a previewed transcript, sending nothing, and
 ;; moves point to the prompt region, as the browser's Attach does, `f'
 ;; forks at the user message at point into a buffer of its own -- on a
-;; previewed transcript it attaches first, and forks at the
-;; next press -- `e' takes the user message at point back into the prompt
-;; region to edit, as the browser's pencil does, so that `C-RET' forks at
-;; that message and sends the edited text and the message's images into
-;; the fork, and `C-c C-k' abandons the edit -- `C-c C-e' does as `e' does
-;; on the last user message, wherever point is, and on a streaming Pi turn
-;; stops the turn too, as the browser's Edit last message and Stop and edit
-;; do -- `r' toggles reading view, and `q' buries.
+;; previewed transcript it attaches first, and forks at the next press --
+;; `e' takes the user message at point back into the prompt region to edit,
+;; as the browser's pencil does, so that `C-RET' forks at that message and
+;; sends the edited text and the message's images into the fork, and
+;; `C-c C-k' abandons the edit -- `C-c C-e' does as `e' does on the last
+;; user message, wherever point is, and on a streaming Pi turn stops the
+;; turn too, as the browser's Edit last message and Stop and edit do --
+;; `r' toggles reading view, and `q' buries.
 ;; Reading view is the browser's (`condense' in
 ;; src/client/render/transcript.ts): tool calls, tool results and thinking
 ;; are elided, and while a turn streams the line above the prompt names the
@@ -102,7 +102,7 @@
 ;; which on Emacs 31.1 (measured 2026-09-29) ends, after one "passed" or
 ;; "skipped" line per test, with a line beginning
 ;;
-;;     Ran 218 tests, 215 results as expected, 0 unexpected, 3 skipped
+;;     Ran 219 tests, 216 results as expected, 0 unexpected, 3 skipped
 ;;
 ;; followed by the run's timestamp and duration.  It is not part of `bun run check',
 ;; which stays Bun-only.
@@ -2802,21 +2802,25 @@ handling exits non-locally was admitted, and keeps its watch too."
 (defun agentpane-attach ()
   "Attach this buffer's session, sending it nothing, and once attached move
 point to the end of the prompt region, as the browser's Attach button opens
-a previewed session and focuses the prompt.  An attached buffer attaches
-nothing and only moves point; one still attaching moves it once that
-attach answers (`agentpane--attached-then').  Refused while a fork is in
-flight, as `agentpane-fork' and `agentpane-edit' are: a Pi fork's parent
-the server has already detached would be attached again, spawning its old
-branch, which the fork's reply then detaches."
+a previewed session and focuses the prompt.  Point moves in the buffer and
+in the window the press came from, if that still shows it, and in no other
+window, which may be reading history, as `agentpane-fork' shows its fork
+in the window the press came from.  An attach that fails moves nothing.
+An attached buffer attaches nothing and only moves point; one still
+attaching moves it once that attach answers (`agentpane--attached-then').
+Refused while a fork is in flight, as `agentpane-fork' and `agentpane-edit'
+are: a Pi fork's parent the server has already detached would be attached
+again, spawning its old branch, which the fork's reply then detaches."
   (interactive)
   (with-current-buffer (agentpane--transcript)
     (when agentpane--forking
       (user-error "A fork of this session is already in flight"))
-    (agentpane--attached-then
-     (lambda ()
-       (goto-char (point-max))
-       (dolist (window (get-buffer-window-list nil nil t))
-         (set-window-point window (point-max)))))))
+    (let ((window (get-buffer-window)))
+      (agentpane--attached-then
+       (lambda ()
+         (goto-char (point-max))
+         (when (and (window-live-p window) (eq (window-buffer window) (current-buffer)))
+           (set-window-point window (point-max))))))))
 
 (defun agentpane-send ()
   "Send the prompt region's text as a prompt, and clear the region once sent.
@@ -3185,13 +3189,14 @@ agree (OW-gekiki).  So trusting the index could fork at another message.
 Refusing, as the browser does by offering no Edit on a preview, would
 cost the user an `agentpane-attach' before pressing `f'; attaching here
 takes that step in place.  Attaching redraws the buffer from the live
-transcript through the attach's snapshot, so the
-index at point becomes a live one, and the second press lets the user
-confirm the message after that redraw, which may have moved it.  The
-attach's reply and its snapshot are unordered (D2), so the message can
-precede the redraw by that snapshot's transit.  This covers the parent of
-a Pi fork too, which is left detached.  While that attach is in flight a
-second press says so and sends nothing."
+transcript through the attach's snapshot, so the index at point becomes a
+live one, and the second press lets the user confirm the message after
+that redraw, which may have moved it.  The message follows that redraw:
+the helper writes the attach's reply only after the snapshot that answers
+it (`sessions/attach' in src/emacs/helper.ts), and `agentpane--attach'
+calls THEN only once that snapshot has attached the buffer.  This covers
+the parent of a Pi fork too, which is left detached.  While that attach
+is in flight a second press says so and sends nothing."
   (interactive)
   (when agentpane--forking
     (user-error "A fork of this session is already in flight"))
