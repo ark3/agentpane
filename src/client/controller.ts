@@ -10,7 +10,7 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 import { sessionKey } from "$shared/protocol.ts";
-import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
+import { ApiClientError, type AgentpaneApi, type EventConnection, type EventHandlers } from "./api.ts";
 import { nextPreviewDelay, PREVIEW_POLL_FAST_MS, PREVIEW_POLL_IDLE_MS } from "./preview-poll.ts";
 import {
 	clearSessionError,
@@ -64,9 +64,12 @@ export interface ControllerView {
 	preview: { ref: SessionRef; turns: SessionPreviewTurn[] } | null;
 	/**
 	 * Why the last read of the selected session's preview failed, which the
-	 * detached-loading pane shows above its Attach button (OW-bilogo). Only
-	 * `loadPreview` writes it, and only for a read that failed with the stream
-	 * up. Never the error slot: no gesture stands behind that read.
+	 * detached-loading pane shows above its Attach button (OW-bilogo).
+	 * `landPreview` writes it for a background read that failed with the stream
+	 * up, and for a click on that pane's row whatever the stream reads, since a
+	 * gesture is owed its answer; the `connected` releases the hold either way.
+	 * Never the error slot: no gesture stands behind the background read, and
+	 * the click's failure belongs on the pane the user is looking at.
 	 *
 	 * It belongs to that session's loading pane, so `publish` drops it once the
 	 * pane leaves that mode -- a read succeeding, a snapshot -- or the selection
@@ -151,7 +154,8 @@ export interface AgentpaneController {
 	/**
 	 * Cheap, read-only selection (OW-39): load OW-38's non-attaching preview for
 	 * a stored session, or -- if the session is already attached -- just reselect
-	 * its live transcript. Spawns nothing for a stored session.
+	 * its live transcript. Spawns nothing for a stored session. A session the
+	 * preview answers `gone` for lands on the startup view (D26 point 6).
 	 */
 	preview(ref: SessionRef): Promise<void>;
 	select(ref: SessionRef): Promise<void>;
@@ -215,7 +219,9 @@ export interface AgentpaneController {
 	 * End the selected session's subprocess and leave the user on its read-only
 	 * preview (OW-tewave), which is where a click on that row would have put
 	 * them: the pane reads detached, and `publish` fetches the preview
-	 * (OW-forinu). No-op with nothing selected.
+	 * (OW-forinu), which for a session with nothing on disk answers `gone` and
+	 * lands on the startup view instead (D26 point 6). No-op with nothing
+	 * selected.
 	 *
 	 * Not held to a live pane, as the other session verbs are: after a gap the
 	 * server still holds the session with no view in this tab, and a detach is
@@ -259,12 +265,36 @@ export interface AgentpaneController {
 const FATAL_STREAM_RETRY_MS = 5_000;
 
 /**
- * How long `loadPreview` lets a preview read run before aborting it
- * (OW-bilogo), which then counts as a failed read. A first cut nothing has
+ * How long a preview read `loadPreview` or a click asks may run before it is
+ * aborted (OW-bilogo), which then counts as a failed read. A first cut nothing has
  * measured: the server answers it from local disk, so ten seconds is far past
  * any answer it would give.
  */
 const PREVIEW_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * Whether a preview read failed because its session is nowhere: the route's
+ * `404` with the code `gone`, for a ref nobody holds and no file backs (D26
+ * point 5). Nothing else is, `not_found` included, which an unmatched route
+ * also answers.
+ */
+function isGone(error: unknown): boolean {
+	return error instanceof ApiClientError && error.status === 404 && error.code === "gone";
+}
+
+/** A preview read out -- see `loadPreview`, which says who owns its answer. */
+interface PreviewRead {
+	abort: AbortController;
+	timeout: ReturnType<typeof setTimeout>;
+	/** The selection intent it was asked under, or the click's that joined it -- see `loadPreview`. */
+	intent: number;
+	/** Whether that intent is a click's. */
+	clicked: boolean;
+	/** Let go of at a `connected` or a disposal, which then lands nothing. */
+	abandoned: boolean;
+	/** Settles once the answer has landed, or has been found to belong to nobody. */
+	landed: Promise<void>;
+}
 
 /**
  * `isVisible` is *injected* rather than read from `document` because this module
@@ -319,20 +349,10 @@ export function createController(
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let pollDelay = PREVIEW_POLL_IDLE_MS;
 	const forkPointsInFlight = new Set<string>();
-	/** The preview reads `loadPreview` has out, by ref key, each with what aborts it and its bound. */
-	const previewLoads = new Map<string, { abort: AbortController; timeout: ReturnType<typeof setTimeout> }>();
+	/** The preview reads `loadPreview` and a click have out between them, by ref key. */
+	const previewLoads = new Map<string, PreviewRead>();
 	/** Whether the `previewFailure` on the view holds `loadPreview` back until the next `connected`. */
 	let previewHeld = false;
-	/**
-	 * The ref keys `detach()` has a close out for, whose preview `loadPreview`
-	 * leaves to it. The server's `ended` can drop the view before the close
-	 * answers, since the server writes it first and the stream and the reply
-	 * are unordered (D2, D26), and until the close answers `detach()` has not
-	 * decided whether its no-disk exit clears the selection; a read in between
-	 * is the one that exit promises is never asked. An interim: OW-lilami retires that exit, and this
-	 * with it.
-	 */
-	const detaching = new Set<string>();
 	const listeners = new Set<(next: ControllerView) => void>();
 
 	/**
@@ -366,9 +386,10 @@ export function createController(
 	 * `reconnecting`, and the reconnect's `connected` is the publish that fetches.
 	 *
 	 * No gesture stands behind it, so like the drop it writes neither `busy` nor
-	 * `error` nor the selection intent. Its preview lands only if the selection
-	 * still names that session and the pane there is still loading: a click
-	 * elsewhere has moved on, and a view that came back meanwhile outranks it.
+	 * `error` nor the selection intent. Its answer lands only while the intent
+	 * it was asked under stands (below) and the selection still names that
+	 * session with the pane there still loading: a view that came back
+	 * meanwhile outranks it.
 	 *
 	 * A failed read is never an answer (OW-bilogo): the pane stays loading and
 	 * the selection stands. A failure cannot be told from the outage that
@@ -377,65 +398,143 @@ export function createController(
 	 * its selection to keep whatever the read found, since the snapshot makes
 	 * the pane live when it lands.
 	 *
+	 * The one exception is `gone` (`isGone`), which is the server answering,
+	 * not failing: the session is nowhere, so the selection clears onto the
+	 * startup view, whatever the stream reads (D26 point 6). That is how a
+	 * dropped view of a session with nothing on disk -- detached here, closed
+	 * elsewhere, or lost with a server that exited -- stops asking.
+	 *
 	 * What keeps a server answering errors from a hot loop is when the read is
 	 * asked again: at the next `connected`, which releases `previewHeld`, or
-	 * when the user clicks the row, whose `preview()` reads it itself -- never
-	 * from the failure, and never from the publishes that merely find the pane
-	 * still loading. A failure with the stream down needs no hold, as nothing
-	 * asks until `connected`; with it up, it holds and puts its message on the
-	 * pane, which the empty pane would otherwise hide from a user who has a
-	 * server to ask.
+	 * when the user clicks the row -- never from the failure, and never from
+	 * the publishes that merely find the pane still loading. A failure with the
+	 * stream down needs no hold, as nothing asks until `connected`; with it up,
+	 * it holds and puts its message on the pane, which the empty pane would
+	 * otherwise hide from a user who has a server to ask.
+	 *
+	 * Each read has one owner, the selection intent it was asked under or the
+	 * click's that joined it. A `gone` or a failure lands only while that
+	 * intent stands, as `refetchPreview` captures it: a click elsewhere has
+	 * moved on from it, whatever the selection still reads, and a `gone` of
+	 * the row it left must not clear the selection under it. A preview lands
+	 * as its owning click's while that click's intent stands, and otherwise
+	 * whenever the pane still waits on that session, whatever the intent: it
+	 * is that session's transcript, a later click replaces it, and after an
+	 * attach from the pane that failed nothing else would ask for it.
+	 *
+	 * A click, `preview()`, shares this read (`readPreview`) rather than
+	 * asking one beside it, which read twice and reported one failure in two
+	 * places (formerly OW-tuyewo): it joins a read out for its ref and makes
+	 * the read its own, so the answer lands as the click's -- opening the
+	 * preview whatever the pane shows, and reporting a failure where
+	 * `landPreview` says. It skips the gates above, so it still asks a held
+	 * read again and still reads while the stream reconnects. And while a
+	 * click's read owned by the current intent is out, for any row, nothing
+	 * is asked here: that read would carry the click's intent, and its `gone`
+	 * would clear the selection before the click lands. The click's landing
+	 * publishes, which asks again if the pane still waits.
 	 *
 	 * A read that has not settled within `PREVIEW_READ_TIMEOUT_MS` is aborted
 	 * and counts as failed: one that hung would keep its key in `previewLoads`
 	 * for good, and nothing would ever ask for that session's preview again.
 	 *
-	 * A read still out at a `connected` is abandoned there (`abandonPreviewLoads`)
-	 * rather than waited on: it was asked before the outage, so its key would
-	 * turn away the fresh read that transition owes, and its failure -- landing
-	 * with the stream up -- would hold the pane on a healthy server. An
-	 * abandoned read neither opens a preview nor holds nor writes a line.
+	 * At a `connected` every read of the detached-loading pane's session is
+	 * abandoned (`abandonPreviewLoads`) rather than waited on, a click's
+	 * included: it was asked before the outage, so its key would turn away the
+	 * fresh read that transition owes, and its failure -- a hung read's
+	 * timeout, say, landing with the stream up -- would hold the pane on a
+	 * healthy server. The fresh read answers the click too. So is every other
+	 * read no click owns. A click's read of another row is kept: nothing else
+	 * would ask it again -- App's auto-select asks one before the first open,
+	 * and never again for that row. An abandoned read neither opens a preview
+	 * nor holds nor writes a line.
 	 */
 	function loadPreview(): void {
 		const selected = view.state.selected;
 		if (selected === null || view.connection !== "connected" || previewHeld || paneMode(view) !== "loading") return;
-		const key = sessionKey(selected);
-		if (previewLoads.has(key) || detaching.has(key)) return;
+		if (previewLoads.has(sessionKey(selected))) return;
+		for (const read of previewLoads.values()) if (read.clicked && read.intent === selectionIntent) return;
+		readPreview(selected);
+	}
+
+	/** The read out for `ref`, asking one under its bound, owned by the current intent, if none is. */
+	function readPreview(ref: SessionRef): PreviewRead {
+		const key = sessionKey(ref);
+		const out = previewLoads.get(key);
+		if (out !== undefined) return out;
 		const abort = new AbortController();
 		const timeout = setTimeout(
 			() => abort.abort(new Error(`No answer within ${PREVIEW_READ_TIMEOUT_MS / 1000}s.`)),
 			PREVIEW_READ_TIMEOUT_MS,
 		);
-		const read = { abort, timeout };
-		previewLoads.set(key, read);
-		// False once the read is abandoned, which already let go of its key.
-		const settle = (): boolean => {
-			if (previewLoads.get(key) !== read) return false;
-			clearTimeout(timeout);
-			previewLoads.delete(key);
-			return true;
-		};
-		const loading = () =>
-			!disposed && view.state.selected !== null && sessionKey(view.state.selected) === key && paneMode(view) === "loading";
-		api.preview(selected, abort.signal).then(
-			(response) => {
-				if (settle() && loading()) openPreview({ ref: selected, turns: response.turns });
-			},
-			(error: unknown) => {
-				if (!settle() || !loading() || view.connection !== "connected") return;
-				previewHeld = true;
-				publish({ previewFailure: { ref: selected, message: errorMessage(error) } });
-			},
+		const read: PreviewRead = { abort, timeout, intent: selectionIntent, clicked: false, abandoned: false, landed: Promise.resolve() };
+		read.landed = api.preview(ref, abort.signal).then(
+			(response) => landPreview(ref, read, response, undefined),
+			(error: unknown) => landPreview(ref, read, undefined, error),
 		);
+		previewLoads.set(key, read);
+		return read;
 	}
 
-	/** Let go of every preview read still out -- see `loadPreview`. */
-	function abandonPreviewLoads(): void {
-		for (const { abort, timeout } of previewLoads.values()) {
-			clearTimeout(timeout);
-			abort.abort();
+	/** Land a read's answer as its owner's -- see `loadPreview` -- or nowhere. */
+	async function landPreview(ref: SessionRef, read: PreviewRead, response: SessionPreviewResponse | undefined, error: unknown): Promise<void> {
+		const key = sessionKey(ref);
+		if (previewLoads.get(key) === read) {
+			clearTimeout(read.timeout);
+			previewLoads.delete(key);
 		}
-		previewLoads.clear();
+		if (read.abandoned || disposed) return;
+		const owned = read.intent === selectionIntent;
+		const clicked = read.clicked && owned;
+		const selected = view.state.selected;
+		// The pane waiting on this read, which a view that came back outranks.
+		const onPane = selected !== null && sessionKey(selected) === key && paneMode(view) === "loading";
+		if (response !== undefined) {
+			if (!clicked) {
+				if (onPane) openPreview({ ref, turns: response.turns });
+				return;
+			}
+			// A snapshot can introduce the session while the fetch is out --
+			// the reconnect's opening snapshots trail its `connected`, which is
+			// when App's auto-select asks. The pane would read live over the
+			// preview anyway (`paneMode`); what reselecting it still buys is the
+			// live selection's model list and pending flags, which
+			// `openPreview` does not set.
+			const live = viewOf(view.state, response.ref);
+			if (live) await reselectLive(live.ref, read.intent);
+			else openPreview(response, { error: null });
+			return;
+		}
+		if (!owned || (!clicked && !onPane)) return;
+		if (isGone(error)) {
+			publish({ state: { ...view.state, selected: null } });
+			return;
+		}
+		// A click's failure goes on the pane when it was the selected
+		// detached-loading row's, holding it, since that is the pane the user
+		// is looking at and the next publish would read again; anywhere else no
+		// pane of that session is on screen to carry it, and it takes the error
+		// slot. The background read writes a line only with the stream up.
+		if (onPane && (clicked || view.connection === "connected")) {
+			previewHeld = true;
+			publish({ previewFailure: { ref, message: errorMessage(error) } });
+		} else if (clicked) publish({ error: errorMessage(error) });
+	}
+
+	/**
+	 * Let go of every preview read still out but a click's of a row other than
+	 * the detached-loading pane's, or at a disposal of every one -- see
+	 * `loadPreview`.
+	 */
+	function abandonPreviewLoads(all = false): void {
+		const waiting = paneMode(view) === "loading" ? sessionKey(view.state.selected!) : null;
+		for (const [key, read] of previewLoads) {
+			if (!all && read.clicked && key !== waiting) continue;
+			clearTimeout(read.timeout);
+			read.abandoned = true;
+			read.abort.abort();
+			previewLoads.delete(key);
+		}
 	}
 
 	function errorMessage(error: unknown): string {
@@ -670,7 +769,11 @@ export function createController(
 	/**
 	 * Re-read the transcript already on screen and replace its turns, reporting
 	 * whether it grew. False for every reason not to touch anything: nothing
-	 * previewed, a stale result, a failed fetch.
+	 * previewed, a stale result, a failed fetch -- and for a `gone`, which
+	 * clears the selection onto the startup view if the preview it re-read is
+	 * still on screen (D26 point 6): a session closed elsewhere, or previewed
+	 * across a server restart, otherwise stayed on a preview whose Attach could
+	 * only 404.
 	 */
 	async function refetchPreview(): Promise<boolean> {
 		const showing = view.preview;
@@ -685,9 +788,13 @@ export function createController(
 		let turns: SessionPreviewTurn[];
 		try {
 			turns = (await api.preview(ref)).turns;
-		} catch {
-			// The pane still shows the last good read and the next tick retries. A
-			// background poll has no business seizing the view's error slot.
+		} catch (error: unknown) {
+			// Otherwise the pane still shows the last good read and the next tick
+			// retries. A background poll has no business seizing the view's error
+			// slot.
+			if (isGone(error) && !disposed && intent === selectionIntent && view.preview !== null && sessionKey(view.preview.ref) === sessionKey(ref)) {
+				publish({ state: { ...view.state, selected: null } });
+			}
 			return false;
 		}
 		if (disposed || intent !== selectionIntent) return false;
@@ -786,11 +893,11 @@ export function createController(
 	 * fetch takes it from there (OW-forinu), under the gapped event's `ref`: the
 	 * reducer returns on a gap before it moves anything, so where that event is
 	 * the first to carry a rename the selection still names the old ref (D24),
-	 * and it is moved here or the fetch would read the old one. Unlike
-	 * `detach()`, this keeps a session with nothing on disk selected too: the
-	 * server still holds it, so the empty preview's Attach reaches it rather
-	 * than 404ing (OW-vasubu), and the poll finds the transcript once the first
-	 * turn writes one.
+	 * and it is moved here or the fetch would read the old one. A session with
+	 * nothing on disk lands on its preview too: the server still holds it, so
+	 * the preview answers an empty transcript rather than `gone` (D26 point 5),
+	 * its Attach reaches the session, and the poll finds the transcript once
+	 * the first turn writes one.
 	 *
 	 * No gesture reaches here -- the only caller is `onEvent` -- so, like the
 	 * stream drop's detach in `onDisconnect`, this writes neither `busy` nor
@@ -801,6 +908,18 @@ export function createController(
 		const sessions = { ...view.state.sessions };
 		delete sessions[handle];
 		publish({ state: { ...view.state, sessions, ...(onScreen ? { selected: ref } : {}) } });
+	}
+
+	/** Select a session this tab holds live, as a click on its row does. */
+	async function reselectLive(live: SessionRef, intent: number): Promise<void> {
+		publish({
+			state: { ...view.state, selected: live },
+			error: null,
+			models: [],
+			modelSetting: modelSettingForSession(live),
+			effortSetting: effortSettingForSession(live),
+		});
+		await loadModelsForSelected(intent);
 	}
 
 	/** Put a fetched preview on screen, polling it from quiet. */
@@ -937,39 +1056,32 @@ export function createController(
 		 * Either way the tab holds nothing live from here (D25): a stream drops
 		 * only when the server exits, so every view goes at once, and a drop the
 		 * server survived gets back what it still holds from the reconnect's
-		 * opening snapshots. A selected session with a transcript on disk stays
-		 * selected, and its pane reads detached: a preview on screen stays, and a
-		 * live one becomes the detached-loading pane, whose preview `publish`
-		 * fetches once the reconnect reports `connected` (OW-forinu) -- or which
-		 * the reconnect's opening snapshot makes live again first. The intent is
-		 * not bumped: a gesture still in flight settles on its own, failing
-		 * against a dead server or landing on a live one, and a bump would strand
-		 * its `busy`.
+		 * opening snapshots. The selection stays, and its pane reads detached: a
+		 * preview on screen stays, and a live one becomes the detached-loading
+		 * pane, whose preview `publish` fetches once the reconnect reports
+		 * `connected` (OW-forinu) -- or which the reconnect's opening snapshot
+		 * makes live again first. That holds for a session with nothing on disk
+		 * too: whether anything is left of it is the preview's to say once a
+		 * server can answer, and `gone` clears the selection then (D26 point 6).
+		 * The intent is not bumped: a gesture still in flight settles on its
+		 * own, failing against a dead server or landing on a live one, and a bump
+		 * would strand its `busy`.
 		 *
-		 * The rows say the same, since the sidebar's stripe and streaming dot read
-		 * them until the reconnect's listing, which may be the whole outage. A
-		 * row with nothing on disk went with the server, as at `detach()`'s
-		 * no-disk exit, and takes the selection along if it held it: there is
-		 * nothing left to preview or attach, and the preview the server would
-		 * answer for its ref is an empty one whose Attach can only 404
-		 * (OW-vasubu). This is where that decision lives for a drop; it reads
-		 * `onDisk` and not `status`, because a row an attach reply added before
-		 * any listing reads `detached` (`replaceSummary`) whatever it holds. The
-		 * rest read detached and idle. Each keeps its `handle`: with its view
-		 * gone, it is what pairs a reconnect's opening snapshot with the row when
-		 * a rename moved the ref during the outage (`followRef`).
+		 * The rows say the same, since the sidebar's stripe and streaming dot
+		 * read them until the reconnect's listing, which may be the whole outage:
+		 * each reads detached and idle, and one with nothing on disk stands until
+		 * that listing drops it, as it does after a detach. Each keeps its
+		 * `handle`: with its view gone, it is what pairs a reconnect's opening
+		 * snapshot with the row when a rename moved the ref during the outage
+		 * (`followRef`).
 		 */
 		onDisconnect(fatal: boolean) {
-			const selected = view.state.selected;
-			let kept = true;
-			const summaries: SessionSummary[] = [];
-			for (const summary of view.state.summaries) {
-				if (summary.onDisk) summaries.push(summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false });
-				else if (selected !== null && sessionKey(summary.ref) === sessionKey(selected)) kept = false;
-			}
+			const summaries = view.state.summaries.map((summary): SessionSummary =>
+				summary.status === "detached" ? summary : { ...summary, status: "detached", isStreaming: false },
+			);
 			publish({
 				connection: "reconnecting",
-				state: { summaries, sessions: {}, selected: kept ? selected : null },
+				state: { summaries, sessions: {}, selected: view.state.selected },
 			});
 			if (fatal) scheduleReconnect();
 		},
@@ -998,7 +1110,7 @@ export function createController(
 			if (disposed) return;
 			disposed = true;
 			stopPoll();
-			abandonPreviewLoads();
+			abandonPreviewLoads(true);
 			clearTimeout(fatalRetryTimer);
 			connection?.close();
 			listeners.clear();
@@ -1010,40 +1122,19 @@ export function createController(
 			const intent = ++selectionIntent;
 			// A session already attached in this client keeps its live transcript --
 			// there is nothing to preview, so just reselect it (no fetch, no re-attach).
-			const reselectLive = async (live: SessionRef) => {
-				publish({
-					state: { ...view.state, selected: live },
-					error: null,
-					models: [],
-					modelSetting: modelSettingForSession(live),
-					effortSetting: effortSettingForSession(live),
-				});
-				await loadModelsForSelected(intent);
-			};
 			if (viewOf(view.state, ref)) {
-				await reselectLive(ref);
+				await reselectLive(ref, intent);
 				return;
 			}
+			// The read `loadPreview` shares, joined if one is out for this ref, and
+			// made this click's before the publish below, which would otherwise
+			// ask a background read under this click's intent. The pane stays as
+			// it is until its answer lands (`landPreview`).
+			const read = readPreview(ref);
+			read.intent = intent;
+			read.clicked = true;
 			publish({ error: null });
-			try {
-				const response = await api.preview(ref);
-				if (!disposed && intent === selectionIntent) {
-					// A snapshot can introduce the session while the fetch is out --
-					// the reconnect's opening snapshots trail its `connected`, which is
-					// when App's auto-select asks. The pane would read live over the
-					// preview anyway (`paneMode`); what reselecting it still buys is the
-					// live selection's model list and pending flags, which
-					// `openPreview` does not set.
-					const live = viewOf(view.state, response.ref);
-					if (live) {
-						await reselectLive(live.ref);
-						return;
-					}
-					openPreview(response, { error: null });
-				}
-			} catch (error: unknown) {
-				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
-			}
+			await read.landed;
 		},
 		async create(cwd, backend) {
 			if (!validWorkspace(cwd)) return;
@@ -1376,81 +1467,22 @@ export function createController(
 			if (!selected) return;
 			// Captured rather than bumped: a detach is not a selection change, and
 			// bumping would retract a preview or attach the user started before
-			// clicking it. `api.close` awaits the subprocess's disposal, so the
-			// window is wide enough to matter: the no-disk exit below would snap the
-			// selection back off a row clicked during it. Bailing costs nothing: the
-			// `ended` the close sends drops the dead view on its own (D26).
+			// clicking it; a close that fails after one of those is not its error
+			// to report.
 			const intent = selectionIntent;
-			// The summary below is found by ref: `list()` gives a summary a handle
-			// only while the server holds the session, so one re-listed after the
-			// close carries none.
-			const key = sessionKey(selected);
 			publish({ error: null });
-			detaching.add(key);
 			try {
-				// Released before anything below publishes, so the pane that
-				// publish leaves loading, if any, reads its preview.
-				await api.close(selected).finally(() => detaching.delete(key));
+				await api.close(selected);
 			} catch (error: unknown) {
 				if (!disposed && intent === selectionIntent) publish({ error: errorMessage(error) });
-				return;
 			}
-			if (disposed || intent !== selectionIntent) return;
-			// The live view is not dropped here: the server's `ended` drops it
-			// (D26), and though the server writes that before it answers the
-			// close, the stream and the reply are unordered (D2), so the pane may
-			// still read live until it lands.
-			//
-			// A session with nothing on disk has nothing to preview and no row to go
-			// back to: until OW-royosa the preview route answered its ref with an
-			// empty-but-*non-null* transcript rather than an error, which was enough
-			// to put the pane on its preview, whose one control is an Attach that can
-			// only 404 on a ref the session manager no longer holds (OW-vasubu); it
-			// now answers `gone` (D26 point 5), which nothing here reads yet. Land
-			// on the startup view instead -- selection cleared -- which is where
-			// every user starts anyway, so a view the `ended` has yet to drop
-			// never leaves a detached-loading pane asking for that preview; the
-			// one an `ended` leaves while the close is still out does not ask
-			// either (`detaching`). Bumping the intent here is safe
-			// and makes this the last word on the selection: the intent is
-			// unchanged, so nothing the user started during the close is in flight.
-			//
-			// Read off the summary's `onDisk`, which is the session index's answer,
-			// and not off anything that merely correlates with it. Not `status`: a
-			// session this client has attached lists as `attached` whatever the
-			// store holds -- the status is about the process (`session-manager.ts`,
-			// `#liveOverlay`). Not the `virtual:` prefix: every backend replaces
-			// that id at attach, while nothing reaches disk until the first turn
-			// (D9), and a fork is born with no file and no such prefix at all
-			// (OW-wedupe). Read after the close, so a re-list that landed during it
-			// is the answer; a row it dropped is a session nothing lists, which is
-			// this exit too. A listing that has not yet caught up with a first turn
-			// errs the same way, and the re-list below brings its row back.
-			const listed = view.state.summaries.find((item) => sessionKey(item.ref) === key);
-			if (!listed?.onDisk) {
-				// This exit asks for the listing itself, and the other does not
-				// (D21). The difference is what the stale row means. A detached stored
-				// session lists with the wrong `status` -- the stripe says attached
-				// when it is not -- which is merely untrue and can wait for the
-				// reconnect re-list. A detached session with nothing on disk is gone
-				// everywhere: no file, and dropped from the manager's table.
-				// Its row nonetheless lives on in `summaries`, which is what the
-				// sidebar renders, and a click on it strands the user on the
-				// empty-but-non-null preview OW-vasubu exists to keep them off. So
-				// the phantom is removed now rather than whenever the stream next
-				// comes up. Not awaited, and `false`: nobody asked for this listing.
-				void refreshSessions(false);
-				++selectionIntent;
-				publish({ state: { ...view.state, selected: null } });
-				return;
-			}
-			// A session with a transcript on disk ends where a click on its
-			// now-detached row would have put the user (OW-tewave): once the view
-			// has gone its pane reads detached-loading, and `publish` fetches the
-			// preview (OW-forinu). An `ended` that landed while the close was out
-			// left that fetch to this publish (`detaching`); one still to come
-			// makes its own.
-			publish({});
+			// Nothing else is this path's. The server's `ended` drops the live view
+			// (D26), before or after the close answers, since the stream and the
+			// reply are unordered (D2), and the pane it leaves reads detached,
+			// whose preview `publish` fetches (OW-forinu). A session with nothing
+			// on disk answers that read `gone`, and it lands on the startup view
+			// (D26 point 6); its row stands until the next listing drops it, as a
+			// stored session's stale stripe does (D21).
 		},
 		clearError() {
 			const selected = view.state.selected;

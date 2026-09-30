@@ -978,12 +978,12 @@
 			if (top) void controller.preview(top.ref);
 		} else if (view.state.selected === null && top && autoPreviewedKey !== topKey && view.connection !== "reconnecting") {
 			// Startup: sessions arrived after the filter had already settled. Or a
-			// stream drop cleared a selection with nothing on disk (D25), which
-			// waits for the stream: the server it is taken to have lost cannot
-			// answer a preview, and the failed fetch would sit in the error slot
-			// past the outage. A selection with a transcript on disk survives the
-			// drop, and the controller reads its preview once the stream is back
-			// (OW-forinu).
+			// preview answered `gone` cleared the selection (D26), which can
+			// happen while the stream is still reconnecting -- a poll, or a click
+			// -- and then waits for the stream: the server it is taken to have
+			// lost cannot answer a preview, and the failed fetch would sit in the
+			// error slot past the outage. A drop itself keeps the selection, and
+			// the controller reads its preview once the stream is back (OW-forinu).
 			autoPreviewedKey = topKey;
 			void controller.preview(top.ref);
 		}
@@ -1070,10 +1070,11 @@
 	}
 
 	/**
-	 * End the selected conversation's subprocess. A session with a transcript on
-	 * disk stays selected, its pane detached until the controller's read of its
-	 * preview lands (OW-tewave, OW-forinu); one with nothing on disk lands on the
-	 * startup view (OW-vasubu). `detach()` in `controller.ts` says why.
+	 * End the selected conversation's subprocess. The session stays selected,
+	 * its pane detached until the controller's read of its preview lands
+	 * (OW-tewave, OW-forinu); one with nothing on disk, whose preview answers
+	 * `gone`, lands on the startup view (D26). `detach()` in `controller.ts`
+	 * says why.
 	 */
 	function detachSession(): void {
 		void controller.detach();

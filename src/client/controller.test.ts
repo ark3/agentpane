@@ -12,6 +12,7 @@ import type {
 	SessionSummary,
 } from "$shared/protocol.ts";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "./api.ts";
+import { ApiClientError } from "./api.ts";
 import { createController, paneMode, type AgentpaneController } from "./controller.ts";
 import { sessionKey } from "$shared/protocol.ts";
 
@@ -73,6 +74,11 @@ function viewAt(controller: AgentpaneController, session: SessionRef) {
  */
 function snapshotOf(session: SessionRef, handle = h(session)): ServerEvent {
 	return { type: "snapshot", session, handle, seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] };
+}
+
+/** What the preview route answers for a ref nobody holds and no file backs (D26 point 5). */
+function gone(): ApiClientError {
+	return new ApiClientError(404, "gone", "no such session");
 }
 
 /** Let every microtask and the timer-free tail of an in-flight refresh run out. */
@@ -402,7 +408,7 @@ describe("client controller", () => {
 
 		await controller.preview(ref);
 
-		expect(api.preview).toHaveBeenCalledWith(ref);
+		expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 		expect(api.attach).not.toHaveBeenCalled();
 		expect(controller.getView().preview).toEqual({ ref, turns: [{ role: "user", content: "hi" }] });
 		expect(controller.getView().state.selected).toEqual(ref);
@@ -772,8 +778,9 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// Unlike detach()'s no-disk exit, the server still holds the session, so the
-	// empty preview's Attach reaches it and the poll finds the first turn's file.
+	// The server still holds the session, so its preview answers an empty
+	// transcript rather than `gone` (D26 point 5): the empty preview's Attach
+	// reaches it and the poll finds the first turn's file.
 	it("lands a gapped selection with nothing on disk on its preview (OW-lunihe)", async () => {
 		const api = new FakeApi();
 		api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
@@ -1102,7 +1109,7 @@ describe("client controller", () => {
 		expect(controller.getView().state.summaries[0]?.isStreaming).toBe(false);
 		api.preview.mockClear();
 		await controller.preview(ref);
-		expect(api.preview).toHaveBeenCalledWith(ref);
+		expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 	});
 
 	// Both orderings, because the server writes the `ended` and the
@@ -1318,12 +1325,14 @@ describe("client controller", () => {
 			expect(controller.getView().state.selected).toEqual(attachedRef);
 			expect(paneMode(controller.getView())).toBe("loading");
 			expect(api.preview).not.toHaveBeenCalled();
-			// The rows say so too: nothing on disk is gone with the server, and the
-			// rest read detached and idle, keeping the handle a reconnect's opening
-			// snapshot pairs by.
+			// The rows say so too: every one reads detached and idle, keeping the
+			// handle a reconnect's opening snapshot pairs by, and one with nothing
+			// on disk stands until the reconnect's listing drops it (D26).
 			expect(controller.getView().state.summaries).toEqual([
 				{ ...streaming, status: "detached", isStreaming: false },
 				{ ...summary(attachedRef), status: "detached" },
+				{ ...virtual, status: "detached" },
+				{ ...fileless, status: "detached" },
 				stored,
 			]);
 			expect(await controller.submit()).toBe(false);
@@ -1332,10 +1341,11 @@ describe("client controller", () => {
 		});
 	}
 
-	// Nothing on disk went with the server: there is nothing left to preview,
-	// and the preview the server would answer is an empty one whose Attach can
-	// only 404 (OW-vasubu), so the selection goes with the row.
-	it("clears a live selection with nothing on disk when the stream drops", async () => {
+	// The drop keeps a selection with nothing on disk and its row as it keeps
+	// any other: whether anything is left to show is the preview's to say once
+	// a server can answer it, and one that no longer holds the session answers
+	// `gone` (D26 point 6). The reconnect's listing drops the row.
+	it("keeps a live selection with nothing on disk through a drop, and clears it once the reconnect's preview answers gone", async () => {
 		const api = new FakeApi();
 		api.listSessions.mockResolvedValue([{ ...summary(forkedRef), onDisk: false }]);
 		const controller = createController(api);
@@ -1345,14 +1355,19 @@ describe("client controller", () => {
 		await controller.preview(forkedRef);
 		expect(paneMode(controller.getView())).toBe("live");
 		api.preview.mockClear();
+		api.preview.mockRejectedValue(gone());
 
 		api.drop();
-		expect(controller.getView().state.summaries).toEqual([]);
+		expect(controller.getView().state.selected).toEqual(forkedRef);
+		expect(controller.getView().state.summaries.map((item) => item.ref)).toEqual([forkedRef]);
+		expect(api.preview).not.toHaveBeenCalled();
+		api.listSessions.mockResolvedValue([]);
 		api.open();
 		await settle();
 
+		expect(api.preview).toHaveBeenCalledExactlyOnceWith(forkedRef, expect.any(AbortSignal));
 		expect(controller.getView().state.selected).toBeNull();
-		expect(api.preview).not.toHaveBeenCalled();
+		expect(controller.getView().state.summaries).toEqual([]);
 		controller.dispose();
 	});
 
@@ -1376,9 +1391,10 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A previewed row the drop removes has nothing to preview or attach once
-	// the server is back (OW-vasubu), so the selection goes with the row.
-	it("clears a previewed selection whose row the drop removes", async () => {
+	// A preview is not live, so the drop leaves one with nothing on disk on
+	// screen too, and the reconnect's listing re-reads it (OW-76): a server
+	// that no longer holds the session answers `gone` (D26 point 6).
+	it("keeps a previewed selection with nothing on disk through a drop, and clears it once the reconnect's re-read answers gone", async () => {
 		const api = new FakeApi();
 		api.listSessions.mockResolvedValue([{ ...summary(virtualRef), status: "virtual", onDisk: false }]);
 		const controller = createController(api);
@@ -1388,6 +1404,12 @@ describe("client controller", () => {
 		expect(controller.getView().preview).not.toBeNull();
 
 		api.drop();
+		expect(controller.getView().state.selected).toEqual(virtualRef);
+		expect(controller.getView().preview).not.toBeNull();
+		api.listSessions.mockResolvedValue([]);
+		api.preview.mockRejectedValue(gone());
+		api.open();
+		await settle();
 
 		expect(controller.getView().state.summaries).toEqual([]);
 		expect(controller.getView().state.selected).toBeNull();
@@ -1535,32 +1557,39 @@ describe("client controller", () => {
 	}
 
 	// A detached session with nothing on disk is gone everywhere -- no file, and
-	// dropped from the manager's table -- but its row lives on in `summaries`,
-	// which is what the sidebar renders, and clicking it lands on exactly the
-	// screen OW-vasubu exists to prevent. So this exit asks for the listing
-	// itself rather than waiting for the reconnect the stripe waits for (D21).
-	// The stream is down here and no event is emitted; the session is created
-	// after the drop, which would otherwise have taken its selection down (D25).
-	it("drops the phantom row of a detached session with nothing on disk, with no broadcast to ride on", async () => {
+	// dropped from the manager's table -- but its row stands in `summaries`
+	// until the next listing, as a stored session's stale stripe does (D21):
+	// a detach asks no listing of its own. A click on the row reads `gone` and
+	// lands on the startup view, which is what makes it harmless (D26 point 6).
+	// The stream is down here, so no listing comes, and the click reads anyway;
+	// the session is created after the drop, which would otherwise have taken
+	// its view down (D25).
+	it("leaves the row of a detached session with nothing on disk to the next listing, and a click on it lands on the startup view", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
 		await controller.start();
 		api.drop();
 		await controller.create("/work", "pi");
-		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
-		api.listSessions.mockResolvedValue([]);
+		api.listSessions.mockClear();
 
 		await controller.detach();
 		await settle();
+		expect(api.listSessions).not.toHaveBeenCalled();
+		expect(controller.getView().state.summaries.map((item) => sessionKey(item.ref))).toContain(sessionKey(createdRef));
 
-		expect(controller.getView().state.summaries).toEqual([]);
+		api.preview.mockRejectedValue(gone());
+		await controller.preview(createdRef);
+
+		expect(api.preview).toHaveBeenCalledExactlyOnceWith(createdRef, expect.any(AbortSignal));
+		expect(controller.getView().state.selected).toBeNull();
+		expect(controller.getView().error).toBeNull();
 		controller.dispose();
 	});
 
-	// Nothing on disk means `preview` would answer with an empty-but-non-null
-	// transcript and strand the user on a screen whose only control is an
-	// Attach the session manager can no longer honour (OW-vasubu).
+	// Nothing on disk and nobody holding the session once it is closed, so its
+	// preview answers `gone` rather than an empty transcript whose only control
+	// would be an Attach the server can no longer honour (OW-vasubu, D26).
 	it("clears the selection onto the startup view when the session detached before its first turn was renamed at attach", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
@@ -1572,31 +1601,32 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(createdRef);
 		await settle();
 		api.preview.mockClear();
+		api.preview.mockRejectedValue(gone());
 
 		await controller.detach();
 		await settle();
 		// The close answered first here; the `ended` the server wrote before it
-		// lands after (D2), and drops the view under a selection already cleared.
+		// lands after (D2), and the pane it leaves reads the preview.
 		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
 		await settle();
 
 		const detachedView = controller.getView();
 		expect(api.close).toHaveBeenCalledWith(createdRef);
-		expect(api.preview).not.toHaveBeenCalled();
+		expect(api.preview).toHaveBeenCalledExactlyOnceWith(createdRef, expect.any(AbortSignal));
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
+		expect(detachedView.previewFailure).toBeNull();
 		expect(detachedView.state.sessions[h(createdRef)]).toBeUndefined();
-		// The re-list is on this exit, and only this one: the row it removes is
-		// not merely stale, it points at a session that exists nowhere (D21).
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
+		// No listing of its own: the row goes at the next one (D26).
+		expect(api.listSessions).toHaveBeenCalledOnce();
 		controller.dispose();
 	});
 
 	// The server says `ended` where it lets go of the handle, before the
 	// disposal the close answers after (D26), so the view drops while the close
-	// is still out and the pane goes detached-loading under a selection the exit
-	// has yet to clear. Until OW-lilami retires the exit, that pane must not ask.
-	it("never reads the preview of a session with nothing on disk whose ended lands before its close answers (OW-sodohi)", async () => {
+	// is still out, and the detached-loading pane it leaves reads its preview
+	// then: nothing waits for the close, and `gone` clears the selection.
+	it("clears the selection of a session with nothing on disk whose ended lands before its close answers, without waiting for the close (OW-sodohi)", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
@@ -1609,16 +1639,20 @@ describe("client controller", () => {
 		const closing = deferred<void>();
 		api.close.mockReturnValueOnce(closing.promise);
 
+		api.preview.mockRejectedValue(gone());
+
 		const detaching = controller.detach();
 		await settle();
 		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
 		await settle();
 		expect(controller.getView().state.sessions[h(createdRef)]).toBeUndefined();
+		expect(api.preview).toHaveBeenCalledExactlyOnceWith(createdRef, expect.any(AbortSignal));
+		expect(controller.getView().state.selected).toBeNull();
 		closing.resolve();
 		await detaching;
 		await settle();
 
-		expect(api.preview).not.toHaveBeenCalled();
+		expect(api.preview).toHaveBeenCalledOnce();
 		expect(controller.getView().state.selected).toBeNull();
 		controller.dispose();
 	});
@@ -1646,7 +1680,7 @@ describe("client controller", () => {
 
 	// A fork is born with no file on every backend, and gets one only when its
 	// first turn ends (OW-japuzo, OW-hojefo). Detaching it mid-turn kills that
-	// turn, so nothing is ever written.
+	// turn, so nothing is ever written, and its preview answers `gone`.
 	it("clears the selection onto the startup view when the detached fork has run no turn", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
@@ -1664,23 +1698,26 @@ describe("client controller", () => {
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 		await settle();
 		api.preview.mockClear();
+		api.preview.mockRejectedValue(gone());
 
 		await controller.detach();
+		api.emit({ type: "ended", session: forkedRef, handle: h(forkedRef) });
 		await settle();
 
 		const detachedView = controller.getView();
 		expect(api.close).toHaveBeenCalledWith(forkedRef);
-		expect(api.preview).not.toHaveBeenCalled();
+		expect(api.preview).toHaveBeenCalledExactlyOnceWith(forkedRef, expect.any(AbortSignal));
 		expect(detachedView.state.selected).toBeNull();
 		expect(detachedView.preview).toBeNull();
-		expect(api.listSessions).toHaveBeenCalledTimes(2);
 		controller.dispose();
 	});
 
-	// The other side of the same signal: once a turn has written the store, the
-	// listing that turn's end asks for says so, and the session detaches onto its
-	// preview like any stored one (OW-tewave).
-	it("previews a session created here once a listing has found its first turn on disk", async () => {
+	// The other side of the same answer: the preview decides, not the summary's
+	// `onDisk`. Here the attach reply said nothing was on disk and no listing
+	// has caught up with the first turn that has written the store since, and
+	// the session still detaches onto its preview like any stored one
+	// (OW-tewave), where a detach that read `onDisk` cleared it.
+	it("previews a session created here whose summary has not caught up with its first turn on disk", async () => {
 		const api = new FakeApi();
 		createRenamedAtAttach(api, false);
 		const controller = createController(api);
@@ -1688,10 +1725,10 @@ describe("client controller", () => {
 		api.open();
 		await controller.create("/work", "pi");
 		api.emit({ type: "snapshot", session: createdRef, handle: h(createdRef), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
-		api.listSessions.mockResolvedValue([{ ...summary(createdRef), onDisk: true }]);
-		api.emit({ type: "sessions-changed" });
 		await settle();
 		api.preview.mockClear();
+		const turns = [previewAssistant("first turn")];
+		api.preview.mockResolvedValue({ ref: createdRef, turns });
 
 		await controller.detach();
 		api.emit({ type: "ended", session: createdRef, handle: h(createdRef) });
@@ -1699,6 +1736,7 @@ describe("client controller", () => {
 
 		expect(api.preview).toHaveBeenCalledWith(createdRef, expect.any(AbortSignal));
 		expect(controller.getView().state.selected).toEqual(createdRef);
+		expect(controller.getView().preview).toEqual({ ref: createdRef, turns });
 		controller.dispose();
 	});
 
@@ -3048,8 +3086,8 @@ describe("client controller", () => {
 				api.open();
 				await vi.advanceTimersByTimeAsync(600_000);
 
-				// `loadPreview`'s reads, which alone carry a signal: the preview's
-				// own poll re-reads it through the 600s as well.
+				// `loadPreview`'s reads, which with a click's alone carry a signal:
+				// the preview's own poll re-reads it through the 600s as well.
 				expect(api.preview.mock.calls.filter(([, signal]) => signal !== undefined)).toHaveLength(2);
 				expect(paneMode(controller.getView())).toBe("preview");
 				expect(controller.getView().preview).toEqual({ ref, turns });
@@ -3226,6 +3264,129 @@ describe("client controller", () => {
 			controller.dispose();
 		});
 
+		// A click's read is the click's answer, not a background read the
+		// `connected` abandons: App's auto-select asks it at startup, before the
+		// first open, and never asks again for that row.
+		it("lands a click whose read is out when the first open lands", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const reading = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValueOnce(reading.promise);
+			const controller = createController(api);
+			await controller.start();
+
+			const clicking = controller.preview(ref);
+			api.open();
+			reading.resolve({ ref, turns });
+			await clicking;
+
+			expect(api.preview).toHaveBeenCalledOnce();
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
+		});
+
+		// A preview is on screen through a drop, and the user clicks another row
+		// before the stream is back.
+		for (const outcome of ["answers", "fails"] as const) {
+			it(`lands a click made while the stream is down whose read ${outcome} after the reconnect`, async () => {
+				const api = new FakeApi();
+				const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+				api.preview.mockResolvedValue({ ref, turns: [previewAssistant("stored")] });
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				await controller.preview(ref);
+				api.drop();
+				const reading = deferred<SessionPreviewResponse>();
+				api.preview.mockReturnValueOnce(reading.promise);
+
+				const clicking = controller.preview(otherRef);
+				api.open();
+				const turns = [previewAssistant("other")];
+				if (outcome === "answers") reading.resolve({ ref: otherRef, turns });
+				else reading.reject(new Error("preview failed"));
+				await clicking;
+
+				if (outcome === "answers") {
+					expect(controller.getView().state.selected).toEqual(otherRef);
+					expect(controller.getView().preview).toEqual({ ref: otherRef, turns });
+				} else {
+					expect(controller.getView().state.selected).toEqual(ref);
+					expect(controller.getView().error).toBe("preview failed");
+				}
+				controller.dispose();
+			});
+		}
+
+		// The click on the selected detached-loading row made while the stream
+		// is down hangs. The `connected` abandons it with every other read of
+		// that pane, since the fresh read it owes the pane answers the click
+		// too; kept, its key turned that read away and its timeout held a
+		// healthy pane on a failure.
+		it("abandons a hung click on the detached-loading row at the reconnect, and lands the fresh read instead", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				const turns = [previewAssistant("stored")];
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				await controller.select(ref);
+				api.emit(snapshotOf(ref));
+				await vi.advanceTimersByTimeAsync(0);
+				api.drop();
+				expect(paneMode(controller.getView())).toBe("loading");
+				api.preview.mockClear();
+				// A read that settles only when it is aborted, as `fetch` does.
+				api.preview.mockImplementationOnce((_session, signal) =>
+					new Promise((_resolve, reject) => {
+						signal?.addEventListener("abort", () => reject(signal.reason));
+					}));
+				api.preview.mockResolvedValue({ ref, turns });
+
+				void controller.preview(ref);
+				api.open();
+				await vi.advanceTimersByTimeAsync(0);
+
+				expect(api.preview).toHaveBeenCalledTimes(2);
+				expect(api.preview.mock.calls[0]?.[1]?.aborted).toBe(true);
+				expect(paneMode(controller.getView())).toBe("preview");
+				await vi.advanceTimersByTimeAsync(10_000);
+				expect(paneMode(controller.getView())).toBe("preview");
+				expect(controller.getView().previewFailure).toBeNull();
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// An attach from the loading pane bumps the intent and fails; the read
+		// out for that pane is still that session's transcript, and nothing
+		// else will ask for it.
+		it("opens a detached-loading pane's preview that answers after an attach from it failed", async () => {
+			const api = new FakeApi();
+			const turns = [previewAssistant("stored")];
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const reading = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValueOnce(reading.promise);
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			api.attach.mockRejectedValueOnce(new Error("attach failed"));
+
+			await controller.select(ref);
+			reading.resolve({ ref, turns });
+			await settle();
+
+			expect(paneMode(controller.getView())).toBe("preview");
+			expect(controller.getView().preview).toEqual({ ref, turns });
+			controller.dispose();
+		});
+
 		// A drop leaves a session with a transcript on disk selected, and its
 		// preview waits for a server that can answer it (D25 point 3).
 		it("keeps a dropped selection detached-loading, and fetches its preview only once the stream is back (OW-forinu)", async () => {
@@ -3255,5 +3416,367 @@ describe("client controller", () => {
 			expect(controller.getView().preview).toEqual({ ref, turns });
 			controller.dispose();
 		});
+	});
+
+	/**
+	 * A preview read of the selected session answered `gone` is the one place
+	 * the browser learns its session is nowhere, and it clears the selection
+	 * onto the startup view from each path that reads it (D26 point 6).
+	 */
+	describe("a preview answered gone", () => {
+		const createdRef: SessionRef = { backend: "pi", id: "virtual:created" };
+
+		// Formerly OW-lejape: the attach reply lands after the drop, naming a
+		// session with nothing on disk, and the server the reconnect reaches no
+		// longer holds it.
+		it("lands on the startup view when an attach reply that followed a drop names a session the reconnect's preview answers gone", async () => {
+			const api = new FakeApi();
+			api.createSession.mockResolvedValue(createdRef);
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await settle();
+			const attaching = deferred<LiveSessionSummary>();
+			api.attach.mockReturnValueOnce(attaching.promise);
+
+			const creating = controller.create("/work", "pi");
+			await settle();
+			api.drop();
+			attaching.resolve({ ...summary(createdRef), onDisk: false });
+			await creating;
+			await settle();
+			expect(controller.getView().state.selected).toEqual(createdRef);
+			api.listSessions.mockResolvedValue([]);
+			api.preview.mockRejectedValue(gone());
+			api.open();
+			await settle();
+
+			const landed = controller.getView();
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(createdRef, expect.any(AbortSignal));
+			expect(landed.state.selected).toBeNull();
+			expect(landed.preview).toBeNull();
+			expect(landed.previewFailure).toBeNull();
+			expect(landed.state.summaries).toEqual([]);
+			controller.dispose();
+		});
+
+		// Formerly OW-lejape's other ordering: another client closes it with
+		// the stream up, and its `ended` drops the view (D26).
+		it("lands on the startup view when another client closes a selected session with nothing on disk", async () => {
+			const api = new FakeApi();
+			api.attach.mockResolvedValueOnce({ ...summary(ref), onDisk: false });
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.preview.mockClear();
+			api.preview.mockRejectedValue(gone());
+
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			await settle();
+
+			const landed = controller.getView();
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref, expect.any(AbortSignal));
+			expect(landed.state.selected).toBeNull();
+			expect(landed.preview).toBeNull();
+			expect(landed.previewFailure).toBeNull();
+			controller.dispose();
+		});
+
+		// Closed elsewhere, or previewed across a restart: the poll is the only
+		// read a pane already on its preview makes.
+		it("lands on the startup view when the poll of the preview on screen answers gone, and polls no more", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				api.preview.mockResolvedValue({ ref, turns: [previewAssistant("stored")] });
+				const controller = createController(api);
+				await controller.preview(ref);
+				expect(paneMode(controller.getView())).toBe("preview");
+				api.preview.mockClear();
+				api.preview.mockRejectedValue(gone());
+
+				await vi.advanceTimersByTimeAsync(16_000);
+
+				expect(api.preview).toHaveBeenCalledOnce();
+				expect(controller.getView().state.selected).toBeNull();
+				expect(controller.getView().preview).toBeNull();
+				await vi.advanceTimersByTimeAsync(60_000);
+				expect(api.preview).toHaveBeenCalledOnce();
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// The poll captures the intent rather than bumping it, and a click
+		// that landed while it was out is the user's last word.
+		it("clears nothing when the poll's gone lands after the user clicked elsewhere", async () => {
+			vi.useFakeTimers();
+			try {
+				const api = new FakeApi();
+				const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+				api.preview.mockResolvedValue({ ref, turns: [previewAssistant("stored")] });
+				const controller = createController(api);
+				await controller.preview(ref);
+				const polled = deferred<SessionPreviewResponse>();
+				api.preview.mockReturnValueOnce(polled.promise);
+				await vi.advanceTimersByTimeAsync(16_000);
+				api.preview.mockResolvedValueOnce({ ref: otherRef, turns: [previewAssistant("other")] });
+				await controller.preview(otherRef);
+
+				polled.reject(gone());
+				await vi.advanceTimersByTimeAsync(0);
+
+				expect(controller.getView().state.selected).toEqual(otherRef);
+				expect(paneMode(controller.getView())).toBe("preview");
+				controller.dispose();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// Formerly OW-tuyewo: the click on the selected detached-loading row
+		// joins the read `publish` already has out for it rather than asking a
+		// second, and its failure is the pane's to show, once.
+		it("reads a clicked detached-loading row's preview once, and reports that read's failure in one place", async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.preview.mockClear();
+			const reading = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValue(reading.promise);
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			expect(paneMode(controller.getView())).toBe("loading");
+
+			const clicking = controller.preview(ref);
+			reading.reject(new Error("preview failed"));
+			await clicking;
+			await settle();
+
+			expect(api.preview).toHaveBeenCalledOnce();
+			expect(controller.getView().state.selected).toEqual(ref);
+			expect(controller.getView().previewFailure).toEqual({ ref, message: "preview failed" });
+			expect(controller.getView().error).toBeNull();
+			controller.dispose();
+		});
+
+		// The exit that read `onDisk` kept this selection, on a pane whose
+		// Attach could only 404.
+		it("lands a detach on the startup view when the preview answers gone, though the summary says the session is on disk", async () => {
+			const api = new FakeApi();
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			expect(controller.getView().state.summaries.find((item) => sessionKey(item.ref) === sessionKey(ref))?.onDisk).toBe(true);
+			api.preview.mockClear();
+			api.preview.mockRejectedValue(gone());
+
+			await controller.detach();
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			await settle();
+
+			const landed = controller.getView();
+			expect(api.close).toHaveBeenCalledWith(ref);
+			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref, expect.any(AbortSignal));
+			expect(landed.state.selected).toBeNull();
+			expect(landed.preview).toBeNull();
+			expect(landed.previewFailure).toBeNull();
+			controller.dispose();
+		});
+
+		// The background read asked for X belongs to the intent it was asked
+		// under, and a click on Y has moved on from it: its `gone` clears
+		// nothing, and the pane stays on X until Y's read lands.
+		it("clears nothing when a detached-loading pane's gone lands after a click on another row", async () => {
+			const api = new FakeApi();
+			const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const background = deferred<SessionPreviewResponse>();
+			const clicked = deferred<SessionPreviewResponse>();
+			api.preview.mockReturnValueOnce(background.promise).mockReturnValueOnce(clicked.promise);
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			expect(paneMode(controller.getView())).toBe("loading");
+			const selections: Array<SessionRef | null> = [];
+			controller.subscribe((next) => selections.push(next.state.selected));
+
+			const clicking = controller.preview(otherRef);
+			background.reject(gone());
+			await settle();
+			clicked.resolve({ ref: otherRef, turns: [previewAssistant("other")] });
+			await clicking;
+
+			expect(selections).not.toContain(null);
+			expect(controller.getView().state.selected).toEqual(otherRef);
+			expect(paneMode(controller.getView())).toBe("preview");
+			controller.dispose();
+		});
+
+		// The background read landed nowhere, and a publish before the click
+		// lands -- a keystroke here -- finds the pane still waiting. No read of
+		// it is asked while the click is out, or it would carry the click's
+		// intent and its `gone` would clear the selection under the click.
+		it("asks no read of the detached-loading pane while a click elsewhere is out", async () => {
+			const api = new FakeApi();
+			const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const background = deferred<SessionPreviewResponse>();
+			const clicked = deferred<SessionPreviewResponse>();
+			api.preview.mockClear();
+			api.preview.mockReturnValueOnce(background.promise).mockReturnValueOnce(clicked.promise).mockRejectedValue(gone());
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			const selections: Array<SessionRef | null> = [];
+			controller.subscribe((next) => selections.push(next.state.selected));
+
+			const clicking = controller.preview(otherRef);
+			background.reject(gone());
+			await settle();
+			controller.setDraft("typed while the click is out");
+			await settle();
+			clicked.resolve({ ref: otherRef, turns: [previewAssistant("other")] });
+			await clicking;
+
+			expect(api.preview).toHaveBeenCalledTimes(2);
+			expect(selections).not.toContain(null);
+			expect(controller.getView().state.selected).toEqual(otherRef);
+			controller.dispose();
+		});
+
+		// The same, with a second click's own `publish({ error: null })` as the
+		// publish: the click's read is registered before it, so that publish
+		// finds a click's read out and asks nothing under that click's intent.
+		it("asks no read of the detached-loading pane from a second click's own publish", async () => {
+			const api = new FakeApi();
+			const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+			const thirdRef: SessionRef = { backend: "codex", id: "thread-third" };
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			const background = deferred<SessionPreviewResponse>();
+			const clicks = new Map([
+				[sessionKey(otherRef), deferred<SessionPreviewResponse>()],
+				[sessionKey(thirdRef), deferred<SessionPreviewResponse>()],
+			]);
+			let asked = false;
+			api.preview.mockClear();
+			api.preview.mockImplementation((session) => {
+				if (sessionKey(session) !== sessionKey(ref)) return clicks.get(sessionKey(session))!.promise;
+				if (asked) return Promise.reject(gone());
+				asked = true;
+				return background.promise;
+			});
+			api.emit({ type: "ended", session: ref, handle: h(ref) });
+			const selections: Array<SessionRef | null> = [];
+			controller.subscribe((next) => selections.push(next.state.selected));
+
+			void controller.preview(otherRef);
+			background.reject(gone());
+			await settle();
+			const clicking = controller.preview(thirdRef);
+			await settle();
+			clicks.get(sessionKey(thirdRef))!.resolve({ ref: thirdRef, turns: [previewAssistant("third")] });
+			await clicking;
+
+			expect(api.preview.mock.calls.filter(([session]) => sessionKey(session) === sessionKey(ref))).toHaveLength(1);
+			expect(selections).not.toContain(null);
+			expect(controller.getView().state.selected).toEqual(thirdRef);
+			controller.dispose();
+		});
+
+		// The same, with the `connected` as the publish: the view dropped with
+		// the stream, and the user clicked another row while it was down.
+		it("asks no read of the dropped pane at the reconnect while a click made during the outage is out", async () => {
+			const api = new FakeApi();
+			const otherRef: SessionRef = { backend: "codex", id: "thread-other" };
+			const controller = createController(api);
+			await controller.start();
+			api.open();
+			await controller.select(ref);
+			api.emit(snapshotOf(ref));
+			await settle();
+			api.drop();
+			const clicked = deferred<SessionPreviewResponse>();
+			api.preview.mockClear();
+			api.preview.mockReturnValueOnce(clicked.promise).mockRejectedValue(gone());
+			const selections: Array<SessionRef | null> = [];
+			controller.subscribe((next) => selections.push(next.state.selected));
+
+			const clicking = controller.preview(otherRef);
+			api.open();
+			await settle();
+			clicked.resolve({ ref: otherRef, turns: [previewAssistant("other")] });
+			await clicking;
+
+			expect(api.preview).toHaveBeenCalledOnce();
+			expect(selections).not.toContain(null);
+			expect(controller.getView().state.selected).toEqual(otherRef);
+			controller.dispose();
+		});
+
+		// Only `404 gone` is an answer (OW-bilogo): `not_found` is also what an
+		// unmatched route answers, and neither it nor any other status says the
+		// session is nowhere.
+		for (const [status, code] of [[404, "not_found"], [500, "gone"]] as const) {
+			it(`keeps the selection when a detached-loading pane's read fails ${status} ${code}`, async () => {
+				const api = new FakeApi();
+				const controller = createController(api);
+				await controller.start();
+				api.open();
+				await controller.select(ref);
+				api.emit(snapshotOf(ref));
+				await settle();
+				api.preview.mockRejectedValue(new ApiClientError(status, code, "not an answer"));
+
+				api.emit({ type: "ended", session: ref, handle: h(ref) });
+				await settle();
+
+				expect(controller.getView().state.selected).toEqual(ref);
+				expect(paneMode(controller.getView())).toBe("loading");
+				expect(controller.getView().previewFailure).toEqual({ ref, message: "not an answer" });
+				controller.dispose();
+			});
+
+			it(`keeps the preview on screen when its poll fails ${status} ${code}`, async () => {
+				vi.useFakeTimers();
+				try {
+					const api = new FakeApi();
+					const turns = [previewAssistant("stored")];
+					api.preview.mockResolvedValue({ ref, turns });
+					const controller = createController(api);
+					await controller.preview(ref);
+					api.preview.mockRejectedValue(new ApiClientError(status, code, "not an answer"));
+
+					await vi.advanceTimersByTimeAsync(16_000);
+
+					expect(controller.getView().state.selected).toEqual(ref);
+					expect(controller.getView().preview).toEqual({ ref, turns });
+					controller.dispose();
+				} finally {
+					vi.useRealTimers();
+				}
+			});
+		}
 	});
 });

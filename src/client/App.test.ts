@@ -943,10 +943,11 @@ describe("App", () => {
 		expect(controller.previewed).toEqual([piSession]);
 	});
 
-	// A drop clears a selection with nothing on disk (D25, OW-forinu), and the
-	// server it is taken to have lost cannot answer a preview: an auto-select
-	// then would only fill the error slot with a failed fetch that outlives the
-	// outage. It waits for the stream instead and then asks as startup does;
+	// A preview answered `gone` can clear the selection while the stream is
+	// still reconnecting (D26), and the server the tab takes to have been lost
+	// with it cannot answer a preview: an auto-select then would only fill the
+	// error slot with a failed fetch that outlives the outage. It waits for the
+	// stream instead and then asks as startup does;
 	// where the reconnect's opening snapshot has put the session back by the
 	// time the fetch returns, `controller.preview` reselects it live rather than
 	// previewing it.
