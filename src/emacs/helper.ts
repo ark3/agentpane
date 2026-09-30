@@ -51,7 +51,7 @@
  * beside `session`, and send it nowhere; `sessions/detach` and
  * `sessions/close` stop the attachment under it, and without one the
  * attachment the snapshot answering the attach their `token` names
- * recorded, if it still stands (`forget` below, OW-linowe).
+ * created, if it still stands (`forget` below, OW-linowe).
  * agentpane-mode's detach carries its buffer's handle, and one without is
  * sent only from a buffer that sent an attach. No notification says a
  * rename: agentpane-mode keys its buffers by the handle (OW-danifa) and
@@ -215,7 +215,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	const attached = new Map<string, SessionRef>();
 	/** Every `sessions/attach` not yet replied to; see `Attaching`. */
 	const attaching = new Set<Attaching>();
-	/** Token of each attach a snapshot answered -> the handle of the attachment that answer recorded, while it stands; see `forget`. */
+	/** Token of each attach whose answering snapshot created an attachment -> that attachment's handle, while it stands; see `forget`. */
 	const answered = new Map<number, string>();
 	let connection: ReturnType<typeof api.connect> | null = null;
 	let stopped = false;
@@ -279,8 +279,8 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	/** Answer `attach` with `view`, the snapshot under `handle` that attaches it, and release its reply. */
 	const answer = (attach: Attaching, view: SessionView, handle: string): void => {
 		attach.done = true;
+		if (!attached.has(handle)) answered.set(attach.token, handle);
 		attached.set(handle, view.ref);
-		answered.set(attach.token, handle);
 		notifySnapshot(view, handle, attach.token);
 		attach.release?.();
 	};
@@ -460,20 +460,21 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * beside it not attached (OW-jofodu). With a `handle`, the attachment
 	 * under that handle goes, whatever ref Emacs names it by, which may be
 	 * one from before a rename it has not heard (OW-wedeli). Without one, the
-	 * attachment the token's answer recorded goes, if it still stands
-	 * (`answered`), as it must for a buffer killed after the snapshot that
-	 * answered its attach went out and before Emacs handled it; and nothing
-	 * else. A token's record goes with the attachment (`drop`), so the token
-	 * of a buffer the helper let go of -- a gap or an `ended` -- drops
-	 * nothing, nor does one no snapshot answered. Until OW-linowe the
-	 * attachment went by the ref Emacs was last told, unless the token gave
-	 * up an attach, and either buffer, killed, silenced another attached on
-	 * that ref since: one on the same ref after the let-go, one whose
-	 * session was renamed onto the ref of the failed attach. What stays is
-	 * shared by handle: a buffer killed before handling the snapshot that
-	 * answered its attach drops the attachment under that handle, which
-	 * another buffer may hold too, one that snapshot would have merged into
-	 * it (`agentpane--attach-by` in emacs/agentpane.el).
+	 * attachment the snapshot answering the token's attach created goes, if
+	 * it still stands (`answered`), as it must for a buffer killed after that
+	 * snapshot went out and before Emacs handled it; and nothing else. A
+	 * snapshot answering under a handle already attached created nothing,
+	 * so its token drops nothing: the attachment is another buffer's. A
+	 * token's record goes with the attachment (`drop`), so the token of a
+	 * buffer the helper let go of -- a gap or an `ended` -- drops nothing,
+	 * nor does one no snapshot answered. Until OW-linowe the attachment went
+	 * by the ref Emacs was last told, unless the token gave up an attach,
+	 * and either buffer, killed, silenced another attached on that ref
+	 * since: one on the same ref after the let-go, one whose session was
+	 * renamed onto the ref of the failed attach. What stays: a buffer killed
+	 * before handling a snapshot whose answer created the attachment still
+	 * drops it, silencing another buffer whose attach was answered under the
+	 * same handle after it, whether or not Emacs has handled the other's snapshot.
 	 */
 	const forget = (handle: string | undefined, token: number | undefined): void => {
 		const pending = [...attaching].find((attach) => !attach.done && attach.token === token);

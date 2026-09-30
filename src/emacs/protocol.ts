@@ -49,9 +49,10 @@
  * no snapshot answers an attach before its reply names the handle; and an
  * attach given up on while the stream's open is pending is never sent.
  * OW-linowe raised it a fifteenth: a `sessions/detach` or `sessions/close`
- * with no `handle` stops what the snapshot answering its `token`'s attach
- * started, where it stopped whatever the helper had last named to Emacs by
- * `session`, which another buffer attached to that ref since could hold.
+ * with no `handle` stops the attachment the snapshot answering its
+ * `token`'s attach created, if that snapshot created one, where it stopped
+ * whatever the helper had last named to Emacs by `session`, which another
+ * buffer attached to that ref since could hold.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -252,9 +253,10 @@
  *   No other attach is, another of the same ref included; a token naming
  *   none gives up nothing. With `handle`, the notifications under that
  *   handle stop, whatever ref `session` is; without, those under the
- *   handle of the snapshot that answered the attach `token` names, unless
- *   they have stopped since, by a detach, a close or a `session/detached`;
- *   and with neither, none. `session` picks out no notifications
+ *   handle of the snapshot that answered the attach `token` names, if
+ *   nothing was attached under that handle before it, and unless they
+ *   have stopped since, by a detach, a close or a `session/detached`; and
+ *   with neither, none. `session` picks out no notifications
  *   (OW-linowe).
  * - `sessions/setModel` -- `{ session, model }` -> `null`. A chosen effort the
  *   new model does not list falls back to that model's `defaultEffort`, or

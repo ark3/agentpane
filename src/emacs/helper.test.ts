@@ -573,7 +573,7 @@ describe("notifications", () => {
 		source.emit({ type: "snapshot", session: virtual, handle: h(virtual), seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		source.emit({ type: "snapshot", session: pi, handle: h(virtual), seq: 0, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		await io.until(3);
-		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: pi, token: 1 } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/detach", params: { session: virtual, token: 1 } });
 		await io.until(4);
 		source.emit({ type: "status", session: pi, handle: h(virtual), seq: 1, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
 		await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1108,6 +1108,33 @@ describe("the attach token (OW-wukako)", () => {
 			["session/detached", "h1", undefined],
 			["session/snapshot", next, 2],
 			["session/status", next, undefined],
+		]);
+	});
+
+	// Y holds h1; X, previewing an alias of that session, attaches it and is
+	// answered under h1 too, then is killed before handling that snapshot.
+	// X's answer created no attachment, so its token stops none, and Y goes
+	// on hearing h1.
+	it("keeps the attachment another buffer holds when a buffer whose attach was answered under that handle detaches carrying its token and no handle (OW-linowe)", async () => {
+		const alias: SessionRef = { backend: "pi", id: "virtual-1" };
+		const { io, source } = start({
+			[`GET ${ROUTES.session(pi)}`]: () => json({ session: summary(pi, "h1") }),
+			[`GET ${ROUTES.session(alias)}`]: () => json({ session: summary(pi, "h1") }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/attach", params: { session: pi, token: 1 } });
+		await tick();
+		source.emit(snapshot(pi, "h1"));
+		await io.until(2);
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: alias, token: 2 } });
+		await io.until(4);
+		io.send({ jsonrpc: "2.0", id: 3, method: "sessions/detach", params: { session: alias, token: 2 } });
+		await io.until(5);
+		source.emit(status(pi, "h1"));
+		await io.until(6);
+		expect(told(io)).toEqual([
+			["session/snapshot", "h1", 1],
+			["session/snapshot", "h1", 2],
+			["session/status", "h1", undefined],
 		]);
 	});
 
