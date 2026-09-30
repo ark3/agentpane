@@ -74,9 +74,9 @@ export class ChildProcessShell {
 	private readonly exitHandlers: ExitHandler[] = [];
 	private stderrTail = "";
 	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
-	private spawnError: string | undefined;
+	private spawnError: Error | undefined;
 	/** Populated by stdin's `error` event: a write into a pipe the child stopped reading. */
-	private stdinError: string | undefined;
+	private stdinError: Error | undefined;
 	/** Set once the child is gone; makes teardown idempotent and writes fail loudly. */
 	private closed = false;
 	private killed = false;
@@ -121,12 +121,12 @@ export class ChildProcessShell {
 		// exception that takes the server down (Node 26.8.1, OW-sozopu); heard,
 		// it is the death report's reason.
 		child.stdin.on("error", (error: Error) => {
-			this.stdinError = `${this.labels.stdin} stdin failed: ${error.message}`;
+			this.stdinError = error;
 		});
 
 		child.on("spawn", () => this.handleSpawn());
 		child.on("error", (error: Error) => {
-			this.spawnError = `Failed to spawn ${this.labels.name} (${this.command}): ${error.message}`;
+			this.spawnError = error;
 		});
 		// `close`, not `exit`: on a spawn failure (ENOENT -- `direnv` or `sbox`
 		// missing from PATH) Node emits `error` and `close` but NEVER `exit`,
@@ -161,7 +161,11 @@ export class ChildProcessShell {
 		this.lineHandlers.push(cb);
 	}
 
-	/** Called once, with the reason the child is gone and the tail of its stderr. */
+	/**
+	 * Called once, with the reason the child is gone and the tail of its
+	 * stderr. The `Error` keeps the spawn or stdin failure it names as its
+	 * `cause`; the message is what adapters hand clients, as a string.
+	 */
 	onExit(cb: ExitHandler): void {
 		this.exitHandlers.push(cb);
 	}
@@ -170,6 +174,16 @@ export class ChildProcessShell {
 	 * Signal termination and settle after close or bounded SIGKILL escalation.
 	 * Memoised: a second call awaits the first rather than re-signalling a pid
 	 * the OS may already have handed to something else.
+	 *
+	 * A child still not closed `KILL_GRACE_MS` after SIGKILL is reported through
+	 * the exit channel: `onExit` fires, once, with code and signal null and an
+	 * error naming the survivor, and a `close` arriving later is not reported
+	 * again. `kill()` itself still resolves, because callers read that as their
+	 * licence to exit and a shutdown that hangs forever is its own failure.
+	 * As of OW-sozopu nobody hears that report: every caller of `kill()` has let
+	 * go of its listeners first -- Codex's connection has no holders left,
+	 * Claude's ownership is no longer live, and Pi reports no `onError` once
+	 * disposed.
 	 */
 	kill(): Promise<void> {
 		if (this.closed) return Promise.resolve();
@@ -189,7 +203,8 @@ export class ChildProcessShell {
 	private async finishTermination(): Promise<void> {
 		if (await this.closesWithin(TERMINATE_GRACE_MS)) return;
 		this.child.kill("SIGKILL");
-		await this.closesWithin(KILL_GRACE_MS);
+		if (await this.closesWithin(KILL_GRACE_MS)) return;
+		this.settle(null, null, `${this.labels.process} did not close within ${KILL_GRACE_MS}ms of SIGKILL`);
 	}
 
 	private closesWithin(milliseconds: number): Promise<boolean> {
@@ -216,18 +231,27 @@ export class ChildProcessShell {
 	}
 
 	private handleClose(code: number | null, signal: string | null): void {
+		// On a failed spawn the exit code is meaningless (-2 for ENOENT), so the
+		// `error` event's account wins when there is one.
+		if (this.spawnError) {
+			const reason = `Failed to spawn ${this.labels.name} (${this.command}): ${this.spawnError.message}`;
+			this.settle(code, signal, reason, this.spawnError);
+		} else if (this.stdinError) {
+			this.settle(code, signal, `${this.labels.stdin} stdin failed: ${this.stdinError.message}`, this.stdinError);
+		} else {
+			this.settle(code, signal, `${this.labels.process} exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+		}
+	}
+
+	/** The one death report, however the child went: `close`, or the escalation giving up. */
+	private settle(code: number | null, signal: string | null, reason: string, cause?: Error): void {
 		if (this.closed) return;
 		this.closed = true;
 		this.resolveClosed();
 
-		// On a failed spawn the exit code is meaningless (-2 for ENOENT), so the
-		// `error` event's account wins when there is one.
-		const reason =
-			this.spawnError ??
-			this.stdinError ??
-			`${this.labels.process} exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
 		const detail = this.stderrTail.trim();
-		const error = new Error(detail ? `${reason}\n${detail}` : reason);
+		const message = detail ? `${reason}\n${detail}` : reason;
+		const error = cause ? new Error(message, { cause }) : new Error(message);
 		for (const handler of this.exitHandlers) handler(code, signal, error);
 	}
 }

@@ -667,7 +667,7 @@ export class PiAdapter implements BackendAdapter {
 	private handleClose(error: Error): void {
 		const message = error.message;
 		for (const pending of this.pendingCommands.values()) {
-			pending.reject(new Error(`${message} before responding`));
+			pending.reject(new Error(`${message} before responding`, { cause: error.cause }));
 		}
 		this.pendingCommands.clear();
 

@@ -199,6 +199,19 @@ describe("PiAdapter.start", () => {
 		expect(h.spawnArgs).toEqual([]);
 	});
 
+	it("rejects start with the spawn failure's original error as the cause (OW-sozopu)", async () => {
+		const h = makeHarness();
+		const started = h.adapter.start({ cwd: WORKSPACE });
+		const spawnError = Object.assign(new Error("spawn direnv ENOENT"), { code: "ENOENT" });
+
+		h.child.emit("error", spawnError);
+		h.child.emit("close", -2, null);
+
+		const error = await started.catch((reason: unknown) => reason);
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).cause).toBe(spawnError);
+	});
+
 	it("attributes a spawn failure to the error event, not the meaningless exit code", async () => {
 		const h = makeHarness();
 		const started = h.adapter.start({ cwd: WORKSPACE }).catch(() => {});
