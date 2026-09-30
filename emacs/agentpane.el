@@ -318,9 +318,11 @@ stylesheet.  Roughly the browser's theme, by role rather than by colour.")
   "Every request `agentpane--request' has sent, or made through a helper
 that has exited and so not sent, and not yet answered, newest first,
 each a cons (CONNECTION . DEATH): the connection it went out on, or
-would have, and a function that answers it as that helper's death.  A
-request leaves at its one answer, and the helper's teardown answers
-every one still here for its connection (`agentpane--helper-gone').
+would have, and a function that answers it as that helper's death, which
+runs FAILED and never UNSENT: one never sent ran its UNSENT as it was
+made (`agentpane--request').  A request leaves at its one answer, and
+the helper's teardown answers every one still here for its connection
+\(`agentpane--helper-gone').
 Agentpane's own record rather than jsonrpc.el's, since jsonrpc.el at a
 death answers only some of them: its sentinel calls each pending
 request's error handler newest first, and a synchronous request's throws
@@ -531,8 +533,9 @@ CALLBACK exits non-locally -- the helper failing to start, or a reply's
 handling failing partway -- so a flag that FAILED clears never outlives the
 request that set it.
 UNSENT, when given, runs with no arguments when the request reached no
-backend -- the helper answered it with an error, or sending it exited
-non-locally -- before FAILED, and whether or not this buffer is still
+backend -- the helper answered it with an error, sending it exited
+non-locally, or it was sent nowhere, its helper having exited -- before
+FAILED, and whether or not this buffer is still
 live: for state the request set outside the buffer, which a buffer
 killed meanwhile must not strand, as a prompt's turn-done watch is
 \(`agentpane--send-prompt').  A timeout, the helper's death, and a
@@ -579,7 +582,13 @@ for a turn from elsewhere it had seen streaming (OW-hiliti).  Until
 OW-hiliti the error handler answered nothing once the helper read as
 dead, so such a request failed as the death, running FAILED alone, and
 the reason the helper gave, a server it could not reach, say, was never
-shown.
+shown.  An error reply is always one the helper meant: it writes none
+for a request its own teardown aborts (`runHelper' in
+src/emacs/helper.ts), since the abort says nothing of whether the
+request reached the backend.  Its -32603 reply for one, read as a
+refusal, abandoned the watch of a prompt whose turn was streaming when
+the server's stream dropped, and the teardown raised nothing (bun 1.4.0,
+Emacs 31.1, measured 2026-09-29; OW-zedawo, OW-hiliti).
 A reply jsonrpc.el held back, as an \"anxious continuation\", behind a
 synchronous request still out when the helper died, is no pending
 request to the sentinel, and is handed on from a timer queued as the
@@ -591,16 +600,20 @@ nothing, since no attach reply does (`agentpane--attach'): the buffer the
 teardown let go of stays so, and a prompt waiting on the attach fails
 rather than starting the next helper and going out through it, which
 forwarded nothing under that handle (OW-kifuhi, OW-rebawa).
-A request made through a helper that has exited, before its teardown
-has run -- from a handler of what that helper wrote last, most often,
-which runs in jsonrpc.el's timer -- is sent nowhere and signals nothing:
-it waits in `agentpane--requests-out' under that helper's connection for
-the teardown to answer as the death, as it answers one in flight
-\(`agentpane--connection').  It supersedes no earlier request, whose
-reply may still come among those messages and is then the one CALLBACK
-takes.  Refused with an error, as until OW-hiliti, it signalled out of
-the handler that chained it, and Emacs reported `Error running timer':
-a fork's attach so refused left the fork's buffer made and never shown.
+A request made through a helper that has exited, before its teardown has
+run -- from a handler of what that helper wrote last, most often, which
+runs in jsonrpc.el's timer -- is sent nowhere and signals nothing.
+Having reached no backend, it runs UNSENT at once, saying nothing, so a
+prompt's watch is abandoned before the teardown's `agentpane--let-go'
+could end it as a turn from elsewhere; and it waits in
+`agentpane--requests-out' under that helper's connection for the
+teardown to answer as the death, running FAILED and saying so once, and
+no UNSENT again (`agentpane--connection').  It supersedes no earlier
+request, whose reply may still come among those messages and is then the
+one CALLBACK takes.  Refused with an error, as until OW-hiliti, it
+signalled out of the handler that chained it, and Emacs reported `Error
+running timer': a fork's attach so refused left the fork's buffer made
+and never shown.
 
 With ALWAYS non-nil, CALLBACK runs even when a later request has been sent
 since: for a command -- attach, prompt, abort -- whose reply is not a view
@@ -646,9 +659,11 @@ ert tests `agentpane-test-nested-refetch-*' provoke it)."
                                            (message "agentpane: %s failed: the helper exited" method)
                                            (agentpane--failed buffer failed)))))
                      (push entry agentpane--requests-out)
-                     ;; Through a helper that has exited, nothing: the
-                     ;; teardown answers.
-                     (when (jsonrpc-running-p connection)
+                     ;; Through a helper that has exited, nothing: it
+                     ;; reached no backend, and the teardown answers.
+                     (if (not (jsonrpc-running-p connection))
+                         (progn (when unsent (funcall unsent))
+                                nil)
                        (jsonrpc-async-request
                         connection method (or params :jsonrpc-omit)
                         ;; An explicit nil would mean no timeout at all.
@@ -2809,16 +2824,15 @@ even one it wrote as it died (OW-hiliti), abandons the watch it armed,
 as the browser's `watchAbandon' does for a refused or failed POST:
 refused, the prompt started nothing, and the next turn on the session is
 not one this Emacs asked for.  So does one that never went out, sending
-it having exited non-locally.  The watch is abandoned even when a merge
+it having exited non-locally, or its helper having exited before the
+teardown (`agentpane--request').  The watch is abandoned even when a merge
 has killed this buffer before the answer (`agentpane--absorb'), as
 UNSENT in `agentpane--request' runs whether or not the buffer lives: the
 watch is on the handle, which the survivor holds, and left standing it
 raised the indicator for the next turn from elsewhere to end there.
 One still out when its helper dies keeps its watch for the teardown to
-settle, a death not saying the prompt reached no backend, as does one
-made once its helper had exited, which the teardown answers as it does
-those (`agentpane--request'): a turn seen streaming then ends as an
-aborted one does (`agentpane--helper-gone').
+settle, a death not saying the prompt reached no backend: a turn seen
+streaming then ends as an aborted one does (`agentpane--helper-gone').
 Abandoned at the death, as it was until OW-mopuyi, that turn raised
 nothing (OW-zedawo).
 One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the

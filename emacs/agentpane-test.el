@@ -5123,8 +5123,9 @@ of the buffer, whether the reply is handled before or after its sentinel
 
 (ert-deftest agentpane-test-no-request-before-the-teardown ()
   "A request sent after the helper has exited, before its teardown, sends
-nothing and signals nothing, and the teardown answers it as the death,
-running its FAILED once; it leaves the buffer's latest request the one
+nothing and signals nothing: it runs its UNSENT at once, having reached
+no backend, and the teardown answers it as the death, running its FAILED
+once and no UNSENT again; it leaves the buffer's latest request the one
 sent through the dead helper, whose reply is then the one the callback
 takes: no request goes through a replacement, whose ids would count from
 1 again and could match a late reply's (OW-bukupu).  Until OW-hiliti it
@@ -5149,12 +5150,12 @@ reported as `Error running timer'."
                               (lambda (result) (push (cons 'second result) got))
                               nil (lambda () (cl-incf failures)) nil
                               (lambda () (cl-incf unsents)))
-          (should (= failures 0))
+          (should (equal (list failures unsents) '(0 1)))
           (should (equal calls '(sessions/preview)))
           (should (eq agentpane--connection dead))
           (should (eql agentpane--latest-request 1))
           (agentpane-test--heard-out dead)
-          (should (equal (list failures unsents) '(1 0)))
+          (should (equal (list failures unsents) '(1 1)))
           (should (equal got '("the dead helper's"))))))))
 
 (ert-deftest agentpane-test-late-status-leaves-the-buffer-idle ()
@@ -5249,12 +5250,13 @@ order at a drop."
                 (should-not (agentpane-test--said-p "Error running timer" said))))))
       (kill-buffer picker))))
 
-(ert-deftest agentpane-test-prompt-after-its-helper-died-is-refused ()
-  "A prompt waiting on an attach, whose helper sends the attach's snapshot,
-answers the attach and then exits before the prompt goes out, is
-refused, keeping its draft, rather
-than sent through a replacement for a buffer that helper's teardown then
-lets go of, and no turn-done watch outlives it (OW-bukupu)."
+(defun agentpane-test--prompt-after-its-helper-died (streaming)
+  "Send a prompt whose attach the helper answers, after the attach's
+snapshot, which reads STREAMING, and then exits before the prompt goes
+out.  The prompt must be refused, keeping its draft, rather than sent
+through a replacement for a buffer that helper's teardown then lets go
+of, and no turn-done watch may outlive it; return whether the indicator
+is raised once the teardown has run."
   (let ((calls nil)
         (async (symbol-function 'jsonrpc-async-request))
         (submit (symbol-function 'agentpane--watch-submit))
@@ -5273,7 +5275,8 @@ lets go of, and no turn-done watch outlives it (OW-bukupu)."
                    (funcall submit))))
         (agentpane-test--outliving
             (list (list :jsonrpc "2.0" :method "session/snapshot"
-                        :params (list :session ref :handle "h1" :isStreaming :false
+                        :params (list :session ref :handle "h1"
+                                      :isStreaming (if streaming t :false)
                                       :nodes (vector)))
                   (list :jsonrpc "2.0" :id 1 :result (list :ref ref :handle "h1")))
           (setq linger t)
@@ -5289,7 +5292,25 @@ lets go of, and no turn-done watch outlives it (OW-bukupu)."
           (should-not agentpane--handle)
           (should-not agentpane--turn-watches)
           (should (equal (buffer-substring-no-properties agentpane--prompt-start (point-max))
-                         "hello")))))))
+                         "hello"))
+          (and (agentpane-test--turn-done-p) t))))))
+
+(ert-deftest agentpane-test-prompt-after-its-helper-died-is-refused ()
+  "A prompt waiting on an attach, whose helper sends the attach's snapshot,
+answers the attach and then exits before the prompt goes out, is
+refused, keeping its draft, rather
+than sent through a replacement for a buffer that helper's teardown then
+lets go of, and no turn-done watch outlives it (OW-bukupu)."
+  (should-not (agentpane-test--prompt-after-its-helper-died nil)))
+
+(ert-deftest agentpane-test-prompt-after-its-helper-died-raises-nothing ()
+  "A prompt refused as `agentpane-test-prompt-after-its-helper-died-is-refused'
+is, into a session the attach's snapshot read streaming a turn from
+elsewhere, abandons the watch it armed as it is refused, since it reached
+no backend, so the teardown, which ends that turn, raises nothing for
+it.  Left for the teardown, as in OW-hiliti's first cut, the watch
+already read the turn streaming, and the teardown raised the indicator."
+  (should-not (agentpane-test--prompt-after-its-helper-died t)))
 
 (ert-deftest agentpane-test-attach-answered-by-an-exited-helper-fails ()
   "An attach reply handled after the helper that wrote it has exited, but
@@ -5358,8 +5379,9 @@ attach's reply (D2), and a helper can exit before it replies (OW-bukupu)."
   (agentpane-test--snapshot-then-death nil))
 
 (ert-deftest agentpane-test-late-error-reply-fails-once ()
-  "An error reply a dead helper wrote, handled once the helper reads as
-dead, is the request's one answer, as one from a live helper is: UNSENT
+  "An error reply a dead helper wrote, an HTTP refusal as `toRpcError' in
+src/emacs/helper.ts builds one, handled once the helper reads as dead,
+is the request's one answer, as one from a live helper is: UNSENT
 runs once, then FAILED once, and the echo area shows the helper's own
 message, not its exit; neither jsonrpc.el's \"Server died\" nor the
 teardown answers it again (OW-bukupu, OW-hiliti).  Until OW-hiliti the
@@ -5370,7 +5392,9 @@ answered it, read as unsent."
         (unsents 0))
     (agentpane-test--outliving
         (list (list :jsonrpc "2.0" :id 1
-                    :error (list :code -32603 :message "stream dropped")))
+                    :error (list :code 404 :message "no such session"
+                                 :data (list :status 404 :error "gone"
+                                             :detail "no such session"))))
       (agentpane-test--noting
         (agentpane--request 'sessions/preview nil #'ignore nil
                             (lambda () (cl-incf failures)) nil
@@ -5381,12 +5405,13 @@ answered it, read as unsent."
           (agentpane-test--heard-out dead)
           (should (= failures 1))
           (should (= unsents 1))
-          (should (member "agentpane: sessions/preview failed: stream dropped" said))
+          (should (member "agentpane: sessions/preview failed: no such session" said))
           (should-not (agentpane-test--said-p "the helper exited" said)))))))
 
 (ert-deftest agentpane-test-error-reply-before-a-death-abandons-the-watch ()
   "A prompt the helper refuses with an error reply it writes just before
-it exits, after a status under the buffer's handle said a turn from
+it exits, the server's 409 for a turn already running as `toRpcError'
+builds it, after a status under the buffer's handle said a turn from
 elsewhere streams, abandons the turn-done watch it armed, as a refusal
 from a live helper does, and the teardown raises nothing for that turn,
 which this Emacs never started (OW-hiliti).  Answered as the death, as
@@ -5397,7 +5422,9 @@ there, raising the indicator."
         (list (list :jsonrpc "2.0" :method "session/status"
                     :params (list :session ref :handle "h1" :isStreaming t))
               (list :jsonrpc "2.0" :id 1
-                    :error (list :code -32603 :message "stream dropped")))
+                    :error (list :code 409 :message "a turn is already running"
+                                 :data (list :status 409 :error "turn_active"
+                                             :detail "a turn is already running"))))
       (let ((dead (agentpane--connection)))
         (setq agentpane--attached dead
               agentpane--handle "h1")
