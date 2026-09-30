@@ -36,3 +36,15 @@ ERT tests in `emacs/agentpane-test.el`, each red first:
 - a fork callback chained off a dead helper's last reply issues no request that signals from a timer, and the fork buffer is shown or its failure said once (OW-kimafi's case);
 - OW-bukupu's, OW-laluso's and OW-zedawo's existing tests still pass.
 Then OW-bonuhi closes `--moot` citing this card, OW-kimafi closes `--moot` or is amended to what remains, and OW-pezelo is amended to its `src/emacs/helper.ts` half.
+
+## Amended 2026-09-29 at execution
+
+The adversarial read of the first cut found rule 1 false as the helper stood: `runHelper` in `src/emacs/helper.ts` aborts `inFlight` at its teardown, and `respond`'s catch then writes `-32603 "The operation was aborted."` for every request still waiting, which the helper's test "aborts a request still waiting on the server when the input ends, and answers it with the abort" asserts.
+Read as the request's answer under rule 1, that reply runs UNSENT, so a prompt whose turn this Emacs saw streaming loses its watch at every stream drop Emacs is busy through, which is OW-zedawo back; the reader reproduced it against the real helper (bun 1.4.0, Emacs 31.1, jsonrpc.el 1.0.29), 3 of 3 runs on the first cut and 0 of 3 on `main`.
+So this card now also owns the helper's half of rule 1: a request the helper aborts at its own teardown gets no reply from it, and Emacs's teardown answers it as the death.
+OW-pezelo keeps its question, what the request that opened the helper is answered with when the first open fails; after this card that request gets no reply unless OW-pezelo gives it one.
+
+The same read found that a request made in the gap, recorded for the teardown, lost UNSENT, which `agentpane--failing` had run when `agentpane--connection` signalled: a prompt whose attach answered while the helper lived and whose request came after its death kept a watch that `agentpane--let-go`, running a tick before `agentpane--answer-deaths`, ended by raising the indicator for a turn from elsewhere.
+A request sent nowhere reached no backend, so its UNSENT runs at once; its FAILED stays the teardown's.
+
+Added to "Done when": a test in `src/emacs/helper.test.ts`, red first, that a request aborted by the helper's teardown gets no reply, with `bun run check` passing; and an ERT test, red first, that a prompt made in the gap on a session seen streaming leaves no turn-done indicator.
