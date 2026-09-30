@@ -49,6 +49,10 @@ export function watchSubmit(watch: TurnWatch, key: string): TurnWatch {
  * before it was issued, or its POST failed (OW-mifuki). Stop waiting: the next
  * stream on that session, from another tab or a turn that was already running,
  * is not one this tab asked for and must not badge.
+ *
+ * A seq gap ends a watch the same way, streamed or not (D25 point 5,
+ * OW-jadoda): this tab stopped hearing the turn, and a later snapshot under the
+ * same handle cannot say whether the turn it shows ending is that one.
  */
 export function watchAbandon(watch: TurnWatch, key: string): TurnWatch {
 	if (!watch.waiting.has(key)) return watch;
@@ -95,6 +99,16 @@ export function watchFocus(watch: TurnWatch): TurnWatch {
  * `status:false`, and you asked for something and it stopped. First cut,
  * 2026-08-18 -- revisit from use if a dot for a turn you cancelled yourself
  * reads as noise.
+ *
+ * A session missing from `streaming` keeps its watch waiting, because a view
+ * that has not formed yet looks exactly like one that went away. Of the three
+ * things that take a view away, only a seq gap ends the watch, and not here:
+ * the controller tells `App.svelte`, which calls `watchAbandon` (OW-jadoda).
+ * A stream drop leaves it waiting: where the server survived the drop, the
+ * reconnect's opening snapshot re-forms the view under the same handle, and a
+ * turn ending there badges. An `ended` leaves it waiting too, but `ended` is
+ * the last event under its handle (D26), so nothing re-forms there and the
+ * watch is never read again.
  */
 export function watchSessions(
 	watch: TurnWatch,
@@ -106,7 +120,8 @@ export function watchSessions(
 	for (const [key, sawStreaming] of watch.waiting) {
 		const isStreaming = streaming.get(key);
 		// A session the client has no view of yet: the submit's own POST can
-		// resolve before the first SSE event for it arrives (D2). Keep waiting.
+		// resolve before the first SSE event for it arrives (D2). Keep waiting;
+		// a watch whose view a gap dropped is gone by now (see above).
 		if (isStreaming === undefined) continue;
 		if (isStreaming === sawStreaming) continue;
 		waiting ??= new Map(watch.waiting);

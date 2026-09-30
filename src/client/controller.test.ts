@@ -778,6 +778,31 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
+	// The badge's watch ends on this and on nothing else that drops a view: a
+	// stream drop and an `ended` stay silent (OW-jadoda).
+	it("tells the gap listeners the handle a gap detached, and only a gap", async () => {
+		const other: SessionRef = { backend: "codex", id: "codex-2" };
+		const api = new FakeApi();
+		const controller = createController(api);
+		const gapped: string[] = [];
+		controller.subscribeGaps((handle) => gapped.push(handle));
+		await controller.start();
+		api.open();
+		const snapshot = (session: SessionRef): ServerEvent => ({ type: "snapshot", session, handle: h(session), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
+		api.emit(snapshot(ref));
+		api.emit(snapshot(other));
+
+		api.emit({ type: "ended", session: other, handle: h(other) });
+		api.emit({ type: "status", session: ref, handle: h(ref), seq: 3, isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null });
+		expect(gapped).toEqual([h(ref)]);
+
+		api.emit(snapshot(ref));
+		api.drop();
+		expect(controller.getView().state.sessions).toEqual({});
+		expect(gapped).toEqual([h(ref)]);
+		controller.dispose();
+	});
+
 	// The server still holds the session, so its preview answers an empty
 	// transcript rather than `gone` (D26 point 5): the empty preview's Attach
 	// reaches it and the poll finds the first turn's file.

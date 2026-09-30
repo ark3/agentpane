@@ -403,6 +403,12 @@
 		const unsubscribe = controller.subscribe((next) => {
 			view = next;
 		});
+		// A gap ends the badge's watch on that session, raising nothing (D25
+		// point 5, OW-jadoda); `watchSessions` alone cannot tell the view it
+		// dropped from one that has not formed yet.
+		const unsubscribeGaps = controller.subscribeGaps((handle) => {
+			turnWatch = watchAbandon(turnWatch, handle);
+		});
 		void controller.start();
 
 		// A read-only preview polls itself, but the controller owns no DOM (OW-76),
@@ -441,6 +447,7 @@
 		return () => {
 			systemTheme.removeEventListener("change", onSystemTheme);
 			unsubscribe();
+			unsubscribeGaps();
 			document.removeEventListener("visibilitychange", onTabVisibility);
 			window.removeEventListener("focus", onTabVisibility);
 			window.removeEventListener("focus", onWindowFocus);

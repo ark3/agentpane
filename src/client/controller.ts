@@ -145,6 +145,13 @@ export function paneMode(view: Pick<ControllerView, "state" | "preview">): PaneM
 export interface AgentpaneController {
 	getView(): ControllerView;
 	subscribe(listener: (view: ControllerView) => void): () => void;
+	/**
+	 * Hear each session this tab detaches at a seq gap (`detachGapped`, D25
+	 * point 5), by the handle its view was keyed under. A published view cannot
+	 * say it: a view the gap dropped reads exactly as one that has not formed
+	 * yet, and the badge's watch has to tell the two apart (OW-jadoda).
+	 */
+	subscribeGaps(listener: (handle: string) => void): () => void;
 	start(): Promise<void>;
 	dispose(): void;
 	setDraft(text: string): void;
@@ -354,6 +361,7 @@ export function createController(
 	/** Whether the `previewFailure` on the view holds `loadPreview` back until the next `connected`. */
 	let previewHeld = false;
 	const listeners = new Set<(next: ControllerView) => void>();
+	const gapListeners = new Set<(handle: string) => void>();
 
 	/**
 	 * The controller's one chokepoint, so the pane's mode is settled here and
@@ -902,8 +910,14 @@ export function createController(
 	 * No gesture reaches here -- the only caller is `onEvent` -- so, like the
 	 * stream drop's detach in `onDisconnect`, this writes neither `busy` nor
 	 * `error` and does not bump the intent (OW-yasewo).
+	 *
+	 * The gap listeners hear it before the view goes, which is how the badge's
+	 * turn watch on the handle ends raising nothing, streamed or not (D25 point
+	 * 5, OW-jadoda): a later snapshot under the same handle re-forms the view,
+	 * and a turn ending there is one this tab stopped hearing.
 	 */
 	function detachGapped({ ref, handle }: Recovery): void {
+		for (const listener of gapListeners) listener(handle);
 		const onScreen = selects(handle);
 		const sessions = { ...view.state.sessions };
 		delete sessions[handle];
@@ -1098,6 +1112,10 @@ export function createController(
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		subscribeGaps(listener) {
+			gapListeners.add(listener);
+			return () => gapListeners.delete(listener);
+		},
 		refreshSessions: () => refreshSessions(true),
 		refreshPreview,
 		async start() {
@@ -1114,6 +1132,7 @@ export function createController(
 			clearTimeout(fatalRetryTimer);
 			connection?.close();
 			listeners.clear();
+			gapListeners.clear();
 		},
 		setDraft(text) {
 			publish({ draft: text });

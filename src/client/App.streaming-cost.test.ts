@@ -68,6 +68,10 @@ class PublishingController implements AgentpaneController {
 		return () => this.listeners.delete(listener);
 	}
 
+	subscribeGaps() {
+		return () => {};
+	}
+
 	publish(next: Partial<ControllerView>): void {
 		this.current = { ...this.current, ...next };
 		for (const listener of this.listeners) listener(this.current);

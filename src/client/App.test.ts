@@ -147,6 +147,10 @@ class FakeController implements AgentpaneController {
 		return () => this.listeners.delete(listener);
 	}
 
+	subscribeGaps() {
+		return () => {};
+	}
+
 	async start() {
 		this.started += 1;
 	}
@@ -1794,6 +1798,73 @@ describe("App", () => {
 				state: state({ selected: piSession, sessions: { "pi:pi-1": { ...streamed, isStreaming: false } } }),
 			}));
 			await tick();
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * Driven by the real controller, not the fake: the gap is the controller's to
+	 * detect, and the wiring from its detach to the watch is what is under test.
+	 * A later snapshot under the same handle -- this tab's re-attach, or another
+	 * client's attach -- re-forms the view, and the turn it then shows ending is
+	 * one this tab stopped hearing (D25 point 5, OW-jadoda).
+	 */
+	it("ends the badge's watch at a seq gap, so a turn under the same handle after a re-attach raises nothing (OW-jadoda)", async () => {
+		let emit: (event: ServerEvent) => void = () => {};
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession)],
+			createSession: async () => piSession,
+			attach: async () => ({ ...summary(piSession), handle: "h-1" }),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [],
+			fork: async () => piSession,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const snapshot = (isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session: piSession, handle: "h-1", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			const controller = createController(api);
+			render(App, { props: { controller } });
+			emit(snapshot(false));
+			await controller.select(piSession);
+			await tick();
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "Summarize the diff" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+
+			emit(status(2, true));
+			await tick();
+			// seq 3 never arrives: the tab dropped an event and detaches the session.
+			emit(status(4, true));
+			await tick();
+			expect(controller.getView().state.sessions["h-1"]).toBeUndefined();
+
+			emit(snapshot(true));
+			await tick();
+			emit(status(2, false));
+			await tick();
+
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
 		} finally {
 			document.hasFocus = hasFocus;
