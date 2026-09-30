@@ -48,3 +48,8 @@ The same read found that a request made in the gap, recorded for the teardown, l
 A request sent nowhere reached no backend, so its UNSENT runs at once; its FAILED stays the teardown's.
 
 Added to "Done when": a test in `src/emacs/helper.test.ts`, red first, that a request aborted by the helper's teardown gets no reply, with `bun run check` passing; and an ERT test, red first, that a prompt made in the gap on a session seen streaming leaves no turn-done indicator.
+
+The second adversarial read found the helper's no-reply check misses a server death: the in-flight request's socket error can reach `respond`'s catch before `onDisconnect`'s chain reaches `inFlight.abort()`, and its `-32603 "The socket connection was closed unexpectedly..."` reply, read as a refusal, abandoned the watch in 7 of 8 runs against a real server killed with a prompt in flight (bun 1.4.0, Emacs 31.1).
+So what decides UNSENT is Emacs's reading of the error, not the helper's silence: only an HTTP refusal, an error whose `data` carries the server's `status` (`toRpcError`'s `ApiClientError` branch), says the request reached no backend; any other error leaves the outcome unknown, as a timeout does, and runs FAILED and ERRED without UNSENT.
+The helper's no-reply for a request its teardown aborted stays, for what the echo area says: the death's "the helper exited" rather than an abort.
+Added to "Done when": an ERT test, red first, that a `-32603` error reply with no `data`, written after a status under the handle read streaming and before the helper exits, leaves the watch for the teardown, which raises the indicator.
