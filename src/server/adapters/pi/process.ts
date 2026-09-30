@@ -76,6 +76,7 @@ export interface PiWritable {
 	readonly destroyed: boolean;
 	write(chunk: string): unknown;
 	end(): unknown;
+	on(event: string, listener: Listener): unknown;
 }
 
 export interface PiChild {
@@ -259,6 +260,8 @@ export class PiAdapter implements BackendAdapter {
 	private closed = false;
 	/** Populated by the `error` event, which on a failed spawn is the only account of why. */
 	private spawnError?: string;
+	/** Populated by stdin's `error` event: a write into a pipe Pi stopped reading. */
+	private stdinError?: string;
 	private stderrTail = "";
 
 	private readonly updateListeners = new Set<UpdateListener>();
@@ -276,6 +279,10 @@ export class PiAdapter implements BackendAdapter {
 	// -- lifecycle ------------------------------------------------------------
 
 	async start(opts: StartOptions): Promise<void> {
+		// A child spawned after `dispose()` would outlive it: the disposal is
+		// memoised and has already run.
+		if (this.disposed) throw new Error("Pi adapter disposed");
+		if (this.child) throw new Error("Pi adapter already started");
 		const { command, args, cwd } = buildPiSpawnCommand({
 			cwd: opts.cwd,
 			resumeId: opts.resumeId,
@@ -303,6 +310,13 @@ export class PiAdapter implements BackendAdapter {
 		child.stderr.setEncoding("utf8");
 		child.stderr.on("data", (chunk: string) => {
 			this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
+		});
+
+		// A write landing after Pi died but before `close` goes into a pipe with
+		// no reader, and EPIPE arrives here. Unheard, it is an uncaught exception
+		// that takes the server down; heard, it is the death report's reason.
+		child.stdin.on("error", (err: Error) => {
+			this.stdinError = `Pi stdin failed: ${err.message}`;
 		});
 
 		child.on("error", (err: Error) => {
@@ -395,10 +409,8 @@ export class PiAdapter implements BackendAdapter {
 	 * Idempotent, because the server reaches one adapter from more than one
 	 * direction: an explicit close and the startup's own failure path can hold
 	 * the same adapter, and shutdown walks both the process table and the
-	 * startups still in flight. A second `stdin.end()` raises
-	 * ERR_STREAM_ALREADY_FINISHED on a stream nobody is listening to for
-	 * `error`, which takes the server down; a second `kill()` re-signals a pid
-	 * the OS may have already handed to something else.
+	 * startups still in flight. A second `kill()` re-signals a pid the OS may
+	 * have already handed to something else.
 	 */
 	dispose(): Promise<void> {
 		this.disposal ??= this.finishDisposal();
@@ -764,7 +776,7 @@ export class PiAdapter implements BackendAdapter {
 
 		// On a failed spawn the exit code is meaningless (-2 for ENOENT), so the
 		// `error` event's account wins when we have one.
-		const reason = this.spawnError ?? `Pi process exited (code=${code}, signal=${signal})`;
+		const reason = this.spawnError ?? this.stdinError ?? `Pi process exited (code=${code}, signal=${signal})`;
 		const detail = this.stderrTail.trim();
 		const message = detail ? `${reason}\n${detail}` : reason;
 

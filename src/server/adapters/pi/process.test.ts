@@ -30,7 +30,7 @@ class FakeStream extends EventEmitter {
 	setEncoding(): void {}
 }
 
-class FakeStdin {
+class FakeStdin extends EventEmitter {
 	destroyed = false;
 	endCalls = 0;
 	chunks: string[] = [];
@@ -188,6 +188,15 @@ describe("PiAdapter.start", () => {
 		h.child.emit("close", -2, null);
 
 		await expect(started).rejects.toThrow(/Failed to spawn Pi \(direnv\)/);
+	});
+
+	it("refuses to start once disposed, and spawns nothing (OW-sozopu)", async () => {
+		const h = makeHarness();
+		await h.adapter.dispose();
+
+		await expect(h.adapter.start({ cwd: WORKSPACE })).rejects.toThrow(/disposed/);
+		// A child spawned here would outlive the disposal, which has already run.
+		expect(h.spawnArgs).toEqual([]);
 	});
 
 	it("attributes a spawn failure to the error event, not the meaningless exit code", async () => {
@@ -1698,10 +1707,8 @@ describe("PiAdapter teardown", () => {
 	it("tears down once however many times it is disposed", async () => {
 		// The manager can reach one adapter from two directions -- an explicit
 		// close and the startup's own failure path, or a shutdown that walks both
-		// the process table and the in-flight startups. `stdin.end()` on an
-		// already-finished stream raises ERR_STREAM_ALREADY_FINISHED, and nothing
-		// listens for `error` on the child's stdin, so the second teardown would
-		// take the server down with it.
+		// the process table and the in-flight startups. A second teardown would
+		// re-signal a pid the OS may have already reused.
 		const h = makeHarness();
 		await startAdapter(h);
 
@@ -1722,6 +1729,21 @@ describe("PiAdapter teardown", () => {
 		h.child.stdin.destroyed = false;
 
 		await expect(h.adapter.submit("hello")).rejects.toThrow(/not running/);
+	});
+
+	it("reports a stdin failure through onError at the death, rather than throwing out of the pipe (OW-sozopu)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		// Pi died after this write but before `close`, so the pipe has no reader
+		// and Node raises EPIPE as an `error` event on stdin.
+		const submitted = h.adapter.submit("hello");
+		expect(() => h.child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))).not.toThrow();
+		h.child.emit("close", 1, null);
+
+		await expect(submitted).rejects.toThrow(/before responding/);
+		expect(h.errors).toHaveLength(1);
+		expect(h.errors[0]).toContain("EPIPE");
 	});
 
 	it("reports a death once, even if close somehow arrives twice", async () => {
