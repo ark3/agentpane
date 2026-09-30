@@ -3152,7 +3152,7 @@ describe("App", () => {
 		}
 	});
 
-	it("a Pi-shaped fork ends on the fork's own handle with the follow and scroll maps moved onto it (OW-hezidi)", async () => {
+	it("a Pi-shaped fork ends on the fork's own handle with the follow armed on it (OW-hezidi)", async () => {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-77" };
 		const controller = new FakeController(view({
 			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], piSession, false, "h-parent"),
@@ -3160,8 +3160,8 @@ describe("App", () => {
 		// Pi's fork moves the live process onto a new file, which is a new session
 		// under a new handle and names nothing under the parent's (D24, OW-suhoto). The real
 		// `forkAndSubmit` attaches the fork's ref and publishes the selection
-		// *before* it resolves, so the fake does too; the shell moves what it
-		// armed on the parent's handle onto the fork's once it resolves.
+		// *before* it resolves, so the fake does too; the shell arms follow on the
+		// handle the fork's attach replied with (OW-vitefo).
 		controller.forkResult = { ...summary(forkRef), handle: "h-fork" };
 		controller.onForkAndSubmit = () => {
 			controller.publish(view({ state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])], forkRef, false, "h-fork") }));
@@ -3196,7 +3196,7 @@ describe("App", () => {
 		expect(container.querySelector("button[type='submit']")).toHaveTextContent("Send");
 	});
 
-	it("moves the arming onto the fork's handle even when the fork's first prompt renamed it before the fork resolved (OW-kimaya)", async () => {
+	it("arms the fork's handle even when the fork's first prompt renamed it before the fork resolved (OW-kimaya)", async () => {
 		// Claude Code renames at `init`, after `submit()`: the status carrying the
 		// fork's new ref can land under its handle before `forkAndSubmit`
 		// resolves, and the reducer has moved the view, summary and selection off
@@ -3230,17 +3230,17 @@ describe("App", () => {
 		await tick();
 		await nextFrame();
 
-		// Moved onto a key named by the attach reply's ref, which nothing holds
+		// Armed on a key named by the attach reply's ref, which nothing holds
 		// any more, follow never engages and this reads where the switch parked it.
 		expect(el.scrollTop).toBe(400);
 	});
 
 	/**
 	 * The Codex half of the test above: a fork that renames nothing lands on
-	 * another session just the same, so the follow armed under the parent's key
-	 * before the fork has to be moved once `forkAndSubmit` resolves, or it is
-	 * stranded there -- follow never engages on the fork, and the parent keeps a
-	 * stale entry pointing at an earlier index.
+	 * another session just the same, so the follow has to be armed on the
+	 * fork's own handle, or it is stranded under the parent's -- follow never
+	 * engages on the fork, and the parent keeps a stale entry pointing at an
+	 * earlier index.
 	 */
 	it("a Codex-shaped fork, which renames nothing, still ends following the fork's own turn (OW-hezidi)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "thread-2" };
@@ -3274,6 +3274,89 @@ describe("App", () => {
 
 		// Stranded under "pi:pi-1" this reads 60 -- where the session switch parked
 		// it -- because nothing ever armed follow on the fork.
+		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
+	});
+
+	/**
+	 * The follow, like the badge, is the fork's from the moment its handle is
+	 * known. Armed on a parent that is streaming, the parent's own transcript
+	 * already holds the edited message, so the arming engaged there at once --
+	 * and the parent's turn ending mid-fork (Pi's abort; Codex finishing on its
+	 * own) released it before it ever reached the fork (OW-vitefo).
+	 */
+	it.each(["pi", "codex"] as const)("follows the fork's turn when forked from a streaming %s parent whose turn ends mid-fork (OW-vitefo)", async (backend) => {
+		const parentRef: SessionRef = { backend, id: "parent" };
+		const forkRef: SessionRef = { backend, id: "fork" };
+		const reworded = user("reworded");
+		let resolveAbort = () => {};
+		let resolveFork = (_ref: SessionRef) => {};
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string, seq: number, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session, handle, seq, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(parentRef)],
+			createSession: async () => parentRef,
+			attach: async (ref) => {
+				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", 1, [reworded], false));
+				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => emit(status(forkRef, "h-fork", 2, true)),
+			editDraft: async (body) => ({ text: body.text }),
+			abort: () => new Promise<void>((resolve) => {
+				resolveAbort = resolve;
+			}),
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: () => new Promise<SessionRef>((resolve) => {
+				resolveFork = resolve;
+			}),
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		const { container } = render(App, { props: { controller } });
+		const el = container.querySelector(".conversation") as HTMLElement;
+		emit(snapshot(parentRef, "h-parent", 1, [user("first draft"), assistant([{ type: "text", text: "an ans" }])], true));
+		await controller.select(parentRef);
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		emit(status(parentRef, "h-parent", 2, false));
+		await tick();
+
+		resolveAbort();
+		await tick();
+		if (backend === "pi") emit({ type: "ended", session: parentRef, handle: "h-parent" });
+		resolveFork(forkRef);
+		await tick();
+		await tick();
+		expect(controller.getView().state.selected).toEqual(forkRef);
+		expect(controller.getView().sending).toBe(false);
+
+		// The fork's turn grows past the viewport while the edited message sits
+		// far below, so following it reads the transcript's bottom.
+		const anchorEl = el.querySelector('[data-index="0"]') as HTMLElement;
+		mockContentTop(anchorEl, el, 5000);
+		mockScrollMetrics(el, { scrollHeight: 900, clientHeight: 500 });
+		emit(snapshot(forkRef, "h-fork", 3, [reworded, assistant([{ type: "text", text: "a new answer" }])], true));
+		await tick();
+		await nextFrame();
+
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 

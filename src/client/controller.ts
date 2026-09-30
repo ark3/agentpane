@@ -202,9 +202,10 @@ export interface AgentpaneController {
 	 *
 	 * Resolves to **the attach reply of the session the prompt landed on**, or
 	 * null if it never landed. Not a boolean, because the caller has per-tab
-	 * state keyed on the session it armed before the fork -- scroll and follow --
-	 * and has to move it onto the fork; reading `state.selected` back
-	 * instead would move it onto whatever the user clicked mid-fork (OW-mifuki).
+	 * state keyed on the session it forked -- the row's turn marks -- and
+	 * carries it onto the fork; reading `state.selected` back instead would
+	 * move it onto whatever the user clicked mid-fork (OW-mifuki). Follow is
+	 * not among it: that is armed through `onAttached` (OW-vitefo).
 	 * And carrying the fork's handle, not only its ref, because the fork's first
 	 * prompt can rename it before this resolves -- Claude Code renames at `init`,
 	 * after `submit()` -- and by then no view or summary carries the ref the

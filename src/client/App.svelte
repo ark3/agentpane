@@ -476,15 +476,14 @@
 	 * Move this tab's own per-session state -- follow, remembered scroll -- from
 	 * one session key to another.
 	 *
-	 * A rename moves nothing: it leaves the handle alone. Two things still move
-	 * a key. A fork, which on every backend is another session under another
-	 * handle (D24), so the follow `send()` armed on the parent has to move onto
-	 * the fork (OW-hezidi, OW-suhoto); orphaning it on the parent strands
-	 * follow mode mid-turn, which is what OW-27 was. And a selection that stays
-	 * on one ref while its key moves, as a stored session's does from its ref to
-	 * the handle its attach gives it -- see the switch effect below, which moves
-	 * the badge's turn watch as well. A fork's watch never needs moving: `send()`
-	 * arms it on the fork itself (OW-koledi).
+	 * A rename moves nothing: it leaves the handle alone. What still moves a key
+	 * is a selection that stays on one ref while its key moves, as a stored
+	 * session's does from its ref to the handle its attach gives it -- see the
+	 * switch effect below, which moves the badge's turn watch as well. A fork,
+	 * which on every backend is another session under another handle (D24),
+	 * moves no follow or scroll: `send()` arms the fork's follow and watch on
+	 * the fork's own handle (OW-koledi, OW-vitefo), the parent's scroll stays
+	 * the parent's, and only the row's turn marks are carried onto the fork.
 	 */
 	function rekeySession(fromKey: string, toKey: string): void {
 		if (fromKey === toKey) return;
@@ -806,18 +805,15 @@
 	}
 
 	/**
-	 * On submit, arm follow-mode for whatever message this submission produces.
-	 *
-	 * `from` is the index the produced message cannot land before. It defaults to
-	 * the transcript's current length, which is right for an ordinary prompt; a
-	 * fork's transcript is the parent truncated just before the edited message,
-	 * so there the caller passes that message's index instead -- the parent's
-	 * length would sit past the end of the fork and never arm (OW-hezidi).
+	 * On submit, arm follow-mode for whatever message this submission produces:
+	 * the first user message at or past the transcript's current length. A
+	 * fork's follow is the one armed elsewhere, in `send()`, on the fork's own
+	 * handle (OW-vitefo).
 	 */
-	function armFollow(from?: number): void {
+	function armFollow(): void {
 		const ref = view.state.selected;
 		if (!ref) return;
-		pendingFollow.set(keyOf(ref), from ?? selectedSession?.messages.length ?? 0);
+		pendingFollow.set(keyOf(ref), selectedSession?.messages.length ?? 0);
 	}
 
 	/**
@@ -892,10 +888,10 @@
 
 	/**
 	 * Message-boundary upserts and turn-status flips drive follow mode:
-	 * arming a pending follow (from `armFollow`) once its message exists, and
-	 * disengaging when the turn ends (nothing left to chase). The actual
-	 * scroll adjustment is `reconcile`, via the same throttle as the markdown
-	 * re-render (D5).
+	 * arming a pending follow (from `armFollow`, or `send()` for a fork) once
+	 * its message exists, and disengaging when the turn ends (nothing left to
+	 * chase). The actual scroll adjustment is `reconcile`, via the same
+	 * throttle as the markdown re-render (D5).
 	 */
 	$effect(() => {
 		const ref = view.state.selected;
@@ -1205,46 +1201,47 @@
 		// `busy` -- which an abort or an attach clears while the POST it described
 		// is still outstanding (OW-kelede).
 		if (view.sending) return;
-		armFollow(edit?.index);
 		// Arming follow is keyed on the session's handle, which a rename landing
 		// while the request is in flight (D9) leaves alone, so this is still
 		// where the arming sits when the request settles (OW-kimaya).
 		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
+			armFollow();
 			armBadge();
 			void controller.submit().then((sent) => {
 				if (!sent && armedKey) disarmSubmit(armedKey);
 			});
 			return;
 		}
-		// A fork's badge is armed on the fork itself, as soon as its handle is
-		// known and before its prompt goes out, never on the parent: a parent
-		// still streaming ends its own turn during the fork -- Pi's abort ends
-		// it, Codex and Claude Code may simply finish it -- and a watch on the
-		// parent took that end for the fork's (OW-koledi).
+		// A fork's follow and badge are both armed on the fork itself, as soon as
+		// its handle is known and before its prompt goes out, never on the
+		// parent: a parent still streaming ends its own turn during the fork --
+		// Pi's abort ends it, Codex and Claude Code may simply finish it -- and a
+		// watch on the parent took that end for the fork's (OW-koledi). A follow
+		// armed there fared no better: the parent's transcript already holds the
+		// edited message, so it engaged on the parent at once, and that turn's
+		// end released it before the fork ever saw it (OW-vitefo).
+		//
+		// The handle is the attach reply's: not the fork's ref, which its first
+		// prompt may already have renamed (OW-kimaya), and never `state.selected`,
+		// which a click mid-fork moves and the controller honours. And the follow
+		// arms from the edited message's index, not the transcript's length: the
+		// fork's transcript is the parent's truncated just before that message,
+		// so the parent's length would sit past its end and never arm (OW-hezidi).
 		let forkKey: string | null = null;
 		void controller.forkAndSubmit(edit.index, edit.images, (handle) => {
 			forkKey = handle;
+			pendingFollow.set(handle, edit.index);
 			turnWatch = watchSubmit(turnWatch, handle);
 		}).then((landed) => {
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
 				// be badged about -- and a fork nothing prompted is no exception.
-				if (armedKey) pendingFollow.delete(armedKey);
-				if (forkKey) turnWatch = watchAbandon(turnWatch, forkKey);
+				if (forkKey) disarmSubmit(forkKey);
 				return;
 			}
-			// A fork is another session under another handle on every backend
-			// (D24) -- on Pi, whose live process moved onto a new file, exactly as
-			// much as on Codex, which hands back a ref nothing was renamed to --
-			// so this is where the follow armed above moves onto the fork the
-			// prompt landed on (OW-suhoto). Its handle, as the attach
-			// replied with it: not its ref, which its first prompt may already
-			// have renamed (OW-kimaya), and never `state.selected`, which a click
-			// mid-fork moves and the controller honours, so reading the selection
-			// back here would move this tab's arming onto a session it never
-			// submitted to.
-			if (armedKey) rekeySession(armedKey, landed.handle);
+			// The parent's row marks are the one thing still carried onto the fork.
+			if (armedKey) sessionTurnMarks = moveSessionTurnMarks(sessionTurnMarks, armedKey, landed.handle);
 			if (editing === edit) editing = null;
 		});
 	}
