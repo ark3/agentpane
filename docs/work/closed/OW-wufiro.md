@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: declined
 ---
 
 # A turn-done watch agentpane-mode keeps across a seq gap outlives the kill of its buffer, so a later buffer attaching the same live handle raises the indicator for a turn from elsewhere
@@ -34,3 +35,9 @@ Whichever, the OW-nuzoto behaviour stays: a gap raises nothing, keeps a `streame
 - Still green: `agentpane-test-turn-done-raised-after-a-gap-and-a-reattach`, `agentpane-test-turn-done-not-raised-by-a-gap`, `agentpane-test-turn-done-not-raised-after-a-gap-before-streaming` and `agentpane-test-turn-done-not-raised-by-a-shutdown` and `agentpane-test-shutdown-drops-a-watch-a-gap-kept`.
 - The `agentpane--detach` and `agentpane--let-go` docstrings say who ends a watch kept at a gap.
 - The ERT suite (`emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`) and `bun run check` pass.
+
+## Close note
+
+Declined 2026-09-30 by the owner: rather than give the watch a gap keeps an owner a buffer's kill can reach, a gap now keeps no watch at all, the same treatment OW-nuzoto gave a deliberate shutdown.
+OW-bepudu makes that change in agentpane-mode and OW-jadoda in the browser, which makes this card's scenario, and the later-turn case it set aside, unreachable.
+If the re-attach case is ever wanted back, this card's two shapes (the buffer keeping the handle it let go of, or a watch recording the buffer that armed it) are where to start.
