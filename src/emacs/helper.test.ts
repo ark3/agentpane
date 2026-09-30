@@ -1285,6 +1285,25 @@ describe("shutdown", () => {
 		expect(io.response(1)).toBeUndefined();
 	});
 
+	// Only a failure the abort caused is silenced, not every failure once it
+	// has run: under Bun the input's end outruns the replies to a failed
+	// first open, and those are no abort's (OW-nuzoto).
+	it("answers a request whose call fails with its own error as the teardown aborts it (OW-nuzoto)", async () => {
+		const { io, calls, done } = start({
+			[`GET ${ROUTES.sessions}`]: (_url, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => reject(new Error("socket closed")));
+				}),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		await vi.waitFor(() => expect(calls).toHaveLength(1));
+		io.end();
+		await done;
+		stop = null;
+		await tick();
+		expect(io.response(1)).toMatchObject({ error: { code: -32603, message: "socket closed" } });
+	});
+
 	// A chunk the input delivered before the teardown cancelled it is still
 	// read. Sent, its call would be aborted and its reply silenced, and Emacs
 	// would take a request that may have reached a backend for the helper's

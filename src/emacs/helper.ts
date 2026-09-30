@@ -180,10 +180,14 @@ interface HeldNode {
  * goes unanswered, so one that failed on its own in the same instant gets
  * its own error, which agentpane-mode reads as an outcome unknown too.
  * Until OW-nuzoto the test was whether the abort had run, and such a
- * request went unanswered. A request read once the teardown has begun, from
- * a chunk the input delivered before it was cancelled, calls nothing and
- * is answered that the helper is exiting: sent, its call would be aborted
- * and its reply silenced, though it might have reached a backend. Writing
+ * request went unanswered. A call to the server attempted once `stopped`
+ * is set is refused, and its request answered that the helper is exiting:
+ * sent, the call would be aborted and its reply silenced, though it might
+ * have reached a backend. That reaches a request read from a chunk the
+ * input delivered before it was cancelled, and a `sessions/list` or
+ * `sessions/attach` whose wait on the stream's open resumes after
+ * `onDisconnect`; a request that calls nothing, as `sessions/detach`,
+ * still runs and is answered as ever. Writing
  * nothing keeps nothing open: with a prompt in flight, the helper exited
  * 0.029s to 0.030s after its stdin closed, as fast as OW-kofuda measured
  * (bun 1.4.0, measured 2026-09-29).
