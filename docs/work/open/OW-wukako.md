@@ -41,3 +41,24 @@ Since OW-likopo, `sessions/attach` in `runHelper` (`src/emacs/helper.ts`) enters
 A `sessions/detach` of the asked-for ref that lands while that first open is pending abandons the attach through `forget`, but the handler still sends the REST attach once the open settles, which spawns the session nobody is waiting on; the reply then goes out with nothing recorded.
 This is not a regression: before OW-likopo that REST call had already gone out.
 It is the same attach-to-request matching this card owns, so whatever token replaces the ref match should also let an attach abandoned during the open send no REST call; add that case to the helper test above, holding the open with the fake source's `holding` flag and `openHeld()`.
+
+## Amended 2026-09-30 at execution: the echo is declined, and the ref match goes instead
+
+A cold read at execution found a third design beside the two above, and this card takes it.
+The attach's REST reply already names the handle of the container that attach landed on (`sessionRoute`'s GET in `src/server/http/app.ts` answers `summaryOf(ref)`), and the `sessions/attach` handler already answers at the reply from the view the reducer holds under `summary.handle`, or waits for the snapshot under it.
+OW-savafi's wrong answer comes only from `introduce` answering an attach whose reply has not come by `sessionKey(attach.asked) === key`; with that clause gone, an attach is answered only under the handle its reply names, and a snapshot under another handle of the same ref answers nothing.
+A snapshot that beats its reply costs nothing: the reducer holds its view, upserts meanwhile included, and the reply answers from it.
+So no server echo is taken, and nothing changes on the HTTP API.
+What the echo alone would have added is telling apart, at a reply that finds no view but a snapshot `seen` under its handle, a gap that took this attach's own snapshot from one that took another's; that takes a lost or malformed frame, which D26 point 4 calls a server bug not to defend, and without the ref match it now reaches a same-ref attach as well as an alias's.
+The echo would also have cost the frozen helper contract a wire field the server must carry (a token array on the snapshot, since concurrent attaches collapse onto one startup and one snapshot in `SessionManager.attach`), a rework of every attach in `src/emacs/helper.test.ts`, and a skew hazard: a new helper against an older running server would wait out every attach to `agentpane--spawn-timeout`.
+
+The change is therefore:
+- Emacs mints a per-attach token and sends it on `sessions/attach` from both `agentpane--attach` and `agentpane--attach-now`, and the helper keys its `Attaching` records by it.
+- The snapshot that answers an attach carries that token in place of `askedFor`, and `agentpane--notified-buffer` binds it to the buffer whose attach sent it.
+- `sessions/detach` and `sessions/close` carry the token of the buffer's attach in flight, if any, whether or not the buffer holds a handle (`agentpane-refetch` attaches a buffer that holds one), and `forget` abandons only the attach that token names; a handle alone abandons no attach.
+- `introduce` answers an attach only under the handle its reply named.
+- An attach abandoned while its stream's open is pending sends no REST attach (the OW-likopo amendment above).
+
+The done condition's echo test becomes a test of the ordering in OW-savafi's body, without the echo: a snapshot under H1 for ref R arrives before the reply naming H2, and the attach binds H2 and receives its events, red first.
+OW-savafi then closes `--moot` citing this card, and so does OW-jofodu.
+The decision is recorded in D25 in `docs/DESIGN.md`.
