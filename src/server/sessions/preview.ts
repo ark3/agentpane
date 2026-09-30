@@ -17,12 +17,16 @@
  *  - **Codex**: the ref is a UUIDv7 thread id embedded in the filename. A
  *    readdir-only walk (`findJsonlFiles`, no file reads) turns up the candidate
  *    names; the one whose filename carries the matching uuid is read, and only
- *    that one, save a fork's base as above. If none matches, the preview is
- *    empty rather than an error -- the same "tolerate a missing file" spirit
- *    enumeration takes.
+ *    that one, save a fork's base as above.
  *  - **Claude Code**: the ref is the session uuid the file is named after;
  *    same match-by-filename as Codex, over the readdir-only
  *    `findClaudeSessionFiles` walk.
+ *
+ * A ref no file backs -- a Pi path that does not resolve inside the store,
+ * or no filename match -- answers null rather than throwing, and never an
+ * empty preview, which is a file with no turns: the preview route reads the
+ * null, for a ref the manager does not hold, as the session gone (D26
+ * point 5).
  *
  * Each backend maps its store records to the shared transcript structure;
  * locating and reading the single file remains this module's only job.
@@ -59,7 +63,7 @@ export interface ReadPreviewOptions {
 export async function readSessionPreview(
 	ref: SessionRef,
 	opts: ReadPreviewOptions = {},
-): Promise<SessionPreviewTurn[]> {
+): Promise<SessionPreviewTurn[] | null> {
 	const readPiTurns = opts.readPiTurns ?? extractPiPreviewTurns;
 	const readCodexTurns = opts.readCodexTurns ?? extractCodexPreviewTurns;
 	const readClaudeTurns = opts.readClaudeTurns ?? extractClaudePreviewTurns;
@@ -68,7 +72,7 @@ export async function readSessionPreview(
 		// D9: the ref IS the file path. Validate it against the same store-root
 		// boundary as attach, then read it directly with no discovery.
 		const file = await resolvePiSessionPath(ref.id, opts.piRoot);
-		return file === null ? [] : readPiTurns(file);
+		return file === null ? null : readPiTurns(file);
 	}
 
 	if (ref.backend === "claude") {
@@ -76,7 +80,7 @@ export async function readSessionPreview(
 		const findFiles = opts.findFiles ?? findClaudeSessionFiles;
 		const files = await findFiles(opts.claudeRoot ?? SESSION_ROOTS.claude);
 		const match = files.find((file) => fileMatchesThreadId(file, ref.id));
-		if (!match) return [];
+		if (!match) return null;
 		return readClaudeTurns(match);
 	}
 
@@ -85,6 +89,6 @@ export async function readSessionPreview(
 	const root = opts.codexRoot ?? codexSessionsRoot();
 	const files = await findFiles(root);
 	const match = files.find((file) => fileMatchesThreadId(file, ref.id));
-	if (!match) return [];
+	if (!match) return null;
 	return readCodexTurns(match, (threadId) => files.find((file) => fileMatchesThreadId(file, threadId)));
 }

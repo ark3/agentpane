@@ -457,6 +457,19 @@ export class SessionManager {
 	}
 
 	/**
+	 * Whether this manager holds `ref` under any name: a container in the
+	 * table, a startup in flight (`#attaching`, whose entries `#retire` deletes
+	 * once empty), or a parked fork. What the preview route asks before it
+	 * reads a missing file as the session gone (D26 point 5, D24). Not
+	 * `#disposing`: a close retires what it stops at once, and a session it is
+	 * still disposing with nothing on disk is going.
+	 */
+	holds(ref: SessionRef): boolean {
+		const key = sessionKey(ref);
+		return this.#names.has(key) || this.#attaching.has(key) || this.#pendingForks.has(key);
+	}
+
+	/**
 	 * D9: a `virtual` session is a workspace choice and nothing more. Nothing
 	 * touches the backend's store until its first turn, whatever id attach
 	 * gives it, so browsing never litters it with empty sessions.

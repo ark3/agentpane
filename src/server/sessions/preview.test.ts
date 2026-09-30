@@ -189,6 +189,13 @@ function previewText(turn: SessionPreviewTurn | undefined): string {
 		.join("");
 }
 
+/** A preview of a ref a file backs: `readSessionPreview`, failing on its no-file null (D26). */
+async function readTurns(...args: Parameters<typeof readSessionPreview>): Promise<SessionPreviewTurn[]> {
+	const turns = await readSessionPreview(...args);
+	if (turns === null) throw new Error(`no file backs ${args[0].id}`);
+	return turns;
+}
+
 describe("readSessionPreview", () => {
 	let root: string;
 
@@ -213,8 +220,16 @@ describe("readSessionPreview", () => {
 				{ piRoot, readPiTurns },
 			);
 
-			expect(turns).toEqual([]);
+			expect(turns).toBeNull();
 			expect(readPiTurns).not.toHaveBeenCalled();
+		});
+
+		it("answers null for a ref no file backs, and no turns for a file with none (D26)", async () => {
+			const file = join(root, "session.jsonl");
+			await writeJsonl(file, [piHeader()]);
+
+			expect(await readSessionPreview({ backend: "pi", id: join(root, "missing.jsonl") }, { piRoot: root })).toBeNull();
+			expect(await readSessionPreview({ backend: "pi", id: file }, { piRoot: root })).toEqual([]);
 		});
 
 		it("returns the user/assistant conversation from the ref's file (D9)", async () => {
@@ -228,7 +243,7 @@ describe("readSessionPreview", () => {
 			]);
 
 			const ref: SessionRef = { backend: "pi", id: file };
-			const turns = await readSessionPreview(ref, { piRoot: root });
+			const turns = await readTurns(ref, { piRoot: root });
 
 			// The record's own timestamp rides each turn (OW-71), not dropped.
 			expect(turns.map((turn) => ({ role: turn.role, timestamp: turn.timestamp }))).toEqual([
@@ -254,7 +269,7 @@ describe("readSessionPreview", () => {
 				{ type: "message", id: "m", parentId: null, message: { role: "user", content: [{ type: "text", text: "no time on me" }] } },
 			]);
 
-			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 			expect(turns[0]).not.toHaveProperty("timestamp");
@@ -293,7 +308,7 @@ describe("readSessionPreview", () => {
 				piMessage("assistant", "It says hello."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual([
 				"user",
@@ -320,7 +335,7 @@ describe("readSessionPreview", () => {
 			await writeJsonl(other2, [piHeader(), piMessage("user", "not me 2")]);
 
 			const reads: string[] = [];
-			const turns = await readSessionPreview(
+			const turns = await readTurns(
 				{ backend: "pi", id: wanted },
 				{
 					piRoot: root,
@@ -349,7 +364,7 @@ describe("readSessionPreview", () => {
 			}
 			await writeJsonl(file, lines);
 
-			const turns = await readSessionPreview({ backend: "pi", id: file }, { piRoot: root });
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns.length).toBe(messageCount);
 			// This turn sits past both the 200-line cap and the 512KB cap (each
@@ -371,7 +386,7 @@ describe("readSessionPreview", () => {
 				codexAssistant("Done, it passes now."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			// The synthetic wrapper turn is dropped; the real turns survive in order,
 			// each carrying its record's own timestamp (OW-71).
@@ -391,7 +406,7 @@ describe("readSessionPreview", () => {
 				const file = join(root, "sessions", "2026", "09", "23", `rollout-2026-09-23T10-00-00-${THREAD}.jsonl`);
 				await writeJsonl(file, [codexHeader(THREAD), codexUser("Fix the failing test."), codexAssistant("Done.")]);
 
-				const turns = await readSessionPreview({ backend: "codex", id: THREAD });
+				const turns = await readTurns({ backend: "codex", id: THREAD });
 
 				expect(turns.map((turn) => turn.role)).toEqual(["user", "assistant"]);
 			} finally {
@@ -406,7 +421,7 @@ describe("readSessionPreview", () => {
 				{ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "no time on me" }] } },
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns).toMatchObject([{ role: "user", content: [{ type: "text" }] }]);
 			expect(turns[0]).not.toHaveProperty("timestamp");
@@ -435,7 +450,7 @@ describe("readSessionPreview", () => {
 				codexAssistant("The file was inspected."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual([
 				"user",
@@ -468,7 +483,7 @@ describe("readSessionPreview", () => {
 				{ type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "probe\n/var/tmp/x" } },
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns[0]).toMatchObject({
 				role: "assistant",
@@ -503,7 +518,7 @@ describe("readSessionPreview", () => {
 				},
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns[0]).toMatchObject({
 				role: "assistant",
@@ -522,7 +537,7 @@ describe("readSessionPreview", () => {
 				},
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns[0]).toMatchObject({
 				role: "assistant",
@@ -530,13 +545,22 @@ describe("readSessionPreview", () => {
 			});
 		});
 
-		it("returns an empty preview when no file carries the thread id, rather than throwing", async () => {
+		it("answers null when no file carries the thread id, rather than throwing (D26)", async () => {
 			await writeJsonl(join(root, "2026", "08", "12", "rollout-someone-else.jsonl"), [
 				codexHeader("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
 				codexUser("not the one you want"),
 			]);
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			expect(turns).toBeNull();
+		});
+
+		it("answers no turns, not null, for a file that carries the thread id and none (D26)", async () => {
+			await writeJsonl(join(root, "2026", "08", "12", `rollout-2026-08-12T22-10-29-${THREAD}.jsonl`), [
+				codexHeader(THREAD),
+			]);
+
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 			expect(turns).toEqual([]);
 		});
 
@@ -550,7 +574,7 @@ describe("readSessionPreview", () => {
 			for (const o of others) await writeJsonl(o, [codexHeader("x"), codexUser("not me")]);
 
 			const reads: string[] = [];
-			const turns = await readSessionPreview(
+			const turns = await readTurns(
 				{ backend: "codex", id: THREAD },
 				{
 					codexRoot: root,
@@ -574,7 +598,7 @@ describe("readSessionPreview", () => {
 			]);
 
 			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
-			expect(turns).toEqual([]);
+			expect(turns).toBeNull();
 		});
 
 		it("draws a compaction marker carrying the last token_count figure before the compacted record (OW-bisubi)", async () => {
@@ -595,7 +619,7 @@ describe("readSessionPreview", () => {
 				codexAssistant("Carrying on."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "assistant"]);
 			expect(turns[1]).toMatchObject({
@@ -622,7 +646,7 @@ describe("readSessionPreview", () => {
 				codexCompacted("2026-08-12T22:31:01.000Z"),
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "compactionSummary"]);
 			expect(turns[1]).toMatchObject({ tokensBefore: 0 });
@@ -642,7 +666,7 @@ describe("readSessionPreview", () => {
 				codexCompacted("2026-08-28T07:31:01.000Z"),
 			]);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual(["user", "compactionSummary", "compactionSummary"]);
 			expect(turns[1]).toMatchObject({ tokensBefore: 207782 });
@@ -659,7 +683,7 @@ describe("readSessionPreview", () => {
 			}
 			await writeJsonl(file, lines);
 
-			const turns = await readSessionPreview({ backend: "codex", id: THREAD }, { codexRoot: root });
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
 
 			expect(turns.length).toBe(messageCount);
 			const late = turns[250];
@@ -693,7 +717,7 @@ describe("readSessionPreview", () => {
 				await writeJsonl(codexRollout(root, PARENT), parentLines);
 				await writeJsonl(codexRollout(root, FORK), forkLines);
 
-				const turns = await readSessionPreview({ backend: "codex", id: FORK }, { codexRoot: root });
+				const turns = await readTurns({ backend: "codex", id: FORK }, { codexRoot: root });
 
 				expect(turns.map((turn) => previewText(turn))).toEqual([
 					"first prompt",
@@ -708,7 +732,7 @@ describe("readSessionPreview", () => {
 			it("draws only the fork's own turns when the parent's rollout is not in the store", async () => {
 				await writeJsonl(codexRollout(root, FORK), forkLines);
 
-				const turns = await readSessionPreview({ backend: "codex", id: FORK }, { codexRoot: root });
+				const turns = await readTurns({ backend: "codex", id: FORK }, { codexRoot: root });
 
 				expect(turns.map((turn) => previewText(turn))).toEqual([
 					"fork's own prompt",
@@ -729,7 +753,7 @@ describe("readSessionPreview", () => {
 					CODEX_SETTINGS_APPLIED,
 				]);
 
-				const turns = await readSessionPreview({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
+				const turns = await readTurns({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
 
 				expect(turns.map((turn) => previewText(turn))).toEqual([
 					"first prompt",
@@ -749,7 +773,7 @@ describe("readSessionPreview", () => {
 					CODEX_SETTINGS_APPLIED,
 				]);
 
-				const turns = await readSessionPreview({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
+				const turns = await readTurns({ backend: "codex", id: FORK_OF_FORK }, { codexRoot: root });
 
 				expect(turns.map((turn) => previewText(turn))).toEqual(["first prompt", "first reply"]);
 			});
@@ -769,7 +793,7 @@ describe("readSessionPreview", () => {
 					codexAssistant("subagent's reply"),
 				]);
 
-				const turns = await readSessionPreview({ backend: "codex", id: SUBAGENT }, { codexRoot: root });
+				const turns = await readTurns({ backend: "codex", id: SUBAGENT }, { codexRoot: root });
 
 				expect(turns.map((turn) => previewText(turn))).toEqual([
 					"first prompt",
@@ -791,7 +815,7 @@ describe("readSessionPreview", () => {
 				claudeAssistant("Done, it passes now."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+			const turns = await readTurns({ backend: "claude", id: SID }, { claudeRoot: root });
 
 			// The wrapper turn is dropped; the real turns survive in order, each
 			// carrying its record's own timestamp (OW-71).
@@ -834,7 +858,7 @@ describe("readSessionPreview", () => {
 				claudeAssistant("The file was inspected."),
 			]);
 
-			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+			const turns = await readTurns({ backend: "claude", id: SID }, { claudeRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual([
 				"user",
@@ -872,7 +896,7 @@ describe("readSessionPreview", () => {
 				},
 			]);
 
-			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+			const turns = await readTurns({ backend: "claude", id: SID }, { claudeRoot: root });
 
 			expect(turns).toHaveLength(1);
 			expect(turns[0]).toMatchObject({
@@ -884,12 +908,21 @@ describe("readSessionPreview", () => {
 			expect(turns[0].summary.length).toBeGreaterThan(0);
 		});
 
-		it("returns an empty preview when no file carries the session uuid, rather than throwing", async () => {
+		it("answers null when no file carries the session uuid, rather than throwing (D26)", async () => {
 			await writeJsonl(join(root, "-ws-project", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"), [
 				claudeUser([{ type: "text", text: "not the one you want" }]),
 			]);
 
 			const turns = await readSessionPreview({ backend: "claude", id: SID }, { claudeRoot: root });
+			expect(turns).toBeNull();
+		});
+
+		it("answers no turns, not null, for a file named after the session uuid that holds none (D26)", async () => {
+			await writeJsonl(join(root, "-ws-project", `${SID}.jsonl`), [
+				claudeUser("<command-name>/execute</command-name>"),
+			]);
+
+			const turns = await readTurns({ backend: "claude", id: SID }, { claudeRoot: root });
 			expect(turns).toEqual([]);
 		});
 
@@ -903,7 +936,7 @@ describe("readSessionPreview", () => {
 			for (const o of others) await writeJsonl(o, [claudeUser([{ type: "text", text: "not me" }])]);
 
 			const reads: string[] = [];
-			const turns = await readSessionPreview(
+			const turns = await readTurns(
 				{ backend: "claude", id: SID },
 				{
 					claudeRoot: root,

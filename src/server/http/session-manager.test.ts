@@ -1983,6 +1983,62 @@ describe("onDisk", () => {
 	});
 });
 
+describe("holds, what the preview route asks before it answers gone (D26 point 5)", () => {
+	it("holds a name in the table, and nothing it never heard of", async () => {
+		const ref = sessions.createVirtual(WORKSPACE, "pi");
+		expect(sessions.holds(ref)).toBe(true);
+		expect(sessions.holds(REF)).toBe(false);
+	});
+
+	it("holds a startup still in its index lookup, before any container exists", async () => {
+		const lookup = deferred();
+		const held: SessionIndex = {
+			list: (query) => index.list(query),
+			get: async (ref) => {
+				await lookup.promise;
+				return index.get(ref);
+			},
+			preview: (ref) => index.preview(ref),
+		};
+		sessions = new SessionManager({ index: held, adapters: { pi } }, broadcaster);
+
+		const attaching = sessions.attach(REF);
+		await settle();
+		expect(sessions.summaryOf(REF)).toBeNull();
+		expect(sessions.holds(REF)).toBe(true);
+
+		lookup.resolve();
+		await attaching;
+		expect(sessions.holds(REF)).toBe(true);
+	});
+
+	it("holds a parked fork before its attach", async () => {
+		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
+		const claude = new FakeAdapterFactory({ forkMode: "claude" });
+		index = new FakeSessionIndex([storedSession(claudeRef, WORKSPACE)]);
+		sessions = new SessionManager({ index, adapters: { claude } }, broadcaster);
+		await sessions.attach(claudeRef);
+
+		const forked = await sessions.fork(claudeRef, "e1");
+
+		expect(sessions.summaryOf(forked)).toBeNull();
+		expect(sessions.holds(forked)).toBe(true);
+	});
+
+	it("does not hold a session whose close is still disposing it", async () => {
+		const adapter = (await sessions.attach(REF)) as FakeAdapter;
+		const release = holdDispose(adapter);
+
+		const closing = sessions.close(REF);
+		await settle();
+		expect(adapter.disposed).toBe(false);
+		expect(sessions.holds(REF)).toBe(false);
+
+		release();
+		await closing;
+	});
+});
+
 describe("teardown racing a startup", () => {
 	// `start()` is the window in which an adapter already owns a sandboxed child
 	// but the manager has not recorded it: `#sessions` only learns about the

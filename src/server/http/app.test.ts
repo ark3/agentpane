@@ -260,7 +260,7 @@ describe("preview (OW-38, read-only, non-attaching)", () => {
 		expect(app.sessions.isAttached(CODEX_SESSION)).toBe(false);
 	});
 
-	it("never touches the session manager: preview does not attach", async () => {
+	it("never attaches through the session manager", async () => {
 		// A spy on the manager's attach proves the read path stays off it entirely.
 		const attachSpy = vi.spyOn(app.sessions, "attach");
 
@@ -285,12 +285,52 @@ describe("preview (OW-38, read-only, non-attaching)", () => {
 		expect(pi.forRef(PI_SESSION)?.started).toBe(true);
 	});
 
-	it("empty turns for a session the store cannot find, without spawning", async () => {
-		const unknown: SessionRef = { backend: "pi", id: "/nope.jsonl" };
-		const response = await get(ROUTES.preview(unknown));
+	it("empty turns for a stored file with none, without spawning", async () => {
+		const response = await get(ROUTES.preview(PI_SESSION));
 		expect(response.status).toBe(200);
 		expect(((await response.json()) as SessionPreviewResponse).turns).toEqual([]);
 		expect(pi.created).toHaveLength(0);
+	});
+
+	it("404s gone for a ref the manager does not hold and no file backs (D26)", async () => {
+		const unknown: SessionRef = { backend: "pi", id: "/nope.jsonl" };
+		index.previews.set(sessionKey(unknown), null);
+
+		const response = await get(ROUTES.preview(unknown));
+
+		expect(response.status).toBe(404);
+		expect(((await response.json()) as ApiError).error).toBe("gone");
+		expect(pi.created).toHaveLength(0);
+	});
+
+	describe("a session the manager holds with no file yet answers empty turns, not gone", () => {
+		async function expectEmpty(ref: SessionRef): Promise<void> {
+			index.previews.set(sessionKey(ref), null);
+			const response = await get(ROUTES.preview(ref));
+			expect(response.status).toBe(200);
+			expect(((await response.json()) as SessionPreviewResponse).turns).toEqual([]);
+		}
+
+		it("a virtual session before its first prompt", async () => {
+			const { ref } = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse;
+			await expectEmpty(ref);
+		});
+
+		it("an attached session with nothing on disk yet", async () => {
+			const { ref } = (await (await post(ROUTES.sessions, { cwd: WORKSPACE, backend: "pi" })).json()) as CreateSessionResponse;
+			await get(ROUTES.session(ref));
+			expect(app.sessions.isAttached(ref)).toBe(true);
+			await expectEmpty(ref);
+		});
+
+		it("a parked fork before its attach, which the table does not hold", async () => {
+			const claude = new FakeAdapterFactory({ forkMode: "claude" });
+			app = createApp({ index, adapters: { claude } });
+			await get(ROUTES.session(CLAUDE_SESSION));
+			const { ref } = (await (await post(ROUTES.fork(CLAUDE_SESSION), { entryId: "e1" })).json()) as ForkResponse;
+			expect(app.sessions.summaryOf(ref)).toBeNull();
+			await expectEmpty(ref);
+		});
 	});
 
 	it("405s a non-GET method", async () => {
@@ -1227,7 +1267,10 @@ describe("routing and errors", () => {
 
 	it("404s an unknown route", async () => {
 		expect((await get("/api/nope")).status).toBe(404);
-		expect((await get("/api/sessions/pi/x/teleport")).status).toBe(404);
+		const unmatched = await get("/api/sessions/pi/x/teleport");
+		expect(unmatched.status).toBe(404);
+		// Never `gone`, which the preview route alone answers (D26).
+		expect(((await unmatched.json()) as ApiError).error).toBe("not_found");
 	});
 
 	it("falls through to the static handler outside /api", async () => {

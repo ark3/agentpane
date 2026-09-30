@@ -433,8 +433,11 @@ export class FakeSessionIndex implements SessionIndex {
 
 	constructor(
 		public summaries: SessionSummary[] = [],
-		/** Canned preview turns keyed by `sessionKey(ref)`. */
-		public previews: Map<string, SessionPreviewTurn[]> = new Map(),
+		/**
+		 * Canned preview turns keyed by `sessionKey(ref)`. A ref with none reads
+		 * as a file with no turns; null says no file backs it.
+		 */
+		public previews: Map<string, SessionPreviewTurn[] | null> = new Map(),
 	) {}
 
 	async list(query?: ListSessionsQuery): Promise<SessionSummary[]> {
@@ -445,9 +448,10 @@ export class FakeSessionIndex implements SessionIndex {
 		return this.summaries.find((s) => sessionKey(s.ref) === sessionKey(ref)) ?? null;
 	}
 
-	async preview(ref: SessionRef): Promise<SessionPreviewTurn[]> {
+	async preview(ref: SessionRef): Promise<SessionPreviewTurn[] | null> {
 		this.previewed.push(ref);
-		return this.previews.get(sessionKey(ref)) ?? [];
+		const turns = this.previews.get(sessionKey(ref));
+		return turns === undefined ? [] : turns;
 	}
 }
 

@@ -39,9 +39,12 @@ export interface SessionIndex {
 	 * A read-only, non-attaching transcript preview for one stored session
 	 * (OW-38). Distinct from `get`: it reads the session's own JSONL and returns
 	 * its transcript messages, spawning nothing. Like the rest of this seam it
-	 * touches exactly the one session's file, never the whole corpus.
+	 * touches exactly the one session's file, never the whole corpus. Null when
+	 * no file backs the ref, which is not the same answer as a file with no
+	 * turns: the preview route reads it, for a ref the manager does not hold,
+	 * as the session gone (D26 point 5).
 	 */
-	preview(ref: SessionRef): Promise<SessionPreviewTurn[]>;
+	preview(ref: SessionRef): Promise<SessionPreviewTurn[] | null>;
 }
 
 /** An index with nothing in it. Useful before the real one exists. */
@@ -53,7 +56,7 @@ export const emptySessionIndex: SessionIndex = {
 		return null;
 	},
 	async preview() {
-		return [];
+		return null;
 	},
 };
 

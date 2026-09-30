@@ -256,14 +256,20 @@ export function createApp(deps: AppDeps): App {
 	): Promise<Response> {
 		switch (action) {
 			case "preview": {
-				// Read-only, non-attaching (OW-38). This deliberately never touches
-				// `sessions` (the process table): selecting a session to look at must
+				// Read-only, non-attaching (OW-38): selecting a session to look at must
 				// not spawn one, and must not re-walk the corpus (D9). It reads the
 				// one stored file for this ref through the index seam and returns its
 				// mapped transcript messages. The attach-on-GET route is left untouched.
+				// It asks `sessions` one thing, whether it holds the ref, so that no
+				// file reads as `gone` only for a session nobody holds (D26 point 5);
+				// a held one with nothing on disk yet is empty. Asked before the read:
+				// asked after, a file that appeared during it for a session closed
+				// meanwhile would read as gone.
 				if (request.method !== "GET") return methodNotAllowed(request.method, "GET");
+				const held = sessions.holds(ref);
 				const turns = await deps.index.preview(ref);
-				const response: SessionPreviewResponse = { ref, turns };
+				if (turns === null && !held) return error(404, "gone", `no such session: ${sessionKey(ref)}`);
+				const response: SessionPreviewResponse = { ref, turns: turns ?? [] };
 				return json(response);
 			}
 			case "prompt": {
