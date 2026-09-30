@@ -2900,8 +2900,8 @@ dropped, though a `session/detached' for the handle has usually come
 while the close was out, the server letting go of the session before its
 subprocess is gone: dropped, it would attach the session again where it
 should preview.  Then the
-listing says whether the session is on disk, as the browser reads
-`onDisk' after its close.  One that is is redrawn from its stored
+listing says whether the session is on disk, which the browser has
+not read since OW-lilami: its preview's `gone' answers instead.  One that is is redrawn from its stored
 transcript, the read-only preview the browser lands on, and a send
 attaches it again.  One that is not, or that the listing no longer
 carries -- a session created or forked and never prompted -- has nothing
