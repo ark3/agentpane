@@ -34,6 +34,12 @@ Cards whose stale premises another `sweep-0929` card already carries are not rep
 - `#handOver` in `src/server/http/session-manager.ts`: OW-kamave's adversarial read reported that its `winner === pending` check (in `if (!winner || winner === pending) return undefined;`) can never fire, and that it predates OW-kamave; not filed as its own card.
   Confirm at the source why no path hands a startup over to itself, then remove the conjunct with a sentence in the close note saying why, or record here why it is needed after all.
 
+## A docblock claim to check
+
+- The docblock on `SessionManager.fork` in `src/server/http/session-manager.ts` (its paragraph beginning "Where the ref DOES change, which is Pi alone") says a Pi fork leaves the parent "detached -- still on disk"; OW-royosa's read attributed it to `#forkOnto`.
+  OW-royosa's adversarial read doubted, unverified, that this holds for a fork taken during the parent's first turn, before anything of the parent may have been written; not filed as its own card.
+  Settle it from the Pi adapter and the fork records in `docs/MANUAL_TESTING.md` (OW-sededi's run read the streamed-into file on `pi 0.85.1`), naming the version; correct the docblock if it is false, and say in the close note what a preview of such a parent now answers under D26's `gone`.
+
 ## Done when
 
 Each card listed is closed with a note giving the evidence, or rewritten so its body matches the code, having been checked at the source first.
