@@ -2,7 +2,7 @@
 labels: [defect, emacs]
 ---
 
-# The Emacs helper records one token per attachment, so a detach still drops a handle another buffer's attach was answered under, and an attachment whose answering buffer is gone is never dropped; the helper should know every token holding each handle and drop an attachment only when the last goes
+# The Emacs helper records one token per attachment, so a detach still drops a handle another buffer's attach was answered under, and an attachment whose answering buffer is gone is never dropped; since agentpane-mode lets one buffer hold a handle, the latest answer under a handle should own it
 
 Found 2026-09-30 by the adversarial read of OW-linowe, which replaced `forget`'s by-ref drop with a per-token record; that record is the check this card replaces.
 Confirmed by reading `src/emacs/helper.ts` and `emacs/agentpane.el` after OW-linowe landed; case 1 below was reproduced as a helper-level ordering by the reader, the others were read and not run.
@@ -40,3 +40,16 @@ Tests in `src/emacs/helper.test.ts`, each red first against the helper as OW-lin
 An ERT test in `emacs/agentpane-test.el`, red first, for case 4, run as `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
 `answered` is gone from `src/emacs/helper.ts`, and the `forget` docblock, the `agentpane--detach` docstring, and the `sessions/detach` entry in `src/emacs/protocol.ts` (which the header docblock says to raise when the wire changes) describe the new rule with no remaining case, or name exactly what remains.
 `bun run check` passes.
+
+## Amended 2026-09-30: build on the one-buffer-per-handle guarantee, and stop at what it leaves
+
+The direction above, every token holding each handle, tracks a state agentpane-mode already rules out: at most one buffer holds a handle, since `agentpane--attach-by` in `emacs/agentpane.el` has the buffer that asked absorb any other holding the handle (`agentpane--absorb`, whose docstring says why two holders cannot stand).
+So the helper's "several tokens under H" exists only while snapshots are on their way to Emacs, and the buffer that survives is always the one whose answer came last.
+That suggests a smaller rule, a direction and not a prescription: the helper keeps, per attached handle, the token of the latest answer under it, and a detach or close drops the attachment only when its token is that one, handle or not.
+It appears to settle cases 1 and 2, and is consistent with a merge (the absorbed buffer never detaches, and the survivor holds the latest token) and with `g` (`agentpane-refetch`'s fresh token becomes the latest); check both.
+Case 3 needs the helper to know that two tokens came from one buffer; settle it only if that is cheap, and otherwise name it where what remains is named.
+Case 4 is agentpane-mode's alone, and the OW-linowe implementer's suggestion, that a tagged snapshot no buffer's token matches binds at most the buffer already holding its handle, may be all it needs.
+
+The owner set a stopping rule for this chain (OW-wukako, OW-linowe, this card) on 2026-09-30: whatever ordering this card's adversarial read finds that the rule leaves, it is named in the `forget` docblock and the `agentpane--detach` docstring and accepted, not filed as another card.
+
+This amends the "Done when" above: the red-first helper tests are for cases 1 and 2, and for case 3 only if it is settled; the ERT test for case 4 stands; `answered` is gone, replaced by whatever the helper keeps per handle; and what remains is named, not required to be nothing.

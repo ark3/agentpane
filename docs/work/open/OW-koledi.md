@@ -2,7 +2,7 @@
 labels: [defect]
 ---
 
-# The browser's badge watch sits on the parent's handle for the whole of a fork's prompt, so a gap on the fork's handle in that window ends nothing and watchMove then carries the watch onto a handle whose view the gap dropped
+# Forking from a parent that is itself streaming may badge the browser tab for the parent's turn and leave the fork's own turn unwatched, because the badge watch sits on the parent's handle until the fork's prompt resolves
 
 Filed 2026-09-30 from the adversarial read of OW-jadoda (commit "a seq gap ends the favicon's turn watch on its handle, streamed or not (OW-jadoda)"); traced at the code, not run.
 In service of D25 point 5 in `docs/DESIGN.md`, where the owner decided on 2026-09-30 that a gap raises nothing and drops the turn-done watch on that handle, `streamed` or not, in both clients.
@@ -33,4 +33,19 @@ The reader's suggestion, not a decision: publish when each handle gapped (handle
 - A test, red first, in which the parent gaps during the fork, then the fork's turn ends unfocused and badges.
 - The streaming-parent case is either pinned by a red-first test and fixed, or shown unreachable by a test that passes against the unchanged code, and the card's close note says which.
 - If the change replaces OW-jadoda's `subscribeGaps` signal, the signal and its listener in `App.svelte` are gone, not kept beside the new mechanism.
+- `bun run check` passes.
+
+## Amended 2026-09-30: narrowed to the streaming parent
+
+The owner decided on 2026-09-30 to accept the two gap cases above, a gap on the fork's handle while its prompt is pending and a gap on the parent during the fork, as they accepted the re-attach case D25 point 5 gives up: each needs a gap, which D25 reads as something already wrong, inside a fork's short window, and costs one spurious or missed badge, not worth new state.
+Only the third case is this card's: forking from a parent that is itself streaming, traced and never run, and older than OW-jadoda.
+Settle it first with a test against the unchanged code, then fix it only if it is real.
+Where a fix is needed, the reader's diagnosis above stands as a direction: the watch belongs on the fork from the moment the controller knows the fork's handle, rather than on the parent until `forkAndSubmit` resolves; OW-jadoda's `subscribeGaps` signal stays either way.
+
+This replaces the "Done when" above:
+
+- A test in `src/client/App.test.ts` drives the real controller through a fork from a parent whose turn is streaming, the parent's turn then ending (as the Pi fork's abort ends it, or as a Codex or Claude Code turn may finish during the fork), and then the fork's turn streaming and ending, with the window unfocused. It asserts no badge at the parent's turn's end and a badge at the fork's.
+- If that test passes against the unchanged code, the case is unreachable: the test stays as its record and the close note says so, with nothing else changed. If it fails, it is the red-first test, and the change makes it pass.
+- The comment beside `if (isStreaming === undefined) continue;` in `watchSessions` (`src/client/favicon.ts`), which names this card as the exception, says instead that a gap in a fork's window is accepted (D25 point 5).
+- D25 point 5 in `docs/DESIGN.md` names the fork-window gap among what the decision gives up.
 - `bun run check` passes.
