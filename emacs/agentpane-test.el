@@ -4991,17 +4991,85 @@ on that handle still stands, as a cons."
             (and (assoc "h1" agentpane--turn-watches) t)))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-by-a-gap ()
-  "A `session/detached' for a `seq' gap ends the watch on the handle
-raising nothing: the handle stays live on the server and the turn goes
-on, unheard here, as the browser's `detachGapped' deletes the view the
-favicon would read (OW-kutome)."
-  (should (equal (agentpane-test--detached-mid-turn "gapped") '(nil . nil))))
+  "A `session/detached' for a `seq' gap raises nothing, and keeps the watch
+on the handle of a turn seen streaming: the handle stays live on the
+server and the turn goes on, unheard here, as the browser's
+`detachGapped' deletes the view the favicon would read and its
+`watchSessions' keeps the watch (OW-kutome, OW-nuzoto)."
+  (should (equal (agentpane-test--detached-mid-turn "gapped") '(nil . t))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-after-a-gap-before-streaming ()
+  "A `session/detached' for a `seq' gap that arrives after a prompt went
+out and before its turn was seen streaming drops the watch, so a turn
+from elsewhere under the same handle a re-attach answers raises nothing
+\(OW-dunahe, OW-nuzoto)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (funcall submit)
+      (agentpane--on-notification nil 'session/detached
+                                  (list :session ref :handle "h1" :cause "gapped"))
+      (should-not (assoc "h1" agentpane--turn-watches))
+      (agentpane-attach)
+      (should (equal agentpane--handle "h1"))
+      (funcall status t)
+      (funcall status nil)
+      (should-not (agentpane-test--turn-done-p)))))
 
 (ert-deftest agentpane-test-turn-done-raised-when-the-server-lets-go ()
   "A `session/detached' for the server's `ended' under the handle ends a
 turn seen streaming as an aborted one does, raising the indicator, and
 the watch goes with the handle (D26, OW-kutome)."
   (should (equal (agentpane-test--detached-mid-turn "ended") '(t . nil))))
+
+(ert-deftest agentpane-test-turn-done-raised-after-a-gap-and-a-reattach ()
+  "A turn seen streaming whose handle gapped, raising nothing at the gap,
+raises the indicator when it ends after a re-attach under the same
+handle, as the browser's favicon keeps a watch whose view a gap deleted
+\(`watchSessions' in src/client/favicon.ts; OW-homogu, OW-nuzoto)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (funcall submit)
+      (funcall status t)
+      (agentpane--on-notification nil 'session/detached
+                                  (list :session ref :handle "h1" :cause "gapped"))
+      (should-not agentpane--handle)
+      (should-not (agentpane-test--turn-done-p))
+      (setq hold '(sessions/attach))
+      (agentpane-attach)
+      (agentpane--on-notification
+       'connection 'session/snapshot
+       (list :session ref :handle "h1" :nodes agentpane-test--nodes :isStreaming t))
+      (funcall (cdr (pop held)) t)
+      (should (equal agentpane--handle "h1"))
+      (should-not (agentpane-test--turn-done-p))
+      (funcall status nil)
+      (should (agentpane-test--turn-done-p)))))
+
+(ert-deftest agentpane-test-turn-done-not-raised-by-a-shutdown ()
+  "`agentpane-shutdown' with a watched turn streaming raises nothing and
+leaves no watch on the handle: the server keeps the turn running unheard,
+and a deliberate shutdown is not the server letting go (D25 point 4,
+OW-nuzoto)."
+  (agentpane-test--submitting
+    (let ((global-mode-string global-mode-string))
+      (funcall submit)
+      (funcall status t)
+      (setq agentpane--connection nil)
+      (let ((connection (cl-letf (((symbol-function 'agentpane--start-helper)
+                                   (lambda ()
+                                     (make-process :name "agentpane-test helper"
+                                                   :command '("cat")
+                                                   :connection-type 'pipe
+                                                   :noquery t))))
+                          (agentpane--connection))))
+        (setq agentpane--attached connection)
+        (agentpane-shutdown)
+        (should (agentpane-test--wait-for (lambda () (null agentpane--connection))
+                                          (+ (float-time) 10))))
+      (should-not agentpane--handle)
+      (should-not agentpane--streaming)
+      (should-not (agentpane-test--turn-done-p))
+      (should-not (assoc "h1" agentpane--turn-watches)))))
 
 (defun agentpane-test--reattach-after-helper-death (late)
   "Submit a turn, see it stream, let the helper exit, which raises the

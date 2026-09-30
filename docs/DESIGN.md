@@ -1046,6 +1046,9 @@ The one exception it found is the browser's selected session closed by another c
    D21's listing at a reconnect stays, and so do the server's opening snapshots, which re-introduce whatever is still live after a drop the server survived.
 4. The Emacs helper exits when its event stream drops or its first open fails, and does not reconnect.
    agentpane-mode takes any helper's death to mean every buffer it served is detached, whatever the cause: a helper that crashed over a live server is rare, and costs an attach, since under D26 `g` previews a buffer that is not attached.
+   Every death but a deliberate `agentpane-shutdown` is also taken to mean the server let go of each handle, so a turn-done watch on a turn seen streaming ends as an aborted turn's does and raises the indicator (OW-zedawo).
+   A deliberate shutdown is not the server letting go: `SessionManager` in `src/server/http/session-manager.ts` disposes nothing when a client's stream closes, so the turn goes on unheard.
+   The owner decided on 2026-09-30 that it raises nothing and drops the watch, `streamed` or not; a re-attach after a restart that finds the turn still running then raises nothing either, a case judged unlikely and cheap to lose (OW-nuzoto).
    A picker open at that moment goes stale until `g`, which the owner accepted.
 5. A sequence gap detaches that one session, in either client, instead of attaching it to recover a snapshot.
 
