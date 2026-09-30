@@ -1,5 +1,6 @@
 ---
 labels: [change, sweep-0929]
+closed: done
 ---
 
 # The browser's favicon watch outlives a seq gap's detach, so a later snapshot under the same handle, from any client's attach, can badge a turn this tab stopped hearing; a gap should end the watch raising nothing
@@ -28,3 +29,13 @@ A view deleted by a stream drop or by an `ended` also leaves its watch waiting t
 - The existing case that a watch armed before its view forms still badges when that turn ends stays green.
 - D25 point 5 in `docs/DESIGN.md` records the decision: whichever of this card and OW-bepudu lands first writes it, and the second checks it says both clients.
 - `bun run check` passes.
+
+## Close note
+
+Landed as 0f096b9, with 5dc1c65 correcting two of its comments.
+`detachGapped` in `src/client/controller.ts` now tells `subscribeGaps` listeners the handle it drops, before the view goes, and `App.svelte` answers with `watchAbandon`, so a gap ends the turn-done watch on that handle raising nothing, streamed or not; a watch waiting on a view not yet formed still waits and badges.
+A stream drop and an `ended` leave the watch waiting, as `watchSessions`' docblock in `src/client/favicon.ts` now says; the `ended` case must, since a Pi fork's `ended` comes under the parent's handle mid-fork and that watch is the one `watchMove` carries onto the fork.
+New App test "ends the badge's watch at a seq gap" drives the real controller through submit, stream, gap, re-formed snapshot and turn end, unfocused, and was red against the unchanged code (badge raised); a controller test pins the signal to a gap and not an `ended` or a drop.
+D25 point 5 in `docs/DESIGN.md`, written by OW-bepudu, already says both clients.
+The adversarial read found the signal misses a gap on a fork's handle while the fork's prompt is pending, after which `watchMove` carries the watch onto the gapped handle; filed as OW-koledi with two related fork-window cases, and OW-pohusi amended with the server-exited stream-drop finding.
+bun run check passed, 1570 tests.
