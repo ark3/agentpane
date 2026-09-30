@@ -11,7 +11,7 @@ It absorbs OW-vetebu and the remaining edge of OW-wabiju, both closed `--moot` i
 
 ## What is there now
 
-`agentpane--dropped` in `emacs/agentpane.el` is set by `agentpane--let-go`, cleared by `agentpane--attach-by` and `agentpane-close-session`, and read in one place: `agentpane-refetch`'s `(or agentpane--attached agentpane--dropped)`, which makes `g` attach rather than preview in a buffer the helper let go of, so as not to draw the stored transcript over the live one.
+`agentpane--dropped` in `emacs/agentpane.el` is set by `agentpane--let-go`, cleared by `agentpane--attach-by`, `agentpane-close-session` and, for a Pi parent once its fork lands, `agentpane--fork-at`, and read in one place: `agentpane-refetch`'s `(or agentpane--attached agentpane--dropped)`, which makes `g` attach rather than preview in a buffer the helper let go of, so as not to draw the stored transcript over the live one.
 `agentpane-close-session`, once `sessions/close` answers, asks `sessions/list` to choose between redrawing from the stored transcript and killing the buffer for having nothing on disk (OW-vasubu), putting the composer's text on the kill ring first; when that listing fails the buffer stays, holding no handle (OW-vetebu).
 `agentpane--request` hands its caller no error: FAILED and UNSENT run with no arguments and the error goes only to the echo area, and the test macros that fail a held request, `agentpane-test--forking` among them, fail it with `nil`, so today nothing can tell a `gone` from any other failure.
 `agentpane-refetch` refuses while `agentpane--closing` is set, and today the close's listing callback clears that flag before it calls `agentpane-refetch`.
@@ -28,8 +28,8 @@ About fifteen assertions in `emacs/agentpane-test.el` read `agentpane--dropped`,
 
 ## Records that change with it
 
-The docstrings of `agentpane--let-go`, `agentpane-refetch`, `agentpane-close-session` (its passage beginning "Nor is it dropped") and `agentpane--request`, and the code in `agentpane--attach-by` that clears the flag.
-`docs/DESIGN.md` D25 point 4 already reads "costs an attach"; check nothing else there still names `g` as the way back.
+The docstrings of `agentpane--let-go`, `agentpane-refetch`, `agentpane-close-session` (its passage beginning "Nor is it dropped") and `agentpane--request`, and the code in `agentpane--attach-by` and `agentpane--fork-at` that clears the flag.
+`docs/DESIGN.md` D25 point 4 already reads "costs an attach"; check nothing else there still names `g` as the way back -- the D21 reconnect paragraph (the one containing "which comes back by its ref on `g` or its next prompt") still does.
 
 ## Done when
 
