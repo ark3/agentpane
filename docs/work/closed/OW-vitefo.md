@@ -1,5 +1,6 @@
 ---
 labels: [defect, browser-testing]
+closed: done
 ---
 
 # Forking from a parent whose turn is streaming loses follow mode on the fork, because the follow armed on the parent is released by the parent's own turn ending and then moved onto the fork
@@ -16,3 +17,13 @@ The likely direction is the same `onAttached` callback, arming follow on the for
 Follow mode's scrolling is layout jsdom cannot see in full, so per `AGENTS.md`, "Commands", run `bun run test:browser` by hand before committing if `App.svelte`'s follow-mode scrolling changes.
 
 Done when a test in `src/client/App.test.ts`, red first, drives the real controller (`createController`, as OW-koledi's "badges the fork's turn and not the streaming %s parent's that ends mid-fork" does) through a fork from a streaming parent whose turn ends mid-fork, then streams the fork's turn, and asserts the transcript follows it; `bun run test:browser` and `bun run check` pass.
+
+## Close note
+
+Landed as 5da7f85 and a6716e9 on main.
+`send()` in `src/client/App.svelte` now arms a fork's follow in `forkAndSubmit`'s `onAttached(handle)` callback, on the fork's own handle and from the edited message's index, beside the badge OW-koledi put there; a fork that does not land disarms both at the fork's handle via `disarmSubmit`.
+The fork path no longer calls `rekeySession(armedKey, landed.handle)`: the parent's scroll and any follow of its own stay the parent's, and only the row's turn marks are still moved, which OW-pirobi files as the same shape of defect.
+`armFollow` lost its `from` parameter, since the fork was its only user.
+The adversarial reader found the fix moves the state to its owner rather than adding a check, and that no backend's fork shares its parent's ref, so the switch effect's same-ref branch cannot clobber the fork's pending follow; it also found the old rekey was actively harmful when the reader had scrolled the parent, copying that scroll over the fork's engaged anchor.
+Verified by `follows the fork's turn when forked from a streaming %s parent whose turn ends mid-fork (OW-vitefo)` in `src/client/App.test.ts`, run for pi and codex through the real `createController`: red against the old `App.svelte` (`expected +0 to be 400`), and red again with the rekey reinstated once the test scrolls the parent first.
+`bun run check` (1589 tests) and `bun run test:browser` (26) pass on main.
