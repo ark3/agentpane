@@ -1606,6 +1606,21 @@ no composer, the other's, that composer is named after the survivor."
       (should (eq (buffer-local-value 'agentpane--composer previewing) composer))
       (should (equal (buffer-name composer) "*agentpane/claude: sandbox<2> prompt*")))))
 
+(ert-deftest agentpane-test-merged-transcript-kill-takes-both-composers ()
+  "When a merge leaves the survivor's own composer and the other's beside
+it, both sending to the survivor, killing the survivor kills both
+(OW-sihoma)."
+  (agentpane-test--merging
+    (let ((composers (mapcar (lambda (transcript)
+                               (with-current-buffer transcript
+                                 (save-current-buffer (agentpane-prompt))
+                                 agentpane--composer))
+                             (list holder previewing))))
+      (with-current-buffer previewing (agentpane--attach))
+      (should (seq-every-p #'buffer-live-p composers))
+      (kill-buffer previewing)
+      (should-not (seq-some #'buffer-live-p composers)))))
+
 (ert-deftest agentpane-test-snapshot-keeps-window-start ()
   "A `session/snapshot' leaves the start of a window following the tail the
 same distance from the end, and that of any other window where it was."
@@ -3679,6 +3694,33 @@ so that `yank' brings back what the user was writing (OW-watawe)."
       (should-not (buffer-live-p buffer))
       (should (equal kill-ring '("my draft" "Fix the bug now"))))))
 
+(ert-deftest agentpane-test-close-session-whose-preview-is-gone-keeps-the-composer ()
+  "The kill of a buffer whose preview after the close answers `gone' kills
+its composer too, the composer's text going on the kill ring before the
+prompt region's, so that `yank' brings back the region's and `yank-pop'
+the composer's, the echo area saying why the buffer went and that its
+text is on the kill ring (OW-sihoma)."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--closing
+      (setq hold '(sessions/preview))
+      (let ((composer (with-current-buffer buffer
+                        (save-current-buffer (agentpane-prompt))
+                        agentpane--composer)))
+        (with-current-buffer composer (insert "composed"))
+        (with-current-buffer buffer
+          (goto-char (point-max))
+          (insert "half a thought")
+          (agentpane-close-session))
+        (funcall (cdr (pop held)) '(:status 404 :error "gone"))
+        (should-not (buffer-live-p buffer))
+        (should-not (buffer-live-p composer))
+        (should (equal kill-ring '("half a thought" "composed")))
+        (should (string-search "is gone" (car said)))
+        (should (string-search "kill ring" (car said)))))))
+
 (ert-deftest agentpane-test-close-session-whose-preview-fails-keeps-the-buffer ()
   "A preview after the close that fails other than `gone' leaves the
 buffer as it is, holding no handle and no close in flight, so it
@@ -3968,6 +4010,46 @@ moved inside the stars and ` prompt' before the closing one."
                      "*agentpane/claude: sandbox prompt*"))
       (should (equal (buffer-name (buffer-local-value 'agentpane--composer second))
                      "*agentpane/claude: sandbox<2> prompt*")))))
+
+(ert-deftest agentpane-test-transcript-kill-takes-its-composer ()
+  "Killing a transcript kills its composer, which could send nowhere, the
+composer's text going on the kill ring first, the echo area saying so.
+An empty composer goes and puts nothing there (OW-sihoma)."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--forking nil nil
+      (dolist (text '("" "half a thought"))
+        (let* ((transcript (agentpane--transcript-buffer
+                            (list :ref '(:backend "claude" :id "c1") :cwd "/tmp/x/sandbox")))
+               (composer (with-current-buffer transcript
+                           (save-current-buffer (agentpane-prompt))
+                           agentpane--composer)))
+          (with-current-buffer composer (insert text))
+          (setq said nil)
+          (kill-buffer transcript)
+          (should-not (buffer-live-p composer))
+          (if (string-empty-p text)
+              (should-not kill-ring)
+            (should (equal (current-kill 0) text))
+            (should (seq-some (lambda (said) (string-search "kill ring" said)) said))))))))
+
+(ert-deftest agentpane-test-composer-name-free-after-its-transcript-dies ()
+  "A transcript killed with its composer open leaves that composer's name
+free, so the next transcript in the project gets a composer named with no
+`<N>' of its own (OW-sihoma)."
+  (agentpane-test--forking nil nil
+    (let ((summary (list :ref '(:backend "claude" :id "c1") :cwd "/tmp/x/sandbox")))
+      (with-current-buffer (agentpane--transcript-buffer summary)
+        (save-current-buffer (agentpane-prompt))
+        (kill-buffer))
+      (with-current-buffer (agentpane--transcript-buffer
+                            (plist-put (copy-sequence summary)
+                                       :ref '(:backend "claude" :id "c2")))
+        (save-current-buffer (agentpane-prompt))
+        (should (equal (buffer-name agentpane--composer)
+                       "*agentpane/claude: sandbox prompt*"))))))
 
 (ert-deftest agentpane-test-picker-takes-the-projects-root ()
   "`agentpane-sessions' run from a buffer below a project's root sets the

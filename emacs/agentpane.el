@@ -2144,6 +2144,7 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   (setq-local agentpane--folds (make-hash-table :test #'equal))
   (add-hook 'kill-buffer-hook #'agentpane--detach nil t)
   (add-hook 'kill-buffer-hook #'agentpane--forget-turn-done nil t)
+  (add-hook 'kill-buffer-hook #'agentpane--kill-composers nil t)
   ;; No ellipsis: a folded header's marker already says there is more, and
   ;; the one-line header needs the room (OW-gageru).
   (add-to-invisibility-spec 'agentpane)
@@ -2328,13 +2329,16 @@ same answer.  What the user typed in the prompt region goes on the kill
 ring first, as the browser's draft survives its Detach (OW-watawe);
 under an edit, as on a fork closed before its first turn, the edit's
 text goes there and then the draft it displaced, so that `yank' brings
-back the draft and `yank-pop' the edit.  The kill ring rather than
+back the draft and `yank-pop' the edit.  Any composer sending here goes
+too, its text going on the kill ring before these, so one `yank-pop'
+further back (`agentpane--kill-composers').  The kill ring rather than
 keeping the buffer, whose send could only attach that ref in vain, or
 asking before the kill, which would prompt from inside the preview's
 callback; `agentpane--absorb' set the precedent for text a buffer's end
 would otherwise take with it.  The echo area says why the buffer went,
 and where its text is."
-  (let ((texts (seq-remove
+  (let ((composed (agentpane--kill-composers))
+        (texts (seq-remove
                 #'string-empty-p
                 (delq nil (list (buffer-substring-no-properties
                                  agentpane--prompt-start (point-max))
@@ -2342,7 +2346,7 @@ and where its text is."
     (mapc #'kill-new texts)
     (message "agentpane: the session of %s is gone, and the buffer was killed%s"
              (buffer-name)
-             (if texts "; its prompt's text is on the kill ring" ""))
+             (if (or texts composed) "; its prompt's text is on the kill ring" ""))
     (kill-buffer)))
 
 (defun agentpane--same-ref-p (a b)
@@ -3028,9 +3032,10 @@ session before its subprocess is gone (D26): one on disk is redrawn from
 its stored transcript, the read-only preview the browser lands on, and a
 send attaches it again.  One with nothing on disk -- a session created or
 forked and never prompted -- has nothing to preview, and the preview
-answers `gone', which kills the buffer, its prompt region's text going
-to the kill ring first, as the browser clears its selection to the
-startup view; see `agentpane--gone'.  Until OW-vugefa a listing asked
+answers `gone', which kills the buffer, its prompt region's text, and
+its composer's, going to the kill ring first, as the browser clears its
+selection to the startup view; see `agentpane--gone'.  Until OW-vugefa
+a listing asked
 after the close said whether the session was on disk, since until
 OW-royosa the preview answered a ref the server no longer held with an
 empty transcript rather than an error (OW-vasubu), and a listing that
@@ -3636,6 +3641,36 @@ closing one, so `*agentpane/claude: sandbox*<2>' has the composer
     (format "%s%s prompt*"
             (string-remove-suffix "*" (string-remove-suffix suffix name))
             suffix)))
+
+(defun agentpane--kill-composers ()
+  "Kill every composer that sends to this transcript, which is being
+killed, putting each one's text, when there is any, on the kill ring
+first, and return non-nil when any did go there (OW-sihoma).
+The buffer-local `kill-buffer-hook' of a transcript.  Left alive, a
+composer could send nowhere, every command in it answering that it is
+not an agentpane buffer, and it kept its name, so the next transcript in
+the project had a composer named with a `<N>' of its own.  The kill ring
+rather than asking, as `agentpane--gone' keeps a prompt region's text.
+Every composer sending here rather than this buffer's own: one that
+`agentpane--absorb' took over has been sending to the survivor since, so
+the kill of the buffer it came from leaves it alone, while the survivor
+may hold it beside a composer of its own.  The echo area says the text
+is on the kill ring; `agentpane--gone', which runs this before its kill
+so that the text it keeps goes on the kill ring after, says so itself."
+  (let ((transcript (current-buffer))
+        kept)
+    (dolist (composer (buffer-list))
+      (when (eq (buffer-local-value 'agentpane--composer-transcript composer) transcript)
+        (let ((text (with-current-buffer composer
+                      (buffer-substring-no-properties (point-min) (point-max)))))
+          (unless (string-empty-p text)
+            (kill-new text)
+            (setq kept t)))
+        (kill-buffer composer)))
+    (when kept
+      (message "agentpane: the composer of %s was killed with it; \
+its text is on the kill ring" (buffer-name transcript)))
+    kept))
 
 (defun agentpane-prompt ()
   "Open this transcript's composer in a small window below it."
