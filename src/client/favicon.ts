@@ -126,9 +126,9 @@ export function watchSessions(
 		const isStreaming = streaming.get(key);
 		// A session the client has no view of yet: the submit's own POST can
 		// resolve before the first SSE event for it arrives (D2). Keep waiting;
-		// a gap ended the watch on its handle (see above), and one that came in a
-		// fork's window, before the fork's watch was armed, is accepted (D25
-		// point 5).
+		// a gap ended the watch on its handle (see above), except one on a
+		// fork's handle before its attach replied, which a watch armed at that
+		// reply outlives; D25 point 5 accepts that fork window.
 		if (isStreaming === undefined) continue;
 		if (isStreaming === sawStreaming) continue;
 		waiting ??= new Map(watch.waiting);

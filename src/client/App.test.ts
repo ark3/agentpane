@@ -2940,6 +2940,154 @@ describe("App", () => {
 		}
 	});
 
+	it("badges a fork whose whole turn ran while its prompt's POST was still out (OW-koledi)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "fork" };
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session: forkRef, handle: "h-fork", seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(codexSession)],
+			createSession: async () => codexSession,
+			attach: async (ref) => {
+				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
+				emit(snapshot(ref, handle));
+				return { ...summary(ref), handle };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			// A short turn, start to end, before the POST that started it returns.
+			// A macrotask apart, as two SSE events are: in one tick the two
+			// publishes coalesce and the watch never sees the turn at all.
+			prompt: async () => {
+				emit(status(2, true));
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				emit(status(3, false));
+			},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: async () => forkRef,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			await controller.select(codexSession);
+			await tick();
+
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await tick();
+
+			expect(controller.getView().sending).toBe(false);
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * A parent streaming a turn this tab sent keeps that turn's watch through a
+	 * fork taken from it: Codex keeps the turn running, and its end is still
+	 * this tab's to be told about, as the fork's own is (OW-koledi).
+	 */
+	it("keeps the parent's own watch on the parent through a fork taken mid-turn (OW-koledi)", async () => {
+		const forkRef: SessionRef = { backend: "codex", id: "fork" };
+		let resolveFork = (_ref: SessionRef) => {};
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages: [user("first draft")], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(codexSession)],
+			createSession: async () => codexSession,
+			attach: async (ref) => {
+				const handle = ref.id === forkRef.id ? "h-fork" : "h-parent";
+				emit(snapshot(ref, handle));
+				return { ...summary(ref), handle };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async (ref) => {
+				if (ref.id === forkRef.id) emit(status(forkRef, "h-fork", 2, true));
+			},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: () => new Promise<SessionRef>((resolve) => {
+				resolveFork = resolve;
+			}),
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		const icon = () => document.querySelector('link[rel="icon"]')!.getAttribute("href");
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			render(App, { props: { controller } });
+			await controller.select(codexSession);
+			await tick();
+
+			// This tab's own turn on the parent, streaming.
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "carry on" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			emit(status(codexSession, "h-parent", 2, true));
+			await tick();
+
+			// Forked from it while it runs; the fork lands and its turn starts.
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			resolveFork(forkRef);
+			await tick();
+			await tick();
+			expect(controller.getView().sending).toBe(false);
+
+			emit(status(codexSession, "h-parent", 3, false));
+			await tick();
+			expect(icon()).toBe("/favicon-badged.svg");
+
+			window.dispatchEvent(new Event("focus"));
+			expect(icon()).toBe("/favicon.svg");
+			emit(status(forkRef, "h-fork", 3, false));
+			await tick();
+			expect(icon()).toBe("/favicon-badged.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
 	it("drops the watch armed on a fork whose prompt failed, so a turn there from elsewhere raises nothing (OW-koledi)", async () => {
 		const forkRef: SessionRef = { backend: "codex", id: "fork" };
 		let emit: (event: ServerEvent) => void = () => {};
