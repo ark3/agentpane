@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs, sweep-0929]
 blocked-by: [OW-royosa, OW-likopo, OW-bupivi]
+closed: done
 ---
 
 # agentpane-mode keeps agentpane--dropped so g re-attaches a buffer its helper let go, and asks a listing after a close; under D26 a buffer not attached previews, and a preview answered gone kills it
@@ -40,3 +41,19 @@ ERT tests in `emacs/agentpane-test.el`, red first:
 - `agentpane-close-session` sends no `sessions/list`, and a close whose preview answers `gone` kills the buffer (OW-vetebu's case), built on the `agentpane-test--closing` macro.
 `agentpane--dropped` is gone from `emacs/agentpane.el` and its tests.
 `bun run check` passes, and so does `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Built in `emacs/agentpane.el`: `agentpane--dropped` is gone, so a buffer is live exactly when `agentpane--attached`, and `g` (`agentpane-refetch`) in any other buffer sends `sessions/preview`; going live is a send or `a` (`agentpane-attach`, OW-bupivi).
+`agentpane--request` gained a last optional argument, ERRED, run after FAILED with the helper's error `data` (`{status, error, detail}`, `toRpcError` in `src/emacs/helper.ts`), gated as CALLBACK is on the buffer being live and the request still the latest; a timeout, the helper's death and a non-local exit run none.
+A preview answered `error: "gone"` calls the new `agentpane--gone`, which puts the prompt region's text and an open edit's draft on the kill ring and kills the buffer; `g`, the preview after a close and a picker row (`agentpane-show-transcript`) all go through `agentpane-refetch`.
+Any other preview failure leaves the buffer.
+`agentpane-close-session` asks no `sessions/list`: once the close answers it clears `agentpane--closing` and previews.
+Docstrings of `agentpane--request`, `agentpane--let-go`, `agentpane-refetch`, `agentpane-close-session`, `agentpane--closing`, `agentpane--helper-gone`, `agentpane-fork` and `agentpane--attached` updated, and `docs/DESIGN.md` D21's four sentences naming `g` as the way back now name a send or `a`; D26 point 7 records it built.
+
+Verified: new and rewritten ERT tests in `emacs/agentpane-test.el` (`agentpane-test-detached-lets-go-of-the-handle-and-g-previews`, `agentpane-test-pi-fork-parent-detached-before-the-reply-previews`, `agentpane-test-preview-gone-kills-the-buffer-keeping-its-text`, `agentpane-test-preview-gone-kills-only-as-the-latest-request`, and the `agentpane-test-close-session-*` set on `agentpane-test--closing`, including `...-whose-preview-is-gone-kills-the-buffer` for OW-vetebu's case) each seen red against the base; an adversarial reader's mutations (dropping the latest-request gate, ignoring `gone`, dropping the `kill-new`) each turned tests red.
+ERT: 220 run, 0 unexpected, 3 skipped; `bun run check`: 54 files, 1556 tests pass.
+
+Accepted behaviour change: a send while the post-close preview is out now goes out and supersedes it, where the old listing kept the close in flight (OW-watawe); for a session with nothing on disk that send's attach fails, the text stays in the prompt region, and the next `g` kills the buffer with the text on the kill ring.
+The test macro `agentpane-test--forking` runs ERRED and CALLBACK without modelling supersession, as it did CALLBACK before; supersession is pinned only through the real `agentpane--request` in `...-kills-only-as-the-latest-request`.
+Filed OW-luwita for a preview superseded by no request when `agentpane--attach-now` attaches synchronously; amended OW-sihoma, since `g` and a picker row now also strand a composer buffer.
