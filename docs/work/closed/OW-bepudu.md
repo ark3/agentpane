@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs, sweep-0929]
+closed: done
 ---
 
 # At a seq gap agentpane-mode keeps a streamed turn-done watch for a re-attach to end, which the owner judged not worth its state: a gap should drop the watch, as a shutdown does
@@ -26,3 +27,14 @@ The docstrings of `agentpane--let-go` and `agentpane--watch-turn` stop saying a 
 - `agentpane-test-shutdown-drops-a-watch-a-gap-kept` either goes, a gap now keeping nothing for a shutdown to drop, or is kept with a docstring saying what it still holds; the implementer's call.
 - Still green: `agentpane-test-turn-done-not-raised-by-a-gap`, `agentpane-test-turn-done-not-raised-after-a-gap-before-streaming`, `agentpane-test-turn-done-raised-when-the-server-lets-go` and `agentpane-test-turn-done-not-raised-by-a-shutdown`.
 - The ERT suite (`emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`) and `bun run check` pass.
+
+## Close note
+
+Landed as f2c6775 on main.
+At a `session/detached` for a seq gap, `agentpane--let-go` now drops the turn-done watch on the handle, `streamed` or not, raising nothing, as a shutdown does; `agentpane--watch-forget-sent` lost its only caller and went.
+Review found that `agentpane--watch-forget-every` existed only for the watch a gap kept on an unattached buffer (df399ac, OW-nuzoto), so it went too: a shutdown's per-buffer `shutdown` let-go drops each held handle's watch, and the only other watches left are on handles a snapshot moved a buffer off, which are never read again.
+The docblocks of `agentpane--let-go`, `agentpane--watch-turn`, `agentpane--helper-gone` and `agentpane-shutdown` no longer describe a gap-kept watch.
+D25 point 5 in `docs/DESIGN.md` records the decision for both clients and the re-attach case given up, so OW-jadoda only has to check it.
+Tests: `agentpane-test-turn-done-raised-after-a-gap-and-a-reattach` turned round as `...-not-raised-after-a-gap-and-a-reattach`, and `agentpane-test-turn-done-not-raised-by-a-gap`, which the card listed as still green but which asserted the kept watch, now expects none; both red against the unchanged code.
+`agentpane-test-shutdown-drops-a-watch-a-gap-kept` was deleted, since its state can no longer occur.
+ERT 236 run, 233 as expected, 3 skipped; `bun run check` 1568 passed.
