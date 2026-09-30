@@ -866,6 +866,29 @@ describe("notifications", () => {
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(source.opens).toHaveLength(1);
 	});
+
+	// No server answered, so no `data.status`, which agentpane-mode takes as
+	// the server's refusal of a request that reached no backend (OW-pezelo).
+	it("answers each request waiting on a first open that fails that the server could not be reached, before it exits (D25, OW-pezelo)", async () => {
+		const { io, source, done } = start({ ...attachRoutes(pi), [`GET ${ROUTES.sessions}`]: () => json({ sessions: [] }) });
+		source.failing = 1;
+		source.holding = true;
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/list" });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/attach", params: { session: pi } });
+		await tick();
+		source.openHeld();
+
+		expect(await settled(done)).toBe("resolved");
+		stop = null;
+		for (const id of [1, 2]) {
+			const response = io.response(id);
+			expect(response).toBeDefined();
+			expect(response).not.toHaveProperty("result");
+			const error = response!["error"] as { message: string; data?: unknown };
+			expect(error.message).toMatch(/reach.*server/);
+			expect(error.data).toBeUndefined();
+		}
+	});
 });
 
 // The server says a handle has ended, under it, where it lets go of it

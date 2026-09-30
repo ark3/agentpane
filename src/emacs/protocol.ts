@@ -323,7 +323,9 @@
  *
  * No notification says the event stream dropped. When it does, or its first
  * open fails, the helper exits (D25 point 4, OW-mepufi), and Emacs sees its
- * process end.
+ * process end. A failed first open first answers each `sessions/list` and
+ * `sessions/attach` waiting on it with an error saying the server could not
+ * be reached, carrying no `data` (OW-pezelo).
  */
 
 import type {

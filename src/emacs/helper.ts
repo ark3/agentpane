@@ -447,26 +447,42 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 	 * arrive (`sse.ts`), and the server registers the client in the stream's
 	 * `start()` (`openEventStream` in src/server/http/app.ts), which runs
 	 * inside `new ReadableStream(...)`, before the `Response` exists: so an
-	 * open means registered. A first open that fails never settles, and the
-	 * helper ends (`onDisconnect`).
+	 * open means registered. A first open that fails rejects, saying the
+	 * server could not be reached, and the helper ends (`onDisconnect`).
 	 */
 	let opened: Promise<void> | undefined;
 	const openStream = (): Promise<void> =>
-		(opened ??= new Promise<void>((resolve) => {
+		(opened ??= new Promise<void>((resolve, reject) => {
+			let open = false;
 			connection = api.connect({
 				onEvent,
-				onOpen: resolve,
+				onOpen() {
+					open = true;
+					resolve();
+				},
 				// A drop, or a failed first open, ends the helper (D25 point 4):
 				// cancelling the input ends the read loop below as its end would,
 				// and under `main.ts` the process with it, Emacs's end of stdin
 				// still open (bun 1.4.0, measured 2026-09-28). A node the throttle
 				// holds goes out first, since no timer will send it after the exit.
+				// A failed first open is where a server that is not running shows,
+				// so each request waiting on it answers that (OW-pezelo), with no
+				// `data.status`, which would say a server refused it. Those replies
+				// are chains of microtasks from the rejection, all run before the
+				// timer that cancels the input, so each is written before the
+				// teardown's abort would silence it (`respond`), and before
+				// `runHelper` resolves.
 				onDisconnect() {
 					closeStream();
 					if (stopped) return;
 					flushNodes();
 					stopped = true;
-					void reader.cancel();
+					if (open) {
+						void reader.cancel();
+						return;
+					}
+					reject(new Error("could not reach the agentpane server"));
+					setTimeout(() => void reader.cancel());
 				},
 				// The server frames its own JSON, so a frame that fails to parse is a
 				// server bug, not a case to defend (D26 point 4). It has no session
