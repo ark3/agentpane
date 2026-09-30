@@ -1401,9 +1401,8 @@ same ref is in flight, detaches by its handle and the token of its own
 last attach, never the other's, so the helper gives up only its own
 \(OW-jofodu); and the snapshot answering the other's attach, carrying
 that attach's token, binds that buffer, not a third only previewing the
-ref.  Until OW-wukako the helper gave up every attach of the ref, and the
-snapshot went by the ref to whichever buffer holding it and no handle
-came first."
+ref.  Until OW-wukako the helper gave up every attach of the ref, the
+other's included, whose reply then came with no snapshot."
   (let ((ref '(:backend "claude" :id "real-2")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -1464,7 +1463,7 @@ unordered (D2), so only the handle joins the two buffers."
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-leaves-one-buffer ()
   "An attach whose snapshot comes under the handle another transcript
-buffer holds, carrying the ref this one asked for, leaves exactly one
+buffer holds, carrying the token this one's attach carried, leaves exactly one
 buffer holding it: the one that attached, which hears the session from
 then on.  The other is killed without detaching the session, a window
 that showed it shows the survivor, and the survivor sends no second
@@ -1491,7 +1490,7 @@ attach, the snapshot that merged being drawn there."
 
 (ert-deftest agentpane-test-attach-now-onto-a-held-handle-leaves-one-buffer ()
   "A synchronous attach whose snapshot, handled while it waits, comes under
-the handle another buffer holds, carrying the ref this one asked for,
+the handle another buffer holds, carrying the token this one's attach carried,
 merges that one into this one, as the asynchronous attach does, and
 sends nothing more: the snapshot that merges is this buffer's own."
   (agentpane-test--with-helper

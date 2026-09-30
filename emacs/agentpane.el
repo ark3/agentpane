@@ -2829,8 +2829,10 @@ changes nothing.  A buffer that never sent one holds nothing in the
 helper, and its ref may be a live buffer's too: a preview of the ref a
 live buffer's session was since renamed onto, left beside it rather than
 merged (D24).  Sent from there, the detach silenced the live one.
-Two cases stay, each a detach by the ref from a buffer holding no handle
-whose token gave up nothing.  One whose attach no snapshot answered --
+Three cases stay, each a detach by the ref from a buffer holding no handle
+whose token gave up nothing (OW-linowe).  One the helper let go of -- a
+gap or an `ended' -- keeps its last token, which names no waiting attach,
+so killed it silences another buffer attached on the ref since.  One whose attach no snapshot answered --
 it failed outright, with an error, a timeout or a quit, and the helper
 too is done with it -- and whose ref another buffer's session was since
 renamed onto, silences that one when killed, the helper having last
