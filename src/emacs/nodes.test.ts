@@ -148,6 +148,28 @@ describe("tool parts", () => {
 		}
 	});
 
+	it("carries the child threads a subagent call names as threadIds, and none where it names none (OW-gakide)", () => {
+		const messages = replayCodex("subagent");
+		const parts = toolParts(projectTranscript(messages, false, render)).filter((part) => part.name === "subagent");
+		expect(parts.length).toBeGreaterThan(0);
+		for (const part of parts) {
+			expect(part.threadIds?.length).toBeGreaterThan(0);
+			for (const id of part.threadIds!) expect(part.args).toContain(id);
+		}
+
+		const turn = messages.find(
+			(message): message is AssistantMessage =>
+				message.role === "assistant" && message.content.some((block) => block.type === "toolCall"),
+		)!;
+		const only = (call: ToolCall): ToolPart =>
+			toolParts(projectTranscript([{ ...turn, content: [call] }], false, render))[0]!;
+		// A spawn's `item/started` names no child yet, and its part carries no field at all.
+		expect("threadIds" in only({ type: "toolCall", id: "spawn-1", name: "subagent", arguments: { tool: "spawnAgent", threadIds: [] } })).toBe(false);
+		// Keyed by name, as the browser picks its subagent card: another tool's
+		// `threadIds` argument names no child thread.
+		expect("threadIds" in only({ type: "toolCall", id: "other-1", name: "lookup", arguments: { threadIds: ["t-1"] } })).toBe(false);
+	});
+
 	it("keeps an orphan result as its own tool-result node", () => {
 		const messages = replayClaude("tool-use");
 		const result = messages.find((message) => message.role === "toolResult");

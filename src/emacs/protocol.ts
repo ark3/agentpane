@@ -61,8 +61,8 @@
  * seventeenth, deciding before changing it: what the elisp needs of a tool
  * call reaches it as typed fields on the tool part, derived in
  * `src/emacs/nodes.ts`, never as something the elisp parses out of `args`,
- * which is display text. OW-gakide is to add `threadIds`, the child threads
- * a subagent call names. OW-4 is to add `files`, one entry per file an edit
+ * which is display text. OW-gakide added `threadIds`, the child threads a
+ * subagent call names. OW-4 is to add `files`, one entry per file an edit
  * or write touches carrying its path, its kind where the backend names one,
  * and its diff lines, retiring the flat `diff`.
  *
@@ -111,8 +111,8 @@
  *   thinking blocks carrying only a signature, and the browser draws nothing
  *   for such a part unless the turn is still streaming.
  * - `{ type: "tool", name, summary, args, result, state, timestamp?,
- *   images?, diff? }` -- one tool call with its answer folded in. `name`
- *   (string) is the backend's own tool name, casing preserved. `summary`
+ *   images?, diff?, threadIds? }` -- one tool call with its answer folded in.
+ *   `name` (string) is the backend's own tool name, casing preserved. `summary`
  *   (string) is the one-line description the browser's tool card shows in
  *   its header: the command for a shell, the basename and line counts for a
  *   file tool, the arguments otherwise; may be empty. `args` (string) is the
@@ -137,8 +137,14 @@
  *   `edit` it is the unified diff the browser draws. For `write` it is the
  *   whole written content as `"add"` lines: the browser shows a write as
  *   plain content, never a diff, and the lines are here so one drawer serves
- *   both. An orphan `tool-result` node carries one of these parts too, with
- *   `args` empty and no `diff`.
+ *   both. `threadIds` (array of strings) is present only for a call named
+ *   `subagent` (case-insensitive), Codex's collab call, that names child
+ *   threads: each a Codex thread id, the `id` of the child's ref with
+ *   `backend: "codex"`, in the order the call names them, exactly the
+ *   threads the browser's subagent card offers Open thread on. Absent for
+ *   any other call, and for a subagent call naming none, as a spawn's
+ *   `item/started` does. An orphan `tool-result` node carries one of these
+ *   parts too, with `args` empty and no `diff` or `threadIds`.
  * - `{ type: "image", mimeType, data }` -- an image the user attached, or
  *   one in a tool result's `images`.
  *   `mimeType` (string) such as `"image/png"`; `data` (string) is base64.
@@ -485,6 +491,7 @@ export interface ToolPart {
 	timestamp?: number;
 	images?: ImagePart[];
 	diff?: NodeDiffLine[];
+	threadIds?: string[];
 }
 
 export interface NodeDiffLine {

@@ -33,7 +33,7 @@ import type { AssistantTurn, PaneMessage } from "$shared/protocol.ts";
 import { buildTranscript, type TranscriptEntry, type TranscriptView } from "$client/render/transcript.ts";
 import { argString, editHunks, prettyArgs } from "$client/render/tools/args.ts";
 import { buildDiff } from "$client/render/tools/diff.ts";
-import { toolSummary } from "$client/render/tools/summary.ts";
+import { subagentThreadIds, toolSummary } from "$client/render/tools/summary.ts";
 import { oneLine, resultImages, resultText, toolState, userBlocks } from "$client/render/types.ts";
 import type {
 	ImagePart,
@@ -158,6 +158,13 @@ function toolPart(call: ToolCall, result: ToolResultMessage | undefined, streami
 	};
 	const diff = diffFor(call);
 	if (diff) part.diff = diff;
+	// Keyed by name, as `registry.ts` picks the browser's `SubagentTool`: only
+	// that card offers Open thread, so no other tool's `threadIds` argument
+	// names a child here either.
+	if (call.name.toLowerCase() === "subagent") {
+		const threadIds = subagentThreadIds(call);
+		if (threadIds.length > 0) part.threadIds = threadIds;
+	}
 	return withResult(part, result);
 }
 
