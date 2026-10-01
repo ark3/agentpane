@@ -1,6 +1,7 @@
 ---
 labels: [unverified]
 blocked-by: [OW-niwusi]
+closed: done
 ---
 
 # Pi's steer is unmeasured against a tool turn, which is the case its own docs describe
@@ -31,3 +32,23 @@ Whatever the answer, add it to D16's Pi paragraph, which currently names this as
 ## Amended 2026-09-30
 
 `agentpane_pi_steer_probe.py` still waits for the `renamed` event OW-mofuho retired, so it times out before its first turn; OW-niwusi moves it to the handle, and this card waits on that.
+
+## Close note
+
+Measured on the home server on 2026-09-30 with `pi 0.87.1`, `--model openrouter/deepseek/deepseek-v4.1-flash:high`.
+On that version, a steer posted into an executing tool batch waits for the whole batch, and only then lands.
+`resources/probes/agentpane_pi_steer_probe.py` gained `--turn tool`; the text turn stays the default.
+The tool prompt asks for three parallel `bash` calls sleeping 4, 15 and 25 seconds.
+The probe reads Pi's stdout tap and posts the marker once the first call has its `tool_execution_end` and the other two are still executing, pinning the cut from that same read.
+`checks.tool_placement` reports by tap index where the steered `user` message landed against each call's start, end and `toolResult` and the round's `turn_end`.
+It fails a run that cannot show a call still executing when Pi queued the steer.
+In four runs Pi put the marker on the `steering` queue while two calls were still running.
+It let both finish, emitted all three `toolResult` messages, and closed the round with `turn_end`.
+The steered message was the first message of the next round (`placement: "after_batch_turn_end"`), never between calls or between results.
+All of this stayed inside one `agent_start`…`agent_settled` span, so the verdict in every run was `steered_into_running_turn`.
+This matches `rpc-commands.md` 0.87.1 ("delivered after the current assistant turn finishes executing its tool calls, before the next LLM call").
+It also matches the bundled `runLoop`, which polls `getSteeringMessages` only after `turn_end`, and the comment beside `submit()` in `src/server/adapters/pi/process.ts`, so `src/` was not changed.
+The new gate was shown red first: posting only after every call had ended failed `tool_placement` and exited 1.
+The text turn was re-run once and still passed.
+A sequential batch was not exercised: no built-in tool in 0.87.1 declares `executionMode: "sequential"`, and no `toolExecution` setting was in play.
+Recorded in `docs/MANUAL_TESTING.md` "Pi's steer waits for the whole tool batch (OW-nufitu)", in D16's Pi paragraph in `docs/DESIGN.md`, and in `resources/probes/README.md`'s steer-probe entry.
