@@ -33,3 +33,8 @@ A patch is a `fileChange` live, drawn as `edit`, and an `exec` script calling `t
 A script that calls no tool, such as the tool-list search Codex ran before a collab call, has no live item at all.
 The `Script completed` / `Wall time` / `Output:` preamble is still in the stored output on 0.157.1.
 `src/server/sessions/codex-conformance.test.ts` lists each of these in `KNOWN_DIFFERENCES` under this card, so a fold that lands shows up there as a failing entry to remove.
+
+## Amended 2026-09-30 under OW-luvema
+
+OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records through live `mapItem` wherever a rollout carries them, which retires this card's preview-side differences for those rollouts (a `CommandExecution` record has no `Script completed` preamble, and a `FileChange` record is per path); its done-condition removes this card's `KNOWN_DIFFERENCES` entries.
+A rollout with no item records keeps today's path, its differences accepted as a first cut, so read OW-luvema's outcome before working this card, and close it by what remains.

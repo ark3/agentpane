@@ -1,0 +1,41 @@
+---
+labels: [change, sweep-0929]
+---
+
+# The Codex preview rebuilds each item from rollout scripts and response items, though the rollout's own item_completed records hold every item the live stream completed; it should translate those into mapItem, and keep today's parser only for rollouts that lack them
+
+Filed 2026-09-30 from OW-zadupu's finding, as the structural fix to its own headline: Codex items reach the transcript through two unconnected mappers, live `mapItem` in `src/server/adapters/codex/mapping.ts` and the preview's `extractStoreTurn` in `src/server/sessions/codex.ts`.
+It is meant to retire, for every rollout that carries item records, the preview defects OW-zadupu's conformance test found; OW-bomere and OW-mehezu close moot under it, and OW-zabiko, OW-kelise and OW-yobuyi are amended to point here.
+
+## What OW-zadupu found
+
+On `codex-cli 0.157.1` the rollout's `event_msg` records of type `item_completed` covered every item the thread's own stream completed, with the same ids in the same order, in a different serialization (capitalised types, snake_case fields, argv commands, `file://` cwd, path-keyed diffs); `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+Read again on 2026-09-30 against the seven `resources/fixtures/codex/*.rollout.jsonl`, the records carry exactly what the preview's known defects lack:
+- `CollabAgentToolCall` has `status` (`"failed"` on `collab-failed`), `tool` (`spawn_agent`, `wait`), the spawn's `prompt`, `receiver_agents` with nicknames, and `agents_states` mapping each child to its outcome (`{"completed": "Hello"}`, `"not_found"`). The preview today draws these as `exec` scripts with `isError: false` (OW-kelise, OW-bomere).
+- `FileChange` has `changes` keyed by path, each with its `unified_diff` or added `content`, and `CommandExecution` has `aggregated_output` with no `Script completed` preamble, where the preview draws both as raw `exec` scripts (OW-zabiko).
+- `UserMessage` records exist only for what the user typed: the `<environment_context>`, `<subagent_notification>` and `<turn_aborted>` user-role `response_item`s have none, so the synthetic-prefix list `SYNTHETIC_USER_PREFIXES` has nothing to filter (OW-mehezu, and the stored `user <turn_aborted>` row in OW-yobuyi).
+- The kinds seen were `UserMessage`, `AgentMessage`, `Reasoning`, `CommandExecution`, `FileChange`, `CollabAgentToolCall`, `Plan` and `ContextCompaction`.
+
+## Which rollouts carry them
+
+Counted on 2026-09-30 over the home server's real `~/.codex/sessions` (read-only): every rollout from `0.147.0`, `0.153.0`, `0.153.4` and `0.156.0` carries `item_completed` records; on `0.150.1` 19 of 34 do, and the 15 that do not have `session_meta.source` `vscode` or a subagent spawn and hold their items only as `response_item`s and legacy `event_msg`s (`agent_message`, `user_message`, `patch_apply_end`); on `0.154.0` 32 of 44 do, and the 12 that do not hold no turn at all.
+So whether a rollout carries item records is decided per file, not by version, and the preview needs both paths.
+
+## The change
+
+For a rollout that carries `item_completed` records, the preview builds its items by translating each record into the `ThreadItem` shape `mapItem` takes and calling `mapItem`, so live and preview share one mapper; the translation is per kind and is all the new code should be.
+For a rollout that carries none, today's `extractStoreTurn` path stays as it is, and its known differences are accepted for those files (a first cut; the owner may revisit).
+What the preview takes from records other than items stays where it is: turn boundaries and settings (`turnSettings`), token usage, compaction (`compactionTurnFor`), and a fork's history base (`historyBase`); check whether a forked thread's rollout repeats the parent's `item_completed` records, which decides what `historyBase` cuts.
+The app-server bindings in `resources/codex-protocol/v2/` type `mapItem`'s input; whether anything types the rollout's snake_case items is for the executor to find, and a kind with no typed source is translated from the committed fixtures.
+A kind the translation does not know (`webSearch`, `mcpToolCall`, `dynamicToolCall` and image generation have no capture; DESIGN's "have no capture yet" row) is skipped with nothing drawn, or drawn as today's path draws its `response_item`, whichever is less code; say which in `extractStoreTurn`'s docblock.
+
+## Done when
+
+- `KNOWN_DIFFERENCES` in `src/server/sessions/codex-conformance.test.ts` holds no entry keyed to OW-bomere, OW-mehezu, OW-zabiko or OW-kelise, and the preview half of OW-yobuyi's `interrupt` entry (`preview: ["user <turn_aborted>"]`) is gone. The test fails while an entry it no longer needs remains, which is the red-then-green. Any entry left is keyed to a card that still owns it, with a sentence saying why.
+- A test in `src/server/sessions/codex.test.ts` or `preview.test.ts`, red first, previews a rollout that carries no `item_completed` records (a trimmed copy of a fixture's `response_item` lines will do) and gets today's output, so the fallback path is pinned.
+- `SYNTHETIC_USER_PREFIXES`, `execScriptArguments` and the hardcoded `isError: false` either have no caller on the item-record path or are gone; whatever stays serves the fallback alone, and its docblock says so.
+- `extractStoreTurn`'s docblock (or the module's) states the two paths and which rollouts take each, with the counts above as the measurement.
+- `bun run check` passes.
+
+Afterwards, close OW-zabiko and OW-kelise `--done` or `--moot` by what remains of each: OW-kelise also asks for a link to the child thread, which is presentation and may belong with OW-novuye and OW-gakide instead.
+OW-yobuyi keeps its live half and its stored aborted marking.

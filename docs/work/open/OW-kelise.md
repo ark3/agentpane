@@ -41,3 +41,8 @@ The spawn prompt is plain text in that script (`message: "Reply with exactly one
 The child's reply is recoverable on disk three ways: the wait script's output, the `<subagent_notification>` user-role message Codex writes when a child finishes (which the preview draws as a user turn, OW-mehezu), and the collab call's `item_completed` record.
 `src/server/sessions/codex-conformance.test.ts` lists the naming disagreement in `KNOWN_DIFFERENCES` under this card.
 Rollouts written by older versions still carry the `collaboration__spawn_agent` form, so a parity decision has two stored shapes to answer for.
+
+## Amended 2026-09-30 under OW-luvema
+
+OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records through live `mapItem` wherever a rollout carries them; a `CollabAgentToolCall` record carries `tool`, `prompt`, `receiver_agents` and `agents_states`, so a spawn previews as the live `subagent` card, and its done-condition removes this card's `KNOWN_DIFFERENCES` entries.
+What remains here afterwards is the link to the child thread, which is presentation and may belong with OW-novuye and OW-gakide, and the older `collaboration__spawn_agent` rollouts that carry no item records, whose differences OW-luvema accepts as a first cut.

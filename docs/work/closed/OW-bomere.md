@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # A failed Codex tool call previews as a success, because extractStoreTurn sets isError false on every stored tool result
@@ -20,3 +21,8 @@ Read `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadup
 The preview marks the failed result `isError: true` on `collab-failed`, and this card's entry is gone from `KNOWN_DIFFERENCES` in `codex-conformance.test.ts` — that test fails until the entry is removed, which is the red-then-green.
 A unit test in `src/server/sessions/codex.test.ts` or `preview.test.ts` covers the record shape the fix reads, and was shown red before the fix.
 The hardcoded `isError: false` is gone from `extractStoreTurn`.
+
+## Close note
+
+Folded into OW-luvema on 2026-09-30, which has the preview build items from the rollout's `item_completed` records through `mapItem`; the `CollabAgentToolCall` record carries `status: "failed"` on `collab-failed`, so the failed result previews as an error there.
+Its done-condition removes this card's `KNOWN_DIFFERENCES` entry; a rollout with no item records keeps today's path and its `isError: false`, accepted as a first cut.

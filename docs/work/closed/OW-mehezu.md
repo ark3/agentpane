@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: moot
 ---
 
 # A Codex subagent_notification message previews as a user turn nobody typed, because SYNTHETIC_USER_PREFIXES does not list it
@@ -16,3 +17,8 @@ The evidence is committed: `resources/fixtures/codex/collab-multi.jsonl` and `co
 ## Done when
 
 The preview of `collab-multi.rollout.jsonl` draws no user turn for either notification, and this card's part of that hunk is removed from `KNOWN_DIFFERENCES` — the conformance test fails until it is, which is the red-then-green.
+
+## Close note
+
+Folded into OW-luvema on 2026-09-30: a rollout's `item_completed` `UserMessage` records hold only what the user typed, with none for a `<subagent_notification>`, so the item-record path draws no such turn and needs no prefix list.
+Its done-condition removes this card's `KNOWN_DIFFERENCES` entry; a rollout with no item records keeps today's path and `SYNTHETIC_USER_PREFIXES` as they are.

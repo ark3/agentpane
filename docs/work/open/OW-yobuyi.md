@@ -32,3 +32,8 @@ Live, `turn/completed` for the interrupted turn carries `turn.status: "interrupt
 Stored, the rollout again kept no assistant message, holding a user-role `<turn_aborted>` message and a `turn_aborted` event with `reason: "interrupted"`.
 `src/server/sessions/codex-conformance.test.ts` lists both halves in `KNOWN_DIFFERENCES["interrupt"]` under this card: live `assistant pending`, preview `user`; the missing partial reply in the preview is permanent, since Codex keeps none on disk.
 `interrupt.jsonl` is the captured input this card's first done-condition test can be fed.
+
+## Amended 2026-09-30 under OW-luvema
+
+OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records wherever a rollout carries them, and the `<turn_aborted>` user-role message has no such record, so the stored `user <turn_aborted>` row goes with it, and with it the preview half of this card's `interrupt` entry in `KNOWN_DIFFERENCES`.
+This card keeps its live half and the stored turn's aborted marking, which the `turn_aborted` event still carries.
