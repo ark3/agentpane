@@ -31,7 +31,7 @@ const renderers = new Map<string, ToolRenderer>([
 	["read", ReadTool as ToolRenderer],
 	["write", WriteTool as ToolRenderer],
 	["edit", EditTool as ToolRenderer],
-	// Codex's collab tools, all five under one name (`CODEX_TOOL_NAMES`).
+	// Codex's collab tools, every one under one name (`CODEX_TOOL_NAMES`).
 	["subagent", SubagentTool as ToolRenderer],
 ]);
 

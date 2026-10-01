@@ -49,11 +49,11 @@ import type {
  * registry's `edit` contract; `fileChangeArguments` translates Codex's unified
  * diffs into that renderer's nested `edits[]` shape.
  *
- * All five collab tools (`spawnAgent`, `sendInput`, `resumeAgent`, `wait`,
- * `closeAgent`) share the single name `subagent` rather than getting one
- * registry key each: the card is the same in every case -- which operation,
- * which child thread, what the child said -- and the operation rides in
- * `arguments.tool`, where the renderer reads it.
+ * Every collab tool the protocol's `CollabAgentTool` lists (`spawnAgent`,
+ * `wait` and the rest) shares the single name `subagent` rather than getting
+ * one registry key each: the card is the same in every case -- which
+ * operation, which child thread, what the child said -- and the operation
+ * rides in `arguments.tool`, where the renderer reads it.
  */
 export const CODEX_TOOL_NAMES = {
 	commandExecution: "bash",
@@ -583,7 +583,7 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			// reader gets: the operation, the child thread it names, and, for
 			// `wait`, what the child answered.
 			// Observed on `codex-cli 0.153.4` for `spawnAgent` and `wait` only
-			// (resources/fixtures/codex/subagent.jsonl); the other three
+			// (resources/fixtures/codex/subagent.jsonl); the other
 			// operations take this arm untested. `agentsStates` is the protocol's
 			// "last known status of the target agents", NOT this call's output --
 			// so for a `sendInput` or `closeAgent` against a child that already
