@@ -925,6 +925,38 @@ describe("App", () => {
 		expect(controller.previewed).toContainEqual({ backend: "codex", id: child });
 	});
 
+	it("opens the child thread from a preview's subagent card too (OW-kelise)", async () => {
+		// The preview branch is a second Transcript, so it needs its own
+		// `onopensession`; the child opens as another preview.
+		const child = "01a086ce-039d-7720-86cb-ceb8ec8f3774";
+		const turns = storedTurns([
+			assistant(
+				[{
+					type: "toolCall" as const,
+					id: "exec-1",
+					name: "subagent",
+					arguments: { tool: "wait", threadIds: [child] },
+				}],
+				"toolUse" as const,
+			),
+			toolResult("exec-1", "subagent", "Hello! How can I help?"),
+		]);
+		const controller = new FakeController(view({
+			state: state({ selected: codexSession, summaries: [summary(codexSession, "Stored")] }),
+			preview: { ref: codexSession, turns },
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		// Previewing, not attached: the composer is replaced by Attach.
+		expect(screen.getByRole("button", { name: "Attach" })).toBeInTheDocument();
+		controller.previewed.length = 0;
+		openToolCards(container);
+
+		await fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
+
+		expect(controller.previewed).toEqual([{ backend: "codex", id: child }]);
+	});
+
 	it("auto-selects the most recent session in scope on startup", async () => {
 		const older = summary(piSession, "Older", { updatedAt: "2026-01-01T00:00:00.000Z" });
 		const newer = summary(codexSession, "Newer", { updatedAt: "2026-06-01T00:00:00.000Z" });

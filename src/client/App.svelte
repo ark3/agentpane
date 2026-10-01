@@ -1428,8 +1428,10 @@
 	>
 		{#if previewing}
 			<!-- Read-only and non-attaching (OW-38/OW-39), but structurally the same
-			     transcript as the live path. No `onedit` keeps it read-only. -->
-			<Transcript messages={previewMessageList} {reading} />
+			     transcript as the live path. No `onedit` keeps it read-only;
+			     `onopensession` only previews, so a subagent card's Open thread
+			     leads to another preview (OW-kelise). -->
+			<Transcript messages={previewMessageList} {reading} onopensession={openSession} />
 		{:else}
 			<Transcript
 				messages={selectedSession?.messages ?? []}

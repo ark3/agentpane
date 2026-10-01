@@ -54,10 +54,10 @@
 			     every renderer and most tools name no session. A read-only
 			     preview reaches this card only for a rollout whose collab calls
 			     have whole item records, as `codex-cli 0.157.1` writes them
-			     (OW-luvema), and passes no handler, so it shows the child with no
-			     link. One that stores them in the `collaboration` namespace names
-			     each after its namespace and function name and draws it on
-			     `DefaultTool`. -->
+			     (OW-luvema), and passes the same handler, which opens the child as
+			     another preview (OW-kelise). One that stores them in the
+			     `collaboration` namespace names each after its namespace and
+			     function name and draws it on `DefaultTool`. -->
 			{#if onopensession}
 				<button type="button" class="ap-action open-thread" onclick={() => open(id)}>
 					Open thread
