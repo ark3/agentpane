@@ -189,4 +189,28 @@ describe("fixture scrub", () => {
 			`private account telemetry in a committed fixture:\n${violations.join("\n")}`,
 		).toEqual([]);
 	});
+
+	it("no Codex rollout names the account that created it", () => {
+		// A rollout's `session_meta` carries the operator's account ids (as of
+		// `codex-cli 0.157.1`); `capture_fixtures.py` writes these placeholders.
+		const placeholders: Record<string, string> = {
+			creator_user_id: "user-example",
+			creator_account_id: "example-account",
+		};
+		const violations: string[] = [];
+		for (const file of files.filter((path) => path.endsWith(".jsonl"))) {
+			for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
+				if (!line) continue;
+				const record = JSON.parse(line) as { type?: string; payload?: Record<string, unknown> };
+				if (record.type !== "session_meta") continue;
+				for (const [key, placeholder] of Object.entries(placeholders)) {
+					const value = record.payload?.[key];
+					if (value !== undefined && value !== placeholder) {
+						violations.push(`${file.replace(FIXTURES, "resources/fixtures/")}:${index + 1}: ${key}`);
+					}
+				}
+			}
+		}
+		expect(violations, `account ids in a committed rollout:\n${violations.join("\n")}`).toEqual([]);
+	});
 });
