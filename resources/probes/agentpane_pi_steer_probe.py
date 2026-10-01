@@ -54,6 +54,30 @@ began. Positions in the tap are pinned the same way -- the tap's line count is
 read at the instant the mid-turn POST goes out, and the census below that cut
 is the one that decides the verdict.
 
+## The tool turn (`--turn tool`, OW-nufitu)
+
+The text turn above never calls a tool, so it says nothing about the case Pi's
+own `rpc-commands.md` describes `"steer"` by: the text "is delivered after the
+current assistant turn finishes executing its tool calls, before the next LLM
+call" (`pi 0.87.1`'s copy). `--turn tool` replaces the essay with a prompt
+asking for three `bash` calls in one response, each a `sleep` of a different
+length, and posts the marker while that batch is executing. The wait is read
+off the tap, not the SSE stream, because the stream cannot see a tool call
+execute: the post goes out once the newest assistant message carrying tool
+calls has at least one call with a `tool_execution_start` and no
+`tool_execution_end` -- and, if the batch holds more than one call, at least
+one already ended, so that "between two calls" and "after the whole batch" are
+different positions in the tap. The tap read that satisfies the condition is
+the one whose length becomes the cut.
+
+`tool_placement` then reports where the steered `user` message landed against
+each call's `tool_execution_start`/`tool_execution_end` and `toolResult`
+message and the batch's `turn_end`, by tap index. That a call was demonstrably
+still executing when the steer was queued is read from Pi's own ordering --
+the `queue_update` naming the marker sits before that call's
+`tool_execution_end` -- and a run that cannot show it has not measured the
+case and fails. Where the steer landed is recorded, not asserted.
+
 ## The model flag
 
 `AGENTS.md` pins the home server's Pi to one model and says the flag is the
@@ -125,6 +149,17 @@ LONG_PROMPT = (
 )
 MIN_CHARS_BEFORE_STEER = 1200
 MIN_UPSERTS_BEFORE_STEER = 25
+
+# Staggered so that the batch has a call that has ended while others are still
+# running, and long enough that the post lands well inside the second sleep.
+# Pi 0.87.1 runs a batch's calls in parallel by default (`toolExecution`
+# defaults to "parallel" in pi-agent-core), so these overlap rather than queue.
+TOOL_PROMPT = (
+    "Use the bash tool. In one single response, issue exactly three bash tool calls together, "
+    "not one after another, with exactly these commands: `sleep 4; echo first`, "
+    "`sleep 15; echo second`, `sleep 25; echo third`. After all three have returned, reply with "
+    "one short sentence listing their outputs."
+)
 
 
 def pi_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -219,6 +254,24 @@ def timeline(events: list[Any], marker: str) -> list[dict[str, Any]]:
             row["role"] = message.get("role") if isinstance(message, dict) else None
             row["chars"] = len(text)
             row["has_marker"] = marker in text
+            if row["role"] == "toolResult":
+                row["toolCallId"] = message.get("toolCallId")
+            elif row["role"] == "assistant" and isinstance(message.get("content"), list):
+                calls = [
+                    block.get("id")
+                    for block in message["content"]
+                    if isinstance(block, dict) and block.get("type") == "toolCall"
+                ]
+                if calls:
+                    row["toolCallIds"] = calls
+        elif kind in ("tool_execution_start", "tool_execution_end"):
+            row["toolCallId"] = event.get("toolCallId")
+            row["toolName"] = event.get("toolName")
+            if kind == "tool_execution_start":
+                row["args"] = event.get("args")
+            else:
+                row["isError"] = event.get("isError")
+                row["result_text"] = message_text(event.get("result"))[:200]
         elif kind == "turn_end":
             message = event.get("message", {})
             text = message_text(message)
@@ -362,6 +415,154 @@ def classify(rows: list[dict[str, Any]], cut: int, marker: str) -> dict[str, Any
     }
 
 
+def batch_state(rows: list[dict[str, Any]], at: int | None = None) -> dict[str, Any] | None:
+    """A tool batch in the tap, and how far through executing it is.
+
+    A batch is the tool calls of one assistant `message_end`; Pi executes them
+    after that message ends and before the round's `turn_end`. `at` names that
+    `message_end` by tap index; without it, the newest batch is read.
+    """
+    batch = None
+    for row in rows:
+        if row["type"] == "message_end" and row.get("role") == "assistant" and row.get("toolCallIds"):
+            if at is None or row["i"] == at:
+                batch = row
+    if batch is None:
+        return None
+    calls = {call_id: {"toolCallId": call_id} for call_id in batch["toolCallIds"]}
+    for row in rows:
+        if row["i"] <= batch["i"] or row.get("toolCallId") not in calls:
+            continue
+        call = calls[row["toolCallId"]]
+        if row["type"] == "tool_execution_start":
+            call["start"] = row["i"]
+            call["toolName"] = row.get("toolName")
+            call["args"] = row.get("args")
+        elif row["type"] == "tool_execution_end":
+            call["end"] = row["i"]
+            call["isError"] = row.get("isError")
+            call["result_text"] = row.get("result_text")
+        elif row["type"] == "message_end" and row.get("role") == "toolResult":
+            call["toolResult"] = row["i"]
+    ordered = [calls[call_id] for call_id in batch["toolCallIds"]]
+    return {
+        "assistant_message_end": batch["i"],
+        "calls": ordered,
+        "executing": [call["toolCallId"] for call in ordered if "start" in call and "end" not in call],
+        "ended": [call["toolCallId"] for call in ordered if "end" in call],
+    }
+
+
+def ready_to_steer(state: dict[str, Any] | None) -> bool:
+    """A call is executing, and -- in a batch of several -- another has ended."""
+    if state is None or not state["executing"]:
+        return False
+    return len(state["calls"]) == 1 or bool(state["ended"])
+
+
+def tool_placement(
+    rows: list[dict[str, Any]], cut: int, marker: str, batch_at_cut: dict[str, Any]
+) -> dict[str, Any]:
+    """Where the steered text landed against the batch that was executing.
+
+    Every position is a tap index. `user_message` is the `message_start` of the
+    `user` message carrying the marker -- the point at which Pi drained its
+    steering queue into the conversation. It is compared against the batch's
+    `tool_execution_end`s, its `toolResult` messages and the round's
+    `turn_end`, which are the three places Pi could have put it after the
+    post: between calls, between results, or after the whole batch.
+
+    `executing_at_queue` names the calls whose `tool_execution_end` comes after
+    the `queue_update` that put the marker on a queue: Pi's own ordering, and
+    not the probe's clock, showing those calls still running when Pi accepted
+    the steer.
+    """
+    # The batch that was executing at the cut, re-read to completion.
+    state = batch_state(rows, at=batch_at_cut["assistant_message_end"])
+    assert state is not None
+    after = [row for row in rows if row["i"] >= cut]
+    queue_row = next(
+        (
+            row
+            for row in after
+            if row["type"] == "queue_update"
+            and any(marker in str(text) for text in (row.get("steering") or []) + (row.get("followUp") or []))
+        ),
+        None,
+    )
+    user_row = next(
+        (
+            row
+            for row in after
+            if row["type"] == "message_start" and row.get("role") == "user" and row.get("has_marker")
+        ),
+        None,
+    )
+    batch_turn_end = next(
+        (row["i"] for row in rows if row["i"] > state["assistant_message_end"] and row["type"] == "turn_end"),
+        None,
+    )
+    ends = [call["end"] for call in state["calls"] if "end" in call]
+    results = [call["toolResult"] for call in state["calls"] if "toolResult" in call]
+    complete = len(ends) == len(state["calls"]) and len(results) == len(state["calls"])
+
+    placement = None
+    if user_row is not None and complete and batch_turn_end is not None:
+        u = user_row["i"]
+        if u < max(ends):
+            placement = "between_calls_before_batch_finished"
+        elif u < max(results):
+            placement = "after_executions_between_tool_results"
+        elif u < batch_turn_end:
+            placement = "after_tool_results_before_turn_end"
+        else:
+            placement = "after_batch_turn_end"
+
+    executing_at_queue = (
+        []
+        if queue_row is None
+        else [call["toolCallId"] for call in state["calls"] if call.get("end", -1) > queue_row["i"]]
+    )
+
+    # What Pi did next, so the reader can see the round the steer opened.
+    following = None
+    if user_row is not None:
+        following = [
+            row
+            for row in rows
+            if row["i"] > user_row["i"]
+            and row["type"] in ("turn_start", "turn_end", "message_end", "agent_end", "agent_settled")
+        ][:8]
+
+    return {
+        "placement": placement,
+        "batch_complete": complete,
+        "batch": state,
+        "batch_turn_end": batch_turn_end,
+        "queue_update": queue_row["i"] if queue_row else None,
+        "user_message_start": user_row["i"] if user_row else None,
+        "executing_at_queue": executing_at_queue,
+        "events_after_user_message": following,
+    }
+
+
+def wait_for_tap(tap: Path, marker: str, predicate: Any, timeout: float, label: str) -> tuple[Any, int]:
+    """Poll the tap until `predicate(rows)` is truthy; return it and that read's length.
+
+    The length returned is the cut: the condition and the pin come from the
+    same read of the file, so the posted request is strictly later than every
+    line the condition saw.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        raw = tap_events(tap)
+        found = predicate(timeline(raw, marker))
+        if found:
+            return found, len(raw)
+        time.sleep(0.05)
+    raise TimeoutError(f"timed out waiting for {label}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-root", type=Path, default=REPO)
@@ -379,6 +580,12 @@ def parse_args() -> argparse.Namespace:
         help="directory containing Pi's auth/model state (contents are never printed)",
     )
     parser.add_argument("--skip-build", action="store_true", help="reuse an existing dist/client bundle")
+    parser.add_argument(
+        "--turn",
+        choices=("text", "tool"),
+        default="text",
+        help="steer into a long text turn (OW-yuyofu, the default) or into an executing tool batch (OW-nufitu)",
+    )
     return parser.parse_args()
 
 
@@ -406,7 +613,8 @@ def main() -> int:
         "started_at": now(),
         "backend": "pi",
         "probe": "agentpane_pi_steer_probe.py",
-        "card": "OW-yuyofu",
+        "card": "OW-yuyofu" if args.turn == "text" else "OW-nufitu",
+        "turn": args.turn,
         "workspace": str(workspace),
         "commit": subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
@@ -475,43 +683,66 @@ def main() -> int:
             "process_tree": tree,
         }
 
-        # -- 1. a turn long enough to steer into ---------------------------
+        # -- 1. a turn to steer into -------------------------------------
         long_start = len(stream.snapshot())
         long_requested_at = now()
         long_status, long_body = http.json(
-            "POST", ref_path(attached_ref, "/prompt"), {"text": LONG_PROMPT}
+            "POST",
+            ref_path(attached_ref, "/prompt"),
+            {"text": LONG_PROMPT if args.turn == "text" else TOOL_PROMPT},
         )
         if long_status != 202:
-            raise RuntimeError(f"long prompt failed: HTTP {long_status} {long_body}")
+            raise RuntimeError(f"first prompt failed: HTTP {long_status} {long_body}")
 
-        def long_enough(events: list[tuple[str, dict[str, Any]]]) -> Any:
-            upserts = 0
-            longest = 0
-            for _, event in events[long_start:]:
-                if event.get("handle") != handle or event.get("type") != "upsert":
-                    continue
-                upserts += 1
-                longest = max(longest, len(assistant_text(event.get("message", {}))))
-            if upserts >= MIN_UPSERTS_BEFORE_STEER and longest >= MIN_CHARS_BEFORE_STEER:
-                return {"upserts": upserts, "assistant_chars": longest}
-            return None
+        batch_at_cut: dict[str, Any] | None = None
+        tool_cut = 0
+        if args.turn == "text":
 
-        # The floor is asserted, not assumed: a model that declined the prompt
-        # never reaches it and this times out rather than steering into a turn
-        # that had already finished.
-        reached = stream.wait_for(
-            long_enough,
-            180,
-            f"the first turn to stream at least {MIN_CHARS_BEFORE_STEER} assistant characters",
-        )
-        evidence["checks"]["long_turn"] = {
-            "result": "pass",
-            "prompt_http_status": long_status,
-            "prompt_requested_at": long_requested_at,
-            "floor_chars": MIN_CHARS_BEFORE_STEER,
-            "floor_upserts": MIN_UPSERTS_BEFORE_STEER,
-            **reached,
-        }
+            def long_enough(events: list[tuple[str, dict[str, Any]]]) -> Any:
+                upserts = 0
+                longest = 0
+                for _, event in events[long_start:]:
+                    if event.get("handle") != handle or event.get("type") != "upsert":
+                        continue
+                    upserts += 1
+                    longest = max(longest, len(assistant_text(event.get("message", {}))))
+                if upserts >= MIN_UPSERTS_BEFORE_STEER and longest >= MIN_CHARS_BEFORE_STEER:
+                    return {"upserts": upserts, "assistant_chars": longest}
+                return None
+
+            # The floor is asserted, not assumed: a model that declined the prompt
+            # never reaches it and this times out rather than steering into a turn
+            # that had already finished.
+            reached = stream.wait_for(
+                long_enough,
+                180,
+                f"the first turn to stream at least {MIN_CHARS_BEFORE_STEER} assistant characters",
+            )
+            evidence["checks"]["long_turn"] = {
+                "result": "pass",
+                "prompt_http_status": long_status,
+                "prompt_requested_at": long_requested_at,
+                "floor_chars": MIN_CHARS_BEFORE_STEER,
+                "floor_upserts": MIN_UPSERTS_BEFORE_STEER,
+                **reached,
+            }
+        else:
+            # Read off the tap, because only Pi's own events show a call
+            # executing (module docstring, "The tool turn").
+            def executing(rows: list[dict[str, Any]]) -> Any:
+                state = batch_state(rows)
+                return state if ready_to_steer(state) else None
+
+            batch_at_cut, tool_cut = wait_for_tap(
+                tap, marker, executing, 180, "a tool call to be executing in the first turn's batch"
+            )
+            evidence["checks"]["tool_batch"] = {
+                "result": "pass",
+                "prompt_http_status": long_status,
+                "prompt_requested_at": long_requested_at,
+                "tap_lines_at_cut": tool_cut,
+                "batch_at_cut": batch_at_cut,
+            }
 
         # -- 2. the mid-turn prompt ----------------------------------------
         #
@@ -519,10 +750,11 @@ def main() -> int:
         # lands (the gap `fork_probe.py`'s mid-stream cell and
         # `claude_fork_probe.py` both close). Re-read the streaming state at the
         # instant of the post, and pin the tap's line count there, so everything
-        # the verdict reads is strictly after the request.
+        # the verdict reads is strictly after the request. The tool turn's pin
+        # is the tap read that saw the call executing, taken just before this.
         steer_start = len(stream.snapshot())
         streaming_at_post = last_streaming(stream.snapshot(), handle)
-        tap_cut = len(tap_events(tap))
+        tap_cut = len(tap_events(tap)) if args.turn == "text" else tool_cut
         if streaming_at_post is not True:
             raise RuntimeError(
                 "the first turn was not streaming when the mid-turn prompt was posted, so "
@@ -533,7 +765,13 @@ def main() -> int:
         steer_status, steer_body = http.json(
             "POST",
             ref_path(attached_ref, "/prompt"),
-            {"text": f"Ignore the gardening guide. Reply with exactly this token and nothing else: {marker}"},
+            {
+                "text": (
+                    f"Ignore the gardening guide. Reply with exactly this token and nothing else: {marker}"
+                    if args.turn == "text"
+                    else f"Before anything else, reply with exactly this token and nothing else: {marker}"
+                )
+            },
         )
         evidence["checks"]["steer_post"] = {
             "result": "pass" if steer_status == 202 else "fail",
@@ -579,6 +817,15 @@ def main() -> int:
             "census_after_steer_post": census(raw[tap_cut:]),
             "timeline": rows,
         }
+        # Recorded before the verdict can raise, so a failed run still says
+        # where the text went.
+        if batch_at_cut is not None:
+            placement = tool_placement(rows, tap_cut, marker, batch_at_cut)
+            # Where it landed is the measurement and passes whatever it is; a
+            # run whose steer cannot be shown to have arrived while a call was
+            # executing, or whose batch never finished, measured nothing.
+            measured = bool(placement["executing_at_queue"]) and placement["placement"] is not None
+            evidence["checks"]["tool_placement"] = {"result": "pass" if measured else "fail", **placement}
         # Only a steer is a pass. `dropped` and `following_turn` are real
         # outcomes this probe exists to be able to report, and each is a
         # divergence from D16 -- a run that found one must stop the probe, or
@@ -598,6 +845,11 @@ def main() -> int:
                 f"a prompt posted mid-turn was {verdict['verdict']} rather than steered "
                 f"into the running turn, which D16 does not allow of the Pi adapter "
                 f"(queued as {verdict.get('queued_as')!r})"
+            )
+        if batch_at_cut is not None and evidence["checks"]["tool_placement"]["result"] != "pass":
+            raise RuntimeError(
+                "the steer was not shown to arrive while a tool call was executing, or the batch "
+                "never finished, so where it landed in the batch was not measured"
             )
 
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
