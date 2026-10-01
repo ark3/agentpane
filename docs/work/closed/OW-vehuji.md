@@ -1,5 +1,6 @@
 ---
 labels: [deferral, emacs, sweep-0929]
+closed: done
 ---
 
 # agentpane-mode's streaming levels outlive a gap in the picker's listings: a sessions/list that fails while a picker stays open leaves them stale, and the next listing marks a turn that ended in the gap, watched or not
@@ -25,3 +26,19 @@ Or: measured as not worth it and declined in the `agentpane--listed-streaming` d
 A sweep of the open deck for consolidations (read against e1cf2e6) found one more gap in the listing feed this card does not name: a helper that dies over a live server.
 `agentpane--listed-streaming` is cleared only in `agentpane--picker-gone`, so the levels a picker held survive `agentpane--helper-gone` just as they survive a failed `sessions/list`, and the next listing through a new helper marks a turn that ended in between.
 Whatever owner this card settles on for those levels should cover that case too, with its own ERT test.
+
+## Close note
+
+Landed in df0e29a and 2273dd0 (emacs/agentpane.el, emacs/agentpane-test.el; Emacs only, no src/ change).
+
+What was built: the streaming levels' validity now belongs to the continuity of each picker's listing feed, decided in one place, `agentpane--refetch-sessions`.
+A buffer-local `agentpane--listed-through` in each picker holds the connection its listings are unbroken through.
+A listing records the connection it goes out on; it joins the feed as it goes out when some picker is then unbroken through that connection; when it lands it keeps `agentpane--listed-streaming` only if its picker is unbroken through the connection it went out on, and otherwise empties the levels first.
+Its FAILED breaks the picker only while it is still the picker's latest listing (`agentpane--latest-listing` token), so a superseded failure breaks nothing.
+The three breaks reach that check with no hook of their own: the last picker going takes its variable with it, a latest listing failing sets it nil, and a helper death leaves every picker naming a torn-down connection the next helper's never matches.
+`agentpane--picker-gone`, its two hooks and its `seq-some` guard are gone.
+
+Verified: ERT tests for a failed listing and for a helper death between a streaming and a done listing, each red on 6a25fec and green after; the adversarial read of the first cut found three mark losses relative to 6a25fec (a picker killed before a second's first listing lands, a superseded listing failing, a reply landing after the helper's teardown), each now covered by a test red on the first cut and green after, plus a test that one picker's failed listing keeps the levels another reads.
+`agentpane-test-new-picker-does-not-mark-a-turn-that-ended-with-no-picker` and `agentpane-test-picker-gone-keeps-the-levels-another-picker-reads` stay green; full suite 247 tests, 244 as expected, 3 skipped (skipped on main too).
+
+One loss is left and stated in the `agentpane--listed-through` docstring: a listing that goes out while no picker is unbroken empties the levels as it lands, even if another picker's listing landed meanwhile, so a turn that ended within that one round trip (about 0.2 to 0.3 s on the home server, per OW-wazipa's measurement) loses its mark; closing it would need ordering across pickers' listings.
