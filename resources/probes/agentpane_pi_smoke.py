@@ -52,8 +52,10 @@ from pathlib import Path
 from typing import Any
 
 from agentpane_live_support import (
+    LONG_PROMPT,
     Http,
     SseReader,
+    assistant_chars,
     assistant_text,
     build_client,
     compact_tree,
@@ -62,13 +64,14 @@ from agentpane_live_support import (
     growing_assistant_text,
     last_streaming,
     make_state_home,
-    max_assistant_length,
     message_block_types,
     now,
     ref_path,
     start_server,
     streaming_value,
+    turn_messages,
     wait_for_built_client,
+    wait_for_turn_to_fill,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -495,7 +498,8 @@ def main() -> int:
         # which is how the OW-moradi `--tool-check` run, at `967b319`, passed
         # while aborting an unknown turn. So assert the session is idle *before*
         # the prompt is posted -- the reading that does distinguish them -- and
-        # record it.
+        # record it. The same reading is what lets `turn_messages` take every
+        # transcript position past `abort_start` as this turn's.
         pre_prompt_streaming = last_streaming(stream.snapshot(), real_ref)
         if pre_prompt_streaming is not False:
             raise RuntimeError(
@@ -504,23 +508,8 @@ def main() -> int:
             )
 
         abort_start = len(stream.snapshot())
-        # What this asks for and what it delivers are not the same thing, and the
-        # gap is the phase's real reach. As of `pi 0.85.1` on 2026-09-13 the
-        # model declined the task and explained itself instead in every one of
-        # the six runs measured that day, none of which left a pre-abort
-        # transcript above 472 characters against a request for 10000 lines.
-        # So the phase establishes that `/abort` is accepted and that a
-        # streaming turn stops and stays stopped; it does not establish
-        # anything about tearing down a large buffered transcript.
-        # The prompt is left as written on purpose -- `agentpane_codex_smoke.py`
-        # sends the same string and nothing has measured it there, so each run
-        # reports its own `assistant_length_at_abort` below rather than this
-        # probe guessing at a wording the model would comply with. There is
-        # deliberately no assertion on that length: compliance is the model's.
         long_status, long_body = http.json(
-            "POST",
-            ref_path(real_ref, "/prompt"),
-            {"text": "Do not use tools. Write the integers from 1 through 10000, one per line, and continue until every integer is written."},
+            "POST", ref_path(real_ref, "/prompt"), {"text": LONG_PROMPT}
         )
         if long_status != 202:
             raise RuntimeError(f"long prompt failed: HTTP {long_status} {long_body}")
@@ -532,7 +521,11 @@ def main() -> int:
             return None
 
         active_at = stream.wait_for(active, 90, "long turn streaming=true")
-        time.sleep(0.35)
+
+        # Let the turn's own text build up before cutting it, so the abort
+        # tears down a large in-flight transcript rather than its first
+        # sentence (`wait_for_turn_to_fill`, OW-sofige).
+        abort_wait = wait_for_turn_to_fill(stream, real_ref, abort_start)
 
         # The cut is pinned immediately before the request, so a turn that ended
         # on its own cannot stand in for the abort. See the Codex harness for
@@ -540,16 +533,14 @@ def main() -> int:
         pre_abort = stream.snapshot()
         abort_index = len(pre_abort)
         pre_abort_streaming = last_streaming(pre_abort, real_ref)
+        turn_at_abort = turn_messages(pre_abort, real_ref, abort_start)
         if pre_abort_streaming is not True:
             raise RuntimeError(
                 "long turn was not streaming when the abort was issued "
-                f"(last reported state: {pre_abort_streaming})"
+                f"(last reported state: {pre_abort_streaming}; the turn held "
+                f"{assistant_chars(turn_at_abort)} assistant characters)"
             )
-        # The longest assistant message in the session so far, not this turn's
-        # own length: a prior turn's reply would stand in for it if it were
-        # longer. Under `--tool-check` there are two such turns ahead of this
-        # one, so read this as an upper bound on what the abort tore down.
-        length_at_abort = max_assistant_length(pre_abort, real_ref)
+        length_at_abort = assistant_chars(turn_at_abort)
 
         abort_requested_at = now()
         abort_status, abort_body = http.json("POST", ref_path(real_ref, "/abort"))
@@ -563,26 +554,30 @@ def main() -> int:
             return None
 
         aborted = stream.wait_for(aborted_idle, 90, "aborted turn streaming=false")
-        settled_length = max_assistant_length(stream.snapshot(), real_ref)
+        # The whole of what the turn added, position by position, not a total:
+        # a message that grows, shrinks or appears after idle all change it.
+        turn_when_idle = turn_messages(stream.snapshot(), real_ref, abort_start)
         time.sleep(1.5)
-        after_length = max_assistant_length(stream.snapshot(), real_ref)
-        if after_length != settled_length:
+        turn_after = turn_messages(stream.snapshot(), real_ref, abort_start)
+        if turn_after != turn_when_idle:
             raise RuntimeError(
-                f"transcript kept growing after the abort reported idle: {settled_length} -> {after_length}"
+                f"the aborted turn changed after it reported idle: {turn_when_idle} -> {turn_after}"
             )
         evidence["checks"]["abort"] = {
             "result": "pass",
             "prompt_http_status": long_status,
             "streaming_before_long_prompt": pre_prompt_streaming,
             "streaming_at": active_at,
+            "abort_wait": abort_wait,
             "streaming_at_abort": pre_abort_streaming,
             "abort_requested_at": abort_requested_at,
             "abort_http_status": abort_status,
             "idle_at": aborted["timestamp"],
             "idle_event_type": aborted["event_type"],
             "assistant_length_at_abort": length_at_abort,
-            "assistant_length_when_idle": settled_length,
-            "assistant_length_after_settling": after_length,
+            "assistant_length_when_idle": assistant_chars(turn_when_idle),
+            "assistant_length_after_settling": assistant_chars(turn_after),
+            "turn_messages_when_idle": turn_when_idle,
         }
 
         # This is DESIGN's third open question for Pi: the agent is two `exec`s

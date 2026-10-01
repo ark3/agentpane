@@ -26,8 +26,10 @@ from pathlib import Path
 from typing import Any
 
 from agentpane_live_support import (
+    LONG_PROMPT,
     Http,
     SseReader,
+    assistant_chars,
     assistant_text,
     build_client,
     compact_tree,
@@ -41,7 +43,9 @@ from agentpane_live_support import (
     ref_path,
     start_server,
     streaming_value,
+    turn_messages,
     wait_for_built_client,
+    wait_for_turn_to_fill,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -288,13 +292,13 @@ def main() -> int:
             "process_tree_after": after_tree,
         }
 
+        # The aborted turn's messages are read as every position past the
+        # transcript's length at this cut (`turn_messages`), which holds only
+        # if no earlier turn is still writing: the first turn reported idle
+        # above and nothing has been prompted since.
         abort_start = len(reconnect.snapshot())
         long_status, long_body = http.json(
-            "POST",
-            ref_path(real_ref, "/prompt"),
-            {
-                "text": "Do not use tools. Write the integers from 1 through 10000, one per line, and continue until every integer is written."
-            },
+            "POST", ref_path(real_ref, "/prompt"), {"text": LONG_PROMPT}
         )
         if long_status != 202:
             raise RuntimeError(f"long prompt failed: HTTP {long_status} {long_body}")
@@ -306,7 +310,11 @@ def main() -> int:
             return None
 
         active_at = reconnect.wait_for(active, 60, "long turn streaming=true")
-        time.sleep(0.35)
+
+        # Let the turn's own text build up before cutting it, so the abort
+        # tears down a large in-flight transcript rather than its first
+        # sentence (`wait_for_turn_to_fill`, OW-sofige).
+        abort_wait = wait_for_turn_to_fill(reconnect, real_ref, abort_start)
 
         # Everything the abort is judged on has to arrive after this point.
         # Scanning from the prompt instead lets a turn that ended on its own --
@@ -323,12 +331,14 @@ def main() -> int:
         pre_abort = reconnect.snapshot()
         abort_index = len(pre_abort)
         pre_abort_streaming = last_streaming(pre_abort, real_ref)
+        turn_at_abort = turn_messages(pre_abort, real_ref, abort_start)
         if pre_abort_streaming is not True:
             raise RuntimeError(
                 "long turn was not streaming when the abort was issued "
-                f"(last reported state: {pre_abort_streaming})"
+                f"(last reported state: {pre_abort_streaming}; the turn held "
+                f"{assistant_chars(turn_at_abort)} assistant characters)"
             )
-        length_at_abort = max_assistant_length(pre_abort, real_ref)
+        length_at_abort = assistant_chars(turn_at_abort)
 
         abort_requested_at = now()
         abort_status, abort_body = http.json("POST", ref_path(real_ref, "/abort"))
@@ -345,17 +355,20 @@ def main() -> int:
 
         # Idle is a claim about the turn; the transcript is what proves it. A
         # turn that keeps emitting text after reporting idle was not aborted.
-        settled_length = max_assistant_length(reconnect.snapshot(), real_ref)
+        # Compared position by position, not as a total: a message that grows,
+        # shrinks or appears after idle all change it.
+        turn_when_idle = turn_messages(reconnect.snapshot(), real_ref, abort_start)
         time.sleep(1.5)
-        after_length = max_assistant_length(reconnect.snapshot(), real_ref)
-        if after_length != settled_length:
+        turn_after = turn_messages(reconnect.snapshot(), real_ref, abort_start)
+        if turn_after != turn_when_idle:
             raise RuntimeError(
-                f"transcript kept growing after the abort reported idle: {settled_length} -> {after_length}"
+                f"the aborted turn changed after it reported idle: {turn_when_idle} -> {turn_after}"
             )
         evidence["checks"]["abort"] = {
             "result": "pass",
             "prompt_http_status": long_status,
             "streaming_at": active_at,
+            "abort_wait": abort_wait,
             "streaming_at_abort": pre_abort_streaming,
             "events_before_abort": abort_index,
             "abort_requested_at": abort_requested_at,
@@ -363,8 +376,9 @@ def main() -> int:
             "idle_at": aborted_idle_event["timestamp"],
             "idle_event_type": aborted_idle_event["event_type"],
             "assistant_length_at_abort": length_at_abort,
-            "assistant_length_when_idle": settled_length,
-            "assistant_length_after_settling": after_length,
+            "assistant_length_when_idle": assistant_chars(turn_when_idle),
+            "assistant_length_after_settling": assistant_chars(turn_after),
+            "turn_messages_when_idle": turn_when_idle,
         }
 
         evidence["shutdown_requested_at"] = now()

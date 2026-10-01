@@ -308,6 +308,68 @@ def max_assistant_length(events: list[tuple[str, dict[str, Any]]], ref: dict[str
     return longest
 
 
+def transcript(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> list[dict[str, Any]]:
+    """This session's transcript as the wire has described it so far.
+
+    Replayed the way a client holds it (`src/shared/protocol.ts`): a `snapshot`
+    replaces the whole array, an `upsert` writes `message` at `index`, which
+    may equal the length to append. Nothing else on the wire touches it. The
+    wire names a message by that position alone -- `PaneMessage` carries no
+    id -- so a position in this array is the only handle a probe has on one.
+    """
+    messages: list[dict[str, Any]] = []
+    for _, event in events:
+        if event.get("session") != ref:
+            continue
+        if event.get("type") == "snapshot":
+            messages = list(event.get("messages", []))
+        elif event.get("type") == "upsert":
+            index = event.get("index")
+            message = event.get("message", {})
+            if not isinstance(index, int) or index < 0 or index > len(messages):
+                # A gap the wire contract does not allow; a reader that papered
+                # over it would attribute text to the wrong position.
+                raise RuntimeError(f"upsert at index {index} against a transcript of {len(messages)}")
+            if index == len(messages):
+                messages.append(message)
+            else:
+                messages[index] = message
+    return messages
+
+
+def turn_messages(
+    events: list[tuple[str, dict[str, Any]]], ref: dict[str, str], start: int
+) -> list[dict[str, Any]]:
+    """What one turn added to the transcript: every message past the cut.
+
+    `start` is a cut taken while the session was idle and immediately before
+    the turn's prompt was posted, so the transcript's length at that cut is
+    where the turn begins and every position past it is the turn's: its own
+    user message, then whatever the backend produced for it. Each row is the
+    position, the role, and the assistant text length (0 for anything that is
+    not assistant text).
+
+    A turn may produce more than one assistant message -- Pi opens one per
+    model call, and Codex maps each `ThreadItem` to its own, so a reasoning
+    item and the `agentMessage` after it are two -- and all of them count.
+    Picking one (the first, the last, the longest) would undercount a turn
+    split across several and would need a rule for which, while the floor
+    alone already excludes every earlier turn, which is the misattribution
+    `max_assistant_length` could not avoid (OW-sofige).
+    """
+    floor = len(transcript(events[:start], ref))
+    return [
+        {"index": index, "role": message.get("role"), "chars": len(assistant_text(message))}
+        for index, message in enumerate(transcript(events, ref))
+        if index >= floor
+    ]
+
+
+def assistant_chars(rows: list[dict[str, Any]]) -> int:
+    """Total assistant text across `turn_messages` rows."""
+    return sum(row["chars"] for row in rows)
+
+
 def growing_assistant_text(
     events: list[tuple[str, dict[str, Any]]], ref: dict[str, str], start: int
 ) -> Any:
@@ -334,6 +396,62 @@ def growing_assistant_text(
                 "last": distinct[-1],
             }
     return None
+
+
+# ---------------------------------------------------------------------------
+# the long turn both smoke probes abort
+# ---------------------------------------------------------------------------
+
+# The prompt whose turn both smoke probes abort. The phase exists to tear down
+# a large in-flight transcript, so the prompt has to be one the pinned models
+# write at length. Until OW-sofige both probes asked for "the integers from 1
+# through 10000, one per line", and neither model wrote them: as of `pi 0.85.1`
+# DeepSeek V4.1 Flash declined in all six runs measured on 2026-09-13 (414-472
+# characters), and as of `codex-cli 0.157.1` on 2026-09-30 Luna's turn ended
+# on its own after 76. This handbook was complied with by both on 2026-09-30
+# (`pi 0.87.1`, `codex-cli 0.157.1`), each passing 20000 characters still
+# streaming; `docs/MANUAL_TESTING.md` (OW-sofige) has the runs. Twenty
+# chapters of 400 words is roughly twice what the wait below needs, so a model
+# that writes short chapters still has the turn running at the cut.
+LONG_PROMPT = (
+    "Do not use tools. Write a long, detailed handbook on growing vegetables in a home garden. "
+    "Write twenty chapters, each under its own title and each at least 400 words long, covering in order: "
+    "planning the plot, soil testing, soil preparation, raised beds, choosing varieties, starting seeds indoors, "
+    "transplanting, direct sowing, watering, mulching, sunlight and siting, fertilising, composting, "
+    "companion planting, pest control, disease control, weeding, crop rotation, harvesting, and storing the harvest. "
+    "Write every chapter in full and do not summarise or abbreviate any of them."
+)
+
+# How much of the long turn's own text to let build up before the abort, and
+# how long to wait for it. A wait, not a check: the abort goes out on timeout
+# with whatever the turn holds, and the length is reported, never asserted,
+# because how much a model writes is the model's. The probes used to abort
+# 0.35s after `streaming=true`, which cuts any turn while it is still a
+# sentence or two whatever it was asked for.
+ABORT_AT_CHARS = 20000
+ABORT_WAIT_SECONDS = 150
+
+
+def wait_for_turn_to_fill(stream: SseReader, ref: dict[str, str], start: int) -> str:
+    """Wait until the turn begun at `start` holds `ABORT_AT_CHARS` of assistant text.
+
+    Answers how the wait ended: "filled", "timed out", or "ended" -- the turn
+    went idle by itself. The last is not raised here, so the caller's own
+    streaming-at-the-cut check is what fails the run, and says why: an abort
+    sent to a turn that already finished proves nothing about aborting.
+    """
+
+    def filled_or_ended(events: list[tuple[str, dict[str, Any]]]) -> Any:
+        if assistant_chars(turn_messages(events, ref, start)) >= ABORT_AT_CHARS:
+            return "filled"
+        if last_streaming(events, ref) is False:
+            return "ended"
+        return None
+
+    try:
+        return stream.wait_for(filled_or_ended, ABORT_WAIT_SECONDS, "the long turn to fill")
+    except TimeoutError:
+        return "timed out"
 
 
 # ---------------------------------------------------------------------------
