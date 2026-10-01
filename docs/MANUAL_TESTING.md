@@ -3812,9 +3812,9 @@ The windows are non-empty ranges of live traffic, as OW-lapuye showed of the sam
 **The probe could not have passed since OW-mofuho, and now waits for the snapshot that replaced `renamed`.**
 The first run from this worktree, with only the model change in, failed at the rename check after a minute: `TimeoutError: timed out waiting for the virtual id to be replaced by Pi's own (D9); saw 3 events` (20:35:49.292 to 20:36:56.073).
 OW-mofuho retired the `renamed` event from both wires on 2026-09-25 (`e8c9253`), so a rename is said only by a snapshot under the session's handle carrying the new ref, and the probe was still waiting for the event.
-It now takes the handle from the attach reply and waits for a snapshot under it naming a non-virtual ref, and records the handle in `checks.rename`; both runs reported `renamed_during: "attach"`, with the superseded `virtual:` id still resolving to the new ref and a prompt through it answered 202.
+This change made it take the handle from the attach reply and wait for a snapshot under it naming a non-virtual ref, and record the handle in `checks.rename`; both runs reported `renamed_during: "attach"`, with the superseded `virtual:` id still resolving to the new ref and a prompt through it answered 202.
 `agentpane_pi_steer_probe.py` still waits for `renamed` and will time out the same way; `fork_attach_probe.py` takes its ref from the attach reply and only scans for `renamed` in `follow_renames`, which now never matches, so it would miss a later move rather than hang.
-Neither was changed here; OW-niwusi moved both to the handle, and moved this probe's later waits too, which this change left keyed by the adopted ref ("The live Pi probes follow a session by its handle (OW-niwusi)" at the end of this file).
+Neither was changed here; OW-niwusi moved both to the handle, retired this probe's wait for that snapshot before the first prompt, which made a rename on the first prompt a timeout, and moved its later waits too, which this change left keyed by the adopted ref ("The live Pi probes follow a session by its handle (OW-niwusi)" at the end of this file).
 
 **The rest of each Pi run behaved as the earlier sections recorded.**
 The tree was `bun → bwrap → bwrap → pi` with one Pi descendant, and `copied_credential_files` was still `["auth.json", "models-store.json", "settings.json"]`.
