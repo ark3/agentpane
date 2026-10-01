@@ -58,14 +58,14 @@ is the one that decides the verdict.
 
 `AGENTS.md` pins the home server's Pi to one model and says the flag is the
 whole of the constraint, because `~/.pi/agent/settings.json` is mutable and was
-for one day unreadable. `agentpane_pi_smoke.py` sends no `--model` and gets away
-with it only because that file happens to name the pinned model. This probe
-passes it explicitly, through the create-session route's `model` field, which
-reaches `buildPiSpawnCommand`'s `--model`: the long first turn's length is a
-criterion here, so a run that silently answered on a different model would not
-be measuring what it reports. The model that actually answered is read back off
-the wire regardless, and it is the wire string -- carrying a provider prefix the
-settings file's string does not -- that the write-up names.
+for one day unreadable. This probe passes it explicitly, as
+`agentpane_pi_smoke.py` has since OW-yehisa, through the create-session route's
+`model` field, which reaches `buildPiSpawnCommand`'s `--model`: the long first
+turn's length is a criterion here, so a run that silently answered on a
+different model would not be measuring what it reports. The model that actually
+answered is read back off the wire regardless, and it is the wire string --
+carrying a provider prefix the settings file's string does not -- that the
+write-up names.
 
 This makes real model calls. It never invokes Codex or Claude, copies Pi
 credentials by name without reading them, and scopes process inspection to the

@@ -62,6 +62,7 @@ The same assembled application path with a real Pi process, plus the three thing
 ```bash
 python3 agentpane_pi_smoke.py --workspace /home/asa0717/src/agentpane
 python3 agentpane_pi_smoke.py --workspace ... --tool-check   # also assert a toolCall block
+python3 agentpane_pi_smoke.py --model <ref>                   # default is the model AGENTS.md pins
 ```
 
 Same guarantees as the Codex harness: temporary writable state dir
@@ -72,8 +73,10 @@ inspection scoped to this run's server tree. It never invokes Codex.
 the model has to choose to call a tool. It passes; it is separated so the
 default run stays deterministic.
 
-Verified with: `pi` 0.85.1 on the home server, 2026-09-13, both bare and with `--tool-check`; those were its first runs on that machine.
-See `docs/MANUAL_TESTING.md`, "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi), for what the evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
+It passes `--model` explicitly, through the create-session route's `model` field, defaulting to the `openrouter/deepseek/deepseek-v4.1-flash:high` that `AGENTS.md` pins, and records that flag in `model_flag` and `checks.model.flag_passed` beside the model and level read back off the wire (OW-yehisa).
+
+Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
+Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi) for what that evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
 
 ## `agentpane_pi_steer_probe.py`
 
@@ -93,7 +96,7 @@ The tap is a `pi` shim first on the server's PATH that pipes the real binary thr
 Pi's exit status does not pass through — `sh` reports the pipeline's last stage — which costs this probe nothing because it never reads the agent's exit code, but has to be taken out of the pipeline by anyone copying the shim to assert on how Pi exited.
 The tap preserves order, not time — `tee` stamps nothing — so every duration in the record is measured from a stamp taken immediately before the request that caused the event, and positions in the tap are pinned by reading its line count at the instant the mid-turn POST goes out.
 
-It **passes `--model` explicitly**, unlike `agentpane_pi_smoke.py`, through the create-session route's `model` field.
+It **passes `--model` explicitly**, as `agentpane_pi_smoke.py` has since OW-yehisa, through the create-session route's `model` field.
 The first turn's length is a criterion here, so a run that silently answered on whatever `~/.pi/agent/settings.json` happened to name would not be measuring what it reports; the model that answered is still read back off the wire and recorded.
 
 Writes no fixtures.

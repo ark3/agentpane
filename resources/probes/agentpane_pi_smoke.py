@@ -22,6 +22,18 @@ Three things only this harness can establish:
   and assumed for Pi. Killing the server has to reach an agent two `exec`s
   down inside `bwrap`, or every closed session leaks a live agent.
 
+## The model flag
+
+`AGENTS.md` pins the home server's Pi to one model and says the flag is the
+whole of the constraint, because `~/.pi/agent/settings.json` is mutable and was
+for one day unreadable, when Pi resolved no model at all. So the session is
+created with an explicit `model`, defaulting to that pin, which reaches
+`buildPiSpawnCommand`'s `--model` (`src/server/adapters/pi/spawn.ts`). Until
+OW-yehisa this probe sent none and answered on whatever the settings file named.
+The model that answered is still read back off the wire and recorded beside the
+flag; the wire string carries a provider prefix the settings file's does not
+and no thinking-level suffix the flag does.
+
 This makes real model calls. It never invokes Codex and never prints
 credential contents; process inspection is scoped to this run's server tree by
 `agentpane_live_support`, which owns that guarantee for both harnesses.
@@ -65,6 +77,7 @@ PORT = 44174
 # Credentials plus the model catalogue and trust state -- the same set
 # `capture_fixtures.py` copies, which is enough for a turn. Copied by name.
 PI_STATE_FILES = ("auth.json", "models.json", "models-store.json", "settings.json", "trust.json")
+PINNED_MODEL = "openrouter/deepseek/deepseek-v4.1-flash:high"
 
 
 def pi_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -158,6 +171,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument(
+        "--model",
+        default=PINNED_MODEL,
+        help="model ref passed to Pi's --model (default: the model AGENTS.md pins)",
+    )
+    parser.add_argument(
         "--credential-source",
         type=Path,
         default=Path.home() / ".pi" / "agent",
@@ -201,6 +219,7 @@ def main() -> int:
         "pi_version": subprocess.run(
             ["pi", "--version"], capture_output=True, text=True, check=True
         ).stdout.strip(),
+        "model_flag": args.model,
         "transport_level": "built client reachability plus production REST/SSE; no browser automation",
         "temporary_state_home": str(state_home),
         "copied_credential_files": copied,
@@ -238,7 +257,7 @@ def main() -> int:
 
         # -- 1. spawn through the real wrapper chain ------------------------
         create_status, created = http.json(
-            "POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi"}
+            "POST", "/api/sessions", {"cwd": str(workspace), "backend": "pi", "model": args.model}
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
@@ -364,13 +383,14 @@ def main() -> int:
         evidence["checks"]["text_stream"] = {"result": "pass", **growth}
         evidence["checks"]["idle"] = {"result": "pass", **idle}
 
-        # Which model actually answered. The run sends no `--model`, so Pi
-        # resolved its own default out of the `settings.json` copied into the
-        # throwaway state home -- a mutable file -- and the criteria that depend
-        # on the model most (a tool call happening at all, how much text a long
-        # turn produces) cannot be read without it. `snapshot` and `status` both
-        # carry it, but it is null until `start()`'s `get_state` answers, so take
-        # the latest one the settled turn left on the wire.
+        # Which model actually answered. The run passes `--model` (see the
+        # module doc), but reading back is what shows Pi honoured it, and the
+        # criteria that depend on the model most (a tool call happening at all,
+        # how much text a long turn produces) cannot be read without it.
+        # `snapshot` and `status` both carry it, but it is null until `start()`'s
+        # `get_state` answers, so take the latest one the settled turn left on
+        # the wire. The thinking level rides beside it as `effort`, and is the
+        # half of the flag a settings file naming the same model cannot fake.
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in reversed(events):
                 if event.get("session") != real_ref:
@@ -379,13 +399,18 @@ def main() -> int:
                     continue
                 model = event.get("model")
                 if isinstance(model, str) and model:
-                    return {"at": stamp, "model": model, "event_type": event.get("type")}
+                    return {
+                        "at": stamp,
+                        "model": model,
+                        "effort": event.get("effort"),
+                        "event_type": event.get("type"),
+                    }
             return None
 
         model_seen = resolved_model(stream.snapshot())
         if model_seen is None:
             raise RuntimeError("no settled snapshot or status event named the model Pi resolved")
-        evidence["checks"]["model"] = {"result": "pass", **model_seen}
+        evidence["checks"]["model"] = {"result": "pass", "flag_passed": args.model, **model_seen}
 
         # Any dialog Pi raised is worth recording either way: whether these
         # fire at all under the sandbox is an open question, and each one
