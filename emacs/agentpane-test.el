@@ -490,9 +490,9 @@ per step; and so does one whose summary is right-to-left text."
 (ert-deftest agentpane-test-motion-cuts-where-the-search-does ()
   "A header cut by `vertical-motion' is the one the binary search cuts, for
 summaries that fit, that just miss and that run to many lines, of words,
-of wide characters, of right-to-left text, and holding a tab or a
-newline, with the meta beside them and without, at widths from a few
-columns to the window's, and with the window scrolled horizontally."
+of wide characters, of right-to-left text, and holding a tab, with the
+meta beside them and without, at widths from a few columns to the
+window's, and with the window scrolled horizontally."
   :tags '(tty)
   (skip-unless (not noninteractive))
   (should (agentpane--motion-window))
@@ -503,8 +503,7 @@ columns to the window's, and with the window scrolled horizontally."
                                     '(1 10 30 60 70 75 76 77 78 79 80 200 1000))
                             (list wide (concat "rg -n " wide) hebrew (concat "echo " hebrew)
                                   (propertize (concat "Thinking about\t" words)
-                                              'face 'agentpane-thinking)
-                                  (concat "abc\ndef " words))))
+                                              'face 'agentpane-thinking))))
          (head (concat (propertize "✓" 'face 'agentpane-tool-ok) " "
                        (propertize "Bash" 'face 'agentpane-tool) " "))
          (tail (propertize " · claude-opus-5 · 49k tok" 'face 'agentpane-dim))

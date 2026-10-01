@@ -1307,11 +1307,10 @@ motion to count; nothing inserted carries a `line-prefix' property of its
 own.  It turns off `word-wrap', which ends the screen line at an earlier
 space, and bidi reordering, which would break the tie between a position
 and a column in right-to-left text.
-A SUMMARY holding a tab or a newline is cut by the search instead.  A
-tab's width depends on its column, which SUFFIX laid out ahead shifts;
-and `string-pixel-width' measures the widest line of a string, where the
-motion stops at the end of the first."
-  (if (string-match-p "[\t\n]" summary)
+A SUMMARY holding a tab, as a thinking part's first line may, is cut by
+the search instead: a tab's width depends on its column, which SUFFIX
+laid out ahead shifts."
+  (if (string-match-p "\t" summary)
       (agentpane--cut-by-search fits summary suffix)
     (let* ((buffer (current-buffer))
            (cut (with-work-buffer
