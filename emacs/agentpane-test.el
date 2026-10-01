@@ -4368,31 +4368,47 @@ summaries, filtered by the request's `cwd' as the server filters it, and
 `relist' bound to a function that makes its arguments the listing and
 delivers a `sessions/changed'.  A listing asked for from a buffer in
 `failing', a list BODY may set, fails instead, running its FAILED as
-`agentpane--request' does after an error or a timeout.  A listing lands
-through `agentpane--connection', as a reply does, or through a stand-in
-while no helper is running.  The finished-turn marks start empty, and
-every buffer BODY made is killed afterwards."
+`agentpane--request' does after an error or a timeout.  One asked for
+while `holding', which BODY may set, is non-nil is answered by neither,
+and is appended to `held' as (LAND . FAIL), two functions that answer it
+later, LAND reading `listing' then.  `agentpane--connection' is a
+stand-in that counts as running, unless BODY binds it.  The finished-turn
+marks start empty, and every buffer BODY made is killed afterwards."
   (declare (indent 0))
   `(let* ((listing nil)
           (failing nil)
+          (holding nil)
+          (held nil)
+          (agentpane--connection 'connection)
+          (running (symbol-function 'jsonrpc-running-p))
           (buffers (buffer-list))
           (agentpane--listed-streaming (make-hash-table :test #'equal))
           (agentpane--finished-turns (make-hash-table :test #'equal))
           (relist (lambda (&rest summaries)
                     (setq listing summaries)
                     (agentpane--on-notification nil 'sessions/changed nil))))
-     (cl-letf (((symbol-function 'agentpane--request)
+     (cl-letf (((symbol-function 'jsonrpc-running-p)
+                (lambda (connection)
+                  (or (eq connection 'connection) (funcall running connection))))
+               ((symbol-function 'agentpane--request)
                 (lambda (method params callback &optional _always failed &rest _)
                   (when (eq method 'sessions/list)
-                    (if (memq (current-buffer) failing)
-                        (when failed (funcall failed))
-                      (let ((cwd (plist-get params :cwd))
-                            (agentpane--connection (or agentpane--connection 'connection)))
-                        (funcall callback
-                                 (vconcat (seq-filter (lambda (summary)
-                                                        (or (null cwd)
-                                                            (equal (plist-get summary :cwd) cwd)))
-                                                      listing)))))))))
+                    (let* ((buffer (current-buffer))
+                           (fail (lambda ()
+                                   (when failed
+                                     (with-current-buffer buffer (funcall failed)))))
+                           (land (lambda ()
+                                   (let ((cwd (plist-get params :cwd)))
+                                     (with-current-buffer buffer
+                                       (funcall callback
+                                                (vconcat (seq-filter
+                                                          (lambda (summary)
+                                                            (or (null cwd)
+                                                                (equal (plist-get summary :cwd) cwd)))
+                                                          listing))))))))
+                      (cond (holding (setq held (append held (list (cons land fail)))))
+                            ((memq buffer failing) (funcall fail))
+                            (t (funcall land))))))))
        (unwind-protect
            (save-window-excursion ,@body)
          (dolist (buffer (buffer-list))
@@ -4790,6 +4806,65 @@ marked (OW-vehuji, as OW-wazipa for a picker gone)."
         (with-current-buffer first (revert-buffer))
         (funcall relist (agentpane-test--summary "a" nil))
         (should (agentpane-test--finished-p second "h-a"))))))
+
+(ert-deftest agentpane-test-new-picker-keeps-the-levels-of-a-picker-gone-before-it-lands ()
+  "A second picker, whose first listing goes out while the first picker
+still lists, keeps the streaming level the first read though the first
+goes before that listing lands: a turn that ended meanwhile is marked
+\(OW-vehuji, as OW-wazipa for a picker gone after)."
+  (agentpane-test--listing
+    (let ((first (save-window-excursion (agentpane-sessions t) (current-buffer))))
+      (with-current-buffer first (rename-buffer "*agentpane sessions: first*"))
+      (funcall relist (agentpane-test--summary "a" nil))
+      (funcall relist (agentpane-test--summary "a" t))
+      (setq holding t)
+      (let ((second (save-window-excursion (agentpane-sessions t) (current-buffer))))
+        (setq holding nil)
+        (should (= (length held) 1))
+        (kill-buffer first)
+        (setq listing (list (agentpane-test--summary "a" nil)))
+        (funcall (car (pop held)))
+        (should (agentpane-test--finished-p second "h-a"))))))
+
+(ert-deftest agentpane-test-superseded-listing-failing-keeps-the-levels ()
+  "A picker's listing that fails after a later one of its own went out
+breaks nothing, whether the later one landed before or lands after: a
+turn the later one reads ended is marked, and so is one that ends after
+\(OW-vehuji)."
+  (dolist (later-lands-first '(t nil))
+    (agentpane-test--listing
+      (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
+        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
+        (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
+        (setq holding t)
+        (funcall relist (agentpane-test--summary "a" t) (agentpane-test--summary "b" t))
+        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" t))
+        (setq holding nil)
+        (let ((superseded (pop held))
+              (later (pop held)))
+          (if later-lands-first
+              (progn (funcall (car later)) (funcall (cdr superseded)))
+            (funcall (cdr superseded))
+            (funcall (car later))))
+        (funcall relist (agentpane-test--summary "a" nil) (agentpane-test--summary "b" nil))
+        (should (agentpane-test--finished-p picker "h-a"))
+        (should (agentpane-test--finished-p picker "h-b"))))))
+
+(ert-deftest agentpane-test-listing-landing-after-the-teardown-keeps-the-levels ()
+  "A listing that went out through a helper, and whose reply lands only
+after that helper's teardown, as one jsonrpc.el held back behind a
+synchronous request does (`agentpane--request'), reads levels unbroken up
+to it: the turn it reads ended is marked (OW-vehuji)."
+  (agentpane-test--listing
+    (let ((picker (save-window-excursion (agentpane-sessions t) (current-buffer))))
+      (funcall relist (agentpane-test--summary "a" nil))
+      (funcall relist (agentpane-test--summary "a" t))
+      (setq holding t)
+      (funcall relist (agentpane-test--summary "a" nil))
+      (setq holding nil)
+      (let ((agentpane--connection nil))
+        (funcall (car (pop held))))
+      (should (agentpane-test--finished-p picker "h-a")))))
 
 (ert-deftest agentpane-test-picker-does-not-mark-a-turn-that-ended-while-the-helper-was-gone ()
   "A session listed streaming through a helper that has since exited and

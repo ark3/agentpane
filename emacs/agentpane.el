@@ -4127,40 +4127,56 @@ the rows the filter keeps.")
 (defvar agentpane--listed-streaming (make-hash-table :test #'equal)
   "The streaming level the last listing read for each session the server
 holds: a hash table from the session's handle to t or nil.
-Read only while the listings feeding it are unbroken, and emptied by the
-first listing to land after a break, which then only reads the levels
-afresh; see `agentpane--listed-through'.")
+Read by a listing only while its picker's listings are unbroken, and
+emptied first by one that lands otherwise, which then only reads the
+levels afresh; see `agentpane--listed-through'.")
 
 (defvar-local agentpane--listed-through nil
-  "In a picker, the connection its last listing landed through, or nil
-when it has had none land, or one failed since.
+  "In a picker, the connection its listings are unbroken through, or nil.
 A listing reads the levels `agentpane--listed-streaming' holds only when
-some picker's last listing landed through the current connection with
-none failing since; otherwise the feed broke, and it empties them first
-\(`agentpane--refetch-sessions'), the one place that does.  A level is
+it went out through this connection; otherwise it empties them first
+\(`agentpane--refetch-sessions', the one place that does).  A level is
 read at a turn's start and compared at its end, so it means something
 only while every `sessions/changed' between is answered by a listing that
 lands; across a break, a turn that ended meanwhile would read as ended
-unseen at the next listing, watched or not.  The feed breaks three ways.
-The last picker goes, killed or turned to another major mode, so that
-nothing asks: this variable goes with it, and the next picker's first
-listing finds no picker unbroken.  A picker's listing fails, by an error,
-a timeout, or a non-local exit, and its FAILED sets this nil; a
-superseded listing that fails breaks it too, though a later one may have
-landed, which costs at most a mark.  The helper exits, so that nothing
-is heard: every picker's connection is then one torn down, which the
-next helper's never is (`agentpane--connection'), whether or not a
-listing was out to fail.
-One picker's break is no break while another's listings still land: the
-levels are one table, every picker asks for every session, and a mark is
-about the session, not the picker that drew it (`agentpane--finished-turns').
-So a picker going, or its listing failing, while another lists keeps them,
-and a second picker's first listing may mark (OW-wazipa: the levels were
-once emptied as a picker was made, wiping those a second still read, and a
-turn that ended before the new picker's first listing lost its mark).
+unseen at the next listing, watched or not.
+A listing sets this as it lands, to the connection it went out through,
+or, for one that started the helper, the connection then current.  A
+listing sets it too as it goes out, joining the feed, when some picker
+is then unbroken through the connection it goes out on, this one or
+another: a second picker made while the first lists reads its levels,
+even should the first go before that listing lands (OW-wazipa: the
+levels were once emptied as a picker was made, wiping those a second
+still read, and a turn that ended before the new picker's first listing
+lost its mark).  So one picker going, or its listing failing, while
+another is unbroken keeps the levels for that one.
+It is nil before any listing has landed or joined, and after the
+picker's latest listing failed, by an error, a timeout, or a non-local
+exit; an earlier listing failing breaks nothing, as the later one,
+already out, answers instead, as a superseded one's reply is dropped
+\(`agentpane--latest-listing').  It is nil too after a listing that
+started the helper landed only after that helper's teardown, as a reply
+jsonrpc.el held back behind a synchronous request can
+\(`agentpane--request'), there being no connection to name.
+So the feed breaks three ways.  The last picker goes, killed or turned
+to another major mode, so that nothing asks: this variable goes with it,
+and the next picker's first listing goes out with none to join.  A
+picker's latest listing fails.  The helper exits, so that nothing is
+heard: every picker's connection is then one torn down, which the next
+helper's never is (`agentpane--connection'), whether or not a listing
+was out to fail.
+A listing that goes out with no picker unbroken empties the levels as it
+lands, even should another picker's listing have landed meanwhile and
+read them afresh: a turn that ended within that round trip loses its
+mark.
 Until OW-vehuji the last picker going alone emptied them, by a hook that
 looked for another, and a listing that failed or a helper that exited
 left them standing.")
+
+(defvar-local agentpane--latest-listing nil
+  "In a picker, a token unique to the latest listing it sent, which a
+listing's FAILED compares with its own: one that has been superseded
+breaks nothing (`agentpane--listed-through').")
 
 (defvar agentpane--finished-turns (make-hash-table :test #'equal)
   "The sessions marked as having finished a turn unseen: a hash table from
@@ -4477,11 +4493,11 @@ its own unfiltered listing (`filteredSummaries' in src/client/App.svelte),
 so that `agentpane--note-turns' reads the streaming level of a session the
 picker does not show: one listed streaming, then filtered out while its
 turn ended in plain sight, would otherwise read as ended unseen when
-listed again.  A listing that lands first empties those levels when the
-listings feeding them broke, and one that fails breaks them; see
-`agentpane--listed-through'.  The server walks every session's file
-whatever the filter, and filters after, so what that costs is the size
-of the reply.
+listed again.  A listing that lands first empties those levels when its
+picker's listings were not unbroken, and one that fails while still the
+latest breaks them; see `agentpane--listed-through'.  The server walks
+every session's file whatever the filter, and filters after, so what
+that costs is the size of the reply.
 That was measured and left (Emacs 31.1 with jsonrpc.el 1.0.29, bun 1.4.0,
 measured 2026-09-27; docs/MANUAL_TESTING.md, OW-wazipa): on the home
 server's 369 stored sessions the reply was 116 KB, which the helper
@@ -4493,32 +4509,38 @@ The server's own `cwd' filter differs in one row: it also lists a live
 session under the cwd it was created with when the file its CLI wrote
 records another (`list' in src/server/http/session-manager.ts), which
 neither client now asks it for."
-  (agentpane--request 'sessions/list nil
-                      (lambda (summaries)
-                        (let ((summaries (append summaries nil)))
-                          ;; A reply jsonrpc.el handed on after the teardown
-                          ;; lands with no connection (`agentpane--request').
-                          (unless (and agentpane--connection
-                                       (seq-some (lambda (buffer)
-                                                   (eq (buffer-local-value
-                                                        'agentpane--listed-through buffer)
-                                                       agentpane--connection))
-                                                 (buffer-list)))
-                            (clrhash agentpane--listed-streaming))
-                          (agentpane--note-turns summaries)
-                          (setq agentpane--listed-through agentpane--connection)
-                          (setq agentpane--listing summaries)
-                          (setq tabulated-list-entries
-                                (mapcar #'agentpane--session-entry
-                                        (if agentpane--cwd
-                                            (seq-filter (lambda (summary)
-                                                          (equal (plist-get summary :cwd)
-                                                                 agentpane--cwd))
-                                                        summaries)
-                                          summaries))))
-                        (tabulated-list-print t))
-                      nil
-                      (lambda () (setq agentpane--listed-through nil))))
+  (let ((through agentpane--connection)
+        (token (list 'listing)))
+    (setq agentpane--latest-listing token)
+    (when (and through
+               (seq-some (lambda (buffer)
+                           (eq (buffer-local-value 'agentpane--listed-through buffer) through))
+                         (buffer-list)))
+      (setq agentpane--listed-through through))
+    (agentpane--request 'sessions/list nil
+                        (lambda (summaries)
+                          (let ((summaries (append summaries nil)))
+                            ;; One that went out with no helper running started
+                            ;; one, which no listing has landed through yet: a
+                            ;; break, where nil would match a picker never fed.
+                            (unless (and through (eq agentpane--listed-through through))
+                              (clrhash agentpane--listed-streaming))
+                            (agentpane--note-turns summaries)
+                            (setq agentpane--listed-through (or through agentpane--connection))
+                            (setq agentpane--listing summaries)
+                            (setq tabulated-list-entries
+                                  (mapcar #'agentpane--session-entry
+                                          (if agentpane--cwd
+                                              (seq-filter (lambda (summary)
+                                                            (equal (plist-get summary :cwd)
+                                                                   agentpane--cwd))
+                                                          summaries)
+                                            summaries))))
+                          (tabulated-list-print t))
+                        nil
+                        (lambda ()
+                          (when (eq token agentpane--latest-listing)
+                            (setq agentpane--listed-through nil))))))
 
 (define-derived-mode agentpane-sessions-mode tabulated-list-mode "agentpane-sessions"
   "Major mode listing agentpane sessions.
