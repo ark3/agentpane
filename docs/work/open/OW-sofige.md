@@ -20,7 +20,8 @@ This matters most for OW-fagemo, which wants the abort phase to tear down a genu
 ## What this needs
 
 A length read against the aborted turn's own message rather than the session.
-The SSE events carry message identity — see how `growing_assistant_text` and `max_assistant_length` walk `upsert` and `snapshot` payloads in `resources/probes/agentpane_live_support.py` — so a helper keyed on the message id that the aborted turn's `upsert` events name would do it, and it belongs in the shared support module because both probes need it.
+The SSE events carry message identity — see how `growing_assistant_text` and `max_assistant_length` walk `upsert` and `snapshot` payloads in `resources/probes/agentpane_live_support.py` — so a helper keyed on the message the aborted turn's `upsert` events name would do it, and it belongs in the shared support module because both probes need it.
+The wire names a message by position, not by id: an `upsert` carries `index`, the position in the very array `snapshot.messages` addresses (`src/shared/protocol.ts`, the `upsert` member of the SSE event union, and `ForkPoint.index` beside it); `PaneMessage` carries no id of its own (amended 2026-09-30 on checking the card against the source).
 The growth check should then compare that message's length rather than the session maximum, which is what makes "the transcript stopped growing" a claim about the turn that was aborted.
 
 ## Done when
