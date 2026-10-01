@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The CODEX_TOOL_NAMES docblock says all five collab tools share the name subagent, and the protocol now has nine
@@ -12,3 +13,8 @@ The paragraph's point still holds for every value: they all take the `collabAgen
 The comment inside that arm, which says the operations other than `spawnAgent` and `wait` take it untested, should say how many that is.
 
 Done when the docblock names the protocol's tools without a count that the next bindings update can falsify, or cites `CollabAgentTool` for the list, and the arm's comment agrees; docs-in-code only, so `bun run check` passing is the whole check.
+
+## Close note
+
+The CODEX_TOOL_NAMES docblock in src/server/adapters/codex/mapping.ts now cites the protocol's CollabAgentTool for the list instead of counting five, the collabAgentToolCall arm's comment says "the other operations" without a count, and the same stale count in src/client/render/tools/registry.ts ("all five under one name") went with them.
+Comments only; bun run check passed (56 files, 1612 tests). Landed in 8665693's successor on main.
