@@ -4127,8 +4127,40 @@ the rows the filter keeps.")
 (defvar agentpane--listed-streaming (make-hash-table :test #'equal)
   "The streaming level the last listing read for each session the server
 holds: a hash table from the session's handle to t or nil.
-Read only while some picker is fed listings, and emptied when the last one
-goes (`agentpane--picker-gone').")
+Read only while the listings feeding it are unbroken, and emptied by the
+first listing to land after a break, which then only reads the levels
+afresh; see `agentpane--listed-through'.")
+
+(defvar-local agentpane--listed-through nil
+  "In a picker, the connection its last listing landed through, or nil
+when it has had none land, or one failed since.
+A listing reads the levels `agentpane--listed-streaming' holds only when
+some picker's last listing landed through the current connection with
+none failing since; otherwise the feed broke, and it empties them first
+\(`agentpane--refetch-sessions'), the one place that does.  A level is
+read at a turn's start and compared at its end, so it means something
+only while every `sessions/changed' between is answered by a listing that
+lands; across a break, a turn that ended meanwhile would read as ended
+unseen at the next listing, watched or not.  The feed breaks three ways.
+The last picker goes, killed or turned to another major mode, so that
+nothing asks: this variable goes with it, and the next picker's first
+listing finds no picker unbroken.  A picker's listing fails, by an error,
+a timeout, or a non-local exit, and its FAILED sets this nil; a
+superseded listing that fails breaks it too, though a later one may have
+landed, which costs at most a mark.  The helper exits, so that nothing
+is heard: every picker's connection is then one torn down, which the
+next helper's never is (`agentpane--connection'), whether or not a
+listing was out to fail.
+One picker's break is no break while another's listings still land: the
+levels are one table, every picker asks for every session, and a mark is
+about the session, not the picker that drew it (`agentpane--finished-turns').
+So a picker going, or its listing failing, while another lists keeps them,
+and a second picker's first listing may mark (OW-wazipa: the levels were
+once emptied as a picker was made, wiping those a second still read, and a
+turn that ended before the new picker's first listing lost its mark).
+Until OW-vehuji the last picker going alone emptied them, by a hook that
+looked for another, and a listing that failed or a helper that exited
+left them standing.")
 
 (defvar agentpane--finished-turns (make-hash-table :test #'equal)
   "The sessions marked as having finished a turn unseen: a hash table from
@@ -4445,8 +4477,11 @@ its own unfiltered listing (`filteredSummaries' in src/client/App.svelte),
 so that `agentpane--note-turns' reads the streaming level of a session the
 picker does not show: one listed streaming, then filtered out while its
 turn ended in plain sight, would otherwise read as ended unseen when
-listed again.  The server walks every session's file whatever the
-filter, and filters after, so what that costs is the size of the reply.
+listed again.  A listing that lands first empties those levels when the
+listings feeding them broke, and one that fails breaks them; see
+`agentpane--listed-through'.  The server walks every session's file
+whatever the filter, and filters after, so what that costs is the size
+of the reply.
 That was measured and left (Emacs 31.1 with jsonrpc.el 1.0.29, bun 1.4.0,
 measured 2026-09-27; docs/MANUAL_TESTING.md, OW-wazipa): on the home
 server's 369 stored sessions the reply was 116 KB, which the helper
@@ -4461,7 +4496,17 @@ neither client now asks it for."
   (agentpane--request 'sessions/list nil
                       (lambda (summaries)
                         (let ((summaries (append summaries nil)))
+                          ;; A reply jsonrpc.el handed on after the teardown
+                          ;; lands with no connection (`agentpane--request').
+                          (unless (and agentpane--connection
+                                       (seq-some (lambda (buffer)
+                                                   (eq (buffer-local-value
+                                                        'agentpane--listed-through buffer)
+                                                       agentpane--connection))
+                                                 (buffer-list)))
+                            (clrhash agentpane--listed-streaming))
                           (agentpane--note-turns summaries)
+                          (setq agentpane--listed-through agentpane--connection)
                           (setq agentpane--listing summaries)
                           (setq tabulated-list-entries
                                 (mapcar #'agentpane--session-entry
@@ -4471,7 +4516,9 @@ neither client now asks it for."
                                                                  agentpane--cwd))
                                                         summaries)
                                           summaries))))
-                        (tabulated-list-print t))))
+                        (tabulated-list-print t))
+                      nil
+                      (lambda () (setq agentpane--listed-through nil))))
 
 (define-derived-mode agentpane-sessions-mode tabulated-list-mode "agentpane-sessions"
   "Major mode listing agentpane sessions.
@@ -4484,31 +4531,11 @@ neither client now asks it for."
          ("Workspace" 16 t)
          ("Preview" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
-  (add-hook 'kill-buffer-hook #'agentpane--picker-gone nil t)
-  (add-hook 'change-major-mode-hook #'agentpane--picker-gone nil t)
   (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
   (add-variable-watcher 'agentpane--handle #'agentpane--binding-changed)
   (add-variable-watcher 'agentpane--session #'agentpane--binding-changed)
   (setq-local revert-buffer-function #'agentpane--refetch-sessions)
   (tabulated-list-init-header))
-
-(defun agentpane--picker-gone ()
-  "Forget every streaming level when the last picker goes: this buffer, a
-picker being killed or changing major mode, is the only one left.
-Nothing lists while there is no picker, so a level kept past the last one
-would read a turn that ended meanwhile, watched or not, as ended unseen at
-the next picker's first listing.  The marks stay: each is a turn that did.
-The levels go here, where they stop being fed, and not when a picker is
-made: a clear there wiped the levels a second picker still read, and a
-turn that ended before the new picker's first listing lost its mark
-\(OW-wazipa).  Re-running the mode in the one picker, by
-`M-x agentpane-sessions-mode' there, still forgets them, as its own
-`change-major-mode-hook' runs first; `agentpane-sessions' never re-runs it."
-  (unless (seq-some (lambda (buffer)
-                      (and (not (eq buffer (current-buffer)))
-                           (eq (buffer-local-value 'major-mode buffer) 'agentpane-sessions-mode)))
-                    (buffer-list))
-    (clrhash agentpane--listed-streaming)))
 
 (defun agentpane--revert-pickers ()
   "Refetch every picker buffer's listing."
