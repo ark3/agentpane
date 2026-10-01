@@ -48,6 +48,7 @@ function makeShell() {
 describe("ChildProcessShell", () => {
 	it("reports a child that has not closed within the deadline after SIGKILL through the exit channel, once (OW-sozopu)", async () => {
 		vi.useFakeTimers();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const { child, shell, onExit } = makeShell();
 			const stopping = shell.kill();
@@ -63,11 +64,16 @@ describe("ChildProcessShell", () => {
 			expect(code).toBeNull();
 			expect(signal).toBeNull();
 			expect(error.message).toMatch(/SIGKILL/);
+			// Every caller has let go of its exit listeners by the time it kills,
+			// so the survivor goes to stderr as well (OW-tozuyo).
+			expect(logged).toHaveBeenCalledOnce();
+			expect(String(logged.mock.calls[0]?.[0])).toMatch(/SIGKILL/);
 
 			// A close arriving after the shell gave up is not a second death.
 			child.emit("close", null, "SIGKILL");
 			expect(onExit).toHaveBeenCalledOnce();
 		} finally {
+			logged.mockRestore();
 			vi.useRealTimers();
 		}
 	});

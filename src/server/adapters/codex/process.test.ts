@@ -202,6 +202,8 @@ describe("Codex process lifecycle", () => {
 
 	it("escalates a stuck termination and remains bounded", async () => {
 		vi.useFakeTimers();
+		// The survivor report the shell writes to stderr (OW-tozuyo).
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const { child, proc } = spawnHarness();
 			const stopping = proc.kill();
@@ -213,6 +215,7 @@ describe("Codex process lifecycle", () => {
 
 			expect(child.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
 		} finally {
+			logged.mockRestore();
 			vi.useRealTimers();
 		}
 	});

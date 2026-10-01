@@ -1327,6 +1327,7 @@ All three backends' children run in one shell, `ChildProcessShell` in `src/serve
 - **A child that outlives SIGKILL is given up on, not waited for.**
   The kill escalation is SIGTERM, a bounded grace, SIGKILL, a second bounded grace.
   A child not closed `KILL_GRACE_MS` after SIGKILL gets a synthetic exit report naming it, and teardown resolves anyway, because a shutdown that hangs forever is its own failure.
+  Every caller of `kill()` has let go of its exit listeners before it kills, so that report reaches no adapter; the shell also writes the survivor to the server's stderr before `kill()` resolves, so at shutdown it is out before the server exits (OW-tozuyo).
   That report does not wait for stdio to drain, so on this path alone "`close` fires strictly after stdio drains" does not hold; a `close` arriving after it is not reported again.
 
 ## Testing strategy

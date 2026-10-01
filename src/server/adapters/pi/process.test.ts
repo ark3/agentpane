@@ -1695,6 +1695,7 @@ describe("PiAdapter teardown", () => {
 
 	it("escalates to SIGKILL when the child ignores SIGTERM", async () => {
 		vi.useFakeTimers();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const h = makeHarness();
 			await startAdapter(h);
@@ -1710,7 +1711,14 @@ describe("PiAdapter teardown", () => {
 			// A child that outlives SIGKILL must not hang shutdown forever.
 			await vi.advanceTimersByTimeAsync(1_000);
 			await expect(disposing).resolves.toBeUndefined();
+			// Nor go unreported: a disposed adapter raises no `onError`, and this
+			// is the call shutdown makes, so stderr is where the survivor goes
+			// (OW-tozuyo).
+			expect(h.errors).toEqual([]);
+			expect(logged).toHaveBeenCalledOnce();
+			expect(String(logged.mock.calls[0]?.[0])).toMatch(/Pi process did not close within 1000ms of SIGKILL/);
 		} finally {
+			logged.mockRestore();
 			vi.useRealTimers();
 		}
 	});

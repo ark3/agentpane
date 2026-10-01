@@ -182,10 +182,12 @@ export class ChildProcessShell {
 	 * error naming the survivor, and a `close` arriving later is not reported
 	 * again. `kill()` itself still resolves, because callers read that as their
 	 * licence to exit and a shutdown that hangs forever is its own failure.
-	 * As of OW-sozopu nobody hears that report: every caller of `kill()` has let
-	 * go of its listeners first -- Codex's connection has no holders left,
+	 * Nobody hears that report through `onExit`: every caller of `kill()` has
+	 * let go of its listeners first -- Codex's connection has no holders left,
 	 * Claude's ownership is no longer live, and Pi reports no `onError` once
-	 * disposed.
+	 * disposed. So the shell also writes the survivor to the server's stderr
+	 * itself, before `kill()` resolves; at shutdown the server exits right
+	 * after, and stderr is the one place a person still reads (OW-tozuyo).
 	 */
 	kill(): Promise<void> {
 		if (this.closed) return Promise.resolve();
@@ -206,7 +208,9 @@ export class ChildProcessShell {
 		if (await this.closesWithin(TERMINATE_GRACE_MS)) return;
 		this.child.kill("SIGKILL");
 		if (await this.closesWithin(KILL_GRACE_MS)) return;
-		this.settle(null, null, `${this.labels.process} did not close within ${KILL_GRACE_MS}ms of SIGKILL`);
+		const reason = `${this.labels.process} did not close within ${KILL_GRACE_MS}ms of SIGKILL`;
+		console.error(reason);
+		this.settle(null, null, reason);
 	}
 
 	private closesWithin(milliseconds: number): Promise<boolean> {
