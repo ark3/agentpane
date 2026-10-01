@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Codex subagent rollout from 0.153.0 through 0.154.0 that takes the preview's item path no longer shows the parent messages it copied inline, which the preview drew before OW-luvema
@@ -32,3 +33,11 @@ Measure that first, on a real 0.153.x subagent thread, on the home server with `
 - The live measurement is recorded in `docs/MANUAL_TESTING.md`.
 - Whatever it shows, the "draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied" test in `src/server/sessions/preview.test.ts` asserts the preview matches it, and the comment beside that assertion cites the measurement; where that changes the preview, the test went red first.
 - `historyBase`'s docblock no longer describes the loss as unexplained.
+
+## Close note
+
+Measured live on the home server 2026-10-01 on codex-cli 0.157.1 against subagent rollouts written by 0.153.0, 0.153.4 and 0.154.0, each in a throwaway CODEX_HOME: loaded through its parent, a subagent's thread holds only its own reasoning, agentMessage and commandExecution items and no userMessage, so neither the copied parent prompts nor its own task appear live; agentpane's hydrate of those turns and the preview agreed at every position (16/16, 25/25, 16/16).
+So the preview leaving out the copied parent messages matches live, and the code stays as OW-luvema left it.
+Recorded in docs/MANUAL_TESTING.md, "A Codex subagent's live thread holds none of the parent messages its rollout copies (OW-hagito)"; the preview.test.ts test "draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied" now cites it and was watched red by forcing projectRollout onto its response_item fallback; historyBase's docblock says the loss matches live.
+The dispatching session reproduced the resume refusal, the empty thread/read and the through-parent item counts independently.
+The run found that a plain thread/resume of such a subagent is refused on 0.157.1 ("resume the parent first"), so attaching one from the picker fails; filed as OW-filasi.
