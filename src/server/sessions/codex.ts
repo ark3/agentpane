@@ -336,9 +336,14 @@ function turnSettings(line: string): CodexTurnSettings | null {
  * Of the 32 subagents from those versions, the 10 that store collab calls
  * take the fallback (`extractStoreTurn`) and draw that copy as before; the
  * other 22 draw from their own item records and show none of it, and 17 of
- * them so lose a user message the preview drew before. The ten 0.150.1
- * subagents that carry item records carry only copies of their parent's
- * `SubAgentActivity`, and draw from their `response_item`s as before.
+ * them so lose a user message the preview drew before. That matches live:
+ * on `codex-cli` 0.157.1 such a thread, loaded through its parent, holds
+ * only its own items and no `userMessage`, and agentpane's own attach is
+ * refused outright (`docs/MANUAL_TESTING.md`, "A Codex subagent's live
+ * thread holds none of the parent messages its rollout copies
+ * (OW-hagito)"). The ten 0.150.1 subagents that carry item records carry
+ * only copies of their parent's `SubAgentActivity`, and draw from their
+ * `response_item`s as before.
  */
 function historyBase(header: string): { threadId: string; endOrdinal: number } | null {
 	let parsed: unknown;

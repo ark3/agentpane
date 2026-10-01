@@ -4043,3 +4043,39 @@ The change was reverted before the commit.
 **The text turn measured what OW-niwusi recorded.**
 The first turn had streamed 153 upserts and 1211 characters when the marker went out, the cut was 158, and the `queue_update` putting it in `steering` was at 161, the lines between being the reply's `message_update`s.
 The gardening reply ran to its own `message_end` at 1103 with 10531 characters and `turn_end` at 1104; the marker came back in a 24-character assistant message at 1113 in the next round, with `agent_end` at 1115 and `agent_settled` at 1116 and none between, for `verdict: "steered_into_running_turn"` by both readings, idle 18.943 s after the POST.
+
+## A Codex subagent's live thread holds none of the parent messages its rollout copies (OW-hagito)
+
+Run on the home server 2026-10-01 on **`codex-cli 0.157.1`**, from the `card/OW-hagito` worktree at `bfdc1b1`, against three subagent rollouts written by older versions: `01a0825f-1270-...` (**0.153.0**), `01a08935-7d5e-...` (**0.153.4**, the one OW-hagito named) and `01a08bf0-2de1-...` (**0.154.0**), each `thread_source: "subagent"` at depth 1.
+Each is one of the 17 subagents that, since OW-luvema, preview from their own item records and so lose a user message their rollout copies from the parent; `01a08935` copies three of the parent's prompts, from "Please execute OW-rizima" on, after a second `session_meta`, and its own task arrives as a `response_item` of type `agent_message` whose payload is encrypted.
+The question was whether those copied messages belong in the preview, whose aim since OW-luvema is to show what attaching live shows.
+Every app-server ran in a throwaway `CODEX_HOME` under `/tmp` holding copies of `auth.json` and `config.toml` and of the three subagents' rollouts and their parents', at the same paths under `sessions/`, with a `git init`ed scratch directory as the workspace; every `thread/resume` named `model: "gpt-5.6-luna"`, and no turn was started.
+The copies mattered: the resumes appended between 800 and 2100 bytes to each copy whose size was read afterwards, and the originals under `~/.codex/sessions` kept their September sizes and mtimes.
+The drivers were throwaway scripts, not kept, and what follows is how they ran.
+
+**agentpane cannot attach such a subagent at all.**
+`CodexAdapterFactory`, with its production spawner (`direnv exec <workspace> sbox -- codex app-server`), was asked to `start({cwd, resumeId, model: "gpt-5.6-luna"})` each subagent, as an attach from the picker does.
+All three starts rejected with the app-server's answer to `thread/resume`: `cannot resume an unloaded multi-agent v2 sub-agent through its parent; resume the parent first, or use thread/read to inspect it` (code -32600).
+So the live transcript of such a subagent is no transcript, and attaching it from the picker fails.
+`bun resources/probes/agentpane_codex_history_live.ts --thread 01a08935-7d5e-7ff1-adca-be6d47a2665a`, run with the same `CODEX_HOME` and workspace, reproduces the refusal as an uncaught `CodexRpcError` at its reattach.
+The parent, `01a0891a-fd1d-...`, attached through the same factory and drew 49 messages, its three prompts among them.
+
+**Neither of the reads the refusal suggests returns any turn.**
+On a bare `codex app-server` after `initialize`, `thread/read` with `includeTurns: true` answered each subagent's thread, `status: {"type": "notLoaded"}`, with an empty `turns`, and `thread/turns/list` at `itemsView: "full"` answered an empty page, without an error either way.
+
+**Loaded through its parent, the subagent's thread holds only its own items.**
+On one bare app-server, `thread/resume` of the parent and then of the subagent both succeeded, and `thread/turns/list` at `sortDirection: "asc"`, `itemsView: "full"` -- the adapter's `readTurns` -- paged in the subagent's turns: one turn of 20 items for 0.153.4, one of 30 for 0.153.0, three of 6, 10 and 6 for 0.154.0.
+They are `reasoning`, `agentMessage` and `commandExecution` items, and not one `userMessage` among them: neither the parent's copied prompts nor the subagent's own task appears in any turn, in any form.
+For a depth-2 0.154.0 subagent, `01a08bec-5fa0-...`, resuming its parent was itself refused the same way, its parent being a subagent too; it was not pursued through the grandparent.
+
+**What agentpane would draw from those turns is what the preview draws.**
+Those turns were fed to a fresh `CodexReducer` by `hydrate`, as the adapter does after `readTurns`, and the stored rollout from `~/.codex/sessions` to `extractCodexPreviewTurns`, and the two lists of messages compared position by position on role, the first 40 characters of each text block and each tool call's name.
+They agreed at every position: 16 of 16 for 0.153.4, 25 of 25 for 0.153.0, 16 of 16 for 0.154.0.
+Both open on the subagent's first assistant message, with no prompt above it.
+
+**So the preview stays as it is.**
+The copied parent messages the preview stopped drawing at OW-luvema are absent from the live thread too, so leaving them out is matching live rather than losing something live shows; the preview drew them before only because its own mapper read the copy.
+`src/server/sessions/preview.test.ts`'s "draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied" now cites this section, and it was seen red by forcing `projectRollout` onto its `response_item` fallback, which drew the copied `first prompt` and `first reply` ahead of the subagent's own reply.
+
+**Not established.**
+Whether a subagent written by 0.157.1 is refused the same way was not tried, nor what a client would show for one attached through its parent's app-server, which agentpane does not do.

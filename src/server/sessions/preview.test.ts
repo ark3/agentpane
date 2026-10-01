@@ -960,6 +960,10 @@ describe("readSessionPreview", () => {
 
 				const turns = await readTurns({ backend: "codex", id: SUBAGENT }, { codexRoot: root });
 
+				// What live shows: loaded through its parent on 0.157.1, such a
+				// thread's turns hold only its own items, no `userMessage` at all
+				// (`docs/MANUAL_TESTING.md`, "A Codex subagent's live thread holds
+				// none of the parent messages its rollout copies (OW-hagito)").
 				expect(turns.map((turn) => previewText(turn))).toEqual(["subagent's reply"]);
 			});
 		});
