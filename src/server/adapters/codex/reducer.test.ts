@@ -32,7 +32,7 @@ import {
 
 const FIXTURES = ["text", "tool-read", "tool-edit"] as const satisfies readonly FixtureName[];
 
-const EXPECTED_ROLES: Record<Exclude<FixtureName, "compact" | "subagent">, AgentMessage["role"][]> = {
+const EXPECTED_ROLES: Record<(typeof FIXTURES)[number], AgentMessage["role"][]> = {
 	text: ["user", "assistant"],
 	"tool-read": ["user", "assistant", "assistant", "toolResult", "assistant"],
 	"tool-edit": [

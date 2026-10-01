@@ -12,9 +12,13 @@ import { readSessionPreview } from "./preview.ts";
  * reads the rollouts its inherited history lives in (OW-buligi).
  *
  * Fixtures below are synthesized store-format JSONL, matching the sibling
- * parser tests (pi.test.ts / codex.test.ts): the recorded `resources/fixtures`
- * are RPC-stream captures, a different shape from the on-disk store these
- * parsers read.
+ * parser tests (pi.test.ts / codex.test.ts), because each test needs a
+ * particular store shape and only a hand-built line carries exactly that. Most
+ * of `resources/fixtures` is RPC-stream captures, a different shape from the
+ * on-disk store. The exceptions are Codex rollouts: the `codex/*.rollout.jsonl`
+ * kept beside their streams, which codex-conformance.test.ts reads to hold the
+ * preview against the live mapper, and `codex/fork.jsonl`, which no preview
+ * test reads.
  */
 
 async function writeJsonl(file: string, lines: unknown[]): Promise<void> {

@@ -16,7 +16,19 @@ import {
 	type ThreadItem,
 } from "./protocol.ts";
 
-export type FixtureName = "text" | "tool-read" | "tool-edit" | "compact" | "subagent";
+export type FixtureName =
+	| "text"
+	| "tool-read"
+	| "tool-edit"
+	| "compact"
+	| "subagent"
+	| "plan"
+	| "interrupt"
+	| "collab-failed"
+	| "collab-multi"
+	| "long-shell"
+	| "multi-patch"
+	| "compact-rollout";
 
 const FIXTURE_DIR = fileURLToPath(new URL("../../../../resources/fixtures/codex/", import.meta.url));
 
