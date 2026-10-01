@@ -138,7 +138,11 @@ home path, but the username and hostname are still yours to check.
 ```bash
 python3 capture_fixtures.py                                # all
 python3 capture_fixtures.py --backend codex --scenario tool-edit
+python3 capture_fixtures.py --backend pi --pi-model <ref>  # default is the model AGENTS.md pins
 ```
+
+Both backends are spawned with an explicit model: Codex as `codex -m gpt-5.6-luna app-server`, recorded as `command` in the `.meta.json`, and Pi as `pi --mode rpc --no-session --model <ref>`, recorded as `model_flag` beside `models_seen`, the `provider/model` its assistant `message_end` events named (OW-yehisa).
+Neither metadata field passes through the scrub, so a capture made with a non-public model ref commits that ref.
 
 Read `../fixtures/README.md` for what was captured and what it revealed.
 

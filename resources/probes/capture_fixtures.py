@@ -51,6 +51,14 @@ sbox per D7; fixtures do not need to.
 
 Neither backend's real session store is polluted: Pi runs with `--no-session`,
 and Codex threads are started with `ephemeral: true`.
+
+Both backends are spawned with an explicit model, the one `AGENTS.md` pins,
+because the flag is the whole of that constraint: Pi's default lives in a
+mutable `settings.json` (and resolved no model at all on the day that file was
+unreadable), Codex's in `config.toml`. Pi's can be overridden with `--pi-model`.
+A Pi capture's `.meta.json` records the ref it passed (`model_flag`) beside the
+models its assistant messages named (`models_seen`); a Codex capture's records
+its `command`.
 """
 
 from __future__ import annotations
@@ -148,6 +156,7 @@ SCENARIOS: dict[str, dict] = {
 PI_STATE_FILES = ("auth.json", "models.json", "models-store.json",
                   "settings.json", "trust.json")
 CODEX_STATE_FILES = ("auth.json", "config.toml")
+PI_PINNED_MODEL = "openrouter/deepseek/deepseek-v4.1-flash:high"
 
 
 def make_state_home(real_dir: Path, names: tuple[str, ...], prefix: str) -> Path:
@@ -290,7 +299,7 @@ class Recorder:
 PI_DIALOG_METHODS = ("select", "confirm", "input", "editor")
 
 
-def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
+def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
     work = make_workspace(spec["files"])
     home = make_state_home(Path.home() / ".pi" / "agent", PI_STATE_FILES,
                            "agentpane-pihome-")
@@ -321,7 +330,7 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
         settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     proc = subprocess.Popen(
-        ["pi", "--mode", "rpc", "--no-session"],
+        ["pi", "--mode", "rpc", "--no-session", "--model", model],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         cwd=work, env=dict(os.environ, PI_CODING_AGENT_DIR=str(home)),
     )
@@ -376,6 +385,23 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
 
+    # The model that answered, read off the assistant `message_end` events Pi
+    # already sends -- no extra request, so the recorded stream is untouched.
+    # `provider/model` is the spelling the flag uses, less its level suffix.
+    # Read before the scrub, so it is the real value even when the fixture's is
+    # a placeholder.
+    models_seen: list[str] = []
+    for line in rec.raw:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        message = event.get("message") if event.get("type") == "message_end" else None
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            seen = f"{message.get('provider')}/{message.get('model')}"
+            if seen not in models_seen:
+                models_seen.append(seen)
+
     return {
         "raw": rec.raw,
         "terminated_cleanly": settled,
@@ -384,7 +410,8 @@ def capture_pi(scenario: str, spec: dict, timeout: float) -> dict:
             for line in rec.raw
             if line.startswith("{")
         ),
-        "extra": {"dialogs_seen": dialogs},
+        "extra": {"model_flag": model, "models_seen": models_seen,
+                  "dialogs_seen": dialogs},
     }
 
 
@@ -517,6 +544,8 @@ def main() -> int:
                     help="repeatable; default is all")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="seconds to wait for a turn to settle (default: 120)")
+    ap.add_argument("--pi-model", default=PI_PINNED_MODEL,
+                    help="model ref passed to Pi's --model (default: the model AGENTS.md pins)")
     ap.add_argument("--no-scrub", action="store_true",
                     help="keep real model/provider/host identifiers (do not commit these)")
     args = ap.parse_args()
@@ -541,7 +570,8 @@ def main() -> int:
                 continue
             print(f"\n=== {backend} / {scenario} ({version}) ===")
             started = time.time()
-            result = capture(scenario, spec, args.timeout)
+            kwargs = {"model": args.pi_model} if backend == "pi" else {}
+            result = capture(scenario, spec, args.timeout, **kwargs)
             elapsed = time.time() - started
 
             lines, scrubbed = (result["raw"], {}) if args.no_scrub else scrub(result["raw"])
