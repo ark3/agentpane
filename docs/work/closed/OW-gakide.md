@@ -1,5 +1,6 @@
 ---
 labels: [change, emacs]
+closed: done
 ---
 
 # agentpane-mode offers no way to open the child thread a subagent tool call names, where the browser's Open thread does (OW-benige, D19)
@@ -22,3 +23,10 @@ Since OW-luvema the stored preview draws the same subagent card, and previews ar
 The browser's behaviour is pinned by `src/client/App.test.ts` "opens the child thread a subagent card names (OW-benige)" and by `src/client/render/tools/subagent.test.ts` "opens the child thread as its own session".
 
 Done when an ERT test in `emacs/agentpane-test.el` runs the command on a subagent tool node and sees `sessions/preview` requested for the child's Codex ref, red before the change and green after, once from a live buffer and once from a preview buffer, and a test in `src/emacs/` sees `threadIds` on the node for a subagent call.
+
+## Close note
+
+Landed in 300a732 and 193f608.
+`ToolPart` in `src/emacs/protocol.ts` gains `threadIds`, derived in `src/emacs/nodes.ts` through `subagentThreadIds` for a call named `subagent` (case-insensitive, as `resolveToolRenderer` picks `SubagentTool`) and absent where it names none; the docblock's Parts section states that rule and the OW-novuye paragraph now says OW-gakide added it.
+`agentpane-open-thread`, bound to `o` in `agentpane-transcript-mode-map`, reads `threadIds` from the tool part at point (else every part of the node at point), asks with completion when there are several, and opens the child's Codex ref through `agentpane-show-transcript`, the picker's path, which sends `sessions/preview` and attaches nothing.
+Evidence: `src/emacs/nodes.test.ts` "carries the child threads a subagent call names as threadIds..." and ERT `agentpane-test-open-thread-from-a-live-buffer` and `agentpane-test-open-thread-from-a-preview-buffer`, red before and green after; `bun run check` 1612 passed, ERT 241 run, 0 unexpected.
