@@ -287,16 +287,27 @@ def main() -> int:
         # adapter's contract is that `ref` is unstable at two points, not that
         # it changes at exactly one -- so scan the whole stream and record which
         # one actually happened.
+        #
+        # There is no `renamed` event to wait for since OW-mofuho retired it
+        # (2026-09-25): a rename is said only by a snapshot under the session's
+        # handle -- which a rename never changes (D24) -- carrying the new ref.
+        handle = attached["session"].get("handle")
+        if not isinstance(handle, str) or not handle:
+            raise RuntimeError(f"attach answered no handle: {attached['session']}")
+
         def renamed(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in events:
-                if event.get("type") == "renamed" and event.get("from") == virtual_ref:
-                    return {"renamed_at": stamp, "to": event.get("session")}
+                if event.get("type") != "snapshot" or event.get("handle") != handle:
+                    continue
+                session = event.get("session")
+                if isinstance(session, dict) and not str(session.get("id", "")).startswith("virtual:"):
+                    return {"renamed_at": stamp, "to": session}
             return None
 
-        rename = stream.wait_for(renamed, 60, "the virtual id to be replaced by Pi's own (D9)")
+        rename = stream.wait_for(renamed, 60, "a snapshot under the handle naming Pi's own id (D9, D24)")
         real_ref = rename["to"]
-        if not isinstance(real_ref, dict) or real_ref.get("backend") != "pi":
-            raise RuntimeError(f"renamed event carried no Pi ref: {rename}")
+        if real_ref.get("backend") != "pi":
+            raise RuntimeError(f"the handle's snapshot carried no Pi ref: {rename}")
         if real_ref["id"].startswith("virtual:") or not real_ref["id"].endswith(".jsonl"):
             raise RuntimeError(f"Pi did not adopt a JSONL path as its id: {real_ref}")
 
@@ -309,6 +320,7 @@ def main() -> int:
             raise RuntimeError(f"the superseded id stopped resolving: HTTP {alias_status} {aliased}")
         evidence["checks"]["rename"] = {
             "result": "pass",
+            "handle": handle,
             "renamed_at": rename["renamed_at"],
             "renamed_during": "attach" if not attached_ref["id"].startswith("virtual:") else "first prompt",
             "adopted_id_is_jsonl_path": True,
