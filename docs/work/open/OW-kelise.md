@@ -32,3 +32,12 @@ Measure that before choosing, because it decides whether parity buys a real card
 - A decision is recorded in `docs/DESIGN.md` beside D19 saying whether the preview path reaches parity, with the measurement of what a preview card could actually show behind it.
 - If parity is chosen, a preview of a stored parent rollout renders the subagent card and a test driven by a committed rollout fixture asserts it, watched red first.
 - If parity is declined, D19's statement of the live-only scope is what closes this, and no code changes.
+
+## Amended 2026-09-30 by OW-zadupu
+
+Measured on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`: `resources/fixtures/codex/collab-failed.rollout.jsonl` and `collab-multi.rollout.jsonl`, each beside the stream of the same run; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+On that version the mechanism above no longer fires: no collab rollout holds a `function_call` at all, and a spawn or wait is a `custom_tool_call` named `exec` whose script calls `tools.multi_agent_v1__spawn_agent` or `tools.multi_agent_v1__wait_agent`, which the preview draws as `exec`.
+The spawn prompt is plain text in that script (`message: "Reply with exactly one word: Hello."`), not encrypted, so the bound "the prompt is not readable from the rollout" holds only for the 2026-08-28 rollout's version.
+The child's reply is recoverable on disk three ways: the wait script's output, the `<subagent_notification>` user-role message Codex writes when a child finishes (which the preview draws as a user turn, OW-mehezu), and the collab call's `item_completed` record.
+`src/server/sessions/codex-conformance.test.ts` lists the naming disagreement in `KNOWN_DIFFERENCES` under this card.
+Rollouts written by older versions still carry the `collaboration__spawn_agent` form, so a parity decision has two stored shapes to answer for.

@@ -24,3 +24,12 @@ Deferred because it is text, not a wrong name, and nobody has yet read a preview
 ## Done when
 
 A decision is recorded here or in `docs/DESIGN.md` for each of the two: fold, strip, or leave, with the live names measured and the version named.
+
+## Amended 2026-09-30 by OW-zadupu
+
+The live names this card asked to measure first are measured, on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`: `resources/fixtures/codex/long-shell.jsonl`, `multi-patch.jsonl` and `collab-*.jsonl`, each with the rollout of the same run; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+A `write_stdin` poll is folded into the same single `commandExecution` item live, so the preview's extra `exec` pair for it has no live counterpart.
+A patch is a `fileChange` live, drawn as `edit`, and an `exec` script calling `tools.apply_patch` on disk, drawn as `exec`.
+A script that calls no tool, such as the tool-list search Codex ran before a collab call, has no live item at all.
+The `Script completed` / `Wall time` / `Output:` preamble is still in the stored output on 0.157.1.
+`src/server/sessions/codex-conformance.test.ts` lists each of these in `KNOWN_DIFFERENCES` under this card, so a fold that lands shows up there as a failing entry to remove.

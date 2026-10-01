@@ -31,3 +31,10 @@ If the decision is to show it, that also means a preview test asserting the summ
 
 Load-bearing: that a reader who later finds `payload.message` sitting unused does not have to re-derive why.
 Incidental: which way it goes.
+
+## Amended 2026-09-30 by OW-zadupu
+
+Measured on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`, `resources/fixtures/codex/compact-rollout.rollout.jsonl` beside the stream of the same run; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+On that version the `compacted` record's `message` is `""`, and its only other content is an encrypted compaction item, so the preview has no summary to show either.
+Live and preview agree on that run: both draw one compaction marker with an empty summary and `tokensBefore` 11778, and `src/server/sessions/codex-conformance.test.ts` holds them to it.
+So the premise "the preview could carry a real summary" held on the 0.150.1 and 0.153.0 rollouts and does not on 0.157.1; the decision is now only what to do for rollouts older versions wrote, and recording that at `compactionTurnFor` still closes this card.

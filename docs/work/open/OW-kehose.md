@@ -51,3 +51,11 @@ changes with it -- it pins today's behaviour deliberately, so a change here
 should make it fail and then be rewritten, not deleted.
 
 Filed from OW-sumevi's close, which pinned the behaviour and flagged it.
+
+## Amended 2026-09-30 by OW-zadupu
+
+Still blocked on evidence.
+OW-zadupu added an `image-gen` scenario to `resources/probes/capture_fixtures.py` and ran it twice on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`: on the first prompt the model said the built-in `image_gen` tool was not in its session and drew an SVG instead, and on the second it answered `UNAVAILABLE`, though `codex features list` reported `image_generation` stable and enabled.
+Why the tool was not offered was not established, and no fixture was committed; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)", records the attempts.
+A capture needs a model or account that offers the tool; the scenario is in place for that run.
+Read from the code, not run: `extractStoreTurn` in `src/server/sessions/codex.ts` has no branch for an image-generation record, so the preview of a stored generated image probably shows nothing at all, where the live transcript shows `[image: image/png]`.

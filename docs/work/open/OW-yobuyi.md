@@ -24,3 +24,11 @@ The partial reply is gone from disk, so the preview cannot show it; what it can 
 
 A test fed an interrupted turn's notifications, as captured, yields an assistant message with `stopReason: "aborted"` and no usage borrowed from an earlier turn, red before the fix.
 A test fed a rollout carrying the `<turn_aborted>` user message yields no `user` node for it, red before the fix, and whatever it yields instead is shown in the preview.
+
+## Amended 2026-09-30 by OW-zadupu
+
+The wire fact the live half needed is captured, on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`: `resources/fixtures/codex/interrupt.jsonl` and `interrupt.rollout.jsonl`; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+Live, `turn/completed` for the interrupted turn carries `turn.status: "interrupted"` and `error: null`; the partial `agentMessage` got `item/started` and deltas but never `item/completed`, so `mapItem` leaves it `pending`; and no `thread/tokenUsage/updated` arrived anywhere in that turn, so Codex sent no stale `last` after the interrupt: whatever figure the partial reply shows came from an earlier turn's update, and where agentpane carries it onto this message was not traced.
+Stored, the rollout again kept no assistant message, holding a user-role `<turn_aborted>` message and a `turn_aborted` event with `reason: "interrupted"`.
+`src/server/sessions/codex-conformance.test.ts` lists both halves in `KNOWN_DIFFERENCES["interrupt"]` under this card: live `assistant pending`, preview `user`; the missing partial reply in the preview is permanent, since Codex keeps none on disk.
+`interrupt.jsonl` is the captured input this card's first done-condition test can be fed.

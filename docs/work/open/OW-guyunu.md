@@ -29,3 +29,12 @@ Fixing them now means guessing at the shape and writing tests against hand-built
 ## Done when
 
 Either a capture drives one of these shapes and the card renders it legibly with a fixture-driven test, or a run establishes the shape does not occur and that is recorded where D19 states the card's scope.
+
+## Amended 2026-09-30 by OW-zadupu
+
+Both shapes now have a capture, on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna`: `resources/fixtures/codex/collab-failed.jsonl` and `collab-multi.jsonl`, with their rollouts; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+A `wait` on an id that names no child came back `status: "failed"` with that receiver marked `notFound` and no message, which `mapItem` maps to an error result with an empty body: the empty error card, as predicted.
+A `wait` naming two finished children came back with both messages, which maps to `"Hello\n\nHello"` with nothing saying which child said which.
+A `wait` returned as soon as its first child finished and named only that child, so a multi-receiver result needed both children done before the wait; the committed run sleeps 15 seconds first.
+The protocol has moved under the "empty error card" section: as of the 0.156.0 bindings in `resources/codex-protocol/`, `CollabAgentToolCallStatus` is `"inProgress" | "completed" | "failed" | "interrupted"`.
+So the deferral's reason, that no capture showed either shape, is gone; what remains is a presentation decision for each, made against these fixtures: what text the failed card supplies when the item carries none, and how a reply is attributed to its child.

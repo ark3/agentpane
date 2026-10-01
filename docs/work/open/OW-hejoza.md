@@ -19,3 +19,8 @@ Incidental: how the preview carries the synthetic call's id.
 The item is reached only when a client other than agentpane started a turn with `toolOutput`; agentpane never sends one.
 
 Done when a test beside the existing Codex session-preview tests, fed such a record, goes red on the current reader and green after, and `bun run check` passes.
+
+## Amended 2026-09-30 by OW-zadupu
+
+OW-zadupu's captures produced no row for this card: none of its scenarios starts a turn with `toolOutput`, so no committed rollout holds a `function_call_output` without a `call_id`.
+The card stands as filed, on its 0.156.0 measurement.
