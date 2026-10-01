@@ -706,8 +706,13 @@ def capture_codex(scenario: str, spec: dict, timeout: float) -> dict:
     # own; only the parent's is kept, the others are counted.
     rollout: list[str] | None = None
     extra: dict = {}
-    if keep_rollout and state["thread_id"]:
-        path = codex_rollout_for(home, state["thread_id"])
+    if keep_rollout:
+        path = codex_rollout_for(home, state["thread_id"]) if state["thread_id"] else None
+        if path is None:
+            # Never an empty `.rollout.jsonl` written as though it were the run's.
+            shutil.rmtree(home, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)
+            raise RuntimeError(f"{scenario}: no rollout found for thread {state['thread_id']}")
         rollout = [line.decode("utf-8") for line in codex_rollout_lines(path)]
         all_rollouts = list((home / "sessions").rglob("*.jsonl")) if (home / "sessions").exists() else []
         models_seen: list[str] = []
