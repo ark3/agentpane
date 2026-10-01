@@ -40,3 +40,9 @@ If no scenario shows a type change, the outcome is a recorded delta and untouche
 Whatever a re-capture shows, record what it means for the scrub guard `OW-demuwi` left behind: a fresh capture is a fresh opportunity to leak account telemetry, and that guard is what should catch it.
 
 This needs a live Codex run on the home server -- `codex -m gpt-5.6-luna` per AGENTS.md -- and no work-laptop trip.
+
+## Amended 2026-09-30 by OW-zadupu
+
+OW-zadupu re-captured none of the five 0.147.0 fixtures: it added seven new scenarios on `codex-cli 0.157.1`, each with the rollout of its run, and kept `compact` because `reducer.test.ts`'s OW-kelomi assertions rest on its 0.147.0 figure (`compact-rollout` covers compaction on 0.157.1 instead).
+The new captures carry three event types no 0.147.0 fixture has: `account/updated`, `thread/settings/updated` and `item/plan/delta` (the last only because plan mode was driven); `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+That is not this card's per-scenario diff, since none of the new scenarios is one of the five, so the done condition above stands as written.

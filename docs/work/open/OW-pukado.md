@@ -35,3 +35,8 @@ A test covers the comparison itself against two synthetic censuses, since the re
 `resources/fixtures/README.md` says what the census is for and that a fixture is a stamped snapshot rather than a statement about the current CLI, so the next person to bump a CLI knows the diff exists and runs it instead of re-capturing everything.
 
 Note the counts are noisy by nature -- delta events scale with reply length and the same prompt does not produce the same token stream twice. Distinguishing a type that vanished from a count that drifted is the substance of this card, not an afterthought; a comparison that reports every count change will be ignored within two bumps.
+
+## Amended 2026-09-30 by OW-zadupu
+
+OW-zadupu did not wait on this card: `capture_fixtures.py` now writes an `item_census` (`item/completed` counted by item type) into every Codex `.meta.json`, and a `rollout_census` (rollout lines counted by `(type, payload.type)`) for a scenario that keeps its rollout, alongside the per-method `event_census`.
+Nothing compares one census with another yet, which is still this card's work; the new censuses give it a per-item-kind baseline the per-method one could not, since every item kind is counted under `item/completed` there.
