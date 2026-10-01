@@ -29,6 +29,9 @@ operator's infrastructure with structurally-equivalent placeholders —
 key (`model`, `provider`, `modelProvider`, `api`, `serverName`, `userAgent`),
 so tool names like `bash` and `read` are untouched and remain assertable.
 
+The scrub covers the `.jsonl` only.
+A Pi capture's `.meta.json` keeps the `--model` ref it passed (`model_flag`) and the `provider/model` its assistant messages named (`models_seen`) unscrubbed, as a Codex capture's keeps its `command` with `-m`: they are the evidence that the capture ran on the pinned model, so a capture made against a model that identifies the operator's infrastructure must not be committed as is (OW-yehisa).
+
 The by-key substitution above cannot see operator data a backend replays into
 *content*, and that gap is a trap for anyone adding a probe or scenario: Codex
 folds the host's skills manifest into the turn context, so a fork capture

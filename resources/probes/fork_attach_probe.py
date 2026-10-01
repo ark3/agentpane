@@ -46,7 +46,7 @@ harness lying, not the product failing, which is the whole reason this note is
 longer than the code it explains.
 
 Each backend is pinned to its model explicitly rather than inheriting whatever
-the settings file happens to say (AGENTS.md; OW-yehisa is that defect in the
+the settings file happens to say (AGENTS.md; OW-yehisa was that defect in the
 two smoke harnesses).
 """
 

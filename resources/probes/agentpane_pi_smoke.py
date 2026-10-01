@@ -384,13 +384,14 @@ def main() -> int:
         evidence["checks"]["idle"] = {"result": "pass", **idle}
 
         # Which model actually answered. The run passes `--model` (see the
-        # module doc), but reading back is what shows Pi honoured it, and the
-        # criteria that depend on the model most (a tool call happening at all,
-        # how much text a long turn produces) cannot be read without it.
+        # module doc), and the criteria that depend on the model most (a tool
+        # call happening at all, how much text a long turn produces) cannot be
+        # read without it. It shows what ran, not what chose it: where the
+        # settings file resolves to the same model and level, as it did on the
+        # home server on 2026-09-30, the read-back is the same either way.
         # `snapshot` and `status` both carry it, but it is null until `start()`'s
         # `get_state` answers, so take the latest one the settled turn left on
-        # the wire. The thinking level rides beside it as `effort`, and is the
-        # half of the flag a settings file naming the same model cannot fake.
+        # the wire. The thinking level rides beside it as `effort`.
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in reversed(events):
                 if event.get("session") != real_ref:
