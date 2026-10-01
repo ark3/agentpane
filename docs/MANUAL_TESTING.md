@@ -1947,7 +1947,7 @@ So whether the steer is drained inside the first agent loop or into a fresh one 
 No run cut an in-flight assistant message short.
 In every one the first reply ran to its own `message_end` before the steered user message appeared, so this measures the request being accepted mid-turn and answered without the turn ending, not a steer truncating generation — the same caveat OW-tifuha's Codex section carries.
 Neither did any turn here call a tool.
-Pi's steering is documented to deliver after the current *tool batch*, and every run was a pure text turn on an explicit "do not use tools" prompt, so the tool-batch case is untested.
+Pi's steering is documented to deliver after the current *tool batch*, and every run was a pure text turn on an explicit "do not use tools" prompt, so these runs left the tool-batch case untested; "Pi's steer waits for the whole tool batch (OW-nufitu)" measured it on `pi 0.87.1`.
 And this is the `submit()` path only: nothing here exercised `streamingBehavior: "followUp"`, which the adapter never sends, so "Pi would have queued it for a following turn had we asked" is inference and not measurement.
 
 **The discriminating check was broken on purpose first.**
@@ -3987,3 +3987,58 @@ SIGTERM left `remaining_worker_pids: []` in both.
 `python3 resources/probes/fork_attach_probe.py --skip-build` ran all three backends against their real stores, as its docblock says it must (22:28:53.140 to 22:29:28).
 The Claude Code leg, on `claude 2.1.283` with `--model haiku`, reported `"result": "pass"` with no failed step: both parent turns settled by the attach reply's handle, the fork attached under a handle of its own and answered `THREE` under it, and `refs` held one ref in each.
 The Pi and Codex legs errored at their first attach, before any of the changed code ran, because `~/.pi/agent/sessions` and `~/.codex` were mounted read-only in this session: Pi died on `ENOENT` creating its session directory there, and `codex app-server` on `failed to initialize sqlite state runtime under /home/ark3/.codex`; a `touch` in each from the session answered `Read-only file system`.
+
+## Pi's steer waits for the whole tool batch (OW-nufitu)
+
+Run on the home server 2026-09-30, between 22:46 and 22:51 local (`-04:00`), on **`pi 0.87.1`**, from the `card/OW-nufitu` worktree, each run passing `--model openrouter/deepseek/deepseek-v4.1-flash:high`; every run read back `openrouter/deepseek/deepseek-v4.1-flash`.
+`python3 resources/probes/agentpane_pi_steer_probe.py --turn tool` ran once with the build (22:46:46.663 to 22:47:24.527) and twice more with `--skip-build` (22:47:48.711 to 22:48:19.377, 22:48:19.796 to 22:48:50.527), those three from a tree at `9b08469` carrying the uncommitted probe change that was then committed unchanged as `7281022`, and a fourth time at `7281022` itself (22:49:45.169 to 22:50:15.612).
+The text turn ran once at `9b08469` plus that change, as `python3 resources/probes/agentpane_pi_steer_probe.py --skip-build` (22:48:50.944 to 22:49:17.055).
+All five reported `"result": "pass"` with every check inside passing, exited 0, and left `cleanup.result: "pass"`; the tree was `bun → bwrap → bwrap → pi → pi → tee`, the second `pi` and the `tee` being the probe's shim.
+
+**The question.**
+OW-yuyofu's runs and OW-niwusi's re-run were all pure text turns, so D16's Pi measurement never reached the case Pi's documentation describes a steer by.
+The `rpc-commands.md` shipped with `pi 0.87.1` says a `"steer"` prompt "is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call".
+A turn holding several tool calls has internal structure the steer could land in: between two calls, between their `toolResult` messages, or after the whole batch.
+
+**What the probe did.**
+`--turn tool` asks for three `bash` calls in one response, `sleep 4; echo first`, `sleep 15; echo second` and `sleep 25; echo third`.
+In all four runs the model put all three in one assistant message, and Pi started them at three consecutive tap indices, before any ended: the batch ran in parallel, which is the default `toolExecution` in the agent loop `pi` 0.87.1 bundles.
+The probe polled the tap until the 4-second call had its `tool_execution_end` and the other two had a `tool_execution_start` and no end, took that read's length as the cut, and posted the marker prompt; the session was `streaming_at_post: true` and the POST came back 202 every time.
+
+**Pi accepted the steer while two calls were still executing.**
+In every run the `queue_update` carrying the marker in `steering`, with `followUp` empty, was the first line at or past the cut, and the second and third calls' `tool_execution_end` both came after it in the tap (`executing_at_queue` named both).
+That ordering is Pi's own, so it does not depend on the probe's clock.
+
+**The steered message landed after the whole batch, and never inside it.**
+Pi let both running calls finish, each ending `isError: false` with its own output (`second\n`, `third\n`), emitted all three `toolResult` messages in call order after the last end, and closed the round with `turn_end`.
+Only then did it open a new round: `turn_start`, a `queue_update` with both queues empty, and the steered `user` message's `message_start`, the first message of that round.
+Tap indices per run:
+
+| run | batch `message_end` | `tool_execution_start` | first call's end | cut = marker's `queue_update` | second, third call's end | `toolResult` `message_end`s | `turn_end` | `turn_start` | marker `user` `message_start` | marker answer `message_end` | `agent_settled` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 42 | 43, 44, 45 | 50 | 51 | 54, 56 | 58, 60, 62 | 63 | 64 | 66 | 155 | 158 |
+| 2 | 56 | 57, 58, 59 | 64 | 65 | 68, 70 | 72, 74, 76 | 77 | 78 | 80 | 117 | 120 |
+| 3 | 49 | 50, 51, 52 | 57 | 58 | 61, 63 | 65, 67, 69 | 70 | 71 | 73 | 103 | 106 |
+| 4 | 67 | 68, 69, 70 | 75 | 76 | 79, 81 | 83, 85, 87 | 88 | 89 | 91 | 98 | 101 |
+
+So `placement: "after_batch_turn_end"` in all four, and no run disagreed.
+The session reported idle 21.3 to 22.1 s after the marker POST, the rest of the 25-second sleep plus the reply, which is the batch being waited out seen from the wire's side.
+
+**It was still a steer into the running turn.**
+Each run's whole span was one `agent_start` (tap 2) and one `agent_settled`, holding exactly two `turn_start`/`turn_end` pairs, the batch round and the steered one: the shape `resources/fixtures/pi/tool-read.jsonl` already has with no steer involved.
+No `agent_end` and no `agent_settled` fell between the marker's `queue_update` and its answer, so `verdict: "steered_into_running_turn"` by both the queue and the turn boundary, as for the text turn.
+In every run the steered round held one assistant message, the 24-character marker reply, followed by `agent_end` and `agent_settled`: the sentence listing the outputs that the first prompt asked for was never written.
+
+**This matches the source and the adapter's comment.**
+The agent loop bundled into the `pi` binary, `pi-coding-agent` 0.87.1's `dist/bundle/chunks/chunk-OJP47DM6.js`, carrying the same `runLoop` that `pi-agent-core` 0.87.1 ships as `dist/agent-loop.js`, polls `getSteeringMessages` only after a round's `turn_end`, once the batch's results are in, and emits what it drains as the next round's first messages, which is the order measured above.
+The comment beside `submit()` in `src/server/adapters/pi/process.ts`, "deliver after the current tool batch", describes what was measured.
+Not exercised: a *sequential* batch, which that loop runs when a tool declares `executionMode: "sequential"` or `toolExecution` is set to `"sequential"`; nothing in `pi-coding-agent` 0.87.1's `dist` declares `executionMode: "sequential"`, and the copied `settings.json` names no `toolExecution`.
+
+**The new gate was broken on purpose first.**
+`ready_to_steer` was temporarily changed to fire only once every call in the batch had ended, and the probe run live (22:50:44.196 to 22:51:14.866).
+The marker's `queue_update` landed at tap 63, after the batch's `turn_end` at 61, so `executing_at_queue` was empty; the run reported `"result": "fail"` with `checks.tool_placement.result: "fail"` and `"error": "RuntimeError: the steer was not shown to arrive while a tool call was executing, or the batch never finished, so where it landed in the batch was not measured"`, and exited 1, while its `checks.verdict` still read `steered_into_running_turn`.
+The change was reverted before the commit.
+
+**The text turn measured what OW-niwusi recorded.**
+The first turn had streamed 153 upserts and 1211 characters when the marker went out, the cut was 158, and the `queue_update` putting it in `steering` was at 161, the lines between being the reply's `message_update`s.
+The gardening reply ran to its own `message_end` at 1103 with 10531 characters and `turn_end` at 1104; the marker came back in a 24-character assistant message at 1113 in the next round, with `agent_end` at 1115 and `agent_settled` at 1116 and none between, for `verdict: "steered_into_running_turn"` by both readings, idle 18.943 s after the POST.

@@ -102,7 +102,14 @@ Copied from `agentpane_pi_smoke.py` rather than added to it — the card asked f
 python3 agentpane_pi_steer_probe.py
 python3 agentpane_pi_steer_probe.py --skip-build      # reuse dist/client
 python3 agentpane_pi_steer_probe.py --model <ref>     # default is the model AGENTS.md pins
+python3 agentpane_pi_steer_probe.py --turn tool       # steer into an executing tool batch (OW-nufitu)
 ```
+
+`--turn tool` (OW-nufitu) measures where the steered text lands inside a tool batch, which the default text turn never calls.
+Its first prompt asks for three `bash` calls in one response, sleeping 4, 15 and 25 seconds, and the probe watches the tap rather than the SSE stream, because only Pi's own `tool_execution_start`/`tool_execution_end` show a call executing.
+It posts the marker once one call of the batch has ended and another is still executing, taking the cut from that same read of the tap, and `checks.tool_placement` reports, by tap index, where the steered `user` message landed against each call's start, end and `toolResult` and the round's `turn_end`.
+That placement is recorded, not asserted; what the mode does assert is that the `queue_update` naming the marker came before some call's `tool_execution_end`, Pi's own evidence that a call was still executing when the steer was accepted, and that the batch finished.
+A run that cannot show both has not measured the case and fails.
 
 Two things it does that the other live harnesses do not.
 
@@ -116,7 +123,7 @@ The first turn's length is a criterion here, so a run that silently answered on 
 
 Writes no fixtures.
 Same temporary writable state dir and credentials-copied-by-name discipline as the two smoke harnesses.
-Costs tokens: one long turn plus the steered reply.
+Costs tokens: one long turn plus the steered reply; `--turn tool` costs one short tool round and about 25 seconds of `sleep` instead of the long turn.
 
 Only `steered_into_running_turn` passes.
 `dropped` and `following_turn` are real outcomes it exists to be able to report, and each is a divergence from D16, so each raises; so does `indeterminate`, which is what a run gets when the `queue_update` and `agent_settled` readings disagree or when no `queue_update` names the marker at all — the boundary alone is not allowed to carry a verdict it cannot discriminate.
@@ -124,6 +131,7 @@ Only `steered_into_running_turn` passes.
 Verified with: `pi` 0.85.1 on the home server, 2026-09-14, six runs.
 What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)".
 It could not pass again after OW-mofuho retired the `renamed` event it waited for (2026-09-25), until OW-niwusi keyed its waits by the handle the attach reply carried; verified again with `pi` 0.87.1 on the home server, 2026-09-30, one run, in "The live Pi probes follow a session by its handle (OW-niwusi)".
+`--turn tool` verified with `pi` 0.87.1 on the home server, 2026-09-30, four runs, with the text turn re-run once beside them, in "Pi's steer waits for the whole tool batch (OW-nufitu)".
 
 ## `agentpane_live_support.py`
 
