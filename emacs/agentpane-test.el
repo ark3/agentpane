@@ -3727,6 +3727,79 @@ one's `gone', carried in the error's `data', kills it."
           (funcall (cdr (pop sent)) gone)
           (should-not (buffer-live-p buffer)))))))
 
+;;;; Opening a subagent's child thread, against a stub connection
+
+(defun agentpane-test--subagent (index &rest ids)
+  "An assistant node at INDEX whose one part is a Codex `subagent' call
+naming the child threads IDS, as the helper projects it (OW-gakide)."
+  (list :index index :role "assistant"
+        :parts (vector (append (list :type "tool" :name "subagent" :summary "wait"
+                                     :args "" :result "" :state "ok")
+                               (and ids (list :threadIds (vconcat ids)))))
+        :meta '(:model "luna" :usage (:totalTokens 1 :cost 0))))
+
+(ert-deftest agentpane-test-open-thread-from-a-live-buffer ()
+  "`agentpane-open-thread' on an attached buffer's subagent call naming one
+child thread asks nothing, and opens the child as the picker opens a
+session: `sessions/preview' for the child's Codex ref, into a buffer of
+its own, leaving the parent attached (OW-gakide)."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (child '(:backend "codex" :id "child-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (cl-letf (((symbol-function 'jsonrpc-async-request) #'ignore)
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _) (error "Asked with one thread to open"))))
+          (setq attached (list :ref ref :handle "h1"))
+          (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+            (with-current-buffer buffer (agentpane--attach))
+            (agentpane--on-notification
+             agentpane--connection 'session/snapshot
+             (list :session ref :handle "h1" :isStreaming :json-false
+                   :nodes (vector (agentpane-test--subagent 1 "child-1"))))
+            (setq sent nil)
+            (with-current-buffer buffer
+              (should (agentpane--attached-p))
+              (agentpane-test--goto-index 1)
+              (agentpane-open-thread))
+            (should (equal sent `((sessions/preview :session ,child))))
+            (let ((opened (agentpane--buffer-for child)))
+              (should opened)
+              (should-not (eq opened buffer))
+              (should (eq (window-buffer) opened)))
+            (with-current-buffer buffer
+              (should (agentpane--attached-p)))))))))
+
+(ert-deftest agentpane-test-open-thread-from-a-preview-buffer ()
+  "`agentpane-open-thread' works in a previewed transcript as in a live one:
+on a subagent call naming two child threads it reads one with completion,
+offering both, and sends `sessions/preview' for that child's Codex ref.
+On a node naming none it refuses, sending nothing (OW-gakide)."
+  (let ((ref '(:backend "codex" :id "t1"))
+        (offered nil))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_prompt collection &rest _)
+                     (setq offered collection)
+                     "child-2")))
+          (let ((buffer (agentpane--transcript-buffer (list :ref ref))))
+            (with-current-buffer buffer
+              (agentpane--draw (vector (agentpane-test--assistant 0 "<p>Spawning.</p>")
+                                       (agentpane-test--subagent 1 "child-1" "child-2")
+                                       (agentpane-test--subagent 2)))
+              (should-not (agentpane--attached-p))
+              (agentpane-test--goto-index 0)
+              (should-error (agentpane-open-thread) :type 'user-error)
+              (agentpane-test--goto-index 2)
+              (should-error (agentpane-open-thread) :type 'user-error)
+              (should-not sent)
+              (agentpane-test--goto-index 1)
+              (agentpane-open-thread))
+            (should (equal offered '("child-1" "child-2")))
+            (should (equal sent '((sessions/preview :session (:backend "codex" :id "child-2")))))
+            (should (agentpane--buffer-for '(:backend "codex" :id "child-2")))))))))
+
 ;;;; Closing a session, against a stub connection
 
 (defmacro agentpane-test--closing (&rest body)

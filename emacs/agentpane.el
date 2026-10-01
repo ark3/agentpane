@@ -36,6 +36,8 @@
 ;; moves point to the prompt region, as the browser's Attach does, `f'
 ;; forks at the user message at point into a buffer of its own -- on a
 ;; previewed transcript it attaches first, and forks at the next press --
+;; `o' opens a child thread the subagent call at point names, previewing
+;; it as the picker's `RET' does, as the browser's Open thread does,
 ;; `e' takes the user message at point back into the prompt region to edit,
 ;; as the browser's pencil does, so that `C-RET' forks at that message and
 ;; sends the edited text and the message's images into the fork, and
@@ -2197,6 +2199,7 @@ as `C-RET', fall through to `agentpane-transcript-mode-map'.")
     (define-key map (kbd "a") #'agentpane-attach)
     (define-key map (kbd "f") #'agentpane-fork)
     (define-key map (kbd "e") #'agentpane-edit)
+    (define-key map (kbd "o") #'agentpane-open-thread)
     (define-key map (kbd "C-c C-e") #'agentpane-edit-last)
     (define-key map (kbd "C-c C-k") #'agentpane-cancel-edit)
     (define-key map (kbd "r") #'agentpane-toggle-reading)
@@ -3895,6 +3898,41 @@ or cancel it there with C-c C-k"))
       (setq agentpane--session summary)
       (agentpane-refetch))
     (pop-to-buffer buffer '(display-buffer-same-window))))
+
+(defun agentpane--thread-ids-at-point ()
+  "The child threads named at point, as a list of Codex thread ids: those of
+the tool part whose fold point is on, else those of every part of the node
+at point.  Each comes from a tool part's `threadIds', which the helper
+derives for a subagent call; `args' is display text and is never read."
+  (let* ((data (ewoc-data (or (agentpane--locate) (user-error "No node at point"))))
+         (key (or (get-text-property (point) 'agentpane-fold)
+                  (save-excursion
+                    (beginning-of-line)
+                    (get-text-property (point) 'agentpane-fold))))
+         (parts (append (plist-get data :parts) nil)))
+    (when (and key (eql (car key) (plist-get data :index)))
+      (setq parts (list (nth (cdr key) parts))))
+    (delete-dups (seq-mapcat (lambda (part) (append (plist-get part :threadIds) nil))
+                             parts))))
+
+(defun agentpane-open-thread ()
+  "Open a child thread the subagent call at point names, as the browser's
+subagent card's Open thread does (OW-benige, OW-kelise): the child is a
+Codex session of its own, opened as its picker row would open it, by
+`agentpane-show-transcript', which previews it and attaches nothing.
+With more than one thread named, read which with completion.  The
+child's buffer takes this one's workspace, as a fork's does, since the
+child's own is known only to a listing.  Works the same in a previewed
+transcript as in a live one (OW-gakide)."
+  (interactive)
+  (let* ((ids (or (agentpane--thread-ids-at-point)
+                  (user-error "No child thread at point")))
+         (id (if (cdr ids)
+                 (completing-read "Open thread: " ids nil t)
+               (car ids))))
+    (agentpane-show-transcript
+     (list :ref (list :backend "codex" :id id)
+           :cwd (plist-get agentpane--session :cwd)))))
 
 ;;;; The turn-done indicator
 
