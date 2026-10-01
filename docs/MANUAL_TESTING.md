@@ -1742,6 +1742,7 @@ Create and attach returned `[201, 200]`; the adopted id was a `.jsonl` path; the
 **Streaming, idle and abort all behave, far faster than the probe's timeouts assume.**
 The bare run's first turn streamed in 3 incremental updates (27 → 67 characters) and returned to idle 5.0s after `streaming=true`.
 The abort was issued against a confirmed-streaming turn at 23:12:38.366 and the turn reported idle at 23:12:38.382 — **16 ms**, the one genuine request-to-event measurement in the run — with the longest assistant message at 472 characters both when idle and 1.5s later, so nothing kept arriving after the abort.
+That 472 was a session maximum, `max_assistant_length`, not the aborted turn's own length, and a check on it could not see a shorter message arriving after the abort; see "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)" at the end of this file.
 SIGTERM to the server was answered in 32 ms with `returncode: 0`, `launched_pi_worker_pids: [295]` and `remaining_worker_pids: []`; cleanup removed the temporary state home and the server log and reported no orphan.
 Waits budgeted at 60, 90, 120 and 180 seconds all resolved within seconds.
 
@@ -3819,6 +3820,7 @@ Neither was changed here.
 The tree was `bun → bwrap → bwrap → pi` with one Pi descendant, and `copied_credential_files` was still `["auth.json", "models-store.json", "settings.json"]`.
 Bare: abort requested at 20:39:56.624 against a streaming long turn, idle at 20:39:56.662, 437 characters unchanged through settling.
 `--tool-check`: `streaming_before_long_prompt: false`, abort requested at 20:41:15.509, idle at 20:41:15.550, 399 characters unchanged.
+Both lengths are `max_assistant_length` session maxima, not the aborted turn's own; see "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)" below.
 SIGTERM left `remaining_worker_pids: []` in both, and cleanup removed the state home and the server log.
 
 **`agentpane_codex_smoke.py` had the same defect against `~/.codex/config.toml`, and is fixed the same way.**
@@ -3837,14 +3839,16 @@ All three reported `"result": "pass"` with every check inside them passing, and 
 
 **`assistant_length_at_abort` is now the aborted turn's own text.**
 Until this change both probes read it, and the post-abort growth check, with `max_assistant_length`, the longest assistant message in the session, so an earlier and longer reply could stand in for the aborted turn and a shorter message arriving after idle could not move it.
-The wire names a message only by its position -- `upsert.index` addresses the same array `snapshot.messages` carries, and `PaneMessage` has no id -- so `resources/probes/agentpane_live_support.py` now replays the transcript the way a client holds it (`transcript`: a snapshot replaces it, an upsert writes at `index`) and `turn_messages` returns every position past the transcript's length at the cut taken immediately before the long prompt, which each probe takes while the session is idle.
+The wire names a message only by its position -- `upsert.index` addresses the same array `snapshot.messages` carries, and `PaneMessage` has no id -- so `resources/probes/agentpane_live_support.py` now replays the transcript the way a client holds it (`transcript`: a snapshot replaces it, an upsert writes at `index`) and `turn_messages` returns every position past the transcript's length at the cut taken immediately before the long prompt.
+The Pi probe asserts the session is idle at that cut; the Codex probe infers it, from the first stream's idle and the reconnect's opening snapshot with nothing prompted since, and does not assert it there.
 Each row is the position, the role and the assistant text length, and the reported length is their sum: a turn that splits into several assistant messages (Pi opens one per model call; Codex one per `ThreadItem`, so a commentary `agentMessage` and a final answer are two) counts all of them, and the floor alone keeps every earlier turn out.
-The growth check compares those rows position by position at idle and 1.5 s later, so a message that grows, shrinks or appears after idle all fail it.
+The growth check compares those rows position by position at idle and 1.5 s later, so a message whose text grows or shrinks after idle fails it, and so does a message that appears.
+It compares assistant text length only, so a change after idle to a message's thinking, its `stopReason`, or Codex reasoning-summary text on an existing message would pass; comparing whole messages would instead go red on the usage upsert a late Codex `thread/tokenUsage/updated` produces.
 In all three runs the turn was one user message and one assistant message; under `--tool-check` they sat at positions 7 and 8, so the seven messages of the two turns before it were excluded by the floor rather than by luck.
 
 **The long prompt is new, because neither pinned model wrote the integers.**
 Codex was measured first, as the card asked: on the integers prompt, with the new helper and the fill wait below, Luna's turn ended on its own holding 76 characters, and the run failed at the abort cut with `RuntimeError: long turn was not streaming when the abort was issued (last reported state: False; the turn held 76 assistant characters)` (20:54:00.377 to 20:54:26.593).
-Pi had declined the same prompt in all six runs OW-hahohi recorded on `pi 0.85.1`, and a run of the unchanged probe from the main checkout at `d04448b`, launched by mistake from a shell line whose `cd` into the worktree reached only the job before it, read 467 characters on `pi 0.87.1` -- a session maximum, but as short as every earlier one.
+Pi had declined the same prompt in all six runs OW-hahohi recorded on `pi 0.85.1`, whose lengths are `max_assistant_length` session maxima no higher than 472, three of them under `--tool-check`; the two OW-yehisa runs on `pi 0.87.1` read 437 bare and 399 under `--tool-check`, session maxima too; and a run of the unchanged probe from the main checkout at `d04448b`, launched by mistake from a shell line whose `cd` into the worktree reached only the job before it, read 467 characters on `pi 0.87.1` -- a session maximum, but as short as every earlier one.
 So no backend kept the old string and nothing diverges: both probes import one `LONG_PROMPT`, a twenty-chapter vegetable-growing handbook of at least 400 words a chapter, which `agentpane_pi_steer_probe.py`'s shorter version of it had already shown Pi complies with.
 
 **The abort now waits for twenty thousand characters of the turn's own text, and asserts none.**
@@ -3858,15 +3862,16 @@ All three runs reported `abort_wait: "filled"`.
 | Pi `--tool-check` | 63.0 s (21:04:08.593 to 21:05:11.577) | 20021 | 36 ms | 20021, 20021 |
 
 Each abort was answered HTTP 204 and reached idle on a `status` event.
-Two exploratory runs earlier in the session, on the uncommitted tree with the same logic, also passed and show the turn still writing across the abort's round trip: Codex 20005 at the cut and 20009 at idle (70.6 s of streaming), Pi bare 20005 and 20074 (18.6 s); neither changed in the 1.5 s after.
-That growth between the cut and idle is the round trip, not a defect: the check is that nothing moves once idle is reported.
+Two exploratory runs earlier in the session, on the uncommitted tree with the same logic, also passed: Codex 20005 at the cut and 20009 when idle was read (70.6 s of streaming), Pi bare 20005 and 20074 (18.6 s); neither changed in the 1.5 s after.
+Those runs show text arriving after the cut, and do not show whether it arrived before the idle event or after it.
+The baseline is read when `wait_for` next polls after the idle event, up to about 50 ms later, not at the event, so text that arrives in that gap is absorbed into the baseline instead of failing the check.
 The length is near 20000 in every run because the wait stops there; it measures what was in flight at the cut, not what the model would have written.
 The hole the probes' own comment names -- the cut is taken before the request, so a turn that ends of its own accord inside the round trip still passes -- is narrowed rather than closed: every turn here was a handbook asked for at least 8000 words, cut a little over 20000 characters in, with the wire showing it still streaming at the cut.
 
 **The growth check was seen red live before it was believed.**
 With the Pi probe deliberately comparing the settled turn against the turn as it stood halfway between the long prompt and the cut (`turn_messages(pre_abort[: (abort_start + abort_index) // 2], ...)` in place of the snapshot at idle), the bare run reported `"result": "fail"`, exit 1, with `RuntimeError: the aborted turn changed after it reported idle: [{'index': 3, 'role': 'user', 'chars': 0}, {'index': 4, 'role': 'assistant', 'chars': 9094}] -> [{'index': 3, 'role': 'user', 'chars': 0}, {'index': 4, 'role': 'assistant', 'chars': 20004}]` (20:58:56.104 to 20:59:41.782), and no `abort` check was written.
 That is a faithful red: the same comparison, against the same turn's real positions, sees the growth of that turn's own message when there is growth to see.
-A first attempt that compared against the turn as it stood at the cut passed (20:57:54.208 to 20:58:45.472), because in that run no text landed during the abort's round trip -- 20009 at the cut and at idle -- so growth across the round trip, which two runs above did show, is not something a red can rely on.
+A first attempt that compared against the turn as it stood at the cut passed (20:57:54.208 to 20:58:45.472), because in that run no text landed between the cut and the idle read -- 20009 at both -- so text arriving after the cut, which two runs above did show, is not something a red can rely on.
 
 **The misattribution and the shorter late message can only be shown red against a synthetic event list.**
 No live turn can be made to append a message after idle, and the earlier turns here are too short to outrun a 20000-character one, so a throwaway script (not committed) built an event list in `ServerEvent`'s shapes -- a snapshot of an earlier turn whose reply is 5000 characters, then the long prompt's user upsert, a `status` with `isStreaming: true`, the aborted turn's assistant upserts at 100, 200 and 400, and a `status` with `isStreaming: false` -- and ran both reads over it in three cases.

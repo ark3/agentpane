@@ -555,7 +555,8 @@ def main() -> int:
 
         aborted = stream.wait_for(aborted_idle, 90, "aborted turn streaming=false")
         # The whole of what the turn added, position by position, not a total:
-        # a message that grows, shrinks or appears after idle all change it.
+        # a message whose text grows or shrinks after idle, or a message that
+        # appears, changes it.
         turn_when_idle = turn_messages(stream.snapshot(), real_ref, abort_start)
         time.sleep(1.5)
         turn_after = turn_messages(stream.snapshot(), real_ref, abort_start)

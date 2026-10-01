@@ -342,10 +342,11 @@ def turn_messages(
 ) -> list[dict[str, Any]]:
     """What one turn added to the transcript: every message past the cut.
 
-    `start` is a cut taken while the session was idle and immediately before
-    the turn's prompt was posted, so the transcript's length at that cut is
-    where the turn begins and every position past it is the turn's: its own
-    user message, then whatever the backend produced for it. Each row is the
+    `start` is a cut taken immediately before the turn's prompt was posted,
+    with the session idle -- asserted at the cut by the Pi probe, inferred by
+    the Codex probe from its earlier idle wait -- so the transcript's length
+    at that cut is where the turn begins and every position past it is the
+    turn's: its own user message, then whatever the backend produced for it. Each row is the
     position, the role, and the assistant text length (0 for anything that is
     not assistant text).
 
@@ -407,8 +408,8 @@ def growing_assistant_text(
 # a large in-flight transcript, so the prompt has to be one the pinned models
 # write at length. Until OW-sofige both probes asked for "the integers from 1
 # through 10000, one per line", and neither model wrote them: as of `pi 0.85.1`
-# DeepSeek V4.1 Flash declined in all six runs measured on 2026-09-13 (414-472
-# characters), and as of `codex-cli 0.157.1` on 2026-09-30 Luna's turn ended
+# DeepSeek V4.1 Flash declined in all six runs measured on 2026-09-13 (session
+# maxima, `max_assistant_length`, no higher than 472 characters), and as of `codex-cli 0.157.1` on 2026-09-30 Luna's turn ended
 # on its own after 76. This handbook was complied with by both on 2026-09-30
 # (`pi 0.87.1`, `codex-cli 0.157.1`), each passing 20000 characters still
 # streaming; `docs/MANUAL_TESTING.md` (OW-sofige) has the runs. Twenty

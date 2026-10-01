@@ -355,8 +355,8 @@ def main() -> int:
 
         # Idle is a claim about the turn; the transcript is what proves it. A
         # turn that keeps emitting text after reporting idle was not aborted.
-        # Compared position by position, not as a total: a message that grows,
-        # shrinks or appears after idle all change it.
+        # Compared position by position, not as a total: a message whose text
+        # grows or shrinks after idle, or a message that appears, changes it.
         turn_when_idle = turn_messages(reconnect.snapshot(), real_ref, abort_start)
         time.sleep(1.5)
         turn_after = turn_messages(reconnect.snapshot(), real_ref, abort_start)
