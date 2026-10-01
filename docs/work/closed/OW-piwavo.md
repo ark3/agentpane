@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: declined
 ---
 
 # A Pi fork still badges for a parent turn this client sent when the turn ends by a path other than the fork's own abort, in both clients
@@ -27,3 +28,11 @@ Placement is the executor's; the adversarial reader suggested dropping just befo
 If the placement chosen subsumes OW-rihanu's `onAbort`, the done-condition includes that callback being gone, not only the new cases passing.
 
 Done when, red first, a test in `src/client/App.test.ts` driving the real controller (`createController`, as OW-rihanu's "badges the %s parent turn this tab sent, forked mid-turn, only where the fork leaves it running" does) submits on a Pi session, forks before `status:true` arrives, emits `status:true` then `status:false` for the parent before resolving the fork, and asserts no badge at the parent's end and a badge at the fork's; an ERT test in `emacs/agentpane-test.el` pins the same order for agentpane-mode; Case B's decision is recorded as above, with a test in each client pinning whichever way it went; and `bun run check` passes, and the Emacs suite passes, run by the `ert-run-tests-batch-and-exit` command in `emacs/agentpane-test.el`'s header.
+
+## Close note
+
+Declined 2026-09-30 by the owner, read at the code and not run.
+Both cases end in a badge only if the client is unfocused (the browser's `hasFocus` read in `watchSessions`) or the parent's buffer is not shown (agentpane-mode) at the moment the stopped turn's `status:false` arrives, and in both that status follows within one round trip of a click the user just made in that tab or buffer: the fork press in case A, Stop and edit in case B.
+In agentpane-mode the fork's buffer takes the parent's window only at the fork's reply (`agentpane-fork` in `emacs/agentpane.el`), and as of `pi 0.87.1` the abandoned turn's last events arrive before that reply (OW-dutute), so the parent's buffer is still shown when its status lands.
+So each case needs the user to leave the client within a fraction of a second, and costs one spurious badge; the owner has declined state for cases of that size twice on 2026-09-30 (a deliberate shutdown under OW-nuzoto, a gap under OW-bepudu and OW-jadoda).
+If a spurious badge after a Pi fork is ever seen in use, this card's two paths and the reader's suggested placement (drop the parent's watch just before `api.fork` on Pi as well as at the abort, never before `api.forkPoints`) are where to start.

@@ -1,5 +1,5 @@
 ---
-labels: [defect]
+labels: [defect, sweep-0929]
 ---
 
 # A fork carries its parent's turn marks onto the fork, so a Codex or Claude Code parent whose turn ends unseen mid-fork loses its finished dot
