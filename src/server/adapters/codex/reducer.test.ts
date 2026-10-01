@@ -136,6 +136,46 @@ describe("replaying the subagent fixture", () => {
 	});
 });
 
+describe("a collab wait's result names which child said what (OW-guyunu)", () => {
+	function waitOf(name: FixtureName) {
+		const wait = byMethod(readFixture(name), "item/completed")
+			.map(itemOf)
+			.find(
+				(item): item is Extract<ThreadItem, { type: "collabAgentToolCall" }> =>
+					item.type === "collabAgentToolCall" && item.tool === "wait",
+			);
+		if (!wait) throw new Error(`${name} fixture has no completed wait`);
+		const result = replay(name).messages.find(
+			(message): message is ToolResultMessage => message.role === "toolResult" && message.toolCallId === wait.id,
+		);
+		if (!result) throw new Error(`${name} fixture's wait produced no result`);
+		const text = result.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+		return { wait, result, text };
+	}
+
+	it("says a failed wait's child was not found, by its short id, instead of nothing", () => {
+		const { wait, result, text } = waitOf("collab-failed");
+		const [child] = wait.receiverThreadIds;
+		if (!child) throw new Error("collab-failed's wait names no child");
+		expect(wait.status).toBe("failed");
+		expect(wait.agentsStates[child]).toEqual({ status: "notFound", message: null });
+		expect(result.isError).toBe(true);
+		expect(text).not.toBe("");
+		expect(text).toBe(`${child.slice(-8)}: not found`);
+	});
+
+	it("prefixes each of several children's replies with that child's own short id", () => {
+		const { wait, text } = waitOf("collab-multi");
+		const children = wait.receiverThreadIds;
+		expect(children).toHaveLength(2);
+		// The ids share their leading timestamp, so the prefix has to be the tail.
+		expect(new Set(children.map((id) => id.slice(-8))).size).toBe(2);
+		expect(text.split("\n\n")).toEqual(
+			children.map((id) => `${id.slice(-8)}: ${wait.agentsStates[id]?.message}`),
+		);
+	});
+});
+
 const ANCILLARY_METHODS = new Set([
 	"account/rateLimits/updated",
 	"mcpServer/startupStatus/updated",

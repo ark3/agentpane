@@ -24,10 +24,12 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantTurn } from "../../../shared/protocol.ts";
+import { shortThreadId } from "../../../shared/thread-id.ts";
 import { parsePatch } from "diff";
 import { isRecord } from "./protocol.ts";
 import type {
 	CodexItem,
+	CollabAgentStatus,
 	FileUpdateChange,
 	JsonValue,
 	ThreadItem,
@@ -305,6 +307,44 @@ function asArguments(value: JsonValue): Record<string, unknown> {
 	return { value };
 }
 
+/** What a child with no message says instead: its last known status, in words. */
+const COLLAB_STATUS_WORDS: Record<CollabAgentStatus, string> = {
+	pendingInit: "starting",
+	running: "still running",
+	interrupted: "interrupted",
+	completed: "completed with no message",
+	errored: "errored",
+	shutdown: "shut down",
+	notFound: "not found",
+};
+
+/** A failed collab call whose `agentsStates` names none of its receivers. */
+const COLLAB_FAILED_NO_REASON = "The call failed, and Codex gave no reason.";
+
+/**
+ * The body of a collab call's result: what each child it names last said,
+ * attributed (OW-guyunu). One child with a message gets that message alone,
+ * as it always has; otherwise every child with a state gets a line of its own
+ * prefixed by its `shortThreadId` -- the same form the card's header uses --
+ * carrying its message or, when it has none, its status in words. That is
+ * what turns a failed `wait` on a vanished child from a red badge over an
+ * empty body into "<id>: not found". A child with no state at all (every
+ * receiver on an `item/started`) contributes nothing.
+ */
+function collabResultText(item: CodexItem<"collabAgentToolCall">): string {
+	const children = item.receiverThreadIds;
+	const parts = children.flatMap((threadId) => {
+		const state = item.agentsStates[threadId];
+		if (!state) return [];
+		// `??` covers a status a later Codex adds before this table learns it.
+		return [{ threadId, message: state.message || null, words: COLLAB_STATUS_WORDS[state.status] ?? state.status }];
+	});
+	const [only] = parts;
+	if (children.length === 1 && only?.message) return only.message;
+	if (parts.length === 0) return item.status === "failed" ? COLLAB_FAILED_NO_REASON : "";
+	return parts.map((part) => `${shortThreadId(part.threadId)}: ${part.message ?? part.words}`).join("\n\n");
+}
+
 // ---------------------------------------------------------------------------
 // The mapping
 // ---------------------------------------------------------------------------
@@ -550,11 +590,10 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 			// replied, the result below is that earlier reply, and the next
 			// `wait` will show the same text again. Left as-is deliberately:
 			// nothing has been measured that would tell a better rule from a
-			// guess.
+			// guess. The same holds for a status: a spawn's completion reports
+			// its child `pendingInit`, so its body reads "<id>: starting".
+			// `collabResultText` says how the replies are attributed.
 			const children = item.receiverThreadIds;
-			const replies = children
-				.map((threadId) => item.agentsStates[threadId]?.message)
-				.filter((message): message is string => Boolean(message));
 			return toolPair(
 				ctx,
 				{
@@ -570,7 +609,7 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 					},
 				},
 				{
-					content: textBlocks(replies.join("\n\n")),
+					content: textBlocks(collabResultText(item)),
 					isError: item.status === "failed",
 					details: {
 						tool: item.tool,

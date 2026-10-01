@@ -143,7 +143,7 @@ describe("tool parts", () => {
 			if (!Array.isArray(threadIds)) continue;
 			for (const id of threadIds) {
 				if (typeof id !== "string") continue;
-				expect(part.summary).toContain(id.slice(0, 8));
+				expect(part.summary).toContain(id.slice(-8));
 			}
 		}
 	});

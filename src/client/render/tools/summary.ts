@@ -5,6 +5,7 @@
  */
 
 import type { ToolCall } from "@earendil-works/pi-ai";
+import { shortThreadId } from "$shared/thread-id.ts";
 import { basename, oneLine } from "../types.ts";
 import { argNumber, argString, editHunks, summarizeArgs } from "./args.ts";
 import { buildDiff, diffStats } from "./diff.ts";
@@ -45,11 +46,10 @@ export function toolSummary(call: ToolCall): string {
 
 	if (name === "subagent") {
 		// A Codex collab call: the operation, then enough of each child thread's
-		// uuid to tell two apart without eating the line. Empty thread ids on a
-		// spawn's `item/started` leave just the operation.
-		return [argString(call.arguments, "tool"), ...subagentThreadIds(call).map((id) => id.slice(0, 8))].join(
-			" · ",
-		);
+		// uuid to tell two apart without eating the line -- `shortThreadId`, the
+		// same form the result body prefixes each child's reply with. Empty
+		// thread ids on a spawn's `item/started` leave just the operation.
+		return [argString(call.arguments, "tool"), ...subagentThreadIds(call).map(shortThreadId)].join(" · ");
 	}
 
 	return oneLine(summarizeArgs(call.arguments));

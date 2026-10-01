@@ -25,6 +25,7 @@ export type { MessagePhase } from "../../../../resources/codex-protocol/MessageP
 export type { WebSearchItem } from "../../../../resources/codex-protocol/WebSearchItem";
 export type { ThreadItem } from "../../../../resources/codex-protocol/v2/ThreadItem";
 export type { UserInput } from "../../../../resources/codex-protocol/v2/UserInput";
+export type { CollabAgentStatus } from "../../../../resources/codex-protocol/v2/CollabAgentStatus";
 export type { Thread } from "../../../../resources/codex-protocol/v2/Thread";
 export type { Turn } from "../../../../resources/codex-protocol/v2/Turn";
 export type { TurnError } from "../../../../resources/codex-protocol/v2/TurnError";

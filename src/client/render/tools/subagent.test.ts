@@ -61,13 +61,27 @@ describe("the subagent card", () => {
 		const wait = call("wait");
 		const { container } = render(ToolCallBlock, { props: { call: wait } });
 		expect(summaryLine(container)).toContain(toolSummary(wait));
-		expect(summaryLine(container)).toContain("wait · 01a086ce");
+		expect(summaryLine(container)).toContain("wait · ec8f3774");
 		expect(summaryLine(container)).not.toContain(CHILD);
 
 		const spawn: ToolCall = { type: "toolCall", id: "exec-1", name: "subagent", arguments: { tool: "spawnAgent", threadIds: [] } };
 		const spawned = render(ToolCallBlock, { props: { call: spawn } });
 		expect(summaryLine(spawned.container)).toContain(toolSummary(spawn));
 		expect(toolSummary(spawn)).toBe("spawnAgent");
+	});
+
+	it("tells apart in the header two children spawned in the same second (OW-guyunu)", () => {
+		// Codex thread ids are UUIDv7: the leading characters are a timestamp,
+		// so siblings spawned together share them. These two are collab-multi's.
+		const first = "01a0f517-04e0-7480-9a67-79db4ff6cf13";
+		const second = "01a0f517-0458-7693-9f98-42186c30b652";
+		expect(first.slice(0, 8)).toBe(second.slice(0, 8));
+		const [, a, b] = toolSummary(call("wait", { threadIds: [first, second] })).split(" · ");
+		expect(a).toBeTruthy();
+		expect(b).toBeTruthy();
+		expect(a).not.toBe(b);
+		expect(first).toContain(a!);
+		expect(second).toContain(b!);
 	});
 
 	it("names the operation and the child thread, and shows the child's reply", () => {
