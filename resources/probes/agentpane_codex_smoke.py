@@ -4,6 +4,13 @@
 This makes real model calls. It never invokes Pi and never prints credential
 contents. Process inspection is scoped to the server tree this run launched --
 see `agentpane_live_support`, which owns that guarantee for both harnesses.
+
+The session is created with an explicit `model`, defaulting to the one
+`AGENTS.md` pins, because nothing else would choose it: agentpane spawns a bare
+`codex app-server` (`codexCommand`) and sends no model on `thread/start` unless
+the session was created with one, so Codex would answer on whatever the
+`config.toml` copied into the throwaway `CODEX_HOME` names. The model the thread
+reported is read back off the wire and recorded beside the flag (OW-yehisa).
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ HOST = "127.0.0.1"
 PORT = 44173
 # Credentials plus the config Codex needs to reach a model. Copied by name.
 CODEX_STATE_FILES = ("auth.json", "config.toml")
+PINNED_MODEL = "gpt-5.6-luna"
 
 
 def codex_workers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -71,6 +79,11 @@ def parse_args() -> argparse.Namespace:
         help="workspace for the new Codex session (default: app root)",
     )
     parser.add_argument("--port", type=int, default=PORT)
+    parser.add_argument(
+        "--model",
+        default=PINNED_MODEL,
+        help="model passed on the create-session route (default: the model AGENTS.md pins)",
+    )
     parser.add_argument(
         "--credential-source",
         type=Path,
@@ -104,6 +117,7 @@ def main() -> int:
         "codex_version": subprocess.run(
             ["codex", "--version"], capture_output=True, text=True, check=True
         ).stdout.strip(),
+        "model_flag": args.model,
         "transport_level": "built client reachability plus production REST/SSE; no browser automation",
         "temporary_state_home": str(state_home),
         "copied_credential_files": copied,
@@ -138,7 +152,7 @@ def main() -> int:
         streams.append(stream)
 
         create_status, created = http.json(
-            "POST", "/api/sessions", {"cwd": str(workspace), "backend": "codex"}
+            "POST", "/api/sessions", {"cwd": str(workspace), "backend": "codex", "model": args.model}
         )
         if create_status != 201:
             raise RuntimeError(f"create failed: HTTP {create_status} {created}")
@@ -210,6 +224,26 @@ def main() -> int:
             **growth,
         }
         evidence["checks"]["idle"] = {"result": "pass", **idle}
+
+        # Which model the thread reported, off the latest `snapshot` or `status`
+        # the settled turn left on the wire: the adapter fills it from the
+        # `thread/start` answer (`CodexAdapter.start`), so it is Codex's word,
+        # not an echo of the flag.
+        def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
+            for stamp, event in reversed(events):
+                if event.get("session") != real_ref:
+                    continue
+                if event.get("type") not in ("snapshot", "status"):
+                    continue
+                model = event.get("model")
+                if isinstance(model, str) and model:
+                    return {"at": stamp, "model": model, "event_type": event.get("type")}
+            return None
+
+        model_seen = resolved_model(stream.snapshot())
+        if model_seen is None:
+            raise RuntimeError("no settled snapshot or status event named the model Codex resolved")
+        evidence["checks"]["model"] = {"result": "pass", "flag_passed": args.model, **model_seen}
 
         final_length = max_assistant_length(stream.snapshot(), real_ref)
         before_tree, before_workers = process_evidence(server.pid)

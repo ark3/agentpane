@@ -55,6 +55,11 @@ location, creates and removes a temporary writable `CODEX_HOME`, copies only
 of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
 `"result": "pass"` is the acceptance signal.
 
+It creates the session with an explicit `model`, `--model`, defaulting to the `gpt-5.6-luna` that `AGENTS.md` pins: agentpane spawns a bare `codex app-server` and sends no model on `thread/start` unless the session was created with one, so without it Codex answers on whatever the copied `config.toml` names.
+`checks.model` records the flag beside the model the thread reported (OW-yehisa).
+
+Verified with: `codex-cli` 0.157.1 on the home server, 2026-09-30, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
+
 ## `agentpane_pi_smoke.py`
 
 The same assembled application path with a real Pi process, plus the three things only Pi can establish: that the production `direnv exec <workspace> sbox -- pi --mode rpc` chain actually starts an agent (`capture_fixtures.py` deliberately bypasses sbox, so nothing had run this chain until this harness first did), that the session id changes under the client and the superseded id keeps working, and that killing the server reaches an agent two `exec`s down inside `bwrap`.
