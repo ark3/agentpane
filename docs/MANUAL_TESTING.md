@@ -3814,7 +3814,7 @@ The first run from this worktree, with only the model change in, failed at the r
 OW-mofuho retired the `renamed` event from both wires on 2026-09-25 (`e8c9253`), so a rename is said only by a snapshot under the session's handle carrying the new ref, and the probe was still waiting for the event.
 It now takes the handle from the attach reply and waits for a snapshot under it naming a non-virtual ref, and records the handle in `checks.rename`; both runs reported `renamed_during: "attach"`, with the superseded `virtual:` id still resolving to the new ref and a prompt through it answered 202.
 `agentpane_pi_steer_probe.py` still waits for `renamed` and will time out the same way; `fork_attach_probe.py` takes its ref from the attach reply and only scans for `renamed` in `follow_renames`, which now never matches, so it would miss a later move rather than hang.
-Neither was changed here.
+Neither was changed here; OW-niwusi moved both to the handle, and moved this probe's later waits too, which this change left keyed by the adopted ref ("The live Pi probes follow a session by its handle (OW-niwusi)" at the end of this file).
 
 **The rest of each Pi run behaved as the earlier sections recorded.**
 The tree was `bun → bwrap → bwrap → pi` with one Pi descendant, and `copied_credential_files` was still `["auth.json", "models-store.json", "settings.json"]`.
@@ -3950,3 +3950,40 @@ Every tool call the model made through `exec` other than `tools.exec_command` pr
 **The scrub grew three cases.**
 A rollout's `session_meta` names the account as `creator_user_id` and `creator_account_id`, its `token_count` records carry `rate_limits`, and 0.157.1's stream carries an `account/updated` naming the plan; `capture_fixtures.py` now scrubs all of them, and `src/fixture-scrub.test.ts` fails on live `rate_limits` values in a rollout as it already did on the wire, and on a `session_meta` naming any `creator_user_id` or `creator_account_id` but the placeholders.
 Each guard was seen red first, on a one-line rollout placed under `resources/fixtures/codex/` and removed again: one carrying `primary` and `plan_type` values, which the guard as it stood before passed, and one carrying made-up creator ids.
+
+## The live Pi probes follow a session by its handle (OW-niwusi)
+
+Run on the home server 2026-09-30, between 22:25 and 22:30 local (`-04:00`), on **`pi 0.87.1`**, from the `card/OW-niwusi` worktree at `219493b`, the commit that moved the probes, each run passing `--model openrouter/deepseek/deepseek-v4.1-flash:high`.
+`python3 resources/probes/agentpane_pi_steer_probe.py` ran once (22:25:06.461 to 22:25:47.088), `python3 resources/probes/agentpane_pi_smoke.py` once bare (22:27:33.006 to 22:28:02.181) and once with `--skip-build --tool-check` (22:28:08.272 to 22:28:30.190), and every one reported `"result": "pass"` with every check inside it passing, exited 0, and left `cleanup.result: "pass"`.
+
+**The steer probe could not have passed since OW-mofuho, and was seen failing before it was moved.**
+It waited for a `renamed` event before its first turn, and OW-mofuho retired that event from both wires on 2026-09-25 (`e8c9253`).
+The probe as `6cd6337` left it, run from a copy in `/tmp` with its own `agentpane_live_support.py` against this worktree's build (`--app-root`, `--skip-build`), failed after a minute with `TimeoutError: timed out waiting for Pi to adopt its own session id (D9); saw 3 events` (22:26:10.697 to 22:27:12.855), having posted no prompt.
+
+**All three probes now key every per-session wait by the handle the attach reply carried, and record a move rather than wait on one.**
+The shared readers in `resources/probes/agentpane_live_support.py` take a handle or a ref (`is_of`), and `refs_under` lists every ref a handle carried on the wire, oldest first.
+The steer probe posts both its prompts to the attach reply's ref and records `session` with the handle, those refs, `renamed_during` and `session_id_is_jsonl_path`.
+The smoke probe no longer waits for the move before its first prompt, which made a rename on the first prompt a 60-second timeout rather than the legitimate ordering its comment called it; it reads the refs once the first turn is idle, asserts that the last is a JSONL path, and records `refs` in `checks.rename`, then `refs_at_end` after the abort.
+`fork_attach_probe.py`'s `turn` waits by handle, and reports the session's last ref and every ref it carried.
+
+**Every Pi run saw the rename at attach, and the `virtual:` id never appeared under the handle.**
+The steer run and both smoke runs reported `renamed_during: "attach"` with `refs` holding a single JSONL path under the throwaway state home, the same at the end of the run as after the first turn, so nothing moved the session after attach.
+The attach reply already named that path (`still_virtual_after_attach: false`): the rename inside `start()` writes the name at once and announces nothing (`SessionManager`'s `#rename`, `announce` false), so the first snapshot under the handle carries the adopted ref.
+The created `virtual:` id still resolved to it, and the first prompt through that id was answered 202, in both smoke runs.
+
+**What the steer probe measured is what OW-yuyofu recorded on 0.85.1.**
+The first turn had streamed 184 upserts and 1208 characters when the marker prompt went out, with `streaming_at_post: true`, and was answered 202.
+Pi put it on the `steering` queue in a `queue_update` at tap index 188, the first line past the cut, with no `agent_end` and no `agent_settled` between it and the answer; the gardening reply's `message_end` held 13421 characters, and the marker came back in a 24-character assistant message inside the same run, giving `verdict: "steered_into_running_turn"` by both the queue and the turn boundaries.
+The session reported idle 25.091 s after the marker prompt went out, and the model read back was `openrouter/deepseek/deepseek-v4.1-flash`.
+The tree was `bun → bwrap → bwrap → pi → pi → tee`, the second `pi` and the `tee` being the probe's shim.
+
+**The rest of each smoke run behaved as the OW-sofige section recorded.**
+The tree was `bun → bwrap → bwrap → pi` with one Pi descendant, `copied_credential_files` was `["auth.json", "models-store.json", "settings.json"]`, and `checks.model` read `openrouter/deepseek/deepseek-v4.1-flash` at `effort: "high"`.
+Bare: the long turn filled (`abort_wait: "filled"`), the abort went out at 22:28:00.572 with 20031 characters of the turn's own text, idle followed at 22:28:00.587 with 20079, and nothing changed through settling.
+`--tool-check`: a `toolCall` arrived in a message of `["thinking", "toolCall"]` blocks, no dialog was cancelled in either turn's window, and the abort went out at 22:28:28.591 with 20084 characters, idle at 22:28:28.608 and unchanged after.
+SIGTERM left `remaining_worker_pids: []` in both.
+
+**`fork_attach_probe.py` ran live on Claude Code alone; its Pi and Codex legs could not run in this session's sandbox.**
+`python3 resources/probes/fork_attach_probe.py --skip-build` ran all three backends against their real stores, as its docblock says it must (22:28:53.140 to 22:29:28).
+The Claude Code leg, on `claude 2.1.283` with `--model haiku`, reported `"result": "pass"` with no failed step: both parent turns settled by the attach reply's handle, the fork attached under a handle of its own and answered `THREE` under it, and `refs` held one ref in each.
+The Pi and Codex legs errored at their first attach, before any of the changed code ran, because `~/.pi/agent/sessions` and `~/.codex` were mounted read-only in this session: Pi died on `ENOENT` creating its session directory there, and `codex app-server` on `failed to initialize sqlite state runtime under /home/ark3/.codex`; a `touch` in each from the session answered `Read-only file system`.

@@ -86,7 +86,9 @@ It passes `--model` explicitly, through the create-session route's `model` field
 Its abort phase is the Codex harness's: it waits for 20000 characters of the long turn's own text and reports the length off that turn's messages alone (OW-sofige).
 Verified with the change: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`; see the same OW-sofige section.
 
-Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
+It keys every wait by the handle the attach reply carried and reads the rename after the first turn, recording in `checks.rename` every ref the handle carried and whether the move came at attach or on the first prompt (OW-niwusi).
+Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`, after the move to the handle; see `docs/MANUAL_TESTING.md`, "The live Pi probes follow a session by its handle (OW-niwusi)".
+The runs before that move are "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi) for what that evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
 
 ## `agentpane_pi_steer_probe.py`
@@ -119,6 +121,7 @@ Only `steered_into_running_turn` passes.
 
 Verified with: `pi` 0.85.1 on the home server, 2026-09-14, six runs.
 What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered into Pi's running turn (OW-yuyofu)".
+It could not pass again after OW-mofuho retired the `renamed` event it waited for (2026-09-25), until OW-niwusi keyed its waits by the handle the attach reply carried; verified again with `pi` 0.87.1 on the home server, 2026-09-30, one run, in "The live Pi probes follow a session by its handle (OW-niwusi)".
 
 ## `agentpane_live_support.py`
 
