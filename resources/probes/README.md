@@ -58,6 +58,9 @@ of the server it starts. It never invokes Pi. Exit 0 plus the emitted JSON
 It creates the session with an explicit `model`, `--model`, defaulting to the `gpt-5.6-luna` that `AGENTS.md` pins: agentpane spawns a bare `codex app-server` and sends no model on `thread/start` unless the session was created with one, so without it Codex answers on whatever the copied `config.toml` names.
 `checks.model` records the flag beside the model the thread reported (OW-yehisa).
 
+The abort phase waits for the long turn to hold 20000 characters of its own text before aborting it, and reports `assistant_length_at_abort` off that turn's messages alone (OW-sofige), so a run spends that much output and up to 150 s more than it did; the prompt and the wait are shared with the Pi harness in `agentpane_live_support.py`.
+Verified with the change: `codex-cli` 0.157.1 on the home server, 2026-09-30; see `docs/MANUAL_TESTING.md`, "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)".
+
 Verified with: `codex-cli` 0.157.1 on the home server, 2026-09-30, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 
 ## `agentpane_pi_smoke.py`
@@ -79,6 +82,9 @@ the model has to choose to call a tool. It passes; it is separated so the
 default run stays deterministic.
 
 It passes `--model` explicitly, through the create-session route's `model` field, defaulting to the `openrouter/deepseek/deepseek-v4.1-flash:high` that `AGENTS.md` pins, and records that flag in `model_flag` and `checks.model.flag_passed` beside the model and level read back off the wire (OW-yehisa).
+
+Its abort phase is the Codex harness's: it waits for 20000 characters of the long turn's own text and reports the length off that turn's messages alone (OW-sofige).
+Verified with the change: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`; see the same OW-sofige section.
 
 Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`; see `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi) for what that evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
