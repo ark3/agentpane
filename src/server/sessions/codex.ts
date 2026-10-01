@@ -469,9 +469,44 @@ function camel<T extends string>(value: string): T {
 	return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as T;
 }
 
-/** argv as one command line, quoting as the live `commandExecution.command` does. */
+/**
+ * argv as one command line, as the live `commandExecution.command` reads: a
+ * port of `quote` from the Rust `shlex` crate 1.3.0, joined by spaces. Each
+ * word is cut into the longest chunks one strategy can carry -- bare, single
+ * quoted, or double quoted with `"` and `\` escaped -- preferring them in that
+ * order. Pinned against the live strings of `tool-read`, `tool-edit`,
+ * `collab-multi` and `long-shell` in `resources/fixtures/codex/`.
+ */
 function shellJoin(argv: string[]): string {
-	return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'"'"'`)}'`)).join(" ");
+	return argv.map(shellQuote).join(" ");
+}
+
+const BARE = 1;
+const SINGLE = 2;
+const DOUBLE = 4;
+
+function shellQuote(word: string): string {
+	if (word === "") return "''";
+	let out = "";
+	let rest = word;
+	while (rest) {
+		// `^` is single-quoted only right after the opening quote (a Bash bug).
+		let ok = rest[0] === "^" ? SINGLE : BARE | SINGLE | DOUBLE;
+		let length = rest[0] === "^" ? 1 : 0;
+		for (; length < rest.length; length++) {
+			const c = rest[length]!;
+			let next = ok;
+			if (!/^[+\-./:@\]_0-9A-Za-z]$/.test(c)) next &= ~BARE;
+			if (c === "'" || c === "^" || c === "\\") next &= ~SINGLE;
+			if (c === "`" || c === "$" || c === "!" || c === "^") next &= ~DOUBLE;
+			if (next === 0) break;
+			ok = next;
+		}
+		const chunk = rest.slice(0, length);
+		rest = rest.slice(length);
+		out += ok & BARE ? chunk : ok & SINGLE ? `'${chunk}'` : `"${chunk.replace(/["\\]/g, "\\$&")}"`;
+	}
+	return out;
 }
 
 /**

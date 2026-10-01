@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
+import { byMethod, itemOf, readFixture, type FixtureName } from "../adapters/codex/test-support.ts";
 import { readSessionPreview } from "./preview.ts";
 
 /**
@@ -614,6 +615,48 @@ describe("readSessionPreview", () => {
 				"toolResult exec ok",
 				"assistant stop",
 			]);
+		});
+
+		it.each<[FixtureName, string[]]>([
+			["tool-read", ["/bin/bash", "-lc", "sed -n '1,20p' greeting.txt"]],
+			["tool-edit", ["/bin/bash", "-lc", "sed -n '1,120p' greeting.txt"]],
+			["collab-multi", ["/bin/bash", "-lc", "sleep 15"]],
+			["long-shell", ["/bin/bash", "-lc", "for i in $(seq 1 45); do echo line-$i; sleep 1; done"]],
+		])("joins a stored command's argv as the live %s item's command reads", async (fixture, argv) => {
+			// The argv is what the rollout stores for that run, or for the two
+			// captures with no rollout, the run's own script under the same shell.
+			const live = byMethod(readFixture(fixture), "item/completed").map(itemOf).find((item) => item.type === "commandExecution");
+			if (live?.type !== "commandExecution") throw new Error(`${fixture} completes no commandExecution`);
+			await writeJsonl(codexRollout(root, THREAD), [
+				codexHeader(THREAD),
+				{
+					type: "event_msg",
+					payload: {
+						type: "item_completed",
+						started_at_ms: 1,
+						item: {
+							type: "CommandExecution",
+							id: "exec-1",
+							command: argv,
+							cwd: "file:///ws/project",
+							parsed_cmd: [],
+							process_id: null,
+							source: "unified_exec_startup",
+							status: "completed",
+							aggregated_output: "",
+							exit_code: 0,
+							duration: { secs: 0, nanos: 0 },
+						},
+					},
+				},
+			]);
+
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns[0]).toMatchObject({
+				role: "assistant",
+				content: [{ type: "toolCall", name: "bash", arguments: { command: live.command } }],
+			});
 		});
 
 		it("answers null when no file carries the thread id, rather than throwing (D26)", async () => {
