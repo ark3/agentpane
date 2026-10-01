@@ -1,5 +1,6 @@
 ---
 labels: [defect, sweep-0929]
+closed: done
 ---
 
 # agentpane_pi_smoke.py takes its model from the mutable settings file, not from the pin
@@ -35,3 +36,14 @@ Done also requires `capture_fixtures.py` to pass Pi an explicit `--model` defaul
 OW-letevu removed the `request` SSE events the probe's dialog window observed, and rewrote that observation without a live run: `requests_in` became `dialogs_in`, which counts `error` events whose message begins "Pi sent a dialog agentpane cannot answer", and the evidence key `agent_requests_seen` became `agent_dialogs_cancelled` (`resources/probes/agentpane_pi_smoke.py`, the `DIALOG_CANCELLED` constant and the `if args.tool_check:` block).
 The home-server run this card already requires is therefore the probe's first since that change.
 Done also requires that run to complete with `agent_dialogs_cancelled` in its blob, `docs/MANUAL_TESTING.md` to say in that run's entry that the key and what it counts changed under OW-letevu, and the probe's "Verified with" line in `resources/probes/README.md` to name that run.
+
+## Close note
+
+Landed on main as 0c6bd70..387d9bc plus review fixes d01e6b7.
+agentpane_pi_smoke.py now creates its session with "model": openrouter/deepseek/deepseek-v4.1-flash:high (--model, default the AGENTS.md pin), and records model_flag and checks.model.flag_passed beside the model and effort read back.
+Home-server runs 2026-09-30 on pi 0.87.1, bare and --tool-check, both passed with agent_dialogs_cancelled present (no dialogs fired) and checks.model reading openrouter/deepseek/deepseek-v4.1-flash at effort high.
+The probe could not pass at all since OW-mofuho retired the renamed event; it now waits for a snapshot under the attach reply's handle.
+agentpane_codex_smoke.py had the same defect (codexCommand spawns a bare app-server and CodexAdapter.start sends model only if the session was created with one), so it now posts gpt-5.6-luna and reads the thread's model back; passed on codex-cli 0.157.1.
+capture_fixtures.py spawns Pi with --model (--pi-model, default the pin) and records model_flag beside models_seen in the .meta.json; compiled, not run live.
+On this machine the read-back cannot tell flag from settings file, since both resolve to the pin; docs/MANUAL_TESTING.md, "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)", records that, the OW-letevu key change, and the Codex finding.
+Review filed OW-niwusi (probes still keyed by ref and on renamed; the steer probe hangs) and OW-yezeya (fork_probe.py and pi_rpc_probe.sh unpinned).
