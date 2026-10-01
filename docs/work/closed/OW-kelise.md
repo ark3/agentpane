@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A stored Codex rollout previewed from the picker draws the subagent card with no link to the child thread, and one from 0.150.1 through 0.154.0 still draws an opaque collaboration__spawn_agent card
@@ -56,3 +57,10 @@ Rollouts from 0.150.1 through 0.154.0 that store collab calls as `collaboration`
 What remains here is the decision this card's first done-condition asked for, narrowed to the link: whether the read-only preview's subagent card should offer Open thread, which today it cannot, because the `{#if previewing}` branch of `src/client/App.svelte` renders `<Transcript>` with no `onopensession`.
 Per `AGENTS.md`, "Both clients", a yes lands in agentpane-mode too, where OW-gakide carries the live link and OW-novuye the node contract it needs.
 Done when that decision is recorded beside D19 in `docs/DESIGN.md`, together with a sentence on whether the 0.150.1–0.154.0 default card is left as it is; where the decision is yes, a client test renders the preview's subagent card with the control, watched red first.
+
+## Close note
+
+Decided with the owner on 2026-10-01 and recorded beside D19 in `docs/DESIGN.md`: the read-only preview's subagent card offers Open thread in both clients, and the opaque default card for 0.150.1–0.154.0 rollouts stays as it is (encrypted arguments, no spawn record, so no child to link).
+Browser half: the `{#if previewing}` branch of `src/client/App.svelte` passes `onopensession={openSession}`. Open thread calls `controller.preview`, as a picker row click does, so it never attaches. Pinned by "opens the child thread from a preview's subagent card too (OW-kelise)" in `src/client/App.test.ts`, red on the old code because the control was absent. `bun run check` is green on main.
+The adversarial read found that the comments' "another preview" overclaimed, since a child already attached in this client goes to its live transcript, and those comments were corrected. Its other checks came out clean: selection-intent races, preview polling, `gone`, a child equal to the current preview, and scroll keys all behave as for a row click.
+Emacs half: OW-gakide was amended to cover preview buffers and to test from both.
