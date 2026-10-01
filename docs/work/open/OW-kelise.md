@@ -2,7 +2,7 @@
 labels: [defect]
 ---
 
-# A stored Codex rollout previewed from the picker still shows a subagent spawn as an opaque collaboration__spawn_agent card with an encrypted argument and no link to the child thread.
+# A stored Codex rollout previewed from the picker draws the subagent card with no link to the child thread, and one from 0.150.1 through 0.154.0 still draws an opaque collaboration__spawn_agent card
 
 `src/server/sessions/codex.ts` (`extractCodexPreviewTurns`, the `function_call || custom_tool_call` branch that builds the name), `src/client/App.svelte` (the `{#if previewing}` branch that renders `<Transcript>` without `onopensession`), `src/client/render/tools/SubagentTool.svelte` and `src/client/render/tools/registry.ts`.
 
@@ -46,3 +46,13 @@ Rollouts written by older versions still carry the `collaboration__spawn_agent` 
 
 OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records through live `mapItem` wherever a rollout carries them; a `CollabAgentToolCall` record carries `tool`, `prompt`, `receiver_agents` and `agents_states`, so a spawn previews as the live `subagent` card, and its done-condition removes this card's `KNOWN_DIFFERENCES` entries.
 What remains here afterwards is the link to the child thread, which is presentation and may belong with OW-novuye and OW-gakide, and the older `collaboration__spawn_agent` rollouts that carry no item records, whose differences OW-luvema accepts as a first cut.
+
+## Amended 2026-10-01 after OW-luvema closed
+
+OW-luvema landed the naming half for every rollout whose `item_completed` records are a full copy, 0.157.1's among them: the preview draws a collab call through live `mapItem` as the `subagent` card, with the child's id, and `codex-conformance.test.ts` holds no entry for this card, which was red until it did.
+`docs/DESIGN.md` beside D19 now records that, at "since OW-luvema the preview draws it through `mapItem` like the live item".
+Rollouts from 0.150.1 through 0.154.0 that store collab calls as `collaboration`-namespace function calls take the preview's fallback instead, because their records are not a full copy (no record for a spawn, an empty one for every wait; counts in `extractStoreTurn`'s docblock in `src/server/sessions/codex.ts`), so they keep the opaque default card; OW-luvema accepted that as a first cut.
+
+What remains here is the decision this card's first done-condition asked for, narrowed to the link: whether the read-only preview's subagent card should offer Open thread, which today it cannot, because the `{#if previewing}` branch of `src/client/App.svelte` renders `<Transcript>` with no `onopensession`.
+Per `AGENTS.md`, "Both clients", a yes lands in agentpane-mode too, where OW-gakide carries the live link and OW-novuye the node contract it needs.
+Done when that decision is recorded beside D19 in `docs/DESIGN.md`, together with a sentence on whether the 0.150.1–0.154.0 default card is left as it is; where the decision is yes, a client test renders the preview's subagent card with the control, watched red first.
