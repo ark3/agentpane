@@ -1298,7 +1298,7 @@ Target types (`resources/codex-protocol/` for Codex; `pi-ai/dist/types.d.ts` for
 | `commandExecution` | `AssistantMessage` `{type:"toolCall"}` + `ToolResultMessage` | command + streamed output → tool call/result pair |
 | `fileChange` | `toolCall` + `toolResult` (diff) | render with the `diff` package |
 | `mcpToolCall`, `dynamicToolCall`, `webSearch` | `toolCall` + `toolResult` | arbitrary names — these are why D5 needs a fallback card |
-| `plan` | assistant text or a custom block | optional polish |
+| `plan` | `AssistantMessage` text | no custom block, decided below (OW-19) |
 | `contextCompaction` | compaction summary message | Pi has a compaction message type; mirror it |
 | `collabAgentToolCall` | `toolCall` + `toolResult`, named `subagent` | one card per collab operation, naming the child thread (D19) |
 
@@ -1306,6 +1306,13 @@ Target types (`resources/codex-protocol/` for Codex; `pi-ai/dist/types.d.ts` for
 The registry is `src/server/adapters/codex/mapping.ts` — `mapItem`'s switch and the `SILENT_ITEM_TYPES` set above it, each arm carrying its own reasoning.
 Two mapped types are missing here, `imageGeneration` and `imageView`, both of which produce output.
 The table is deliberately not kept complete: Codex adds `ThreadItem` variants between releases, and `mapItem`'s doc comment says what happens to the ones nobody has taught it about.
+
+**A `plan` stays assistant text, decided 2026-10-01 (OW-19).**
+As of `codex-cli 0.157.1` (`resources/fixtures/codex/plan.jsonl`), a plan arrives as one `plan` item holding a short numbered markdown list, which markdown already renders as a list in both clients, so a custom block would buy nothing.
+agentpane never sends plan mode, so a plan reaches a user only from a thread another client drove.
+On disk the rollout wraps the same text in `<proposed_plan>` tags as a final-answer assistant message, beside a `Plan` `item_completed` record holding the bare text; since OW-luvema the preview builds the plan from that record, so the tags do not show.
+A rollout on the preview's fallback path, such as one from 0.150.1 through 0.154.0, still draws the wrapped message, tags included, as every preview did before OW-luvema (`docs/MANUAL_TESTING.md`, "What the two mappers disagree on").
+Nothing strips them: on 2026-10-01 none of the home server's 119 rollouts held `<proposed_plan>`.
 
 **The `commandExecution` row is the live shape only.**
 As of `codex-cli 0.155.1`, measured 2026-09-22, the live wire presents a shell run as `commandExecution`, while the rollout on disk stores it as a `custom_tool_call` named `exec` wrapping `tools.exec_command(...)` or as a `function_call` named `exec_command`.

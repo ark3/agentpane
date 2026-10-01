@@ -371,8 +371,8 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 		}
 
 		case "plan": {
-			// DESIGN leaves plan rendering open ("assistant text or a custom
-			// block"). Text is the honest minimum: it is literally a text field.
+			// A short numbered list markdown already renders, so text and no
+			// custom block (DESIGN, "A `plan` stays assistant text", OW-19).
 			return {
 				kind: "single",
 				message: assistant(ctx, textBlocks(item.text), ctx.completed ? "stop" : "pending"),
