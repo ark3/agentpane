@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The Codex subagent card shows a red error badge with an empty body when a collab call fails, and glues several children's replies together with nothing saying which child said which.
@@ -67,3 +68,11 @@ Each watched red first.
 
 `bun run check` passes.
 The earlier "Done when" above is superseded by this one.
+
+## Close note
+
+Landed on main as 8a97b83, after the owner decided on 2026-10-01 to fix this in the mapping text (option A, structured per-child results declined) and to fold in the short-id fix.
+`collabResultText` in `src/server/adapters/codex/mapping.ts` builds a collab call's result body. One child with a message gets that message alone. Otherwise each child with a state gets `<short id>: <message>`, or its status in words when it has none (`COLLAB_STATUS_WORDS`, e.g. "not found"). A failed call with no receiver state reads "The call failed, and Codex gave no reason." The short id is now `shortThreadId` in `src/shared/thread-id.ts`, the last 8 characters, because the first 8 of a UUIDv7 are a timestamp that siblings share. `toolSummary`'s header uses the same short id, so header and body agree, and agentpane-mode gets both through `src/emacs/nodes.ts`.
+Verified: new tests in `reducer.test.ts` (collab-failed, collab-multi) and `subagent.test.ts` (two same-second children), plus the moved assertion in `nodes.test.ts`, each watched red on the old code. `bun run check` is green on main with 1610 tests. The adversarial read replayed both rollouts and found live and preview agree on the text. The fallback-path preview never produces a `subagent` card.
+Visible side effect, flagged to the owner: a spawn's completion reports its child `pendingInit`, so a spawn card's body now reads "<id>: starting" where it was empty.
+Filed from the read: OW-lamoso, a stale count of collab tools in the `CODEX_TOOL_NAMES` docblock.
