@@ -13,6 +13,10 @@ OW-yehisa pinned the model in `resources/probes/agentpane_pi_smoke.py`, `agentpa
 Prior art for each shape: `agentpane_pi_steer_probe.py` and `session_name_probe.py` for Pi (`--model openrouter/deepseek/deepseek-v4.1-flash:high`), and `codex_fork_same_process_probe.py` for a bare `codex app-server` — its comment "app-server takes no flag, so the pin rides on every turn/start" and its `MODEL` constant on `turn/start`; `session_name_probe.py` sends it on `thread/start` instead.
 `codex_fork_history_probe.py` sends no `model` on `thread/start` but drives its turns through `codex_fork_same_process_probe.run_turn`, which pins, so it is not in scope.
 
+Two neighbours read this fact and must stay right.
+`resources/probes/claude_fork_probe.py` justifies its unflagged `MODEL` constant with "`fork_probe.py` exposes no model flag either"; that clause becomes false and is retired in the same change, per `AGENTS.md` "retire every copy".
+`resources/probes/hydrate_window_probe.py` subclasses `PiSession` as `PinnedPiSession`, overriding `__init__` to add `--model`; the change must leave it working, and collapsing it into the base class is not this card's work.
+
 The load-bearing part is that each spawn or thread passes the pinned model explicitly and the probe records the flag beside whatever it reads back; a `--model` override flag is incidental.
 
 ## Done when
