@@ -1,5 +1,6 @@
 ---
 labels: [question, sweep-0929]
+closed: done
 ---
 
 # The session naming and marking stream predates the Both clients rule and specifies browser UI only, so it needs one plan for what a row carries and how both clients label it
@@ -25,3 +26,12 @@ Some of these bodies have stale premises, found by the same sweep:
 One decision recorded in `docs/DESIGN.md`, extending D13 or as a new D-number, that names the `SessionSummary` fields a row carries (a name, D13's mark, and the fork parent), one label rule both clients follow, and where each field comes from.
 Whatever it decides, each of the five cards is rewritten to it or closed, and each capability that survives has its Emacs card, labelled `emacs` and blocked by the wire card, per the Both clients rule.
 OW-20 and OW-21 sit next to this (listing latency, which OW-yilene's done condition measures; and models, which OW-muvili offers to collect): say in the decision whether either changes.
+
+## Close note
+
+Decided with the owner on 2026-10-01 and recorded as D27 in `docs/DESIGN.md`.
+`SessionSummary` gains `name` (read from the backend, never kept by agentpane), D13's `mark`, and `forkedFrom` (read from the session header). Both clients label a row by the name, then the preview, then the first user text, and a fork gets a marker that names its parent.
+A choice beyond what the owner was asked, found by the adversarial read and flagged to them: marks follow `onDisk`, not `virtual`, because `#liveOverlay` reports a created session as `attached` before its first prompt, so no client can see that it is virtual.
+OW-muvili, the Codex name collector, is deferred, because a listing-only `codex app-server` sits awkwardly with D25's "Only an attach starts an agent". OW-20 and OW-21 are unchanged.
+The cards were restructured under "Both clients". OW-jamaha (rename), OW-66 (marks) and OW-vezipo (fork parent) became wire cards covering the HTTP API, `src/client/api.ts` and the Emacs helper's JSON-RPC. Each has a browser card and an `emacs` card blocked by it: OW-bumonu and OW-jidihu, OW-zewiru and OW-hahuna, and OW-galuhu and OW-kepemu, with the two marker cards also blocked by their client's label card. OW-yilene stays server-only. OW-ruyewe holds the deferred auto-hiding of forks.
+The adversarial read also moved into OW-66 what fell between wire and client: a notice held and sent to each client at connect, every `event.handle` narrowing, and `sessions-changed` after a mark. It corrected OW-jamaha's Pi fake location and its vendored-method claim.
