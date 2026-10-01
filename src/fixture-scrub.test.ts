@@ -163,10 +163,19 @@ describe("fixture scrub", () => {
 				const event = JSON.parse(line) as {
 					method?: string;
 					params?: { rateLimits?: Record<string, unknown> };
+					type?: string;
+					payload?: { type?: string; rate_limits?: Record<string, unknown> | null };
 				};
-				if (event.method !== "account/rateLimits/updated") continue;
-				const privateValues = Object.entries(event.params?.rateLimits ?? {})
-					.filter(([key, value]) => key !== "limitId" && value !== null)
+				// The wire's `account/rateLimits/updated`, and the same telemetry
+				// as a rollout writes it, on an `event_msg` `token_count` (OW-zadupu).
+				const [rateLimits, idKey] =
+					event.method === "account/rateLimits/updated"
+						? [event.params?.rateLimits, "limitId"]
+						: event.type === "event_msg" && event.payload?.type === "token_count"
+							? [event.payload.rate_limits, "limit_id"]
+							: [undefined, ""];
+				const privateValues = Object.entries(rateLimits ?? {})
+					.filter(([key, value]) => key !== idKey && value !== null)
 					.map(([key]) => key);
 				if (privateValues.length > 0) {
 					violations.push(
