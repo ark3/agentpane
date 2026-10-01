@@ -278,27 +278,60 @@ def message_block_types(message: dict[str, Any]) -> list[str]:
     ]
 
 
-def streaming_value(event: dict[str, Any], ref: dict[str, str]) -> bool | None:
-    if event.get("session") != ref or event.get("type") not in ("snapshot", "status"):
+# A session as a probe names it: the `handle` its attach reply carried, which a
+# rename never moves (D24), or a ref, which a rename does.
+Session = str | dict[str, str]
+
+
+def is_of(event: dict[str, Any], session: Session) -> bool:
+    """Whether `event` is under `session`, by handle or by ref.
+
+    Since OW-mofuho retired the `renamed` event (2026-09-25), a rename is said
+    only by a `snapshot` under the session's handle carrying the new ref, so a
+    probe that keys its waits by a ref stops matching its own session's events
+    the moment it moves. The Pi probes and `fork_attach_probe.py` pass the
+    handle (OW-niwusi); `agentpane_codex_smoke.py` still passes a ref. A string
+    never equals a ref, nor a ref a string, so one comparison serves both.
+    """
+    return event.get("handle") == session or event.get("session") == session
+
+
+def refs_under(events: list[tuple[str, dict[str, Any]]], handle: str) -> list[dict[str, str]]:
+    """Every ref the session under `handle` carried on the wire, oldest first.
+
+    One entry per move (D9): what a probe records, rather than requires, about
+    a rename. The last entry is the session's current ref, though any of them
+    still reaches it, because the server honours every name it ever had.
+    """
+    refs: list[dict[str, str]] = []
+    for _, event in events:
+        ref = event.get("session")
+        if event.get("handle") == handle and isinstance(ref, dict) and ref not in refs[-1:]:
+            refs.append(ref)
+    return refs
+
+
+def streaming_value(event: dict[str, Any], session: Session) -> bool | None:
+    if not is_of(event, session) or event.get("type") not in ("snapshot", "status"):
         return None
     value = event.get("isStreaming")
     return value if isinstance(value, bool) else None
 
 
-def last_streaming(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> bool | None:
+def last_streaming(events: list[tuple[str, dict[str, Any]]], session: Session) -> bool | None:
     """The most recent streaming state this session was reported to be in."""
     for _, event in reversed(events):
-        value = streaming_value(event, ref)
+        value = streaming_value(event, session)
         if value is not None:
             return value
     return None
 
 
-def max_assistant_length(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> int:
+def max_assistant_length(events: list[tuple[str, dict[str, Any]]], session: Session) -> int:
     """Longest assistant text seen for this session, across upserts and snapshots."""
     longest = 0
     for _, event in events:
-        if event.get("session") != ref:
+        if not is_of(event, session):
             continue
         if event.get("type") == "upsert":
             longest = max(longest, len(assistant_text(event.get("message", {}))))
@@ -308,7 +341,7 @@ def max_assistant_length(events: list[tuple[str, dict[str, Any]]], ref: dict[str
     return longest
 
 
-def transcript(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> list[dict[str, Any]]:
+def transcript(events: list[tuple[str, dict[str, Any]]], session: Session) -> list[dict[str, Any]]:
     """This session's transcript as the wire has described it so far.
 
     Replayed the way a client holds it (`src/shared/protocol.ts`): a `snapshot`
@@ -319,7 +352,7 @@ def transcript(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) ->
     """
     messages: list[dict[str, Any]] = []
     for _, event in events:
-        if event.get("session") != ref:
+        if not is_of(event, session):
             continue
         if event.get("type") == "snapshot":
             messages = list(event.get("messages", []))
@@ -338,7 +371,7 @@ def transcript(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) ->
 
 
 def turn_messages(
-    events: list[tuple[str, dict[str, Any]]], ref: dict[str, str], start: int
+    events: list[tuple[str, dict[str, Any]]], session: Session, start: int
 ) -> list[dict[str, Any]]:
     """What one turn added to the transcript: every message past the cut.
 
@@ -359,10 +392,10 @@ def turn_messages(
     alone already excludes every earlier turn, which is the misattribution
     `max_assistant_length` could not avoid (OW-sofige).
     """
-    floor = len(transcript(events[:start], ref))
+    floor = len(transcript(events[:start], session))
     return [
         {"index": index, "role": message.get("role"), "chars": len(assistant_text(message))}
-        for index, message in enumerate(transcript(events, ref))
+        for index, message in enumerate(transcript(events, session))
         if index >= floor
     ]
 
@@ -373,7 +406,7 @@ def assistant_chars(rows: list[dict[str, Any]]) -> int:
 
 
 def growing_assistant_text(
-    events: list[tuple[str, dict[str, Any]]], ref: dict[str, str], start: int
+    events: list[tuple[str, dict[str, Any]]], session: Session, start: int
 ) -> Any:
     """Evidence that a transcript arrived incrementally rather than in one lump.
 
@@ -382,7 +415,7 @@ def growing_assistant_text(
     """
     lengths_by_index: dict[int, list[int]] = {}
     for _, event in events[start:]:
-        if event.get("type") != "upsert" or event.get("session") != ref:
+        if event.get("type") != "upsert" or not is_of(event, session):
             continue
         text = assistant_text(event.get("message", {}))
         if text:
@@ -434,7 +467,7 @@ ABORT_AT_CHARS = 20000
 ABORT_WAIT_SECONDS = 150
 
 
-def wait_for_turn_to_fill(stream: SseReader, ref: dict[str, str], start: int) -> str:
+def wait_for_turn_to_fill(stream: SseReader, session: Session, start: int) -> str:
     """Wait until the turn begun at `start` holds `ABORT_AT_CHARS` of assistant text.
 
     Answers how the wait ended: "filled", "timed out", or "ended" -- the turn
@@ -444,9 +477,9 @@ def wait_for_turn_to_fill(stream: SseReader, ref: dict[str, str], start: int) ->
     """
 
     def filled_or_ended(events: list[tuple[str, dict[str, Any]]]) -> Any:
-        if assistant_chars(turn_messages(events, ref, start)) >= ABORT_AT_CHARS:
+        if assistant_chars(turn_messages(events, session, start)) >= ABORT_AT_CHARS:
             return "filled"
-        if last_streaming(events, ref) is False:
+        if last_streaming(events, session) is False:
             return "ended"
         return None
 

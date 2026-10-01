@@ -69,6 +69,7 @@ from agentpane_live_support import (
     finalize,
     now,
     ref_path,
+    refs_under,
     start_server,
     streaming_value,
     wait_for_built_client,
@@ -109,26 +110,19 @@ def worker_filter_for(backend: str):
     return lambda rows: [row for row in rows if row["comm"] in comms]
 
 
-def follow_renames(events: list[tuple[str, dict[str, Any]]], ref: dict[str, str]) -> dict[str, str]:
-    """Where `ref` has moved to, if a `renamed` chain moved it.
-
-    Every backend replaces a `virtual:` ref at attach (D9), and Pi's id is its
-    JSONL path, so a probe that holds the ref it created stops matching its
-    own session's events.
-    """
-    current = ref
-    for _, event in events:
-        if event.get("type") == "renamed" and event.get("from") == current:
-            nxt = event.get("session")
-            if isinstance(nxt, dict):
-                current = nxt
-    return current
-
-
 def turn(
-    http: Http, stream: SseReader, ref: dict[str, str], text: str, timeout: float
+    http: Http, stream: SseReader, ref: dict[str, str], handle: str, text: str, timeout: float
 ) -> dict[str, Any]:
-    """Prompt, wait for streaming to go up and come back down, report the reply."""
+    """Prompt, wait for streaming to go up and come back down, report the reply.
+
+    Waits by the `handle` the attach reply carried, never by `ref`: every
+    backend replaces a `virtual:` ref at attach and some move it again later
+    (D9), and since OW-mofuho a move is only a snapshot under the unchanged
+    handle carrying the new ref (D24). The ref posted to may be stale by then;
+    the server honours every name a session ever had. What the session is
+    called when the turn settles is reported as `ref`, and every name it has
+    carried as `refs`.
+    """
     start = len(stream.snapshot())
     status, body = http.json("POST", ref_path(ref, "/prompt"), {"text": text})
     record: dict[str, Any] = {"prompt_http": status, "prompted_at": now()}
@@ -137,14 +131,13 @@ def turn(
         return record
 
     def settled(events: list[tuple[str, dict[str, Any]]]) -> Any:
-        live = follow_renames(events, ref)
         seen_streaming = False
         for stamp, event in events[start:]:
-            value = streaming_value(event, live)
+            value = streaming_value(event, handle)
             if value is True:
                 seen_streaming = True
             elif value is False and seen_streaming:
-                return {"idle_at": stamp, "ref": live}
+                return {"idle_at": stamp}
         return None
 
     try:
@@ -153,25 +146,27 @@ def turn(
         record["result"] = "timeout"
         record["error"] = str(exc)
         return record
-    live = done["ref"]
+    events = stream.snapshot()
+    refs = refs_under(events, handle)
     replies = [
         assistant_text(event.get("message", {}))
-        for _, event in stream.snapshot()[start:]
-        if event.get("type") == "upsert" and event.get("session") == live
+        for _, event in events[start:]
+        if event.get("type") == "upsert" and event.get("handle") == handle
     ]
     record.update(
         result="pass",
         idle_at=done["idle_at"],
-        ref=live,
+        ref=refs[-1] if refs else ref,
+        refs=refs,
         reply_tail=(replies[-1][-200:] if replies else ""),
     )
     return record
 
 
-def transcript_of(stream: SseReader, ref: dict[str, str]) -> dict[str, Any]:
+def transcript_of(stream: SseReader, handle: str) -> dict[str, Any]:
     """The newest snapshot this session broadcast, summarised by role."""
     for _, event in reversed(stream.snapshot()):
-        if event.get("type") == "snapshot" and event.get("session") == ref:
+        if event.get("type") == "snapshot" and event.get("handle") == handle:
             messages = event.get("messages", [])
             return {
                 "count": len(messages),
@@ -269,6 +264,7 @@ def fork_at_last_point(
     step["result"] = "pass" if attach_status == 200 else "attach failed"
     if attach_status == 200:
         step["attached_ref"] = attached["session"]["ref"]
+        step["attached_handle"] = attached["session"]["handle"]
     return step
 
 
@@ -341,20 +337,21 @@ def run_backend(backend: str, workspace: Path, port: int, args: argparse.Namespa
         if attach_status != 200:
             raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
         ref = attached["session"]["ref"]
-        evidence["steps"]["session"] = {"create_http": create_status, "ref": ref}
+        handle = attached["session"]["handle"]
+        evidence["steps"]["session"] = {"create_http": create_status, "ref": ref, "handle": handle}
 
         # Two turns, so the last fork point is not also the first.
-        first = turn(http, stream, ref, "Reply with exactly the word ONE and nothing else.", args.turn_timeout)
+        first = turn(http, stream, ref, handle, "Reply with exactly the word ONE and nothing else.", args.turn_timeout)
         evidence["steps"]["turn_one"] = first
         if first.get("result") != "pass":
             raise RuntimeError(f"the first turn never settled: {first}")
         ref = first["ref"]
-        second = turn(http, stream, ref, "Reply with exactly the word TWO and nothing else.", args.turn_timeout)
+        second = turn(http, stream, ref, handle, "Reply with exactly the word TWO and nothing else.", args.turn_timeout)
         evidence["steps"]["turn_two"] = second
         if second.get("result") != "pass":
             raise RuntimeError(f"the second turn never settled: {second}")
         ref = second["ref"]
-        evidence["steps"]["parent_transcript"] = transcript_of(stream, ref)
+        evidence["steps"]["parent_transcript"] = transcript_of(stream, handle)
 
         # 1. The case the owner reports: edit the last message.
         forked = fork_at_last_point(http, stream, ref, backend=backend, store_root=store_root)
@@ -377,14 +374,15 @@ def run_backend(backend: str, workspace: Path, port: int, args: argparse.Namespa
 
         if forked.get("result") == "pass":
             fork_ref = forked["attached_ref"]
+            fork_handle = forked["attached_handle"]
             # 2. The prompt `forkAndSubmit` sends into the fork.
             third = turn(
-                http, stream, fork_ref, "Reply with exactly the word THREE and nothing else.", args.turn_timeout
+                http, stream, fork_ref, fork_handle, "Reply with exactly the word THREE and nothing else.", args.turn_timeout
             )
             evidence["steps"]["fork_turn"] = third
             if third.get("result") == "pass":
                 fork_ref = third["ref"]
-                evidence["steps"]["fork_transcript"] = transcript_of(stream, fork_ref)
+                evidence["steps"]["fork_transcript"] = transcript_of(stream, fork_handle)
 
             # 3. Re-attach, now that the fork's own store file exists.
             again_status, again = http.json("GET", ref_path(fork_ref))

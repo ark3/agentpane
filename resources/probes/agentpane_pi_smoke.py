@@ -67,6 +67,7 @@ from agentpane_live_support import (
     message_block_types,
     now,
     ref_path,
+    refs_under,
     start_server,
     streaming_value,
     turn_messages,
@@ -298,59 +299,17 @@ def main() -> int:
             "pi_worker_pids": sorted(launched_workers),
         }
 
-        # -- 2. Pi names the session, and the id changes under the client ---
+        # -- 2. streaming transcript, prompted through the created id ------
         #
-        # D9 once said a `virtual` session has no JSONL path until its first
-        # prompt writes one, so this check was originally written to fire after
-        # the prompt. Observed instead on pi 0.84.1: Pi has named the session
-        # file by the time `start()`'s `get_state` probe answers, so the rename
-        # lands during *attach* (on 0.87.1 the file itself is not written until
-        # the first turn's reply ends). Both orderings are legitimate -- the
-        # adapter's contract is that `ref` is unstable at two points, not that
-        # it changes at exactly one -- so scan the whole stream and record which
-        # one actually happened.
-        #
-        # There is no `renamed` event to wait for since OW-mofuho retired it
-        # (2026-09-25): a rename is said only by a snapshot under the session's
-        # handle -- which a rename never changes (D24) -- carrying the new ref.
+        # Every reading from here on is keyed by the handle the attach reply
+        # carried, which a rename never changes (D24); since OW-mofuho retired
+        # the `renamed` event (2026-09-25), a snapshot under that handle
+        # carrying the new ref is all a rename is on the wire. So the probe
+        # never waits for one: a move is something it records in section 3.
         handle = attached["session"].get("handle")
         if not isinstance(handle, str) or not handle:
             raise RuntimeError(f"attach answered no handle: {attached['session']}")
 
-        def renamed(events: list[tuple[str, dict[str, Any]]]) -> Any:
-            for stamp, event in events:
-                if event.get("type") != "snapshot" or event.get("handle") != handle:
-                    continue
-                session = event.get("session")
-                if isinstance(session, dict) and not str(session.get("id", "")).startswith("virtual:"):
-                    return {"renamed_at": stamp, "to": session}
-            return None
-
-        rename = stream.wait_for(renamed, 60, "a snapshot under the handle naming Pi's own id (D9, D24)")
-        real_ref = rename["to"]
-        if real_ref.get("backend") != "pi":
-            raise RuntimeError(f"the handle's snapshot carried no Pi ref: {rename}")
-        if real_ref["id"].startswith("virtual:") or not real_ref["id"].endswith(".jsonl"):
-            raise RuntimeError(f"Pi did not adopt a JSONL path as its id: {real_ref}")
-
-        # The browser that created the session is still holding the old id and
-        # may already have a prompt in flight against it, so it has to keep
-        # working -- this is the difference between "the second message in a new
-        # conversation works" and a 404.
-        alias_status, aliased = http.json("GET", ref_path(virtual_ref))
-        if alias_status != 200:
-            raise RuntimeError(f"the superseded id stopped resolving: HTTP {alias_status} {aliased}")
-        evidence["checks"]["rename"] = {
-            "result": "pass",
-            "handle": handle,
-            "renamed_at": rename["renamed_at"],
-            "renamed_during": "attach" if not attached_ref["id"].startswith("virtual:") else "first prompt",
-            "adopted_id_is_jsonl_path": True,
-            "superseded_id_still_resolves": alias_status == 200,
-            "superseded_id_resolves_to_new_ref": aliased["session"]["ref"] == real_ref,
-        }
-
-        # -- 3. streaming transcript, prompted through the superseded id ----
         first_start = len(stream.snapshot())
         prompt_status, prompt_body = http.json(
             "POST",
@@ -359,9 +318,8 @@ def main() -> int:
         )
         if prompt_status != 202:
             raise RuntimeError(f"prompt failed: HTTP {prompt_status} {prompt_body}")
-        evidence["checks"]["rename"]["prompt_via_superseded_id_http_status"] = prompt_status
         growth = stream.wait_for(
-            lambda events: growing_assistant_text(events, real_ref, first_start),
+            lambda events: growing_assistant_text(events, handle, first_start),
             120,
             "incremental assistant transcript updates",
         )
@@ -370,7 +328,7 @@ def main() -> int:
             saw_true = False
             true_at = None
             for stamp, event in events[first_start:]:
-                value = streaming_value(event, real_ref)
+                value = streaming_value(event, handle)
                 if value is True:
                     saw_true = True
                     true_at = stamp
@@ -386,6 +344,44 @@ def main() -> int:
         evidence["checks"]["text_stream"] = {"result": "pass", **growth}
         evidence["checks"]["idle"] = {"result": "pass", **idle}
 
+        # -- 3. Pi named the session, and the id changed under the client ---
+        #
+        # D9 once said a `virtual` session has no JSONL path until its first
+        # prompt writes one, so this check was originally written to fire after
+        # the prompt. Observed instead on pi 0.84.1: Pi has named the session
+        # file by the time `start()`'s `get_state` probe answers, so the rename
+        # lands during *attach* (on 0.87.1 the file itself is not written until
+        # the first turn's reply ends). Both orderings are legitimate -- the
+        # adapter's contract is that `ref` is unstable at two points, not that
+        # it changes at exactly one -- so this reads, once the first turn is
+        # over, every ref the handle carried and which of the two moved it.
+        refs = refs_under(stream.snapshot(), handle)
+        if not refs:
+            raise RuntimeError(f"no event arrived under the attach reply's handle {handle}")
+        real_ref = refs[-1]
+        if real_ref.get("backend") != "pi":
+            raise RuntimeError(f"the handle's events carried no Pi ref: {refs}")
+        if real_ref["id"].startswith("virtual:") or not real_ref["id"].endswith(".jsonl"):
+            raise RuntimeError(f"Pi did not adopt a JSONL path as its id: {refs}")
+
+        # The browser that created the session is still holding the old id and
+        # may already have a prompt in flight against it, so it has to keep
+        # working -- this is the difference between "the second message in a new
+        # conversation works" and a 404.
+        alias_status, aliased = http.json("GET", ref_path(virtual_ref))
+        if alias_status != 200:
+            raise RuntimeError(f"the superseded id stopped resolving: HTTP {alias_status} {aliased}")
+        evidence["checks"]["rename"] = {
+            "result": "pass",
+            "handle": handle,
+            "refs": refs,
+            "renamed_during": "attach" if not attached_ref["id"].startswith("virtual:") else "first prompt",
+            "adopted_id_is_jsonl_path": True,
+            "prompt_via_created_id_http_status": prompt_status,
+            "superseded_id_still_resolves": alias_status == 200,
+            "superseded_id_resolves_to_new_ref": aliased["session"]["ref"] == real_ref,
+        }
+
         # Which model actually answered. The run passes `--model` (see the
         # module doc), and the criteria that depend on the model most (a tool
         # call happening at all, how much text a long turn produces) cannot be
@@ -397,7 +393,7 @@ def main() -> int:
         # the wire. The thinking level rides beside it as `effort`.
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in reversed(events):
-                if event.get("session") != real_ref:
+                if event.get("handle") != handle:
                     continue
                 if event.get("type") not in ("snapshot", "status"):
                     continue
@@ -440,7 +436,7 @@ def main() -> int:
 
             def tool_called(events: list[tuple[str, dict[str, Any]]]) -> Any:
                 for stamp, event in events[tool_start:]:
-                    if event.get("session") != real_ref:
+                    if event.get("handle") != handle:
                         continue
                     messages = (
                         [event.get("message", {})]
@@ -466,7 +462,7 @@ def main() -> int:
                 saw_true = False
                 true_at = None
                 for stamp, event in events[tool_start:]:
-                    value = streaming_value(event, real_ref)
+                    value = streaming_value(event, handle)
                     if value is True:
                         saw_true = True
                         true_at = stamp
@@ -500,7 +496,7 @@ def main() -> int:
         # the prompt is posted -- the reading that does distinguish them -- and
         # record it. The same reading is what lets `turn_messages` take every
         # transcript position past `abort_start` as this turn's.
-        pre_prompt_streaming = last_streaming(stream.snapshot(), real_ref)
+        pre_prompt_streaming = last_streaming(stream.snapshot(), handle)
         if pre_prompt_streaming is not False:
             raise RuntimeError(
                 "a turn was still active when the long prompt was posted, so the "
@@ -516,7 +512,7 @@ def main() -> int:
 
         def active(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in events[abort_start:]:
-                if streaming_value(event, real_ref) is True:
+                if streaming_value(event, handle) is True:
                     return stamp
             return None
 
@@ -525,15 +521,15 @@ def main() -> int:
         # Let the turn's own text build up before cutting it, so the abort
         # tears down a large in-flight transcript rather than its first
         # sentence (`wait_for_turn_to_fill`, OW-sofige).
-        abort_wait = wait_for_turn_to_fill(stream, real_ref, abort_start)
+        abort_wait = wait_for_turn_to_fill(stream, handle, abort_start)
 
         # The cut is pinned immediately before the request, so a turn that ended
         # on its own cannot stand in for the abort. See the Codex harness for
         # the full argument, including the hole this narrows rather than closes.
         pre_abort = stream.snapshot()
         abort_index = len(pre_abort)
-        pre_abort_streaming = last_streaming(pre_abort, real_ref)
-        turn_at_abort = turn_messages(pre_abort, real_ref, abort_start)
+        pre_abort_streaming = last_streaming(pre_abort, handle)
+        turn_at_abort = turn_messages(pre_abort, handle, abort_start)
         if pre_abort_streaming is not True:
             raise RuntimeError(
                 "long turn was not streaming when the abort was issued "
@@ -549,7 +545,7 @@ def main() -> int:
 
         def aborted_idle(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in events[abort_index:]:
-                if streaming_value(event, real_ref) is False:
+                if streaming_value(event, handle) is False:
                     return {"timestamp": stamp, "event_type": event.get("type")}
             return None
 
@@ -557,9 +553,9 @@ def main() -> int:
         # The whole of what the turn added, position by position, not a total:
         # a message whose text grows or shrinks after idle, or a message that
         # appears, changes it.
-        turn_when_idle = turn_messages(stream.snapshot(), real_ref, abort_start)
+        turn_when_idle = turn_messages(stream.snapshot(), handle, abort_start)
         time.sleep(1.5)
-        turn_after = turn_messages(stream.snapshot(), real_ref, abort_start)
+        turn_after = turn_messages(stream.snapshot(), handle, abort_start)
         if turn_after != turn_when_idle:
             raise RuntimeError(
                 f"the aborted turn changed after it reported idle: {turn_when_idle} -> {turn_after}"
@@ -580,6 +576,10 @@ def main() -> int:
             "assistant_length_after_settling": assistant_chars(turn_after),
             "turn_messages_when_idle": turn_when_idle,
         }
+        # A later move would not have stopped anything above, which is keyed by
+        # the handle and posts through names the server keeps honouring, so say
+        # whether one happened.
+        evidence["checks"]["rename"]["refs_at_end"] = refs_under(stream.snapshot(), handle)
 
         # This is DESIGN's third open question for Pi: the agent is two `exec`s
         # down inside `bwrap`, and nothing else will ever reap it.

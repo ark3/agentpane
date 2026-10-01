@@ -99,6 +99,7 @@ from agentpane_live_support import (
     max_assistant_length,
     now,
     ref_path,
+    refs_under,
     start_server,
     streaming_value,
     wait_for_built_client,
@@ -454,6 +455,13 @@ def main() -> int:
         attach_status, attached = http.json("GET", ref_path(virtual_ref))
         if attach_status != 200:
             raise RuntimeError(f"attach failed: HTTP {attach_status} {attached}")
+        # D9: Pi's id is its JSONL path, adopted at attach or on the first
+        # prompt, so the ref moves under this probe. Every reading below is
+        # keyed by the handle instead, which a rename never changes (D24), and
+        # every request goes to the attach reply's ref, which the server keeps
+        # honouring whatever the session is called later.
+        attached_ref = attached["session"]["ref"]
+        handle = attached["session"]["handle"]
 
         tree, workers = process_evidence(server.pid)
         launched_workers.update(row["pid"] for row in workers)
@@ -467,23 +475,11 @@ def main() -> int:
             "process_tree": tree,
         }
 
-        # D9: the id is the JSONL path and is adopted once Pi names the file.
-        # Every `streaming`/`upsert` reading below is keyed on the adopted ref,
-        # so resolve it before anything is measured.
-        def renamed(events: list[tuple[str, dict[str, Any]]]) -> Any:
-            for stamp, event in events:
-                if event.get("type") == "renamed" and event.get("from") == virtual_ref:
-                    return {"renamed_at": stamp, "to": event.get("session")}
-            return None
-
-        real_ref = stream.wait_for(renamed, 60, "Pi to adopt its own session id (D9)")["to"]
-        evidence["session_id_is_jsonl_path"] = real_ref["id"].endswith(".jsonl")
-
         # -- 1. a turn long enough to steer into ---------------------------
         long_start = len(stream.snapshot())
         long_requested_at = now()
         long_status, long_body = http.json(
-            "POST", ref_path(real_ref, "/prompt"), {"text": LONG_PROMPT}
+            "POST", ref_path(attached_ref, "/prompt"), {"text": LONG_PROMPT}
         )
         if long_status != 202:
             raise RuntimeError(f"long prompt failed: HTTP {long_status} {long_body}")
@@ -492,7 +488,7 @@ def main() -> int:
             upserts = 0
             longest = 0
             for _, event in events[long_start:]:
-                if event.get("session") != real_ref or event.get("type") != "upsert":
+                if event.get("handle") != handle or event.get("type") != "upsert":
                     continue
                 upserts += 1
                 longest = max(longest, len(assistant_text(event.get("message", {}))))
@@ -525,7 +521,7 @@ def main() -> int:
         # instant of the post, and pin the tap's line count there, so everything
         # the verdict reads is strictly after the request.
         steer_start = len(stream.snapshot())
-        streaming_at_post = last_streaming(stream.snapshot(), real_ref)
+        streaming_at_post = last_streaming(stream.snapshot(), handle)
         tap_cut = len(tap_events(tap))
         if streaming_at_post is not True:
             raise RuntimeError(
@@ -536,7 +532,7 @@ def main() -> int:
         steer_monotonic = time.monotonic()
         steer_status, steer_body = http.json(
             "POST",
-            ref_path(real_ref, "/prompt"),
+            ref_path(attached_ref, "/prompt"),
             {"text": f"Ignore the gardening guide. Reply with exactly this token and nothing else: {marker}"},
         )
         evidence["checks"]["steer_post"] = {
@@ -553,7 +549,7 @@ def main() -> int:
         # -- 3. let everything Pi is going to do finish --------------------
         def settled(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in events[steer_start:]:
-                if streaming_value(event, real_ref) is False:
+                if streaming_value(event, handle) is False:
                     return {"idle_at": stamp, "event_type": event.get("type")}
             return None
 
@@ -606,7 +602,7 @@ def main() -> int:
 
         def resolved_model(events: list[tuple[str, dict[str, Any]]]) -> Any:
             for stamp, event in reversed(events):
-                if event.get("session") != real_ref:
+                if event.get("handle") != handle:
                     continue
                 if event.get("type") not in ("snapshot", "status"):
                     continue
@@ -619,7 +615,24 @@ def main() -> int:
         if model_seen is None:
             raise RuntimeError("no snapshot or status event named the model Pi resolved")
         evidence["checks"]["model"] = {"result": "pass", "flag_passed": args.model, **model_seen}
-        evidence["final_max_assistant_chars"] = max_assistant_length(stream.snapshot(), real_ref)
+        evidence["final_max_assistant_chars"] = max_assistant_length(stream.snapshot(), handle)
+
+        # What the session was called, recorded rather than required: a rename
+        # at attach and one on the first prompt are both D9's contract.
+        refs = refs_under(stream.snapshot(), handle)
+        current = refs[-1] if refs else attached_ref
+        evidence["session"] = {
+            "handle": handle,
+            "refs": refs,
+            "renamed_during": (
+                "attach"
+                if not attached_ref["id"].startswith("virtual:")
+                else "first prompt"
+                if not current["id"].startswith("virtual:")
+                else None
+            ),
+            "session_id_is_jsonl_path": current["id"].endswith(".jsonl"),
+        }
 
         evidence["finished_at"] = now()
         evidence["result"] = "pass"
