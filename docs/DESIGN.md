@@ -1270,8 +1270,12 @@ Captured turns also carry `turn/diff/updated` (a cumulative diff for the turn), 
 Token usage feeds the cost display and status changes feed the streaming signal, so some of these belong in the adapter even though they are not messages.
 Read a fixture before assuming this section is exhaustive.
 
-Fixtures currently cover `userMessage`, `reasoning`, `agentMessage`, `commandExecution`, `fileChange`, `contextCompaction` (`resources/fixtures/codex/compact.jsonl`), and `collabAgentToolCall` (`resources/fixtures/codex/subagent.jsonl`, HANDOFF finding 49).
-The remaining rows — `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan` — have no capture yet; add a scenario when implementing each.
+Fixtures currently cover `userMessage`, `reasoning`, `agentMessage`, `commandExecution`, `fileChange`, `contextCompaction` (`resources/fixtures/codex/compact.jsonl`), `collabAgentToolCall` (`resources/fixtures/codex/subagent.jsonl`, HANDOFF finding 49), and `plan` (`resources/fixtures/codex/plan.jsonl`, `codex-cli 0.157.1`).
+The remaining rows — `mcpToolCall`, `dynamicToolCall`, `webSearch` — have no capture yet; add a scenario when implementing each.
+`imageGeneration` has none either: on `codex-cli 0.157.1` with `gpt-5.6-luna` the model reported no `image_gen` tool in its session (`docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)").
+
+**The preview reads the same run through a second mapper.**
+Seven Codex fixtures captured on `codex-cli 0.157.1` keep the rollout of their run beside its stream, as `<scenario>.rollout.jsonl`, and `src/server/sessions/codex-conformance.test.ts` replays each through both mappers and lists every place they disagree, keyed to the card that owns it.
 
 On the Pi side, note the fixtures show Pi choosing `bash` to perform a file edit rather than a dedicated edit tool.
 The tool vocabulary is not fixed, which is the practical argument for D5's default tool card.

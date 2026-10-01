@@ -322,9 +322,12 @@ export class CodexReducer {
 				const turn = message.params.turn;
 				if (this.pageRead) this.pageRead.turn = true;
 				const effects: CodexEffect[] = this.setCompaction(null);
-				// NOTE: `turn.items` here is a *summary* view (`itemsView:
-				// "summary"` in every fixture) -- only the final agent message.
-				// Rebuilding the transcript from it would delete the turn.
+				// NOTE: `turn.items` here is at most a *summary* view -- only the
+				// final agent message (`itemsView: "summary"`), or nothing at all
+				// (`"notLoaded"`) for a turn with none: the compaction turn in
+				// compact.jsonl, and plan.jsonl and interrupt.jsonl on
+				// `codex-cli 0.157.1`. Rebuilding the transcript from it would
+				// delete the turn.
 				if (turn.status === "failed" && turn.error?.message && turn.id !== this.reportedErrorTurnId) {
 					effects.push({ type: "error", message: upstreamMessage(turn.error.message) });
 				}

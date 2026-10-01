@@ -3878,3 +3878,74 @@ No live turn can be made to append a message after idle, and the earlier turns h
 `max_assistant_length` reported 5000 at the cut in every case and its growth check passed in every case, including when a 50-character message appeared at a new position after idle and when the aborted message grew from 400 to 450.
 `turn_messages` reported 400, failed both of those cases, and passed the case where nothing arrived after idle.
 With the helper deliberately broken to a floor of 0 -- the whole session instead of the turn -- it reported 5400, and the script's own check went red.
+
+## Codex fixtures that keep their rollout (OW-zadupu)
+
+Run on the home server 2026-09-30, between 21:28 and 21:35 local (`-04:00`), on **`codex-cli 0.157.1`**, from the `card/OW-zadupu` worktree, by `python3 resources/probes/capture_fixtures.py --backend codex --scenario <name> --timeout 240`, one or more scenarios per invocation.
+Each thread ran under `codex -m gpt-5.6-luna app-server` with `gpt-5.6-luna` also named on `thread/start` and every `turn/start`, at the `sandbox: "danger-full-access"` and `approvalPolicy: "never"` `CodexAdapter` sends, in a throwaway `CODEX_HOME`; every rollout's `turn_context` named `gpt-5.6-luna` before the scrub, recorded as `models_seen` in each `.meta.json`.
+Unlike every earlier Codex capture the threads were not ephemeral, so each scenario keeps the rollout Codex wrote for its run beside the stream, as `resources/fixtures/codex/<scenario>.rollout.jsonl`.
+
+| Scenario | Stream lines | Rollout lines | Completed items on the thread's own stream |
+| --- | --- | --- | --- |
+| `plan` | 63 | 15 | `userMessage`, `reasoning`, `plan` |
+| `interrupt` | 59 | 13 | `userMessage`, `reasoning` |
+| `collab-failed` | 43 | 26 | `userMessage`, 2 `reasoning`, `collabAgentToolCall`, `agentMessage` |
+| `collab-multi` | 101 | 45 | `userMessage`, 4 `reasoning`, 3 `collabAgentToolCall`, `commandExecution`, 2 `agentMessage` |
+| `long-shell` | 73 | 26 | `userMessage`, 2 `reasoning`, `commandExecution`, `agentMessage` |
+| `multi-patch` | 41 | 22 | `userMessage`, `reasoning`, `fileChange`, 2 `agentMessage` |
+| `compact-rollout` | 144 | 20 | `userMessage`, `agentMessage`, `contextCompaction` |
+
+**A plan is one `plan` item live and a wrapped assistant message on disk.**
+On a connection that set `initialize`'s `capabilities.experimentalApi` and a `turn/start` naming `collaborationMode` `plan`, the reply arrived as 42 `item/plan/delta`s and one `plan` item of 180 characters, a three-line numbered list, with no `agentMessage` at all.
+The rollout stored the same text as an assistant `message` with `phase: "final_answer"`, wrapped in `<proposed_plan>` and `</proposed_plan>`, and an `event_msg` `item_completed` of type `Plan` carrying the bare text.
+The turn's `turn/completed` listed no items, at `itemsView: "notLoaded"`.
+
+**An interrupted turn's partial reply is never completed live, and is not on disk.**
+`turn/interrupt` went out at the reply's 40th `item/agentMessage/delta`, 51 characters in.
+The `agentMessage` had its `item/started` and no `item/completed`; `turn/completed` followed with `status: "interrupted"`, `error: null`, no items at `itemsView: "notLoaded"`, and no `thread/tokenUsage/updated` arrived at any point in the turn.
+The rollout held no assistant message, an `event_msg` `turn_aborted` with `reason: "interrupted"`, and a user-role message wrapping a `<turn_aborted>` notice, as on 0.156.0 (OW-gunuke above).
+
+**A failed collab call is a `collabAgentToolCall` with `status: "failed"` and no message.**
+Asked to `wait` on an agent id that does not exist, the model called `tools.multi_agent_v1__wait_agent` from an `exec` script; the live item was `tool: "wait"`, `status: "failed"`, `receiverThreadIds` naming the id, and `agentsStates` mapping it to `{"status": "notFound", "message": null}`.
+On disk the call is the `custom_tool_call` `exec` script and its output, `{"status":{"<id>":"not_found"},"timed_out":false}`.
+
+**One `wait` named two children, but only once both had finished.**
+In a first run of `collab-multi`, whose fixture was not kept, the model spawned two children with one `exec` script and then called `wait_agent` naming both; the call returned when the first child finished, and the live `wait` item named only that child in `receiverThreadIds` and `agentsStates`.
+The committed run had the model run `sleep 15` between the spawns and the wait, and its `wait` item named both children, each `{"status": "completed", "message": "Hello"}`.
+Both spawns are separate `spawnAgent` items live and one `exec` script calling `tools.multi_agent_v1__spawn_agent` twice on disk.
+Each child's completion also reached the parent's rollout as a user-role message wrapping `<subagent_notification>`, which the live stream has no item for.
+As on 0.153.4 (`subagent.jsonl`), no `thread/started` arrived for either child.
+
+**A shell run that outlasts its yield is one item live and two scripts on disk.**
+A 45-second loop ran as one `commandExecution` live.
+On disk the model's first `exec` script called `tools.exec_command` with `yield_time_ms: 30000`, got back a session id, and a second script polled it with `tools.write_stdin`.
+In the first `long-shell` run, whose fixture was not kept, a 15-second loop finished inside the first yield and no `write_stdin` was written.
+The live item's `aggregatedOutput`, and its `item/commandExecution/outputDelta`s, began at the loop's second line; the stored `exec_command` output began at its first.
+Nothing was run to explain that.
+
+**A two-file patch is one `fileChange` live and an `exec` script on disk.**
+The live item carried both files in `changes`, an `update` and an `add`; on disk the model's `exec` script called `tools.apply_patch` with the whole patch as a string, and its output was `{}`.
+
+**A compaction's stored message is empty.**
+After one turn and `thread/compact/start`, the rollout's `compacted` record carried `message: ""`; its `replacement_history` held the user's prompt and a `compaction` item whose only content is `encrypted_content`.
+The live marker's `tokensBefore`, sampled at the `contextCompaction` `item/started`, was 11778, and the preview's, the last `token_count` before the `compacted` record, was 11778 too; one `thread/tokenUsage/updated` arrived between the item's start and its completion, at 4623, and its `token_count` was written after the `compacted` record.
+The existing `compact` fixture, captured on 0.147.0, was not re-captured: the OW-kelomi test asserts its exact pre-compaction figure, and the three token updates between that compaction's start and completion it guards against are that capture's.
+
+**Image generation was not provoked.**
+Asked to generate an image with its image generation tool, the model read the bundled `imagegen` skill, said the built-in `image_gen` tool was not available in the session, and drew an SVG with `apply_patch` and converted it with `convert` instead.
+Asked to call `image_gen` directly and to answer `UNAVAILABLE` if it had no such tool, it answered `UNAVAILABLE`, using no tool.
+`codex features list` showed `image_generation` as stable and enabled; why the tool was absent was not established, and no `image-gen` fixture is committed.
+
+**The rollout's `item_completed` records cover every item kind captured, in a shape `mapItem` cannot take.**
+Across the seven rollouts, every `item/completed` on the thread's own stream -- 34 items of eight kinds -- had an `event_msg` `item_completed` with the same id, in the same order, and nothing else did.
+Their items are a different serialization from the wire's `ThreadItem`: the type is capitalised (`CommandExecution`), fields are snake_case, an `AgentMessage` carries `content` blocks rather than `text`, a `CommandExecution`'s `command` is an argv array and its `cwd` a `file://` URL, a `FileChange`'s `changes` is a map from path to `{type, unified_diff | content}`, and a `CollabAgentToolCall`'s `agents_states` maps each child to a bare status string, or `{"completed": "<message>"}` once it has answered, with `tool` spelled `spawn_agent` where the wire says `spawnAgent`.
+So the records could feed `mapItem` only through a translation per kind, but they name the item the live wire names, with no `exec` script to see through; the partial reply of an interrupted turn has no record, as it has no `item/completed`.
+
+**What the two mappers disagree on.**
+`src/server/sessions/codex-conformance.test.ts` replays each stream through `CodexReducer` and each rollout through `extractCodexPreviewTurns`, and lists every difference with the card that owns it.
+`plan` and `compact-rollout` agree; the plan's text differs only by the preview keeping the `<proposed_plan>` tags, which the projection leaves out.
+Every tool call the model made through `exec` other than `tools.exec_command` previews as a tool named `exec`, and the preview marks every tool result `isError: false`, so the failed `wait` reads as a success.
+
+**The scrub grew three cases.**
+A rollout's `session_meta` names the account as `creator_user_id` and `creator_account_id`, its `token_count` records carry `rate_limits`, and 0.157.1's stream carries an `account/updated` naming the plan; `capture_fixtures.py` now scrubs all of them, and `src/fixture-scrub.test.ts` fails on live `rate_limits` values in a rollout as it already did on the wire.
+That guard was seen red first, on a one-line rollout carrying `primary` and `plan_type` values placed under `resources/fixtures/codex/` and removed again, which the guard as it stood before passed.
