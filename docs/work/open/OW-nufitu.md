@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+blocked-by: [OW-niwusi]
 ---
 
 # Pi's steer is unmeasured against a tool turn, which is the case its own docs describe
@@ -26,3 +27,7 @@ What it needs is a first prompt that reliably calls a tool and stays in the batc
 `resources/probes/agentpane_pi_smoke.py`'s `--tool-check` block is the prior art for provoking a tool call, and OW-hahohi is the worked example of why waiting for the *right* turn matters: that card exists because a phase posted its prompt 42 ms after a `toolCall` arrived and could not tell which turn it had hit.
 
 Whatever the answer, add it to D16's Pi paragraph, which currently names this as one of three things its measurement does not reach.
+
+## Amended 2026-09-30
+
+`agentpane_pi_steer_probe.py` still waits for the `renamed` event OW-mofuho retired, so it times out before its first turn; OW-niwusi moves it to the handle, and this card waits on that.
