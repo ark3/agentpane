@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: declined
 ---
 
 # A Pi parent whose turn a fork aborts can get a finished dot on its row when the user clicks away before the abort's status:false arrives
@@ -21,3 +22,9 @@ Stale keys under a let-go handle are OW-nodade's, not this card's.
 Load-bearing: a turn the user stopped on purpose gets no finished mark, the same rule the badge follows.
 Done when a test in `src/client/App.test.ts`, red first, drives the real controller through a Pi fork from a streaming parent, clicks another session before the parent's `status:false` is emitted, and asserts no row shows "Turn finished" for the parent; `bun run check` passes.
 Or, if no row can draw the mark, when the card closes `--moot` with the trace that shows it.
+
+## Close note
+
+Declined 2026-10-01 by the owner, read at the code and not run, for the reason OW-piwavo was declined on 2026-09-30.
+The mark needs the user to click another session within the round trip between pressing Send on a Pi fork and the abort's `status:false` arriving, and costs one wrong finished dot; the card itself suspected no row can draw it, since Pi lets the parent's handle go after the fork and `rowKey` in `src/client/App.svelte` falls back past it.
+If a finished dot on a Pi fork's parent is ever seen in use, this card's trace (whether any row still keys by the let-go handle, and the agentpane-mode counterpart) is where to start.
