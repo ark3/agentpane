@@ -170,6 +170,31 @@ describe("tool parts", () => {
 		expect("threadIds" in only({ type: "toolCall", id: "other-1", name: "lookup", arguments: { threadIds: ["t-1"] } })).toBe(false);
 	});
 
+	it("keeps a newline or tab in a file name or a collab operation off the one-line header (OW-gogona)", () => {
+		const messages = replayClaude("tool-use");
+		const turn = messages.find(
+			(message): message is AssistantMessage =>
+				message.role === "assistant" && message.content.some((block) => block.type === "toolCall"),
+		)!;
+		const summary = (name: string, args: Record<string, unknown>): string =>
+			toolParts(projectTranscript([{ ...turn, content: [{ type: "toolCall", id: "odd-1", name, arguments: args }] }], false, render))[0]!
+				.summary;
+		for (const odd of ["odd\nname.ts", "odd\tname.ts", "odd\r\n name.ts"]) {
+			const path = `/tmp/${odd}`;
+			for (const header of [
+				summary("read", { path, offset: 3 }),
+				summary("write", { path, content: "a\nb" }),
+				summary("edit", { path, oldText: "a", newText: "b" }),
+			]) {
+				expect(header).not.toMatch(/[\t\n\r]/);
+				expect(header).toContain("odd name.ts");
+			}
+		}
+		const collab = summary("subagent", { tool: "spawn\nAgent", threadIds: ["01a086ce-039d-7720-86cb-ceb8ec8f3774"] });
+		expect(collab).not.toMatch(/[\t\n\r]/);
+		expect(collab).toContain("spawn Agent");
+	});
+
 	it("keeps an orphan result as its own tool-result node", () => {
 		const messages = replayClaude("tool-use");
 		const result = messages.find((message) => message.role === "toolResult");

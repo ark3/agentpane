@@ -10,7 +10,18 @@ import { basename, oneLine } from "../types.ts";
 import { argNumber, argString, editHunks, summarizeArgs } from "./args.ts";
 import { buildDiff, diffStats } from "./diff.ts";
 
+/**
+ * Always one line, whatever the call's arguments hold: a file name or a
+ * collab operation name may carry a newline or a tab, and Emacs fits its
+ * header to one screen line by a measure that sees only a string's widest
+ * line (OW-gogona). Collapsed without `oneLine`'s cut, so a long file name is
+ * not shortened here; each client cuts the line to fit.
+ */
 export function toolSummary(call: ToolCall): string {
+	return summarize(call).replace(/\s+/g, " ").trim();
+}
+
+function summarize(call: ToolCall): string {
 	const name = call.name.toLowerCase();
 	if (name === "bash" || name === "shell") {
 		return oneLine(argString(call.arguments, "command", "cmd", "script")) || "shell";
