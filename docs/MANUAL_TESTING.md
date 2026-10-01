@@ -3946,6 +3946,7 @@ So the records could feed `mapItem` only through a translation per kind, but the
 `src/server/sessions/codex-conformance.test.ts` replays each stream through `CodexReducer` and each rollout through `extractCodexPreviewTurns`, and lists every difference with the card that owns it.
 `plan` and `compact-rollout` agree; the plan's text differs only by the preview keeping the `<proposed_plan>` tags, which the projection leaves out.
 Every tool call the model made through `exec` other than `tools.exec_command` previews as a tool named `exec`, and the preview marks every tool result `isError: false`, so the failed `wait` reads as a success.
+Those were the differences before OW-luvema (2026-10-01), which draws a rollout carrying `item_completed` records through `mapItem` too; of them, only the interrupted turn's reply, `pending` live and absent on disk, is left, and the rest now hold only for a rollout with no such records.
 
 **The scrub grew three cases.**
 A rollout's `session_meta` names the account as `creator_user_id` and `creator_account_id`, its `token_count` records carry `rate_limits`, and 0.157.1's stream carries an `account/updated` naming the plan; `capture_fixtures.py` now scrubs all of them, and `src/fixture-scrub.test.ts` fails on live `rate_limits` values in a rollout as it already did on the wire, and on a `session_meta` naming any `creator_user_id` or `creator_account_id` but the placeholders.

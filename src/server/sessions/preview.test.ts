@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,8 +17,8 @@ import { readSessionPreview } from "./preview.ts";
  * of `resources/fixtures` is RPC-stream captures, a different shape from the
  * on-disk store. The exceptions are Codex rollouts: the `codex/*.rollout.jsonl`
  * kept beside their streams, which codex-conformance.test.ts reads to hold the
- * preview against the live mapper, and `codex/fork.jsonl`, which no preview
- * test reads.
+ * preview against the live mapper, and one of which a test below strips of its
+ * item records; and `codex/fork.jsonl`, which no preview test reads.
  */
 
 async function writeJsonl(file: string, lines: unknown[]): Promise<void> {
@@ -116,12 +116,24 @@ function codexAssistant(text: string) {
 	};
 }
 
+/** The `item_completed` record `codex-cli` 0.156.0 writes for a reply, trimmed to what the preview reads. */
+function codexAgentItem(reply: string) {
+	return {
+		type: "event_msg",
+		payload: {
+			type: "item_completed",
+			item: { type: "AgentMessage", id: `msg-${reply}`, content: [{ type: "Text", text: reply }], phase: "final_answer" },
+		},
+	};
+}
+
 /**
  * One turn as `codex-cli` 0.156.0 writes it to a rollout, each record trimmed
- * to its type (OW-buligi). Only the two messages project, but every record
- * counts toward the ordinal a fork's `history_base` cuts at, so none is left
- * out. `opening` is what the first turn carries between `task_started` and
- * `turn_context`: injected instructions and a `world_state`.
+ * to its type or to what the preview reads (OW-buligi). Only the two item
+ * records project (OW-luvema), but every record counts toward the ordinal a
+ * fork's `history_base` cuts at, so none is left out. `opening` is what the
+ * first turn carries between `task_started` and `turn_context`: injected
+ * instructions and a `world_state`.
  */
 function codexTurn(prompt: string, reply: string, opening: unknown[] = []): unknown[] {
 	return [
@@ -129,8 +141,14 @@ function codexTurn(prompt: string, reply: string, opening: unknown[] = []): unkn
 		...opening,
 		{ type: "turn_context", payload: {} },
 		codexUser(prompt),
-		{ type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage" } } },
-		{ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage" } } },
+		{
+			type: "event_msg",
+			payload: {
+				type: "item_completed",
+				item: { type: "UserMessage", id: `user-${prompt}`, content: [{ type: "text", text: prompt, text_elements: [] }] },
+			},
+		},
+		codexAgentItem(reply),
 		codexAssistant(reply),
 		{ type: "token_usage_record", payload: {} },
 		codexTokenCount(31271, 15639),
@@ -549,6 +567,55 @@ describe("readSessionPreview", () => {
 			});
 		});
 
+		it("maps a rollout with no item records it translates from its response items, as before OW-luvema", async () => {
+			// A capture's rollout with its `item_completed` records taken out, the
+			// shape of the rollouts that carry none, and one put back of a kind the
+			// translation skips, as the 0.150.1 rollouts that carry only
+			// `SubAgentActivity` records have. Its known differences from live stay:
+			// `exec` scripts drawn as their own pairs, every result ok, and the
+			// `<subagent_notification>`s Codex injects drawn as user turns.
+			const capture = await readFile(
+				new URL("../../../resources/fixtures/codex/collab-multi.rollout.jsonl", import.meta.url),
+				"utf8",
+			);
+			const records = capture.trim().split("\n").map((line) => JSON.parse(line) as { payload?: { type?: string } });
+			await writeJsonl(codexRollout(root, THREAD), [
+				...records.filter((record) => record.payload?.type !== "item_completed"),
+				{
+					type: "event_msg",
+					payload: {
+						type: "item_completed",
+						item: { type: "SubAgentActivity", id: "subagent-completed-1", kind: "completed", agent_thread_id: "t", agent_path: "/root/a" },
+					},
+				},
+			]);
+
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => {
+				if (turn.role === "toolResult") return `toolResult ${turn.toolName} ${turn.isError ? "error" : "ok"}`;
+				if (turn.role === "assistant") {
+					const calls = turn.content.flatMap((block) => (block.type === "toolCall" ? [` ${block.name}`] : []));
+					return `assistant ${turn.stopReason}${calls.join("")}`;
+				}
+				return `${turn.role}${/^<\w+>/.exec(previewText(turn))?.[0] ?? ""}`;
+			})).toEqual([
+				"user",
+				"assistant stop",
+				"assistant toolUse exec",
+				"toolResult exec ok",
+				"assistant toolUse exec",
+				"toolResult exec ok",
+				"assistant toolUse bash",
+				"toolResult bash ok",
+				"user<subagent_notification>",
+				"user<subagent_notification>",
+				"assistant toolUse exec",
+				"toolResult exec ok",
+				"assistant stop",
+			]);
+		});
+
 		it("answers null when no file carries the thread id, rather than throwing (D26)", async () => {
 			await writeJsonl(join(root, "2026", "08", "12", "rollout-someone-else.jsonl"), [
 				codexHeader("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
@@ -794,6 +861,7 @@ describe("readSessionPreview", () => {
 						payload: { id: SUBAGENT, forked_from_id: PARENT, thread_source: "subagent", cwd: "/ws/project" },
 					},
 					...parentLines.slice(0, 13),
+					codexAgentItem("subagent's reply"),
 					codexAssistant("subagent's reply"),
 				]);
 

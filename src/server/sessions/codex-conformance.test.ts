@@ -4,8 +4,11 @@
  *
  * An attached session reaches the transcript through `mapItem`
  * (`adapters/codex/mapping.ts`, driven by `CodexReducer`); a preview reads the
- * rollout Codex wrote to disk through `extractStoreTurn` (`./codex.ts`).
- * Nothing else ties them together. Each scenario below is one capture by
+ * rollout Codex wrote to disk, and where it carries `item_completed` records,
+ * as every rollout here does, translates them and maps them through `mapItem`
+ * as well (`./codex.ts`, OW-luvema). So what this holds is the translation and
+ * the reducer's handling around `mapItem`; the preview's fallback for a
+ * rollout with no item records, `extractStoreTurn`, is not reached. Each scenario below is one capture by
  * `resources/probes/capture_fixtures.py` that kept both halves of the same
  * run: `<scenario>.jsonl`, the app-server stream, and `<scenario>.rollout.jsonl`,
  * the rollout. The stream is replayed through the reducer, the rollout through
@@ -148,67 +151,16 @@ const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 			owners: {
 				"OW-yobuyi":
 					"live, the reply cut off by `turn/interrupt` stays `pending`, though `turn/completed` says `interrupted`; " +
-					"stored, Codex keeps no partial reply, and the `<turn_aborted>` notice it writes instead previews as a user turn",
+					"stored, Codex keeps no partial reply and writes no item for it, so the preview draws nothing there",
 			},
 			live: ["assistant pending [text]"],
-			preview: ["user <turn_aborted>"],
+			preview: [],
 		},
 	],
-	"collab-failed": [
-		{
-			owners: {
-				"OW-zabiko":
-					"the first `exec` script only searched the tool list and called no tool; live has no item for it, the preview draws it",
-				"OW-kelise":
-					"the failed `wait` is `subagent` live and an `exec` script calling `tools.multi_agent_v1__wait_agent` on disk",
-				"OW-bomere": "the preview sets `isError: false` on every tool result, so the failed call reads as a success",
-			},
-			live: [call("subagent"), "toolResult subagent error"],
-			preview: [call("exec"), ok("exec"), call("exec"), ok("exec")],
-		},
-	],
-	"collab-multi": [
-		{
-			owners: {
-				"OW-zabiko": "the tool-list search script again, with no live item",
-				"OW-kelise":
-					"both spawns are one `exec` script on disk, calling `tools.multi_agent_v1__spawn_agent` twice, and two `subagent` pairs live",
-			},
-			live: [call("subagent"), ok("subagent"), call("subagent"), ok("subagent")],
-			preview: [call("exec"), ok("exec"), call("exec"), ok("exec")],
-		},
-		{
-			owners: {
-				"OW-mehezu":
-					"each child's completion is a `<subagent_notification>` user-role message on disk, which " +
-					"`SYNTHETIC_USER_PREFIXES` does not list, so the preview draws two user turns nobody typed",
-				"OW-kelise": "the `wait` naming both children is `subagent` live and an `exec` script on disk",
-			},
-			live: [call("subagent"), ok("subagent")],
-			preview: ["user <subagent_notification>", "user <subagent_notification>", call("exec"), ok("exec")],
-		},
-	],
-	"long-shell": [
-		{
-			owners: {
-				"OW-zabiko":
-					"the run outlasted its `exec_command` yield and was polled with `tools.write_stdin`; live that is the one " +
-					"`commandExecution`, on disk a second `exec` script the preview draws as its own pair",
-			},
-			live: [],
-			preview: [call("exec"), ok("exec")],
-		},
-	],
-	"multi-patch": [
-		{
-			owners: {
-				"OW-zabiko":
-					"the patch is a `fileChange` live, drawn as `edit`, and an `exec` script calling `tools.apply_patch` on disk",
-			},
-			live: [call("edit"), ok("edit")],
-			preview: [call("exec"), ok("exec")],
-		},
-	],
+	"collab-failed": [],
+	"collab-multi": [],
+	"long-shell": [],
+	"multi-patch": [],
 	"compact-rollout": [],
 };
 

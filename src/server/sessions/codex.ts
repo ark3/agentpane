@@ -23,10 +23,17 @@
  * the agent report.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Stats } from "node:fs";
+import { fileURLToPath } from "node:url";
+import type { FileChange } from "../../../resources/codex-protocol/FileChange";
+import type { ParsedCommand } from "../../../resources/codex-protocol/ParsedCommand";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
+import { mapItem } from "../adapters/codex/mapping.ts";
+import type { CodexItem, MessagePhase, ThreadItem, UserInput } from "../adapters/codex/protocol.ts";
+import type { CommandAction } from "../../../resources/codex-protocol/v2/CommandAction";
 import { readLinesLfOnly } from "./line-reader.ts";
-import { storedAgentMessage } from "./preview-message.ts";
+import { previewTurnsFromMessages, storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
 import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
 
@@ -47,6 +54,10 @@ import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
  * This prefix list is therefore a heuristic, not a documented contract, and
  * will need to grow as injected wrapper content drifts -- same spirit as the
  * header-format drift D9 already calls out for the session header itself.
+ *
+ * It serves enumeration and the transcript preview of a rollout with no item
+ * records. A rollout that has them draws only what the user typed and never
+ * reaches this list (`projectRollout`).
  */
 const SYNTHETIC_USER_PREFIXES = [
 	"<environment_context>",
@@ -197,9 +208,8 @@ export type CodexRolloutLocator = (threadId: string) => string | undefined;
 
 /**
  * The full transcript of a stored Codex session for the read-only preview
- * (OW-38). Codex stores Responses API `response_item` payloads, not the live
- * `ThreadItem` shape, so this module maps those store variants directly. The
- * synthetic user filtering remains shared with enumeration.
+ * (OW-38), drawn by the live mapper where the rollout allows; see
+ * `projectRollout` for the two paths.
  *
  * A fork's rollout may hold none of the history it inherited, which then lives
  * in another rollout its header names; `locate` finds that file, and the
@@ -316,6 +326,16 @@ function turnSettings(line: string): CodexTurnSettings | null {
  * server written by 0.150.1 through 0.154.0, never `history_base`: its file
  * repeats its parent's records inline, like the 0.147.0 fork. Following
  * `forked_from_id` would draw that history twice.
+ *
+ * Neither kind repeats its parent's item records (OW-luvema; home server,
+ * 2026-10-01), so the cut serves a rollout drawn from those unchanged. None of
+ * the 19 forks there with a `history_base` (0.154.0 and 0.156.0) shares an
+ * item id with its base, nor any of the 26 subagents written by 0.153.0
+ * through 0.154.0 with its parent: what such a subagent copies inline is a
+ * few of the parent's `response_item` messages, which that path does not
+ * draw. The ten 0.150.1 subagents that carry item records carry only copies
+ * of their parent's `SubAgentActivity`, and draw from their `response_item`s
+ * as before.
  */
 function historyBase(header: string): { threadId: string; endOrdinal: number } | null {
 	let parsed: unknown;
@@ -334,6 +354,10 @@ function historyBase(header: string): { threadId: string; endOrdinal: number } |
  * Projects `filePath`'s records below `endOrdinal` onto `turns`, the history it
  * inherited first. When the base's rollout is not in the store the inherited
  * turns are simply missing, and the fork draws only its own.
+ *
+ * Both of `extractStoreTurn`'s paths are drawn as the file is read, and the
+ * file picks one at its end, so the choice is per file: each rollout a fork's
+ * history spans makes its own. Compaction markers belong to both.
  */
 async function projectRollout(
 	filePath: string,
@@ -344,6 +368,9 @@ async function projectRollout(
 ): Promise<void> {
 	let lineNo = 0;
 	let ownLines = Infinity;
+	const fromItems: SessionPreviewTurn[] = [];
+	const fromStore: SessionPreviewTurn[] = [];
+	let carriesItems = false;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
 	// stopping early at the enumeration caps would be a visible regression).
@@ -357,33 +384,207 @@ async function projectRollout(
 			continue;
 		}
 		if (lineNo > ownLines) break;
-		const turn = extractStoreTurn(line, context);
-		if (turn) turns.push(turn);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (typeof parsed !== "object" || parsed === null) continue;
+		const rec = parsed as Record<string, unknown>;
+
+		const compactionTurn = compactionTurnFor(rec, context);
+		if (compactionTurn) {
+			fromItems.push(compactionTurn);
+			fromStore.push(compactionTurn);
+			continue;
+		}
+		const payload = rec.payload as { type?: unknown; item: RolloutItem; started_at_ms: number } | undefined;
+		if (rec.type === "event_msg" && payload?.type === "item_completed") {
+			const item = threadItem(payload.item);
+			if (item) {
+				carriesItems = true;
+				fromItems.push(...previewTurnsFromMessages(mappedMessages(item, payload.started_at_ms)));
+			}
+			continue;
+		}
+		const turn = extractStoreTurn(rec, context);
+		if (turn) fromStore.push(turn);
+	}
+	turns.push(...(carriesItems ? fromItems : fromStore));
+}
+
+/** What `mapItem` draws for one completed item, as the reducer flattens it. */
+function mappedMessages(item: ThreadItem, timestamp: number): AgentMessage[] {
+	const mapped = mapItem(item, { ...CODEX_PREVIEW_IDENTITY, timestamp, effort: null, completed: true, tokensBefore: 0 });
+	if (mapped.kind === "none") return [];
+	if (mapped.kind === "single") return [mapped.message];
+	return mapped.result ? [mapped.call, mapped.result] : [mapped.call];
+}
+
+/**
+ * An `item_completed` record's item as the rollout serializes it. Nothing in
+ * `resources/codex-protocol/` types the item itself -- the app-server bindings
+ * there type the camelCase `ThreadItem` -- so this is read off the seven
+ * `resources/fixtures/codex/*.rollout.jsonl` (`codex-cli 0.157.1`) and the
+ * home server's rollouts from 0.147.0 through 0.156.0. Only parts have
+ * bindings: `FileChange`, one entry of a file change's path-keyed `changes`,
+ * and `ParsedCommand`, one entry of a command's `parsed_cmd`.
+ */
+type RolloutItem =
+	| { type: "UserMessage"; id: string; content: { type: string }[] }
+	| { type: "AgentMessage"; id: string; content: { type: string; text: string }[]; phase: MessagePhase | null }
+	| { type: "Reasoning"; id: string; summary_text: string[]; raw_content: string[] }
+	| { type: "Plan"; id: string; text: string }
+	| {
+		type: "CommandExecution";
+		id: string;
+		command: string[];
+		cwd: string;
+		parsed_cmd: ParsedCommand[];
+		process_id: string | null;
+		source: string;
+		status: string;
+		aggregated_output: string;
+		exit_code: number | null;
+		duration: { secs: number; nanos: number } | null;
+	}
+	| { type: "FileChange"; id: string; changes: Record<string, FileChange>; status: string }
+	| {
+		type: "CollabAgentToolCall";
+		id: string;
+		tool: string;
+		status: string;
+		sender_thread_id: string;
+		receiver_thread_ids: string[];
+		prompt?: string | null;
+		model?: string | null;
+		reasoning_effort?: CodexItem<"collabAgentToolCall">["reasoningEffort"];
+		/** A bare status (`"not_found"`), or a status keyed to its message (`{"completed": "Hello"}`). */
+		agents_states: Record<string, string | Record<string, string | null>>;
+	};
+
+/** `unified_exec_startup` -> `unifiedExecStartup`: the rollout's enum values in the bindings' case. */
+function camel<T extends string>(value: string): T {
+	return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as T;
+}
+
+/** argv as one command line, quoting as the live `commandExecution.command` does. */
+function shellJoin(argv: string[]): string {
+	return argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'"'"'`)}'`)).join(" ");
+}
+
+/**
+ * The `ThreadItem` `mapItem` takes for a rollout item, or null for a kind not
+ * translated here; see `extractStoreTurn` for which those are.
+ */
+function threadItem(item: RolloutItem): ThreadItem | null {
+	const { id } = item;
+	switch (item.type) {
+		case "UserMessage": {
+			// Only text input has been seen on disk; see `extractStoreTurn`.
+			const content = item.content.filter((input) => input.type === "text") as UserInput[];
+			return { type: "userMessage", id, clientId: null, content };
+		}
+		case "AgentMessage": {
+			const text = item.content.map((part) => part.text).join("");
+			return { type: "agentMessage", id, text, phase: item.phase, memoryCitation: null, delivery: null, questions: null };
+		}
+		case "Reasoning":
+			return { type: "reasoning", id, summary: item.summary_text, content: item.raw_content };
+		case "Plan":
+			return { type: "plan", id, text: item.text };
+		case "CommandExecution": {
+			const { duration } = item;
+			return {
+				type: "commandExecution",
+				id,
+				pluginId: null,
+				scriptPath: null,
+				command: shellJoin(item.command),
+				cwd: fileURLToPath(item.cwd),
+				processId: item.process_id,
+				source: camel(item.source),
+				status: camel(item.status),
+				commandActions: item.parsed_cmd.map(({ cmd, ...action }) => ({ ...action, type: camel(action.type), command: cmd }) as CommandAction),
+				aggregatedOutput: item.aggregated_output,
+				exitCode: item.exit_code,
+				durationMs: duration ? Math.trunc(duration.secs * 1000 + duration.nanos / 1e6) : null,
+			};
+		}
+		case "FileChange":
+			return {
+				type: "fileChange",
+				id,
+				changes: Object.entries(item.changes).map(([path, change]) =>
+					change.type === "update"
+						? { path, kind: { type: "update", move_path: change.move_path }, diff: change.unified_diff }
+						: { path, kind: { type: change.type }, diff: change.content }
+				),
+				status: camel(item.status),
+			};
+		case "CollabAgentToolCall":
+			return {
+				type: "collabAgentToolCall",
+				id,
+				tool: camel(item.tool),
+				status: camel(item.status),
+				senderThreadId: item.sender_thread_id,
+				receiverThreadIds: item.receiver_thread_ids,
+				prompt: item.prompt ?? null,
+				model: item.model ?? null,
+				reasoningEffort: item.reasoning_effort ?? null,
+				agentsStates: Object.fromEntries(
+					Object.entries(item.agents_states).map(([thread, state]) => {
+						const [status, message] = typeof state === "string" ? [state, null] : Object.entries(state)[0]!;
+						return [thread, { status: camel(status), message: message ?? null }];
+					}),
+				),
+			};
+		default:
+			return null;
 	}
 }
 
 /**
- * One transcript message from a Codex store line. Current stores wrap a
- * Responses API item in `response_item`; the drifted flat message form remains
- * accepted for old sessions.
+ * One transcript message from a Codex store line: the preview's fallback path.
+ *
+ * The preview has two. A rollout that carries `event_msg` records of type
+ * `item_completed` -- the rollout's copy of each item the thread's live stream
+ * completed, same ids, same order (`docs/MANUAL_TESTING.md`, "Codex fixtures
+ * that keep their rollout (OW-zadupu)", `codex-cli 0.157.1`) -- draws its items
+ * from those alone: `threadItem` translates each into the `ThreadItem` the
+ * live `mapItem` takes, so live and preview have one mapper (OW-luvema). A
+ * rollout with none comes here instead, and this maps its Responses API
+ * `response_item` payloads directly, with the differences from live that
+ * `codex-conformance.test.ts` once listed accepted for those files as a first
+ * cut: injected user-role messages that `SYNTHETIC_USER_PREFIXES` misses, an
+ * `exec` script for every tool the model ran that way, and `isError: false` on
+ * every result.
+ *
+ * Which rollouts take which, counted on 2026-10-01 over the home server's
+ * `~/.codex/sessions`: every rollout from `codex-cli` 0.147.0 (1), 0.153.0
+ * (15), 0.153.4 (20) and 0.156.0 (5) carries item records. On 0.154.0 32 of
+ * 44 do, and the other 12 hold no turn at all. On 0.150.1 only 2 of 34 do: 17
+ * more carry `item_completed` records, but of `SubAgentActivity` alone --
+ * seven `vscode` threads that spawned subagents, and ten subagents whose
+ * records are their parent's, copied inline -- and the remaining 15 carry
+ * none; all 32 hold their items as `response_item`s and legacy `event_msg`s.
+ * So a rollout takes the item path only when one of its records translates,
+ * which keeps those 17 here.
+ *
+ * Kinds the translation does not know -- `SubAgentActivity`, which `mapItem`
+ * draws nothing for either; `ContextCompaction`, whose marker comes from the
+ * `compacted` record (`compactionTurnFor`); and `WebSearch`, `McpToolCall`,
+ * `DynamicToolCall` and image generation, which have no capture yet -- are
+ * skipped and draw nothing. User input other than text is dropped the same
+ * way: none has been seen in an item record.
  */
 function extractStoreTurn(
-	line: string,
+	rec: Record<string, unknown>,
 	context: PreviewContext,
 ): SessionPreviewTurn | null {
 	const { toolNames } = context;
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(line);
-	} catch {
-		return null;
-	}
-	if (typeof parsed !== "object" || parsed === null) return null;
-	const rec = parsed as Record<string, unknown>;
-
-	const compactionTurn = compactionTurnFor(rec, context);
-	if (compactionTurn) return compactionTurn;
-
 	let payload: Record<string, unknown> | null = null;
 	if (rec.type === "response_item" && typeof rec.payload === "object" && rec.payload !== null) {
 		payload = rec.payload as Record<string, unknown>;
@@ -506,6 +707,8 @@ function extractStoreTurn(
 				toolCallId: payload.call_id,
 				toolName: name,
 				content: outputContent(payload.output),
+				// The stored output says nothing about failure; a rollout with item
+				// records takes it from the item instead (`extractStoreTurn`).
 				isError: false,
 			},
 			timestamp,
@@ -691,6 +894,9 @@ function shellArguments(args: Record<string, unknown>): Record<string, unknown> 
  * script. The key is bare in newer rollouts and double-quoted in older ones;
  * the value is one double-quoted literal with JSON's escapes, so the matched
  * literal decodes with `JSON.parse`.
+ *
+ * Only the fallback reaches it: a rollout with item records previews the run
+ * from its `CommandExecution` record (`extractStoreTurn`).
  */
 function execScriptArguments(script: unknown): Record<string, unknown> | null {
 	if (typeof script !== "string" || !script.includes("tools.exec_command(")) return null;
