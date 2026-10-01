@@ -528,7 +528,7 @@ observed.
 What a fork with no subsequent prompt costs is therefore a real file, settled against this section's own reading.
 The 2026-09-15 run read `moved_file_on_disk_at_fork: true` and `moved_file_messages_at_fork: ALPHA -> ALPHA`, so F2 was in the sessions directory before any prompt, carrying the branch up to the fork point.
 `src/server/sessions/walk.ts` readdir-walks that directory to build the picker, so a user who opens an edit, forks, and changes their mind leaves a session there to be listed.
-Whether the listing should filter it is a separate question, and OW-vezipo is where it lives.
+Whether the listing should filter it is a separate question, and OW-ruyewe is where it lives (moved from OW-vezipo by D27 on 2026-10-01).
 
 ### Settling second-message semantics and mid-stream fork behavior (OW-yudoni)
 

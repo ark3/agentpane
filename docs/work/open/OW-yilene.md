@@ -3,7 +3,7 @@ labels: [change]
 blocked-by: [OW-jamaha]
 ---
 
-# Pi and Claude Code session names are read from the store files the walk already opens, and shown in place of the preview
+# Pi and Claude Code session names are read from the store files the walk already opens
 
 `src/server/sessions/pi.ts` (`parsePiSession`), `src/server/sessions/claude.ts` (`parseClaudeSession` and its docblock), `src/server/sessions/line-reader.ts`, `src/shared/protocol.ts` (`SessionSummary.name`)
 
@@ -32,7 +32,7 @@ That docblock's paragraph beginning "Preview: first human message" declined `ai-
 Update it in the same change so it describes what the parser now does with both line types.
 
 The preview stays the first human message.
-A name, when present, is shown in the row in place of the preview, and the preview remains on the summary for whatever else uses it.
+How a row shows a name is `docs/DESIGN.md` D27's label rule, which OW-bumonu draws in the browser and OW-jidihu in agentpane-mode; this card is server-only, amended 2026-10-01 under D27 to drop the client test it carried.
 
 ## Done when
 
@@ -40,7 +40,5 @@ Each watched red first.
 
 1. A Pi parser test builds a file whose `session_info` entries come after several messages, with a later one clearing the name, and asserts the summary's `name` follows the last entry.
 2. A Claude parser test builds a file with a `custom-title` line after the first assistant message, repeated later, and asserts `name` is that title and `preview` is still the first prompt.
-3. A test asserts a file with no such entries yields `name: null`, and that enumeration of such a file reads no more of it than it did before, by whatever measure the existing bounded-read tests use.
-4. A client test asserts a summary with a name renders the name and one without renders the preview.
 
-`bun run check` passes, and a listing of the home server's real corpus is timed before and after, the figures recorded in the close note with the date.
+`bun run check` passes, and a listing of the home server's real corpus is timed before and after, the figures recorded in the close note with the date; that timing is the guard on enumeration staying cheap, since no parser-level bounded-read test exists (`src/server/sessions/line-reader.test.ts` bounds the reader alone), and OW-20, which waits on a measured listing latency, gets one from it.

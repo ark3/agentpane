@@ -1,71 +1,47 @@
 ---
-labels: [deferral]
+labels: [change]
 ---
 
 # A forked session's row in the list is a character-for-character copy of its parent's, so the two cannot be told apart.
 
-`src/shared/protocol.ts` `SessionSummary.preview`, and `sessionLabel` in `src/client/App.svelte`, which is what a sidebar row renders
+`src/shared/protocol.ts` (`SessionSummary`), `src/server/sessions/pi.ts` (`parsePiSession`), `src/server/sessions/codex.ts` (its header read and the module docblock on subagent rollouts), `src/server/sessions/claude.ts`, `src/emacs/protocol.ts` (the `sessions/list` entry of its docblock).
 
-`SessionSummary.preview` is *"First user message, trimmed for display"*
-(`protocol.ts:79`). A fork carries the history up to the fork point, so a
-session forked at message 5 has the same first user message as its parent and
-therefore the same preview -- identical rows, ordered by recency,
-distinguishable only by timestamp. The single exception is a fork taken at the
-first message, whose branch has no history at all and whose preview is the
-edited text.
+`SessionSummary.preview` is the first user message, and a fork carries the history up to the fork point, so a fork's preview is its parent's and the two rows are identical but for their timestamps.
+Since OW-kekoji (`0edd97e`) the parent stays listed beside a fork on all three backends, so the twins are live everywhere; OW-sehaja (`732769a`) is a different thing, stopping a fork from wearing its parent's *stored* preview.
 
-**Scoped on 2026-09-13 by OW-risuwo, which ran it.**
-The identical-rows problem is real on Codex and is *not* reachable today on Pi or Claude Code, for a reason that is itself a defect rather than a fix.
-Codex's `thread/fork` leaves `adapter.ref` unchanged, so `SessionManager.fork` sets no alias and both the parent and the fork are listed -- the twin rows this card describes.
-Pi's and Claude's forks change `adapter.ref`, so `#adoptRef` re-keys the parent's container onto the fork's id and `list()` drops the parent entirely (`src/server/http/session-manager.test.ts`, "(WRONG) drops the parent from list() after a ref-changing fork").
-There is one row there because the parent has been hidden, not because it can be told apart.
-So this card is not stale and neither claim was wrong; when the drop is fixed, the twin rows appear on all three backends and this card bites everywhere.
-**The drop was fixed the same day, by OW-kekoji (`0edd97e`): a fork no longer aliases the parent, so the parent stays in `list()` and the twin rows are now live on all three backends.**
-OW-sehaja (`732769a`) followed and is not this card: it stopped the fork from wearing the parent's *stored* preview, while this card is about the fork's true preview, which is genuinely the parent's first user message once the index catches up.
+Rewritten 2026-10-01 under `docs/DESIGN.md` D27 (OW-fifaji), and no longer a deferral.
+The owner had deferred this on 2026-08-19 to hiding some kinds of fork automatically, which waits on OW-66 and on use; D27 keeps that deferred but takes the cheapest of the three alternatives named here before, marking lineage on the row, which needs no verdict from use.
+This card is the wire half: `forkedFrom` on `SessionSummary`.
+Hiding forks automatically stays deferred, now in OW-ruyewe.
+The markers are OW-galuhu in the browser and OW-kepemu in agentpane-mode, each blocked by this card, per `AGENTS.md`, "Both clients".
 
-OW-hezidi is what makes this bite: it makes forking cheap enough to do often,
-and every fork adds a twin.
+## Where the parent is
 
-**Deferred by the owner on 2026-08-19.** His judgement was that the answer is
-to auto-hide some kinds of fork, which cannot be built before the hiding
-exists -- that is OW-66. So this waits on OW-66 landing, and then on enough use
-of forking to say *which* forks are the ones worth hiding, which is a verdict
-to take from use rather than predict here.
+Agentpane records no parentage of its own, and needs none: the backends write it into the session file's header, so it is readable retroactively for every fork already taken, by the walk `src/server/sessions/` already performs.
+Checked in the committed captures on 2026-08-19:
 
-Recorded so the constraint is findable rather than rediscovered, and so nobody
-reads the identical rows as a bug in the list. Three alternatives were named in
-passing and are written down only to save re-deriving them, not because any is
-chosen: take the preview from the fork point rather than the start, mark
-lineage on the row, or nest a fork under its parent.
+- Pi: `"parentSession"` in the `session` header line, a JSONL path (`resources/fixtures/pi/fork.jsonl`, first line), which is already a Pi ref's id (D9).
+- Codex: `"forked_from_id"` inside `session_meta` (`resources/fixtures/codex/fork.jsonl`, first line), a thread id, which is already a Codex ref's id.
+  A subagent's rollout carries `forked_from_id` too, naming the parent thread that spawned it, and that is not a fork: the docblock at the head of `src/server/sessions/codex.ts` gives the census and names `thread_source === "subagent"` as the marker.
+  So a Codex summary's `forkedFrom` is null on a subagent rollout.
+- Claude Code: the Goals section of `docs/DESIGN.md` says "Pi and Codex record lineage on disk; Claude Code does not", with no version behind it.
+  Fork a session on the home server (`claude --model haiku`), read the fork's store file for anything naming the parent, and record what was found, with the version, in `docs/MANUAL_TESTING.md`.
+  Whatever it shows, Claude's `forkedFrom` follows it, and the Goals sentence is corrected or given its version in the same change.
 
-## Revisit when
+## What has to exist
 
-OW-66 has landed and edit-and-fork has been used for long enough that the
-owner can say which forks he wants out of sight. Closing this means a decision
-recorded where decisions go -- `DESIGN.md` if it moves D13's storage, this
-file's close note otherwise -- not a UI tweak made in passing.
+- `forkedFrom: SessionRef | null` on `SessionSummary`, filled by each parser from what its header holds, null where it holds nothing.
+- The `sessions/list` entry of the `src/emacs/protocol.ts` docblock lists the summary's fields and gains `forkedFrom`, and the docblock records the raising.
 
-**Nothing is being lost while this waits (checked 2026-08-19).** The worry that
-would argue for acting early -- that lineage has to be captured at fork time or
-not at all -- does not hold. Agentpane records no parentage of its own (no
-`parent`, `forkedFrom` or equivalent in `protocol.ts`, `src/server/sessions/`
-or `session-manager.ts`), but both backends already write it into the session
-file header, confirmed in the committed captures rather than from the type
-declarations:
+A fork born without a file (D9) is listed from the manager before the walk can read its header.
+Whether its summary carries `forkedFrom` from the moment `SessionManager.fork` makes it, or only once the walk finds its file, is decided in flight and said in the close note.
 
-- **Codex**: `"forked_from_id"` inside `session_meta`
-  (`resources/fixtures/codex/fork.jsonl`, first line); `Thread.forkedFromId`
-  also exists in the vendored bindings.
-- **Pi**: `"parentSession"` in the session header line
-  (`resources/fixtures/pi/fork.jsonl`, first line).
+## Done when
 
-In both cases the recorded parent is already in the form agentpane uses as a
-ref -- a thread id for Codex, a JSONL path for Pi (D9) -- so no translation is
-implied either. All three alternatives named above need exactly this one input,
-and it is durably on disk for every fork already taken, retroactively readable
-by the walk `src/server/sessions/` already performs.
+Each watched red first.
 
-So the work whenever the verdict arrives is to surface that field into
-`SessionSummary` from the existing parsers and then decide presentation.
-Waiting for use to say *which* forks deserve hiding costs nothing, which is
-what one wants to be true of a deferral.
+1. A Pi parser test reads a header with `parentSession` and asserts `forkedFrom` is the Pi ref of that path, and a header without one yields null.
+2. A Codex parser test asserts `forkedFrom` is the Codex ref of `forked_from_id` for a fork, and null for a rollout whose `thread_source` is `subagent`.
+3. A Claude parser test asserts whatever the live run found.
+
+`bun run check` passes.

@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [deferral]
 blocked-by: [OW-jamaha]
 ---
 
@@ -27,9 +27,9 @@ Collect models if it costs one more request, and say in the close note whether i
   D12's cap and reaper are about session processes, and this one is not counted among them; say so where those constants live.
 - The merge: for each Codex summary the walk produced, the name from the matching `thread/list` row keyed by thread id, which is the rollout's `session_id` and the summary's `ref.id`.
 - After the merge, the existing `sessions-changed` event, which the client already answers with a refetch; no new wire arm.
-- The name is shown in the row in place of the preview, which the card this one is blocked on settles for every backend.
+- How a row shows the name is `docs/DESIGN.md` D27's label rule, which the clients already follow by then.
 
-Load-bearing: the walk's list goes out first and is not delayed by this; the collector takes no writer lock on any thread; a collector that fails to start or answer degrades to today's list with the failure reported rather than logged (D13 has the `notice` arm for exactly this kind of session-less condition, and if OW-66 has not landed it, this is the second caller that justifies it).
+Load-bearing: the walk's list goes out first and is not delayed by this; the collector takes no writer lock on any thread; a collector that fails to start or answer degrades to today's list with the failure reported rather than logged (D13's session-less arm, which OW-66 builds, is for exactly this kind of condition, and if OW-66 has not landed it, this is the second caller that justifies it).
 Incidental, decide in flight and record: whether the collector runs once, on every `sessions-changed`, or on an interval; whether it stays up or exits after answering; and what happens to a name renamed from the Codex TUI after the collector ran, which stays stale until it runs again.
 
 ## Done when
@@ -42,3 +42,10 @@ Each watched red first.
 
 `bun run check` passes.
 Then one live run on the home server against the real corpus, timed from server start to the merged `sessions-changed`, recorded in `docs/MANUAL_TESTING.md` with the version.
+
+## Deferred 2026-10-01 under D27
+
+The owner deferred this card in OW-fifaji, recorded in `docs/DESIGN.md` D27.
+Pi and Claude Code names come cheaply from the store files (OW-yilene), and an attached Codex session carries its name through its adapter (OW-jamaha), so until this lands a Codex name shows in the list only while its session is attached.
+D25 says "Only an attach starts an agent", and this card starts a `codex app-server` no attach asked for; D25 was written about session routes, but a collector is a second kind of Codex child, which is the kind of surprise D25 removed.
+Revisit when OW-jamaha and OW-yilene have landed and names have been in use, and answer D25 then: amend it to say what it covers, or find the names another way.

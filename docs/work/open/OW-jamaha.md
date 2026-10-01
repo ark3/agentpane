@@ -2,13 +2,16 @@
 labels: [change]
 ---
 
-# An attached session can be renamed from agentpane, written through to the backend and kept nowhere else
+# An attached session can be renamed over the HTTP API and the Emacs helper, written through to the backend and kept nowhere else
 
-`src/server/adapters/types.ts` (`BackendAdapter`), `src/server/adapters/pi/process.ts`, `src/server/adapters/claude/adapter.ts`, `src/server/adapters/codex/adapter.ts`, `src/server/http/app.ts` (the per-session switch), `src/shared/protocol.ts` (`SessionSummary`), `src/client/App.svelte`
+`src/server/adapters/types.ts` (`BackendAdapter`), `src/server/adapters/pi/process.ts`, `src/server/adapters/claude/adapter.ts`, `src/server/adapters/codex/adapter.ts`, `src/server/http/app.ts` (the per-session switch), `src/shared/protocol.ts` (`SessionSummary`), `src/emacs/protocol.ts` and `src/emacs/helper.ts` (`sessions/setModel` is the sibling)
 
 The owner wants to name a session during the session, and decided on 2026-09-15 that the name goes to the backend and agentpane keeps no copy: `docs/DESIGN.md` D13, "Names are not marks, and this file does not hold them".
 Read that paragraph for the why, and `docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire", for the evidence that each backend accepts the rename mid-session.
 Renaming a detached session is out of scope by the owner's decision, not by omission: there is no wire to write through, and the control is simply absent when the session is not attached.
+
+Rewritten 2026-10-01 under `docs/DESIGN.md` D27 (OW-fifaji): this card is the wire half only, both wires, per `AGENTS.md`, "Both clients".
+The controls and the row label are OW-bumonu in the browser and OW-jidihu in agentpane-mode, each blocked by this card.
 
 ## The three wire paths, all measured on 2026-09-15
 
@@ -18,34 +21,34 @@ Renaming a detached session is out of scope by the owner's decision, not by omis
   `sendControl({ subtype: "set_model", ... })` in `src/server/adapters/claude/adapter.ts` is the sibling.
   Do not send `/rename` as a user message: it works, but it runs as a turn, and the adapter already refuses input while a turn is active (OW-jihete).
 - Codex (`codex-cli 0.154.0`): the request `thread/name/set` with `threadId` and `name`, answered `{}`, followed by a `thread/name/updated` notification carrying `threadName`.
-  The vendored `resources/codex-protocol/v2/ThreadSetNameParams.ts` names the method wrongly; `thread/setName` is rejected with `-32600`.
-  The params type is still right, so `import type` it and spell the method as the server does.
+  `thread/setName` is rejected with `-32600`; the vendored `resources/codex-protocol/ClientRequest.ts` spells it `thread/name/set`, and `v2/ThreadSetNameParams.ts` is its params type, so `import type` that.
 
 ## What has to exist
 
-- A `rename(name: string)` method on `BackendAdapter`, beside `setModel`, implemented in all three adapters.
-- A route beside `case "model"` in the per-session switch of `src/server/http/app.ts`, taking `{ name }` and answering the way `model` does.
+- A `setName(name: string)` method on `BackendAdapter`, beside `setModel`, implemented in all three adapters.
+  Not `rename`: in this code a rename is a ref change, as `onRefChanged`'s `cause` in `src/server/adapters/types.ts` says.
+- A route beside `case "model"` in the per-session switch of `src/server/http/app.ts`, taking `{ name }` and answering the way `model` does, and `setName` beside `setModel` on the API in `src/client/api.ts`, which the Emacs helper calls too (`createAgentpaneApi` in `src/emacs/helper.ts`).
 - `name: string | null` on `SessionSummary`.
   This card owns the field; the walk fills it with `null` here, and reading backend names into the list is other cards' work, which are blocked on this one for the field.
-  An attached session's summary carries the name its adapter last set, and for Codex the name a `thread/name/updated` notification last reported, so the list shows the rename without a refetch of the store.
+  An attached session's summary carries the name its adapter last set, and for Codex the name a `thread/name/updated` notification last reported, and the manager sends `sessions-changed` after either, as it does at a turn's end, so both clients re-list and show the name without a refetch of the store.
   It also carries a name the backend already had when the session was attached, where the adapter has that in hand at no extra cost: Pi's `get_state` round trip at start reports `sessionName`, and Codex's `thread/resume` response carries `thread.name`.
   Claude Code has no in-process read of its title, so a pre-existing Claude title waits for the card that reads store files; do not add a read here for it.
   Between this card and the two reader cards, a name therefore shows only while the session is attached, and a server restart drops it from the list until the session is attached again; that is expected, not a defect.
-- A control in the client, present only while the session is attached and not mid-turn, per D14 reachable by pointer.
-  The owner chose the Tools popover in `src/client/App.svelte` for it on 2026-09-15, beside New conversation and Compact, which are already gated on a selected session.
-  What the item opens, an inline edit of the selected row or a prompt, is a first cut, and whichever it is has a visible way out (D14).
+- `sessions/setName` on the Emacs helper's JSON-RPC, beside `sessions/setModel` in `src/emacs/protocol.ts` and `src/emacs/helper.ts`, forwarding to the route.
+  That changes the contract the `src/emacs/protocol.ts` docblock declares frozen, so the docblock records the raising.
+  `name` reaches agentpane-mode through `SessionSummary`, which the helper's `sessions/list` already returns as the shared type; that docblock's `sessions/list` entry lists the summary's fields, and gains `name`.
 
-Load-bearing: write-through with no copy of agentpane's own, no control on a detached session, the Codex method spelling, and the Claude control request rather than the slash command.
-Incidental: whether the rename is inline editing of the row or a prompt, and how an empty name is treated (Pi clears on empty and Codex accepts any string; pick one behaviour and say which in the close note).
+Load-bearing: write-through with no copy of agentpane's own, a rename refused for a detached session, the Codex method spelling, and the Claude control request rather than the slash command.
+Incidental: how an empty name is treated (Pi clears on empty and Codex accepts any string; pick one behaviour and say which in the close note).
 
 ## Done when
 
 Each watched red first.
 
-1. A test per adapter, against that adapter's fake in `test-support.ts`, asserts the exact command or request written for a rename and that the adapter's state carries the name after the response.
+1. A test per adapter, against that adapter's fake (`test-support.ts` for Claude Code and Codex; Pi's lives in `src/server/adapters/pi/process.test.ts`), asserts the exact command or request written for a rename and that the adapter's state carries the name after the response.
    For Codex, a second test feeds a `thread/name/updated` notification and asserts the state follows it.
    For Pi and Codex, a third test has the fake answer the attach-time `get_state` or `thread/resume` with a name and asserts the state carries it before any rename.
-2. A route test asserts the rename endpoint refuses a session that is not attached and forwards to the adapter for one that is.
-3. A client test asserts the Tools menu item is absent for a detached session and present for an attached one, and that a `SessionSummary` carrying a name renders it in place of the preview.
+2. A route test asserts the rename endpoint refuses a session that is not attached, and forwards to the adapter for one that is and then broadcasts `sessions-changed`.
+3. A test in `src/emacs/helper.test.ts` asserts `sessions/setName` forwards the session and name to the route.
 
 `bun run check` passes.

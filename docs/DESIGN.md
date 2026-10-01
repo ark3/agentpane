@@ -475,7 +475,7 @@ Single-user, no config file: `idleTimeoutMs` and `maxSessions` are named constan
 
 ### D13. Agentpane owns one small state file, and its marks are server state
 
-**Decided, not yet built**: OW-66 carries it, and nothing under `src/server/` writes a file today.
+**Decided, not yet built**: OW-66 carries it, and nothing under `src/server/` writes agentpane state today (the editor-draft temp file in `src/server/http/app.ts` is not state).
 
 Agentpane has never written anything of its own.
 D9 enumerates sessions from the backends' stores, and every server-side fact is derived from a file some other program wrote.
@@ -509,7 +509,7 @@ This file holds what the *user* authored, which cannot.
   `SessionSummary` carries the mark and the client decides what to draw, because a "show hidden" control needs the rows in hand either way and this leaves the route's meaning unchanged.
 
 **A corrupt file is reported, not logged.**
-If the file will not parse, it is renamed aside and the store starts empty -- keeping the evidence rather than eating it -- and the server *tells the browser*.
+If the file will not parse, it is renamed aside and the store starts empty -- keeping the evidence rather than eating it -- and the server *tells the clients*.
 A log line on a headless server is indistinguishable from swallowing it, which this repo already has a name for (OW-15).
 Reporting it needs a session-less `notice` arm on the `ServerEvent` union, since every error today carries a `session` ref and a per-session `seq` and this condition belongs to no session.
 It lands with this feature rather than ahead of it, following the pattern the compaction work used for `compact()`, and it is small because `sessions-changed` is already a session-less, seq-less arm.
@@ -1195,6 +1195,50 @@ The docblocks that describe today's behaviour change with the code, each in the 
 Six, labelled `sweep-0929`, filed 2026-09-29: OW-sodohi, the `ended` event on the HTTP stream and the shared reducer; OW-vebeno, the browser's listing drops retired, and OW-likopo, the helper's with its wait for the open, labelled `emacs`, each blocked by OW-sodohi; OW-royosa, the preview's `gone`, blocked by OW-kamave; OW-lilami, the browser's selection at `gone`, blocked by OW-royosa and OW-vebeno; and OW-vugefa, agentpane-mode's `agentpane--dropped` retired, labelled `emacs`, blocked by OW-royosa, OW-likopo and OW-bupivi.
 Closed moot into them the same day: OW-lejape and OW-tuyewo into OW-lilami, OW-wabiju and OW-vetebu into OW-vugefa.
 Amended to say what D26 means for them: OW-reyayi, whose case 1 it settles; OW-tujami, whose endless retry goes; OW-kafupo, OW-bupivi, OW-savafi, OW-puzome and OW-pezelo.
+
+### D27. A session's row carries a name, a mark and its fork parent, and both clients label it by one rule
+
+The owner took this on 2026-10-01 (OW-fifaji).
+**Decided, not yet built**: the cards named at the end carry it.
+
+**What it settles.**
+Five open cards were one question, what identifies a session's row, and all predated the owner's 2026-09-23 rule that a user-facing capability lands in both clients or in neither (`AGENTS.md`, "Both clients"): OW-jamaha renaming, OW-yilene and OW-muvili reading names, OW-66 marks, and OW-vezipo a fork's row copying its parent's.
+Each specified browser UI and none named the Emacs picker.
+
+**The fields.**
+`SessionSummary` gains three, and agentpane keeps only the second:
+
+1. `name: string | null`, the name the backend holds.
+   For Pi and Claude Code the walk reads it from the store file (OW-yilene); for an attached session the adapter carries the name it last set or was told (OW-jamaha).
+   A rename is written through to the backend and kept nowhere else, as D13's "Names are not marks" paragraph decided.
+2. `mark`, D13's `"starred" | "hidden"`, absent for normal, from D13's store (OW-66).
+   D13 forbids a mark on a `virtual` session, but no client can see one: a created session reports `attached` once its adapter exists, before the first prompt gives it a real ref.
+   So the rule both the route and the clients follow is `onDisk`: a session whose `onDisk` is false cannot be marked, which also covers a fork born without a file.
+   The corrupt-store arm reaches a client that connects after the server started, since the store is read before any client connects, and OW-66 names it.
+3. `forkedFrom: SessionRef | null`, read by the walk from the session file's header: Pi's `parentSession`, and Codex's `forked_from_id` on a rollout whose `thread_source` is not `subagent`, since a subagent's rollout carries `forked_from_id` too.
+   For Claude Code, the Goals section says it records no lineage; OW-vezipo measures that against a fork's store file before relying on it.
+
+**The label.**
+Both clients label a row by one rule: the name, then the preview, then the first user text of a loaded transcript, then the browser's backend and id, which agentpane-mode leaves empty because its Backend column already says it.
+The browser's `sessionLabel` and agentpane-mode's `agentpane--session-entry` already followed the last three by convention; the picker's Preview column becomes a Session column.
+A fork's label follows the same rule, so it is usually its parent's, and the row carries a fork marker naming the parent instead.
+Of the three alternatives OW-vezipo recorded -- the preview taken from the fork point, a lineage mark on the row, a fork nested under its parent -- the mark is the cheapest and needs no verdict from use.
+Hiding some kinds of fork automatically, which the owner named on 2026-08-19 as the real answer to fork clutter, stays deferred until OW-66 has landed and use says which forks deserve it; OW-ruyewe holds that.
+A starred row is drawn distinctly, and a hidden one is absent unless the client is showing hidden rows, as D13 has the client filter.
+
+**Codex names for detached sessions are deferred.**
+Codex keeps a thread's name outside its rollout, so the walk cannot read it, and OW-muvili's answer is a `codex app-server` started for the listing alone.
+That sits awkwardly with D25's "Only an attach starts an agent": D25 was written about session routes, but a collector is a second kind of Codex child, and D25 removed exactly that kind of surprise.
+Two of three backends get names cheaply without it, so until OW-muvili is taken up a Codex name shows only while its session is attached, and whoever takes it up answers D25 first.
+Neither OW-20 nor OW-21 changes: OW-20 still waits on a measured listing latency, which OW-yilene's before-and-after timing supplies, and OW-21's models with no Codex session attached were only an offer of the collector's.
+
+**Cards.**
+Each capability is a wire card carrying it onto the HTTP API and the Emacs helper's JSON-RPC, and a browser card and an `emacs` card each blocked by it.
+Renaming: OW-jamaha, then OW-bumonu and OW-jidihu.
+Marks: OW-66, then OW-zewiru and OW-hahuna.
+Fork lineage: OW-vezipo, then OW-galuhu and OW-kepemu; OW-ruyewe holds the deferred auto-hiding.
+OW-yilene reads Pi and Claude Code names, blocked by OW-jamaha for the field, server-only.
+OW-muvili is deferred as above.
 
 ## The backend adapter contract
 
