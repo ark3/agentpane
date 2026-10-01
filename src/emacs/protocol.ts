@@ -57,7 +57,14 @@
  * attach their buffer sent and every one a buffer it absorbed sent, where
  * they carried one `token`, and stop the attachment under a handle once
  * every token answered under it is released, where the handle stopped it,
- * or without one the token whose answer created it.
+ * or without one the token whose answer created it. OW-novuye raised it a
+ * seventeenth, deciding before changing it: what the elisp needs of a tool
+ * call reaches it as typed fields on the tool part, derived in
+ * `src/emacs/nodes.ts`, never as something the elisp parses out of `args`,
+ * which is display text. OW-gakide is to add `threadIds`, the child threads
+ * a subagent call names. OW-4 is to add `files`, one entry per file an edit
+ * or write touches carrying its path, its kind where the backend names one,
+ * and its diff lines, retiring the flat `diff`.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section

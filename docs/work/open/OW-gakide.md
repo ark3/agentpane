@@ -13,13 +13,13 @@ The full ids appear only inside the args JSON that `agentpane--tool-body` shows 
 
 Opening is `sessions/preview`, which exists.
 The node carries no thread-id field: the ids sit only in the `args` string.
-A structured field would change the node contract that `src/emacs/protocol.ts` declares a "FROZEN INTERFACE, in the sense of DESIGN D11", and that docblock says to raise such a change before making it.
-Parsing `args` in elisp avoids that.
-Which of the two this card takes is its own to decide, and the change states why.
+OW-novuye decided on 2026-10-01 that the elisp never parses `args`, which is display text, and recorded that in the `src/emacs/protocol.ts` docblock.
+This card adds `threadIds` to `ToolPart` there, derived in `src/emacs/nodes.ts` through `subagentThreadIds` and absent where the call names none, as on a spawn's `item/started`; it states that presence rule in the docblock's Parts section and replaces the docblock's sentence naming `threadIds` as pending with one saying it landed.
 
 Scope is live transcripts only.
-`docs/DESIGN.md` D19 leaves the stored preview with "no child link at all" in both clients, and OW-kelise holds that gap.
+Since OW-luvema, `docs/DESIGN.md` D19 has the stored preview draw the same subagent card "with the child's id but no link to open it", and previews are projected by the same `projectTranscript`, so a preview's node will carry `threadIds` too.
+Whether the preview offers the link is OW-kelise's decision; until it is made, the command does nothing in a preview buffer, as the browser draws no control there.
 
 The browser's behaviour is pinned by `src/client/App.test.ts` "opens the child thread a subagent card names (OW-benige)" and by `src/client/render/tools/subagent.test.ts` "opens the child thread as its own session".
 
-Done when an ERT test in `emacs/agentpane-test.el` runs the command on a subagent tool node and sees `sessions/preview` requested for the child's Codex ref, red before the change and green after.
+Done when an ERT test in `emacs/agentpane-test.el` runs the command on a subagent tool node and sees `sessions/preview` requested for the child's Codex ref, red before the change and green after, and a test in `src/emacs/` sees `threadIds` on the node for a subagent call.
