@@ -15,7 +15,7 @@ The 10 such subagents that also store `collaboration` function calls take the fa
 Example: the rollout whose name contains `01a08935` under `~/.codex/sessions/2026/09/09/`.
 `historyBase`'s docblock carries the same counts.
 
-The test that pins today's behaviour is "leaves a subagent's rollout" in `src/server/sessions/preview.test.ts`, which asserts only the subagent's own reply is drawn; it asserts what the code does, not a decision that this is right.
+The test that pins today's behaviour is "draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied" in `src/server/sessions/preview.test.ts`, which asserts only the subagent's own reply is drawn; it asserts what the code does, not a decision that this is right.
 
 ## The same mechanism, not yet seen
 
@@ -30,5 +30,5 @@ Measure that first, on a real 0.153.x subagent thread, on the home server with `
 ## Done when
 
 - The live measurement is recorded in `docs/MANUAL_TESTING.md`.
-- Whatever it shows, the "leaves a subagent's rollout" test in `src/server/sessions/preview.test.ts` asserts the preview matches it, and the comment beside that assertion cites the measurement; where that changes the preview, the test went red first.
+- Whatever it shows, the "draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied" test in `src/server/sessions/preview.test.ts` asserts the preview matches it, and the comment beside that assertion cites the measurement; where that changes the preview, the test went red first.
 - `historyBase`'s docblock no longer describes the loss as unexplained.
