@@ -1,5 +1,6 @@
 ---
 labels: [defect, sweep-0929]
+closed: done
 ---
 
 # A fork carries its parent's turn marks onto the fork, so a Codex or Claude Code parent whose turn ends unseen mid-fork loses its finished dot
@@ -20,3 +21,15 @@ The likely fix is deleting the move on the fork path, but that is the executor's
 Prose that states the old behaviour goes in the same change: the `moveSessionTurnMarks` docblock and the fork test in `src/client/session-turns.test.ts`, the fork-path comment in `send()` ("The parent's row marks are the one thing still carried onto the fork"), the `rekeySession` docblock, the `forkAndSubmit` docblock in `src/client/controller.ts` that names the row's turn marks as what the caller carries onto the fork, and the passage in `emacs/agentpane.el` that begins "Nothing moves a mark or a level from a fork's parent to the fork, as the browser's `moveSessionTurnMarks' does", which explains the Emacs client's behaviour against the browser's and whose Emacs half stays true.
 
 Done when a test in `src/client/App.test.ts`, red first, drives the real controller through a fork from a streaming Codex parent whose turn ends mid-fork and asserts the parent's row keeps its finished mark after the fork resolves; the move from parent to fork is gone from the fork path; and `bun run check` passes.
+
+## Close note
+
+Landed in 4b79e65, "client: leave a fork's parent its own turn marks (OW-pirobi)".
+`send()` in `src/client/App.svelte` no longer calls `moveSessionTurnMarks` on the fork path; that function's one remaining caller is `rekeySession`, for a selected session's key moving between its ref and its handle (OW-kimaya).
+Turn marks, like follow and the badge, stay with the session whose turn they observed.
+New test in `src/client/App.test.ts`, "keeps the finished mark on a streaming Codex parent whose turn ends mid-fork (OW-pirobi)", drives the real controller, holds the fork's `api.prompt` in flight, ends the parent's turn, and asserts the parent's row keeps its finished dot after the fork resolves.
+With the move restored it fails at the post-fork assertion (the implementer saw it, and the adversarial reader reproduced it in a scratch copy); without the move it passes, and `bun run check` passed (1601 tests).
+Prose stating the old move was rewritten in the same commit: the `moveSessionTurnMarks` docblock and its test in `src/client/session-turns.test.ts`, `rekeySession`'s docblock, the `armedKey` comment in `send()`, the `forkAndSubmit` docblock in `src/client/controller.ts`, and the browser half of the fork passage in `emacs/agentpane.el`.
+The adversarial read found the deletion also fixes a case the card did not list: copying the parent's `false` over a streaming fork's `true` had hidden the fork's own turn end from an unselected fork.
+The other two consequences the card named (a mark landing on the fork's row after a click-away, and a moved `true` producing a false dot on the fork) are fixed by the same deletion but are not separately tested.
+Filed from the review: OW-kokemo (the resolved attach reply now has no reader, and the docblocks still justify it) and OW-nuyepe (a Pi parent whose turn the fork aborts can be marked finished if the user clicks away before its status:false; pre-existing).
