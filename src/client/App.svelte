@@ -481,9 +481,9 @@
 	 * session's does from its ref to the handle its attach gives it -- see the
 	 * switch effect below, which moves the badge's turn watch as well. A fork,
 	 * which on every backend is another session under another handle (D24),
-	 * moves no follow or scroll: `send()` arms the fork's follow and watch on
-	 * the fork's own handle (OW-koledi, OW-vitefo), the parent's scroll stays
-	 * the parent's, and only the row's turn marks are carried onto the fork.
+	 * moves none of it: `send()` arms the fork's follow and watch on the fork's
+	 * own handle (OW-koledi, OW-vitefo), and the parent's scroll and row turn
+	 * marks stay the parent's, whose turn they observed (OW-pirobi).
 	 */
 	function rekeySession(fromKey: string, toKey: string): void {
 		if (fromKey === toKey) return;
@@ -1206,7 +1206,7 @@
 		// The selected session's handle, which a rename landing while the request
 		// is in flight (D9) leaves alone, so it still names that session when the
 		// request settles (OW-kimaya): where the plain path armed its follow and
-		// badge, and the parent a fork carries its row's turn marks from.
+		// badge.
 		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
 			armFollow();
@@ -1253,8 +1253,6 @@
 				if (forkKey) disarmSubmit(forkKey);
 				return;
 			}
-			// The parent's row marks are the one thing still carried onto the fork.
-			if (armedKey) sessionTurnMarks = moveSessionTurnMarks(sessionTurnMarks, armedKey, landed.handle);
 			if (editing === edit) editing = null;
 		});
 	}

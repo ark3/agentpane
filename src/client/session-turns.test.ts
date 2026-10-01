@@ -42,26 +42,28 @@ describe("session finished-turn marks", () => {
 		expect(marks.finished.has("pi:other")).toBe(false);
 	});
 
-	// Keys are handles (D24), so a rename never moves one; a fork, which is
-	// another session under another handle, is what `App.svelte` still moves a
-	// key for.
-	it("carries both an observed stream and a finished mark from a fork's parent to the fork", () => {
+	// Keys are handles (D24), so a rename never moves one, and a fork is another
+	// session whose marks are its own (OW-pirobi). What `App.svelte` still moves
+	// a key for is a selected session's key between its ref and its handle
+	// (OW-kimaya); this drives the move directly, not that sequence, to pin that
+	// it carries both kinds of state.
+	it("carries both an observed stream and a finished mark from one key to another", () => {
 		let streamingMarks = emptySessionTurnMarks();
 		streamingMarks = foldSessionTurns(
 			streamingMarks,
-			streaming([["h-parent", true]]),
+			streaming([["pi:stored", true]]),
 			"h-selected",
 		);
-		streamingMarks = moveSessionTurnMarks(streamingMarks, "h-parent", "h-fork");
+		streamingMarks = moveSessionTurnMarks(streamingMarks, "pi:stored", "h-stored");
 		streamingMarks = foldSessionTurns(
 			streamingMarks,
-			streaming([["h-fork", false]]),
+			streaming([["h-stored", false]]),
 			"h-selected",
 		);
-		expect(streamingMarks.finished.has("h-fork")).toBe(true);
+		expect(streamingMarks.finished.has("h-stored")).toBe(true);
 
-		const movedFinished = moveSessionTurnMarks(streamingMarks, "h-fork", "h-again");
-		expect(movedFinished.finished.has("h-fork")).toBe(false);
+		const movedFinished = moveSessionTurnMarks(streamingMarks, "h-stored", "h-again");
+		expect(movedFinished.finished.has("h-stored")).toBe(false);
 		expect(movedFinished.finished.has("h-again")).toBe(true);
 	});
 });

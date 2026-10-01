@@ -209,15 +209,13 @@ export interface AgentpaneController {
 	 * leaves that turn running unwatched, as agentpane-mode's does.
 	 *
 	 * Resolves to **the attach reply of the session the prompt landed on**, or
-	 * null if it never landed. Not a boolean, because the caller has per-tab
-	 * state keyed on the session it forked -- the row's turn marks -- and
-	 * carries it onto the fork; reading `state.selected` back instead would
-	 * move it onto whatever the user clicked mid-fork (OW-mifuki). Follow is
-	 * not among it: that is armed through `onAttached` (OW-vitefo).
-	 * And carrying the fork's handle, not only its ref, because the fork's first
-	 * prompt can rename it before this resolves -- Claude Code renames at `init`,
-	 * after `submit()` -- and by then no view or summary carries the ref the
-	 * attach replied with, so a lookup by it finds nothing (OW-kimaya).
+	 * null if it never landed. The shell reads only whether it landed: the
+	 * fork's follow and watch are armed through `onAttached` (OW-koledi,
+	 * OW-vitefo), and nothing of the parent's moves to the fork (OW-pirobi).
+	 * The reply carries the fork's handle, not only its ref, because the fork's
+	 * first prompt can rename it before this resolves -- Claude Code renames at
+	 * `init`, after `submit()` -- and by then no view or summary carries the ref
+	 * the attach replied with, so a lookup by it finds nothing (OW-kimaya).
 	 *
 	 * Null means a genuine failure -- nothing selected, a selection this tab
 	 * holds no live view of (OW-forinu), an empty draft, a press on top of one

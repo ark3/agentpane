@@ -4234,17 +4234,16 @@ the browser, reading the live status, marks it.  Such a turn is shorter
 than one `sessions/list' round trip: one that failed or was aborted as it
 began, not one a user switched away to wait on, so the miss is left, and
 an attached buffer's live `session/status' is not read to close it.
-Nothing moves a mark or a level from a fork's parent to the fork, as the
-browser's `moveSessionTurnMarks' does.  The browser moves them because its
-fork takes the parent's place in its one selected view, and the prompt
-it sends there follows onto the fork.  Here a fork opens in a buffer of
-its own and sends nothing (`agentpane-fork'), and the parent is forked
-from its own buffer, on screen, so it carries no mark to move; a turn
-running on it stays with it, on Codex and Claude Code, or is aborted,
-and its handle let go, on Pi.  The fork takes the parent's window
+Nothing moves a mark or a level from a fork's parent to the fork, here
+or in the browser: a fork is another session, and a mark belongs to the
+session whose turn it observed.  Here a fork opens in a buffer of its
+own and sends nothing (`agentpane-fork'), and the parent is forked from
+its own buffer, on screen, so it carries no mark to move; a turn running
+on it stays with it, on Codex and Claude Code, or is aborted, and its
+handle let go, on Pi.  The fork takes the parent's window
 \(`agentpane--fork-at'), so a Codex or Claude Code turn still running on
-the parent ends off screen and marks the parent, where the browser would
-have moved its level to the fork and marked nothing; that turn did end
+the parent ends off screen and marks the parent, as the browser marks
+it when that turn ends with the fork selected; that turn did end
 unseen, in a buffer the user can still open.
 A handle SUMMARIES does not carry is dropped from both tables.  The
 listing is never filtered, as `agentpane--refetch-sessions', the one

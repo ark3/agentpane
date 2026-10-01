@@ -3466,6 +3466,79 @@ describe("App", () => {
 		expect(el.scrollTop).toBe(400); // scrollHeight(900) - clientHeight(500)
 	});
 
+	/**
+	 * Turn marks, like the badge and follow, belong to the session whose turn
+	 * they observed. A Codex parent keeps running after the fork, so a turn of
+	 * its own that ends while the fork is selected ended unseen, and the
+	 * parent's row keeps its dot once the fork lands (OW-pirobi).
+	 */
+	it("keeps the finished mark on a streaming Codex parent whose turn ends mid-fork (OW-pirobi)", async () => {
+		const parentRef: SessionRef = { backend: "codex", id: "parent" };
+		const forkRef: SessionRef = { backend: "codex", id: "fork" };
+		let resolvePrompt = () => {};
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const status = (session: SessionRef, handle: string, seq: number, isStreaming: boolean): ServerEvent => ({
+			type: "status", session, handle, seq, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null,
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(parentRef)],
+			createSession: async () => parentRef,
+			attach: async (ref) => {
+				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", [user("reworded")], false));
+				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			// The fork's prompt stays out until the test lets it go.
+			prompt: () => new Promise<void>((resolve) => {
+				resolvePrompt = resolve;
+			}),
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: async () => forkRef,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		emit(snapshot(parentRef, "h-parent", [user("first draft")], true));
+		await controller.select(parentRef);
+		await tick();
+		const nav = within(screen.getByRole("navigation", { name: "Sessions" }));
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().state.selected).toEqual(forkRef);
+		expect(controller.getView().sending).toBe(true);
+
+		// Codex's parent turn survives the fork and finishes while the fork's
+		// prompt is still out.
+		emit(status(parentRef, "h-parent", 2, false));
+		await tick();
+		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("first draft");
+
+		resolvePrompt();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().sending).toBe(false);
+
+		expect(nav.getByLabelText("Turn finished").closest("button")).toHaveTextContent("first draft");
+	});
+
 	// -- composer shortcuts to the last message (OW-relehi) ------------------
 
 	/**

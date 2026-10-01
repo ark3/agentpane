@@ -53,7 +53,13 @@ export function foldSessionTurns(
 	return { streaming: observed ?? marks.streaming, finished: finished ?? marks.finished };
 }
 
-/** Carry both the transition guard and any retained mark from one key to another: a fork's parent to the fork. */
+/**
+ * Carry both the transition guard and any retained mark from one key to
+ * another: a selected session's key moving between its ref and its handle, as
+ * an attach gives it one and a detach takes it back (OW-kimaya). Never a fork's
+ * parent to the fork, which is another session whose marks are its own
+ * (OW-pirobi).
+ */
 export function moveSessionTurnMarks(
 	marks: SessionTurnMarks,
 	from: string,
