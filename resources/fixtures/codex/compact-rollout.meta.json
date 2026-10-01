@@ -1,0 +1,54 @@
+{
+  "backend": "codex",
+  "scenario": "compact-rollout",
+  "covers": "manual compaction after one turn, with the rollout it leaves",
+  "prompt": "Explain, in two short paragraphs, how TCP congestion control works.",
+  "workspace_files": [],
+  "cli_version": "codex-cli 0.157.1",
+  "captured_at": "2026-09-30T21:31:15-0400",
+  "elapsed_seconds": 13.3,
+  "lines": 144,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 4,
+    "account/rateLimits/updated": 2,
+    "account/updated": 1,
+    "item/agentMessage/delta": 117,
+    "item/completed": 3,
+    "item/started": 3,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 4,
+    "thread/tokenUsage/updated": 2,
+    "turn/completed": 2,
+    "turn/started": 2
+  },
+  "thread_id": "01a0f516-21c4-7180-b0ab-38289c13eb16",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "server_requests_seen": [],
+  "item_census": {
+    "agentMessage": 1,
+    "contextCompaction": 1,
+    "userMessage": 1
+  },
+  "models_seen": [
+    "gpt-5.6-luna"
+  ],
+  "child_rollouts": 0,
+  "rollout_census": {
+    "compacted": 1,
+    "event_msg/item_completed/AgentMessage": 1,
+    "event_msg/item_completed/ContextCompaction": 1,
+    "event_msg/item_completed/UserMessage": 1,
+    "event_msg/task_complete": 2,
+    "event_msg/task_started": 2,
+    "event_msg/thread_settings_applied": 1,
+    "event_msg/token_count": 2,
+    "response_item/message": 4,
+    "session_meta": 1,
+    "token_usage_record": 2,
+    "turn_context": 1,
+    "world_state": 1
+  }
+}

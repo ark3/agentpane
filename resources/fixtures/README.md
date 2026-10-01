@@ -20,6 +20,9 @@ Each capture writes two files:
 - `<scenario>.meta.json` — provenance: CLI version, capture time, the prompt,
   an event-type census, and whether the turn terminated cleanly.
 
+A Codex scenario marked `rollout` in `capture_fixtures.py` writes a third, `<scenario>.rollout.jsonl`: the rollout Codex wrote to disk for the same run, scrubbed like the stream.
+Its `.meta.json` adds `item_census`, `rollout_census` and `models_seen`; see "The rollout scenarios" below.
+
 ## Scrubbed values
 
 These files get committed, so the harness replaces values that identify the
@@ -54,7 +57,9 @@ Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 
 Codex `account/rateLimits/updated` events keep their field shape, but the scrubber nulls subscription, utilization, reset-time, and credit values because those describe the operator's account rather than the protocol behavior under test.
-`src/fixture-scrub.test.ts` rejects committed live values in those fields.
+A rollout carries the same telemetry as `rate_limits` on its `event_msg` `token_count` records, nulled the same way, and `account/updated`'s `planType` is nulled too.
+`src/fixture-scrub.test.ts` rejects committed live values in the rate-limit fields, on the wire and in a rollout.
+A rollout's `session_meta` also names the account, as `creator_user_id` and `creator_account_id`; those are replaced by key, with `model_provider` and `originator`.
 New Claude `rate_limit_event` captures follow the same rule, and their `init` events replace the host's tools, MCP services, commands, agents, and skills with structural example values.
 
 ## Scenarios
@@ -67,6 +72,13 @@ New Claude `rate_limit_event` captures follow the same rule, and their `init` ev
 | `compact` | prime the context, then compact it | manual compaction command + its events (OW-72) |
 | `subagent` | spawn one child and wait for it | parent and child notifications sharing one Codex connection (OW-fafeja) |
 | `fork` | fork/clone from a past point, then take a turn | fork-from-past on-disk residue and lineage (OW-mewiga) |
+| `plan` | propose a three-step plan in collaboration mode `plan` | a `plan` item, with rollout (OW-zadupu) |
+| `interrupt` | count to 400, cut by `turn/interrupt` at the 40th delta | an interrupted turn, with rollout (OW-zadupu) |
+| `collab-failed` | `wait` on an agent id that does not exist | a failed `collabAgentToolCall`, with rollout (OW-zadupu) |
+| `collab-multi` | spawn two children, then one `wait` naming both | a `wait` naming two children, with rollout (OW-zadupu) |
+| `long-shell` | run a 45-second loop | a shell run polled with `write_stdin` on disk, with rollout (OW-zadupu) |
+| `multi-patch` | one `apply_patch` touching two files | a two-file `fileChange`, with rollout (OW-zadupu) |
+| `compact-rollout` | one turn, then compact it | manual compaction, with rollout (OW-zadupu) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
 
@@ -82,8 +94,9 @@ a fixed tool vocabulary.
 
 **Codex** exercised five `ThreadItem` types: `userMessage`, `reasoning`,
 `agentMessage`, `commandExecution`, `fileChange`. Reasoning items appear even
-in the `text` scenario. Still uncovered, because they are hard to trigger
-deterministically: `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`.
+in the `text` scenario.
+`plan` has been captured since, in the rollout scenarios below.
+Still uncovered: `mcpToolCall`, `dynamicToolCall` and `webSearch`, because they are hard to trigger deterministically, and `imageGeneration`, which `codex-cli 0.157.1` with `gpt-5.6-luna` could not be made to produce (the `image-gen` scenario, kept in the harness with no fixture).
 Add scenarios when you implement those mapping rows.
 
 ## The claude/ directory (OW-yilabe, OW-jihete)
@@ -168,6 +181,14 @@ and the post-fork turn are both present:
   45). `thread/rollback`, the in-place rewind, is deprecated and unused
   (HANDOFF 46), so there is no Codex-rewind fixture: that cell is a documented
   absence, not a capture.
+
+## The rollout scenarios (OW-zadupu, captured 2026-09-30)
+
+`plan`, `interrupt`, `collab-failed`, `collab-multi`, `long-shell`, `multi-patch` and `compact-rollout` were captured on `codex-cli 0.157.1` with `capture_fixtures.py`, each on a non-ephemeral thread whose rollout is kept beside its stream.
+The live mapper and the preview read the two halves of one run, so `src/server/sessions/codex-conformance.test.ts` replays both and lists every place they disagree, keyed to the card that owns it.
+`compact-rollout` is a separate scenario rather than a re-capture of `compact`, whose 0.147.0 token figures the OW-kelomi test asserts.
+What each run showed, and why there is no `image-gen` fixture, is in `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+A child thread's rollout is not kept; `child_rollouts` in the meta counts them.
 
 ## Determinism
 

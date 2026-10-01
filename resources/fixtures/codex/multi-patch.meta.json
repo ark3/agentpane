@@ -1,0 +1,60 @@
+{
+  "backend": "codex",
+  "scenario": "multi-patch",
+  "covers": "one apply_patch touching more than one file",
+  "prompt": "Using a single apply_patch call, not a shell command, append a line saying 'goodbye' to greeting.txt and create a new file notes.txt containing the line 'notes'. Then reply DONE.",
+  "workspace_files": [
+    "greeting.txt"
+  ],
+  "cli_version": "codex-cli 0.157.1",
+  "captured_at": "2026-09-30T21:30:20-0400",
+  "elapsed_seconds": 8.0,
+  "lines": 41,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 2,
+    "account/updated": 1,
+    "item/agentMessage/delta": 12,
+    "item/completed": 5,
+    "item/started": 5,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 2,
+    "thread/tokenUsage/updated": 2,
+    "turn/completed": 1,
+    "turn/diff/updated": 3,
+    "turn/started": 1
+  },
+  "thread_id": "01a0f515-6042-7673-ac52-a73d70b0ddd8",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "server_requests_seen": [],
+  "item_census": {
+    "agentMessage": 2,
+    "fileChange": 1,
+    "reasoning": 1,
+    "userMessage": 1
+  },
+  "models_seen": [
+    "gpt-5.6-luna"
+  ],
+  "child_rollouts": 0,
+  "rollout_census": {
+    "event_msg/item_completed/AgentMessage": 2,
+    "event_msg/item_completed/FileChange": 1,
+    "event_msg/item_completed/Reasoning": 1,
+    "event_msg/item_completed/UserMessage": 1,
+    "event_msg/task_complete": 1,
+    "event_msg/task_started": 1,
+    "event_msg/token_count": 2,
+    "response_item/custom_tool_call": 1,
+    "response_item/custom_tool_call_output": 1,
+    "response_item/message": 5,
+    "response_item/reasoning": 1,
+    "session_meta": 1,
+    "token_usage_record": 2,
+    "turn_context": 1,
+    "world_state": 1
+  }
+}

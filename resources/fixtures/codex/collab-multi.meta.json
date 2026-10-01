@@ -1,0 +1,63 @@
+{
+  "backend": "codex",
+  "scenario": "collab-multi",
+  "covers": "a collab call naming more than one child thread",
+  "prompt": "Use the collaboration tool to spawn exactly two subagents, each asked to reply with a one-word greeting. Then run the shell command `sleep 15`. Then wait for both of them with a single wait call naming both, and reply with one short sentence.",
+  "workspace_files": [],
+  "cli_version": "codex-cli 0.157.1",
+  "captured_at": "2026-09-30T21:32:25-0400",
+  "elapsed_seconds": 35.7,
+  "lines": 101,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 7,
+    "account/updated": 1,
+    "item/agentMessage/delta": 31,
+    "item/completed": 15,
+    "item/started": 15,
+    "mcpServer/startupStatus/updated": 6,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 8,
+    "thread/tokenUsage/updated": 7,
+    "turn/completed": 3,
+    "turn/started": 3
+  },
+  "thread_id": "01a0f516-dce2-7560-a37b-7ecab2576a19",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "server_requests_seen": [],
+  "item_census": {
+    "agentMessage": 2,
+    "collabAgentToolCall": 3,
+    "commandExecution": 1,
+    "reasoning": 4,
+    "userMessage": 1
+  },
+  "child_item_census": {
+    "agentMessage": 2,
+    "userMessage": 2
+  },
+  "models_seen": [
+    "gpt-5.6-luna"
+  ],
+  "child_rollouts": 2,
+  "rollout_census": {
+    "event_msg/item_completed/AgentMessage": 2,
+    "event_msg/item_completed/CollabAgentToolCall": 3,
+    "event_msg/item_completed/CommandExecution": 1,
+    "event_msg/item_completed/Reasoning": 4,
+    "event_msg/item_completed/UserMessage": 1,
+    "event_msg/task_complete": 1,
+    "event_msg/task_started": 1,
+    "event_msg/token_count": 5,
+    "response_item/custom_tool_call": 4,
+    "response_item/custom_tool_call_output": 4,
+    "response_item/message": 7,
+    "response_item/reasoning": 4,
+    "session_meta": 1,
+    "token_usage_record": 5,
+    "turn_context": 1,
+    "world_state": 2
+  }
+}

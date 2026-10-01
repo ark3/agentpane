@@ -1,0 +1,56 @@
+{
+  "backend": "codex",
+  "scenario": "plan",
+  "covers": "a plan item, on a turn in collaboration mode `plan`",
+  "prompt": "Propose a plan of at most three short steps for adding a --verbose flag to hello.py. Do not run any commands, do not edit files, and do not ask me questions.",
+  "workspace_files": [
+    "hello.py"
+  ],
+  "cli_version": "codex-cli 0.157.1",
+  "captured_at": "2026-09-30T21:29:21-0400",
+  "elapsed_seconds": 9.0,
+  "lines": 63,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 1,
+    "account/updated": 1,
+    "item/completed": 3,
+    "item/plan/delta": 42,
+    "item/started": 3,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/settings/updated": 1,
+    "thread/started": 1,
+    "thread/status/changed": 2,
+    "thread/tokenUsage/updated": 1,
+    "turn/completed": 1,
+    "turn/started": 1
+  },
+  "thread_id": "01a0f514-7675-7a23-8cf5-c1582266fdf5",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "server_requests_seen": [],
+  "item_census": {
+    "plan": 1,
+    "reasoning": 1,
+    "userMessage": 1
+  },
+  "models_seen": [
+    "gpt-5.6-luna"
+  ],
+  "child_rollouts": 0,
+  "rollout_census": {
+    "event_msg/item_completed/Plan": 1,
+    "event_msg/item_completed/Reasoning": 1,
+    "event_msg/item_completed/UserMessage": 1,
+    "event_msg/task_complete": 1,
+    "event_msg/task_started": 1,
+    "event_msg/token_count": 1,
+    "response_item/message": 4,
+    "response_item/reasoning": 1,
+    "session_meta": 1,
+    "token_usage_record": 1,
+    "turn_context": 1,
+    "world_state": 1
+  }
+}

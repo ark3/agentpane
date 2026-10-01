@@ -1,0 +1,57 @@
+{
+  "backend": "codex",
+  "scenario": "collab-failed",
+  "covers": "a collab tool call that fails",
+  "prompt": "Use the collaboration tool's wait operation on the agent id 019a0000-0000-7000-8000-000000000000, which does not exist. Do not spawn any agent. Then reply with one short sentence saying what happened.",
+  "workspace_files": [],
+  "cli_version": "codex-cli 0.157.1",
+  "captured_at": "2026-09-30T21:29:34-0400",
+  "elapsed_seconds": 13.1,
+  "lines": 43,
+  "terminated_cleanly": true,
+  "event_census": {
+    "<response>": 3,
+    "account/rateLimits/updated": 3,
+    "account/updated": 1,
+    "item/agentMessage/delta": 15,
+    "item/completed": 5,
+    "item/started": 5,
+    "mcpServer/startupStatus/updated": 2,
+    "remoteControl/status/changed": 1,
+    "thread/started": 1,
+    "thread/status/changed": 2,
+    "thread/tokenUsage/updated": 3,
+    "turn/completed": 1,
+    "turn/started": 1
+  },
+  "thread_id": "01a0f514-9a6f-7320-9ada-e2422be7b19f",
+  "command": "codex -m gpt-5.6-luna app-server",
+  "server_requests_seen": [],
+  "item_census": {
+    "agentMessage": 1,
+    "collabAgentToolCall": 1,
+    "reasoning": 2,
+    "userMessage": 1
+  },
+  "models_seen": [
+    "gpt-5.6-luna"
+  ],
+  "child_rollouts": 0,
+  "rollout_census": {
+    "event_msg/item_completed/AgentMessage": 1,
+    "event_msg/item_completed/CollabAgentToolCall": 1,
+    "event_msg/item_completed/Reasoning": 2,
+    "event_msg/item_completed/UserMessage": 1,
+    "event_msg/task_complete": 1,
+    "event_msg/task_started": 1,
+    "event_msg/token_count": 3,
+    "response_item/custom_tool_call": 2,
+    "response_item/custom_tool_call_output": 2,
+    "response_item/message": 4,
+    "response_item/reasoning": 2,
+    "session_meta": 1,
+    "token_usage_record": 3,
+    "turn_context": 1,
+    "world_state": 1
+  }
+}
