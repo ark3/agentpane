@@ -1,5 +1,6 @@
 ---
 labels: [defect, sweep-0929]
+closed: done
 ---
 
 # assistant_length_at_abort is a session maximum, so it cannot attribute itself to the aborted turn
@@ -38,3 +39,35 @@ So this is one change to the support module and one live run per backend.
 Done also requires OW-fagemo's condition, measured by this card's per-turn length: a run of each probe on the home server whose aborted turn is of a different order than a few hundred characters, with the abort answered and the transcript not growing afterwards.
 OW-fagemo's escape stands too: if a backend's pinned model refuses every reasonable long prompt, record that beside the prompt and in `docs/MANUAL_TESTING.md` and close on that evidence.
 Run it after OW-yehisa lands, so the Pi run is pinned.
+
+## Close note
+
+Both smoke probes now report `assistant_length_at_abort` from the aborted turn's own messages. The growth check after the abort compares those messages, not the session maximum. Landed on main as 89ee407, 092e3cb, d657fb9 and 3bd09ad.
+
+What was built, in `resources/probes/agentpane_live_support.py`:
+- `transcript` replays the session the way a client holds it: a `snapshot` replaces it, an `upsert` writes at `index`. The wire names a message only by position.
+- `turn_messages` returns every position past the transcript's length at a cut taken just before the long prompt. That cut is idle: the Pi probe asserts it, and the Codex probe infers it.
+- The reported length is the sum of the turn's assistant text, so a turn split across several messages counts in full. The floor excludes earlier turns.
+- The growth check compares the rows position by position, at idle and again 1.5 s later.
+- `max_assistant_length` stays for the steer probe and for the Codex reconnect check.
+
+OW-fagemo, folded in:
+- Both pinned models failed the integers prompt. Luna's turn (`codex-cli 0.157.1`) ended on its own at 76 characters. Pi's runs on 0.85.1 and 0.87.1 stayed at session maxima of 472 or less.
+- Both probes now share `LONG_PROMPT`, a twenty-chapter handbook.
+- `wait_for_turn_to_fill` replaces the 0.35 s sleep. It waits up to 150 s for 20000 characters of the turn's own text, and it asserts no length.
+
+Runs on the home server, 2026-09-30, `pi 0.87.1` and `codex-cli 0.157.1`, pinned models, all passing:
+- Codex: 20005 characters at abort, idle 15 ms after the abort request.
+- Pi bare: 20054 characters, idle after 10 ms.
+- Pi `--tool-check`: 20021 characters, idle after 36 ms. The turn sat at positions 7 and 8, past the seven messages from earlier turns.
+- In all three, the turn did not change in the 1.5 s after idle.
+
+How red was shown:
+- Live: comparing against the turn as it stood half-filled failed the Pi run with exit 1.
+- Synthetic event list: the old helper reported an earlier 5000-character reply for a 400-character aborted turn, and missed both a late message and a late growth. The new one caught both.
+
+Write-up: `docs/MANUAL_TESTING.md`, "The smoke probes abort the long turn's own text, twenty thousand characters in (OW-sofige)". The OW-hahohi "upper bound" paragraph is retired. Pointers were added where the OW-moradi and OW-yehisa sections cite session maxima.
+
+Known limits, recorded in that section:
+- The growth check compares text length only, so a change to thinking or `stopReason` after idle passes.
+- The idle baseline is read at the next 50 ms poll, not at the idle event. OW-wawese carries that fix.
