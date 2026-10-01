@@ -721,6 +721,7 @@ The parent therefore reads "spawned agent", then "waited", in sequence, collapse
 
 This is the **live attached** transcript's view, and only that.
 A stored rollout records the same calls as Responses-API `function_call`s under the `collaboration` namespace — `wait_agent`, `send_message`, `spawn_agent`, `followup_task`, `list_agents` and `interrupt_agent`, counted across the 72 September rollouts on the home server on 2026-09-11 (`codex-cli` 0.150.1 through 0.154.0) — so `extractCodexPreviewTurns` names them `collaboration__wait_agent` and the read-only preview of the same parent draws an opaque default card with no child link at all.
+On `codex-cli 0.157.1` the rollout stores them instead as `custom_tool_call` `exec` scripts calling `tools.multi_agent_v1__spawn_agent`, `tools.multi_agent_v1__wait_agent` and their siblings, which the preview names `exec` (`docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)").
 Closing that gap is separate work.
 
 The child's conversation is **not** inlined as a nested block.

@@ -315,9 +315,12 @@ const SILENT_ITEM_TYPES = new Set<string>([
 	"enteredReviewMode",
 	"exitedReviewMode",
 	"sleep",
-	// `subAgentActivity` is the rollout's on-disk form of the collab lifecycle
-	// the parent sees as `collabAgentToolCall`. It never arrived over the wire
-	// in subagent.jsonl (`codex-cli 0.153.4`), so rendering it would only ever
+	// `subAgentActivity` is the on-disk form of the collab lifecycle the parent
+	// sees as `collabAgentToolCall`, in the rollouts `codex-cli` 0.150.1 through
+	// 0.154.0 wrote on the home server (`sub_agent_activity` records, counted
+	// 2026-09-30); none of the 0.157.1 collab rollouts in
+	// resources/fixtures/codex/ has one. It never arrived over the wire in
+	// subagent.jsonl (`codex-cli 0.153.4`), so rendering it would only ever
 	// double the block that item already draws.
 	"subAgentActivity",
 ]);

@@ -21,7 +21,8 @@ Each capture writes two files:
   an event-type census, and whether the turn terminated cleanly.
 
 A Codex scenario marked `rollout` in `capture_fixtures.py` writes a third, `<scenario>.rollout.jsonl`: the rollout Codex wrote to disk for the same run, scrubbed like the stream.
-Its `.meta.json` adds `item_census`, `rollout_census` and `models_seen`; see "The rollout scenarios" below.
+Its `.meta.json` adds `rollout_census` and `models_seen`; see "The rollout scenarios" below.
+Every Codex capture's `.meta.json` now also carries `item_census`, the thread's own `item/completed`s by item type.
 
 ## Scrubbed values
 
@@ -57,9 +58,9 @@ Nothing should ever assert on a scrubbed value. If you need the real ones
 locally, `capture_fixtures.py --no-scrub` — but do not commit that output.
 
 Codex `account/rateLimits/updated` events keep their field shape, but the scrubber nulls subscription, utilization, reset-time, and credit values because those describe the operator's account rather than the protocol behavior under test.
-A rollout carries the same telemetry as `rate_limits` on its `event_msg` `token_count` records, nulled the same way, and `account/updated`'s `planType` is nulled too.
+As of `codex-cli 0.157.1`, a rollout carries the same telemetry as `rate_limits` on its `event_msg` `token_count` records, nulled the same way, and `account/updated`'s `planType` is nulled too.
 `src/fixture-scrub.test.ts` rejects committed live values in the rate-limit fields, on the wire and in a rollout.
-A rollout's `session_meta` also names the account, as `creator_user_id` and `creator_account_id`; those are replaced by key, with `model_provider` and `originator`.
+As of `codex-cli 0.157.1`, a rollout's `session_meta` also names the account, as `creator_user_id` and `creator_account_id`; those are replaced by key, with `model_provider` and `originator`, and `src/fixture-scrub.test.ts` rejects any value but the placeholders.
 New Claude `rate_limit_event` captures follow the same rule, and their `init` events replace the host's tools, MCP services, commands, agents, and skills with structural example values.
 
 ## Scenarios
@@ -92,9 +93,8 @@ New Claude `rate_limit_event` captures follow the same rule, and their `init` ev
 Pi chose `bash` for the edit rather than a dedicated edit tool — do not assume
 a fixed tool vocabulary.
 
-**Codex** exercised five `ThreadItem` types: `userMessage`, `reasoning`,
-`agentMessage`, `commandExecution`, `fileChange`. Reasoning items appear even
-in the `text` scenario.
+**Codex** exercised five `ThreadItem` types: `userMessage`, `reasoning`, `agentMessage`, `commandExecution`, `fileChange`.
+Reasoning items appear even in the `text` scenario.
 `plan` has been captured since, in the rollout scenarios below.
 Still uncovered: `mcpToolCall`, `dynamicToolCall` and `webSearch`, because they are hard to trigger deterministically, and `imageGeneration`, which `codex-cli 0.157.1` with `gpt-5.6-luna` could not be made to produce (the `image-gen` scenario, kept in the harness with no fixture).
 Add scenarios when you implement those mapping rows.

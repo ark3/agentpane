@@ -3883,14 +3883,15 @@ With the helper deliberately broken to a floor of 0 -- the whole session instead
 
 Run on the home server 2026-09-30, between 21:28 and 21:35 local (`-04:00`), on **`codex-cli 0.157.1`**, from the `card/OW-zadupu` worktree, by `python3 resources/probes/capture_fixtures.py --backend codex --scenario <name> --timeout 240`, one or more scenarios per invocation.
 Each thread ran under `codex -m gpt-5.6-luna app-server` with `gpt-5.6-luna` also named on `thread/start` and every `turn/start`, at the `sandbox: "danger-full-access"` and `approvalPolicy: "never"` `CodexAdapter` sends, in a throwaway `CODEX_HOME`; every rollout's `turn_context` named `gpt-5.6-luna` before the scrub, recorded as `models_seen` in each `.meta.json`.
-Unlike every earlier Codex capture the threads were not ephemeral, so each scenario keeps the rollout Codex wrote for its run beside the stream, as `resources/fixtures/codex/<scenario>.rollout.jsonl`.
+Unlike every earlier `capture_fixtures.py` capture the threads were not ephemeral, so each scenario keeps the rollout Codex wrote for its run beside the stream, as `resources/fixtures/codex/<scenario>.rollout.jsonl`.
+The one rollout committed before them, `resources/fixtures/codex/fork.jsonl` (`codex-cli 0.147.0`, written by `fork_probe.py`), has no stream beside it.
 
 | Scenario | Stream lines | Rollout lines | Completed items on the thread's own stream |
 | --- | --- | --- | --- |
 | `plan` | 63 | 15 | `userMessage`, `reasoning`, `plan` |
 | `interrupt` | 59 | 13 | `userMessage`, `reasoning` |
 | `collab-failed` | 43 | 26 | `userMessage`, 2 `reasoning`, `collabAgentToolCall`, `agentMessage` |
-| `collab-multi` | 101 | 45 | `userMessage`, 4 `reasoning`, 3 `collabAgentToolCall`, `commandExecution`, 2 `agentMessage` |
+| `collab-multi` | 101 | 46 | `userMessage`, 4 `reasoning`, 3 `collabAgentToolCall`, `commandExecution`, 2 `agentMessage` |
 | `long-shell` | 73 | 26 | `userMessage`, 2 `reasoning`, `commandExecution`, `agentMessage` |
 | `multi-patch` | 41 | 22 | `userMessage`, `reasoning`, `fileChange`, 2 `agentMessage` |
 | `compact-rollout` | 144 | 20 | `userMessage`, `agentMessage`, `contextCompaction` |
@@ -3920,8 +3921,8 @@ As on 0.153.4 (`subagent.jsonl`), no `thread/started` arrived for either child.
 A 45-second loop ran as one `commandExecution` live.
 On disk the model's first `exec` script called `tools.exec_command` with `yield_time_ms: 30000`, got back a session id, and a second script polled it with `tools.write_stdin`.
 In the first `long-shell` run, whose fixture was not kept, a 15-second loop finished inside the first yield and no `write_stdin` was written.
-The live item's `aggregatedOutput`, and its `item/commandExecution/outputDelta`s, began at the loop's second line; the stored `exec_command` output began at its first.
-Nothing was run to explain that.
+The live item's `aggregatedOutput`, and its `item/commandExecution/outputDelta`s, began at the loop's second line, and so did the rollout's own `CommandExecution` `item_completed` (`aggregated_output`, `stdout` and `formatted_output` alike); only the raw `exec_command` output the `exec` script returned, stored as its `custom_tool_call_output`, began at the first.
+So it is Codex's item that drops the line, not only the wire; nothing was run to explain it (OW-miwofi).
 
 **A two-file patch is one `fileChange` live and an `exec` script on disk.**
 The live item carried both files in `changes`, an `update` and an `add`; on disk the model's `exec` script called `tools.apply_patch` with the whole patch as a string, and its output was `{}`.
@@ -3947,5 +3948,5 @@ So the records could feed `mapItem` only through a translation per kind, but the
 Every tool call the model made through `exec` other than `tools.exec_command` previews as a tool named `exec`, and the preview marks every tool result `isError: false`, so the failed `wait` reads as a success.
 
 **The scrub grew three cases.**
-A rollout's `session_meta` names the account as `creator_user_id` and `creator_account_id`, its `token_count` records carry `rate_limits`, and 0.157.1's stream carries an `account/updated` naming the plan; `capture_fixtures.py` now scrubs all of them, and `src/fixture-scrub.test.ts` fails on live `rate_limits` values in a rollout as it already did on the wire.
-That guard was seen red first, on a one-line rollout carrying `primary` and `plan_type` values placed under `resources/fixtures/codex/` and removed again, which the guard as it stood before passed.
+A rollout's `session_meta` names the account as `creator_user_id` and `creator_account_id`, its `token_count` records carry `rate_limits`, and 0.157.1's stream carries an `account/updated` naming the plan; `capture_fixtures.py` now scrubs all of them, and `src/fixture-scrub.test.ts` fails on live `rate_limits` values in a rollout as it already did on the wire, and on a `session_meta` naming any `creator_user_id` or `creator_account_id` but the placeholders.
+Each guard was seen red first, on a one-line rollout placed under `resources/fixtures/codex/` and removed again: one carrying `primary` and `plan_type` values, which the guard as it stood before passed, and one carrying made-up creator ids.
