@@ -1,6 +1,7 @@
 ---
 labels: [change, sweep-0929]
 blocked-by: [OW-yehisa]
+closed: done
 ---
 
 # Codex items reach the transcript through two unconnected mappers, live mapItem and the preview's extractStoreTurn, and no fixture keeps the rollout of the run it captured, so nothing catches them disagreeing
@@ -55,3 +56,20 @@ A dry-run reader checked this card against the tree at 5d096a8 before dispatch; 
 - The comparison projects each side to role sequence, tool names, call-to-result pairing, `isError` and `stopReason`; timestamps, usage and model identity differ by design and are excluded.
   Where a card's disagreement sits outside that projection (OW-zabiko's preamble is result text, OW-4 is how a client draws the edit), its amendment says what the rollout shows by inspection.
 - The rows `webSearch`, `mcpToolCall` and `dynamicToolCall` get no scenario in this pass; `docs/DESIGN.md`'s "have no capture yet" row is narrowed to them, not retired.
+
+## Close note
+
+Built: `resources/probes/capture_fixtures.py` keeps a Codex scenario's rollout (non-ephemeral thread in the throwaway CODEX_HOME, rollout located by `session_meta` id, scrubbed including `rate_limits` and the `creator_*` account ids, failing loudly if not found) and records an `item_census` and `rollout_census` in each meta.
+Seven scenarios captured on the home server on `codex-cli 0.157.1` with `gpt-5.6-luna` (verified from each rollout's `turn_context`): `plan`, `interrupt`, `collab-failed`, `collab-multi`, `long-shell`, `multi-patch`, `compact-rollout`, each as `<scenario>.jsonl`, `.rollout.jsonl` and `.meta.json` under `resources/fixtures/codex/`.
+Image generation could not be provoked (the tool was not offered in the session though `codex features list` showed it enabled); the `image-gen` scenario stays in the harness with no fixture.
+`compact` was not re-captured, because `reducer.test.ts`'s OW-kelomi assertions rest on its 0.147.0 figure; `compact-rollout` covers compaction instead.
+
+`src/server/sessions/codex-conformance.test.ts` replays each stream through `CodexReducer` and each rollout through `extractCodexPreviewTurns`, projects both to roles (a user row keeps an opening `<tag>`), tool names, call-to-result pairing (with call distance), `isError` and `stopReason`, and holds the difference to `KNOWN_DIFFERENCES`, keyed by owning card: OW-yobuyi, OW-zabiko, OW-kelise, OW-bomere, OW-mehezu. `plan` and `compact-rollout` agree.
+Each assertion was shown red first (emptied table, perturbed projections, swapped-result unit case); `src/fixture-scrub.test.ts` gained rollout `rate_limits` and `creator_*` guards, each shown red on a temporary sample.
+`bun run check` green on main after the cherry-pick: 56 files, 1600 tests.
+
+Census answer, as of 0.157.1: the rollout's `event_msg` `item_completed` records covered every item the thread's own stream completed (34 items, 8 kinds, same ids, same order), but in a different serialization (capitalised types, snake_case, argv commands, `file://` cwd, path-keyed diffs), so they could feed `mapItem` only through a translation per kind; `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
+
+Cards amended with what their row showed, or that there was none: OW-19, OW-kehose (still blocked on evidence), OW-guyunu, OW-kelise (mechanism moved to `exec` scripts on 0.157.1), OW-hejoza (no row), OW-wapage (no summary on 0.157.1), OW-yobuyi, OW-zabiko, OW-4, OW-wujuda, OW-pukado.
+Filed: OW-bomere and OW-mehezu (preview defects the test found), OW-miwofi (Codex's own item drops a long command's first output line), and OW-wudija for Pi fixture drift, which this pass did not cover.
+Not done: no scenario for `webSearch`, `mcpToolCall` or `dynamicToolCall`; `docs/DESIGN.md`'s "have no capture yet" row is narrowed to those three.
