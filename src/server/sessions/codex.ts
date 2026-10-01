@@ -864,8 +864,12 @@ function compactionTurnFor(
 	context.tokensBefore = 0;
 	return {
 		role: "compactionSummary",
-		// Empty for the same reason as the live marker: the summary field stays
-		// blank there, and two surfaces showing one event must not differ.
+		// Empty, as the live marker's is. The record's `message` was empty on
+		// every rollout read on the home server on 2026-10-01 (`codex-cli`
+		// 0.147.0, 0.150.1, 0.153.0 and 0.157.1), and the summary Codex keeps
+		// is the encrypted `compaction` item in `replacement_history`, so there
+		// is nothing readable to show. Were a readable summary ever to appear,
+		// whether the preview may show what live cannot is OW-wapage's question.
 		summary: "",
 		tokensBefore,
 		...(timestamp ? { timestamp } : {}),
