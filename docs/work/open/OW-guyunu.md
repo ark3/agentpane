@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [defect]
 ---
 
 # The Codex subagent card shows a red error badge with an empty body when a collab call fails, and glues several children's replies together with nothing saying which child said which.
@@ -38,3 +38,32 @@ A `wait` naming two finished children came back with both messages, which maps t
 A `wait` returned as soon as its first child finished and named only that child, so a multi-receiver result needed both children done before the wait; the committed run sleeps 15 seconds first.
 The protocol has moved under the "empty error card" section: as of the 0.156.0 bindings in `resources/codex-protocol/`, `CollabAgentToolCallStatus` is `"inProgress" | "completed" | "failed" | "interrupted"`.
 So the deferral's reason, that no capture showed either shape, is gone; what remains is a presentation decision for each, made against these fixtures: what text the failed card supplies when the item carries none, and how a reply is attributed to its child.
+
+## Decided 2026-10-01 with the owner
+
+The fix is text, written by the `collabAgentToolCall` arm of `mapItem` in `src/server/adapters/codex/mapping.ts`, so live and preview (which since OW-luvema both go through `mapItem`) and both clients (agentpane-mode draws the result text the server made, through `src/emacs/nodes.ts`) all get it from one change.
+A structured per-child result, drawn by each client and carried to Emacs as a typed `ToolPart` field, was declined as more than this shape is worth: it arises only on a thread another client drove.
+
+- **Attribution.** With more than one receiver, each child's part of the result is prefixed by its short id.
+  The order follows `receiverThreadIds`, as the reply list does today.
+- **A child with no message** contributes its `CollabAgentState` status in words instead (`notFound` reads "not found", and so on for every `CollabAgentStatus` in `resources/codex-protocol/v2/CollabAgentStatus.ts`), prefixed the same way, so `collab-failed.jsonl`'s card says the child was not found rather than nothing.
+  A failed call whose `agentsStates` names no receiver at all gets a fixed sentence saying the call failed and Codex gave no reason.
+- **One receiver with a message** keeps today's body, the message alone.
+
+**The short id changes from the first 8 characters to the last 8.**
+Codex thread ids are UUIDv7, whose leading characters encode the creation time, so two children spawned in the same second share them: in `collab-multi.jsonl` the two children are `01a0f517-0458...` and `01a0f517-04e0...`, and the header reads `wait · 01a0f517 · 01a0f517`.
+The trailing characters are random.
+`toolSummary` in `src/client/render/tools/summary.ts` (its `subagent` branch, `id.slice(0, 8)`) and the mapping's prefixes use the same short form, from one definition, so the header and the body name a child the same way.
+OW-gakide's body, which says the header shows "each id's first 8 characters", is corrected in the same change.
+
+## Done when, amended
+
+Each watched red first.
+
+1. A mapping test driven by `collab-failed.jsonl` asserts the failed `wait`'s result names the child by its short id and says it was not found, and that the result is non-empty.
+2. A mapping test driven by `collab-multi.jsonl` asserts the two-child `wait`'s result carries each child's distinct short id beside its reply.
+3. A `toolSummary` test asserts two thread ids sharing their first 8 characters give a header naming them differently; `src/emacs/nodes.test.ts`'s assertion on `id.slice(0, 8)` moves to the new short form.
+4. The existing single-child `subagent.jsonl` tests keep their reply text unchanged, and `src/server/sessions/codex-conformance.test.ts` lists no new difference.
+
+`bun run check` passes.
+The earlier "Done when" above is superseded by this one.

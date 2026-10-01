@@ -8,7 +8,7 @@ Found by the OW-varevo parity survey on 2026-09-26; the parity rule is `AGENTS.m
 
 On a live transcript, the browser's subagent card (`src/client/render/tools/SubagentTool.svelte`) lists the child threads the call names, which `subagentThreadIds` in `src/client/render/tools/summary.ts` reads from the call.
 Its "Open thread" goes through `onopensession` to `openSession` and `controller.preview`, opening the child as a session of its own (closed OW-benige).
-In `emacs/agentpane.el` the tool header shows each id's first 8 characters, since `toolSummary` in the same `summary.ts` appends them and `src/emacs/nodes.ts` carries that summary onto the node.
+In `emacs/agentpane.el` the tool header shows each id's short form (its last 8 characters since OW-guyunu), since `toolSummary` in the same `summary.ts` appends them and `src/emacs/nodes.ts` carries that summary onto the node.
 The full ids appear only inside the args JSON that `agentpane--tool-body` shows in the fold, and no command opens them.
 
 Opening is `sessions/preview`, which exists.
