@@ -15,6 +15,8 @@ type `pi-web-ui`'s `MessageList` consumes. Run it and inspect the
 bash pi_rpc_probe.sh
 ```
 
+Since OW-yezeya, after the run recorded below, it passes `--model openrouter/deepseek/deepseek-v4.1-flash:high`, the ref `AGENTS.md` pins, rather than answering on whatever Pi's settings file names, and prints that flag above the payload's own `model`.
+
 Verified with: `pi` 0.84.1.
 
 ## `codex_turn_probe.py`
@@ -197,6 +199,9 @@ ephemeral here because the on-disk residue is the question. New-session cells
 end with a completed assistant turn inside the fork, so a returned id alone
 cannot pass the check.
 Exit non-zero if either new-session cell failed to drive a turn, or if either mid-stream cell's own verdict — `codex_fork_mid_stream.result`, `pi_rewind.midstream_result` — is anything but `measured`.
+
+Since OW-yezeya, after the runs recorded below, it passes the refs `AGENTS.md` pins, by constant: `--model openrouter/deepseek/deepseek-v4.1-flash:high` to the Pi it spawns, and `model: "gpt-5.6-luna"` on every Codex `thread/start` and `turn/start`.
+Each cell that drives a turn records that pin in `model_flag` beside the model the backend reported, `model_in_force` from Pi's `get_state` and `model` from Codex's `thread/start` response.
 
 Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the Pi cells again with
 `pi` 0.85.1 on the home server, 2026-09-15 (`docs/MANUAL_TESTING.md`, "Pi's

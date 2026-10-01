@@ -129,7 +129,7 @@ MIN_DELTAS = 40
 SAMPLE_MARKS = (40, 80, 120, 160)
 
 # Pinned, and not a flag: AGENTS.md "Evidence" binds agent-driven work on the
-# home server to Haiku, `fork_probe.py` exposes no model flag either, and a
+# home server to Haiku, `fork_probe.py` pins its models by constant too, and a
 # knob whose help text says not to turn it is not configurability.
 MODEL = "haiku"
 

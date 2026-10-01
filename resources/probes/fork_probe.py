@@ -133,6 +133,14 @@ PI_STATE_FILES = ("auth.json", "models.json", "models-store.json",
                   "settings.json", "trust.json")
 CODEX_STATE_FILES = ("auth.json", "config.toml")
 
+# The models AGENTS.md "Evidence" pins agent-driven turns to. The copied
+# settings files name a default too, but the owner may change them, so every
+# Pi spawn passes `--model` and every Codex `thread/start` and `turn/start`
+# carries `model`. Each cell that drives a turn records the pin beside the
+# model the backend reports.
+PI_MODEL = "openrouter/deepseek/deepseek-v4.1-flash:high"
+CODEX_MODEL = "gpt-5.6-luna"
+
 # Fixtures get committed, so identifying values are replaced with structurally
 # equivalent placeholders on the way out (same policy as capture_fixtures.py).
 SCRUB_KEYS = {
@@ -325,7 +333,7 @@ class PiSession:
     def __init__(self, work, home, sessdir):
         env = dict(os.environ, PI_CODING_AGENT_DIR=str(home))
         self.proc = subprocess.Popen(
-            ["pi", "--mode", "rpc", "--session-dir", str(sessdir)],
+            ["pi", "--mode", "rpc", "--session-dir", str(sessdir), "--model", PI_MODEL],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, cwd=work, env=env,
         )
@@ -503,6 +511,8 @@ def run_pi(timeout, want_fixtures):
     pi = PiSession(work, home, sessdir)
     try:
         st = pi.response({"type": "get_state"}, "get_state")
+        st_model = st["data"].get("model") or {}
+        model_in_force = f"{st_model.get('provider')}/{st_model.get('id')}"
         version = cli_version("pi")
         # Prime: three turns so a fork at the SECOND user message is distinct
         # from both "keep nothing" and "keep the whole first turn".
@@ -573,6 +583,8 @@ def run_pi(timeout, want_fixtures):
         rewound_file_messages = pi_file_messages(new_file) if new_file else []
         cells["pi_rewind"] = {
             "operation": "fork (entryId)",
+            "model_flag": PI_MODEL,
+            "model_in_force": model_in_force,
             "exists": fork_resp is not None and fork_resp.get("success") is True,
             "returned": fork_resp.get("data") if fork_resp else None,
             "rewound_to_entry": beta_entry,
@@ -633,6 +645,8 @@ def run_pi(timeout, want_fixtures):
             clone_after = pi_tree_summary(clone_file)
         cells["pi_new_session"] = {
             "operation": "clone (no entryId) + switch_session",
+            "model_flag": PI_MODEL,
+            "model_in_force": model_in_force,
             "exists": clone_resp is not None and clone_resp.get("success") is True,
             "returned": clone_resp.get("data") if clone_resp else None,
             "clone_takes_entry_id": False,
@@ -889,7 +903,8 @@ class CodexSession:
     def turn(self, req_id, thread_id, text, timeout=90):
         mark = len(self.events)
         self.send({"id": req_id, "method": "turn/start",
-                   "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]}})
+                   "params": {"threadId": thread_id, "model": CODEX_MODEL,
+                              "input": [{"type": "text", "text": text}]}})
         deadline = time.time() + timeout
         while time.time() < deadline:
             for e in self.events[mark:]:
@@ -907,7 +922,8 @@ class CodexSession:
         """
         mark = len(self.events)
         self.send({"id": req_id, "method": "turn/start",
-                   "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]}})
+                   "params": {"threadId": thread_id, "model": CODEX_MODEL,
+                              "input": [{"type": "text", "text": text}]}})
         return mark
 
     def events_since(self, mark, method, thread_id):
@@ -1047,7 +1063,7 @@ def run_codex(timeout, want_fixtures):
         cx.request(1, "initialize", {"clientInfo": {"name": "agentpane-fork-probe",
                                                      "version": "0", "title": "agentpane"}})
         # NOT ephemeral: the on-disk residue is the question here.
-        started = cx.request(2, "thread/start", {})
+        started = cx.request(2, "thread/start", {"model": CODEX_MODEL})
         parent_id = started["result"]["thread"]["id"]
         ok1, _ = cx.turn(3, parent_id, "Say exactly: ALPHA", timeout)
         ok2, _ = cx.turn(4, parent_id, "Say exactly: BETA", timeout)
@@ -1093,6 +1109,8 @@ def run_codex(timeout, want_fixtures):
                 fixture_src = f
         cells["codex_new_session"] = {
             "operation": "thread/fork (lastTurnId, inclusive)",
+            "model_flag": CODEX_MODEL,
+            "model": started["result"].get("model"),
             "exists": fork is not None and "result" in fork,
             "returned": {"forked_thread_id": forked_id,
                          "forkedFromId": fthread.get("forkedFromId"),
@@ -1144,7 +1162,8 @@ def run_codex(timeout, want_fixtures):
         # and NOT ephemeral: the parent's on-disk rollout is read below.
         started = cx.request(2, "thread/start", {"cwd": str(mid_work),
                                                  "sandbox": "danger-full-access",
-                                                 "approvalPolicy": "never"})
+                                                 "approvalPolicy": "never",
+                                                 "model": CODEX_MODEL})
         parent_id = started["result"]["thread"]["id"]
         started_model = started["result"].get("model")
         prime_ok, _ = cx.turn(3, parent_id, "Say exactly: ALPHA", timeout)
@@ -1214,6 +1233,7 @@ def run_codex(timeout, want_fixtures):
             "operation": "thread/fork fired while the parent turn is streaming",
             "reads": "the PARENT thread only; no turn is driven in the fork",
             "parent_thread_id": parent_id,
+            "model_flag": CODEX_MODEL,
             "model": started_model,
             "primed_turn_ok": prime_ok,
             "forked_through_turn": last_turn_id,
