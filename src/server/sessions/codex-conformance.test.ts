@@ -13,7 +13,12 @@
  * role sequence, tool names, whether each call has its result and each result
  * its call, `isError`, `stopReason`, and a compaction marker's figure and
  * whether it carries a summary. Timestamps, usage and model identity differ by
- * design and are left out, as is any text.
+ * design and are left out, as is any text but one piece: a user message that
+ * opens with a `<tag>` wrapper, such as `<turn_aborted>`, keeps the tag, so a
+ * row says which injected message it is and a typed prompt stays bare `user`.
+ * A result row names its call by how many calls back it sits, said only when
+ * it is not the latest call, so results that answer same-named calls out of
+ * order still differ, and a call the other side lacks shifts no later row.
  *
  * Every place the two disagree is listed in `KNOWN_DIFFERENCES`, keyed to the
  * card that owns it. Fixing a row is that card's work, not this file's; when it
@@ -48,23 +53,30 @@ function project(messages: Message[]): string[] {
 			results.set(message.toolCallId, (results.get(message.toolCallId) ?? 0) + 1);
 		}
 	}
-	const calls = new Set<string>();
+	const calls: string[] = [];
 	return messages.map((message) => {
 		switch (message.role) {
 			case "assistant": {
 				const blocks = (message.content as { type: string; id: string; name: string }[]).map((block) => {
 					if (block.type !== "toolCall") return block.type;
-					calls.add(block.id);
+					calls.push(block.id);
 					return `call ${block.name}${results.has(block.id) ? "" : " (no result)"}`;
 				});
 				return `assistant ${message.stopReason} [${blocks.join(", ")}]`;
 			}
-			case "toolResult":
-				return `toolResult ${message.toolName} ${message.isError ? "error" : "ok"}${
-					calls.has(message.toolCallId ?? "") ? "" : " (no call)"
-				}`;
+			case "toolResult": {
+				const at = calls.lastIndexOf(message.toolCallId ?? "");
+				const back = calls.length - 1 - at;
+				const link = at === -1 ? " (no call)" : back > 0 ? ` (call ${back} back)` : "";
+				return `toolResult ${message.toolName} ${message.isError ? "error" : "ok"}${link}`;
+			}
 			case "compactionSummary":
 				return `compactionSummary tokensBefore=${message.tokensBefore} summary=${message.summary ? "present" : "empty"}`;
+			case "user": {
+				const first = (message.content as { type: string; text?: string }[])[0];
+				const tag = first?.type === "text" ? /^\s*(<[A-Za-z_][\w-]*>)/.exec(first.text ?? "")?.[1] : undefined;
+				return tag ? `user ${tag}` : "user";
+			}
 			default:
 				return message.role;
 		}
@@ -127,7 +139,7 @@ const ok = (name: string) => `toolResult ${name} ok`;
 /**
  * Captured on `codex-cli 0.157.1`, on 2026-09-30; see each `.meta.json`, and
  * `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout
- * (OW-zadupu)". An entry keyed `unfiled` has no card yet.
+ * (OW-zadupu)".
  */
 const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 	plan: [],
@@ -139,7 +151,7 @@ const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 					"stored, Codex keeps no partial reply, and the `<turn_aborted>` notice it writes instead previews as a user turn",
 			},
 			live: ["assistant pending [text]"],
-			preview: ["user"],
+			preview: ["user <turn_aborted>"],
 		},
 	],
 	"collab-failed": [
@@ -149,7 +161,7 @@ const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 					"the first `exec` script only searched the tool list and called no tool; live has no item for it, the preview draws it",
 				"OW-kelise":
 					"the failed `wait` is `subagent` live and an `exec` script calling `tools.multi_agent_v1__wait_agent` on disk",
-				unfiled: "the preview sets `isError: false` on every tool result, so the failed call reads as a success",
+				"OW-bomere": "the preview sets `isError: false` on every tool result, so the failed call reads as a success",
 			},
 			live: [call("subagent"), "toolResult subagent error"],
 			preview: [call("exec"), ok("exec"), call("exec"), ok("exec")],
@@ -167,13 +179,13 @@ const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 		},
 		{
 			owners: {
-				unfiled:
+				"OW-mehezu":
 					"each child's completion is a `<subagent_notification>` user-role message on disk, which " +
 					"`SYNTHETIC_USER_PREFIXES` does not list, so the preview draws two user turns nobody typed",
 				"OW-kelise": "the `wait` naming both children is `subagent` live and an `exec` script on disk",
 			},
 			live: [call("subagent"), ok("subagent")],
-			preview: ["user", "user", call("exec"), ok("exec")],
+			preview: ["user <subagent_notification>", "user <subagent_notification>", call("exec"), ok("exec")],
 		},
 	],
 	"long-shell": [
@@ -199,6 +211,21 @@ const KNOWN_DIFFERENCES: Record<string, KnownDifference[]> = {
 	],
 	"compact-rollout": [],
 };
+
+describe("the projection", () => {
+	const call = (id: string): Message => ({
+		role: "assistant",
+		stopReason: "toolUse",
+		content: [{ type: "toolCall", id, name: "bash" }],
+	});
+	const result = (id: string): Message => ({ role: "toolResult", toolCallId: id, toolName: "bash", isError: false });
+
+	it("tells apart two same-named calls whose results arrive swapped", () => {
+		const inOrder = project([call("a"), call("b"), result("a"), result("b")]);
+		const swapped = project([call("a"), call("b"), result("b"), result("a")]);
+		expect(hunks(inOrder, swapped)).not.toEqual([]);
+	});
+});
 
 describe("live and preview agree on a Codex run, but for the known differences", () => {
 	for (const [scenario, known] of Object.entries(KNOWN_DIFFERENCES)) {
