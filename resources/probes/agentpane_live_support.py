@@ -350,8 +350,9 @@ def turn_messages(
     not assistant text).
 
     A turn may produce more than one assistant message -- Pi opens one per
-    model call, and Codex maps each `ThreadItem` to its own, so a reasoning
-    item and the `agentMessage` after it are two -- and all of them count.
+    model call, and Codex maps each `ThreadItem` to its own, so a commentary
+    `agentMessage` and the final answer after it are two -- and all of them
+    count.
     Picking one (the first, the last, the longest) would undercount a turn
     split across several and would need a rule for which, while the floor
     alone already excludes every earlier turn, which is the misattribution
