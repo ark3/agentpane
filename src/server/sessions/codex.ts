@@ -55,9 +55,9 @@ import { fileMatchesThreadId, findJsonlFiles } from "./walk.ts";
  * will need to grow as injected wrapper content drifts -- same spirit as the
  * header-format drift D9 already calls out for the session header itself.
  *
- * It serves enumeration and the transcript preview of a rollout with no item
- * records. A rollout that has them draws only what the user typed and never
- * reaches this list (`projectRollout`).
+ * It serves enumeration and the transcript preview of a rollout that takes
+ * the fallback. One that takes the item path draws only what the user typed
+ * and never reaches this list (`extractStoreTurn`).
  */
 const SYNTHETIC_USER_PREFIXES = [
 	"<environment_context>",
@@ -331,11 +331,14 @@ function turnSettings(line: string): CodexTurnSettings | null {
  * 2026-10-01), so the cut serves a rollout drawn from those unchanged. None of
  * the 19 forks there with a `history_base` (0.154.0 and 0.156.0) shares an
  * item id with its base, nor any of the 26 subagents written by 0.153.0
- * through 0.154.0 with its parent: what such a subagent copies inline is a
- * few of the parent's `response_item` messages, which that path does not
- * draw. The ten 0.150.1 subagents that carry item records carry only copies
- * of their parent's `SubAgentActivity`, and draw from their `response_item`s
- * as before.
+ * through 0.154.0 that name their parent in `forked_from_id`: what such a
+ * subagent copies inline is some of the parent's `response_item` messages.
+ * Of the 32 subagents from those versions, the 10 that store collab calls
+ * take the fallback (`extractStoreTurn`) and draw that copy as before; the
+ * other 22 draw from their own item records and show none of it, and 17 of
+ * them so lose a user message the preview drew before. The ten 0.150.1
+ * subagents that carry item records carry only copies of their parent's
+ * `SubAgentActivity`, and draw from their `response_item`s as before.
  */
 function historyBase(header: string): { threadId: string; endOrdinal: number } | null {
 	let parsed: unknown;
@@ -371,6 +374,7 @@ async function projectRollout(
 	const fromItems: SessionPreviewTurn[] = [];
 	const fromStore: SessionPreviewTurn[] = [];
 	let carriesItems = false;
+	let storesCollabCalls = false;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
 	// stopping early at the enumeration caps would be a visible regression).
@@ -408,10 +412,13 @@ async function projectRollout(
 			}
 			continue;
 		}
+		if (rec.type === "response_item" && payload?.type === "function_call") {
+			storesCollabCalls ||= (rec.payload as { namespace?: unknown }).namespace === "collaboration";
+		}
 		const turn = extractStoreTurn(rec, context);
 		if (turn) fromStore.push(turn);
 	}
-	turns.push(...(carriesItems ? fromItems : fromStore));
+	turns.push(...(carriesItems && !storesCollabCalls ? fromItems : fromStore));
 }
 
 /** What `mapItem` draws for one completed item, as the reducer flattens it. */
@@ -587,26 +594,39 @@ function threadItem(item: RolloutItem): ThreadItem | null {
  * The preview has two. A rollout that carries `event_msg` records of type
  * `item_completed` -- the rollout's copy of each item the thread's live stream
  * completed, same ids, same order (`docs/MANUAL_TESTING.md`, "Codex fixtures
- * that keep their rollout (OW-zadupu)", `codex-cli 0.157.1`) -- draws its items
- * from those alone: `threadItem` translates each into the `ThreadItem` the
- * live `mapItem` takes, so live and preview have one mapper (OW-luvema). A
- * rollout with none comes here instead, and this maps its Responses API
- * `response_item` payloads directly, with the differences from live that
- * `codex-conformance.test.ts` once listed accepted for those files as a first
- * cut: injected user-role messages that `SYNTHETIC_USER_PREFIXES` misses, an
- * `exec` script for every tool the model ran that way, and `isError: false` on
- * every result.
+ * that keep their rollout (OW-zadupu)", `codex-cli 0.157.1`) -- can draw its
+ * items from those alone: `threadItem` translates each into the `ThreadItem`
+ * the live `mapItem` takes, so live and preview have one mapper (OW-luvema).
+ * A rollout with none, or whose records are not a full copy, comes here
+ * instead, and this maps its Responses API `response_item` payloads directly,
+ * with the differences from live that `codex-conformance.test.ts` once listed
+ * accepted for those files as a first cut: injected user-role messages that
+ * `SYNTHETIC_USER_PREFIXES` misses, an `exec` script for every tool the model
+ * ran that way, and `isError: false` on every result.
  *
- * Which rollouts take which, counted on 2026-10-01 over the home server's
- * `~/.codex/sessions`: every rollout from `codex-cli` 0.147.0 (1), 0.153.0
- * (15), 0.153.4 (20) and 0.156.0 (5) carries item records. On 0.154.0 32 of
- * 44 do, and the other 12 hold no turn at all. On 0.150.1 only 2 of 34 do: 17
- * more carry `item_completed` records, but of `SubAgentActivity` alone --
- * seven `vscode` threads that spawned subagents, and ten subagents whose
- * records are their parent's, copied inline -- and the remaining 15 carry
- * none; all 32 hold their items as `response_item`s and legacy `event_msg`s.
- * So a rollout takes the item path only when one of its records translates,
- * which keeps those 17 here.
+ * A rollout takes the item path when one of its records translates and it
+ * stores no collab call as a `function_call` in the `collaboration`
+ * namespace. Both conditions are measured, on the home server's
+ * `~/.codex/sessions` on 2026-10-01:
+ *
+ * - On `codex-cli` 0.150.1, 17 rollouts carry `item_completed` records of
+ *   `SubAgentActivity` alone -- seven `vscode` threads that spawned subagents,
+ *   and ten subagents whose records are their parent's, copied inline -- and
+ *   hold every real item as a `response_item` or legacy `event_msg`.
+ * - From 0.150.1 through 0.154.0, 39 rollouts store collab calls that way
+ *   (507 calls: 14 rollouts on 0.150.1, 7 on 0.153.0, 9 on 0.153.4, 9 on
+ *   0.154.0), and their item records are not a full copy. Spawns,
+ *   `send_message`, `followup_task`, `list_agents` and `interrupt_agent` have
+ *   no record at all, and all 179 `CollabAgentToolCall` records there are
+ *   `wait`s naming no child and no state. Drawn from those records, a parent
+ *   would lose its spawns and draw each wait as an empty `subagent` card. The
+ *   0.157.1 captures store collab calls as `exec` scripts instead, and their
+ *   records are whole.
+ *
+ * So, of the 119 rollouts there, 50 take the item path: 1 of 1 on 0.147.0, 2
+ * of 34 on 0.150.1, 8 of 15 on 0.153.0, 11 of 20 on 0.153.4, 23 of 44 on
+ * 0.154.0 (12 of the other 21 hold no turn, and draw only what their
+ * `history_base` names), and 5 of 5 on 0.156.0.
  *
  * Kinds the translation does not know -- `SubAgentActivity`, which `mapItem`
  * draws nothing for either; `ContextCompaction`, whose marker comes from the
@@ -742,8 +762,8 @@ function extractStoreTurn(
 				toolCallId: payload.call_id,
 				toolName: name,
 				content: outputContent(payload.output),
-				// The stored output says nothing about failure; a rollout with item
-				// records takes it from the item instead (`extractStoreTurn`).
+				// The stored output says nothing about failure; a rollout that takes
+				// the item path reads it off the item instead (`extractStoreTurn`).
 				isError: false,
 			},
 			timestamp,
@@ -930,8 +950,8 @@ function shellArguments(args: Record<string, unknown>): Record<string, unknown> 
  * the value is one double-quoted literal with JSON's escapes, so the matched
  * literal decodes with `JSON.parse`.
  *
- * Only the fallback reaches it: a rollout with item records previews the run
- * from its `CommandExecution` record (`extractStoreTurn`).
+ * Only the fallback reaches it: a rollout that takes the item path previews
+ * the run from its `CommandExecution` record (`extractStoreTurn`).
  */
 function execScriptArguments(script: unknown): Record<string, unknown> | null {
 	if (typeof script !== "string" || !script.includes("tools.exec_command(")) return null;

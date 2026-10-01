@@ -724,8 +724,10 @@ The parent therefore reads "spawned agent", then "waited", in sequence, collapse
 This is the **live attached** transcript's view, and only that.
 A stored rollout records the same calls as Responses-API `function_call`s under the `collaboration` namespace — `wait_agent`, `send_message`, `spawn_agent`, `followup_task`, `list_agents` and `interrupt_agent`, counted across the 72 September rollouts on the home server on 2026-09-11 (`codex-cli` 0.150.1 through 0.154.0).
 On `codex-cli 0.157.1` the rollout stores them instead as `custom_tool_call` `exec` scripts calling `tools.multi_agent_v1__spawn_agent`, `tools.multi_agent_v1__wait_agent` and their siblings (`docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)").
-Neither names the operation the way the wire does, so since OW-luvema the preview draws a rollout that also carries `item_completed` records from those instead: each call's `CollabAgentToolCall` record, translated, goes through `mapItem` like the live item, and the preview draws the same `subagent` card, with the child's id but no link to open it.
-Every rollout from 0.153.0 on carries those records, as counted on 2026-10-01; 32 of the 34 0.150.1 rollouts do not, in effect, and their preview still names the calls `collaboration__wait_agent` and the like and draws an opaque default card (`extractStoreTurn` in `src/server/sessions/codex.ts`).
+Neither names the operation the way the wire does.
+A 0.157.1 rollout also carries a whole `item_completed` record for each call, its `CollabAgentToolCall` naming the operation, the children and their states, so since OW-luvema the preview draws it through `mapItem` like the live item: the same `subagent` card, with the child's id but no link to open it.
+Rollouts from 0.153.0 through 0.154.0 carry such records too, but not whole: counted on the home server on 2026-10-01, all 179 of them are `wait`s naming no child, and the other operations have none.
+A rollout that stores collab calls in the `collaboration` namespace therefore keeps the preview's own mapper, which names the calls `collaboration__wait_agent` and the like and draws an opaque default card (`extractStoreTurn` in `src/server/sessions/codex.ts`).
 
 The child's conversation is **not** inlined as a nested block.
 A subagent can run many minutes and many tool calls while the parent is blocked in `wait`, so a nested view would dominate the parent transcript for exactly the confusing effect OW-fafeja removed.
@@ -1264,7 +1266,7 @@ The table is deliberately not kept complete: Codex adds `ThreadItem` variants be
 **The `commandExecution` row is the live shape only.**
 As of `codex-cli 0.155.1`, measured 2026-09-22, the live wire presents a shell run as `commandExecution`, while the rollout on disk stores it as a `custom_tool_call` named `exec` wrapping `tools.exec_command(...)` or as a `function_call` named `exec_command`.
 The preview in `src/server/sessions/codex.ts` folds both stored shapes to `bash` so preview and live transcript agree; see `docs/MANUAL_TESTING.md`, "A Codex shell run is `commandExecution` live and `exec` or `exec_command` on disk (OW-jakahe)".
-Since OW-luvema that folding serves only a rollout with no `item_completed` records; one that has them previews the run from its `CommandExecution` record through `mapItem`.
+Since OW-luvema that folding serves only a rollout that takes the preview's own mapper (see below); any other previews the run from its `CommandExecution` record through `mapItem`.
 
 Content-block mapping (Codex `UserInput` → Pi content), done by `userInputToContent`: `text` → `TextContent`; `image` → `ImageContent` when the URL is a `data:` URL and a text reference otherwise; `localImage`, `audio`, `localAudio`, `skill` and `mention` → text references.
 Why the two local variants degrade rather than load is recorded at `userInputToContent`.
@@ -1280,7 +1282,8 @@ The remaining rows — `mcpToolCall`, `dynamicToolCall`, `webSearch` — have no
 `imageGeneration` has none either: on `codex-cli 0.157.1` with `gpt-5.6-luna` the model reported no `image_gen` tool in its session (`docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)").
 
 **The preview reads the same run through the same mapper.**
-A rollout's `item_completed` records name each item the live stream completed, and the preview translates them into `ThreadItem`s for `mapItem` (OW-luvema); only a rollout with none, which 32 of the 34 0.150.1 rollouts on the home server are in effect, still goes through the preview's own mapper of `response_item`s.
+A rollout's `item_completed` records name each item the live stream completed, and where they are a full copy the preview translates them into `ThreadItem`s for `mapItem` (OW-luvema).
+A rollout with none, or one that stores collab calls in the `collaboration` namespace and so has records that leave those calls out, still goes through the preview's own mapper of `response_item`s: counted on the home server on 2026-10-01, 69 of the 119 rollouts, all from `codex-cli` 0.150.1 through 0.154.0, 12 of them forks holding no turn of their own.
 `extractStoreTurn`'s docblock in `src/server/sessions/codex.ts` says which rollouts take which path.
 Seven Codex fixtures captured on `codex-cli 0.157.1` keep the rollout of their run beside its stream, as `<scenario>.rollout.jsonl`, and `src/server/sessions/codex-conformance.test.ts` replays each through both paths and lists every place they disagree, keyed to the card that owns it.
 

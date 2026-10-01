@@ -617,6 +617,52 @@ describe("readSessionPreview", () => {
 			]);
 		});
 
+		it("maps a rollout holding the stored collab calls of codex-cli 0.153.0 through 0.154.0 from its response items", async () => {
+			// The shape those versions wrote: each collab call a `collaboration`
+			// function_call, and only `wait` with an item record, one that names no
+			// child. Drawn from the records, the spawn would vanish and the wait
+			// would be an empty `subagent` card.
+			const completed = (item: Record<string, unknown>) => ({ type: "event_msg", payload: { type: "item_completed", item, started_at_ms: 1 } });
+			const collab = (callId: string, name: string, args: string, output: string) => [
+				{ type: "response_item", payload: { type: "function_call", name, namespace: "collaboration", arguments: args, call_id: callId } },
+				...(name === "wait_agent"
+					? [completed({
+						type: "CollabAgentToolCall",
+						id: callId,
+						tool: "wait",
+						status: "completed",
+						sender_thread_id: THREAD,
+						receiver_thread_ids: [],
+						receiver_agents: [],
+						agents_states: {},
+					})]
+					: []),
+				{ type: "response_item", payload: { type: "function_call_output", call_id: callId, output } },
+			];
+			await writeJsonl(codexRollout(root, THREAD), [
+				codexHeader(THREAD),
+				codexUser("Spawn a reviewer."),
+				completed({ type: "UserMessage", id: "u1", content: [{ type: "text", text: "Spawn a reviewer.", text_elements: [] }] }),
+				...collab("call_1", "spawn_agent", '{"task_name":"review"}', '{"task_name":"/root/review"}'),
+				...collab("call_2", "wait_agent", '{"timeout_ms":1000}', '{"message":"Wait completed.","timed_out":false}'),
+				completed({ type: "AgentMessage", id: "m1", content: [{ type: "Text", text: "Reviewed." }], phase: "final_answer" }),
+				codexAssistant("Reviewed."),
+			]);
+
+			const turns = await readTurns({ backend: "codex", id: THREAD }, { codexRoot: root });
+
+			expect(turns.map((turn) => turn.role === "assistant"
+				? turn.content.map((block) => (block.type === "toolCall" ? block.name : block.type)).join()
+				: turn.role)).toEqual([
+				"user",
+				"collaboration__spawn_agent",
+				"toolResult",
+				"collaboration__wait_agent",
+				"toolResult",
+				"text",
+			]);
+		});
+
 		it.each<[FixtureName, string[]]>([
 			["tool-read", ["/bin/bash", "-lc", "sed -n '1,20p' greeting.txt"]],
 			["tool-edit", ["/bin/bash", "-lc", "sed -n '1,120p' greeting.txt"]],
@@ -892,10 +938,14 @@ describe("readSessionPreview", () => {
 				expect(turns.map((turn) => previewText(turn))).toEqual(["first prompt", "first reply"]);
 			});
 
-			it("leaves a subagent's rollout, which copies its parent's history inline, drawn once", async () => {
+			it("draws a subagent's rollout from its own item records, neither following its parent nor drawing what it copied", async () => {
 				// Through 0.154.0 a subagent carries `forked_from_id` but no
-				// `history_base`, and its file repeats the parent's records after a
-				// second `session_meta`.
+				// `history_base`, and its file repeats some of the parent's records
+				// after a second `session_meta`. From 0.153.0 those are
+				// `response_item`s but no item record (home server, 2026-10-01), so
+				// the preview, which draws such a file from its item records alone,
+				// shows none of them (OW-luvema). Following `forked_from_id` would
+				// draw the parent's turns.
 				const SUBAGENT = "01a08be7-6b91-79b2-a508-ab46ec970c52";
 				await writeJsonl(codexRollout(root, PARENT), parentLines);
 				await writeJsonl(codexRollout(root, SUBAGENT), [
@@ -903,18 +953,14 @@ describe("readSessionPreview", () => {
 						type: "session_meta",
 						payload: { id: SUBAGENT, forked_from_id: PARENT, thread_source: "subagent", cwd: "/ws/project" },
 					},
-					...parentLines.slice(0, 13),
+					...parentLines.slice(0, 13).filter((line) => (line as { payload?: { type?: string } }).payload?.type !== "item_completed"),
 					codexAgentItem("subagent's reply"),
 					codexAssistant("subagent's reply"),
 				]);
 
 				const turns = await readTurns({ backend: "codex", id: SUBAGENT }, { codexRoot: root });
 
-				expect(turns.map((turn) => previewText(turn))).toEqual([
-					"first prompt",
-					"first reply",
-					"subagent's reply",
-				]);
+				expect(turns.map((turn) => previewText(turn))).toEqual(["subagent's reply"]);
 			});
 		});
 	});

@@ -52,10 +52,12 @@
 			<span class="thread-id" title={id}>{id}</span>
 			<!-- The handler is optional because `ToolRenderProps` is shared by
 			     every renderer and most tools name no session. A read-only
-			     preview reaches this card only for a rollout carrying item
-			     records (OW-luvema), and passes no handler, so it shows the child
-			     with no link; one without names a stored collab call after its
-			     namespace and function name and draws it on `DefaultTool`. -->
+			     preview reaches this card only for a rollout whose collab calls
+			     have whole item records, as `codex-cli 0.157.1` writes them
+			     (OW-luvema), and passes no handler, so it shows the child with no
+			     link. One that stores them in the `collaboration` namespace names
+			     each after its namespace and function name and draws it on
+			     `DefaultTool`. -->
 			{#if onopensession}
 				<button type="button" class="ap-action open-thread" onclick={() => open(id)}>
 					Open thread
