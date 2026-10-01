@@ -1,5 +1,6 @@
 ---
 labels: [change, sweep-0929]
+closed: done
 ---
 
 # The Codex preview rebuilds each item from rollout scripts and response items, though the rollout's own item_completed records hold every item the live stream completed; it should translate those into mapItem, and keep today's parser only for rollouts that lack them
@@ -39,3 +40,13 @@ A kind the translation does not know (`webSearch`, `mcpToolCall`, `dynamicToolCa
 
 Afterwards, close OW-zabiko and OW-kelise `--done` or `--moot` by what remains of each: OW-kelise also asks for a link to the child thread, which is presentation and may belong with OW-novuye and OW-gakide instead.
 OW-yobuyi keeps its live half and its stored aborted marking.
+
+## Close note
+
+Landed on main as 8881fc7, 34348a8, 6c0f63e and 321318f.
+The Codex preview now draws a rollout from its `item_completed` records, each translated by `threadItem` in `src/server/sessions/codex.ts` into the `ThreadItem` live `mapItem` takes, so live and preview share one mapper; `extractStoreTurn` stays as the fallback, and its docblock states the rule and the counts.
+The rule is narrower than the card's "carries item records", because the card's premise that the records are a full copy held only as measured on `codex-cli 0.157.1`: a rollout takes the item path when one of its records translates and it stores no `function_call` in the `collaboration` namespace.
+Measured over the home server's 119 rollouts on 2026-10-01: 17 on 0.150.1 carry only `SubAgentActivity` records, and the 39 rollouts on 0.150.1 through 0.154.0 that store collab calls as function calls have no record for spawns and an empty `wait` record for every wait (179 of 179), so drawn from records they would lose 131 calls; 50 of 119 take the item path.
+`shellJoin` ports Rust `shlex` 1.3.0 `quote`, pinned against the live command strings of four fixtures, after the first cut's quoting differed from live on 495 of 926 real argvs.
+Verified: `KNOWN_DIFFERENCES` in `codex-conformance.test.ts` is empty but for OW-yobuyi's live half of `interrupt` (its stale entries failed the test until removed); a new `preview.test.ts` case pins the fallback on a capture stripped of its records, and another the collab rule, each watched red first; an adversarial reader compared old and new previews over every real rollout and the seven captures field by field against the reducer, which is what found the collab and quoting regressions fixed in the later commits; `bun run check` passed on main (1607 tests).
+Left: 17 real 0.153.x subagent rollouts on the item path no longer draw the parent messages they copy inline, filed as OW-hagito; the item-path translation skips kinds with no capture (webSearch, mcpToolCall, dynamicToolCall, image generation) and draws nothing for them.

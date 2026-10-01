@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # A stored Codex exec script that is not exec_command, such as write_stdin or a patch, still previews as the raw script, and a stored shell result carries a Script completed preamble the live path lacks
@@ -38,3 +39,9 @@ The `Script completed` / `Wall time` / `Output:` preamble is still in the stored
 
 OW-luvema, filed 2026-09-30, has the preview build items from the rollout's `item_completed` records through live `mapItem` wherever a rollout carries them, which retires this card's preview-side differences for those rollouts (a `CommandExecution` record has no `Script completed` preamble, and a `FileChange` record is per path); its done-condition removes this card's `KNOWN_DIFFERENCES` entries.
 A rollout with no item records keeps today's path, its differences accepted as a first cut, so read OW-luvema's outcome before working this card, and close it by what remains.
+
+## Close note
+
+Decided by OW-luvema, closed 2026-10-01, for each of the two questions this card deferred.
+On a rollout whose `item_completed` records are a full copy (the rule is in `extractStoreTurn`'s docblock in `src/server/sessions/codex.ts`: 50 of the home server's 119 rollouts, and every 0.157.1 capture), both are folded by construction: the preview draws the `CommandExecution` and `FileChange` records through live `mapItem`, so a `write_stdin` poll is part of the one `commandExecution`, a patch is an `edit`, a script that calls no tool draws nothing, and the output carries no `Script completed` preamble; `codex-conformance.test.ts` holds no entry for this card.
+On a rollout that takes the fallback (no records, or collab calls stored as function calls, which is 0.150.1 through 0.154.0 only), the decision is leave: other `exec` scripts stay raw `exec` cards and the preamble stays, accepted as a first cut by OW-luvema, since Codex writes no such rollout from 0.157.1 on and regex-matching more script shapes is the approach this card doubted.
