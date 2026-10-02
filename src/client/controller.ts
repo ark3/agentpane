@@ -262,8 +262,8 @@ export interface AgentpaneController {
 	/**
 	 * Rename the selected session, written through to its backend and kept
 	 * nowhere here (D13, "Names are not marks"): the name comes back on the
-	 * listing the server's `sessions-changed` brings (D27). No-op without a live
-	 * view; the caller gates it on attached and idle, as it does Detach.
+	 * listing the server's `sessions-changed` brings (D27). No-op without a
+	 * handle; the caller gates it on attached and idle, as it does Detach.
 	 */
 	setName(name: string): Promise<void>;
 	setModel(model: string): Promise<void>;

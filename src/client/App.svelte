@@ -313,7 +313,9 @@
 	 * session with no adapter, which is all a `virtual` status reports
 	 * (`SessionManager.#liveOverlay`). Not mid-turn because no backend's rename
 	 * was ever tried during one (`docs/MANUAL_TESTING.md`, "All three backends
-	 * rename an attached session over the wire").
+	 * rename an attached session over the wire"). Nor was one before the first
+	 * turn, which this leaves open, as the route does; OW-kametu measures both,
+	 * and this follows whatever the route comes to refuse.
 	 */
 	const renamable = $derived(
 		selectedSummary?.status === "attached" && !streamingNow && !view.sending && compaction === null,
@@ -1021,8 +1023,8 @@
 	 *
 	 * `summary.preview` is server-supplied, parsed from the *first user message*
 	 * of the stored JSONL -- which does not exist yet for a session whose first
-	 * prompt has only just been sent. The backend
-	 * writes its own file, so the re-list at the turn's start may read it before
+	 * prompt has only just been sent. The backend writes its own file, so the
+	 * re-list at the turn's start may read it before
 	 * the prompt is there, and the stored preview can stay null until the first
 	 * turn ends and the `sessions-changed` that end broadcasts (OW-furinu)
 	 * re-lists the session and brings it in; until then the row would show the

@@ -843,6 +843,7 @@ describe("App", () => {
 		});
 
 		expect(offeredWhen({ state: selectedWith({}) })).toBe(true);
+		expect(offeredWhen({ state: selectedWith({}, { messages: [{ role: "user", content: "Hi", timestamp: 1 }] }) })).toBe(true);
 		// A rename is written through to the backend, so a session with no
 		// process refuses it (D13), the route with a 409 -- virtual included.
 		expect(offeredWhen({ state: selectedWith({ status: "detached" }) })).toBe(false);
