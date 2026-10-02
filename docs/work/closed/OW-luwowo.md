@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: declined
 ---
 
 # No route but attach refuses service during shutdown, so a reconnecting browser is served by a server that is leaving
@@ -34,3 +35,20 @@ Either `handle()` (or whichever narrower site the reasoning lands on) refuses du
 
 Under D25 the prompt, fork, fork-points, model and effort routes stop attaching first (OW-sirofi), so they no longer reach `attach`'s `#shuttingDown` check and join abort and compact among the routes that serve during shutdown.
 The reconnecting client above still applies, since D25 keeps D21's listing at a reconnect.
+
+## Close note
+
+Declined, by OW-geselo on 2026-10-01: refusing service during shutdown buys nothing, because at b758f98 every route either refuses already or does nothing harmful.
+`disposeAll()` in `src/server/http/session-manager.ts` sets `#shuttingDown` and clears `#sessions`, `#names` and `#pendingForks`, and retires every startup, all before its first await; `app.close()` calls `broadcaster.closeAll()` first, and `src/server/index.ts` then runs `server.stop(true)` and exits.
+Per route, mid-shutdown:
+- GET a session (attach): 503 `server_shutting_down` (app.test.ts "returns 503 when an attach arrives during shutdown").
+- prompt, fork, model, effort: not attached, 409 `not_attached`; fork-points: no adapter, 409.
+- abort and compact: `UnknownSessionError`, 404 `not_found` (not `not_attached`, as the sweep had it); refused either way.
+- DELETE a session, DELETE an error: nothing to close or clear, 204.
+- GET /api/sessions and preview: disk reads with an empty live overlay, everything reads as detached.
+- POST /api/sessions: `createVirtual` adds a container with no adapter and spawns nothing.
+- GET /api/models: no live adapter, and all three unstarted adapters reject without spawning (Codex `requireClient`, Pi `sendCommand`, Claude `requireProc`), the same answer as any time nothing is attached.
+- POST /api/edit-draft: spawns `$EDITOR` on a temp file it removes, the operator's tool rather than an agent, and nothing about it is specific to shutdown; static assets are served as ever.
+- GET /api/events: a reconnecting browser registers after `closeAll`, gets opening snapshots from `liveHandles()`, now empty, and is cut by `server.stop(true)`; under D25 decision 3 it then holds nothing live and treats the drop as it treats any restart, so being briefly served by a leaving server costs it nothing.
+Nothing spawns an agent mid-shutdown: a verb already queued in `#serially` reaches a disposed adapter, which refuses to write to the agent (a queued Codex `setModel` with no effort chosen still answers 204, as the `#serially` docblock says, and touches no process).
+Reopen if a route is added that spawns an agent or writes durable state without going through `attach` or a live adapter.

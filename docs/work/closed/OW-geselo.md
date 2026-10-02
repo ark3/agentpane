@@ -1,5 +1,6 @@
 ---
 labels: [deferral, sweep-0929]
+closed: done
 ---
 
 # A dozen open cards are probably moot or rest on premises the code has since changed, and each needs closing or rewriting against it
@@ -44,3 +45,20 @@ Cards whose stale premises another `sweep-0929` card already carries are not rep
 
 Each card listed is closed with a note giving the evidence, or rewritten so its body matches the code, having been checked at the source first.
 Nothing here changes code except the dead check above, whose removal keeps `bun run check` passing.
+
+## Close note
+
+Done 2026-10-01, every claim re-checked at b758f98 by dispatched readers, with an adversarial read over what was written; 235 commits had landed since the sweep read e1cf2e6.
+
+Closed: OW-15 `--moot` (the probe never runs on any measured Pi, and a failure re-probes next prompt); OW-21 `--moot` (the model picker is drawn only live in both clients); OW-yayugi `--moot` (`dump-nodes.ts` is the instrument of two MANUAL_TESTING procedures and OW-yobuyi, and its docblock never mentions the spike); OW-luwowo `--declined` with a per-route table showing every route refuses or does nothing harmful mid-shutdown.
+Each close note carries its evidence.
+
+Amended with a dated section, and where the old one was wrong a replacing done-condition: OW-pivuho (the post-dispose case is unreachable; a self-crashing child with a request line still draining reproduces a synchronous, uncaught throw out of the stdout listener); OW-vipito (controller half proven, one e2e step left); OW-muyawi (the note exists; existing tests already go red on the regression; two assertions left); OW-zugetu (`reconcile` and its successor `dropDead` are both gone; attach path worse than described; `render.ts` has no try/catch of its own; OW-vejeka tests get rewritten); OW-wawipu (`emacs` label dropped; the "all three CLIs" target was unclear and is resolved to D9's paragraph); OW-40 (the server checks absolute and existing since OW-yeboje; Emacs already creates in `default-directory`, so this is a browser parity gap for the owner to weigh against the 2026-08-14 deferral); OW-9 (Codex alone; every message after a switch is stamped with the old model until restart; done-condition added); OW-7 (client code, the browser narrows by block and entry and Emacs by entry only; Claude, Pi and Codex can each produce a case; done-condition added); OW-luzipe (stale paths; "O(1) per token" sits in four places).
+OW-19 was already closed `--declined` on 2026-10-01 before this ran; nothing to do.
+
+Dead code: `|| winner === pending` in `#handOver` is removed (792a7be). `#handOver` is only given a startup no container is bound to: `#afterDisposal` calls it before its own `#bind`, and `#start` calls it only in the branch it enters without a container. `container.starting` is set by `#bind` alone, so it can never be that startup. A throwaway probe throwing on the conjunct passed all of `src/server/http`; it went dead in 8c554e1 (OW-suyinu). `bun run check` passed: 1613 tests, svelte-check clean.
+
+Docblock: the "still on disk" in `SessionManager.fork`'s paragraph "Where the ref DOES change, which is Pi alone" is true for a fork during the parent's first turn, and was left unchanged.
+As of `pi 0.87.1`, read at the source on the home server and not run, Pi writes no session file until an assistant message exists (OW-bohodu measured the file appearing after `agent_end` on 0.87.1). Its `fork` refuses with "This session has not been saved yet" while the file is absent, so no successful fork leaves a parent without a file; both clients abort a streaming Pi turn before forking, and the abort's assistant `message_end` writes it.
+A preview of such a parent therefore reads its file: 200 with the user message and an assistant turn at `stopReason: "aborted"`, its text empty or partial. D26's `gone` (404) would need the file absent, which the refusal rules out, and a header-only file, which would answer 200 with no turns, is never written on these paths.
+The reading also found that a first-user-message fork's own file is not on disk when `fork` returns, against the 0.85.1 later-message measurement `AGENTS.md` records; filed as OW-tigaye, to be measured live.
