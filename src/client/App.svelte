@@ -307,6 +307,18 @@
 			compaction === null,
 	);
 	/**
+	 * Whether the Tools menu may offer Rename (OW-bumonu). Detach's predicate,
+	 * with `virtual` out rather than in: a rename is written through to the
+	 * backend (D13, "Names are not marks"), and the name route refuses any
+	 * session with no adapter, which is all a `virtual` status reports
+	 * (`SessionManager.#liveOverlay`). Not mid-turn because no backend's rename
+	 * was ever tried during one (`docs/MANUAL_TESTING.md`, "All three backends
+	 * rename an attached session over the wire").
+	 */
+	const renamable = $derived(
+		selectedSummary?.status === "attached" && !streamingNow && !view.sending && compaction === null,
+	);
+	/**
 	 * The streaming truth the action row may *act* on. Codex and Claude expose a
 	 * compaction through their generic active-turn signals, so `isStreaming`
 	 * stays true on the wire while one runs -- but that turn is not
@@ -1001,9 +1013,15 @@
 	}
 
 	/**
-	 * The sidebar row's label. `summary.preview` is server-supplied, parsed from
-	 * the *first user message* of the stored JSONL -- which does not exist yet
-	 * for a session whose first prompt has only just been sent. The backend
+	 * The sidebar row's label, by D27's rule: the name, then the preview, then
+	 * the first user text of the loaded transcript, then backend and id. D27
+	 * binds the Emacs picker's rows (agentpane-mode's `agentpane--session-entry`)
+	 * to the same rule, short of the last step, which its Backend column already
+	 * says.
+	 *
+	 * `summary.preview` is server-supplied, parsed from the *first user message*
+	 * of the stored JSONL -- which does not exist yet for a session whose first
+	 * prompt has only just been sent. The backend
 	 * writes its own file, so the re-list at the turn's start may read it before
 	 * the prompt is there, and the stored preview can stay null until the first
 	 * turn ends and the `sessions-changed` that end broadcasts (OW-furinu)
@@ -1014,7 +1032,7 @@
 	 * the eventual server value agrees rather than flickering to another string.
 	 */
 	function sessionLabel(summary: SessionSummary): string {
-		return summary.preview || firstUserText(summary) || `${summary.ref.backend} ${summary.ref.id}`;
+		return summary.name || summary.preview || firstUserText(summary) || `${summary.ref.backend} ${summary.ref.id}`;
 	}
 
 	function firstUserText(summary: SessionSummary): string {
@@ -1084,6 +1102,17 @@
 	 */
 	function detachSession(): void {
 		void controller.detach();
+	}
+
+	/**
+	 * Rename the selected session (OW-bumonu). The browser's own prompt is a
+	 * first cut, chosen because its Cancel is the way out D14 asks for at no
+	 * cost. Cancel and a name blank once trimmed both send nothing; the route
+	 * would refuse the blank one (400) anyway.
+	 */
+	function renameSession(): void {
+		const name = window.prompt("Rename session", selectedSummary?.name ?? "");
+		if (name?.trim()) void controller.setName(name);
 	}
 
 	/**
@@ -1571,6 +1600,14 @@
 						onclick={compactSession}
 						disabled={view.state.selected === null || view.busy === "compacting" || compaction !== null}
 					>Compact</button>
+					<button
+						type="button"
+						role="menuitem"
+						popovertarget="tools-menu"
+						popovertargetaction="hide"
+						onclick={renameSession}
+						disabled={!renamable}
+					>Rename</button>
 					<!-- The rare thing this menu is for (OW-relehi): a conversation
 					     that is well and truly done, whose attached stripe in the list
 					     (OW-lepoki) would otherwise claim a live agent until the server

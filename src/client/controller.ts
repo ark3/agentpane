@@ -259,6 +259,13 @@ export interface AgentpaneController {
 	 * (OW-japuzo). Nothing is re-checked here.
 	 */
 	detach(): Promise<void>;
+	/**
+	 * Rename the selected session, written through to its backend and kept
+	 * nowhere here (D13, "Names are not marks"): the name comes back on the
+	 * listing the server's `sessions-changed` brings (D27). No-op without a live
+	 * view; the caller gates it on attached and idle, as it does Detach.
+	 */
+	setName(name: string): Promise<void>;
 	setModel(model: string): Promise<void>;
 	setEffort(effort: string): Promise<void>;
 	/** Re-list sessions from disk (dedup'd against any in-flight listing already running). */
@@ -1191,6 +1198,17 @@ export function createController(
 		},
 		async select(ref) {
 			await attachAndSelect(ref, ++selectionIntent);
+		},
+		async setName(name) {
+			const selected = view.state.selected;
+			const handle = handleOf(view.state, selected);
+			if (!selected || handle === undefined) return;
+			publish({ error: null });
+			try {
+				await api.setName(selected, name);
+			} catch (error: unknown) {
+				if (!disposed && selects(handle)) publish({ error: errorMessage(error) });
+			}
 		},
 		async setModel(model) {
 			const selected = view.state.selected;

@@ -244,6 +244,8 @@ class FakeController implements AgentpaneController {
 		this.publish({ ...this.current, modelSetting: false });
 	}
 
+	async setName(_name: string) {}
+
 	async setEffort(effort: string) {
 		this.effortSets.push(effort);
 		this.publish({ ...this.current, effortSetting: true });
@@ -822,6 +824,86 @@ describe("App", () => {
 		render(App, { props: { controller: virtualController } });
 
 		expect(screen.getByRole("menuitem", { name: "Detach", hidden: true })).toBeEnabled();
+	});
+
+	it("offers Rename only on an attached session that is not mid-turn (OW-bumonu)", () => {
+		const live = { ref: piSession, messages: [], isStreaming: false, compaction: null, model: null, seq: 1, error: null, errorId: null };
+		/** One render per case, torn down before the next, so `screen` sees one menu. */
+		function offeredWhen(overrides: Partial<ControllerView>): boolean {
+			const controller = new FakeController(view(overrides));
+			const { unmount } = render(App, { props: { controller } });
+			const enabled = !(screen.getByRole("menuitem", { name: "Rename", hidden: true }) as HTMLButtonElement).disabled;
+			unmount();
+			return enabled;
+		}
+		const selectedWith = (summaryOverrides: Partial<SessionSummary>, liveOverrides: object = {}) => state({
+			selected: piSession,
+			summaries: [summary(piSession, "P", summaryOverrides)],
+			sessions: { [sessionKey(piSession)]: { ...live, ...liveOverrides } },
+		});
+
+		expect(offeredWhen({ state: selectedWith({}) })).toBe(true);
+		// A rename is written through to the backend, so a session with no
+		// process refuses it (D13), the route with a 409 -- virtual included.
+		expect(offeredWhen({ state: selectedWith({ status: "detached" }) })).toBe(false);
+		expect(offeredWhen({ state: selectedWith({ status: "virtual" }) })).toBe(false);
+		// Mid-turn, read as Detach reads it: the live entry, a prompt in flight,
+		// a compaction.
+		expect(offeredWhen({ state: selectedWith({ isStreaming: false }, { isStreaming: true }) })).toBe(false);
+		expect(offeredWhen({ sending: true, state: selectedWith({}) })).toBe(false);
+		expect(offeredWhen({ state: selectedWith({}, { compaction: "running" }) })).toBe(false);
+	});
+
+	/** Driven by the real controller, so what is under test reaches the API's `setName`. */
+	it("renames the selection through the API with the name typed, and sends nothing on Cancel or a blank name (OW-bumonu)", async () => {
+		let emit: (event: ServerEvent) => void = () => {};
+		const named: Array<{ ref: SessionRef; name: string }> = [];
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession, "P")],
+			createSession: async () => piSession,
+			attach: async () => ({ ...summary(piSession, "P"), handle: "h-1" }),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			setName: async (ref, name) => {
+				named.push({ ref, name });
+			},
+			forkPoints: async () => [],
+			fork: async () => piSession,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		emit({
+			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [], isStreaming: false, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		await controller.select(piSession);
+		await tick();
+
+		const answers: Array<string | null> = [null, "  ", "Release notes"];
+		const prompt = window.prompt;
+		window.prompt = () => answers.shift() ?? null;
+		try {
+			const item = screen.getByRole("menuitem", { name: "Rename", hidden: true });
+			expect(item).toBeEnabled();
+			await fireEvent.click(item);
+			await fireEvent.click(item);
+			await fireEvent.click(item);
+		} finally {
+			window.prompt = prompt;
+		}
+
+		expect(named).toEqual([{ ref: piSession, name: "Release notes" }]);
 	});
 
 	it("previews a stored session on row selection instead of attaching, labelling it by backend and id", async () => {
@@ -1425,6 +1507,21 @@ describe("App", () => {
 		controller.publish(view({ state: state({ selected: piSession, summaries, sessions: live }) }));
 		await tick();
 		expect(nav.getByLabelText("Turn finished")).toBeInTheDocument();
+	});
+
+	it("labels a row by its name before its preview, and by its preview when it has none (D27, OW-bumonu)", () => {
+		const controller = new FakeController(view({
+			state: state({
+				summaries: [
+					summary(piSession, "First prompt", { name: "Release notes" }),
+					summary(codexSession, "Other prompt", { name: null }),
+				],
+			}),
+		}));
+		const { container } = render(App, { props: { controller } });
+
+		const labels = Array.from(container.querySelectorAll(".session-select .session-preview"), (el) => el.textContent);
+		expect(labels.sort()).toEqual(["Other prompt", "Release notes"]);
 	});
 
 	it("stripes the row of an attached session, and says so in its accessible name", () => {
