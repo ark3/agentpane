@@ -169,6 +169,12 @@ export class FakeClaudeProcess {
 		}
 	}
 
+	/** Dropped once killed, as `ChildProcessShell.reply` drops it. */
+	reply(line: string): void {
+		if (this.killed) return;
+		this.write(line);
+	}
+
 	onLine(cb: (line: string) => void): void {
 		this.lineHandlers.push(cb);
 	}

@@ -15,6 +15,8 @@ import { ChildProcessShell } from "../child-process.ts";
 export interface CodexProcess {
 	/** Write one message. The implementation appends the LF. */
 	write(line: string): void;
+	/** Answer a request the child sent; dropped once the child is going or gone (`ChildProcessShell.reply`). */
+	reply(line: string): void;
 	onLine(cb: (line: string) => void): void;
 	onExit(cb: (code: number | null, signal: string | null, error?: Error) => void): void;
 	/** Signal termination and settle after close or bounded SIGKILL escalation. */

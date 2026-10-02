@@ -771,7 +771,9 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * answering a `can_use_tool` became an `is_error` tool result the model
 	 * read, and the turn went on to its `result`. `can_use_tool` is the only
 	 * subtype the CLI could be made to send, so the error reply is measured on
-	 * it alone.
+	 * it alone. `reply` drops the answer once the child is gone, so a request
+	 * line still draining after it died cannot throw out of the line handler
+	 * (`ChildProcessShell.reply`, OW-yofoli).
 	 */
 	private refuseControlRequest(event: Extract<ClaudeEvent, { type: "control_request" }>): void {
 		const subtype = event.request?.subtype ?? "unknown";
@@ -781,7 +783,7 @@ export class ClaudeAdapter implements BackendAdapter {
 				behavior: "deny",
 				message: "agentpane cannot answer can_use_tool; it declined this tool use",
 			};
-			proc.write(
+			proc.reply(
 				JSON.stringify({
 					type: "control_response",
 					response: { subtype: "success", request_id: event.request_id, response: deny },
@@ -792,7 +794,7 @@ export class ClaudeAdapter implements BackendAdapter {
 			);
 			return;
 		}
-		proc.write(
+		proc.reply(
 			JSON.stringify({
 				type: "control_response",
 				response: {

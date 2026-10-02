@@ -718,8 +718,8 @@ describe("PiAdapter dialogs, cancelled at arrival (D2a)", () => {
 		h.child.emit("close", 0, "SIGTERM");
 		await disposing;
 
-		// The line was handled to its end: the failed write threw nothing out of
-		// the handler, which went on to name the dialog.
+		// The line was handled to its end: the dropped cancel threw nothing out
+		// of the handler, which went on to name the dialog.
 		expect(h.errors).toEqual([expect.stringContaining("confirm")]);
 		expect(h.child.sent().filter((c) => c.type === "extension_ui_response")).toEqual([]);
 	});

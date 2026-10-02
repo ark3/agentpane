@@ -60,6 +60,24 @@ const MODELS: ClaudeModelDescriptor[] = [
 	{ value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
 ];
 
+/**
+ * Once `closed` is set, writes throw and replies are dropped, as
+ * `ChildProcessShell.write` and `reply` do once the child's stdin is gone.
+ */
+class ClosedStdinProcess extends FakeClaudeProcess {
+	closed = false;
+
+	override write(line: string): void {
+		if (this.closed) throw new Error("Claude Code process is not running");
+		super.write(line);
+	}
+
+	override reply(line: string): void {
+		if (this.closed) return;
+		super.reply(line);
+	}
+}
+
 interface Harness {
 	adapter: ClaudeAdapter;
 	procs: FakeClaudeProcess[];
@@ -400,6 +418,39 @@ describe("ClaudeAdapter turns", () => {
 		expect(errors).toHaveBeenCalledWith(
 			"claude sent an unsupported request (elicitation); agentpane declined it",
 		);
+	});
+
+	it("does not throw out of the line handler when the child is gone while a request line still drains (OW-yofoli)", async () => {
+		const proc = new ClosedStdinProcess();
+		const adapter = new ClaudeAdapter(VIRTUAL_REF, {
+			spawn: () => proc,
+			newSessionId: () => "minted-1",
+			readStoreEntries: async () => [],
+		});
+		await adapter.start({ cwd: "/workspace" });
+		const errors: string[] = [];
+		adapter.onError((message) => errors.push(message));
+		const before = proc.written.length;
+
+		proc.closed = true;
+		expect(() =>
+			proc.emit({
+				type: "control_request",
+				request_id: "cli-1",
+				request: { subtype: "can_use_tool", tool_name: "Bash", input: {} },
+			}),
+		).not.toThrow();
+		expect(() =>
+			proc.emit({ type: "control_request", request_id: "cli-2", request: { subtype: "elicitation" } }),
+		).not.toThrow();
+		proc.exit(1, null, new Error("claude died"));
+
+		expect(proc.written.length).toBe(before);
+		expect(errors).toEqual([
+			expect.stringContaining("can_use_tool"),
+			expect.stringContaining("elicitation"),
+			"claude died",
+		]);
 	});
 
 	it("replays a recorded turn through the live process seam", async () => {

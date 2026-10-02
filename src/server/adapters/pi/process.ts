@@ -661,13 +661,13 @@ export class PiAdapter implements BackendAdapter {
 			const { requestId, kind } = result.request;
 			// agentpane never holds a dialog, so it is cancelled the moment it
 			// arrives rather than held until the session is killed (D2a,
-			// OW-yosuzo). The write fails only once the process is going away --
-			// a line still arriving after `dispose()` -- and that end is reported,
-			// or deliberately not, by `handleClose`, so there is nothing to add
-			// here, and it must not throw out of this handler.
-			try {
-				this.writeLine({ type: "extension_ui_response", id: requestId, cancelled: true } satisfies PiCommand);
-			} catch {}
+			// OW-yosuzo). The cancel is dropped once the process is going or
+			// gone -- a line still arriving after `dispose()`, or after the
+			// child died on its own -- so it cannot throw out of this handler
+			// (`ChildProcessShell.reply`, OW-yofoli).
+			this.proc?.reply(
+				JSON.stringify({ type: "extension_ui_response", id: requestId, cancelled: true } satisfies PiCommand),
+			);
 			this.emitError(`Pi sent a dialog agentpane cannot answer (${kind}); agentpane cancelled it`);
 		}
 		if (result.error) this.emitError(result.error);

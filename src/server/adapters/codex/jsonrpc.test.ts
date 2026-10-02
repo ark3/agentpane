@@ -13,6 +13,10 @@ class FakeProcess implements CodexProcess {
 		this.written.push(JSON.parse(line) as Record<string, unknown>);
 	}
 
+	reply(line: string): void {
+		this.written.push(JSON.parse(line) as Record<string, unknown>);
+	}
+
 	onLine(cb: (line: string) => void): void {
 		this.lineHandlers.push(cb);
 	}

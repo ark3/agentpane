@@ -112,6 +112,10 @@ export class FakeCodexProcess {
 		for (const handler of [...this.writeHandlers]) handler(message);
 	}
 
+	reply(line: string): void {
+		this.write(line);
+	}
+
 	onLine(cb: (line: string) => void): void {
 		this.lineHandlers.push(cb);
 	}

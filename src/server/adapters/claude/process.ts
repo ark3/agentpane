@@ -12,6 +12,8 @@ import { ChildProcessShell } from "../child-process.ts";
 export interface ClaudeProcess {
 	/** Write one message. The implementation appends the LF. */
 	write(line: string): void;
+	/** Answer a request the child sent; dropped once the child is going or gone (`ChildProcessShell.reply`). */
+	reply(line: string): void;
 	/** Observe successful OS-level process creation. Never fires after a spawn failure. */
 	onSpawn(cb: () => void): void;
 	onLine(cb: (line: string) => void): void;

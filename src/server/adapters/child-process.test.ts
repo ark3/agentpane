@@ -78,6 +78,25 @@ describe("ChildProcessShell", () => {
 		}
 	});
 
+	it("writes a reply while the child runs and drops it, without throwing, once its stdin is gone (OW-yofoli)", () => {
+		const { child, shell, onExit } = makeShell();
+		const written = vi.spyOn(child.stdin, "write");
+
+		shell.reply("alive");
+		expect(written).toHaveBeenCalledExactlyOnceWith("alive\n");
+
+		// The child died on its own: EPIPE destroyed stdin before `close`.
+		child.stdin.destroyed = true;
+		expect(() => shell.reply("draining")).not.toThrow();
+		expect(() => shell.write("command")).toThrow("Test process is not running");
+		expect(written).toHaveBeenCalledOnce();
+
+		child.emit("close", 1, null);
+		expect(() => shell.reply("after close")).not.toThrow();
+		expect(written).toHaveBeenCalledOnce();
+		expect(onExit).toHaveBeenCalledOnce();
+	});
+
 	it("keeps a spawn failure's original error as the cause of the one it reports (OW-sozopu)", () => {
 		const { child, onExit } = makeShell();
 		const spawnError = Object.assign(new Error("spawn direnv ENOENT"), { code: "ENOENT" });

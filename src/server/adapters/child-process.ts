@@ -77,7 +77,7 @@ export class ChildProcessShell {
 	private spawnError: Error | undefined;
 	/** Populated by stdin's `error` event: a write into a pipe the child stopped reading. */
 	private stdinError: Error | undefined;
-	/** Set once the child is gone; makes teardown idempotent and writes fail loudly. */
+	/** Set once the child is gone; makes teardown idempotent, writes fail loudly, and replies drop. */
 	private closed = false;
 	private killed = false;
 	private spawned = false;
@@ -139,14 +139,23 @@ export class ChildProcessShell {
 		child.on("close", (code: number | null, signal: string | null) => this.handleClose(code, signal));
 	}
 
-	/** Write one message. The shell appends the LF. */
+	/** Write one message. The shell appends the LF. Throws once the child is going or gone. */
 	write(line: string): void {
-		// `stdin.destroyed` alone is not enough: `end()` only flips it once the
-		// stream finishes, so a write issued right after `kill()` would otherwise
-		// go into a pipe nobody is reading.
-		if (this.killed || this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded) {
-			throw new Error(`${this.labels.name} process is not running`);
-		}
+		if (this.gone()) throw new Error(`${this.labels.name} process is not running`);
+		this.child.stdin.write(`${line}\n`);
+	}
+
+	/**
+	 * Answer a request the child sent, or drop the answer if the child is going
+	 * or gone. Every adapter refuses an agent request from inside its line
+	 * handler (D2a), and a child that died on its own can still have a request
+	 * line draining from stdout after its stdin is destroyed; a throw there
+	 * escapes the stdout listener as an uncaught exception and takes the server
+	 * down (OW-yofoli). Nobody is left to read the answer, and the death is
+	 * reported once, through `onExit`, so there is nothing to add here.
+	 */
+	reply(line: string): void {
+		if (this.gone()) return;
 		this.child.stdin.write(`${line}\n`);
 	}
 
@@ -224,6 +233,13 @@ export class ChildProcessShell {
 				resolve(true);
 			});
 		});
+	}
+
+	private gone(): boolean {
+		// `stdin.destroyed` alone is not enough: `end()` only flips it once the
+		// stream finishes, so a write issued right after `kill()` would otherwise
+		// go into a pipe nobody is reading.
+		return this.killed || this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded === true;
 	}
 
 	private emitLine(line: string): void {

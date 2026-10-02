@@ -88,13 +88,21 @@ class DelayedTerminationProcess extends AdapterProcess {
 	}
 }
 
-/** Writes throw once `closed` is set, as `ChildProcessShell.write` does once the child's stdin is gone. */
+/**
+ * Once `closed` is set, writes throw and replies are dropped, as
+ * `ChildProcessShell.write` and `reply` do once the child's stdin is gone.
+ */
 class ClosedStdinProcess extends AdapterProcess {
 	closed = false;
 
 	override write(line: string): void {
 		if (this.closed) throw new Error("Codex process is not running");
 		super.write(line);
+	}
+
+	override reply(line: string): void {
+		if (this.closed) return;
+		super.reply(line);
 	}
 }
 

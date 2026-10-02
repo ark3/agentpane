@@ -107,13 +107,16 @@ export class CodexClient implements CodexClientView {
 		});
 	}
 
-	/** Answer a `ServerRequest`. Until this lands, the Codex turn is blocked. */
+	/**
+	 * Answer a `ServerRequest`. Until this lands, the Codex turn is blocked.
+	 * Dropped, not thrown, once the child is gone (`CodexProcess.reply`).
+	 */
 	respond(id: RequestId, result: unknown): void {
-		this.send({ id, result });
+		this.proc.reply(JSON.stringify({ id, result }));
 	}
 
 	respondError(id: RequestId, code: number, message: string): void {
-		this.send({ id, error: { code, message } });
+		this.proc.reply(JSON.stringify({ id, error: { code, message } }));
 	}
 
 	/**
