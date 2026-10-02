@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Codex's arrival decline may leave an unhandled rejection when a request line arrives after the process is killed
@@ -41,3 +42,14 @@ Pi guards its equivalent write with `try { this.writeLine(...) } catch {}` in `h
 - A test in `src/server/adapters/codex/adapter.test.ts`, with a fake process whose `write` throws once it reports itself closed, delivers a request line and expects no throw out of the line handler, going red first.
 - The process's own end is still reported as it is today.
 - `bun run check` passes.
+
+## Close note
+
+Built: the `"request"` case of `applyEffects` in `src/server/adapters/codex/adapter.ts` now wraps both arrival replies — `respond` with a decline shape and `respondError` for a kind with none — in `try {} catch {}`, with a comment naming the case (the child died on its own while the request line was still draining from stdout; the exit path reports that end).
+`requireClient()` stays outside the try, so its "not started" throw surfaces as before, and the error naming the declined kind still fires, as Pi's does.
+
+Verified: the new test "does not throw out of the line handler when the child is gone while a request line still drains (OW-pivuho)" in `src/server/adapters/codex/adapter.test.ts` uses a `ClosedStdinProcess` fake whose `write` throws once `closed`, sends one request of each kind, then exits the process and asserts both kind-naming errors arrive before the exit error, with no response written.
+It was red before the fix, and red again with each of the two guards removed alone; `bun run check` passed (56 files, 1615 tests).
+An adversarial reader found no other path from Codex's stdout line handler that writes to the child, and no floating `request(...)` promise on it.
+
+It also found that Claude's `refuseControlRequest` makes the same write unguarded; filed as OW-yofoli, which moves this to one owner and retires both this guard and Pi's.
