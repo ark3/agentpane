@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A reply written from a line handler after the child dies throws out of stdout; one owner should drop it, not a guard per adapter
@@ -31,3 +32,11 @@ The error each adapter emits naming the declined kind should still fire; that is
 - The per-site `try {} catch {}` around the reply writes in Pi's `handleLine` and Codex's `applyEffects` are gone, replaced by the one owner.
 - Each process's own end is still reported as it is today.
 - `bun run check` passes.
+
+## Close note
+
+Built: `ChildProcessShell.reply` in `src/server/adapters/child-process.ts` is the one owner. It writes while the child runs and drops the line once the child is going or gone, sharing a private `gone()` with `write`, which still throws for `CodexClient.request` and Pi's `sendCommand`. `ClaudeProcess` and `CodexProcess` expose `reply`; Claude's `refuseControlRequest` (both branches), `CodexClient.respond`/`respondError`, and Pi's dialog cancel in `handleLine` all go through it, and the per-site `try {} catch {}` guards in Pi's `handleLine` and Codex's `applyEffects` are gone (`rg "catch \{\}" src/server/adapters` is empty). The declined-kind errors still fire, and the exit/close reporting path is unchanged. Pi needs no disposed check of its own: `finishDisposal` calls `proc.kill()` before its first await, so a disposed adapter's shell already counts as gone.
+
+Verified: the new Claude test "does not throw out of the line handler when the child is gone while a request line still drains (OW-yofoli)" in `src/server/adapters/claude/adapter.test.ts` went red against the unfixed adapter ("Error: Claude Code process is not running" thrown out of the handler), re-run by the dispatching session in a scratch checkout. A new shell test in `child-process.test.ts` shows the reply written while alive and dropped after stdin is destroyed and after close, with `write` still throwing. The existing Pi after-dispose and Codex OW-pivuho tests still pass, and went red when the implementer pointed the replies back at a throwing write. `bun run check` passed: 1631 tests.
+
+The adversarial read found no other write that can run inside a line handler's synchronous extent in any of the three adapters, the Codex connection, or the session manager's subscribers. Residual risk, not filed: `reply` versus `write` is a convention the types do not enforce, so a future refusal site written with `write` would bring the crash back. Also, no adapter-level test drives the "died on its own" case (stdin destroyed, not killed) through a real shell; the shell test covers that condition directly.
