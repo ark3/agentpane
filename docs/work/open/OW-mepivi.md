@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [deferral, d27]
 ---
 
 # The Codex name read at thread/start and at a borrowed fork is pinned by a test

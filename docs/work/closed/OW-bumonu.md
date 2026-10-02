@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, d27]
 blocked-by: [OW-jamaha]
 closed: done
 ---

@@ -1,5 +1,5 @@
 ---
-labels: [unverified]
+labels: [unverified, d27]
 ---
 
 # Renaming a Claude Code or Codex session before its first turn or during a turn is measured, and the name route follows what it shows

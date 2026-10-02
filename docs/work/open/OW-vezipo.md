@@ -1,5 +1,5 @@
 ---
-labels: [change]
+labels: [change, d27]
 ---
 
 # A forked session's row in the list is a character-for-character copy of its parent's, so the two cannot be told apart.

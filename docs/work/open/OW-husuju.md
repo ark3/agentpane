@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [deferral, d27]
 ---
 
 # A Pi rename the adapter did not send reaches the listing through session_info_changed

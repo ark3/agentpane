@@ -1,5 +1,5 @@
 ---
-labels: [change, emacs]
+labels: [change, emacs, d27]
 blocked-by: [OW-jamaha]
 closed: done
 ---

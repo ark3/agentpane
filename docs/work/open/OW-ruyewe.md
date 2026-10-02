@@ -1,5 +1,5 @@
 ---
-labels: [deferral]
+labels: [deferral, d27]
 blocked-by: [OW-66]
 ---
 
