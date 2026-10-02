@@ -1,5 +1,6 @@
 ---
 labels: [deferral]
+closed: done
 ---
 
 # `setModel` changes outgoing turns, but the reducer's identity may still report the previous model.
@@ -22,3 +23,10 @@ What does not: status events, the picker and the Emacs mode line, which read the
 
 A test in `src/server/adapters/codex/adapter.test.ts`, beside "applies a selected model to subsequent turns", calls `setModel`, submits, feeds an `agentMessage` item, and asserts the assistant message in `getState().messages` carries the selected model; it goes red first, carrying the start model.
 `bun run check` passes.
+
+## Close note
+
+Landed in 9df26a1: `CodexAdapter.submit` in `src/server/adapters/codex/adapter.ts` now refreshes the reducer identity's model beside its effort before `turn/start` (`setIdentity({ model: this.model, reasoningEffort: this.effort })`), deliberately not in `setModel`, because a turn already running keeps its model.
+Test "names the selected model on the turn it ran, not the one the thread started at (OW-9)" in `src/server/adapters/codex/adapter.test.ts` went red without the change (received `gpt-start`) and green with it; `bun run check` passed on `main`.
+An adversarial read judged the fix sound and found no case it makes worse, but called it a re-sync at one site: the stamp still comes from one reducer-wide identity at remap time, so hydrate restamps all history with the last turn's model, a re-attach window can stamp `"unknown"`, and `model/rerouted` is dropped.
+Those moved to OW-puluki, which makes the turn the stamp's owner and retires this line.
