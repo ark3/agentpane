@@ -1,6 +1,7 @@
 ---
 labels: [defect, d27]
 blocked-by: [OW-kametu]
+closed: declined
 ---
 
 # Whether a Codex thread has a rollout is the Codex adapter's to record and put on both wires, and the empty-transcript stand-ins for it in the name route and both clients go
@@ -44,3 +45,11 @@ Incidental: the field's name and whether it rides on status or snapshot.
 2. `CodexAdapter` tests in `src/server/adapters/codex/adapter.test.ts`, each watched red first: a rename queued after a first `turn/start` is accepted but before its `userMessage` item arrives sends `thread/name/set`; a rename on a thread opened by `thread/start` and never prompted is still refused; and a first-message fork is refused until prompted.
 3. `renamable` in `src/client/App.svelte` and `agentpane--check-renamable` in `emacs/agentpane.el` read the new field, with an `App.test.ts` case and a case in `emacs/agentpane-test.el`'s `agentpane-test-rename-session-refused-where-the-browser-offers-no-rename` each watched red first, in which a Codex session with an empty transcript but a known rollout is offered Rename.
 4. The stand-in is gone: no `messages.length` test remains in `CodexAdapter.setName`, no transcript-length conjunct remains in `renamable` for Codex, and no ewoc node count remains in `agentpane--check-renamable` for Codex; the docblocks and the D13 sentence in `docs/DESIGN.md` beginning "A second cost, measured on 2026-10-02" name the new fact instead of an empty transcript.
+
+## Close note
+
+Declined by the owner on 2026-10-02: the cases the empty-transcript stand-in gets wrong are rare and cheap when they happen.
+A rename queued behind a first prompt is refused only for an API caller or a second client, since both clients withhold Rename while sending or streaming, and a retry succeeds.
+A resumed rollout with zero turns has no known source.
+Compact before the first prompt on a Codex thread is unmeasured; if it writes the empty thread D9 forbids, the cost is one stray entry in Codex's store with nothing lost.
+OW-kametu's guard stays as the fix for the case that was measured, a rename before the first prompt.
