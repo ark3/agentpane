@@ -7,7 +7,8 @@
  * breaks work in flight -- raise it before editing. D24 raised it twice: the
  * `handle` on `SessionSummary` and beside `session` on every per-session
  * event (OW-suyinu), and the retirement of the event that had said a rename,
- * once both clients keyed by that handle (OW-mofuho).
+ * once both clients keyed by that handle (OW-mofuho). D27 raised it for
+ * `SessionSummary.name` and the route that sets it (OW-jamaha).
  *
  * Shape follows DESIGN D2 (SSE for server->client, REST for client->server)
  * and D3 (the server is authoritative; it sends assembled state, never raw
@@ -97,6 +98,14 @@ export interface SessionSummary {
 	 * has listed it.
 	 */
 	onDisk: boolean;
+	/**
+	 * The session's name as the backend holds it (D27), null for none. For an
+	 * attached session, the one its adapter last set or was told, which a
+	 * change sends `sessions-changed` for; agentpane keeps no copy of its own
+	 * (D13, "Names are not marks"), so a detached session's is what the store
+	 * walk reads, and as of OW-jamaha the walk reads none.
+	 */
+	name: string | null;
 	/**
 	 * The name the server gave the live session holding this conversation (D24,
 	 * OW-suyinu): opaque, never minted twice, even by a restarted server, and
@@ -404,6 +413,18 @@ export interface SetModelRequest {
 }
 
 /**
+ * POST /api/sessions/:backend/:id/name -- written through to the backend,
+ * which holds it; agentpane keeps none (D13, "Names are not marks"). Only an
+ * attached session can be named, since a detached one has no process to
+ * write through: the route answers 409 `not_attached` for one. Leading and
+ * trailing whitespace is trimmed, and a name empty after that answers 400
+ * `bad_request`.
+ */
+export interface SetNameRequest {
+	name: string;
+}
+
+/**
  * POST /api/sessions/:backend/:id/effort -- one of the model's `efforts` ids,
  * taking effect from the next turn. Any other answers 400 `bad_request`, as
  * does any effort while the session's model lists none or is not in the
@@ -488,6 +509,7 @@ export const ROUTES = {
 		`/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/fork-points`,
 	model: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/model`,
 	effort: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/effort`,
+	name: (ref: SessionRef) => `/api/sessions/${ref.backend}/${encodeURIComponent(ref.id)}/name`,
 	/**
 	 * DELETE with a `DismissErrorRequest` -- dismiss the session's turn error,
 	 * so no later snapshot carries it (OW-bipume). Only the error the body names

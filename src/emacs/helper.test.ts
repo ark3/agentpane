@@ -26,7 +26,7 @@ function h(ref: SessionRef): string {
 }
 
 function summary(ref: SessionRef, handle = h(ref)): SessionSummary {
-	return { ref, cwd: "/work", preview: null, createdAt: null, updatedAt: null, status: "attached", isStreaming: false, onDisk: true, handle };
+	return { ref, cwd: "/work", preview: null, createdAt: null, updatedAt: null, status: "attached", isStreaming: false, onDisk: true, name: null, handle };
 }
 
 function fixtureMessages(): PaneMessage[] {
@@ -224,6 +224,14 @@ describe("requests", () => {
 		// Named by id, so the server clears it only while it is still the one held,
 		// even against a newer one with the same text (OW-desufa, OW-jokoto).
 		expect(calls.find((call) => call.url === ROUTES.error(pi))?.body).toEqual({ errorId: "e4" });
+	});
+
+	it("forwards sessions/setName's session and name to the name route (D27, OW-jamaha)", async () => {
+		const { io, calls } = start({ [`POST ${ROUTES.name(pi)}`]: noContent });
+		io.send({ jsonrpc: "2.0", id: 7, method: "sessions/setName", params: { session: pi, handle: h(pi), name: "probe name" } });
+		await io.until(1);
+		expect(io.response(7)).toEqual({ jsonrpc: "2.0", id: 7, result: null });
+		expect(calls.map((call) => [call.method, call.url, call.body])).toEqual([["POST", ROUTES.name(pi), { name: "probe name" }]]);
 	});
 
 	it("carries a server rejection through as a JSON-RPC error with the server's text", async () => {

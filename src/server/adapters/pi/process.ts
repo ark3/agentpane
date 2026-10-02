@@ -208,6 +208,15 @@ export class PiAdapter implements BackendAdapter {
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
+	/**
+	 * The session's name: `get_state`'s `sessionName` at start and after a
+	 * fork, then whatever `setName` had Pi accept. As of `pi 1.0.0` Pi also
+	 * emits a `session_info_changed` event at every rename (`agent-session.js`,
+	 * read at the source), which nothing here reads yet, so a rename this
+	 * adapter did not send -- an extension's -- is not seen until the next
+	 * attach or fork.
+	 */
+	private name: string | null = null;
 	private chosenEffort: string | null = null;
 	/**
 	 * True while `set_model` awaits its answer. On `pi 0.87.1` the level it
@@ -266,6 +275,7 @@ export class PiAdapter implements BackendAdapter {
 		this.model = state.data.model ? modelToInfo(state.data.model).id : null;
 		this.reasoning = state.data.model?.reasoning === true;
 		this.thinkingLevel = state.data.thinkingLevel ?? null;
+		this.name = state.data.sessionName ?? null;
 		this.syncEffort();
 
 		// Cold start (D3): the transcript of a session that predates this
@@ -488,6 +498,8 @@ export class PiAdapter implements BackendAdapter {
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;
 		if (state.data.model) this.reasoning = state.data.model.reasoning === true;
 		this.thinkingLevel = state.data.thinkingLevel ?? this.thinkingLevel;
+		// The fork's name is whatever Pi reports for it, not the parent's carried across.
+		this.name = state.data.sessionName ?? null;
 		this.syncEffort();
 		// A fork rebuilds the session from this process's command line, so the
 		// spawn's `--model` is in force again over the chosen model (OW-sinoha,
@@ -536,6 +548,7 @@ export class PiAdapter implements BackendAdapter {
 			model: this.model,
 			effort: this.state.effort,
 			unrestoredModel: this.unrestoredModel,
+			name: this.name,
 		};
 	}
 
@@ -579,6 +592,17 @@ export class PiAdapter implements BackendAdapter {
 			this.chosenEffort = null;
 		}
 		this.syncEffort();
+		this.emitUpdate("status");
+	}
+
+	/**
+	 * `set_session_name`, which as of `pi 0.85.1` Pi accepted mid-session and
+	 * recorded as a `session_info` entry (docs/MANUAL_TESTING.md, "All three
+	 * backends rename an attached session over the wire").
+	 */
+	async setName(name: string): Promise<void> {
+		await this.sendCommand<PiResponseFor<"set_session_name">>({ type: "set_session_name", name });
+		this.name = name;
 		this.emitUpdate("status");
 	}
 

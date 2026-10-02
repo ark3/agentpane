@@ -36,6 +36,7 @@ function summary(session: SessionRef): SessionSummary {
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 	};
 }

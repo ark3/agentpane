@@ -70,6 +70,7 @@ function summaryFor(id: string, index: number): LiveSessionSummary {
 		updatedAt: new Date(1786419855000 + index * 1000).toISOString(),
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		handle: handleFor(id),
 	};
@@ -192,6 +193,7 @@ const api: AgentpaneApi = {
 	},
 	async setModel() {},
 	async setEffort() {},
+	async setName() {},
 	/**
 	 * One point per user message, each naming that message's transcript index
 	 * -- the same shape `harness.ts` answers, and the reason is the cost being

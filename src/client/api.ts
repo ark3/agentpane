@@ -18,6 +18,7 @@ import {
 	type ServerEvent,
 	type SetEffortRequest,
 	type SetModelRequest,
+	type SetNameRequest,
 	type SessionPreviewResponse,
 	type SessionRef,
 	type LiveSessionSummary,
@@ -83,6 +84,8 @@ export interface AgentpaneApi {
 	listModels(backend: SessionRef["backend"]): Promise<ModelInfo[]>;
 	setModel(ref: SessionRef, model: string): Promise<void>;
 	setEffort(ref: SessionRef, effort: string): Promise<void>;
+	/** Name an attached session, written through to its backend (D27); the name returns in the listing. */
+	setName(ref: SessionRef, name: string): Promise<void>;
 	/**
 	 * The points a session can be forked at (OW-hezidi), each naming the
 	 * transcript index of the user message it forks at (OW-roveze).
@@ -171,6 +174,10 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		setEffort(ref, effort) {
 			const body: SetEffortRequest = { effort };
 			return requestNoContent(ROUTES.effort(ref), jsonRequest(body));
+		},
+		setName(ref, name) {
+			const body: SetNameRequest = { name };
+			return requestNoContent(ROUTES.name(ref), jsonRequest(body));
 		},
 		forkPoints(ref) {
 			return request(ROUTES.forkPoints(ref), { method: "GET" }, (body) => {

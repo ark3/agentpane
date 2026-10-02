@@ -42,6 +42,8 @@ export type { ThreadResumeParams } from "../../../../resources/codex-protocol/v2
 export type { ThreadResumeResponse } from "../../../../resources/codex-protocol/v2/ThreadResumeResponse";
 export type { ThreadForkParams } from "../../../../resources/codex-protocol/v2/ThreadForkParams";
 export type { ThreadForkResponse } from "../../../../resources/codex-protocol/v2/ThreadForkResponse";
+export type { ThreadSetNameParams } from "../../../../resources/codex-protocol/v2/ThreadSetNameParams";
+export type { ThreadSetNameResponse } from "../../../../resources/codex-protocol/v2/ThreadSetNameResponse";
 export type { ThreadReadParams } from "../../../../resources/codex-protocol/v2/ThreadReadParams";
 export type { ThreadReadResponse } from "../../../../resources/codex-protocol/v2/ThreadReadResponse";
 export type { ThreadTurnsListParams } from "../../../../resources/codex-protocol/v2/ThreadTurnsListParams";

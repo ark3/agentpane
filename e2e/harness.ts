@@ -134,6 +134,7 @@ function summary(): LiveSessionSummary {
 		updatedAt: "2026-08-14T00:00:00.000Z",
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		handle: HANDLE,
 	};
@@ -252,6 +253,7 @@ const api: AgentpaneApi = {
 		effort = next;
 		queueMicrotask(() => status(false));
 	},
+	async setName() {},
 	/**
 	 * One point per user message, each naming that message's transcript index
 	 * (OW-roveze) -- the Pi shape, and the one a backend answers with when every

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRef } from "../../../shared/protocol.ts";
-import { BackendRefusedError } from "../types.ts";
+import { BackendRefusedError, type StateChange } from "../types.ts";
 import type { ClaudeStoreMessageEntry } from "../../sessions/claude.ts";
 import { ClaudeAdapter, ClaudeAdapterFactory, CLAUDE_FORK_SESSION_START } from "./adapter.ts";
 import type { ClaudeProcess, ClaudeSpawnOptions } from "./process.ts";
@@ -712,6 +712,28 @@ describe("ClaudeAdapter session controls", () => {
 		const forked = await h.adapter.fork("u1");
 		expect(forked.start?.model).toBe("haiku");
 		expect(h.adapter.getState().model).toBe("haiku");
+	});
+
+	it("names the session with a rename_session control request, never a /rename turn (D27, OW-jamaha)", async () => {
+		const h = harness();
+		await h.adapter.start({ cwd: "/workspace" });
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_state, change) => seen.push(change));
+
+		const naming = h.adapter.setName("probe name");
+		const request = h.proc().lastControlRequest("rename_session");
+		expect(request?.request).toEqual({ subtype: "rename_session", title: "probe name" });
+		expect(h.proc().lastUserMessage()).toBeUndefined();
+		// Written through: nothing is held until the CLI has it.
+		expect(h.adapter.getState().name).toBeNull();
+		h.proc().emit({
+			type: "control_response",
+			response: { subtype: "success", request_id: request?.request_id },
+		});
+		await naming;
+
+		expect(h.adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
 	});
 
 	it("rejects setModel when the CLI rejects the model id", async () => {

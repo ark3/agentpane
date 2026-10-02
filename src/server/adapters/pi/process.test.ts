@@ -516,6 +516,51 @@ describe("PiAdapter command correlation", () => {
 	});
 });
 
+describe("PiAdapter session name (D27, OW-jamaha)", () => {
+	it("sends set_session_name and carries the name once Pi accepts it", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const seen: StateChange[] = [];
+		h.adapter.onUpdate((_s, change) => seen.push(change));
+
+		const done = h.adapter.setName("probe name");
+		const cmd = h.child.lastSent("set_session_name");
+		expect(cmd).toEqual({ id: cmd.id, type: "set_session_name", name: "probe name" });
+		// Written through: nothing is held until the backend has it.
+		expect(h.adapter.getState().name).toBeNull();
+		h.child.respondTo("set_session_name");
+		await done;
+
+		expect(h.adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
+	});
+
+	it("carries the name the attach-time get_state reports, before any rename", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionName: "named elsewhere" });
+
+		expect(h.adapter.getState().name).toBe("named elsewhere");
+		expect(h.child.sent().some((c) => c.type === "set_session_name")).toBe(false);
+	});
+
+	it("takes the fork's name from the get_state after the fork, not the parent's", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionName: "parent" });
+
+		const forked = h.adapter.fork("e1");
+		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
+		await Promise.resolve();
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", { messages: [] });
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+		await forked;
+
+		expect(h.adapter.getState().name).toBeNull();
+	});
+});
+
 describe("PiAdapter stdout framing", () => {
 	it("reassembles a JSON line split across chunk boundaries", async () => {
 		const h = makeHarness();

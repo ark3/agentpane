@@ -65,6 +65,8 @@
  * subagent call names. OW-4 is to add `files`, one entry per file an edit
  * or write touches carrying its path, its kind where the backend names one,
  * and its diff lines, retiring the flat `diff`.
+ * OW-jamaha raised it an eighteenth, under D27: `sessions/setName`, and
+ * `name` on the `SessionSummary` that `sessions/list` answers.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -194,8 +196,11 @@
  *
  * - `sessions/list` -- `{ cwd? }` -> array of `SessionSummary` (the HTTP
  *   listing, unchanged: `ref`, `cwd`, `preview`, `createdAt`, `updatedAt`,
- *   `status`, `isStreaming`, `onDisk`, and `handle` for a session the server
- *   holds, virtual or attached). Opens the event stream if it is not open
+ *   `status`, `isStreaming`, `onDisk`, `name`, and `handle` for a session
+ *   the server holds, virtual or attached). `name` (string or `null`) is
+ *   the session's name as its backend holds it; as of OW-jamaha only an
+ *   attached session's is known, and a change to it sends
+ *   `sessions/changed`. Opens the event stream if it is not open
  *   yet, and waits for it to have opened before the listing is asked, and
  *   from here on `sessions/changed` flows, whether or not anything is
  *   attached.
@@ -288,6 +293,12 @@
  *   new model does not list falls back to that model's `defaultEffort`, or
  *   where that is `null` to whatever the backend then picks, which the
  *   `session/status` that follows reports.
+ * - `sessions/setName` -- `{ session, name }` -> `null`. Names the session,
+ *   written through to its backend, which holds it; agentpane keeps no copy
+ *   (D13, "Names are not marks"). Only an attached session can be named:
+ *   the server refuses any other with a 409 `not_attached`, and a `name`
+ *   empty once trimmed with a 400. The name arrives in the listing the
+ *   `sessions/changed` that follows asks for.
  * - `sessions/setEffort` -- `{ session, effort }` -> `null`. `effort` is one of
  *   the session's model's `efforts` ids, taking effect from the next turn;
  *   the server refuses any other with a 400, and any at all while that
@@ -425,6 +436,7 @@ export interface HelperRequests {
 	"sessions/detach": { params: SessionParams & { tokens?: number[] }; result: null };
 	"sessions/setModel": { params: SessionParams & { model: string }; result: null };
 	"sessions/setEffort": { params: SessionParams & { effort: string }; result: null };
+	"sessions/setName": { params: SessionParams & { name: string }; result: null };
 	"sessions/forkPoints": { params: SessionParams; result: ForkPoint[] };
 	"sessions/fork": { params: SessionParams & ForkRequest; result: SessionRef };
 }

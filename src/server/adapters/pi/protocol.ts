@@ -9,12 +9,14 @@
  * against the installed CLI's `dist/modes/rpc/rpc-types.d.ts`.
  *
  * Only the commands/events/responses this adapter actually speaks are
- * included -- not the full RPC surface (bash-as-a-command, session naming,
- * cycling, etc. are all real commands we simply never send). The
- * manual-compaction `compact` command IS spoken (OW-72), transcribed from
- * rpc.md's "Compaction" section, and so is `set_thinking_level` with the
+ * included -- not the full RPC surface (bash-as-a-command, cycling, etc.
+ * are all real commands we simply never send). The manual-compaction
+ * `compact` command IS spoken (OW-72), transcribed from rpc.md's
+ * "Compaction" section, and so is `set_thinking_level` with the
  * `thinking_level_changed` event (OW-ruzuhu), from `rpc-commands.md`'s
- * "Thinking" and `json.md` as of `pi 0.87.1`.
+ * "Thinking" and `json.md` as of `pi 0.87.1`, and `set_session_name` with
+ * `get_state`'s `sessionName` (OW-jamaha), from `rpc-types.d.ts` and
+ * `rpc-mode.js` as installed at `pi 1.0.0`.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -37,6 +39,9 @@ export type PiCommand =
 	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
+	// As of `pi 1.0.0` Pi trims `name` and refuses one empty after trimming
+	// (`rpc-mode.js`, read at the source); the route refuses it first.
+	| { id?: string; type: "set_session_name"; name: string }
 	// `level` is one of `off|minimal|low|medium|high|xhigh|max`. As of 0.87.1 Pi
 	// answers success for a level the model lacks and clamps it -- to the next
 	// level up the model has, else down -- so `medium` on a model without it
@@ -74,9 +79,18 @@ export type PiResponse =
 			type: "response";
 			command: "get_state";
 			success: true;
-			data: { model: Model<any> | null; thinkingLevel?: string; isStreaming: boolean; sessionFile?: string; messageCount?: number };
+			data: {
+				model: Model<any> | null;
+				thinkingLevel?: string;
+				isStreaming: boolean;
+				sessionFile?: string;
+				messageCount?: number;
+				/** Absent while the session has no name. */
+				sessionName?: string;
+			};
 	  }
 	| { id?: string; type: "response"; command: "set_model"; success: true; data: Model<any> }
+	| { id?: string; type: "response"; command: "set_session_name"; success: true }
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }
 	| {
 			id?: string;

@@ -197,6 +197,8 @@ export async function parseCodexSession(filePath: string, stat: Stats): Promise<
 		preview,
 		createdAt: header.createdAt,
 		updatedAt: stat.mtime.toISOString(),
+		// Never in a rollout as of `codex-cli 0.154.0` (D27).
+		name: null,
 		status: "detached",
 		isStreaming: false,
 		onDisk: true,

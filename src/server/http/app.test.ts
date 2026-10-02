@@ -599,6 +599,10 @@ describe("only the attach route starts an agent (D25, OW-sirofi)", () => {
 		await expectRefused(await post(ROUTES.effort(PI_SESSION), { effort: "low" }));
 	});
 
+	it("refuses a name for a session not attached, which has nothing to write it through to (D13, OW-jamaha)", async () => {
+		await expectRefused(await post(ROUTES.name(PI_SESSION), { name: "probe name" }));
+	});
+
 	it("respawns nothing for a prompt or a model that arrives while a close is out", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		const adapter = pi.forRef(PI_SESSION)!;
@@ -1007,6 +1011,31 @@ describe("fork, model, and enumeration routes", () => {
 		await get(ROUTES.session(PI_SESSION));
 		expect((await post(ROUTES.model(PI_SESSION), { model: "pi-2" })).status).toBe(204);
 		expect(pi.forRef(PI_SESSION)?.model).toBe("pi-2");
+	});
+
+	it("names an attached session through its adapter, then says sessions-changed and lists the name (D27, OW-jamaha)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const client = await openStream();
+		await client.waitForCount(1);
+		const before = client.typed("sessions-changed").length;
+
+		expect((await post(ROUTES.name(PI_SESSION), { name: "  probe name " })).status).toBe(204);
+		// Trimmed, as Pi trims (`pi 1.0.0`), so every backend holds the same string.
+		expect(pi.forRef(PI_SESSION)?.name).toBe("probe name");
+		await client.until(() => client.typed("sessions-changed").length > before, "sessions-changed");
+		const listed = (await (await get(ROUTES.sessions)).json()) as ListSessionsResponse;
+		expect(listed.sessions.find((summary) => sessionKey(summary.ref) === sessionKey(PI_SESSION))?.name).toBe("probe name");
+		await client.close();
+	});
+
+	it("refuses a blank name before it reaches the adapter", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		for (const body of [{ name: "   " }, {}]) {
+			const response = await post(ROUTES.name(PI_SESSION), body);
+			expect(response.status).toBe(400);
+			expect(((await response.json()) as ApiError).error).toBe("bad_request");
+		}
+		expect(pi.forRef(PI_SESSION)?.name).toBeNull();
 	});
 
 	it("hands two overlapping model requests to the adapter one at a time (OW-sewewe)", async () => {

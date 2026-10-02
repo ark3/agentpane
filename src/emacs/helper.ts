@@ -687,6 +687,10 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			await api.setEffort(session, effort);
 			return null;
 		},
+		"sessions/setName": async ({ session, name }) => {
+			await api.setName(session, name);
+			return null;
+		},
 		"sessions/forkPoints": ({ session }) => api.forkPoints(session),
 		"sessions/fork": ({ session, handle: _handle, ...body }) => api.fork(session, body),
 	};

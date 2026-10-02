@@ -3,7 +3,8 @@
  *
  * FROZEN INTERFACE (DESIGN "The backend adapter contract"). The Pi, Codex,
  * and Claude Code adapters all implement it; changing it changes all three --
- * raise it before editing. D24 raised `onRefChanged` (OW-nikogo).
+ * raise it before editing. D24 raised `onRefChanged` (OW-nikogo). D27 raised
+ * `setName` and `AdapterState.name` (OW-jamaha).
  *
  * An adapter owns one sandboxed subprocess's stdio and is responsible for one
  * thing above all: producing and maintaining an `AgentMessage[]` plus a
@@ -35,6 +36,15 @@ export interface AdapterState {
 	 * and cleared, is `PiAdapter`'s docblock on the field.
 	 */
 	unrestoredModel?: string | null;
+	/**
+	 * The session's name as the backend holds it: the one `setName` last had
+	 * accepted, or else the one the backend reported -- at attach where the
+	 * adapter has it in hand, and for Codex at every `thread/name/updated`.
+	 * Null when the backend has none, or none the adapter can read. This is
+	 * the only copy agentpane holds, and it dies with the adapter (D13, "Names
+	 * are not marks").
+	 */
+	name: string | null;
 }
 
 /**
@@ -43,8 +53,9 @@ export interface AdapterState {
  *  - a number: the index of the one message that was added or changed, sent
  *    as an upsert. The status fields may have moved with it.
  *  - `"status"`: no message changed; only `isStreaming`, `compaction`,
- *    `model`, `effort` or `unrestoredModel` may have, sent as a `status`
- *    event. A turn's start and end are this (OW-yirosu).
+ *    `model`, `effort`, `unrestoredModel` or `name` may have, sent as a
+ *    `status` event -- save `name`, which goes out as `sessions-changed`.
+ *    A turn's start and end are this (OW-yirosu).
  *  - `"transcript"`: the messages were replaced wholesale -- a hydrate, a
  *    reset, a fork's rewind -- which only a snapshot can report.
  */
@@ -213,6 +224,13 @@ export interface BackendAdapter {
 
 	// -- session controls ---------------------------------------------------
 	setModel(model: string): Promise<void>;
+	/**
+	 * Name the session, written through to the backend, and carried in
+	 * `getState().name` once the backend has accepted it (D27, OW-jamaha).
+	 * Not `rename`: a rename here is a ref change (`onRefChanged`). The route
+	 * refuses an empty name before it reaches this.
+	 */
+	setName(name: string): Promise<void>;
 	/**
 	 * Choose the reasoning effort from the next turn on, one of the current
 	 * model's `ModelInfo.efforts`. The effort route checks that against

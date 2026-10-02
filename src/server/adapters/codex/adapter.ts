@@ -34,6 +34,8 @@ import {
 	type SandboxMode,
 	type ThreadForkResponse,
 	type ThreadResumeResponse,
+	type ThreadSetNameParams,
+	type ThreadSetNameResponse,
 	type ThreadStartResponse,
 	type ThreadTurnsListParams,
 	type ThreadTurnsListResponse,
@@ -196,6 +198,15 @@ export class CodexAdapter implements BackendAdapter {
 	 * resume and rides `turn/start`, never `thread/resume`.
 	 */
 	private effort: string | null = null;
+	/**
+	 * The thread's name: the one `thread/start` or `thread/resume` answered
+	 * with, then the one `setName` had accepted or a `thread/name/updated` for
+	 * this thread last reported. As of `codex-cli 0.154.0` Codex kept it
+	 * beside the rollout, never in it, so the D9 walk cannot see it
+	 * (docs/MANUAL_TESTING.md, "All three backends rename an attached session
+	 * over the wire").
+	 */
+	private name: string | null = null;
 	private cwd: string | null = null;
 	private disposed = false;
 	private disposal: Promise<void> | null = null;
@@ -308,6 +319,7 @@ export class CodexAdapter implements BackendAdapter {
 			if (stored?.effort) this.effort = stored.effort;
 			const model = (opts.model ? undefined : stored?.model) ?? started.model;
 			this.model = model ?? this.model;
+			this.name = started.thread.name ?? null;
 			this.reducer.setIdentity({
 				threadId: started.thread.id,
 				model,
@@ -398,6 +410,7 @@ export class CodexAdapter implements BackendAdapter {
 		if (stored?.effort) this.effort = stored.effort;
 		const model = (chosenModel ? undefined : stored?.model) ?? resumed.model;
 		this.model = model ?? this.model;
+		this.name = resumed.thread.name ?? null;
 		this.reducer.setIdentity({
 			threadId: resumed.thread.id,
 			model,
@@ -788,7 +801,7 @@ export class CodexAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort ?? this.reducer.effort, name: this.name };
 	}
 
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
@@ -860,6 +873,20 @@ export class CodexAdapter implements BackendAdapter {
 		this.emitUpdate("status");
 	}
 
+	/**
+	 * `thread/name/set`, the method's spelling as of `codex-cli 0.154.0`: the
+	 * `thread/setName` its params type suggests was refused with `-32600`. The
+	 * `thread/name/updated` that follows names the same thread and name, so
+	 * it moves nothing the answer has not.
+	 */
+	async setName(name: string): Promise<void> {
+		const client = this.requireClient();
+		const params: ThreadSetNameParams = { threadId: this.requireThread(), name };
+		await client.request<ThreadSetNameResponse>("thread/name/set", params);
+		this.name = name;
+		this.emitUpdate("status");
+	}
+
 	/** Takes effect on the next `turn/start`, like `setModel`. */
 	async setEffort(effort: string): Promise<void> {
 		this.effort = effort;
@@ -920,6 +947,13 @@ export class CodexAdapter implements BackendAdapter {
 						this.pendingTurnCompletions.clear();
 						this.pendingTurnCompletions.set(startedTurnId, "started");
 					}
+					break;
+				}
+				case "thread/name/updated": {
+					// Every adapter on a shared app-server hears every thread's (OW-lajehi).
+					if (msg.params.threadId !== this.threadId) return;
+					this.name = msg.params.threadName ?? null;
+					this.emitUpdate("status");
 					break;
 				}
 				case "turn/completed": {

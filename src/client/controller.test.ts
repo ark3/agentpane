@@ -35,6 +35,7 @@ function summary(session: SessionRef, cwd = "/work", handle = h(session)): LiveS
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		handle,
 	};
@@ -110,6 +111,7 @@ class FakeApi implements AgentpaneApi {
 	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
 	readonly setModel = vi.fn(async (_session: SessionRef, _model: string) => {});
 	readonly setEffort = vi.fn(async (_session: SessionRef, _effort: string) => {});
+	readonly setName = vi.fn(async (_session: SessionRef, _name: string) => {});
 	readonly forkPoints = vi.fn(async (_session: SessionRef): Promise<ForkPoint[]> => []);
 	readonly fork = vi.fn(async (_session: SessionRef, _body: ForkRequest) => forkedRef);
 	readonly dismissError = vi.fn(async (_session: SessionRef, _errorId: string) => {});

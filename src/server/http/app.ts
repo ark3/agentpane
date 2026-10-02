@@ -37,6 +37,7 @@ import {
 	type SessionSummary,
 	type SetEffortRequest,
 	type SetModelRequest,
+	type SetNameRequest,
 	sessionKey,
 } from "../../shared/protocol.ts";
 import { type BackendAdapter, BackendRefusedError } from "../adapters/types.ts";
@@ -393,6 +394,21 @@ export function createApp(deps: AppDeps): App {
 				}
 				if (!sessions.isAttached(ref)) return notAttached(ref);
 				await sessions.setModel(ref, body.value.model);
+				return noContent();
+			}
+			case "name": {
+				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
+				const body = await readJson<SetNameRequest>(request);
+				if (!body.ok) return body.response;
+				// One rule for all three backends, Pi's: as of `pi 1.0.0` it trims a
+				// name and refuses one empty after that, where Codex takes any string.
+				const name = typeof body.value.name === "string" ? body.value.name.trim() : "";
+				if (name === "") return error(400, "bad_request", "name is required and must not be blank");
+				// Written through, so only a session with a process to write to
+				// (D13, "Names are not marks"). The adapter's state change is what
+				// sends `sessions-changed` (`SessionManager.#onUpdate`).
+				if (!sessions.isAttached(ref)) return notAttached(ref);
+				await sessions.setName(ref, name);
 				return noContent();
 			}
 			case "effort": {

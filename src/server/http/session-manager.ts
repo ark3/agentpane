@@ -127,6 +127,8 @@ interface ManagedSession {
 	lastModel: string | null;
 	lastEffort: string | null;
 	lastUnrestoredModel: string | null;
+	/** The adapter's `name` as last seen; a change is announced as `sessions-changed`, never a `status`. */
+	lastName: string | null;
 	/**
 	 * What the adapter's `onError` and `onNotice` have said, held
 	 * for every snapshot to carry (OW-bipume): a client that was not holding a
@@ -391,6 +393,7 @@ export class SessionManager {
 			lastModel: null,
 			lastEffort: null,
 			lastUnrestoredModel: null,
+			lastName: null,
 			error: null,
 			errorId: "",
 			notices: [],
@@ -633,12 +636,13 @@ export class SessionManager {
 
 	/**
 	 * Run one of a session's mutating verbs once every verb queued on it before
-	 * has settled (D24, OW-sewewe). Five verbs join: `submit`, `fork`,
-	 * `setModel`, `setEffort` and `compact`. Every route is a concurrent
-	 * `Bun.serve` handler and any number of clients can drive one session, so
-	 * without this two of them overlap on one adapter -- two `setModel`s sharing
-	 * Pi's one `settingModel` flag (OW-woyifu), or an effort checked against the
-	 * model a set-model in flight is replacing (OW-zayefe).
+	 * has settled (D24, OW-sewewe). Six verbs join: `submit`, `fork`,
+	 * `setModel`, `setEffort`, `setName` and `compact`. Every route is a
+	 * concurrent `Bun.serve` handler and any number of clients can drive one
+	 * session, so without this two of them overlap on one adapter -- two
+	 * `setModel`s sharing Pi's one `settingModel` flag (OW-woyifu), or an
+	 * effort checked against the model a set-model in flight is replacing
+	 * (OW-zayefe).
 	 *
 	 * It orders admission and nothing more. `submit` settles when the backend
 	 * admits the turn, not when the turn ends, so nothing here waits behind a
@@ -797,6 +801,11 @@ export class SessionManager {
 		return this.#serially(ref, (_session, adapter) => adapter.setModel(model));
 	}
 
+	/** Written through to the backend; the name comes back in the adapter's state, and nowhere here (D27). */
+	setName(ref: SessionRef, name: string): Promise<void> {
+		return this.#serially(ref, (_session, adapter) => adapter.setName(name));
+	}
+
 	/**
 	 * Checked here, not trusted to the backend: as of `claude 2.1.280` and
 	 * `pi 0.87.1` each answered success for a level the model lacks, and Codex
@@ -928,6 +937,7 @@ export class SessionManager {
 		fork.lastModel = parent.lastModel;
 		fork.lastEffort = parent.lastEffort;
 		fork.lastUnrestoredModel = parent.lastUnrestoredModel;
+		fork.lastName = parent.lastName;
 		this.#remove(parent);
 		parent.adapter = undefined;
 		this.#add(fork);
@@ -1171,6 +1181,7 @@ export class SessionManager {
 		bound.lastModel = initialState.model;
 		bound.lastEffort = initialState.effort;
 		bound.lastUnrestoredModel = initialState.unrestoredModel ?? null;
+		bound.lastName = initialState.name;
 		// A rename inside `start()` -- a `virtual` id becoming the backend's own
 		// (D9) -- was held off the wire until the start could no longer fail;
 		// `attach` says it once this returns (`#rename`).
@@ -1225,7 +1236,12 @@ export class SessionManager {
 		// sort off the streaming path (OW-jineli). The backend writes its own
 		// file, so the start-side re-list may still read a timestamp from before
 		// the turn; the end-side one always sees the turn's last write.
-		if (streamingChanged) this.broadcaster.sessionsChanged();
+		// A name rides the listing, not the status: it labels the session's row
+		// (D27), and a re-list is what both clients draw rows from. One event
+		// covers both, at a turn boundary that also renamed.
+		const nameChanged = state.name !== session.lastName;
+		session.lastName = state.name;
+		if (streamingChanged || nameChanged) this.broadcaster.sessionsChanged();
 	}
 
 	/**
@@ -1508,15 +1524,23 @@ export class SessionManager {
 			preview: null,
 			createdAt: session.createdAt,
 			updatedAt: session.createdAt,
+			name: null,
 			...this.#liveOverlay(session),
 			onDisk: session.onDisk,
 			handle: session.handle,
 		};
 	}
 
-	#liveOverlay(session: ManagedSession | undefined): { status: SessionStatus; isStreaming: boolean } {
+	/**
+	 * What a held session says over the index's summary. An attached adapter's
+	 * `name` is the backend's word on it, but one that names none says nothing:
+	 * Claude Code's adapter cannot read a title it did not set, so its null
+	 * must not hide one the walk reads, once the walk reads names (OW-yilene).
+	 */
+	#liveOverlay(session: ManagedSession | undefined): { status: SessionStatus; isStreaming: boolean; name?: string } {
 		if (session?.adapter) {
-			return { status: "attached", isStreaming: session.adapter.getState().isStreaming };
+			const { isStreaming, name } = session.adapter.getState();
+			return { status: "attached", isStreaming, ...(name !== null ? { name } : {}) };
 		}
 		return { status: session?.virtual ? "virtual" : "detached", isStreaming: false };
 	}

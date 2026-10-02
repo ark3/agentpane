@@ -181,6 +181,8 @@ export class FakeAdapter implements BackendAdapter {
 	effort?: string;
 	/** What `AdapterState.unrestoredModel` reports; set it and emit to drive a change. */
 	unrestoredModel?: string;
+	/** What `AdapterState.name` reports: what `setName` took, or set it and emit to drive a change. */
+	name: string | null = null;
 
 	// -- state ---------------------------------------------------------------
 	messages: AgentMessage[] = [];
@@ -284,7 +286,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	getState(): AdapterState {
-		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null, unrestoredModel: this.unrestoredModel ?? null };
+		return { messages: this.messages, isStreaming: this.isStreaming, compaction: this.compaction, model: this.model ?? null, effort: this.effort ?? null, unrestoredModel: this.unrestoredModel ?? null, name: this.name };
 	}
 
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
@@ -310,6 +312,11 @@ export class FakeAdapter implements BackendAdapter {
 	async setModel(model: string): Promise<void> {
 		await this.options.onSetModel?.(model);
 		this.model = model;
+		this.#emit("status");
+	}
+
+	async setName(name: string): Promise<void> {
+		this.name = name;
 		this.#emit("status");
 	}
 
@@ -462,6 +469,7 @@ export function storedSession(ref: SessionRef, cwd: string, at = "2026-08-10T00:
 		preview: "hello",
 		createdAt: at,
 		updatedAt: at,
+		name: null,
 		status: "detached",
 		isStreaming: false,
 		onDisk: true,

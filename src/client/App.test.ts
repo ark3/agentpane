@@ -36,6 +36,7 @@ function summary(
 		updatedAt: null,
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		...overrides,
 	};
@@ -1859,6 +1860,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [],
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -2296,6 +2298,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [],
 			fork: async () => piSession,
 			dismissError: async () => {},
@@ -2839,6 +2842,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => {
 				forks += 1;
@@ -2926,6 +2930,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
@@ -3006,6 +3011,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => forkRef,
 			dismissError: async () => {},
@@ -3070,6 +3076,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
@@ -3165,6 +3172,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
@@ -3249,6 +3257,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => forkRef,
 			dismissError: async () => {},
@@ -3448,6 +3457,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: () => new Promise<SessionRef>((resolve) => {
 				resolveFork = resolve;
@@ -3534,6 +3544,7 @@ describe("App", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
 			fork: async () => forkRef,
 			dismissError: async () => {},
@@ -3798,6 +3809,7 @@ describe("a client that connects after the fact (OW-bipume)", () => {
 			listModels: async () => [],
 			setModel: async () => {},
 			setEffort: async () => {},
+			setName: async () => {},
 			forkPoints: async () => [],
 			fork: async () => piSession,
 			dismissError: async () => {},

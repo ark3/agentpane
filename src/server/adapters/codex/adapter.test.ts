@@ -8,6 +8,7 @@ import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./i
 import type { CodexProcess } from "./process.ts";
 import type { Thread } from "./protocol.ts";
 import { CodexReducer } from "./reducer.ts";
+import type { StateChange } from "../types.ts";
 import { FakeCodexProcess } from "./test-support.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
@@ -132,6 +133,8 @@ interface HappyServerOptions {
 	failSteer?: string;
 	/** The stored thread's `historyMode`; `paginated` is what `thread/start` created as of `codex-cli` 0.156.0. */
 	historyMode?: "legacy" | "paginated";
+	/** The `thread.name` a `thread/start` or `thread/resume` answers with; absent, the thread has none. */
+	threadName?: string;
 }
 
 /**
@@ -189,7 +192,12 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				proc.emit({
 					id,
 					result: {
-						thread: { id: options.threadId ?? "thread-real", historyMode, turns: full ? (options.turns ?? []) : [] },
+						thread: {
+							id: options.threadId ?? "thread-real",
+							historyMode,
+							turns: full ? (options.turns ?? []) : [],
+							...(options.threadName !== undefined ? { name: options.threadName } : {}),
+						},
 						model: options.model ?? "gpt-started",
 						modelProvider: options.modelProvider ?? "openai",
 						reasoningEffort: options.reasoningEffort ?? null,
@@ -230,6 +238,11 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				break;
 			}
 			case "turn/interrupt":
+				proc.emit({ id, result: {} });
+				break;
+			case "thread/name/set":
+				// As of `codex-cli` 0.154.0 the answer is `{}`, and a
+				// `thread/name/updated` follows it, which a test sends itself.
 				proc.emit({ id, result: {} });
 				break;
 			case "thread/compact/start":
@@ -582,7 +595,7 @@ describe("CodexAdapter lifecycle", () => {
 		});
 		proc.emit({ id: 9, method: "item/fileChange/requestApproval", params: {} });
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: "gpt-started", effort: null, name: null });
 		expect(updates).not.toHaveBeenCalled();
 		expect(responses(proc)).toEqual([]);
 	});
@@ -611,7 +624,7 @@ describe("CodexAdapter lifecycle", () => {
 
 		await expect(adapter.start({ cwd: "/workspace" })).rejects.toThrow("registration-time exit");
 
-		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null });
+		expect(adapter.getState()).toEqual({ messages: [], isStreaming: false, compaction: null, model: null, effort: null, name: null });
 		expect(responses(proc)).toEqual([]);
 		expect(proc.killCount).toBe(1);
 	});
@@ -1702,6 +1715,41 @@ function codexModel(id: string, efforts: string[], defaultEffort: string): Recor
 	};
 }
 
+describe("CodexAdapter session name (D27, OW-jamaha)", () => {
+	it("names the thread with thread/name/set and carries the name once Codex answers", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-named" });
+		const seen: StateChange[] = [];
+		adapter.onUpdate((_state, change) => seen.push(change));
+
+		await adapter.setName("probe name");
+
+		expect(methods(proc).filter((method) => String(method).includes("name"))).toEqual(["thread/name/set"]);
+		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: "thread-named", name: "probe name" });
+		expect(adapter.getState().name).toBe("probe name");
+		expect(seen).toEqual(["status"]);
+	});
+
+	it("follows a thread/name/updated for its own thread, and no other", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-named" });
+		const seen: StateChange[] = [];
+		adapter.onUpdate((_state, change) => seen.push(change));
+
+		proc.emit({ method: "thread/name/updated", params: { threadId: "thread-other", threadName: "not mine" } });
+		expect(adapter.getState().name).toBeNull();
+
+		proc.emit({ method: "thread/name/updated", params: { threadId: "thread-named", threadName: "renamed elsewhere" } });
+		expect(adapter.getState().name).toBe("renamed elsewhere");
+		expect(seen).toEqual(["status"]);
+	});
+
+	it("carries the name thread/resume answers with, before any rename", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, threadName: "named before" }, STORED_REF);
+
+		expect(adapter.getState().name).toBe("named before");
+		expect(methods(proc)).not.toContain("thread/name/set");
+	});
+});
+
 describe("CodexAdapter fork points", () => {
 	/**
 	 * Codex forks at turn granularity, so a turn answers with exactly one point
@@ -2034,7 +2082,7 @@ describe("CodexAdapter reducer effects", () => {
 		});
 
 		// The turn's start moved the status alone (OW-yirosu).
-		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null }, "status");
+		expect(updates).toHaveBeenNthCalledWith(1, { messages: [], isStreaming: true, compaction: null, model: "gpt-started", effort: null, name: null }, "status");
 		expect(updates).toHaveBeenNthCalledWith(
 			2,
 			expect.objectContaining({ isStreaming: true, messages: [expect.objectContaining({ role: "assistant" })] }),

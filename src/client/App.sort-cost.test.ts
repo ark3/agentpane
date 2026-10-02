@@ -138,6 +138,7 @@ function summary(ref: SessionRef, index: number): SessionSummary {
 		updatedAt: new Date(Date.UTC(2026, 5, 1) + index * 1000).toISOString(),
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		handle: handleOf(ref),
 	};

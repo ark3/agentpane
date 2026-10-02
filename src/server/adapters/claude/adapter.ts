@@ -228,6 +228,11 @@ export class ClaudeAdapter implements BackendAdapter {
 	private modelFromStore = false;
 	/** `get_settings`'s `applied.effort` as last read: null for a model without effort (see module doc). */
 	private effort: string | null = null;
+	/**
+	 * The title `setName` last had the CLI accept. Null until then, even for a
+	 * session that already had one: the CLI offers no in-process read of it.
+	 */
+	private name: string | null = null;
 	private started = false;
 	private turnActive = false;
 	private disposed = false;
@@ -497,7 +502,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	// -- state --------------------------------------------------------------
 
 	getState(): AdapterState {
-		return { ...this.reducer.getState(), model: this.model, effort: this.effort };
+		return { ...this.reducer.getState(), model: this.model, effort: this.effort, name: this.name };
 	}
 
 	onUpdate(cb: (state: AdapterState, change: StateChange) => void): Unsubscribe {
@@ -528,6 +533,18 @@ export class ClaudeAdapter implements BackendAdapter {
 		// A chosen effort outlives the switch, applied only while the model has
 		// effort at all (module doc), so what is in force is read, not kept.
 		await this.readSettings();
+		this.emitUpdate("status");
+	}
+
+	/**
+	 * The `rename_session` control request, which as of `claude 2.1.270` the
+	 * CLI answered with success mid-session (docs/MANUAL_TESTING.md, "All three
+	 * backends rename an attached session over the wire"). Not `/rename` as a
+	 * user message: that works too, but runs as a turn.
+	 */
+	async setName(name: string): Promise<void> {
+		await this.sendControl({ subtype: "rename_session", title: name });
+		this.name = name;
 		this.emitUpdate("status");
 	}
 

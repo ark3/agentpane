@@ -173,6 +173,8 @@ export async function parseClaudeSession(filePath: string, stat: Stats): Promise
 		preview,
 		createdAt,
 		updatedAt: stat.mtime.toISOString(),
+		// Read from the store by a later card (D27, OW-yilene).
+		name: null,
 		status: "detached",
 		isStreaming: false,
 		onDisk: true,

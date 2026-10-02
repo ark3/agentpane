@@ -115,6 +115,7 @@ function summary(ref: SessionRef, updatedAt: string): SessionSummary {
 		updatedAt,
 		status: "attached",
 		isStreaming: false,
+		name: null,
 		onDisk: true,
 		handle: handleOf(ref),
 	};
