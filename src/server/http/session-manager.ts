@@ -573,7 +573,7 @@ export class SessionManager {
 			return container;
 		}
 		const winner = container.starting;
-		if (!winner || winner === pending) return undefined;
+		if (!winner) return undefined;
 		this.#retire(pending);
 		for (const key of pending.keys) this.#hold(winner, key);
 		return winner.promise;
