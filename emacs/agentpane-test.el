@@ -4228,8 +4228,9 @@ for one (`renameSession' in src/client/App.svelte)."
 sends nothing in each case the browser's `renamable' refuses
 \(src/client/App.svelte): a session only previewed, which it does not
 attach, as `agentpane-set-model' would, since D13 names only an attached
-session; one streaming or compacting; and one with a prompt or a fork in
-flight."
+session; one streaming or compacting; one with a prompt or a fork in
+flight; and one whose close is in flight, as nothing that would reach the
+session goes out then (`agentpane--closing')."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -4251,7 +4252,8 @@ flight."
                           (list :session ref :handle "h1" :isStreaming :json-false
                                 :compaction "running" :model "luna")))
                        (lambda (_) (setq agentpane--sending t))
-                       (lambda (_) (setq agentpane--forking t))))
+                       (lambda (_) (setq agentpane--forking t))
+                       (lambda (_) (setq agentpane--closing t))))
     (agentpane-test--closing
       (with-current-buffer buffer
         (funcall setup ref)

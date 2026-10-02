@@ -2170,7 +2170,8 @@ So nothing that would reach the session goes out while it is set, which
 spares the user a respawn or a refused request: every attach,
 synchronous or not, and every request `agentpane--attached-then' or
 `agentpane--fork-point' sends refuses through `agentpane--refuse-closing',
-and `agentpane-refetch' and a second `agentpane-close-session' read it
+as `agentpane-rename-session', which attaches nothing, does too, and
+`agentpane-refetch' and a second `agentpane-close-session' read it
 themselves.  Cleared when the close answers or fails; until OW-vugefa it
 stayed set until a listing asked after the close had answered, which
 `agentpane-close-session' no longer asks.")
@@ -3364,9 +3365,10 @@ checked before NAME is read, and again before it is sent.  A NAME blank
 once trimmed sends nothing, as the browser's Rename sends nothing for one
 \(`renameSession' in src/client/App.svelte); the server would refuse it.
 The buffer keeps no copy of the name: it arrives in the listing the
-`sessions/changed' that follows asks for, which is why nothing is
-offered as the name to edit, the buffer's summary being as old as the
-buffer."
+`sessions/changed' that follows asks for.  So nothing is offered as the
+name to edit, as the browser offers its row's: the buffer's summary is
+the one it was last opened from (`agentpane-show-transcript'), which a
+rename from this buffer leaves behind."
   (interactive
    (progn
      (agentpane--check-renamable)
