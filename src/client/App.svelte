@@ -316,7 +316,10 @@
 	 * there at once and the turn ran on. Nor on Codex before the first prompt,
 	 * which the Codex adapter refuses: there the rename alone wrote the thread
 	 * into Codex's store, where Claude Code held the name until the first turn
-	 * (`docs/MANUAL_TESTING.md`, OW-kametu). An empty transcript is that case.
+	 * (`docs/MANUAL_TESTING.md`, OW-kametu). An empty transcript stands in for
+	 * "not yet prompted", as it does in the adapter: a prompt whose user
+	 * message has not arrived yet is empty too, but `view.sending` or the
+	 * turn's streaming already withholds Rename then.
 	 */
 	const renamable = $derived(
 		selectedSummary?.status === "attached" &&

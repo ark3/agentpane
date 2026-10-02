@@ -4230,8 +4230,9 @@ sends nothing in each case the browser's `renamable' refuses
 attach, as `agentpane-set-model' would, since D13 names only an attached
 session; one streaming or compacting; one with a prompt or a fork in
 flight; one whose close is in flight, as nothing that would reach the
-session goes out then (`agentpane--closing'); and a Codex session drawn
-with no nodes, one not yet prompted, which the server refuses (OW-kametu)."
+session goes out then (`agentpane--closing'); and a Codex session with no
+indexed node, which stands in for one not yet prompted and which the
+server refuses (OW-kametu), even with a notice drawn."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -4259,7 +4260,14 @@ with no nodes, one not yet prompted, which the server refuses (OW-kametu)."
                          (agentpane--on-notification
                           agentpane--connection 'session/snapshot
                           (list :session ref :handle "h1" :isStreaming :json-false
-                                :model "luna" :nodes [])))))
+                                :model "luna" :nodes [])))
+                       (lambda (ref)
+                         (agentpane--on-notification
+                          agentpane--connection 'session/snapshot
+                          (list :session ref :handle "h1" :isStreaming :json-false
+                                :model "luna" :nodes []
+                                :notices (vector '(:kind "warning" :message "Fallback metadata"
+                                                   :details nil :path nil)))))))
     (agentpane-test--closing
       (with-current-buffer buffer
         (funcall setup ref)

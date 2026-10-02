@@ -880,12 +880,14 @@ export class CodexAdapter implements BackendAdapter {
 	 * `thread/name/updated` it also sends names the same thread and name, so
 	 * whichever arrives first, the other moves nothing.
 	 *
-	 * Refused while the transcript is empty, which is a thread created here and
-	 * not yet prompted: as of `codex-cli 0.160.0` a rename then wrote a
+	 * Refused while the transcript is empty, which stands in for a thread not
+	 * yet prompted: as of `codex-cli 0.160.0` a rename on one wrote a
 	 * `session_index.jsonl` line and a sqlite `threads` row for a thread with
 	 * no rollout, both outliving the process, which is the empty session D9
 	 * promises opening one never leaves behind (docs/MANUAL_TESTING.md,
-	 * OW-kametu). Both clients withhold Rename in the same case.
+	 * OW-kametu). A first turn whose user message has not reached the reducer
+	 * is empty too, and is refused with it; both clients withhold Rename then
+	 * anyway, as mid-turn, and on an empty transcript as here.
 	 */
 	async setName(name: string): Promise<void> {
 		if (this.reducer.getState().messages.length === 0) {

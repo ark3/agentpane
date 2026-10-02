@@ -2227,8 +2227,9 @@ So neither CLI queues a rename behind the turn the way Claude Code queues a stre
 The clients still withhold Rename mid-turn, as they withhold Detach; lifting that is a choice this card did not make.
 
 **What changed.**
-`CodexAdapter.setName` refuses while the transcript is empty, which is a thread created here and not yet prompted, with a `BackendRefusedError` the route answers as 400 `backend_refused`.
-The browser's `renamable` and agentpane-mode's `agentpane--check-renamable` withhold Rename on a Codex session with an empty transcript.
+`CodexAdapter.setName` refuses while the transcript is empty, with a `BackendRefusedError` the route answers as 400 `backend_refused`.
+An empty transcript stands in for a thread not yet prompted rather than being one: a first turn whose user message has not yet reached the reducer is empty too, and is refused with it, a window both clients already close by withholding Rename mid-turn.
+The browser's `renamable` withholds Rename on a Codex session with an empty transcript, and agentpane-mode's `agentpane--check-renamable` on a Codex buffer with no indexed node, since its notices and errors carry no index.
 Claude Code and Pi keep a pre-turn rename, since neither writes one before the first turn.
 
 The store files the runs left: Claude's under `~/.claude/projects/-tmp-agentpane-kametu-claude-pre-turn-xm637bdh/` and `~/.claude/projects/-tmp-agentpane-kametu-claude-mid-turn-habjyr1j/`, and the four temporary Codex homes `/tmp/agentpane-kametu-codexhome-*`, until something cleans `/tmp`.

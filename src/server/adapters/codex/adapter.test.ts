@@ -1752,6 +1752,47 @@ describe("CodexAdapter session name (D27, OW-jamaha)", () => {
 		expect(seen).toEqual([]);
 	});
 
+	it("names a thread it started once its first turn's user message has arrived (OW-kametu)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-prompted" });
+		await adapter.submit("first prompt");
+		proc.emit({
+			method: "item/started",
+			params: {
+				threadId: "thread-prompted",
+				turnId: "turn-1",
+				item: {
+					type: "userMessage",
+					id: "user-live",
+					clientId: null,
+					content: [{ type: "text", text: "first prompt", text_elements: [] }],
+				},
+				startedAtMs: 10,
+			},
+		});
+		proc.emit({
+			method: "turn/completed",
+			params: {
+				threadId: "thread-prompted",
+				turn: {
+					id: "turn-1",
+					items: [],
+					itemsView: "summary",
+					status: "completed",
+					error: null,
+					startedAt: 1,
+					completedAt: 2,
+					durationMs: 1000,
+				},
+			},
+		});
+		expect(adapter.getState().messages.map((message) => message.role)).toContain("user");
+
+		await adapter.setName("probe name");
+
+		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: "thread-prompted", name: "probe name" });
+		expect(adapter.getState().name).toBe("probe name");
+	});
+
 	it("follows a thread/name/updated for its own thread, and no other", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-named" });
 		const seen: StateChange[] = [];
