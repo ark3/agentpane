@@ -345,6 +345,20 @@ Costs tokens: one real model turn, two on Claude.
 Verified with: `pi 0.85.1`, `claude 2.1.270` and `codex-cli 0.154.0` on the home server, 2026-09-15, each on its AGENTS.md pin.
 What it showed is `docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire".
 
+`--when pre-turn|mid-turn`, for Claude Code and Codex only, renames instead in the two states that run never tried (OW-kametu): a session in the state agentpane's adapter leaves it in before the first prompt, and one mid-turn, 40 text deltas in.
+Each reports the rename's answer against a timeline of the turn and lists the store before and after: Claude's directory for the scratch cwd, and for Codex the rollout, `session_index.jsonl` and the sqlite `threads` row.
+`--then-prompt` adds one short turn after a pre-turn rename, and `--skip-rename` makes a Codex pre-turn run the control with no rename.
+
+```bash
+python3 session_name_probe.py --backend claude|codex --when pre-turn|mid-turn [--then-prompt] [--skip-rename]
+```
+
+These run under a fresh scratch cwd in `/tmp`, and Codex in a temporary `CODEX_HOME` holding copies of `auth.json` and `config.toml`, left on disk.
+Costs tokens: none for a pre-turn run, one turn with `--then-prompt` or for a mid-turn run.
+
+Verified with: `claude 2.1.287` and `codex-cli 0.160.0` on the home server, 2026-10-02, each on its AGENTS.md pin.
+What it showed is `docs/MANUAL_TESTING.md`, "A rename before the first turn and during one, on Claude Code and Codex (OW-kametu)".
+
 ## `codex_fork_history_probe.py`
 
 Proves: **a Codex fork's `history_base` names where its inherited history ends, as an ordinal over the named thread's whole history and a byte offset into its own file** (OW-buligi).

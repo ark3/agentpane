@@ -2176,7 +2176,7 @@ A `control_request` of subtype `rename_session` with a `title` field answered a 
 The binary carries the string `rename_session is not supported in this context (onRenameSession callback not registered)`, so this could have failed the way `steer` does (OW-jihete); it did not.
 A user message reading `/rename probe name two` then ran as a turn and returned a `result` whose text was `Session renamed to: probe name two`, so the slash path works too and costs a turn cycle.
 Each rename appended a `custom-title` line to the store file (lines 20 and 22), and the file then repeated the last title at line 33 beside a fresh `ai-title`, so titles are re-emitted rather than written once.
-Nothing here was tried before the first turn or during one.
+Nothing here was tried before the first turn or during one; OW-kametu's section below tried both.
 
 **Codex keeps the name beside the rollout, never in it.**
 The method is `thread/name/set`: a `thread/setName` request, the name the vendored `ThreadSetNameParams.ts` suggests, was rejected with `-32600 unknown variant` and a list of every method the server knows, in a hand run preceding the probe.
@@ -2188,6 +2188,45 @@ So the D9 walk, which reads rollouts, cannot see a Codex name, and only a runnin
 **Read alongside, from the same day's source reading rather than a run.**
 The `threads` table on 0.154.0 also carries `is_pinned` and `archived`, and the protocol has `thread/archive` and `thread/unarchive`; on this machine both columns were zero across 101 threads.
 That is recorded in D13, where it belongs, since it bears on a decision rather than on a card.
+
+## A rename before the first turn and during one, on Claude Code and Codex (OW-kametu)
+
+Run on the home server 2026-10-02 by `python3 resources/probes/session_name_probe.py --backend <b> --when pre-turn|mid-turn`, every invocation exiting 0: `claude 2.1.287` on `--model haiku`, and `codex-cli 0.160.0` under `codex -m gpt-5.6-luna app-server` with `gpt-5.6-luna` also named on `thread/start` and `turn/start`.
+The rename route takes a name for any attached session, and two attached states had never been tried: one created here and not yet prompted, and one mid-turn.
+What rests on it is D9's promise that opening a session never leaves an empty one in the backend's store, and whether the clients' refusal of Rename mid-turn was needed.
+Pi was not run: as of `pi 1.0.0`, `_persist` returns until `_hasConversation()`, so a pre-prompt name is held in memory, read at the source.
+
+Each cell puts the CLI where agentpane's adapter leaves it before the first prompt, read from `start()`: `ClaudeAdapter` has already spawned `claude -p` with `--session-id`, `--verbose` and `--include-partial-messages` and had `get_settings` answered, and `CodexAdapter` has already sent `initialize` and `thread/start` with `sandbox: "danger-full-access"` and `approvalPolicy: "never"`.
+So `setName` reaches the CLI in that state on both backends; neither `requireProc` nor `requireThread` throws, and the route answered 204.
+The probe sends exactly what `setName` sends: a `rename_session` control request, or `thread/name/set`.
+Claude ran directly under a fresh cwd in `/tmp`, against the real `~/.claude/projects/` store; Codex ran in a temporary `CODEX_HOME` holding copies of `auth.json` and `config.toml`, because this session's sandbox mounts `~/.codex` read-only.
+The mid-turn prompt asked for the numbers 1 to 400, one per line, and the rename went out once 40 text deltas had arrived.
+Times below are seconds from the spawn.
+
+**Claude Code holds a pre-turn name in memory and writes it with the first turn.**
+`rename_session` answered `success` 148ms after it went out in one run and 14ms in another, and the store directory for the scratch cwd did not exist before the rename, three seconds after it, or after the process exited with no prompt sent.
+In the run that then sent one prompt, the store file appeared with the turn and opened with the name: `custom-title` at line 1 and an `agent-name` line carrying the same name at line 2, with the title re-emitted at lines 21 and 29.
+The 2026-09-15 probe read only `custom-title` and `ai-title` lines, so whether `claude 2.1.270` also wrote `agent-name` is unknown.
+So a rename before the first turn leaves nothing on disk, and is not lost.
+
+**Codex writes a thread with no conversation into its store when it is renamed.**
+`thread/name/set` answered `{}` 486ms after it went out, and the `thread/name/updated` notification followed.
+Three seconds later there was still no rollout, but `session_index.jsonl` had gained `{"id", "thread_name": "probe name one", "updated_at"}` and `state_5.sqlite` held a `threads` row with that `name`, an empty `title` and `first_user_message`, and a `rollout_path` naming a file that did not exist.
+Both were still there after the app-server exited.
+The control, the same run with the rename skipped (`--skip-rename`), left no index line and no `threads` row, then or after exit, so the rename alone wrote them.
+A second app-server started afterwards did not list the thread in `thread/list` and refused `thread/resume` with `-32600 no rollout found for thread id`, but answered `thread/read` with the name, where the control's thread answered `-32600 thread not loaded`.
+agentpane's own walk reads rollouts only, so it would not show the thread either; what is left is a record in Codex's store of a session nobody prompted, which is what D9 promises opening a session never leaves.
+In the run that then sent one prompt, the rollout appeared at the path the row already named, 13 lines with no trace of the name, and the name survived the turn.
+
+**Both answer a mid-turn rename at once, and the turn runs on.**
+On Claude Code the turn first called the `Write` tool, so 40 text deltas took until 16.372s; `rename_session` went out then and answered `success` at 16.375s, and the `result` came at 20.449s, 4.07s and 161 deltas later, with subtype `success`.
+The store file gained `custom-title` and `agent-name` at lines 29 and 30 before the reply's closing assistant lines, and a sidecar `<session-id>/custom-title.json` holding `{"customTitle": "probe name one"}` appeared beside it, which the pre-turn run with a prompt did not write.
+On Codex, `thread/name/set` went out at 4.958s and answered `{}` at 4.961s, one delta later; `thread/name/updated` followed at 4.967s, and `turn/completed` came at 19.077s with status `completed`, 14.1s and 272 deltas after the answer.
+The rollout and the `threads` row already existed from the turn's start, and the rename filled `threads.name` and appended the index line while the rollout again carried no name.
+So neither CLI queues a rename behind the turn the way Claude Code queues a stream-json user message (OW-jihete), and neither disturbs the turn.
+The clients still withhold Rename mid-turn, as they withhold Detach; lifting that is a choice this card did not make.
+
+The store files the runs left: Claude's under `~/.claude/projects/-tmp-agentpane-kametu-claude-pre-turn-xm637bdh/` and `~/.claude/projects/-tmp-agentpane-kametu-claude-mid-turn-habjyr1j/`, and the four temporary Codex homes `/tmp/agentpane-kametu-codexhome-*`, until something cleans `/tmp`.
 
 ## `DELETE` then attach resumes a real Pi session, and the resumed spawn carries no `--model` (OW-jamoyi)
 
