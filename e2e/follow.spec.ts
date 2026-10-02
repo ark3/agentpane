@@ -141,16 +141,21 @@ test("rapid app-driven scrolls do not masquerade as a reader scroll", async ({ p
 	// event's delivery: its end jump performs the second assignment, then the
 	// submit arms follow, and only then does that first event reach App. A single
 	// suppression boolean consumes it and leaves the second event looking manual.
+	//
+	// The listener waits for the event at the top rather than taking whichever
+	// comes first. The end jump above owes its own event, and "Jump to end" goes
+	// disabled before that is delivered; on a slow frame it was still pending
+	// here, the listener took it, and the submit then preceded the jump to start,
+	// whose disengage is correct (CI runs #90 and #97).
 	await page.evaluate(() => {
 		const pane = document.querySelector<HTMLElement>(".conversation")!;
-		pane.addEventListener(
-			"scroll",
-			() => {
-				(document.querySelector('button[aria-label="Jump to end"]') as HTMLButtonElement).click();
-				(document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
-			},
-			{ capture: true, once: true },
-		);
+		const onScroll = (): void => {
+			if (pane.scrollTop !== 0) return;
+			pane.removeEventListener("scroll", onScroll, { capture: true });
+			(document.querySelector('button[aria-label="Jump to end"]') as HTMLButtonElement).click();
+			(document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+		};
+		pane.addEventListener("scroll", onScroll, { capture: true });
 	});
 	await page.getByRole("button", { name: "Jump to start" }).click();
 	await expect(page.locator('[role="log"]')).toHaveAttribute("aria-busy", "true");

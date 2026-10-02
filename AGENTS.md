@@ -18,6 +18,9 @@ That job is a backstop after the push, never a substitute for the local run: run
 That vehicle cannot report a page as unfocused: it drives `chromium-headless-shell`, which answers `document.hasFocus() === true` everywhere.
 `e2e/harness.ts` stubs `document.hasFocus` for that reason, and `docs/MANUAL_TESTING.md` records the levers that were probed and failed.
 
+In a claude.ai cloud container the suite cannot launch as checked in: as of 2026-10-02, `@playwright/test 1.62.1` wanted `chromium_headless_shell-1234` while the container shipped only `-1194` under `/opt/pw-browsers`, and downloading browsers there is not allowed.
+Run it through an uncommitted config that spreads `playwright.config.ts` and sets `use.launchOptions.executablePath` to `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell` (or whatever build that directory holds then).
+
 ## Code
 
 - Path aliases `$shared/*`, `$server/*`, `$client/*`.
