@@ -579,9 +579,11 @@ export class CodexAdapter implements BackendAdapter {
 		}
 		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
 		// The turn's messages carry the reducer's identity, which otherwise knows
-		// only the effort `thread/start` or `thread/resume` reported. Set before
-		// the request, since the turn's first deltas can arrive with its response.
-		if (this.effort) this.reducer.setIdentity({ reasoningEffort: this.effort });
+		// only the model and effort `thread/start` or `thread/resume` reported.
+		// Set here rather than in `setModel`, since a turn already running keeps
+		// its model; and before the request, since the turn's first deltas can
+		// arrive with its response.
+		this.reducer.setIdentity({ model: this.model, reasoningEffort: this.effort });
 		this.turnStartPending = true;
 		this.turnBusy = { source: "submission", turnId: null };
 		let responseTurnId: string | undefined;

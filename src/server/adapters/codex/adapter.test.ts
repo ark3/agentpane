@@ -1558,6 +1558,25 @@ describe("CodexAdapter turns", () => {
 		expect(request(proc, "turn/start")["params"]).toMatchObject({ model: "gpt-selected" });
 	});
 
+	it("names the selected model on the turn it ran, not the one the thread started at (OW-9)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-model", model: "gpt-start" });
+
+		await adapter.setModel("gpt-selected");
+		await adapter.submit("go");
+		proc.emit({
+			method: "item/completed",
+			params: {
+				threadId: "thread-model",
+				turnId: "turn-1",
+				item: { type: "agentMessage", id: "answer", text: "ok", phase: "final_answer", memoryCitation: null },
+				completedAtMs: 10,
+			},
+		});
+
+		const [answer] = adapter.getState().messages;
+		expect(answer).toMatchObject({ role: "assistant", model: "gpt-selected" });
+	});
+
 	it("sends no effort until one is chosen, and reports the thread's own meanwhile", async () => {
 		const { adapter, proc } = await startedAdapter({ reasoningEffort: "medium" });
 
