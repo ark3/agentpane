@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs]
 blocked-by: [OW-jamaha]
+closed: done
 ---
 
 # agentpane-mode offers no command to rename an attached session, and its picker shows the preview where a session has a name (D27)
@@ -30,3 +31,12 @@ Each watched red first, in `emacs/agentpane-test.el`:
 2. A picker row whose summary carries `:name` shows the name in the Session column, and one with a null name shows the preview.
 
 Run the suite as the commentary at the head of `emacs/agentpane-test.el` gives it: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
+
+## Close note
+
+Landed as 3ed24a5 and ba024fd on main.
+`M-x agentpane-rename-session` reads a name and sends `sessions/setName`; `agentpane--check-renamable` refuses it, before the name is read and again before sending, on a buffer not attached (never attaching it), streaming, compacting, with a prompt or fork in flight, or closing -- the browser's `renamable`, with Emacs's fork and close flags standing for the browser's `view.sending` and every sibling's close refusal.
+A name blank once trimmed sends nothing; nothing is pre-filled, since the buffer's summary is the one it was last opened from and a rename from the buffer leaves it behind.
+The picker's Preview column is now Session: name, then stored preview, then first user text, then empty, as `sessionLabel` orders them.
+Each gate clause, the blank check and the label order watched red by mutation; ert 250 tests, 247 as expected, 0 unexpected, 3 skipped.
+OW-kametu amended so its route-following gate change covers the Emacs gate too.

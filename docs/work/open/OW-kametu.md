@@ -15,7 +15,7 @@ Claude Code (`claude --model haiku`) and Codex (`codex -m gpt-5.6-luna`) are not
 During a turn, each may accept the rename, refuse it, or queue it behind the turn the way a stream-json user message queues behind the first `result` (OW-jihete).
 
 The browser cannot stand in for the route here.
-Its Rename item (OW-bumonu, `renamable` in `src/client/App.svelte`) is disabled mid-turn but offered before the first turn, and it asks for the name with `window.prompt`, which blocks the page: a turn started from Emacs while that dialog is open is processed only after the POST has gone out, so a mid-turn rename reaches the route whatever the client gates.
+Its Rename item (OW-bumonu, `renamable` in `src/client/App.svelte`) is disabled mid-turn but offered before the first turn, as Emacs's `M-x agentpane-rename-session` (OW-jidihu) is refused and allowed, and it asks for the name with `window.prompt`, which blocks the page: a turn started from Emacs while that dialog is open is processed only after the POST has gone out, so a mid-turn rename reaches the route whatever the client gates.
 
 Load-bearing: whether a pre-turn rename creates a store file, and whether a mid-turn rename is answered before the turn ends.
 Incidental: the exact error text of a refusal.
@@ -23,4 +23,4 @@ Incidental: the exact error text of a refusal.
 ## Done when
 
 1. A live run on the home server, with both CLIs pinned to their models, records in `docs/MANUAL_TESTING.md`, under a section naming this card and each CLI's version, what a rename before the first turn and one mid-turn did: the response, its timing against the turn, and whether a store file appeared.
-2. Where a run shows a rename writes an empty session or misbehaves mid-turn, the route or the adapter refuses that case, with a route or adapter test watched red first, and `renamable` in `src/client/App.svelte` withholds the item in the same case, with an `App.test.ts` case watched red first; where it shows neither, the close note says so and nothing changes.
+2. Where a run shows a rename writes an empty session or misbehaves mid-turn, the route or the adapter refuses that case, with a route or adapter test watched red first, and `renamable` in `src/client/App.svelte` withholds the item in the same case, with an `App.test.ts` case watched red first, as `agentpane--check-renamable` in `emacs/agentpane.el` refuses `M-x agentpane-rename-session` (OW-jidihu), with a case in `emacs/agentpane-test.el`'s `agentpane-test-rename-session-refused-where-the-browser-offers-no-rename` watched red first; where it shows neither, the close note says so and nothing changes.
