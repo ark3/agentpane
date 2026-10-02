@@ -66,3 +66,14 @@ of turn length, from a real Pi turn (`e2e/perf-harness.ts` is synthetic and will
 not settle this — it never crosses a socket). If the curve is flat enough at
 realistic turn lengths, close this as measured-and-declined with the numbers,
 and fix D3's wording anyway.
+
+## Amended 2026-10-01 by OW-geselo
+
+Read at b758f98.
+OW-lisaye, the blocker, is closed.
+The line references above are stale: `#onUpdate` in `src/server/http/session-manager.ts` still sends the whole message (`this.broadcaster.upsert(session, change, message)` with `message = state.messages[change]`, fanned out by `Broadcaster.upsert` in `broadcaster.ts`), and Pi's emission is now `emitUpdate(result.changedIndex ?? "status")` in `src/server/adapters/pi/process.ts`, driven by the `message_update` arm of `reducePiNotification` in `pi/reducer.ts`.
+`recompose` in `claude/reducer.ts` and `e2e/perf-harness.ts` both still exist, and none of the `e2e/perf-*.ts` scripts measures bytes on the wire.
+No measurement has been made.
+
+"O(1) per token" sits in four places, and the wording fix covers all of them: D3 in `docs/DESIGN.md` ("upsert during a turn — O(1) per token"), the `#onUpdate` docblock in `session-manager.ts`, the `upsert` variant's docblock in `src/shared/protocol.ts` ("so this is O(1) per token regardless of transcript length"), and a comment in `src/server/http/app.test.ts` ("That is what makes a turn O(1) per token.").
+The `src/emacs/helper.ts` docblock (OW-jeruye) already states the per-message cost -- "The server sends every streamed token as an `upsert` carrying the whole message so far" -- and is the citation to reuse.

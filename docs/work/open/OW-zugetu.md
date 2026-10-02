@@ -28,3 +28,27 @@ Done: tests in `src/emacs/helper.test.ts`, with a `render` that throws for one t
 
 Under D25 the helper exits when its stream drops (OW-mepufi), so a render throw that ends the stream no longer makes a reconnect loop that stalls every attached session: it ends the helper and detaches every buffer (OW-kakate).
 The defect stands; only its consequence above changes.
+
+## Amended 2026-10-01 by OW-geselo
+
+Read at b758f98.
+The "From `reconcile`" bullet is dead, and so is its successor: OW-yibijo replaced `reconcile` with `dropDead`, and OW-likopo (33a9586) retired that too, so that neither name is left in `src/emacs` or `emacs/`.
+An `ended` event now runs `end(handle)`, which sends `session/detached` and no snapshot, so there is no fourth snapshot path to replace it.
+Drop `reconcile` from the done-condition.
+
+The other paths stand, all in `src/emacs/helper.ts`, and `render` still has its one call site in the `text` closure in `nodeFor` in `src/emacs/nodes.ts`:
+
+- `flushNodes` holds the only catch, still silent: `try { node = projectTarget(target, isStreaming, render); } catch { continue; }`.
+- `notifySnapshot` calls `projectTranscript(view.messages, view.isStreaming, render)` uncaught, reached from `introduce` (from `onEvent`) and from the `sessions/attach` handler through `answer`.
+  From `onEvent` a throw propagates through `dispatch`, rejects `run()` in `src/emacs/sse.ts`, and under D25 the helper exits.
+  From attach it is worse than the bullet above says: `answer` records `attach.done`, `attached` and `claims` before `notifySnapshot`, so a throw leaves the attachment recorded with no snapshot ever sent and the attach answered with an error.
+- The `sessions/preview` handler calls `projectTranscript(previewMessages(preview.turns), false, render)` uncaught, so the whole preview answers with an error.
+
+"The renderer, `src/emacs/render.ts`, has its own try/catch" is wrong: `loadRenderer` returns `renderMarkdown` bare, and the only catch on that path is around highlighting, in `highlightCode` in `src/client/render/markdown.ts`.
+The deferral still rests on nobody having seen a render throw.
+
+## Done when (replaces the one above)
+
+Tests in `src/emacs/helper.test.ts`, with a `render` that throws for one text (the OW-vejeka cases already build one, `unrenderable`), go red first and green after, showing a snapshot carrying that text goes out with its other parts intact from `onEvent` (both to an attached handle and as an attach answered by the stream's snapshot), before an attach's reply where the view is already held, and from `sessions/preview`.
+The per-node catch in `flushNodes` is gone, along with the helper.ts docblock sentence that explains it ("A held node whose rendering throws is skipped").
+The two OW-vejeka tests ("skips a held node whose rendering throws ...") assert the node is skipped, which is exactly what this changes, so they are rewritten to expect the node sent with its failed part's fallback, and pass.

@@ -21,3 +21,18 @@ Incidental: whether the lever is a count or a deadline.
 Done when it is settled whether a stopped-and-restarted server heals unaided -- a controller or e2e test that drops the stream at `CONNECTING`, leaves it down, brings it back, and asserts the sidebar freshens with no gesture.
 If it heals, that closes this card as moot with the evidence recorded beside `onDisconnect` in `src/client/controller.ts`, where OW-dekuri's reasoning already sits.
 If it does not, the remaining gap is a deadline on `reconnecting`, and the indicator's wording is the other half.
+
+## Amended 2026-10-01 by OW-geselo
+
+Read at b758f98: the controller half of the done-condition is already proven, and only the browser half remains.
+`onDisconnect` in `src/client/api.ts` reports `source.readyState === EventSource.CLOSED`, and `FakeApi.drop()` in the controller tests drives the `false` (`CONNECTING`) case.
+"re-lists when the event stream comes back up" in `src/client/controller.test.ts` drops at `CONNECTING`, reopens, and asserts the summaries were re-listed; "leaves a recoverable drop to the browser's own retry" asserts nothing is rebuilt within 60s of such a drop.
+Under D25 a drop holds nothing live, so the healing in question is the re-list alone.
+
+What is not proven is that a real `EventSource` against a server that was gone fires `onopen` when it returns.
+`e2e/event-stream.spec.ts` has one test, pinning the first `onerror`'s `readyState`, and never takes the server away and brings it back; `e2e/harness.ts` uses a synthetic `AgentpaneApi`; `docs/MANUAL_TESTING.md`, "What an `EventSource` error says about itself", measured the retry going on forever but not a return.
+
+## Done when (replaces the one above)
+
+A step in `e2e/event-stream.spec.ts` opens an `EventSource` on a `page.route` that serves `text/event-stream` and then cuts, answers the retries with `route.abort()` for several errors, serves again, and asserts `onopen` fires.
+With the controller test above, that settles it: if `onopen` fires, close this as moot with that evidence recorded beside `onDisconnect` in `src/client/controller.ts`; if it does not, the remaining gap is a deadline on `reconnecting`, as above.

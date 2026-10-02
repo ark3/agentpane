@@ -20,3 +20,24 @@ It does not matter whether the fix is a `.catch` or a guard in `reply`.
 
 - A test in `src/server/adapters/codex/adapter.test.ts`, modelled on the Pi test named above, delivers a request line after `dispose()` and passes; it fails the run before the fix, or else the card closes with the reason `reply` cannot throw there.
 - `bun run check` passes.
+
+## Amended 2026-10-01 by OW-geselo
+
+Read at b758f98; the code above has moved, and the case it names cannot happen, but a sibling does.
+`void this.reply(key, null)` is gone: the `"request"` case of `applyEffects` in `src/server/adapters/codex/adapter.ts` now calls `this.requireClient().respond(effect.requestId, DECLINE_RESPONSES[effect.kind])`, or `respondError(...)` for a kind with no decline shape.
+Every step below it is synchronous -- `CodexClient.respond` → `send` in `jsonrpc.ts` → `ChildProcessShell.write` in `src/server/adapters/child-process.ts`, which throws "Codex process is not running" when `killed || closed || stdin.destroyed || stdin.writableEnded` -- so the failure is no longer an unhandled rejection but a synchronous throw out of the stdout `data` listener (`emitLine`), which nothing on that path catches.
+
+**After `dispose()` it is unreachable.**
+`finishDisposal()` sets `ownership = null` and calls `holder?.release()` before its first await; `CodexConnection.release` in `codex/connection.ts` splices the holder out of `#holders` at once, and `#deliver` routes a request only to an answerable holder from `#recipientFor`, so a late line finds no recipient.
+
+**A child that dies on its own reaches it.**
+A dispatched reader reproduced it on Bun 1.4.0 with a throwaway script: a real child closed its stdin, a large `write` took EPIPE and destroyed stdin, a request line still draining from stdout reached an answerable holder, and `holder.respond` threw "Codex process is not running" up through `#deliver` ← `emitLine` ← the stdout `emit`; the process exited 1, and `src/` has no `uncaughtException` handler.
+Node and Bun both destroy `child.stdin` on `exit`, so a request delivered between `exit` and `close` would throw the same way without any EPIPE; three runs of a second script did not get the line to arrive after `exit`, which is a small sample, not a proof.
+It needs the child to send a `ServerRequest`; under D7a's `approvalPolicy: "never"` none had been seen as of `codex-cli 0.154.0`.
+Pi guards its equivalent write with `try { this.writeLine(...) } catch {}` in `handleLine` in `src/server/adapters/pi/process.ts`; Codex has no such guard.
+
+## Done when (replaces the one above)
+
+- A test in `src/server/adapters/codex/adapter.test.ts`, with a fake process whose `write` throws once it reports itself closed, delivers a request line and expects no throw out of the line handler, going red first.
+- The process's own end is still reported as it is today.
+- `bun run check` passes.

@@ -1,5 +1,5 @@
 ---
-labels: [unverified, emacs]
+labels: [unverified]
 ---
 
 # agentpane-created Claude sessions are hidden from the claude --resume picker by their sdk-cli entrypoint, while its Codex sessions show up as vscode
@@ -31,3 +31,13 @@ Upstream closed the `agent-shell`-shaped report as not planned: https://github.c
 Both halves are run on the home server and recorded in `docs/MANUAL_TESTING.md` with the versions: `claude --resume` (`--model haiku`) in the agentpane workspace does not list a session agentpane created and does open it by explicit id, and `codex resume` (`-m gpt-5.6-luna`) does list one.
 Whatever the answer, D9's REST-surface paragraph in `docs/DESIGN.md` and the OW-hezidi-era "all three CLIs" wording get a sentence saying which pickers can see agentpane's sessions, so the next reader does not take the hop for granted on Claude.
 If the run overturns either reading, this card's own text is one of the copies to retire.
+
+## Amended 2026-10-01 by OW-geselo
+
+The `emacs` label is dropped: nothing here is Emacs.
+`emacs/agentpane.el` lists sessions through the server's enumeration (D9) and never touches a CLI's own resume picker, and the work is a run and a record.
+Which "OW-hezidi-era 'all three CLIs' wording" the done-condition means is unclear, and no copy speaks of resume pickers: the phrase sits in the `sendLabel` comment in `src/client/App.svelte` (OW-hezidi, about the word "Fork"), in `docs/MANUAL_TESTING.md` ("The model pin stays a flag on all three CLIs") and in `AGENTS.md` under "Evidence" (model pins), and no doc tells a "hop to the TUI" story in those words.
+So the sentence the done-condition asks for goes in D9's paragraph opening "**REST surface** that follows", and anywhere else only if a copy is found that implies the hop works on every backend.
+`buildClaudeSpawnCommand` in `src/server/adapters/claude/process.ts` still passes `-p` with stream-json input and output, read at b758f98.
+Nothing in `docs/` or `src/` records either half yet.
+The Codex fixtures carry `"source":"vscode"` headers -- `resources/fixtures/codex/compact-rollout.rollout.jsonl`'s `session_meta` on `codex-cli 0.157.1` among them -- which shows the tag but not what `codex resume` does with it.

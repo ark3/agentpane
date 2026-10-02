@@ -46,3 +46,16 @@ And a short note in the snapshot arm itself saying the exemption is the contract
 Under D25 a sequence gap no longer asks for a recovery by attach; it detaches the session (OW-lunihe in the browser, OW-filuge in the helper).
 So the failure the exemption prevents is now a snapshot detaching a session it merely repainted, not a recovery loop, and the test's assertion that no recovery is requested becomes an assertion that the session is not detached.
 The test is still worth having; take the wording from whichever of those cards has landed.
+
+## Amended 2026-10-01 by OW-geselo
+
+Read at b758f98: half of this is done, and the test half is not.
+The note exists, though not in the snapshot arm: at the gap check in `reduceServerEvent` in `src/client/session-state.ts`, after the snapshot and `ended` arms and before the `switch` over the update arms, "A snapshot never gaps -- it restarts the count, which is why its arm above makes no check."
+It does not cite `protocol.ts`'s "Snapshots reset the sequence"; pointing it there is optional.
+The OW-bipume test in `src/client/session-state.test.ts` builds a view at seq 3 (`stateAtSequence(ref, 1)`, an error at 2, a notice at 3), applies a `seq: 0` snapshot, and asserts only `error`, `errorId` and `notices`: it does not assert `recover` is empty and sends no upsert after.
+The D26 test "leaves the view another handle holds of a snapshot's ref to that handle's ended" sends `seq: 0` then `seq: 1`, but on a handle with no prior view, so it passes with or without the exemption.
+The Emacs helper has no reducer of its own -- `src/emacs/helper.ts` imports `reduceServerEvent` from `$client/session-state.ts` -- so this one test covers both clients.
+
+The regression this card guards is already caught, though not by name: the adversarial read of this amendment found that adding `acceptsSequence` to the snapshot arm turns that OW-bipume test red (its `error: null` fails) and "takes the new ref from the snapshot a reconnect sends under a known handle (D21)" too.
+What is left is two assertions the done-condition names and nothing makes: after the `seq: 0` snapshot `recover` is empty, and an upsert at `seq: 1` then applies with `recover` still empty.
+They can go in the OW-bipume test itself.
