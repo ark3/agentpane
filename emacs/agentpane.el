@@ -81,6 +81,8 @@
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
 ;; `M-x agentpane-set-effort' set the model and its reasoning effort, but
 ;; only before the first prompt.
+;; `M-x agentpane-rename-session' names an attached session between turns,
+;; and the picker labels its row by that name.
 ;; `M-x agentpane-shutdown' stops the helper; the next command that needs
 ;; it starts a fresh one.
 ;;
@@ -3335,6 +3337,47 @@ daf5f52, not run live)."
                              (lambda (_) (when then (funcall then)))
                              t))))))
 
+(defun agentpane--check-renamable ()
+  "Signal a user error unless this buffer's session can be renamed now:
+attached, and with no turn, compaction, prompt or fork running, as the
+browser's `renamable' (src/client/App.svelte) offers Rename only then,
+and for its reasons: no backend's rename was tried mid-turn, and a name
+is written through to the backend (D13, \"Names are not marks\"), so
+the server refuses one for a session not attached
+\(`sessions/setName' in src/emacs/protocol.ts).  Not attached is
+therefore refused rather than attached first, as `agentpane-set-model'
+would.  None while a close is in flight either; see `agentpane--closing'."
+  (with-current-buffer (agentpane--transcript)
+    (agentpane--refuse-closing)
+    (cond
+     ((not (agentpane--attached-p))
+      (user-error "This session is not attached; attach it to rename it"))
+     ((or agentpane--streaming (plist-get agentpane--status :compaction))
+      (user-error "This session is running a turn; rename it once the turn ends"))
+     ((or agentpane--sending agentpane--forking)
+      (user-error "A request to this session is in flight; rename it once it answers")))))
+
+(defun agentpane-rename-session (name)
+  "Name this buffer's session NAME through `sessions/setName'.
+Allowed only where `agentpane--check-renamable' allows it, which is
+checked before NAME is read, and again before it is sent.  A NAME blank
+once trimmed sends nothing, as the browser's Rename sends nothing for one
+\(`renameSession' in src/client/App.svelte); the server would refuse it.
+The buffer keeps no copy of the name: it arrives in the listing the
+`sessions/changed' that follows asks for, which is why nothing is
+offered as the name to edit, the buffer's summary being as old as the
+buffer."
+  (interactive
+   (progn
+     (agentpane--check-renamable)
+     (list (read-string "Rename session: "))))
+  (unless (string-blank-p name)
+    (agentpane--check-renamable)
+    (with-current-buffer (agentpane--transcript)
+      (agentpane--request 'sessions/setName
+                          (list :session (agentpane--ref agentpane--session) :name name)
+                          #'ignore t))))
+
 (defun agentpane-set-effort (effort)
   "Set this buffer's session's reasoning EFFORT through `sessions/setEffort'.
 Allowed only before the first prompt, as `agentpane-set-model' is, and an
@@ -4198,12 +4241,13 @@ unseen, as the browser's row draws `.session-finished'.
 Its Workspace column is the last segment of the session's cwd, the full
 path as its help echo, and empty with no cwd, as the browser's
 `.session-cwd' draws it.
-Its Preview column is the stored preview, and while that is null, as it
-is for a session just prompted until the turn's end re-lists it, the text
-of the first user node with any in the transcript buffer holding the
-session, on one line (`agentpane--first-user-text'), as the browser's
-`sessionLabel' falls back to its `firstUserText'; that buffer drawing the
-node redraws the row (`agentpane--preview-pickers').  With neither it is
+Its Session column is the session's name, and while that is null its
+stored preview, and while that is null too, as it is for a session just
+prompted until the turn's end re-lists it, the text of the first user
+node with any in the transcript buffer holding the session, on one line
+\(`agentpane--first-user-text'), as the browser's `sessionLabel'
+\(src/client/App.svelte) labels its row (D27); that buffer drawing the
+node redraws the row (`agentpane--preview-pickers').  With none it is
 empty: the browser's last resort, the backend and id, would repeat the
 Backend column."
   (let ((ref (agentpane--ref summary))
@@ -4219,7 +4263,8 @@ Backend column."
                         (t ""))
                   (agentpane--format-time (plist-get summary :updatedAt))
                   (if cwd (propertize (file-name-nondirectory cwd) 'help-echo cwd) "")
-                  (or (plist-get summary :preview)
+                  (or (plist-get summary :name)
+                      (plist-get summary :preview)
                       (agentpane--first-user-text summary)
                       "")))))
 
@@ -4432,7 +4477,7 @@ what a row draws besides its summary has moved, and no listing is needed."
 
 (defun agentpane--preview-pickers ()
   "Redraw the rows of each picker listing this transcript buffer's session,
-by its handle or its ref, with no stored preview and an empty Preview, so
+by its handle or its ref, with no stored preview and an empty Session, so
 that the row takes the text of the user node just drawn at once rather
 than at the next listing (`agentpane--first-user-text').
 That listing can be a whole turn away: the server asks for one at a
@@ -4443,7 +4488,7 @@ resources/fixtures/codex/ (codex-cli 0.147.0 and 0.153.4), where a
 listing answers in about a quarter of a second.  The browser's label
 reads its transcript reactively, and needs no such call.
 The listing still reads the transcript, for a picker opened after the
-node was drawn.  An empty Preview is what makes this the first user node
+node was drawn.  An empty Session is what makes this the first user node
 with text: once one is drawn, later nodes redraw no picker."
   (let ((handle agentpane--handle)
         (ref (and agentpane--session (agentpane--ref agentpane--session))))
@@ -4551,7 +4596,7 @@ neither client now asks it for."
          ("" 2 nil)
          ("Updated" 17 t)
          ("Workspace" 16 t)
-         ("Preview" 0 nil)])
+         ("Session" 0 nil)])
   (setq tabulated-list-sort-key '("Updated" . t))
   (add-hook 'window-state-change-functions #'agentpane--clear-seen-turns)
   (add-variable-watcher 'agentpane--handle #'agentpane--binding-changed)

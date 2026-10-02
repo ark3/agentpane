@@ -4206,6 +4206,64 @@ would count it attached again."
         (should-error (agentpane-close-session) :type 'user-error)
         (should-not sent)))))
 
+;;;; Renaming a session, against a stub connection
+
+(ert-deftest agentpane-test-rename-session-sends-the-name-read ()
+  "`M-x agentpane-rename-session' on an idle attached session sends
+`sessions/setName' with the session's ref and the name read, and a name
+blank once trimmed sends nothing, as the browser's Rename sends nothing
+for one (`renameSession' in src/client/App.svelte)."
+  (agentpane-test--closing
+    (with-current-buffer buffer
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Bug hunt")))
+        (call-interactively #'agentpane-rename-session))
+      (should (equal sent `((sessions/setName :session ,ref :name "Bug hunt"))))
+      (setq sent nil)
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  \t")))
+        (call-interactively #'agentpane-rename-session))
+      (should-not sent))))
+
+(ert-deftest agentpane-test-rename-session-refused-where-the-browser-offers-no-rename ()
+  "`M-x agentpane-rename-session' signals a user error, reads no name and
+sends nothing in each case the browser's `renamable' refuses
+\(src/client/App.svelte): a session only previewed, which it does not
+attach, as `agentpane-set-model' would, since D13 names only an attached
+session; one streaming or compacting; and one with a prompt or a fork in
+flight."
+  (let ((ref '(:backend "codex" :id "t1")))
+    (agentpane-test--with-helper
+      (agentpane-test--forking nil nil
+        (agentpane-test--with-session ref
+          (agentpane-refetch)
+          (setq sent nil)
+          (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Bug hunt")))
+            (should-error (call-interactively #'agentpane-rename-session) :type 'user-error)
+            (should-error (agentpane-rename-session "Bug hunt") :type 'user-error))
+          (should-not (agentpane--attached-p))
+          (should-not sent)))))
+  (dolist (setup (list (lambda (ref)
+                         (agentpane--on-notification
+                          nil 'session/status
+                          (list :session ref :handle "h1" :isStreaming t :model "luna")))
+                       (lambda (ref)
+                         (agentpane--on-notification
+                          nil 'session/status
+                          (list :session ref :handle "h1" :isStreaming :json-false
+                                :compaction "running" :model "luna")))
+                       (lambda (_) (setq agentpane--sending t))
+                       (lambda (_) (setq agentpane--forking t))))
+    (agentpane-test--closing
+      (with-current-buffer buffer
+        (funcall setup ref)
+        (should (agentpane--attached-p))
+        (let ((read nil))
+          (cl-letf (((symbol-function 'read-string)
+                     (lambda (&rest _) (setq read t) "Bug hunt")))
+            (should-error (call-interactively #'agentpane-rename-session) :type 'user-error)
+            (should-error (agentpane-rename-session "Bug hunt") :type 'user-error))
+          (should-not read))
+        (should-not sent)))))
+
 ;;;; Each buffer's default-directory, against a stub connection
 
 (defmacro agentpane-test--with-directories (names &rest body)
@@ -4580,9 +4638,9 @@ no cwd, as the browser's `.session-cwd' does (OW-bisadi)."
                            ""))))))))
 
 (defun agentpane-test--preview (picker handle)
-  "The Preview cell of PICKER's row for the session holding HANDLE."
+  "The Session cell of PICKER's row for the session holding HANDLE."
   (with-current-buffer picker
-    (let ((column (seq-position (mapcar #'car tabulated-list-format) "Preview"))
+    (let ((column (seq-position (mapcar #'car tabulated-list-format) "Session"))
           (entry (seq-find (lambda (entry) (equal (plist-get (car entry) :handle) handle))
                            tabulated-list-entries)))
       (should column)
@@ -4590,8 +4648,8 @@ no cwd, as the browser's `.session-cwd' does (OW-bisadi)."
       (aref (cadr entry) column))))
 
 (ert-deftest agentpane-test-picker-previews-a-just-prompted-session-by-its-transcript ()
-  "A listed session whose stored preview is still null shows, as its Preview,
-the first user node with text in the transcript buffer holding it, its text
+  "A listed session whose stored preview is still null shows, in its Session
+column, the first user node with text in the transcript buffer holding it, its text
 parts joined, each run of whitespace one space, and trimmed, as the
 server's `trimPreview' makes the stored one and the browser's
 `firstUserText' labels its row, on one line; a stored preview wins over
@@ -4614,6 +4672,24 @@ it, and a session with no buffer shows nothing (OW-sowume)."
         (should (equal (mapcar (lambda (handle) (agentpane-test--preview picker handle))
                                '("h-a" "h-b" "h-c"))
                        '("Fix the bug now" "Stored one" "")))))))
+
+(ert-deftest agentpane-test-picker-labels-a-named-session-by-its-name ()
+  "A listed session whose summary carries a name shows the name in its
+Session column, ahead of its stored preview and its transcript's first
+user text, as the browser's `sessionLabel' labels its row (D27); one whose
+name is null shows its preview."
+  (agentpane-test--listing
+    (let ((named (plist-put (agentpane-test--summary "a" nil) :name "Bug hunt"))
+          (unnamed (plist-put (agentpane-test--summary "b" nil) :name nil)))
+      (with-current-buffer (agentpane-test--holding named)
+        (agentpane--draw agentpane-test--nodes))
+      (setq listing (list named unnamed))
+      (let ((picker (save-window-excursion
+                      (agentpane-sessions t)
+                      (current-buffer))))
+        (should (equal (mapcar (lambda (handle) (agentpane-test--preview picker handle))
+                               '("h-a" "h-b"))
+                       '("Bug hunt" "b")))))))
 
 (ert-deftest agentpane-test-picker-previews-a-user-node-drawn-after-its-listing ()
   "A picker already listing a session whose stored preview is null, while
