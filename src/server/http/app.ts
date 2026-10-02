@@ -401,8 +401,9 @@ export function createApp(deps: AppDeps): App {
 				const body = await readJson<SetNameRequest>(request);
 				if (!body.ok) return body.response;
 				// One rule for all three backends, Pi's: as of `pi 1.0.0` it trims a
-				// name and refuses one empty after that, where Codex takes any string.
-				const name = typeof body.value.name === "string" ? body.value.name.trim() : "";
+				// name, refuses one empty after that, and stores line breaks as one
+				// space (`set_session_name` in `rpc-mode.js`, `appendSessionInfo`).
+				const name = typeof body.value.name === "string" ? body.value.name.replace(/[\r\n]+/g, " ").trim() : "";
 				if (name === "") return error(400, "bad_request", "name is required and must not be blank");
 				// Written through, so only a session with a process to write to
 				// (D13, "Names are not marks"). The adapter's state change is what

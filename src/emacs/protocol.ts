@@ -297,7 +297,8 @@
  *   written through to its backend, which holds it; agentpane keeps no copy
  *   (D13, "Names are not marks"). Only an attached session can be named:
  *   the server refuses any other with a 409 `not_attached`, and a `name`
- *   empty once trimmed with a 400. The name arrives in the listing the
+ *   empty once trimmed with a 400; line breaks in it become one space.
+ *   The name arrives in the listing the
  *   `sessions/changed` that follows asks for.
  * - `sessions/setEffort` -- `{ session, effort }` -> `null`. `effort` is one of
  *   the session's model's `efforts` ids, taking effect from the next turn;

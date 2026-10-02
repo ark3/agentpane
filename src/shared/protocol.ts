@@ -416,9 +416,9 @@ export interface SetModelRequest {
  * POST /api/sessions/:backend/:id/name -- written through to the backend,
  * which holds it; agentpane keeps none (D13, "Names are not marks"). Only an
  * attached session can be named, since a detached one has no process to
- * write through: the route answers 409 `not_attached` for one. Leading and
- * trailing whitespace is trimmed, and a name empty after that answers 400
- * `bad_request`.
+ * write through: the route answers 409 `not_attached` for one. Line breaks
+ * become one space and leading and trailing whitespace is trimmed, as Pi
+ * stores a name, and a name empty after that answers 400 `bad_request`.
  */
 export interface SetNameRequest {
 	name: string;

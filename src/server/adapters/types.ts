@@ -41,8 +41,8 @@ export interface AdapterState {
 	 * accepted, or else the one the backend reported -- at attach where the
 	 * adapter has it in hand, and for Codex at every `thread/name/updated`.
 	 * Null when the backend has none, or none the adapter can read. This is
-	 * the only copy agentpane holds, and it dies with the adapter (D13, "Names
-	 * are not marks").
+	 * the only copy agentpane serves, and it dies with the adapter (D13,
+	 * "Names are not marks").
 	 */
 	name: string | null;
 }

@@ -876,8 +876,8 @@ export class CodexAdapter implements BackendAdapter {
 	/**
 	 * `thread/name/set`, the method's spelling as of `codex-cli 0.154.0`: the
 	 * `thread/setName` its params type suggests was refused with `-32600`. The
-	 * `thread/name/updated` that follows names the same thread and name, so
-	 * it moves nothing the answer has not.
+	 * `thread/name/updated` it also sends names the same thread and name, so
+	 * whichever arrives first, the other moves nothing.
 	 */
 	async setName(name: string): Promise<void> {
 		const client = this.requireClient();

@@ -241,8 +241,8 @@ function configureHappyServer(proc: AdapterProcess, options: HappyServerOptions 
 				proc.emit({ id, result: {} });
 				break;
 			case "thread/name/set":
-				// As of `codex-cli` 0.154.0 the answer is `{}`, and a
-				// `thread/name/updated` follows it, which a test sends itself.
+				// As of `codex-cli` 0.154.0 the answer is `{}`, beside a
+				// `thread/name/updated`, which a test sends itself.
 				proc.emit({ id, result: {} });
 				break;
 			case "thread/compact/start":

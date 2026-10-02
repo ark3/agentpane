@@ -1019,8 +1019,8 @@ describe("fork, model, and enumeration routes", () => {
 		await client.waitForCount(1);
 		const before = client.typed("sessions-changed").length;
 
-		expect((await post(ROUTES.name(PI_SESSION), { name: "  probe name " })).status).toBe(204);
-		// Trimmed, as Pi trims (`pi 1.0.0`), so every backend holds the same string.
+		expect((await post(ROUTES.name(PI_SESSION), { name: "  probe\r\nname " })).status).toBe(204);
+		// Line breaks collapsed and trimmed, as Pi stores it (`pi 1.0.0`), so every backend holds the same string.
 		expect(pi.forRef(PI_SESSION)?.name).toBe("probe name");
 		await client.until(() => client.typed("sessions-changed").length > before, "sessions-changed");
 		const listed = (await (await get(ROUTES.sessions)).json()) as ListSessionsResponse;

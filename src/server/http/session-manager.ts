@@ -1531,16 +1531,11 @@ export class SessionManager {
 		};
 	}
 
-	/**
-	 * What a held session says over the index's summary. An attached adapter's
-	 * `name` is the backend's word on it, but one that names none says nothing:
-	 * Claude Code's adapter cannot read a title it did not set, so its null
-	 * must not hide one the walk reads, once the walk reads names (OW-yilene).
-	 */
-	#liveOverlay(session: ManagedSession | undefined): { status: SessionStatus; isStreaming: boolean; name?: string } {
+	/** What a held session says over the index's summary; an attached one's `name` is its adapter's (D27). */
+	#liveOverlay(session: ManagedSession | undefined): { status: SessionStatus; isStreaming: boolean; name?: string | null } {
 		if (session?.adapter) {
 			const { isStreaming, name } = session.adapter.getState();
-			return { status: "attached", isStreaming, ...(name !== null ? { name } : {}) };
+			return { status: "attached", isStreaming, name };
 		}
 		return { status: session?.virtual ? "virtual" : "detached", isStreaming: false };
 	}

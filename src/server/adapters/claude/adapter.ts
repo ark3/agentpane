@@ -230,7 +230,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	private effort: string | null = null;
 	/**
 	 * The title `setName` last had the CLI accept. Null until then, even for a
-	 * session that already had one: the CLI offers no in-process read of it.
+	 * session that already had one: this adapter has no in-process read of it.
 	 */
 	private name: string | null = null;
 	private started = false;
