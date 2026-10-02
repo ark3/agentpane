@@ -1,5 +1,6 @@
 ---
 labels: [unverified, d27]
+closed: done
 ---
 
 # Renaming a Claude Code or Codex session before its first turn or during a turn is measured, and the name route follows what it shows
@@ -24,3 +25,14 @@ Incidental: the exact error text of a refusal.
 
 1. A live run on the home server, with both CLIs pinned to their models, records in `docs/MANUAL_TESTING.md`, under a section naming this card and each CLI's version, what a rename before the first turn and one mid-turn did: the response, its timing against the turn, and whether a store file appeared.
 2. Where a run shows a rename writes an empty session or misbehaves mid-turn, the route or the adapter refuses that case, with a route or adapter test watched red first, and `renamable` in `src/client/App.svelte` withholds the item in the same case, with an `App.test.ts` case watched red first, as `agentpane--check-renamable` in `emacs/agentpane.el` refuses `M-x agentpane-rename-session` (OW-jidihu), with a case in `emacs/agentpane-test.el`'s `agentpane-test-rename-session-refused-where-the-browser-offers-no-rename` watched red first; where it shows neither, the close note says so and nothing changes.
+
+## Close note
+
+Measured live on the home server 2026-10-02 (`claude 2.1.287 --model haiku`, `codex-cli 0.160.0` on `gpt-5.6-luna`) with `resources/probes/session_name_probe.py --when pre-turn|mid-turn`, recorded in `docs/MANUAL_TESTING.md`, "A rename before the first turn and during one, on Claude Code and Codex (OW-kametu)".
+Before the first turn both adapters already reach the CLI, so the route answered 204 on both.
+Claude Code answered `rename_session` with success and wrote nothing until the first turn, whose store file opened with the title: no change.
+Codex answered `thread/name/set` with `{}` and wrote a `session_index.jsonl` line and a sqlite `threads` row naming a rollout that did not exist, both outliving the process; a control run without the rename wrote neither.
+That is the empty session D9 forbids, so `CodexAdapter.setName` now refuses while the transcript is empty (400 `backend_refused`), `renamable` in `src/client/App.svelte` withholds Rename on a Codex session with an empty transcript, and `agentpane--check-renamable` refuses a Codex buffer with no indexed node; each case was watched red first, plus a notice-only Emacs case the adversarial read found the first cut missed, and an adapter case renaming a thread created here after its first prompt.
+Mid-turn, both CLIs answered the rename within 3ms and the turn ran on to completion seconds later, so neither queues it behind the turn; the clients still withhold Rename mid-turn, and lifting that is an owner choice this card did not make.
+The empty transcript is a stand-in for "Codex has a rollout yet"; the adversarial read named cases it gets wrong (a rename queued behind a first prompt, a compaction before the first prompt), and OW-depari moves that fact to the Codex adapter and retires all three stand-ins.
+`bun run check` passes on main (1633 tests); the Emacs suite ran 250, 247 as expected and 3 skipped.
