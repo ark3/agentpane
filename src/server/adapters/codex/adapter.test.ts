@@ -8,7 +8,7 @@ import { CodexAdapter, CodexAdapterFactory, type CodexAdapterOptions } from "./i
 import type { CodexProcess } from "./process.ts";
 import type { Thread } from "./protocol.ts";
 import { CodexReducer } from "./reducer.ts";
-import type { StateChange } from "../types.ts";
+import { BackendRefusedError, type StateChange } from "../types.ts";
 import { FakeCodexProcess } from "./test-support.ts";
 
 const VIRTUAL_REF: SessionRef = { backend: "codex", id: "virtual:test" };
@@ -1725,16 +1725,31 @@ function codexModel(id: string, efforts: string[], defaultEffort: string): Recor
 
 describe("CodexAdapter session name (D27, OW-jamaha)", () => {
 	it("names the thread with thread/name/set and carries the name once Codex answers", async () => {
-		const { adapter, proc } = await startedAdapter({ threadId: "thread-named" });
+		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, turns: twoStoredTurns() }, STORED_REF);
 		const seen: StateChange[] = [];
 		adapter.onUpdate((_state, change) => seen.push(change));
 
 		await adapter.setName("probe name");
 
 		expect(methods(proc).filter((method) => String(method).includes("name"))).toEqual(["thread/name/set"]);
-		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: "thread-named", name: "probe name" });
+		expect(request(proc, "thread/name/set")["params"]).toEqual({ threadId: STORED_REF.id, name: "probe name" });
 		expect(adapter.getState().name).toBe("probe name");
 		expect(seen).toEqual(["status"]);
+	});
+
+	it("refuses to name a thread with no conversation yet, sending nothing (OW-kametu)", async () => {
+		// As of `codex-cli 0.160.0` a `thread/name/set` before the first turn wrote
+		// a `session_index.jsonl` line and a `threads` row for a thread with no
+		// rollout, and both outlived the process (docs/MANUAL_TESTING.md, OW-kametu).
+		const { adapter, proc } = await startedAdapter({ threadId: "thread-fresh" });
+		const seen: StateChange[] = [];
+		adapter.onUpdate((_state, change) => seen.push(change));
+
+		await expect(adapter.setName("probe name")).rejects.toBeInstanceOf(BackendRefusedError);
+
+		expect(methods(proc)).not.toContain("thread/name/set");
+		expect(adapter.getState().name).toBeNull();
+		expect(seen).toEqual([]);
 	});
 
 	it("follows a thread/name/updated for its own thread, and no other", async () => {

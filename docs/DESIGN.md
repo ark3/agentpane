@@ -525,6 +525,7 @@ The file is the only place a mark can live uniformly, and this paragraph exists 
 The owner decided on 2026-09-15 that a session name set in agentpane is written through to the backend and kept nowhere else: Pi's `set_session_name`, Claude Code's `rename_session` control request, and Codex's `thread/name/set` all accept a rename mid-session on an attached session, measured live that day (`docs/MANUAL_TESTING.md`, "All three backends rename an attached session over the wire").
 The reasons are the ones this decision already weighs: no server-side copy to keep coherent, and agentpane stays one more UI over the underlying agent rather than a store beside it.
 The cost accepted with it is that a detached session cannot be renamed, since there is no wire to write through; the owner does not want that, so the D13 file is not asked to carry a name it could.
+A second cost, measured on 2026-10-02: a Codex session cannot be renamed before its first prompt, because as of `codex-cli 0.160.0` the rename alone wrote the thread into Codex's store, which D9 promises opening a session never does; the Codex adapter refuses it and both clients withhold Rename there, while Claude Code, as of `claude 2.1.287`, held such a name until the first turn wrote the file, and Pi, as of `pi 1.0.0` read at the source, persists nothing before a conversation exists (`docs/MANUAL_TESTING.md`, OW-kametu).
 
 ### D14. Every affordance is reachable with a pointer; the keyboard types text
 

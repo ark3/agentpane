@@ -3340,14 +3340,17 @@ daf5f52, not run live)."
 
 (defun agentpane--check-renamable ()
   "Signal a user error unless this buffer's session can be renamed now:
-attached, and with no turn, compaction, prompt or fork running, as the
-browser's `renamable' (src/client/App.svelte) offers Rename only then,
-and for its reasons: no backend's rename was tried mid-turn, and a name
-is written through to the backend (D13, \"Names are not marks\"), so
-the server refuses one for a session not attached
-\(`sessions/setName' in src/emacs/protocol.ts).  Not attached is
-therefore refused rather than attached first, as `agentpane-set-model'
-would.  None while a close is in flight either; see `agentpane--closing'."
+attached, with no turn, compaction, prompt or fork running, and, on Codex,
+prompted at least once, as the browser's `renamable'
+\(src/client/App.svelte) offers Rename only then, and for its reasons.
+A name is written through to the backend (D13, \"Names are not
+marks\"), so the server refuses one for a session not attached
+\(`sessions/setName' in src/emacs/protocol.ts), and the Codex adapter
+refuses one for a thread not yet prompted, which the rename alone would
+write into Codex's store (docs/MANUAL_TESTING.md, OW-kametu); a buffer
+drawn with no nodes is that case.  Not attached is therefore refused
+rather than attached first, as `agentpane-set-model' would.  None while a
+close is in flight either; see `agentpane--closing'."
   (with-current-buffer (agentpane--transcript)
     (agentpane--refuse-closing)
     (cond
@@ -3356,7 +3359,10 @@ would.  None while a close is in flight either; see `agentpane--closing'."
      ((or agentpane--streaming (plist-get agentpane--status :compaction))
       (user-error "This session is running a turn; rename it once the turn ends"))
      ((or agentpane--sending agentpane--forking)
-      (user-error "A request to this session is in flight; rename it once it answers")))))
+      (user-error "A request to this session is in flight; rename it once it answers"))
+     ((and (equal (plist-get (agentpane--ref agentpane--session) :backend) "codex")
+           (not (ewoc-nth (agentpane--ewoc) 0)))
+      (user-error "Codex cannot name a session before its first prompt; prompt it first")))))
 
 (defun agentpane-rename-session (name)
   "Name this buffer's session NAME through `sessions/setName'.

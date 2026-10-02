@@ -257,7 +257,8 @@ export interface AdapterFactory {
  * know, say -- or the adapter did, for a value the backend's protocol cannot
  * even carry. The server answers 400 with this message, because the
  * request is what was wrong; a backend that died or never answered is not
- * this, and stays a 500. Thrown by `setModel` only (OW-pizaki).
+ * this, and stays a 500. Thrown by `setModel` (OW-pizaki), and by Codex's
+ * `setName` on a thread not yet prompted (OW-kametu).
  */
 export class BackendRefusedError extends Error {
 	constructor(message: string) {

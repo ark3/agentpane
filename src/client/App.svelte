@@ -311,14 +311,19 @@
 	 * with `virtual` out rather than in: a rename is written through to the
 	 * backend (D13, "Names are not marks"), and the name route refuses any
 	 * session with no adapter, which is all a `virtual` status reports
-	 * (`SessionManager.#liveOverlay`). Not mid-turn because no backend's rename
-	 * was ever tried during one (`docs/MANUAL_TESTING.md`, "All three backends
-	 * rename an attached session over the wire"). Nor was one before the first
-	 * turn, which this leaves open, as the route does; OW-kametu measures both,
-	 * and this follows whatever the route comes to refuse.
+	 * (`SessionManager.#liveOverlay`). Not mid-turn, as Detach is not, though
+	 * as of `claude 2.1.287` and `codex-cli 0.160.0` both answered a rename
+	 * there at once and the turn ran on. Nor on Codex before the first prompt,
+	 * which the Codex adapter refuses: there the rename alone wrote the thread
+	 * into Codex's store, where Claude Code held the name until the first turn
+	 * (`docs/MANUAL_TESTING.md`, OW-kametu). An empty transcript is that case.
 	 */
 	const renamable = $derived(
-		selectedSummary?.status === "attached" && !streamingNow && !view.sending && compaction === null,
+		selectedSummary?.status === "attached" &&
+			!streamingNow &&
+			!view.sending &&
+			compaction === null &&
+			!(view.state.selected?.backend === "codex" && (selectedSession?.messages.length ?? 0) === 0),
 	);
 	/**
 	 * The streaming truth the action row may *act* on. Codex and Claude expose a

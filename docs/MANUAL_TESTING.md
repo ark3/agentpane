@@ -2197,7 +2197,7 @@ What rests on it is D9's promise that opening a session never leaves an empty on
 Pi was not run: as of `pi 1.0.0`, `_persist` returns until `_hasConversation()`, so a pre-prompt name is held in memory, read at the source.
 
 Each cell puts the CLI where agentpane's adapter leaves it before the first prompt, read from `start()`: `ClaudeAdapter` has already spawned `claude -p` with `--session-id`, `--verbose` and `--include-partial-messages` and had `get_settings` answered, and `CodexAdapter` has already sent `initialize` and `thread/start` with `sandbox: "danger-full-access"` and `approvalPolicy: "never"`.
-So `setName` reaches the CLI in that state on both backends; neither `requireProc` nor `requireThread` throws, and the route answered 204.
+So `setName` reaches the CLI in that state on both backends; neither `requireProc` nor `requireThread` throws, and before the change below the route answered 204.
 The probe sends exactly what `setName` sends: a `rename_session` control request, or `thread/name/set`.
 Claude ran directly under a fresh cwd in `/tmp`, against the real `~/.claude/projects/` store; Codex ran in a temporary `CODEX_HOME` holding copies of `auth.json` and `config.toml`, because this session's sandbox mounts `~/.codex` read-only.
 The mid-turn prompt asked for the numbers 1 to 400, one per line, and the rename went out once 40 text deltas had arrived.
@@ -2225,6 +2225,11 @@ On Codex, `thread/name/set` went out at 4.958s and answered `{}` at 4.961s, one 
 The rollout and the `threads` row already existed from the turn's start, and the rename filled `threads.name` and appended the index line while the rollout again carried no name.
 So neither CLI queues a rename behind the turn the way Claude Code queues a stream-json user message (OW-jihete), and neither disturbs the turn.
 The clients still withhold Rename mid-turn, as they withhold Detach; lifting that is a choice this card did not make.
+
+**What changed.**
+`CodexAdapter.setName` refuses while the transcript is empty, which is a thread created here and not yet prompted, with a `BackendRefusedError` the route answers as 400 `backend_refused`.
+The browser's `renamable` and agentpane-mode's `agentpane--check-renamable` withhold Rename on a Codex session with an empty transcript.
+Claude Code and Pi keep a pre-turn rename, since neither writes one before the first turn.
 
 The store files the runs left: Claude's under `~/.claude/projects/-tmp-agentpane-kametu-claude-pre-turn-xm637bdh/` and `~/.claude/projects/-tmp-agentpane-kametu-claude-mid-turn-habjyr1j/`, and the four temporary Codex homes `/tmp/agentpane-kametu-codexhome-*`, until something cleans `/tmp`.
 

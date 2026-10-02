@@ -853,6 +853,16 @@ describe("App", () => {
 		expect(offeredWhen({ state: selectedWith({ isStreaming: false }, { isStreaming: true }) })).toBe(false);
 		expect(offeredWhen({ sending: true, state: selectedWith({}) })).toBe(false);
 		expect(offeredWhen({ state: selectedWith({}, { compaction: "running" }) })).toBe(false);
+		// Codex before its first prompt, which the adapter refuses because the
+		// rename alone writes the thread into Codex's store (OW-kametu). Pi and
+		// Claude Code hold a name until the first turn, so the Pi cases above stand.
+		const codexWith = (liveOverrides: object) => state({
+			selected: codexSession,
+			summaries: [summary(codexSession, null)],
+			sessions: { [sessionKey(codexSession)]: { ...live, ref: codexSession, ...liveOverrides } },
+		});
+		expect(offeredWhen({ state: codexWith({}) })).toBe(false);
+		expect(offeredWhen({ state: codexWith({ messages: [{ role: "user", content: "Hi", timestamp: 1 }] }) })).toBe(true);
 	});
 
 	/** Driven by the real controller, so what is under test reaches the API's `setName`. */

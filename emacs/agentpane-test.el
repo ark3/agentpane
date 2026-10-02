@@ -4229,8 +4229,9 @@ sends nothing in each case the browser's `renamable' refuses
 \(src/client/App.svelte): a session only previewed, which it does not
 attach, as `agentpane-set-model' would, since D13 names only an attached
 session; one streaming or compacting; one with a prompt or a fork in
-flight; and one whose close is in flight, as nothing that would reach the
-session goes out then (`agentpane--closing')."
+flight; one whose close is in flight, as nothing that would reach the
+session goes out then (`agentpane--closing'); and a Codex session drawn
+with no nodes, one not yet prompted, which the server refuses (OW-kametu)."
   (let ((ref '(:backend "codex" :id "t1")))
     (agentpane-test--with-helper
       (agentpane-test--forking nil nil
@@ -4253,7 +4254,12 @@ session goes out then (`agentpane--closing')."
                                 :compaction "running" :model "luna")))
                        (lambda (_) (setq agentpane--sending t))
                        (lambda (_) (setq agentpane--forking t))
-                       (lambda (_) (setq agentpane--closing t))))
+                       (lambda (_) (setq agentpane--closing t))
+                       (lambda (ref)
+                         (agentpane--on-notification
+                          agentpane--connection 'session/snapshot
+                          (list :session ref :handle "h1" :isStreaming :json-false
+                                :model "luna" :nodes [])))))
     (agentpane-test--closing
       (with-current-buffer buffer
         (funcall setup ref)

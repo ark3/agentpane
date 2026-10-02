@@ -11,15 +11,16 @@ import { randomUUID } from "node:crypto";
 import type { AgentNotice, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
 import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
 import { codexSessionsRoot } from "../../sessions/index.ts";
-import type {
-	AdapterState,
-	AdapterFactory,
-	BackendAdapter,
-	ForkResult,
-	ImageInput,
-	StartOptions,
-	StateChange,
-	Unsubscribe,
+import {
+	type AdapterState,
+	type AdapterFactory,
+	type BackendAdapter,
+	BackendRefusedError,
+	type ForkResult,
+	type ImageInput,
+	type StartOptions,
+	type StateChange,
+	type Unsubscribe,
 } from "../types.ts";
 import { CodexConnection, CodexConnectionRegistry, type CodexConnectionHolder } from "./connection.ts";
 import type { CodexClientView } from "./jsonrpc.ts";
@@ -878,8 +879,18 @@ export class CodexAdapter implements BackendAdapter {
 	 * `thread/setName` its params type suggests was refused with `-32600`. The
 	 * `thread/name/updated` it also sends names the same thread and name, so
 	 * whichever arrives first, the other moves nothing.
+	 *
+	 * Refused while the transcript is empty, which is a thread created here and
+	 * not yet prompted: as of `codex-cli 0.160.0` a rename then wrote a
+	 * `session_index.jsonl` line and a sqlite `threads` row for a thread with
+	 * no rollout, both outliving the process, which is the empty session D9
+	 * promises opening one never leaves behind (docs/MANUAL_TESTING.md,
+	 * OW-kametu). Both clients withhold Rename in the same case.
 	 */
 	async setName(name: string): Promise<void> {
+		if (this.reducer.getState().messages.length === 0) {
+			throw new BackendRefusedError("a Codex thread cannot be named before its first prompt");
+		}
 		const client = this.requireClient();
 		const params: ThreadSetNameParams = { threadId: this.requireThread(), name };
 		await client.request<ThreadSetNameResponse>("thread/name/set", params);
