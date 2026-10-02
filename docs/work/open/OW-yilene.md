@@ -34,11 +34,18 @@ Update it in the same change so it describes what the parser now does with both 
 The preview stays the first human message.
 How a row shows a name is `docs/DESIGN.md` D27's label rule, which OW-bumonu draws in the browser and OW-jidihu in agentpane-mode; this card is server-only, amended 2026-10-01 under D27 to drop the client test it carried.
 
+## The attached overlay
+
+As OW-jamaha left it on 2026-10-01, an attached session's summary takes `name` from its adapter, unconditionally, in `#liveOverlay` in `src/server/http/session-manager.ts`.
+Claude Code's adapter reports `null` for a title it did not set itself, so once this card reads `custom-title`, an attached Claude session would list no name where the same session detached lists its title.
+Whether the overlay keeps the walk's name when the adapter reports `null` is this card's decision; OW-jamaha dropped a fallback that pre-empted it, because nothing could trigger it before this card.
+
 ## Done when
 
 Each watched red first.
 
 1. A Pi parser test builds a file whose `session_info` entries come after several messages, with a later one clearing the name, and asserts the summary's `name` follows the last entry.
 2. A Claude parser test builds a file with a `custom-title` line after the first assistant message, repeated later, and asserts `name` is that title and `preview` is still the first prompt.
+3. A test in `src/server/http/` attaches a Claude session whose stored summary carries a name, with the adapter reporting `null`, and asserts the listing shows whatever "The attached overlay" decided.
 
 `bun run check` passes, and a listing of the home server's real corpus is timed before and after, the figures recorded in the close note with the date; that timing is the guard on enumeration staying cheap, since no parser-level bounded-read test exists (`src/server/sessions/line-reader.test.ts` bounds the reader alone), and OW-20, which waits on a measured listing latency, gets one from it.

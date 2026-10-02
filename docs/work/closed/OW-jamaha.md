@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # An attached session can be renamed over the HTTP API and the Emacs helper, written through to the backend and kept nowhere else
@@ -52,3 +53,15 @@ Each watched red first.
 3. A test in `src/emacs/helper.test.ts` asserts `sessions/setName` forwards the session and name to the route.
 
 `bun run check` passes.
+
+## Close note
+
+Landed 2026-10-01 in two commits on main: "sessions: name an attached session over the HTTP API and the Emacs helper, written through to the backend (OW-jamaha)" and the review follow-up "sessions: store a name as Pi does, and list an attached session's adapter name as is (OW-jamaha)".
+
+Built: `setName` on `BackendAdapter` and all three adapters (Pi `set_session_name`, Claude Code `rename_session` control request with `title`, Codex `thread/name/set` plus `thread/name/updated` filtered to its own thread); `AdapterState.name`, read at attach from Pi's `get_state` `sessionName` and Codex's start/resume `thread.name`, and for Pi again after a fork; `POST /api/sessions/:backend/:id/name` (`ROUTES.name`, `SetNameRequest`) answering 204, 409 `not_attached` for a detached session, 400 `bad_request` for a blank name; `SessionSummary.name`, `null` from the walk and the adapter's name when attached; `sessions-changed` when an adapter's name changes; `setName` on `AgentpaneApi` and `sessions/setName` on the Emacs helper. The frozen headers of `src/server/adapters/types.ts`, `src/shared/protocol.ts` and `src/emacs/protocol.ts` record the raising under D27. No UI: OW-bumonu and OW-jidihu.
+
+Empty and odd names: one rule for all three backends, Pi's as of `pi 1.0.0` read at the source -- line breaks become one space, the name is trimmed, and one empty after that is refused 400 at the route. Pi applies exactly that (`rpc-mode.js` trims and refuses empty, `appendSessionInfo` collapses `[\r\n]+`), so the listed name equals what Pi stores; "Pi clears on empty" describes Pi's file reader, not its RPC.
+
+Verified: each done-condition test watched red by removing the code it covers -- per-adapter command and state tests, Codex notification test (own thread and other thread), Pi and Codex attach-time name tests, route refusal for a detached session, route forward plus `sessions-changed` plus listing, Emacs helper forward; the newline collapse watched red with the route's old trim. `bun run check` green, 1626 tests, 36s. No live CLI run.
+
+Review dropped a fallback that kept the walk's name when an attached adapter reports `null`: nothing could reach it before names are read from stores, so the choice moved to OW-yilene ("The attached overlay"). Filed from review: OW-kametu (rename before the first turn or mid-turn never measured for Claude and Codex), OW-husuju (Pi's `session_info_changed` unread), OW-mepivi (Codex name read at `thread/start` and borrowed fork untested).
