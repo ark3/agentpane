@@ -973,12 +973,21 @@ export class CodexAdapter implements BackendAdapter {
 					// alternative is D2a's silent stall, a turn that blocks until the
 					// session is killed, with no test and no log naming the cause.
 					// Erroring out costs one turn and names the kind that did it.
+					//
+					// Either reply fails only once the child is already gone -- it
+					// died on its own while this request line was still draining from
+					// stdout -- and that end is reported by the exit path, so there is
+					// nothing to add here, and it must not throw out of the line
+					// handler. The kind is still named: it is what arrived.
+					const client = this.requireClient();
 					if (!Object.hasOwn(DECLINE_RESPONSES, effect.kind)) {
-						this.requireClient().respondError(
-							effect.requestId,
-							UNSUPPORTED_REQUEST_CODE,
-							`agentpane cannot answer ${effect.kind}`,
-						);
+						try {
+							client.respondError(
+								effect.requestId,
+								UNSUPPORTED_REQUEST_CODE,
+								`agentpane cannot answer ${effect.kind}`,
+							);
+						} catch {}
 						this.emitError(
 							`codex sent an unsupported request (${effect.kind}); agentpane declined it`,
 						);
@@ -987,7 +996,9 @@ export class CodexAdapter implements BackendAdapter {
 					// A kind with a decline shape is answered with it -- an approval
 					// answered with a JSON-RPC error would read as a client failure
 					// rather than a "no" (OW-zisumi).
-					this.requireClient().respond(effect.requestId, DECLINE_RESPONSES[effect.kind]);
+					try {
+						client.respond(effect.requestId, DECLINE_RESPONSES[effect.kind]);
+					} catch {}
 					this.emitError(
 						`codex sent a request agentpane cannot answer (${effect.kind}); agentpane declined it`,
 					);

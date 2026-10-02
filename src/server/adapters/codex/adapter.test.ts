@@ -87,6 +87,16 @@ class DelayedTerminationProcess extends AdapterProcess {
 	}
 }
 
+/** Writes throw once `closed` is set, as `ChildProcessShell.write` does once the child's stdin is gone. */
+class ClosedStdinProcess extends AdapterProcess {
+	closed = false;
+
+	override write(line: string): void {
+		if (this.closed) throw new Error("Codex process is not running");
+		super.write(line);
+	}
+}
+
 class SynchronousRegistrationProcess extends AdapterProcess {
 	override onLine(cb: (line: string) => void): void {
 		super.onLine(cb);
@@ -2153,6 +2163,33 @@ describe("CodexAdapter requests, refused at arrival (D2a)", () => {
 				message: expect.stringContaining("item/commandExecution/requestApproval"),
 				answered: [{ id: 41, result: { decision: "decline" } }],
 			},
+		]);
+	});
+
+	it("does not throw out of the line handler when the child is gone while a request line still drains (OW-pivuho)", async () => {
+		const threadId = "thread-draining";
+		const proc = new ClosedStdinProcess();
+		configureHappyServer(proc, { threadId });
+		const adapter = new CodexAdapter(VIRTUAL_REF, { codexRoot: NO_STORE, spawn: () => proc });
+		await adapter.start({ cwd: "/workspace" });
+		const errors: string[] = [];
+		adapter.onError((message) => errors.push(message));
+		const before = responses(proc).length;
+
+		proc.closed = true;
+		expect(() =>
+			proc.emit({ id: 51, method: "item/fileChange/requestApproval", params: { threadId } }),
+		).not.toThrow();
+		expect(() =>
+			proc.emit({ id: 52, method: "workspace/trust/request", params: { threadId } }),
+		).not.toThrow();
+		proc.exit(1, null, new Error("app-server died"));
+
+		expect(responses(proc).length).toBe(before);
+		expect(errors).toEqual([
+			expect.stringContaining("item/fileChange/requestApproval"),
+			expect.stringContaining("workspace/trust/request"),
+			"app-server died",
 		]);
 	});
 
