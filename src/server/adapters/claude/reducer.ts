@@ -37,6 +37,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
 	AssistantMessage,
+	JsonValue,
 	TextContent,
 	ThinkingContent,
 	ToolCall,
@@ -400,7 +401,8 @@ export class ClaudeReducer {
 					content: toolResultContent(block.content),
 					isError: block.is_error === true,
 					timestamp,
-					...(details !== undefined ? { details } : {}),
+					// Parsed off the wire, so JSON by construction; pi-ai 1.2.0 types it `JsonValue`.
+					...(details !== undefined ? { details: details as JsonValue } : {}),
 				};
 				this.messages.push(result);
 				effects.push({ type: "message", index: this.messages.length - 1 });

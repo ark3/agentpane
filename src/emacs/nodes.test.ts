@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, JsonObject, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { PaneMessage } from "$shared/protocol.ts";
 import { ClaudeReducer } from "$server/adapters/claude/reducer.ts";
 import {
@@ -176,7 +176,7 @@ describe("tool parts", () => {
 			(message): message is AssistantMessage =>
 				message.role === "assistant" && message.content.some((block) => block.type === "toolCall"),
 		)!;
-		const summary = (name: string, args: Record<string, unknown>): string =>
+		const summary = (name: string, args: JsonObject): string =>
 			toolParts(projectTranscript([{ ...turn, content: [{ type: "toolCall", id: "odd-1", name, arguments: args }] }], false, render))[0]!
 				.summary;
 		for (const odd of ["odd\nname.ts", "odd\tname.ts", "odd\r\n name.ts"]) {

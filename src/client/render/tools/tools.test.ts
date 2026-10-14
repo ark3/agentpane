@@ -7,7 +7,7 @@
  * `mcpToolCall` names make mandatory.
  */
 import { render } from "@testing-library/svelte";
-import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { JsonObject, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import ToolCallBlock from "../ToolCallBlock.svelte";
 import {
@@ -20,7 +20,7 @@ import DefaultTool from "./DefaultTool.svelte";
 import BashTool from "./BashTool.svelte";
 import { openToolCards } from "./test-support.ts";
 
-function call(name: string, args: Record<string, unknown> = {}, id = "call_1"): ToolCall {
+function call(name: string, args: JsonObject = {}, id = "call_1"): ToolCall {
 	return { type: "toolCall", id, name, arguments: args };
 }
 

@@ -1,10 +1,10 @@
 /**
  * Reading tool call arguments.
  *
- * `ToolCall.arguments` is `Record<string, any>` filled in by whichever backend
- * and model produced the call, so every access here is defensive: a tool named
- * `read` may or may not have a `path`, and a Codex `dynamicToolCall` can have
- * any shape at all. Nothing in this file may throw.
+ * `ToolCall.arguments` is a `JsonObject` (as of pi-ai 1.2.0) filled in by
+ * whichever backend and model produced the call, so every access here is
+ * defensive: a tool named `read` may or may not have a `path`, and a Codex
+ * `dynamicToolCall` can have any shape at all. Nothing in this file may throw.
  */
 
 /** The keys a file-shaped call names its file by, across backends. */

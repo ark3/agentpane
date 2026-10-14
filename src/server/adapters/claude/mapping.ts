@@ -11,6 +11,7 @@
 
 import type {
 	ImageContent,
+	JsonObject,
 	TextContent,
 	ThinkingContent,
 	ToolCall,
@@ -111,7 +112,8 @@ export function assistantBlockToContent(
 				type: "toolCall",
 				id: block.id,
 				name: block.name,
-				arguments: isRecord(block.input) ? block.input : {},
+				// Parsed off the wire, so JSON by construction; pi-ai 1.2.0 types it `JsonObject`.
+				arguments: isRecord(block.input) ? (block.input as JsonObject) : {},
 			};
 		default:
 			return null;

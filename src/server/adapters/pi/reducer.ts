@@ -140,8 +140,8 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			// events after compaction_start are compaction_end and the command
 			// response -- so the transcript would show nothing unless we append a
 			// message here. Mirror the `CompactionSummaryMessage` shape
-			// pi-agent-core declaration-merges into AgentMessage; `Message.svelte`
-			// draws the marker plus this summary text.
+			// src/shared/pi-messages.ts declaration-merges into AgentMessage;
+			// `Message.svelte` draws the marker plus this summary text.
 			if (event.result) {
 				const summary: AgentMessage = {
 					role: "compactionSummary",

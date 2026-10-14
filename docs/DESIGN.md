@@ -388,6 +388,11 @@ Add a package to `TYPE_ONLY_PACKAGES` there if this list grows.
 
 The alternative — vendoring the `.d.ts` files into `src/` — trades drift surprise for manual sync, and loses the property that makes D6 worth having: that Pi's own shape is what we conform to.
 
+One exception, from OW-meriva.
+As of `pi-agent-core 1.2.0` the four message kinds `bashExecution`, `custom`, `branchSummary` and `compactionSummary` left that package for `pi-coding-agent`, which is the CLI and not a dependency here.
+So `src/shared/pi-messages.ts` transcribes them, with their declaration merge into `CustomAgentMessages`, from `pi-coding-agent 1.2.0`'s `dist/core/messages.d.ts`, the same way `src/server/adapters/pi/protocol.ts` transcribes the RPC types.
+Nothing flags drift, so a move of the pins re-diffs that file against `dist/core/messages.d.ts` of the `pi-coding-agent` at the new version.
+
 ### D11. The wire contract is a shared module
 
 Both ends of D2/D3 are ours, so the SSE event union and the REST request/response types live in one module under `src/shared/` and are imported by server and client alike.

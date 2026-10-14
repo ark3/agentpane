@@ -16,6 +16,8 @@
 import type {
 	AssistantMessage,
 	ImageContent,
+	JsonObject,
+	JsonValue as PiJsonValue,
 	TextContent,
 	ToolCall,
 	ToolResultMessage,
@@ -223,10 +225,10 @@ function textBlocks(text: string): TextContent[] {
 	return [{ type: "text", text }];
 }
 
-interface EditHunk {
+type EditHunk = {
 	oldText: string;
 	newText: string;
-}
+};
 
 function sideOfHunk(lines: string[], omittedPrefix: "+" | "-"): string {
 	return lines
@@ -248,7 +250,7 @@ function editsFromDiff(diff: string): EditHunk[] {
 	}
 }
 
-function fileChangeArguments(changes: FileUpdateChange[]): Record<string, unknown> {
+function fileChangeArguments(changes: FileUpdateChange[]): JsonObject {
 	return {
 		path: changes[0]?.path ?? "",
 		edits: changes.flatMap((change) => editsFromDiff(change.diff)),
@@ -302,9 +304,17 @@ function toolPair(
 	};
 }
 
-function asArguments(value: JsonValue): Record<string, unknown> {
-	if (isRecord(value)) return value;
-	return { value };
+/**
+ * ts-rs generates an optional member as `?:`, so Codex's `JsonValue` and
+ * `agentsStates` admit `undefined` members, which pi-ai's `JsonValue` (as of
+ * 1.2.0) does not. These casts and the three on `details` fields below are
+ * sound because no producer writes one: a live item comes out of `JSON.parse`,
+ * and the preview's `threadItem` in `src/server/sessions/codex.ts` fills its
+ * members from strings or `?? null`.
+ */
+function asArguments(value: JsonValue): JsonObject {
+	if (isRecord(value)) return value as JsonObject;
+	return { value } as JsonObject;
 }
 
 /** What a child with no message says instead: its last known status, in words. */
@@ -482,7 +492,8 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 						server: item.server,
 						tool: item.tool,
 						durationMs: item.durationMs,
-						structuredContent: item.result?.structuredContent ?? null,
+						// Codex `JsonValue`, ts-rs `?:` members: see asArguments.
+						structuredContent: (item.result?.structuredContent ?? null) as PiJsonValue,
 					},
 				},
 			);
@@ -550,7 +561,8 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 				{
 					content: textBlocks(results.length ? JSON.stringify(results, null, 2) : ""),
 					isError: false,
-					details: { action: item.action, results },
+					// `results` is Codex `JsonValue[]`, ts-rs `?:` members: see asArguments.
+					details: { action: item.action, results: results as PiJsonValue },
 				},
 			);
 		}
@@ -616,7 +628,8 @@ export function mapItem(item: ThreadItem, ctx: MapContext): MappedItem {
 						status: item.status,
 						senderThreadId: item.senderThreadId,
 						receiverThreadIds: children,
-						agentsStates: item.agentsStates,
+						// `{ [key in string]?: CollabAgentState }` from ts-rs: see asArguments.
+						agentsStates: item.agentsStates as JsonObject,
 					},
 				},
 			);
@@ -651,9 +664,9 @@ function blockAsAssistant(block: TextContent | ImageContent): TextContent {
  * same thing it means on Pi's marker -- the context as it stood going into the
  * compaction (OW-kelomi) -- because two markers on one screen must not name the
  * same figure for different things. Built as the `CompactionSummaryMessage`
- * shape pi-agent-core declaration-merges into `AgentMessage` -- constructed
- * inline rather than via `createCompactionSummaryMessage`, because the pi
- * packages are types-only (D10, enforced by import-boundaries.test.ts).
+ * shape `src/shared/pi-messages.ts` declaration-merges into `AgentMessage` --
+ * constructed inline rather than via `createCompactionSummaryMessage`, because
+ * the pi packages are types-only (D10, enforced by import-boundaries.test.ts).
  */
 function compactionMarker(timestamp: number, tokensBefore: number): AgentMessage {
 	return { role: "compactionSummary", summary: "", tokensBefore, timestamp };
