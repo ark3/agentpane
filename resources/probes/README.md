@@ -216,7 +216,8 @@ Verified with: `pi` 0.84.2, `codex-cli` 0.147.0; the Pi cells again with
 mid-stream fork, and the forked file on disk, re-measured at the instrument
 (OW-gajesu)", and again with the Pi mid-stream gate in place, 2026-09-15,
 "Pi's mid-stream fork, measured against text known to have streamed
-(OW-sededi)"); the Codex mid-stream cell with
+(OW-sededi)"), and again with `pi` 1.2.0 there, 2026-10-14, two runs
+(OW-vijine); the Codex mid-stream cell with
 `codex-cli` 0.154.0, on which the rollout no longer writes an
 `event_msg`/`agent_message` beside each assistant `response_item` — so
 `fork.jsonl`, captured on 0.147.0, is a version behind on line shapes. What that cell showed is `docs/MANUAL_TESTING.md`,
@@ -436,8 +437,8 @@ python3 hydrate_window_probe.py --backend pi
 
 Costs tokens: one long Codex turn on `gpt-5.6-luna` per `--item`, two for `contextCompaction`, or three Pi turns, one of them cut short by the fork.
 
-Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25.
-What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", and "What a Codex listing holds of a running turn, by item kind".
+Verified with: `codex-cli` 0.156.0 and `pi` 0.87.1 on the home server, 2026-09-24; every `--item` with `codex-cli` 0.156.0 there, 2026-09-25; `--backend pi` with `pi` 1.2.0 there, 2026-10-14, three runs (OW-vijine).
+What it showed is `docs/MANUAL_TESTING.md`, "What each backend says while a live session's history is read back", "What a Codex listing holds of a running turn, by item kind", and "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0`".
 
 ## `emacs_helper_drop_probe.el`
 

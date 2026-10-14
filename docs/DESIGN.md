@@ -562,7 +562,7 @@ Asked directly on 2026-09-11 whether the workflow ever involves scrolling back a
 A mid-stream fork there returns `success: true` and abandons the in-flight turn anyway — the active `sessionFile` moves, `isStreaming` goes false, and the turn settles (work laptop, 2026-08-20, `pi 0.84.2`; `docs/MANUAL_TESTING.md`, OW-yudoni).
 That much has held on every run since, and it is the whole of what this decision turns on: agentpane cannot keep the turn alive across a Pi fork, so the only choice left is whether the user is told.
 What the fork costs is now measured rather than inferred.
-OW-sededi gave the probe's Pi cell the delta gate its Codex sibling had and re-ran it (home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`): with 47 `text_delta`s on the wire at the instant the fork request went out, the file the turn was streaming into held the reply's first 447 characters, not the empty assistant entry the ungated run before it had read (`docs/MANUAL_TESTING.md`, OW-sededi).
+OW-sededi gave the probe's Pi cell the delta gate its Codex sibling had and re-ran it (home server, 2026-09-15, `pi 0.85.1` on `deepseek/deepseek-v4.1-flash`, and again on `pi 1.2.0` in OW-vijine): with 47 `text_delta`s on the wire at the instant the fork request went out, the file the turn was streaming into held the reply's first 447 characters, not the empty assistant entry the ungated run before it had read (`docs/MANUAL_TESTING.md`, OW-sededi).
 So the streamed prefix survives on the abandoned branch; what is lost is the rest of the reply and the branch it was on, and the earlier empty entry was a fork that landed before any text existed.
 That makes the loss this decision warns about partial.
 The abort does not cause that loss; it makes it deliberate and visible instead of silent, and the label is the only warning the user gets.
@@ -883,7 +883,7 @@ What each restores on a resume differs, measured for effort on 2026-09-23 (`docs
 
 | | Effort after a resume |
 |---|---|
-| Pi (`pi 0.87.1`) | the level the session file last recorded, clamped to the model the resume resolves, and recorded again only if the file held none (OW-lehita) |
+| Pi (`pi 0.87.1`, again `1.2.0`) | the level the session file last recorded, clamped to the model the resume resolves, and recorded again only if the file held none (OW-lehita) |
 | Codex (`codex-cli 0.156.0`) | the level its latest settings record names, which is the chosen one unless a resume that named a model reset it to the config's; a fork takes the config's |
 | Claude Code (`claude 2.1.280`) | the default, not the chosen level |
 
@@ -900,7 +900,7 @@ The start-only gate is what makes the last turn enough: every stored turn names 
 Where the backend restores a value itself, agentpane's part is not to override it; on Pi, a resume spawn whose `--model` carries a `:<thinking>` suffix overrides the recorded level (OW-ruzuhu's run).
 A fork that keeps no turn, one cut before the first message, has no stored turn to read back, and runs at the parent's model and effort as they stand when it is cut: it is the parent's conversation begun again, not a new one at the backend's defaults.
 Set by the owner on 2026-09-23 (OW-difowo), when Claude Code's such fork carried the parent's model but not its effort.
-Pi forks inside the process that holds the parent, but that does not carry both by construction: as of `pi 0.87.1` that fork rebuilds the session from the process's command line, so a `--model` suffix's level comes back over the chosen one, and the `--model` itself over a model `set_model` chose (`docs/MANUAL_TESTING.md`, OW-dojebo and OW-sinoha), and a fork that keeps no message at all takes the settings default model and level (OW-riyeku).
+Pi forks inside the process that holds the parent, but that does not carry both by construction: as of `pi 0.87.1` and again `1.2.0` that fork rebuilds the session from the process's command line, so a `--model` suffix's level comes back over the chosen one, and the `--model` itself over a model `set_model` chose (`docs/MANUAL_TESTING.md`, OW-dojebo and OW-sinoha), and a fork that keeps no message at all takes the settings default model and level (OW-riyeku).
 
 **Why not a copy of agentpane's own.**
 D13's paragraph on names already weighed this and chose the backend: no second copy to keep coherent, and agentpane stays one more UI over the agent rather than a store beside it.
@@ -909,7 +909,7 @@ A value read from the store also covers a session started outside agentpane, whi
 
 A `virtual` session has nothing to lose: nothing is on disk before its first turn (D9), and its choice lives in memory until that turn is written.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
-On Pi that is the recorded level clamped to the turn's model, since as of `pi 0.87.1` a resume that clamps the recorded level records nothing, and a level given on a resume's command line is recorded nowhere, so a turn run under one reloads with the level before it (`docs/MANUAL_TESTING.md`, OW-lehita).
+On Pi that is the recorded level clamped to the turn's model, since as of `pi 0.87.1` and again `1.2.0` a resume that clamps the recorded level records nothing, and a level given on a resume's command line is recorded nowhere, so a turn run under one reloads with the level before it (`docs/MANUAL_TESTING.md`, OW-lehita).
 What each backend needs from agentpane under this decision:
 
 - **Codex** (OW-sayaju, OW-hojefo): a resume and a fork at an entry re-assert the model and effort the rollout's last `turn_context` recorded.
@@ -920,10 +920,10 @@ What each backend needs from agentpane under this decision:
   That fork also spawns with `--effort` at the parent's effort in force when it was cut, or with none for a model that has no effort.
 - **Pi** (OW-pubulu, OW-dojebo, OW-sinoha, OW-riyeku): nothing to re-assert on a resume, and on a fork the chosen model and level, or the parent's in force when the fork keeps no message.
   It restores both itself, so its resume spawn carries no `--model` at all.
-  It forks inside the process that holds the parent, and as of `pi 0.87.1` a process spawned with `--model <m>:<level>` ran the turn after a fork at that level, over the level chosen before the first prompt, with its `get_state` naming it and the forked file recording nothing, so the adapter re-sends the chosen level after a fork.
-  As of the same version that fork also took the spawn's `--model` over a model `set_model` chose, with `get_state` naming the spawn's model and the forked file still naming the chosen one (`docs/MANUAL_TESTING.md`, OW-sinoha), so the adapter re-sends the chosen model after a fork, before the level, since `set_model` resets the level.
-  As of the same version a fork at the first user message of a session file holding no system message, which every file written before `pi 0.86.0` lacks, kept no message, so Pi had nothing to restore from: `get_state` answered `messageCount` 0 at the settings default model and level, and the forked branch recorded both (`docs/MANUAL_TESTING.md`, OW-riyeku).
-  A resume spawn chooses nothing for the adapter to re-send, so after a fork whose `get_state` answers `messageCount` 0 it re-sends the model and level in force before the fork, chosen or not; a `0.87.1` file keeps its system message at that fork, and Pi restores both itself.
+  It forks inside the process that holds the parent, and as of `pi 0.87.1` and again `1.2.0` (`docs/MANUAL_TESTING.md`, OW-vijine) a process spawned with `--model <m>:<level>` ran the turn after a fork at that level, over the level chosen before the first prompt, with its `get_state` naming it and the forked file recording nothing, so the adapter re-sends the chosen level after a fork.
+  As of the same versions that fork also took the spawn's `--model` over a model `set_model` chose, with `get_state` naming the spawn's model and the forked file still naming the chosen one (`docs/MANUAL_TESTING.md`, OW-sinoha), so the adapter re-sends the chosen model after a fork, before the level, since `set_model` resets the level.
+  As of the same versions a fork at the first user message of a session file holding no system message, which every file written before `pi 0.86.0` lacks, kept no message, so Pi had nothing to restore from: `get_state` answered `messageCount` 0 at the settings default model and level, and the forked branch recorded both (`docs/MANUAL_TESTING.md`, OW-riyeku).
+  A resume spawn chooses nothing for the adapter to re-send, so after a fork whose `get_state` answers `messageCount` 0 it re-sends the model and level in force before the fork, chosen or not; a `0.87.1` or `1.2.0` file keeps its system message at that fork, and Pi restores both itself.
 
 ### D24. A live session is keyed by a handle agentpane mints, its mutations run one at a time, and a hydrate merges history with the live stream
 
@@ -1015,7 +1015,7 @@ As of `codex-cli 0.156.0` every item still streaming, of each kind that could be
 So on a borrowed re-attach `CodexReducer.hydrate` now takes the running turn from the listing, its streaming state, a compaction when it lists no items at all, and its id, which the adapter adopts as though `turn/started` had arrived, so `abort()` interrupts it, `submit()` steers it and `compact()` refuses.
 A turn the stream settled while the history was paged in -- a `turn/started`, a `turn/completed`, or a status other than `active`, which names no turn -- and compaction state it set are newer than the page and win over it, and a cold resume, on a fresh app-server that can be running no turn, adopts none.
 A slot a delta opened is headless and yields to a listed copy, with only the deltas that arrived after the page was asked for laid on top; that retired the unconditional "a live slot wins" rule OW-dutute's hydrate kept, while the delta still opens the slot, since for a streaming item nothing else carried its text.
-As of `pi 0.87.1` nothing arrived in Pi's window at all, on a fork or on a resume: the abandoned turn's last events, `agent_settled` among them, preceded the `fork` response.
+As of `pi 0.87.1`, and in three runs on `pi 1.2.0` (OW-vijine), nothing arrived in Pi's window at all, on a fork or on a resume: the abandoned turn's last events, `agent_settled` among them, preceded the `fork` response.
 So on Pi the truncating merge is the replace `hydrateMessages` already made, and `src/server/adapters/pi/process.test.ts` pins it against a union.
 
 **How a race fix is made from here.**

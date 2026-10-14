@@ -204,9 +204,10 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * The recorded level is clamped to the turn's model, found in `catalogue`,
  * because a resume puts a level in force without recording it: Pi restores the
  * last recorded level and clamps it to the model it resolved, and appends an
- * entry only for a session that has none. As of `pi 0.87.1` a resume whose
- * clamp changed the level, and one given `--model <ref>:<level>` or
- * `--thinking`, each appended nothing (docs/MANUAL_TESTING.md, OW-lehita).
+ * entry only for a session that has none. As of `pi 0.87.1`, and again
+ * `1.2.0`, a resume whose clamp changed the level, and one given
+ * `--model <ref>:<level>` or `--thinking`, each appended nothing
+ * (docs/MANUAL_TESTING.md, OW-lehita and OW-vijine).
  * The clamp recovers the first, since Pi clamps the same way each time; a
  * level Pi records is already clamped, so for it the clamp changes nothing.
  * Both hold only while the model's catalogue entry is the one the turn ran

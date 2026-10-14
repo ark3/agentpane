@@ -104,8 +104,8 @@ export class PiAdapter implements BackendAdapter {
 	private model: string | null = null;
 	/**
 	 * The model a `setModel` last put in force, re-sent after a fork. Measured on
-	 * the home server, 2026-09-24, `pi 0.87.1` (docs/MANUAL_TESTING.md,
-	 * OW-sinoha): spawned with `--model` naming one model and moved to another by
+	 * the home server, 2026-09-24, `pi 0.87.1`, and again 2026-10-14, `pi 1.2.0`
+	 * (docs/MANUAL_TESTING.md, OW-sinoha and OW-vijine): spawned with `--model` naming one model and moved to another by
 	 * `set_model`, a fork answered `get_state` with the spawn's model, with no
 	 * event and no `model_change` in the forked file, which still named the
 	 * chosen model. Pi rebuilds a forked session from the options its command
@@ -113,7 +113,7 @@ export class PiAdapter implements BackendAdapter {
 	 * in the docblock on `thinkingLevel`).
 	 *
 	 * So it covers only a model chosen in this process, and a resume spawn,
-	 * which carries no `--model`, chooses none. Same version, measured on the
+	 * which carries no `--model`, chooses none. Same versions, measured on the
 	 * home server, 2026-09-24 (docs/MANUAL_TESTING.md, OW-riyeku): Pi restores
 	 * a forked branch's model and level only when the branch holds a message,
 	 * and a fork at the first user message of a file with no system message,
@@ -139,7 +139,7 @@ export class PiAdapter implements BackendAdapter {
 	 * fork, which D23 holds to the same promise -- and cleared by a
 	 * `setModel` that succeeds, after which the model in force is one chosen.
 	 * A fork has two more ways to put another model in force: as measured on
-	 * `pi 0.87.1`, a process spawned with `--model` puts that model back at a
+	 * `pi 0.87.1` and again `1.2.0`, a process spawned with `--model` puts that model back at a
 	 * fork over one `set_model` chose (OW-sinoha), and a fork that keeps no
 	 * message puts the settings default in force (OW-riyeku). The fork re-sends
 	 * the chosen model, or for the second the parent's, before it reads the
@@ -188,8 +188,9 @@ export class PiAdapter implements BackendAdapter {
 	 * `get_state` at start is the truth here too, and no choice is resent.
 	 *
 	 * A fork is that same override inside the live process, so `chosenEffort`
-	 * is re-sent after one. Measured on the home server, 2026-09-24, `pi 0.87.1`
-	 * (docs/MANUAL_TESTING.md, OW-dojebo): spawned with `--model ...:high` and
+	 * is re-sent after one. Measured on the home server, 2026-09-24, `pi 0.87.1`,
+	 * and again 2026-10-14, `pi 1.2.0` (docs/MANUAL_TESTING.md, OW-dojebo and
+	 * OW-vijine): spawned with `--model ...:high` and
 	 * set to `off`, a fork answered `get_state` at `high` with no
 	 * `thinking_level_changed`, the next turn's request asked for `high`, and
 	 * the forked file still named `off` as its last level. Pi rebuilds a forked
@@ -309,11 +310,11 @@ export class PiAdapter implements BackendAdapter {
 	 * the branch Pi answers is every message the new session holds, and all
 	 * the transcript held past it is the parent's abandoned turn (OW-yudoni,
 	 * OW-sededi), so laying one under the other keeps nothing of the second.
-	 * As of `pi 0.87.1` no event arrived between the `fork` response and the
-	 * `get_messages` answer that followed, nor on a resume between `get_state`
-	 * and `get_messages`: the abandoned turn's last events, `agent_settled`
-	 * among them, all preceded the `fork` response (docs/MANUAL_TESTING.md,
-	 * OW-dutute). So nothing the live stream builds meanwhile is Pi's to keep.
+	 * As of `pi 0.87.1`, and in three runs on `1.2.0`, no event arrived between
+	 * the `fork` response and the `get_messages` answer that followed, nor on a
+	 * resume between `get_state` and `get_messages`: the abandoned turn's last
+	 * events, `agent_settled` among them, all preceded the `fork` response
+	 * (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). So nothing the live stream builds meanwhile is Pi's to keep.
 	 * Its messages carry no level, so each assistant turn is named from the
 	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu),
 	 * each clamped to its turn's model in the catalogue (OW-lehita).
@@ -477,11 +478,11 @@ export class PiAdapter implements BackendAdapter {
 		// `sessionFile` MOVES to a new file at the fork call. So the id we hold
 		// has diverged from Pi's active file and must be re-adopted -- otherwise
 		// a later turn is keyed to the abandoned pre-fork branch and a listing
-		// indexes a stale id. The one run that measured it at this instrument
+		// indexes a stale id. The runs that measured it at this instrument
 		// found that new file already on disk when the fork returned, carrying
-		// the rewound prefix (0.85.1, MANUAL_TESTING.md OW-gajesu; the earlier
-		// `false` is retired, but this is one sample of a race, not an
-		// invariant). Nothing here depends on it -- the consequence is that a
+		// the rewound prefix (0.85.1, MANUAL_TESTING.md OW-gajesu, and twice on
+		// 1.2.0, OW-vijine; the earlier `false` is retired, but these are
+		// samples of a race, not an invariant). Nothing here depends on it -- the consequence is that a
 		// discarded fork can leave a real session file for the picker to walk.
 		// Unlike `adoptSessionFile` (the one-time virtual->real id adoption, gated
 		// by `idResolved`), this is an already-resolved session whose active file
@@ -492,7 +493,8 @@ export class PiAdapter implements BackendAdapter {
 		// and it is announced at once, before the re-sends and the hydrate below
 		// emit anything under it (D24). Anything Pi emits between the `fork`
 		// response and this answer still goes out under the parent's ref; as of
-		// `pi 0.87.1` nothing arrived there (docs/MANUAL_TESTING.md, OW-dutute).
+		// `pi 0.87.1` and again `1.2.0` nothing arrived there
+		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine).
 		const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 		if (state.data.sessionFile) this.moveTo(state.data.sessionFile, "fork");
 		this.model = state.data.model ? modelToInfo(state.data.model).id : this.model;

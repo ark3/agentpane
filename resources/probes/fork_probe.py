@@ -20,8 +20,8 @@ OW-gojado for the fifth):
                        `sessionFile` MOVES to that new file at the fork call
                        itself (OW-pifowo). On the 2026-08-20 second-message
                        run the rewound branch stops BEFORE the forked-at user
-                       message, matching Codex's edit contract. On 0.85.1 the
-                       moved-to file was on disk at the fork, carrying the
+                       message, matching Codex's edit contract. On 0.85.1 and
+                       1.2.0 the moved-to file was on disk at the fork, carrying the
                        rewound prefix, with the get_state re-query as the first
                        round-trip after the fork -- where OW-pifowo took it and
                        where its `false` was retired, one sample of a race
@@ -30,7 +30,8 @@ OW-gojado for the fifth):
                        idle. Since OW-sededi this cell carries its Codex
                        sibling's streaming discipline -- forty accumulated
                        `text_delta`s before the fork, re-read at the instant
-                       the request goes out -- and on 0.85.1 the streamed-into
+                       the request goes out -- and on 0.85.1 and 1.2.0
+                       (OW-vijine) the streamed-into
                        file KEEPS the partial reply the turn had produced
                        (447 characters at 47 deltas), so the fork ends the
                        turn without discarding what it had already streamed.

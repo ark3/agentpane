@@ -808,9 +808,9 @@ describe("PiAdapter.fork", () => {
 	it("holds the rewound branch alone when the abandoned turn streams in the window before get_messages answers (OW-dutute)", async () => {
 		// A fork truncates (OW-yudoni, OW-sededi), so the merge D24 asks of a
 		// hydrate keeps nothing of the parent's in-flight turn. As of `pi 0.87.1`
-		// nothing arrived in this window at all: the abandoned turn's last
-		// events all preceded the `fork` response (docs/MANUAL_TESTING.md,
-		// OW-dutute). This scripts the window anyway, since a union would let
+		// and again `1.2.0` nothing arrived in this window at all: the abandoned
+		// turn's last events all preceded the `fork` response
+		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). This scripts the window anyway, since a union would let
 		// the parent's partial reply into the fork's transcript.
 		const h = makeHarness();
 		await startAdapter(h);
@@ -1121,8 +1121,8 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		const forked = h.adapter.fork("e1");
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
-		// Measured on 0.87.1: the fork rebuilds the session from the spawn's
-		// command line, so the suffix's `high` is in force again, announced by no
+		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
+		// spawn's command line, so the suffix's `high` is in force again, announced by no
 		// event and recorded nowhere.
 		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "high", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
 		await flush();
@@ -1156,8 +1156,8 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		const forked = h.adapter.fork("u2");
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
-		// Measured on 0.87.1: the fork rebuilds the session from the spawn's
-		// command line, so its `--model` is in force again, announced by no event
+		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
+		// spawn's command line, so its `--model` is in force again, announced by no event
 		// and recorded nowhere, while the chosen level survives it.
 		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
 		await flush();
@@ -1304,9 +1304,10 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		const forked = h.adapter.fork("u1");
 		h.child.respondTo("fork", { text: "hi", cancelled: false });
 		await flush();
-		// Measured on 0.87.1: a fork at the first user message of a session file
-		// holding no system message keeps no message, and Pi rebuilds it at the
-		// settings default model and level, announced by no event.
+		// Measured on 0.87.1 and 1.2.0: a fork at the first user message of a
+		// session file holding no system message keeps no message, and Pi
+		// rebuilds it at the settings default model and level, announced by no
+		// event.
 		h.child.respondTo("get_state", { model: DEFAULT, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl", messageCount: 0 });
 		await flush();
 		expect(h.child.sent().filter((command) => command.type === "set_model")).toEqual([

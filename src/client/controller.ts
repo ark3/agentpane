@@ -1351,7 +1351,8 @@ export function createController(
 				// Pi is that backend. Its CLI stops the in-flight turn on a
 				// mid-stream fork whether or not we abort: `isStreaming` goes
 				// false and the turn settles (home server, 2026-09-15,
-				// `pi 0.85.1`; `docs/MANUAL_TESTING.md` OW-gajesu, which is what
+				// `pi 0.85.1`, and again 2026-10-14, `pi 1.2.0`;
+				// `docs/MANUAL_TESTING.md` OW-gajesu and OW-vijine, which is what
 				// the 2026-08-20 `pi 0.84.2` run in OW-yudoni had not earned).
 				// What the fork costs is the REST of the reply, not the bytes
 				// already streamed: with the probe holding the fork until 47
