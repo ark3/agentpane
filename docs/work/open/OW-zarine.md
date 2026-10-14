@@ -29,5 +29,6 @@ What `providerThinkingLevel` means, against `thinkingLevel`, is read from the Pi
 
 A live run on the installed `pi`, with the pinned `--model openrouter/deepseek/deepseek-v4.1-flash:high`, records in `docs/MANUAL_TESTING.md` whether `get_messages` carries `thinkingLevel` on assistant messages, with the version.
 Whatever that run shows, the `withLoadedEfforts` docblock states it with the version, and every other copy of "`get_messages` carries none" is retired with it (grep the phrase; the `process.ts` docblocks naming `withLoadedEfforts` are candidates).
+The `AssistantTurn` docblock in `src/shared/protocol.ts` ("the one fact about it that pi-ai has no field for", "nothing about effort") went false with OW-meriva's move to `pi-ai 1.2.0`, which declares `thinkingLevel?` and `providerThinkingLevel?` on `AssistantMessage`; OW-meriva left it alone because that file is FROZEN under D11, so this card states it with the version, raising it under D11 first if the change goes beyond the comment.
 If it carries the field: a test loads a message whose `thinkingLevel` differs from what the entries and the clamp would give and asserts the recorded one, red before the change, and a test asserts a message without the field is labelled as today.
 OW-niwube's close note is not edited; if this card fixes what it deferred, this card's close note says so and names it.
