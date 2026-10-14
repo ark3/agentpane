@@ -810,8 +810,9 @@ describe("PiAdapter.fork", () => {
 		// hydrate keeps nothing of the parent's in-flight turn. As of `pi 0.87.1`
 		// and again `1.2.0` nothing arrived in this window at all: the abandoned
 		// turn's last events all preceded the `fork` response
-		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). This scripts the window anyway, since a union would let
-		// the parent's partial reply into the fork's transcript.
+		// (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). This scripts the window
+		// anyway, since a union would let the parent's partial reply into the fork's
+		// transcript.
 		const h = makeHarness();
 		await startAdapter(h);
 		const delta = (text: string) => ({
@@ -1122,8 +1123,8 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
-		// spawn's command line, so the suffix's `high` is in force again, announced by no
-		// event and recorded nowhere.
+		// spawn's command line, so the suffix's `high` is in force again, announced
+		// by no event and recorded nowhere.
 		h.child.respondTo("get_state", { model: FLASH, thinkingLevel: "high", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
 		await flush();
 		expect(h.child.sent().filter((command) => command.type === "set_thinking_level").map((command) => command.level)).toEqual(["off", "off"]);
@@ -1157,8 +1158,8 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		h.child.respondTo("fork", { text: "original prompt", cancelled: false });
 		await flush();
 		// Measured on 0.87.1 and 1.2.0: the fork rebuilds the session from the
-		// spawn's command line, so its `--model` is in force again, announced by no event
-		// and recorded nowhere, while the chosen level survives it.
+		// spawn's command line, so its `--model` is in force again, announced by no
+		// event and recorded nowhere, while the chosen level survives it.
 		h.child.respondTo("get_state", { model: SPAWNED, thinkingLevel: "low", isStreaming: false, sessionFile: "/home/u/.pi/agent/sessions/s-fork.jsonl" });
 		await flush();
 		expect(h.child.lastSent("set_model")).toMatchObject({ provider: "openrouter", modelId: "deepseek/deepseek-v4.1-flash" });
