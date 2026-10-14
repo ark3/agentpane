@@ -24,3 +24,10 @@ Load-bearing: the version, and which message the fork is taken at.
 
 A live run on the home server (`pi --model openrouter/deepseek/deepseek-v4.1-flash:high`, version named) is recorded in `docs/MANUAL_TESTING.md`, settling both: what a `fork` sent before the first assistant message answers, at Pi's RPC and through agentpane's fork route; and whether a first-user-message fork's file exists when `fork` returns.
 `AGENTS.md`'s Pi fork bullet is scoped to what each run measured, and so are the other copies of "the fork's file is on disk when `fork` returns": the comment in `PiAdapter.fork` in `src/server/adapters/pi/process.ts` ("found that new file already on disk when the fork returned") and `docs/MANUAL_TESTING.md`'s "A fork the user then discards therefore costs a real session file".
+
+## Amended 2026-10-14: Pi may now write the file at the first user message
+
+The home server's `pi --version` reported `1.2.0` on 2026-10-14, and Pi's changelog for `0.99.0` reads "The session file is now created when the first user message is sent", rather than once an assistant message exists.
+That is the precondition both facts above rest on: if it holds, the refusal in fact 1 may fire only before the first prompt, and a first-message fork's new branch may be written at once rather than deferred.
+So the run this card asks for is made on the installed `pi`, now `1.2.0`, and settles when the file first appears as well as the two facts.
+Whatever it shows, every copy of OW-bohodu's `0.87.1` finding that the file appears only once the first reply ends is scoped to its version or retired: the `ref` and `idResolved` docblocks on `PiAdapter` in `src/server/adapters/pi/process.ts` ("writes no file there until the first turn's reply ends"), the fact-1 sentence above, and whatever a grep for "OW-bohodu" turns up in `docs/` and `src/`.

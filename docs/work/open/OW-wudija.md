@@ -21,3 +21,10 @@ Then, for each scenario whose delta shows an event type added or removed, and on
 Count drift alone re-captures nothing, and if no scenario shows a type change, a recorded delta with untouched fixtures is a complete close.
 
 Pi runs only with the pinned model, `pi --model openrouter/deepseek/deepseek-v4.1-flash:high` (AGENTS.md, "Evidence"); `capture_fixtures.py` already passes it (OW-yehisa), and the run needs the home server and no work-laptop trip.
+
+## Amended 2026-10-14: the installed Pi is now 1.2.0
+
+`pi --version` on the home server reported `1.2.0` on 2026-10-14, ten releases past the `0.87.1` this card was filed against, `0.99.0` through `1.2.0` with `1.0.0` among them.
+The comparison is now against `1.2.0`, and the delta recorded names it.
+Pi's own changelog for those releases is at `~/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md`; read from it on 2026-10-14, no command, response or event type agentpane consumes was removed or renamed, which is a reading, not this card's measurement.
+OW-meriva, OW-wavini, OW-zarine, OW-kokotu and the amendment to OW-tigaye, filed the same day, carry the changes that reading did find, so a delta here that names one of them is recorded and left to that card.

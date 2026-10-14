@@ -1,0 +1,33 @@
+---
+labels: [change]
+blocked-by: [OW-meriva]
+---
+
+# Pi now records each assistant message's thinkingLevel, which withLoadedEfforts says get_messages carries none of and reconstructs from level-change entries and a catalogue clamp instead
+
+Filed 2026-10-14 from the home server's own Pi session files and the installed `pi 1.2.0` types.
+
+`withLoadedEfforts` in `src/server/adapters/pi/reducer.ts` labels each loaded assistant message with the level it ran at, and its docblock opens on the premise: "`get_messages` carries none".
+So it walks the active branch's `thinking_level_change` entries, matches messages to entries by `timestamp`, and clamps the result to the turn's model in today's `get_available_models` catalogue (OW-helumu, OW-lehita).
+OW-niwube, closed `--declined`, names where that goes wrong — a turn recorded at a level its model has since dropped is labelled with the level that clamps to, plus two narrower cases its card lists — and was declined because "the fix has no clean source: the file records no catalogue".
+
+The source may now exist.
+On 2026-10-14 every assistant message in the four home-server Pi session files written since 2026-10-03 carried `thinkingLevel` (77 of 77, all `"high"`, with `providerThinkingLevel` `null`), and none of the 27 assistant messages in the nine files written 2026-09-14 to 2026-09-16 did.
+`@earendil-works/pi-ai 1.2.0` declares `AssistantMessage.thinkingLevel?` and `providerThinkingLevel?`; the stamp is in `pi-agent-core`'s `agent-loop.js`.
+Which Pi version started writing it is not known: no file on the home server dates from between those two groups, and Pi's changelog was not found to name it.
+
+In service of D23 in `docs/DESIGN.md`, read per turn: a turn's label is the level it actually ran at.
+
+## What is load-bearing
+
+What `get_messages` returns on the installed `pi` is the fact this turns on, and it is measured, not inferred from the file: the field being on disk does not prove it is on the wire.
+Older sessions keep working: a message without the field still gets today's reconstruction, so a session spanning the version boundary labels both halves.
+Where the recorded field and the reconstruction would disagree, the recorded field wins, and the docblock says so.
+What `providerThinkingLevel` means, against `thinkingLevel`, is read from the Pi source or docs before either is chosen; the samples above all had it `null`, which settles nothing.
+
+## Done when
+
+A live run on the installed `pi`, with the pinned `--model openrouter/deepseek/deepseek-v4.1-flash:high`, records in `docs/MANUAL_TESTING.md` whether `get_messages` carries `thinkingLevel` on assistant messages, with the version.
+Whatever that run shows, the `withLoadedEfforts` docblock states it with the version, and every other copy of "`get_messages` carries none" is retired with it (grep the phrase; the `process.ts` docblocks naming `withLoadedEfforts` are candidates).
+If it carries the field: a test loads a message whose `thinkingLevel` differs from what the entries and the clamp would give and asserts the recorded one, red before the change, and a test asserts a message without the field is labelled as today.
+OW-niwube's close note is not edited; if this card fixes what it deferred, this card's close note says so and names it.
