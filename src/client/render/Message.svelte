@@ -9,8 +9,8 @@
 	 * `Message | CustomAgentMessages[keyof CustomAgentMessages]`, and a backend
 	 * can declaration-merge new kinds in. The final `{:else}` is therefore not
 	 * dead code: a kind nobody merged in still reaches it at runtime, which is
-	 * how Pi's system-role message arrived as a JSON dump until pi-ai 1.2.0 put
-	 * it in `Message` (OW-wavini).
+	 * how Pi's system-role message arrived as a JSON dump until it got an arm
+	 * of its own (OW-wavini).
 	 *
 	 * A system message draws as a one-line marker naming what it carries, with
 	 * its text behind a native disclosure, collapsed: a first cut chosen by the

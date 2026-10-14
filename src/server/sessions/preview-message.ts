@@ -117,19 +117,29 @@ export function storedAgentMessage(
 			} as SessionPreviewTurn;
 		}
 		case "system": {
-			// Kept whole, tool schemas and all, as `get_messages` hands it to the
-			// live adapter: Pi counts it in its message indexes, so dropping it
-			// would put every later preview message at a different index from
-			// live (OW-wavini). The clients condense it when they draw it.
+			// Kept, tool schemas and all, as `get_messages` hands it to the live
+			// adapter, so live and the preview show the same system messages
+			// (OW-wavini); the clients condense it when they draw it. Pi parses
+			// its session files without validation and turns a missing
+			// `content` into "" rather than dropping the message, so this does
+			// the same, and keeps only the change fields of the shape
+			// `systemView` reads.
 			const content =
 				typeof value.content === "string"
 					? value.content
 					: Array.isArray(value.content)
 						? value.content.map(textOrImageBlock).filter((block) => block?.type === "text")
-						: null;
-			if (content === null) return null;
-			const { timestamp: _storedTimestamp, ...stored } = value;
-			return { ...stored, role: "system", content, ...timestampField(timestamp) } as SessionPreviewTurn;
+						: "";
+			const { timestamp: _storedTimestamp, sections, toolsAdded, toolsRemoved, ...stored } = value;
+			return {
+				...stored,
+				role: "system",
+				content,
+				...(isRecord(sections) ? { sections } : {}),
+				...(Array.isArray(toolsAdded) ? { toolsAdded } : {}),
+				...(Array.isArray(toolsRemoved) ? { toolsRemoved } : {}),
+				...timestampField(timestamp),
+			} as SessionPreviewTurn;
 		}
 		case "compactionSummary":
 			return {

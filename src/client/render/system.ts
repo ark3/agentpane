@@ -69,11 +69,11 @@ export function systemView(message: SystemMessage, leading: boolean): SystemView
 	const toolsRemoved = (message.toolsRemoved ?? []).map(({ name }) => name);
 
 	const facts: string[] = [];
+	if (content.trim()) facts.push("instructions");
 	if (leading) {
 		if (sections.length > 0) facts.push(plural(sections.length, "section"));
 		if (toolsAdded.length > 0) facts.push(plural(toolsAdded.length, "tool"));
 	} else {
-		if (content.trim()) facts.push("instructions");
 		if (sections.length > 0) {
 			facts.push(sections.map(({ name, text }) => (text === null ? `−${name}` : name)).join(", "));
 		}

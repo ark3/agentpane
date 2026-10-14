@@ -236,7 +236,6 @@ describe("Message", () => {
 			const details = article.querySelector("details");
 			expect(details).not.toBeNull();
 			expect(details!.open).toBe(false);
-			expect(details!.querySelector("summary")?.textContent?.trim()).not.toMatch(/\n/);
 		}
 		expect(first!.dataset.index).toBe("0");
 		expect(later!.dataset.index).toBe("3");

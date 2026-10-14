@@ -308,6 +308,28 @@ describe("readSessionPreview", () => {
 			expect(turns[3]).toEqual({ ...changedRest, timestamp: "2026-10-14T10:05:00.000Z" });
 		});
 
+		it("keeps a stored system message with no content, and drops change fields of the wrong shape (OW-wavini)", async () => {
+			// Pi parses session files without validation and answers a missing
+			// `content` with "" from `get_messages`, so live keeps such a message.
+			const file = join(root, "malformed-system.jsonl");
+			await writeJsonl(file, [
+				piHeader(),
+				{
+					type: "message",
+					id: "s0",
+					parentId: null,
+					timestamp: "2026-10-14T10:00:00.000Z",
+					message: { role: "system", sections: "oops", toolsAdded: { read: {} }, timestamp: 0 },
+				},
+				piMessage("user", "First question.", "2026-10-14T10:00:00.100Z"),
+			]);
+
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual(["system", "user"]);
+			expect(turns[0]).toEqual({ role: "system", content: "", timestamp: "2026-10-14T10:00:00.000Z" });
+		});
+
 		it("carries no timestamp for a record whose timestamp is not a string (OW-71)", async () => {
 			// Absent must stay absent: the client edge renders no time rather than
 			// the epoch. A non-string timestamp is the shape a malformed record has.

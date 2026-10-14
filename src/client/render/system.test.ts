@@ -8,6 +8,12 @@ describe("systemView (OW-wavini)", () => {
 		expect(systemView(systemLeading(), true).summary).toBe("System prompt · 5 sections · 4 tools");
 	});
 
+	it("says when the leading message carries instructions of its own, as a reloaded compaction's can", () => {
+		expect(systemView({ ...systemLeading(), content: "Be terse." }, true).summary).toBe(
+			"System prompt · instructions · 5 sections · 4 tools",
+		);
+	});
+
 	it("names what a later message changes, a removed section and tool marked so", () => {
 		expect(systemView(systemChanged(), false).summary).toBe(
 			"System prompt changed · addendum, −docs · tools −edit −write",
