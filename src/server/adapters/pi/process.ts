@@ -199,14 +199,17 @@ export class PiAdapter implements BackendAdapter {
 	 * An unsuffixed spawn kept `off` across the same fork.
 	 *
 	 * Which turns carry a level: every assistant turn, live or loaded. A live
-	 * one is named at `message_start`. One loaded by `get_messages` -- the whole
+	 * one is named at `message_start`, and renamed at `message_end` by the
+	 * `thinkingLevel` its message records, which as of `pi 1.2.0` Pi stamps on
+	 * every reply (OW-zarine). One loaded by `get_messages` -- the whole
 	 * transcript on a resume, and again after a fork, which replaces every
-	 * message, including turns this adapter had named -- is named from the
-	 * `thinking_level_change` entries on the session file's active branch
-	 * (OW-helumu), since Pi's messages hold no level: the level in force when
-	 * the turn ran, not when it was loaded. A loaded turn that cannot be matched
-	 * to its entry, or ran at `off` on a model other than the current one, which
-	 * may not reason, stays unlabelled (`withLoadedEfforts` in `reducer.ts`).
+	 * message, including turns this adapter had named -- is named the level in
+	 * force when the turn ran, not when it was loaded: that same stamp, else
+	 * the `thinking_level_change` entries on the session file's active branch
+	 * (OW-helumu). An unstamped loaded turn that cannot be matched to its entry,
+	 * or any loaded turn that ran at `off` on a model other than the current
+	 * one, which may not reason, stays unlabelled (`withLoadedEfforts` in
+	 * `reducer.ts`).
 	 */
 	private thinkingLevel: string | null = null;
 	private reasoning = false;
@@ -317,9 +320,10 @@ export class PiAdapter implements BackendAdapter {
 	 * events, `agent_settled` among them, all preceded the `fork` response
 	 * (docs/MANUAL_TESTING.md, OW-dutute and OW-vijine). So nothing the live
 	 * stream builds meanwhile is Pi's to keep.
-	 * Its messages carry no level, so each assistant turn is named from the
-	 * session file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu),
-	 * each clamped to its turn's model in the catalogue (OW-lehita).
+	 * Each assistant turn is named the level its message records, as of
+	 * `pi 1.2.0` (OW-zarine), and one written before that stamp from the session
+	 * file's entries (`withLoadedEfforts` in `reducer.ts`, OW-helumu), clamped to
+	 * its turn's model in the catalogue (OW-lehita).
 	 * Both callers read `get_state` first, because whether the current model
 	 * reasons decides what an `off` turn on it is named, and because the model
 	 * it names is what `unrestoredModel` compares the recorded one with.

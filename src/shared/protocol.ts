@@ -23,16 +23,24 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 // ---------------------------------------------------------------------------
 
 /**
- * An assistant turn, plus the one fact about it that pi-ai has no field for.
+ * An assistant turn, plus the level it ran at, as the footer names it.
  *
  * Codex answers `thread/start` and `thread/resume` with `reasoningEffort`, and
- * a reader wants it next to the model name. `AssistantMessage` carries
- * api/provider/model/responseModel/usage/stopReason/timestamp and nothing about
- * effort, and D10 makes the pi packages types-only -- so the field cannot be
- * added there, and augmenting their interfaces from here would put an
- * agentpane-only property on every consumer of pi-ai. One optional property on
- * a type we own is the smallest shape that does the job, and it survives the
- * JSON round trip on the existing `AgentMessage` payloads untouched.
+ * a reader wants it next to the model name. When this was written
+ * `AssistantMessage` carried api/provider/model/responseModel/usage/stopReason/
+ * timestamp and nothing about effort, and D10 makes the pi packages types-only
+ * -- so the field cannot be added there, and augmenting their interfaces from
+ * here would put an agentpane-only property on every consumer of pi-ai. One
+ * optional property on a type we own is the smallest shape that does the job,
+ * and it survives the JSON round trip on the existing `AgentMessage` payloads
+ * untouched.
+ *
+ * As of `pi-ai 1.2.0` `AssistantMessage` declares `thinkingLevel?`, the Pi
+ * level the agent loop requested, and `providerThinkingLevel?`, the provider's
+ * own effort string, both absent on replies that predate them (OW-zarine).
+ * `effort` stays: Codex's turns carry neither, and a Pi reply without the stamp
+ * is named from its session's entries, so the footer reads one field whoever
+ * filled it.
  *
  * Named `effort`, not `reasoningEffort`: Codex uses both names for the same
  * concept (`reasoningEffort` on the start/resume responses, `effort` on

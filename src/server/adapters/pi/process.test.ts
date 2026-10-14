@@ -1361,10 +1361,28 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		expect(h.adapter.getState().messages[0]).not.toHaveProperty("effort");
 	});
 
+	it("names a streamed turn the level its message_end records, and still none on a model that does not reason (OW-zarine)", async () => {
+		const stamped = (thinkingLevel: string) => ({ ...assistantMessage("hi"), thinkingLevel }) as AgentMessage;
+		const reasoning = makeHarness();
+		await startAdapter(reasoning, { model: FLASH, thinkingLevel: "low" });
+		const plain = makeHarness();
+		await startAdapter(plain, { model: PLAIN, thinkingLevel: "off" });
+
+		// Pi stamps the level it requested, which nothing announced here.
+		reasoning.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		reasoning.child.emitLine({ type: "message_end", message: stamped("high") });
+		plain.child.emitLine({ type: "message_start", message: assistantMessage("") });
+		plain.child.emitLine({ type: "message_end", message: stamped("off") });
+
+		expect((reasoning.adapter.getState().messages[0] as AssistantTurn).effort).toBe("high");
+		expect(plain.adapter.getState().messages[0]).not.toHaveProperty("effort");
+	});
+
 	/**
-	 * A turn loaded by `get_messages` carries no level, so its label is read
-	 * from the session file's `thinking_level_change` entries (OW-helumu): the
-	 * level in force when the turn ran, not the one in force now.
+	 * A turn loaded by `get_messages` is named the level in force when it ran,
+	 * not the one in force now: the `thinkingLevel` its message records
+	 * (OW-zarine), else the session file's `thinking_level_change` entries
+	 * (OW-helumu), which is all a message written before `pi 1.2.0`'s stamp has.
 	 */
 	describe("on loaded turns (OW-helumu)", () => {
 		const T0 = Date.parse("2026-09-23T10:00:00.000Z");
@@ -1521,6 +1539,30 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 
 			// The retired model's own levels are unknown, so its turn keeps the level recorded.
 			expect(efforts(h)).toEqual(["user", "medium", "user", "high"]);
+		});
+
+		it("names a turn the level its message records, over the entries and the clamp (OW-zarine)", async () => {
+			const h = makeHarness();
+			const recording = (m: AgentMessage, thinkingLevel: string) => ({ ...m, thinkingLevel }) as AgentMessage;
+			// Written before Pi stamped the level: read from the entries and clamped
+			// to FLASH, which no longer lists `medium`, as before.
+			const a1 = reply("unstamped", at(3));
+			// FLASH listed `medium` when this ran; today's clamp would say `high`.
+			const a2 = recording(reply("stamped medium", at(6)), "medium");
+			// On no branch entry, so the entries say nothing; the stamp still does.
+			const a3 = recording(reply("not on the branch", at(9)), "low");
+			// Pi stamps `off` on a model that does not reason, so `off` is still not a label off the current model.
+			const a4 = recording(reply("plain", at(12), PLAIN), "off");
+			const entries = [
+				level("l1", null, 0, "medium"),
+				message("a1", "l1", a1),
+				message("a2", "a1", a2),
+				message("a4", "a2", a4),
+			];
+
+			await resume(h, { model: FLASH, thinkingLevel: "high" }, [a1, a2, a3, a4], entries, "a4");
+
+			expect(efforts(h)).toEqual(["high", "medium", "low", undefined]);
 		});
 	});
 });

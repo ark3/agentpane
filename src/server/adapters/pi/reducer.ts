@@ -40,12 +40,14 @@ export interface PiReducerState {
 	readonly compaction: "requesting" | "running" | null;
 	/**
 	 * The thinking level named on each assistant message as it arrives, the
-	 * `AssistantTurn.effort` the footer shows. Pi's messages carried none when
-	 * this was written, so `process.ts` keeps this current from what Pi reports
-	 * (OW-ruzuhu); null names nothing, as for a model that does not reason. As
-	 * of `pi 1.2.0` each assistant `message_end` carries `thinkingLevel`
-	 * (`resources/fixtures/pi/*-session.jsonl`, OW-piyulu), which nothing here
-	 * reads yet (OW-zarine).
+	 * `AssistantTurn.effort` the footer shows. `process.ts` keeps this current
+	 * from what Pi reports (OW-ruzuhu); null names nothing, as for a model that
+	 * does not reason. As of `pi 1.2.0` each assistant `message_end` also
+	 * carries `thinkingLevel`, the level the reply was requested at
+	 * (`resources/fixtures/pi/*-session.jsonl`, OW-piyulu, and
+	 * docs/MANUAL_TESTING.md, OW-zarine), while `message_start` carries none, so
+	 * this names a turn as it starts and the stamp renames it as it ends
+	 * (OW-zarine); a turn this left unnamed stays so.
 	 */
 	readonly effort: string | null;
 }
@@ -96,11 +98,14 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 				return { state: { ...state, messages }, changedIndex: 0 };
 			}
 			// The level the turn started at, not the one in force as it ends: a
-			// `thinking_level_changed` can land mid-stream (OW-ruzuhu).
+			// `thinking_level_changed` can land mid-stream (OW-ruzuhu). Where the
+			// message records the level it ran at, that names it instead
+			// (OW-zarine); whether it is named at all stays the start's call.
 			const replaced = state.messages[index] as PaneMessage | undefined;
 			const started = replaced?.role === "assistant" ? replaced.effort : undefined;
+			const recorded = event.message.role === "assistant" ? event.message.thinkingLevel : undefined;
 			const messages = state.messages.slice();
-			messages[index] = withEffort(event.message, started ?? state.effort);
+			messages[index] = withEffort(event.message, started === undefined ? state.effort : (recorded ?? started));
 			return { state: { ...state, messages }, changedIndex: index };
 		}
 
@@ -174,7 +179,7 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
  * Name the level on an assistant message, as Codex's reducer names its effort.
  * Deltas keep it by spreading the message they extend, so only the two events
  * that bring a whole message need this, and `message_end` passes on the level
- * its slot started with.
+ * its slot started with, or the one its message records.
  */
 function withEffort(message: AgentMessage, effort: string | null): AgentMessage {
 	if (effort === null || message.role !== "assistant") return message;
@@ -183,9 +188,28 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
 }
 
 /**
- * Name on each loaded assistant message the level it ran at, read from the
- * session file's entries (OW-helumu): `get_messages` carries none, and the level
- * in force now is not the one an earlier turn ran at (D23, read per turn).
+ * Name on each loaded assistant message the level it ran at, not the level in
+ * force now (D23, read per turn).
+ *
+ * A message that records its level is named by it (OW-zarine). As of
+ * `pi 1.2.0` the agent loop stamps each reply with `thinkingLevel`, the Pi
+ * level it requested, `config.reasoning ?? "off"` in `pi-agent-core`'s
+ * `streamAssistantResponse`, which the session has already clamped to the
+ * model (`setThinkingLevel` in `pi-coding-agent`'s `agent-session.js`, read at
+ * the source). And `get_messages` carries it: measured on the home server,
+ * 2026-10-14, three turns at `high`, `low` and `off` read back as those three
+ * from the live process and again after a `--session` resume
+ * (docs/MANUAL_TESTING.md, OW-zarine). It is not clamped again, since it is
+ * what ran and the clamp below only reconstructs that.
+ * `providerThinkingLevel` names nothing here: it is the provider's own effort
+ * string, mapped through the model's `thinkingLevelMap`, set in `pi-ai 1.2.0`
+ * only by the `anthropic-messages` and `pi-messages` APIs, and absent from
+ * the pinned model's turns in that run.
+ *
+ * A message without the stamp, written before it -- the home server's own
+ * files from 2026-09-14 to 2026-09-16 are -- is read from the session file's
+ * entries (OW-helumu), so a session spanning the stamp's arrival names both
+ * halves. What follows is that reading.
  *
  * The levels come from the active branch, walked from `leafId` by `parentId`,
  * since `get_entries` also returns abandoned branches. Each assistant message
@@ -215,16 +239,19 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * (docs/MANUAL_TESTING.md, OW-ruzuhu), so a turn run at a level since dropped
  * is named at the level its model clamps it to now. A turn whose model has
  * left the catalogue keeps the level recorded. The
- * override is recoverable nowhere: the level named on the command line is on
- * no record, so a turn driven under one, from the `pi` CLI (agentpane's
- * resume spawn carries no `--model`, OW-pubulu), reloads with the level
- * recorded before it.
+ * override is recoverable from no entry: the level named on the command line
+ * is on none, so an unstamped turn driven under one, from the `pi` CLI
+ * (agentpane's resume spawn carries no `--model`, OW-pubulu), reloads with the
+ * level recorded before it. A stamped one carries the override itself, as read
+ * at the source rather than run.
  *
  * Live stamping names nothing for a model that does not reason, and Pi clamps
  * such a model to `off` (`clampThinkingLevel` in `pi-ai`, read at the source in
  * 0.87.1), so a clamped level other than `off` means the model reasoned. At
  * `off` that is only known for the model `get_state` names now (`current`), so
- * an `off` turn on any other model is left unlabelled.
+ * an `off` turn on any other model is left unlabelled. A recorded level is held
+ * to the same rules, because the stamp is that same clamped level: `off` on a
+ * model that does not reason.
  */
 export function withLoadedEfforts(
 	messages: AgentMessage[],
@@ -248,18 +275,20 @@ export function withLoadedEfforts(
 		const model = models.get(ref);
 		let level = before && before.at < started ? before.level : null;
 		if (level !== null && model) level = clampThinkingLevel(model, level);
-		if (ref === current.model) {
-			if (!current.reasoning) level = null;
-		} else if (level === "off") {
-			level = null;
-		}
-		levels.set(started, levels.has(started) ? null : level);
+		levels.set(started, levels.has(started) ? null : reasoned(ref, level));
 	}
 
 	return messages.map((message) => {
 		if (message.role !== "assistant") return message;
-		return withEffort(message, levels.get(message.timestamp) ?? null);
+		const recorded = message.thinkingLevel;
+		const level = recorded === undefined ? levels.get(message.timestamp) : reasoned(`${message.provider}/${message.model}`, recorded);
+		return withEffort(message, level ?? null);
 	});
+
+	function reasoned(ref: string, level: string | null): string | null {
+		if (ref === current.model) return current.reasoning ? level : null;
+		return level === "off" ? null : level;
+	}
 }
 
 /**
