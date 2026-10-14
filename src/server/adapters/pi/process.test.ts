@@ -1368,7 +1368,7 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 		const plain = makeHarness();
 		await startAdapter(plain, { model: PLAIN, thinkingLevel: "off" });
 
-		// Pi stamps the level it requested, which nothing announced here.
+		// As of `pi 1.2.0` Pi stamps the level it requested, which nothing announced here.
 		reasoning.child.emitLine({ type: "message_start", message: assistantMessage("") });
 		reasoning.child.emitLine({ type: "message_end", message: stamped("high") });
 		plain.child.emitLine({ type: "message_start", message: assistantMessage("") });
@@ -1551,8 +1551,10 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 			const a2 = recording(reply("stamped medium", at(6)), "medium");
 			// On no branch entry, so the entries say nothing; the stamp still does.
 			const a3 = recording(reply("not on the branch", at(9)), "low");
-			// Pi stamps `off` on a model that does not reason, so `off` is still not a label off the current model.
+			// As of `pi 1.2.0` Pi stamps `off` on a model that does not reason, so `off` is still not a label off the current model.
 			const a4 = recording(reply("plain", at(12), PLAIN), "off");
+			// The current model reasons, so its `off` is a label, stamped as it is on no entry.
+			const a5 = recording(reply("flash at off", at(15)), "off");
 			const entries = [
 				level("l1", null, 0, "medium"),
 				message("a1", "l1", a1),
@@ -1560,9 +1562,9 @@ describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
 				message("a4", "a2", a4),
 			];
 
-			await resume(h, { model: FLASH, thinkingLevel: "high" }, [a1, a2, a3, a4], entries, "a4");
+			await resume(h, { model: FLASH, thinkingLevel: "high" }, [a1, a2, a3, a4, a5], entries, "a4");
 
-			expect(efforts(h)).toEqual(["high", "medium", "low", undefined]);
+			expect(efforts(h)).toEqual(["high", "medium", "low", undefined, "off"]);
 		});
 	});
 });

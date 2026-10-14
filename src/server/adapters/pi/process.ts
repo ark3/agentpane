@@ -201,9 +201,10 @@ export class PiAdapter implements BackendAdapter {
 	 * Which turns carry a level: every assistant turn, live or loaded. A live
 	 * one is named at `message_start`, and renamed at `message_end` by the
 	 * `thinkingLevel` its message records, which as of `pi 1.2.0` Pi stamps on
-	 * every reply (OW-zarine). One loaded by `get_messages` -- the whole
-	 * transcript on a resume, and again after a fork, which replaces every
-	 * message, including turns this adapter had named -- is named the level in
+	 * every reply its agent loop builds, not on a run failure's (OW-zarine).
+	 * One loaded by `get_messages` -- the whole transcript on a resume, and
+	 * again after a fork, which replaces every message, including turns this
+	 * adapter had named -- is named the level in
 	 * force when the turn ran, not when it was loaded: that same stamp, else
 	 * the `thinking_level_change` entries on the session file's active branch
 	 * (OW-helumu). An unstamped loaded turn that cannot be matched to its entry,

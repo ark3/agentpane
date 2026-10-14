@@ -45,9 +45,10 @@ export interface PiReducerState {
 	 * does not reason. As of `pi 1.2.0` each assistant `message_end` also
 	 * carries `thinkingLevel`, the level the reply was requested at
 	 * (`resources/fixtures/pi/*-session.jsonl`, OW-piyulu, and
-	 * docs/MANUAL_TESTING.md, OW-zarine), while `message_start` carries none, so
-	 * this names a turn as it starts and the stamp renames it as it ends
-	 * (OW-zarine); a turn this left unnamed stays so.
+	 * docs/MANUAL_TESTING.md, OW-zarine), while that run's `message_start`s
+	 * carried none, so this names a turn as it starts and the stamp renames it
+	 * as it ends (OW-zarine); a turn this left unnamed takes this as it ends,
+	 * stamp or not.
 	 */
 	readonly effort: string | null;
 }
@@ -99,8 +100,9 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			}
 			// The level the turn started at, not the one in force as it ends: a
 			// `thinking_level_changed` can land mid-stream (OW-ruzuhu). Where the
-			// message records the level it ran at, that names it instead
-			// (OW-zarine); whether it is named at all stays the start's call.
+			// start named it and the message records the level it was requested
+			// at, that names it instead (OW-zarine); one the start left unnamed
+			// takes the level in force now, as before.
 			const replaced = state.messages[index] as PaneMessage | undefined;
 			const started = replaced?.role === "assistant" ? replaced.effort : undefined;
 			const recorded = event.message.role === "assistant" ? event.message.thinkingLevel : undefined;
@@ -200,16 +202,18 @@ function withEffort(message: AgentMessage, effort: string | null): AgentMessage 
  * 2026-10-14, three turns at `high`, `low` and `off` read back as those three
  * from the live process and again after a `--session` resume
  * (docs/MANUAL_TESTING.md, OW-zarine). It is not clamped again, since it is
- * what ran and the clamp below only reconstructs that.
+ * what was requested and the clamp below only reconstructs that.
  * `providerThinkingLevel` names nothing here: it is the provider's own effort
  * string, mapped through the model's `thinkingLevelMap`, set in `pi-ai 1.2.0`
  * only by the `anthropic-messages` and `pi-messages` APIs, and absent from
  * the pinned model's turns in that run.
  *
- * A message without the stamp, written before it -- the home server's own
- * files from 2026-09-14 to 2026-09-16 are -- is read from the session file's
- * entries (OW-helumu), so a session spanning the stamp's arrival names both
- * halves. What follows is that reading.
+ * A message without the stamp -- written before it, as the home server's own
+ * files from 2026-09-14 to 2026-09-16 are, or built outside the agent loop, as
+ * a run failure's is (`handleRunFailure` in `pi-agent-core`'s `agent.js`,
+ * 1.2.0) -- is read from the session file's entries (OW-helumu), so a
+ * session spanning the stamp's arrival names both halves. What follows is
+ * that reading.
  *
  * The levels come from the active branch, walked from `leafId` by `parentId`,
  * since `get_entries` also returns abandoned branches. Each assistant message

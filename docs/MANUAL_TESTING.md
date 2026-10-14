@@ -3167,7 +3167,7 @@ Both hold only while the model's catalogue entry is unchanged: this model's leve
 So `withLoadedEfforts` now clamps each recorded level to its turn's model, found in the `get_available_models` catalogue that `hydrateMessages` in `src/server/adapters/pi/process.ts` fetches alongside `get_messages` and `get_entries`, with `clampThinkingLevel` in `src/server/adapters/pi/protocol.ts` transcribing `pi-ai`'s.
 A turn whose model has left the catalogue keeps the level recorded.
 The override is not recoverable: the level lives only in the command line of a process that is gone, and agentpane's resume spawn carries no `--model` (OW-pubulu), so the exposure is a turn driven from the `pi` CLI under an override, which reloads in agentpane labelled with the level recorded before it.
-OW-zarine has since named a turn whose message records its level by that record, unclamped, as `pi 1.2.0` stamps every reply, so the dropped-level mislabel and the override's exposure are left only to turns written before the stamp; see "Pi stamps each reply with its level, and `get_messages` carries it (OW-zarine)", at the end of this file.
+OW-zarine has since named a turn whose message records its level by that record, unclamped, as `pi 1.2.0` stamps every reply its agent loop builds, so the dropped-level mislabel and the override's exposure are left only to turns without the stamp; see "Pi stamps each reply with its level, and `get_messages` carries it (OW-zarine)", at the end of this file.
 
 **Not established.**
 Only a hand-edited level was clamped here; a clamp that arose because the recorded model left the catalogue and the resume fell back to another was run in OW-zujofa's section, below, and appended nothing either.
@@ -4338,8 +4338,9 @@ One process ran three turns: the first at `high`, as spawned, then one after `se
 Then it answered `get_messages`, and exited.
 A second process resumed the file with `--session <file>` and answered `get_state` and `get_messages`; it also passed the pinned `--model` with its `:high` suffix, which agentpane's resume spawn does not, so it read `high` though the file's last level entry was `off`.
 
-**Each reply's `message_end` carries `thinkingLevel`, and its `message_start` does not.**
+**In this run each reply's `message_end` carried `thinkingLevel`, and its `message_start` did not.**
 Every assistant `message_start` carried neither `thinkingLevel` nor `providerThinkingLevel`.
+That is not every `message_start`: read at the source, `streamAssistantResponse` emits one as a copy of the finished, stamped reply when the stream ends without a `start` event.
 Each `message_end` carried `thinkingLevel`, `high`, `low` and `off` in turn, and no `providerThinkingLevel`, with `api: "openai-completions"` and `provider: "openrouter"`.
 
 **`get_messages` carries it, live and after a resume.**
@@ -4361,8 +4362,9 @@ The pinned model goes through `openai-completions`, which never sets it, and thi
 
 **What agentpane makes of it.**
 `withLoadedEfforts` in `src/server/adapters/pi/reducer.ts` names a loaded turn by its message's `thinkingLevel`, unclamped, and reads only a turn without one from the session file's entries, so the mislabel of a level its model has since dropped is left to turns written before the stamp.
-The live reducer renames a turn at `message_end` by the stamp, keeping whether it is named at all from `message_start`, and `storedAgentMessage` in `src/server/sessions/preview-message.ts` names a stored reply by it, except `off`, which a file cannot tell from a model that does not reason.
+The live reducer renames a turn `message_start` named by the stamp at `message_end`, and one `message_start` left unnamed takes the level in force as it ends, as before; and `storedAgentMessage` in `src/server/sessions/preview-message.ts` names a stored reply by it, except `off`, which a file cannot tell from a model that does not reason.
 `thinkingLevel` names the turn rather than `providerThinkingLevel` because it is in the vocabulary the rest of agentpane speaks and is on every reply the agent loop makes.
+A reply built outside that loop carries no stamp: read at the source, `handleRunFailure` in `pi-agent-core`'s `agent.js` builds a run failure's error or aborted reply without one, so such a turn, like one written before the stamp, is read from the entries.
 
 **Not established.**
 No turn ran on a model that does not reason, so its `off` stamp rests on the source.

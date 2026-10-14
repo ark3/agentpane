@@ -339,7 +339,7 @@ describe("readSessionPreview", () => {
 			await writeJsonl(file, [
 				piHeader(),
 				stamped("at high", "2026-10-14T10:00:01.000Z", "high"),
-				// Pi stamps `off` on a model that does not reason, too, which the file cannot tell apart.
+				// As of `pi 1.2.0` Pi stamps `off` on a model that does not reason, too, which the file cannot tell apart.
 				stamped("at off", "2026-10-14T10:00:02.000Z", "off"),
 				// Written before Pi stamped the level.
 				stamped("unstamped", "2026-10-14T10:00:03.000Z"),
