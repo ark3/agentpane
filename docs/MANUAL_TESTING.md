@@ -4154,3 +4154,43 @@ Resuming again with `--tools read,bash` as well emitted a third, with `sections`
 
 **So agentpane holds them in both live paths.**
 `reducePiNotification` appends a `message_start` of any role, and `hydrateMessages` takes `get_messages` whole, so both the live first turn and every load put the leading system message into the held transcript, and any later one where it fell; the stored preview, through `storedAgentMessage`, dropped them until OW-wavini.
+
+## The Pi fixtures' event census on `pi 1.2.0` (OW-wudija)
+
+Run on the home server 2026-10-14, between 18:02 and 18:06 local (`-04:00`), on **`pi 1.2.0`**, from the `card/OW-wudija` worktree, by `python3 resources/probes/capture_fixtures.py --backend pi --scenario text --scenario tool-read --scenario tool-edit --scenario compact --timeout 300`, which exited 0.
+Each scenario spawned `pi --mode rpc --no-session --model openrouter/deepseek/deepseek-v4.1-flash:high` in a throwaway `PI_CODING_AGENT_DIR`, and every assistant `message_end` of all four named `openrouter/deepseek/deepseek-v4.1-flash` (`models_seen`) at `thinkingLevel: "high"`.
+The committed side is the fixtures as they stand in `resources/fixtures/pi/`: `text`, `tool-read` and `tool-edit` captured on `pi 0.84.1` (2026-08-10), `compact` on `pi 0.84.2` (2026-08-18).
+Their metas predate `models_seen`, so the model they ran on is not recorded.
+The comparison was a throwaway script over the two `.meta.json` censuses and over the key sets of each event, message role and `assistantMessageEvent` type in the two `.jsonl`s; it is not kept.
+
+**No event type was added or removed in any scenario, so no fixture was re-captured.**
+All four runs ended with `terminated_cleanly: true` and `dialogs_seen: []`, and `compact` reached `compaction_start` and `compaction_end` with `reason: "manual"`, after the four priming turns.
+
+| Scenario | Lines (0.84.x → 1.2.0) | Counts that moved (0.84.x → 1.2.0) |
+| --- | --- | --- |
+| `text` | 14 → 15 | `message_start` 2 → 3, `message_end` 2 → 3, `message_update` 4 → 3 |
+| `tool-read` | 33 → 41 | `message_start` 4 → 5, `message_end` 4 → 5, `message_update` 15 → 21 |
+| `tool-edit` | 42 → 118 | `message_start` 4 → 7, `message_end` 4 → 7, `message_update` 22 → 85, `tool_execution_start` 1 → 2, `tool_execution_end` 1 → 2, `tool_execution_update` 2 → 5, `turn_start` 2 → 3, `turn_end` 2 → 3 |
+| `compact` | 3587 → 3968 | `message_start` 8 → 9, `message_end` 8 → 9, `message_update` 3544 → 3923 |
+
+Every other type held its count: one `response` per command sent, and in each run one `agent_start`, `agent_end` and `agent_settled` per prompt.
+
+**One `message_start`/`message_end` pair more in every scenario is Pi's leading system message.**
+Each run's first turn opened with a `role: "system"` message carrying `content: ""`, five `sections` (`preamble`, `tools`, `rules`, `docs`, `cwd`) and `toolsAdded`, before the user's pair; that is OW-wavini's subject, recorded in the section above, and left to it.
+The rest of the count drift is the model's: `tool-edit`'s model listed the directory with `bash` before appending with a second `bash` call, a third turn the 0.84.1 run did not take, and `message_update` scales with reply and reasoning length.
+
+**What changed is inside events of the same types, all additive.**
+No key any 0.84.x event carried was missing from its 1.2.0 counterpart, and the compaction events and the `compact` response kept the same keys.
+The version each change is attributed to is a reading of `pi-coding-agent`'s `CHANGELOG.md` for 0.84.1 to 1.2.0, not a measurement.
+
+- The `prompt` response gained `data: {"disposition": "started"}`, which the changelog dates to 0.99.0; Pi's `docs/rpc.md` says a `"handled"` disposition starts no run, so no `agent_settled` follows -- the handled prompts OW-kokotu carries, left to it.
+- Assistant messages gained `thinkingLevel`, the per-message level OW-zarine carries, left to it, along with `durationMs` and `responseId`.
+- `agent_settled` gained `aborted: false`, dated to 1.1.0.
+- `tool_execution_end` and the `toolResult` message gained `durationMs`, dated to 1.1.0 for the event, and `tool_execution_end.result` gained `structuredContent`: the `bash` output, exit code and timing as an object, and for `read` the file text as a string.
+- `toolcall_start` gained `id` and `toolName`, dated to 0.84.3.
+- `message_update` gained a cumulative `usage` in the three 0.84.1 captures; the 0.84.2 `compact` capture already carried it, as the changelog dates the fix to 0.84.2.
+- `thinking_delta` appeared in `tool-read` and `compact`, whose 0.84.x captures had `thinking_start`/`thinking_end` with no delta between them, and `tool-edit`, whose 0.84.1 capture had no thinking sub-event at all, gained all three along with `thinking` blocks in its assistant content; these are `assistantMessageEvent` types inside `message_update`, not census types, and with the earlier model unrecorded they are not attributable to the CLI.
+
+**A re-capture of `tool-edit` would need its directory listing scrubbed.**
+This run's first `bash` call was `ls -la`, whose output names the operator's user and group, in the tool result's `content` and `structuredContent` alike; `capture_fixtures.py` scrubs by key and does not reach it.
+The run was not kept, so nothing carrying it was committed.
