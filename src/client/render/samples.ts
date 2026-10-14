@@ -15,6 +15,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
 	AssistantMessage,
 	StopReason,
+	SystemMessage,
+	Tool,
 	ToolResultMessage,
 	Usage,
 	UserMessage,
@@ -294,6 +296,58 @@ export const withImage: AgentMessage[] = [
 	},
 	assistant([{ type: "text", text: "A single transparent pixel." }]),
 ];
+
+/** A tool definition as Pi's leading system message carries it: a whole JSON schema, which no client draws. */
+function tool(name: string, description: string): Tool {
+	return {
+		name,
+		description,
+		parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+	} as unknown as Tool;
+}
+
+/**
+ * The leading system message every Pi session opens with, as `pi 1.2.0` wrote
+ * one on 2026-10-14 (OW-wavini): empty `content`, the prompt as tag-wrapped
+ * `sections`, every tool in `toolsAdded`. Shortened, the shape kept.
+ */
+export function systemLeading(): SystemMessage {
+	return {
+		role: "system",
+		content: "",
+		sections: {
+			preamble: "<preamble>\nYou are an expert coding assistant.\n</preamble>",
+			tools: "<tools>\nUse read to inspect files, bash for commands.\n</tools>",
+			rules: "<rules>\n- Prefer small edits.\n- Never guess a path.\n</rules>",
+			docs: "<docs>\nPi documentation lives under ~/.pi.\n</docs>",
+			cwd: "<cwd>/tmp/scratch</cwd>",
+		},
+		toolsAdded: [
+			tool("read", "Read the contents of a file."),
+			tool("bash", "Run a shell command."),
+			tool("edit", "Replace text in a file."),
+			tool("write", "Write a file."),
+		],
+		timestamp: stamp(),
+	};
+}
+
+/**
+ * A later system message, the delta a resume with other flags produced on
+ * 2026-10-14: sections replaced by name, one removed, tools dropped.
+ */
+export function systemChanged(): SystemMessage {
+	return {
+		role: "system",
+		content: "",
+		sections: {
+			addendum: "<addendum>\nAlways answer in lowercase.\n</addendum>",
+			docs: null,
+		},
+		toolsRemoved: [{ name: "edit" }, { name: "write" }],
+		timestamp: stamp(),
+	};
+}
 
 /** Everything at once -- the sample a shell would mount to eyeball the design. */
 export const everything: AgentMessage[] = [

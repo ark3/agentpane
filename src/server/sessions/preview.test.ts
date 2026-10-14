@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPreviewTurn, SessionRef } from "../../shared/protocol.ts";
 import { byMethod, itemOf, readFixture, type FixtureName } from "../adapters/codex/test-support.ts";
+import { systemChanged, systemLeading } from "../../client/render/samples.ts";
 import { readSessionPreview } from "./preview.ts";
 
 /**
@@ -281,6 +282,30 @@ describe("readSessionPreview", () => {
 				"Second question.",
 				"Second answer.",
 			]);
+		});
+
+		it("keeps Pi's system-role messages at the index live gives them (OW-wavini)", async () => {
+			// Pi counts them in its message indexes, so a preview that dropped them
+			// would address every later message one or two off from live.
+			const leading = systemLeading();
+			const changed = systemChanged();
+			const file = join(root, "with-system.jsonl");
+			await writeJsonl(file, [
+				piHeader(),
+				{ type: "message", id: "s0", parentId: null, timestamp: "2026-10-14T10:00:00.000Z", message: leading },
+				piMessage("user", "First question.", "2026-10-14T10:00:00.100Z"),
+				piMessage("assistant", "First answer.", "2026-10-14T10:00:03.000Z"),
+				{ type: "message", id: "s3", parentId: null, timestamp: "2026-10-14T10:05:00.000Z", message: changed },
+				piMessage("user", "Second question.", "2026-10-14T10:05:00.100Z"),
+			]);
+
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
+
+			expect(turns.map((turn) => turn.role)).toEqual(["system", "user", "assistant", "system", "user"]);
+			const { timestamp: _leading, ...leadingRest } = leading;
+			const { timestamp: _changed, ...changedRest } = changed;
+			expect(turns[0]).toEqual({ ...leadingRest, timestamp: "2026-10-14T10:00:00.000Z" });
+			expect(turns[3]).toEqual({ ...changedRest, timestamp: "2026-10-14T10:05:00.000Z" });
 		});
 
 		it("carries no timestamp for a record whose timestamp is not a string (OW-71)", async () => {

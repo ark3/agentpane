@@ -17,6 +17,8 @@ import {
 	reducePiNotification,
 } from "./reducer.ts";
 import type { PiNotification, PiOutputLine } from "./protocol.ts";
+import { systemChanged, systemLeading, user } from "../../../client/render/samples.ts";
+import { previewTurnsFromMessages, storedAgentMessage } from "../../sessions/preview-message.ts";
 
 const FIXTURES_DIR = fileURLToPath(new URL("../../../../resources/fixtures/pi/", import.meta.url));
 
@@ -355,6 +357,28 @@ describe("reducePiNotification: error signals not covered by any fixture", () =>
 		const result = reducePiNotification(state, { type: "auto_retry_end", success: true, attempt: 2 });
 		expect(result.error).toBeUndefined();
 		expect(result.state).toBe(state);
+	});
+});
+
+describe("reducePiNotification: system-role messages (OW-wavini)", () => {
+	it("holds each where it arrived, as the stored preview holds the same record", () => {
+		// The shape `pi 1.2.0` sent on 2026-10-14: the leading one ahead of the
+		// first user message, a later one ahead of the turn whose flags changed.
+		const leading = systemLeading();
+		const changed = systemChanged();
+		let state = createInitialPiState();
+		for (const message of [leading, user("between"), changed]) {
+			state = reducePiNotification(state, { type: "message_start", message }).state;
+			state = reducePiNotification(state, { type: "message_end", message }).state;
+		}
+
+		expect(state.messages.map((message) => message.role)).toEqual(["system", "user", "system"]);
+		const identity = { api: "anthropic-messages", provider: "anthropic", model: "pi" } as const;
+		const stored = [leading, changed].map((message) =>
+			storedAgentMessage(message, new Date(message.timestamp).toISOString(), identity),
+		);
+		const live = previewTurnsFromMessages(state.messages);
+		expect([live[0], live[2]]).toEqual(stored);
 	});
 });
 

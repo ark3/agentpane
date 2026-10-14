@@ -113,9 +113,9 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
 /**
  * The full transcript of a stored Pi session for the read-only preview
  * (OW-38). Pi stores message payloads in the same structural shape the live
- * adapter renders, so this validates and retains user, assistant, and
- * tool-result messages with their thinking, tool, and image blocks. The
- * header is skipped.
+ * adapter renders, so this validates and retains user, assistant,
+ * tool-result and system messages with their thinking, tool, and image
+ * blocks. The header is skipped.
  */
 export async function extractPiPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];

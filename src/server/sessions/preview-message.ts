@@ -116,6 +116,21 @@ export function storedAgentMessage(
 				...timestampField(timestamp),
 			} as SessionPreviewTurn;
 		}
+		case "system": {
+			// Kept whole, tool schemas and all, as `get_messages` hands it to the
+			// live adapter: Pi counts it in its message indexes, so dropping it
+			// would put every later preview message at a different index from
+			// live (OW-wavini). The clients condense it when they draw it.
+			const content =
+				typeof value.content === "string"
+					? value.content
+					: Array.isArray(value.content)
+						? value.content.map(textOrImageBlock).filter((block) => block?.type === "text")
+						: null;
+			if (content === null) return null;
+			const { timestamp: _storedTimestamp, ...stored } = value;
+			return { ...stored, role: "system", content, ...timestampField(timestamp) } as SessionPreviewTurn;
+		}
 		case "compactionSummary":
 			return {
 				role: "compactionSummary",
