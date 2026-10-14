@@ -112,14 +112,14 @@ export class PiAdapter implements BackendAdapter {
 	 * session from the options its command line parsed, `--model` included, as it
 	 * does the suffix's level (OW-dojebo, in the docblock on `thinkingLevel`).
 	 *
-	 * So it covers only a model chosen in this process, and a resume spawn,
-	 * which carries no `--model`, chooses none. Same versions, measured on the
-	 * home server, 2026-09-24 (docs/MANUAL_TESTING.md, OW-riyeku): Pi restores
-	 * a forked branch's model and level only when the branch holds a message,
-	 * and a fork at the first user message of a file with no system message,
-	 * which every file written before `pi 0.86.0` lacks, kept none. It answered
-	 * `get_state` with `messageCount` 0 at the settings default model and
-	 * level, with no event, and appended a `model_change` and a
+	 * So it covers only a model chosen in this process, and a resume spawn, which
+	 * carries no `--model`, chooses none. Same versions, measured on the home
+	 * server, 2026-09-24 and 2026-10-14 (docs/MANUAL_TESTING.md, OW-riyeku and
+	 * OW-vijine): Pi restores a forked branch's model and level only when the
+	 * branch holds a message, and a fork at the first user message of a file with
+	 * no system message, which every file written before `pi 0.86.0` lacks, kept
+	 * none. It answered `get_state` with `messageCount` 0 at the settings default
+	 * model and level, with no event, and appended a `model_change` and a
 	 * `thinking_level_change` naming them. So after such a fork `fork` re-sends
 	 * the model and level in force before it, whether chosen or not.
 	 */

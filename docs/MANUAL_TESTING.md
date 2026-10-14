@@ -4230,11 +4230,14 @@ The system message is drawn on both sides, as OW-wavini left it.
 
 ## Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)
 
-Run on the home server 2026-10-14, on **`pi 1.2.0`**, from the `card/OW-vijine` worktree cut at `271a359`, ten releases and a `1.0.0` past the `pi 0.85.1` and `0.87.1` the seven sections this re-measures were run on.
+Run on the home server 2026-10-14, on **`pi 1.2.0`**, from the `card/OW-vijine` worktree cut at `271a359`.
+By Pi's CHANGELOG, `1.2.0` is ten releases past the `pi 0.87.1` five of the seven sections this re-measures were run on, `1.0.0` among them, and fourteen past the `0.85.1` of the other two.
 D18 re-verifies nothing on a version bump; the owner chose to re-measure this set once, because each fact licenses code in `src/server/adapters/pi/process.ts` or `src/client/controller.ts`.
 **All six held.**
 Every turn ran on `openrouter/deepseek/deepseek-v4.1-flash`: the probes pass `--model openrouter/deepseek/deepseek-v4.1-flash:high`, and the throwaway driver below read `get_state` before every prompt and refused to send one unless it named that model.
-The owner's `~/.pi/agent/settings.json` read sha256 `fc2bbcc0...` before and after every run, and nothing under `~/.pi/agent/` was written.
+The fact 3 to 6 drivers recorded the owner's `~/.pi/agent/settings.json` as sha256 `fc2bbcc0...` before and after each of their runs; the probes behind facts 1 and 2 recorded no hash, and a `sha256sum` by hand before the first probe run and after the last run read the same.
+Nothing under `~/.pi/agent/` was written.
+The fact 3 to 6 drivers recorded no version either: what shows `1.2.0` is the probes' own records, `cli_versions.pi` in each `fork_probe.py` run and `pi_version` in each `hydrate_window_probe.py` run, and `pi --version` reading `1.2.0` on the home server on 2026-10-14, before and after the runs.
 
 **How facts 3 to 6 were run.**
 As in the OW-dojebo, OW-sinoha, OW-riyeku and OW-lehita sections, by a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc --session-dir <workspace>/sessions` directly, not through `sbox` or agentpane's server, logging every stdout and stderr line.
@@ -4249,7 +4252,7 @@ At the fork itself the streamed-into turn had 55 and 53 `text_delta`s on the wir
 `midstream_abandoned_tail_chars`, the length of the abandoned file's last assistant entry, read 551 and 519: the reply's beginning, `1\n2\n3\n…`, kept on disk.
 In the first run the streaming turn made one tool call before its text (the census counted `toolcall_start`, `toolcall_delta` and `toolcall_end`), so that file held an empty assistant entry for the call and then the text entry; the second made none.
 The rest of the cell reproduced what OW-gajesu recorded: `copy_on_write`, `original_file_unchanged`, `active_file_moves_at_fork` and `moved_file_on_disk_at_fork` all `true` in both runs, the moved-to file holding `ALPHA -> ALPHA` at the fork, and `forked_message_present_in_get_messages: false`.
-One number differs, and not because the fact moved: `messageCount` after the second-message fork read 3, where OW-gajesu's 0.85.1 run read 2, because Pi has written and counted a leading `role: "system"` message since `0.86.0` (OW-wavini's section); the probe's `midstream_expected_message_count` still says 2, a prediction the cell reports and its exit status never reads.
+One number differs, and not because the fact moved: `messageCount` after the second-message fork read 3, where OW-gajesu's 0.85.1 run read 2, because Pi has written and counted a leading `role: "system"` message since `0.86.0` (OW-riyeku's section, which cites that release's CHANGELOG); the probe's `midstream_expected_message_count` still says 2, a prediction the cell reports and its exit status never reads.
 
 **2. The abandoned turn ends before the `fork` response, and nothing follows it (OW-dutute): held, three times.**
 `python3 resources/probes/hydrate_window_probe.py --backend pi --json <file>`, unchanged, three runs, each exiting 0, forking at 67, 58 and 55 text deltas with the turn still streaming.

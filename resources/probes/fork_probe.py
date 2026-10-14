@@ -24,17 +24,18 @@ OW-gojado for the fifth):
                        1.2.0 the moved-to file was on disk at the fork,
                        carrying the rewound prefix, with the get_state re-query
                        as the first round-trip after the fork -- where
-                       OW-pifowo took it and where its `false` was retired, one
-                       sample of a race (OW-gajesu). A mid-stream fork also
-                       succeeds and the turn stops, and the new branch sits at
-                       the fork point, idle. Since OW-sededi this cell carries
-                       its Codex sibling's streaming discipline -- forty
-                       accumulated `text_delta`s before the fork, re-read at
-                       the instant the request goes out -- and on 0.85.1 and
-                       1.2.0 (OW-vijine) the streamed-into file KEEPS the
-                       partial reply the turn had produced (447 characters at
-                       47 deltas), so the fork ends the turn without discarding
-                       what it had already streamed.
+                       OW-pifowo took it and where its `false` was retired,
+                       samples of a race (OW-gajesu, OW-vijine). A mid-stream
+                       fork also succeeds and the turn stops, and the new
+                       branch sits at the fork point, idle. Since OW-sededi
+                       this cell carries its Codex sibling's streaming
+                       discipline -- forty accumulated `text_delta`s before the
+                       fork, re-read at the instant the request goes out -- and
+                       on 0.85.1 the streamed-into file KEEPS the partial reply
+                       the turn had produced (447 characters at 47 deltas; on
+                       1.2.0, 551 at 55 and 519 at 53, OW-vijine), so the fork
+                       ends the turn without discarding what it had already
+                       streamed.
                        The empty assistant entry the 2026-09-15 OW-gajesu run
                        read there was the ungated case: a fork that landed
                        before any text existed. Proven by
