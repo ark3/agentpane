@@ -57,8 +57,10 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   A reader on 2026-09-08 took it as a property of the machine and proposed restricting the model picker to enforce it; that was never the intent.
 - **What is still confined to the work laptop is that machine itself.**
   Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and a card asking for one belongs wherever the session is.
-  What remains is that clone's own provisioning — its `.git/card/` and its PATH, as in OW-gabemi — and the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop".
+  What remains is that clone's own provisioning — its `.git/card/` and its PATH, as in OW-gabemi — the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).
   Such an item carries the label `work-laptop`, and its body still opens with the line `**Work laptop:**` naming what the visit needs.
+  Since 2026-10-14 no agent session develops agentpane on the work laptop: cards are authored and executed on the home server, and a work-laptop item is one the owner carries out by hand, so its body names the exact commands to run and what to bring back, and anything that needs an agent — writing a probe, filing cards from the result — happens on the home server before or after the visit.
+  The owner updates every CLI to its latest release on both machines each morning, so as of 2026-10-14 a version measured on the home server is the version the work laptop runs that day.
   The label is the filter: `card list --open --label work-laptop` prints those cards with their headlines, which is the intersection view the old two-command survey could not produce.
   Name the machine rather than writing "here": this file is checked in and read from both clones, so a sentence that resolves against the reader's location is false on one of them.
 - **A work-laptop item does all of its work in one visit.**
