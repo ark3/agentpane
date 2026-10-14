@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # Pi's fork, resume and model-restore behaviour was last measured on 0.87.1, and agentpane's fork and hydrate code rests on it under pi 1.2.0
@@ -31,3 +32,16 @@ Load-bearing: the version on every result, the pinned model (`pi --model openrou
 Each of the six facts has a dated entry in `docs/MANUAL_TESTING.md` naming `1.2.0` (or whatever `pi --version` then reports) and saying whether it held.
 Every copy of a fact that moved is retired in the same change, wherever it stands — `AGENTS.md`'s Pi fork bullet under "Evidence", the `process.ts` and `reducer.ts` docblocks, `docs/DESIGN.md` — per AGENTS.md's "retires every copy" rule; a fact that held gets its version added where the copy names one.
 Every fact that moved and leaves agentpane's code wrong gets a `defect` card, or an amendment to the open card that already owns it.
+
+## Close note
+
+Re-measured all six facts on `pi 1.2.0` (home server, 2026-10-14), every turn on `openrouter/deepseek/deepseek-v4.1-flash` under throwaway `PI_CODING_AGENT_DIR`s; the owner's `~/.pi/agent/settings.json` hash (`fc2bbcc0`) was unchanged and its mtime predates the runs.
+All six held; the record is `docs/MANUAL_TESTING.md`, "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", with a pointer line in each of the seven original sections.
+1. Mid-stream fork: two `fork_probe.py --backend pi` runs, 55/53 deltas at the fork, 551/519 characters kept in the abandoned file, turn settled, moved-to file on disk.
+2. Hydrate window: three `hydrate_window_probe.py --backend pi` runs, `agent_settled` before the `fork` response every time and only the `get_state` response between it and `get_messages`, so `hydrateMessages`' replace still stands.
+3-6. OW-sinoha, OW-dojebo, OW-riyeku, OW-lehita reproduced by a throwaway driver as those sections describe, now with request payloads proving the effort each turn ran at.
+Fact 5 settled the open question: on a file written since `0.86.0` a first-message fork keeps the system message and `get_state` answers `messageCount` 1, so Pi restores the kept branch's model and level; with the level changed after the turns and the session resumed, that fork came back at the opening `high`, not the parent's `low`.
+That is OW-bupuko's level half, measured at Pi's RPC; OW-bupuko was amended with it (its model half is still unrun).
+Copies naming a version now name `1.2.0` beside it, scoped to what the 1.2.0 runs measured: `AGENTS.md`'s Pi fork bullet, D15/D23/D24 and the resume table in `docs/DESIGN.md`, docblocks in `src/server/adapters/pi/process.ts`, `reducer.ts`, `process.test.ts`, `src/client/controller.ts`, and `resources/probes/README.md` and `fork_probe.py`'s docstring.
+An adversarial reader checked every number against the raw logs and found the over-stamped copies the last commit scoped.
+No code changed; `bun run check` passed. Filed OW-jetofe for the probe's stale `midstream_expected_message_count`.
