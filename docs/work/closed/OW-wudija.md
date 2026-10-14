@@ -1,5 +1,6 @@
 ---
 labels: [unverified]
+closed: done
 ---
 
 # The five Pi fixtures were captured on 0.84.x against an installed pi 0.87.1, and nothing has measured whether the wire moved
@@ -34,3 +35,15 @@ OW-meriva, OW-wavini, OW-zarine, OW-kokotu and the amendment to OW-tigaye, filed
 `capture_fixtures.py` drives four Pi scenarios -- `text`, `tool-read`, `tool-edit` and `compact` -- and those four are what "per scenario" in the done-condition covers.
 `pi/fork.jsonl` is not an RPC stream: it is a session file `resources/probes/fork_probe.py` left behind on 0.84.2 (`resources/fixtures/README.md`, "The fork scenario"), so no live turn's event census diffs against it, and whether Pi 1.2.0's session-file shape still matches it is a different measurement this card does not make.
 `OW-pukado` is still open on 2026-10-14, so the comparison is by hand.
+
+## Close note
+
+Measured, no fixture re-captured.
+On 2026-10-14 the home server ran `python3 resources/probes/capture_fixtures.py --backend pi --scenario text --scenario tool-read --scenario tool-edit --scenario compact --timeout 300` on `pi 1.2.0`, pinned to `openrouter/deepseek/deepseek-v4.1-flash:high` (every run's `models_seen` confirmed it), and diffed each live `event_census` against the committed fixture's (`text`, `tool-read`, `tool-edit` on 0.84.1, `compact` on 0.84.2).
+No event type was added or removed in any of the four; all ran `terminated_cleanly` with no dialogs, and `compact` reached `compaction_end` with `reason: "manual"`.
+Count drift only: one more `message_start`/`message_end` pair everywhere is Pi's leading system message (OW-wavini's), and the rest is the model (`tool-edit` took an extra `ls -la` turn).
+Inside existing types everything was additive: `prompt` response `data.disposition` (OW-kokotu's), assistant `thinkingLevel` (OW-zarine's), plus `durationMs`, `responseId`, `agent_settled.aborted`, `tool_execution_end.result.structuredContent`, `toolcall_start.id`/`toolName`, and `message_update.usage`; `thinking_*` sub-events inside `message_update` appeared but are not census types and the old model is unrecorded.
+Verified by the dispatching session with its own script over the saved old and new metas and streams; per the card, a recorded delta with untouched fixtures is the complete close.
+The full delta is in `docs/MANUAL_TESTING.md`, "The Pi fixtures' event census on `pi 1.2.0` (OW-wudija)".
+`pi/fork.jsonl` was out of scope (a session file from `fork_probe.py`, not an RPC stream), as the 2026-10-14 amendment says; OW-pukado's tooling had not landed, so the comparison was by hand.
+A future re-capture of `tool-edit` on 1.2.0 can carry the operator's username in `ls -la` output, which neither the key scrub nor `src/fixture-scrub.test.ts` catches by OW-demuwi's decision; the READMEs' human grep is the stated control, and the MANUAL_TESTING section notes it.
