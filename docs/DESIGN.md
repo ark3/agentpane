@@ -879,7 +879,7 @@ The owner took this on 2026-09-23, after OW-kokalo, OW-ruzuhu and OW-hokaye land
 A conversation's model and effort are chosen before its first prompt and fixed after it, by a gate in each client (`setModel` in `src/client/controller.ts`, `agentpane--check-gate` in `emacs/agentpane.el`).
 Agentpane holds both only in memory -- the manager's session record and each adapter's own fields -- so a close, a D12 eviction or a server restart loses agentpane's copy; OW-jamoyi's run saw a Pi resume spawn carry no model after a close, and OW-pubulu found that Pi restores it itself.
 
-Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries.
+Each backend's store already records both for every turn: Codex's rollout in each turn's `turn_context`, Claude Code on each assistant store line as `model` and `effort`, and Pi in its session file's `model_change` and `thinking_level_change` entries, and as of `pi 1.2.0` on each assistant message as `model` and `thinkingLevel` too (`docs/MANUAL_TESTING.md`, OW-zarine).
 What each restores on a resume differs, measured for effort on 2026-09-23 (`docs/MANUAL_TESTING.md`, the three sections named for those cards, and OW-sayaju's for Codex):
 
 | | Effort after a resume |
@@ -911,6 +911,7 @@ A value read from the store also covers a session started outside agentpane, whi
 A `virtual` session has nothing to lose: nothing is on disk before its first turn (D9), and its choice lives in memory until that turn is written.
 The per-turn label is the same source read per turn rather than once: a loaded turn names the effort its own entries record, which is OW-helumu.
 On Pi that is the recorded level clamped to the turn's model, since as of `pi 0.87.1` and again `1.2.0` a resume that clamps the recorded level records nothing, and a level given on a resume's command line is recorded nowhere, so a turn run under one reloads with the level before it (`docs/MANUAL_TESTING.md`, OW-lehita).
+That reading is now the fallback: as of `pi 1.2.0` each reply records the level it was requested at as `thinkingLevel`, `get_messages` carries it, and a turn that has it is named by it, unclamped; only a reply written before that stamp is read from the entries (`docs/MANUAL_TESTING.md`, OW-zarine).
 What each backend needs from agentpane under this decision:
 
 - **Codex** (OW-sayaju, OW-hojefo): a resume and a fork at an entry re-assert the model and effort the rollout's last `turn_context` recorded.

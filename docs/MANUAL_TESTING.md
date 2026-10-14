@@ -3167,6 +3167,7 @@ Both hold only while the model's catalogue entry is unchanged: this model's leve
 So `withLoadedEfforts` now clamps each recorded level to its turn's model, found in the `get_available_models` catalogue that `hydrateMessages` in `src/server/adapters/pi/process.ts` fetches alongside `get_messages` and `get_entries`, with `clampThinkingLevel` in `src/server/adapters/pi/protocol.ts` transcribing `pi-ai`'s.
 A turn whose model has left the catalogue keeps the level recorded.
 The override is not recoverable: the level lives only in the command line of a process that is gone, and agentpane's resume spawn carries no `--model` (OW-pubulu), so the exposure is a turn driven from the `pi` CLI under an override, which reloads in agentpane labelled with the level recorded before it.
+OW-zarine has since named a turn whose message records its level by that record, unclamped, as `pi 1.2.0` stamps every reply, so the dropped-level mislabel and the override's exposure are left only to turns written before the stamp; see "Pi stamps each reply with its level, and `get_messages` carries it (OW-zarine)", at the end of this file.
 
 **Not established.**
 Only a hand-edited level was clamped here; a clamp that arose because the recorded model left the catalogue and the resume fell back to another was run in OW-zujofa's section, below, and appended nothing either.
@@ -4192,6 +4193,7 @@ The version each change is attributed to is a reading of `pi-coding-agent`'s `CH
 
 - The `prompt` response gained `data: {"disposition": "started"}`, which the changelog dates to 0.99.0; Pi's `docs/rpc.md` says a `"handled"` disposition starts no run, so no `agent_settled` follows -- the handled prompts OW-kokotu carries, left to it.
 - Assistant messages gained `thinkingLevel`, the per-message level OW-zarine carries, left to it, along with `durationMs` and `responseId`.
+  OW-zarine has since landed it; see its section at the end of this file.
 - `agent_settled` gained `aborted: false`, dated to 1.1.0.
 - `tool_execution_end` and the `toolResult` message gained `durationMs`, dated to 1.1.0 for the event, and `tool_execution_end.result` gained `structuredContent`: the `bash` output, exit code and timing as an object, and for `read` the file text as a string.
 - `toolcall_start` gained `id` and `toolName`, dated to 0.84.3.
@@ -4226,6 +4228,7 @@ Its `firstKeptEntryId` named the second `assistant` message, the run's last.
 The stream's assistant `message_end`s and the file's assistant messages both had it, beside `durationMs`, `responseId`, and `rawStopReason`.
 
 `src/server/sessions/pi-conformance.test.ts` replays both halves and lists two disagreements, a level each live assistant turn names and the preview does not (OW-zarine), and the compaction marker the preview never draws (OW-livowu).
+OW-zarine has since made the preview name each stored reply's `thinkingLevel`, so the compaction marker is the one left; see its section at the end of this file.
 The system message is drawn on both sides, as OW-wavini left it.
 
 ## Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)
@@ -4319,3 +4322,50 @@ That is the parent's model and level unless one changed after the first turn: re
 **Not established.**
 Nothing here went through `sbox`, agentpane's server, the browser or Emacs, and the adapter's re-sends were run as commands by hand, not through the adapter.
 No turn ran on a snapped-back or settings-default fork, so what such a turn would run on rests on `get_state`.
+
+## Pi stamps each reply with its level, and `get_messages` carries it (OW-zarine)
+
+Run on the home server 2026-10-14, from 19:16:57 to 19:17:01 local (`-04:00`), on **`pi 1.2.0`** (`pi --version` before the run), from the `card/OW-zarine` worktree cut at `8d6330d`.
+The driver was a throwaway Python script, not kept, speaking LF-framed JSON to `pi --mode rpc --session-dir <scratch>/sessions --model openrouter/deepseek/deepseek-v4.1-flash:high` directly, not through `sbox` or agentpane's server, from a `git init`ed scratch directory under `/tmp`.
+It read `get_state` before every prompt and refused to send one unless it named `deepseek/deepseek-v4.1-flash`.
+Every prompt was `Do not use any tools. Reply with exactly: ok`, every reply was `ok`, and each cost $0.00006 or less; no process wrote a line to stderr.
+
+`PI_CODING_AGENT_DIR` pointed at a scratch directory holding copies of `auth.json`, `models-store.json` and `settings.json`, because a first attempt without it could not run a turn: in this session's sandbox the home server's `~/.pi/agent/` was mounted read-only, and Pi warned on stderr that it could not take `settings.json.lock` and refused the `prompt` with `Credential store read failed for openrouter: EROFS: read-only file system, mkdir '/home/ark3/.pi/agent/auth.json.lock'`.
+The owner's `settings.json` read sha256 `fc2bbcc0...` before and after.
+
+**What ran.**
+One process ran three turns: the first at `high`, as spawned, then one after `set_thinking_level` `low`, then one after `set_thinking_level` `off`, each `get_state` reading back the level just set.
+Then it answered `get_messages`, and exited.
+A second process resumed the file with `--session <file>` and answered `get_state` and `get_messages`; it also passed the pinned `--model` with its `:high` suffix, which agentpane's resume spawn does not, so it read `high` though the file's last level entry was `off`.
+
+**Each reply's `message_end` carries `thinkingLevel`, and its `message_start` does not.**
+Every assistant `message_start` carried neither `thinkingLevel` nor `providerThinkingLevel`.
+Each `message_end` carried `thinkingLevel`, `high`, `low` and `off` in turn, and no `providerThinkingLevel`, with `api: "openai-completions"` and `provider: "openrouter"`.
+
+**`get_messages` carries it, live and after a resume.**
+Both `get_messages` answers held the three assistant messages with the level each ran at, the resumed one while `high` was in force:
+
+```json
+{"role": "assistant", "model": "deepseek/deepseek-v4.1-flash", "timestamp": 1792019818399, "thinkingLevel": "high"}
+{"role": "assistant", "model": "deepseek/deepseek-v4.1-flash", "timestamp": 1792019819172, "thinkingLevel": "low"}
+{"role": "assistant", "model": "deepseek/deepseek-v4.1-flash", "timestamp": 1792019819803, "thinkingLevel": "off"}
+```
+
+The session file held the same three values on its assistant messages, each after the `thinking_level_change` entry naming it.
+
+**What the two fields mean, read at the source in `pi 1.2.0`.**
+`thinkingLevel` is Pi's own level, the one the picker and `thinking_level_change` use: `streamAssistantResponse` in `pi-agent-core`'s `agent-loop.js` assigns `config.reasoning ?? "off"` onto the finished reply, `config.reasoning` being the agent's level as `prepareRequest` left it, which `setThinkingLevel` in `pi-coding-agent`'s `core/agent-session.js` has already clamped to the model.
+So a model that does not reason is stamped `off`, as is a reasoning model run at `off`.
+`providerThinkingLevel` is the provider's own effort string, after the model's `thinkingLevelMap`: in `pi-ai` only `anthropic-messages` sets it, for a model whose compat has `supportsMidConvoEffort`, and `pi-messages` copies it from its server's answer.
+The pinned model goes through `openai-completions`, which never sets it, and this run saw none.
+
+**What agentpane makes of it.**
+`withLoadedEfforts` in `src/server/adapters/pi/reducer.ts` names a loaded turn by its message's `thinkingLevel`, unclamped, and reads only a turn without one from the session file's entries, so the mislabel of a level its model has since dropped is left to turns written before the stamp.
+The live reducer renames a turn at `message_end` by the stamp, keeping whether it is named at all from `message_start`, and `storedAgentMessage` in `src/server/sessions/preview-message.ts` names a stored reply by it, except `off`, which a file cannot tell from a model that does not reason.
+`thinkingLevel` names the turn rather than `providerThinkingLevel` because it is in the vocabulary the rest of agentpane speaks and is on every reply the agent loop makes.
+
+**Not established.**
+No turn ran on a model that does not reason, so its `off` stamp rests on the source.
+No turn ran under a resume's `--model` suffix or `--thinking` override, so that a stamped turn records the override, where no entry does, rests on the source too; so does a virtual model's routing, which can change the level a request runs at.
+No model on `anthropic-messages` or `pi-messages` ran, so `providerThinkingLevel` was never seen present.
+Nothing here went through agentpane's server, the browser or Emacs.
