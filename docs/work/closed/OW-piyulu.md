@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-wudija]
+closed: done
 ---
 
 # Pi captures run with --no-session, so no Pi session file is on record and nothing holds a live Pi transcript against its stored preview
@@ -33,3 +34,19 @@ That test is shown to fail when one entry is removed from the table.
 `bun run check` passes.
 
 Blocked by OW-wudija because that card diffs the live wire against the current Pi fixtures, and a re-capture here would replace the baseline it reads.
+
+## Close note
+
+Two Pi scenarios now keep the session file Pi wrote beside their RPC stream, and a conformance test holds one against the other.
+
+`resources/probes/capture_fixtures.py` gained a `session` flag: such a Pi scenario runs with `--session-dir` inside the throwaway `PI_CODING_AGENT_DIR` instead of `--no-session`, keeps the one file as `<scenario>.session.jsonl`, scrubbed by key against the stream, with `session_census` in its meta.
+Every Pi line now also has the operator's home replaced by `/example-home`, because as of `pi 1.2.0` the leading system message's `docs` section names Pi's install path.
+`tool-read-session` (a tool call and its result) and `compact-session` (two turns then a manual compaction) are new Pi-only scenarios, captured 2026-10-14 on `pi 1.2.0` pinned to `openrouter/deepseek/deepseek-v4.1-flash:high` (`models_seen` confirms it); they are new rather than re-captures of `tool-read` and `compact`, whose 0.84.x streams `reducer.test.ts` and several docblocks cite, so no existing fixture or test changed.
+`~/.pi/agent/sessions` listed identically before and after the run, and the six new files grep clean of the username, home roots, hostname and keys; the system message's `sections` held only Pi's own preamble, tools, rules, docs and cwd.
+
+`src/server/sessions/pi-conformance.test.ts` replays each stream through `reducePiNotification` (skipping `response` lines, as `process.ts` does, and seeding the effort `get_state` would) and each file through `extractPiPreviewTurns`, projected after `codex-conformance.test.ts`, whose `hunks` moved to `src/server/sessions/conformance-support.ts` for both to share.
+Its table lists two disagreements: every assistant turn names `effort=high` live and nothing in the preview, because `storedAgentMessage` keeps `thinkingLevel` but never names it as `effort` (OW-zarine, amended to own the preview half), and live draws a `compactionSummary` marker the preview never does, because Pi stores a compaction as a `type: "compaction"` entry and `extractPreviewTurn` reads only `message` entries (filed as OW-livowu).
+Verified by the dispatching session: green as landed, red with one `tool-read-session` entry removed.
+The adversarial read found a third disagreement the projection left out, the assistant footer's time (the preview uses the entry's append time, the message keeps its start), filed as OW-jiwaso and named in the test header; and it found the reducer's "Pi's messages carry none" overturned for the live stream on 1.2.0, versioned in place and pointed at OW-zarine.
+Not acted on, from that read: the test asserts no table entry's `owners` and no shared rows, so a regression both sides share passes, as in the Codex test; the replay hands `thinking_level_changed` to the reducer where `process.ts` intercepts it, harmless while no capture contains one; and `model_change.modelId` is scrubbed only because the same model also appears at a scrubbed key.
+`resources/fixtures/README.md`, "The session-file scenarios", and `docs/MANUAL_TESTING.md`, "Pi fixtures that keep their session file (OW-piyulu)", record the runs. `bun run check` passed.
