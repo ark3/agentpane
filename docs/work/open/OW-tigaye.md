@@ -14,7 +14,7 @@ Two facts about Pi forks were read in the installed `pi 0.87.1` source on the ho
    The server's fork route aborts nothing, so a raw HTTP or JSON-RPC fork during the first turn reaches the refusal, and what agentpane answers then is unmeasured.
 2. A fork at the first user message leaves the new branch holding no assistant message, so `createBranchedSession` defers writing it: the fork's file is not on disk when `fork` returns.
    It takes that path, rather than the `newSession` one that skips the check, because the first user message has a parent: `sdk.js` always appends a `thinking_level_change` to a new session.
-   `AGENTS.md`'s Pi fork bullet under "Evidence" says "The 0.85.1 runs also read the fork's moved-to session file as already on disk when `fork` returned, carrying the rewound prefix"; that was a fork at a later message and does not generalise to the first.
+   `AGENTS.md`'s Pi fork bullet under "Evidence" says "The 0.85.1 and 1.2.0 runs also read the fork's moved-to session file as already on disk when `fork` returned, carrying the rewound prefix" (the `1.2.0` runs are OW-vijine's, added 2026-10-14); those were forks at a later message and do not generalise to the first.
    `#forkOnto` in `src/server/http/session-manager.ts` already tolerates the absence with `onDisk: false`.
 
 In service of the fork records being true for every fork point, so nobody builds on "the fork's file is on disk" for a first-message fork.
@@ -31,3 +31,5 @@ The home server's `pi --version` reported `1.2.0` on 2026-10-14, and Pi's change
 That is the precondition both facts above rest on: if it holds, the refusal in fact 1 may fire only before the first prompt, and a first-message fork's new branch may be written at once rather than deferred.
 So the run this card asks for is made on the installed `pi`, now `1.2.0`, and settles when the file first appears as well as the two facts.
 Whatever it shows, every copy of OW-bohodu's `0.87.1` finding that the file appears only once the first reply ends is scoped to its version or retired: the `ref` and `idResolved` docblocks on `PiAdapter` in `src/server/adapters/pi/process.ts` ("writes no file there until the first turn's reply ends"), the fact-1 sentence above, and whatever a grep for "OW-bohodu" turns up in `docs/` and `src/`.
+
+Amended again 2026-10-14 at execution: the `AGENTS.md` quote above gained "and 1.2.0" from OW-vijine's runs since filing, and `docs/MANUAL_TESTING.md`'s OW-vijine section already cites the `0.99.0` changelog line ("changed nothing these runs needed, since every one forked from a file a turn had already written"), which this run's result may need to qualify too.
