@@ -23,3 +23,11 @@ A visible item in that place would leave the pending call a non-last entry, draw
 Jsdom tests in `src/client/render/` assert `data-state="running"` on every pending card in two shapes: one streaming assistant message holding two `toolCall` blocks with no results (block level), and a pending tool call in an entry followed by another message while the turn streams (entry level); both go red first.
 Cases in `src/emacs/nodes.test.ts` pin the same two shapes: the block-level one already passes there, and the entry-level one goes red first.
 `bun run check` passes.
+
+## Amended 2026-10-14 by OW-wavini
+
+A third shape reaches the same entry-level narrowing, from Pi.
+As of `pi 1.2.0` a `role: "system"` message is a visible transcript entry, drawn by the `system` arm of `Message.svelte` and the `"system"` case of `nodeFor` in `src/emacs/nodes.ts`, and `declareToolChanges` in `pi-agent-core/dist/agent-loop.js` (under `~/.bun/install/global/node_modules/@earendil-works/`) inserts a tool-only one before any request whose tool set changed, including a request made after tool results inside a turn.
+That message becomes `view.lastIndex`, so the assistant message before it loses `streaming` in both clients until the next assistant `message_start`: its cursor disappears for the time to first token.
+Read at the source by OW-wavini's adversarial reader, not run; a tool set changing mid-turn needs an extension, which nothing on the home server installs as of 2026-10-14.
+Whatever fix this card lands should hold for a system message after the streaming one, and the done-condition's entry-level shape may use one.
