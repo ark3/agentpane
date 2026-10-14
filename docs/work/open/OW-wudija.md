@@ -28,3 +28,9 @@ Pi runs only with the pinned model, `pi --model openrouter/deepseek/deepseek-v4.
 The comparison is now against `1.2.0`, and the delta recorded names it.
 Pi's own changelog for those releases is at `~/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md`; read from it on 2026-10-14, no command, response or event type agentpane consumes was removed or renamed, which is a reading, not this card's measurement.
 OW-meriva, OW-wavini, OW-zarine, OW-kokotu and the amendment to OW-tigaye, filed the same day, carry the changes that reading did find, so a delta here that names one of them is recorded and left to that card.
+
+## Amended 2026-10-14 at execution: four of the five fixtures are in scope
+
+`capture_fixtures.py` drives four Pi scenarios -- `text`, `tool-read`, `tool-edit` and `compact` -- and those four are what "per scenario" in the done-condition covers.
+`pi/fork.jsonl` is not an RPC stream: it is a session file `resources/probes/fork_probe.py` left behind on 0.84.2 (`resources/fixtures/README.md`, "The fork scenario"), so no live turn's event census diffs against it, and whether Pi 1.2.0's session-file shape still matches it is a different measurement this card does not make.
+`OW-pukado` is still open on 2026-10-14, so the comparison is by hand.
