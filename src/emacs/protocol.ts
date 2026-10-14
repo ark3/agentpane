@@ -67,6 +67,9 @@
  * and its diff lines, retiring the flat `diff`.
  * OW-jamaha raised it an eighteenth, under D27: `sessions/setName`, and
  * `name` on the `SessionSummary` that `sessions/list` answers.
+ * OW-wavini raised it a nineteenth: the `"system"` role and its `system`
+ * part, for the system-role message `pi 1.2.0` opens every session with and
+ * sends again whenever its configuration changes.
  *
  * A transcript projects to a JSON array of **nodes**, one per visible
  * transcript entry, in transcript order. The Emacs buffer draws one section
@@ -82,8 +85,10 @@
  * - `role` (string, always). One of `"user"`, `"assistant"`, `"tool-result"`
  *   (a result whose call is not in the transcript -- a truncated or forked
  *   slice can start mid-turn), `"compactionSummary"` (the seam the backend
- *   folded its context at), or another backend-defined role the elisp should
- *   draw generically.
+ *   folded its context at), `"system"` (a system-role message: the system
+ *   prompt, or a later change to it, carrying one `system` part and no role
+ *   label of its own), or another backend-defined role the elisp should draw
+ *   generically.
  * - `parts` (array, always, possibly empty). The node's content in display
  *   order; each element is one of the parts below, told apart by `type`.
  * - `meta` (object, only on `role: "assistant"`). The turn's footer facts,
@@ -147,6 +152,13 @@
  *   any other call, and for a subagent call naming none, as a spawn's
  *   `item/started` does. An orphan `tool-result` node carries one of these
  *   parts too, with `args` empty and no `diff` or `threadIds`.
+ * - `{ type: "system", summary, body }` -- the one part of a `"system"` node,
+ *   drawn as the browser draws it: `summary` (string, never empty) as a
+ *   one-line marker naming what the message carries, and `body` (string,
+ *   plain text, not markdown) folded beneath it, collapsed until opened --
+ *   the message's own text, each section under its name, and the tools it
+ *   adds and removes. Both come from `systemView` in
+ *   `$client/render/system.ts`, which the browser draws from too.
  * - `{ type: "image", mimeType, data }` -- an image the user attached, or
  *   one in a tool result's `images`.
  *   `mimeType` (string) such as `"image/png"`; `data` (string) is base64.
@@ -480,7 +492,7 @@ export interface TranscriptNode {
 	tokensBefore?: number;
 }
 
-export type NodePart = TextPart | ThinkingPart | ToolPart | ImagePart;
+export type NodePart = TextPart | ThinkingPart | ToolPart | SystemPart | ImagePart;
 
 export interface TextPart {
 	type: "text";
@@ -505,6 +517,12 @@ export interface ToolPart {
 	images?: ImagePart[];
 	diff?: NodeDiffLine[];
 	threadIds?: string[];
+}
+
+export interface SystemPart {
+	type: "system";
+	summary: string;
+	body: string;
 }
 
 export interface NodeDiffLine {

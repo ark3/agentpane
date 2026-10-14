@@ -133,6 +133,27 @@ and a marker whose size is 0 names none."
     (should (= 1 (count-matches "tok" (point-min) (point-max))))
     (should-not (string-search "compactionSummary" (buffer-string)))))
 
+(ert-deftest agentpane-test-system-node-is-a-folded-marker ()
+  "A system node draws as its summary on one header line with no role label,
+its body folded beneath it until TAB, as the browser's disclosure is."
+  (with-temp-buffer
+    (agentpane-transcript-mode)
+    (agentpane--draw
+     [(:index 0 :role "system"
+       :parts [(:type "system" :summary "System prompt · 5 sections · 4 tools"
+                :body "preamble:\n<preamble>\nYou are an expert.\n</preamble>\n\ntools added:\nread — Read a file.")])
+      (:index 1 :role "user"
+       :parts [(:type "text" :text "Fix the bug" :html "<p>Fix the bug</p>\n")])])
+    (should-not (string-match-p "^system$" (buffer-string)))
+    (should-not (string-search "[unknown part type" (buffer-string)))
+    (should (string-search "System prompt" (agentpane-test--line-at "System prompt")))
+    (should (invisible-p (agentpane-test--position "You are an expert.")))
+    (should (invisible-p (agentpane-test--position "read — Read a file.")))
+    (should-not (invisible-p (agentpane-test--position "Fix the bug")))
+    (goto-char (agentpane-test--position "System prompt"))
+    (agentpane-toggle)
+    (should-not (invisible-p (agentpane-test--position "You are an expert.")))))
+
 (ert-deftest agentpane-test-tool-result-images-in-the-fold ()
   "A tool result's image parts are drawn in its folded body, where its text
 is, and a result that is only images is not drawn as none."

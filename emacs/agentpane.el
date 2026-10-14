@@ -159,8 +159,8 @@
 
 (defface agentpane-role-other
   '((t :inherit font-lock-type-face :weight bold))
-  "Face for the role line of a node whose role is not user, assistant or
-compactionSummary, which draw none.")
+  "Face for the role line of a node whose role is not user, assistant,
+compactionSummary or system, which draw none.")
 
 (defface agentpane-tool
   '((t :inherit font-lock-doc-markup-face))
@@ -1536,6 +1536,20 @@ all of it when the first line was cut."
          (and body (not (string-empty-p body))
               (propertize body 'face 'agentpane-thinking))))))))
 
+(defun agentpane--insert-system (key part)
+  "Insert a system PART under fold KEY: its summary, the browser's marker for
+a system message, as the header, cut short to keep it one screen line, and
+its body folded beneath it, collapsed, as the browser's disclosure starts.
+A summary the header cut short leads the body whole, as a tool's does.
+The decision, a first cut chosen by the owner on 2026-10-14 and to be
+judged in use, is `systemView' in src/client/render/system.ts."
+  (let* ((summary (plist-get part :summary))
+         (body (plist-get part :body))
+         (fit (agentpane--fit-header "" (propertize summary 'face 'agentpane-dim) nil))
+         (chunks (delq nil (list (and (nth 1 fit) summary)
+                                 (and body (not (string-empty-p body)) body)))))
+    (agentpane--insert-fold key (nth 0 fit) (and chunks (mapconcat #'identity chunks "\n\n")))))
+
 (defun agentpane--insert-part (index ordinal part &optional tail)
   "Insert PART, part number ORDINAL of the node at INDEX.
 TAIL, given only for a tool PART, is the step's meta for its header; the
@@ -1549,6 +1563,7 @@ return value is then non-nil when the header carries it."
            (agentpane--insert-html html))))
       ("thinking" (agentpane--insert-thinking key part))
       ("tool" (agentpane--insert-tool key part tail))
+      ("system" (agentpane--insert-system key part))
       ("image" (insert (agentpane--image-line part) "\n"))
       (_
        (insert (propertize (format "[unknown part type %S]" type)
@@ -1726,7 +1741,8 @@ label between two rules, naming the context size it folded when above 0."
      ((equal role "compactionSummary")
       (insert (propertize (agentpane--compaction-marker node) 'face 'agentpane-dim)
               "\n"))
-     ((not (or userp (equal role "assistant")))
+     ;; A system node's marker is its part's fold header.
+     ((not (or userp (member role '("assistant" "system"))))
       (insert (propertize role 'face 'agentpane-role-other) "\n")))
     (let* ((body-start (point))
            (time (agentpane--format-timestamp (plist-get node :timestamp)))

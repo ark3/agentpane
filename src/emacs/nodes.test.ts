@@ -18,8 +18,10 @@ import {
 	type FixtureName as CodexFixtureName,
 } from "$server/adapters/codex/test-support.ts";
 import { toolSummary } from "$client/render/tools/summary.ts";
+import { assistant, systemChanged, systemLeading, user } from "$client/render/samples.ts";
+import { systemView } from "$client/render/system.ts";
 import { projectTranscript, projectUpsert } from "./nodes.ts";
-import type { TextPart, ToolPart, TranscriptNode } from "./protocol.ts";
+import type { SystemPart, TextPart, ToolPart, TranscriptNode } from "./protocol.ts";
 import { loadRenderer } from "./render.ts";
 
 /** A stand-in for `renderMarkdown`: the structure tests only need to see it was called with the part's text. */
@@ -412,6 +414,36 @@ describe("other roles", () => {
 		if (message.role !== "compactionSummary") throw new Error("marker is not a compactionSummary");
 		expect(message.tokensBefore).toBeGreaterThan(0);
 		expect(marker!.tokensBefore).toBe(message.tokensBefore);
+	});
+
+	it("yields a system node as the browser's marker over its folded text, not the JSON dump (OW-wavini)", () => {
+		const leading = systemLeading();
+		const changed = systemChanged();
+		const messages: PaneMessage[] = [leading, user("hi"), assistant([{ type: "text", text: "yo" }]), changed];
+		const nodes = projectTranscript(messages, false, render);
+
+		expect(nodes.map((node) => node.role)).toEqual(["system", "user", "assistant", "system"]);
+		const [first, later] = nodes.filter((node) => node.role === "system");
+		for (const node of [first!, later!]) {
+			expect(node.parts.map((part) => part.type)).toEqual(["system"]);
+			expect(node.meta).toBeUndefined();
+		}
+		const firstPart = first!.parts[0] as SystemPart;
+		const laterPart = later!.parts[0] as SystemPart;
+		expect(firstPart.summary).toBe(systemView(leading, true).summary);
+		expect(laterPart.summary).toBe(systemView(changed, false).summary);
+
+		// The body holds every section and every tool's description, never a schema.
+		for (const [name, text] of Object.entries(leading.sections!)) {
+			expect(firstPart.body).toContain(name);
+			expect(firstPart.body).toContain(text!);
+		}
+		for (const tool of leading.toolsAdded!) expect(firstPart.body).toContain(tool.description);
+		expect(firstPart.body).not.toContain('"properties"');
+		for (const tool of changed.toolsRemoved!) expect(laterPart.body).toContain(tool.name);
+
+		// An upsert of the later one finds the same leading message, so draws the same node.
+		expect(projectUpsert(messages.slice(0, 3), 3, changed, false, render)).toEqual(later);
 	});
 
 	it("yields a user node with text and image parts in order", () => {

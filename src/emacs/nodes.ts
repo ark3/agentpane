@@ -34,11 +34,13 @@ import { buildTranscript, type TranscriptEntry, type TranscriptView } from "$cli
 import { argString, editHunks, prettyArgs } from "$client/render/tools/args.ts";
 import { buildDiff } from "$client/render/tools/diff.ts";
 import { subagentThreadIds, toolSummary } from "$client/render/tools/summary.ts";
+import { leadingSystemIndex, systemView, type SystemView } from "$client/render/system.ts";
 import { oneLine, resultImages, resultText, toolState, userBlocks } from "$client/render/types.ts";
 import type {
 	ImagePart,
 	NodeDiffLine,
 	NodePart,
+	SystemPart,
 	TextPart,
 	ToolPart,
 	TranscriptNode,
@@ -138,6 +140,12 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 				tokensBefore: message.tokensBefore,
 				parts: message.summary ? [text(message.summary)] : [],
 			};
+		case "system":
+			return {
+				index,
+				role: "system",
+				parts: [systemPart(systemView(message, index === leadingSystemIndex(view)))],
+			};
 		default:
 			return {
 				index,
@@ -145,6 +153,22 @@ function nodeFor(view: TranscriptView, entry: TranscriptEntry, isStreaming: bool
 				parts: [text(JSON.stringify(message, null, 2))],
 			};
 	}
+}
+
+/**
+ * What `Message.svelte` draws for a system message (OW-wavini): the same
+ * marker, and as plain text what its disclosure holds, in the same order.
+ * The decision is `systemView`'s docblock.
+ */
+function systemPart(view: SystemView): SystemPart {
+	const chunks: string[] = [];
+	if (view.content.trim()) chunks.push(view.content);
+	for (const { name, text } of view.sections) chunks.push(text === null ? `${name}: removed` : `${name}:\n${text}`);
+	if (view.toolsAdded.length > 0) {
+		chunks.push(`tools added:\n${view.toolsAdded.map((tool) => `${tool.name} — ${tool.description}`).join("\n")}`);
+	}
+	if (view.toolsRemoved.length > 0) chunks.push(`tools removed: ${view.toolsRemoved.join(", ")}`);
+	return { type: "system", summary: view.summary, body: chunks.join("\n\n") };
 }
 
 function toolPart(call: ToolCall, result: ToolResultMessage | undefined, streaming: boolean): ToolPart {
