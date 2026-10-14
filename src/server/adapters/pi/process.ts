@@ -379,11 +379,23 @@ export class PiAdapter implements BackendAdapter {
 			type: "prompt",
 			message: text,
 			images: images?.map((i) => ({ type: "image" as const, data: i.base64, mimeType: i.mimeType })),
-			// rpc.md: a `prompt` sent while already streaming is rejected unless
-			// `streamingBehavior` is set. "steer" (deliver after the current tool
-			// batch) is Pi's own default interactive behavior for a message typed
-			// mid-turn, so that's what an adapter-level `submit()` -- which has no
-			// way for the caller to express steer-vs-follow-up -- should pick.
+			// A `prompt` without `streamingBehavior` while Pi is running a turn is
+			// refused. Measured on the home server, 2026-10-14, `pi 1.2.0`
+			// (docs/MANUAL_TESTING.md, OW-kokotu): `success: false`, "Agent is
+			// already processing. Specify streamingBehavior ...", and Pi counts
+			// the run from accepting it, before its own response and `agent_start`.
+			// "steer" (deliver after the current tool batch) is Pi's own default
+			// interactive behavior for a message typed mid-turn, so that's what an
+			// adapter-level `submit()` -- which has no way for the caller to
+			// express steer-vs-follow-up -- should pick.
+			//
+			// `isStreaming` turns true only at `agent_start`, which Pi writes after
+			// the response that resolves the previous `submit()`. Same runs: a
+			// second prompt queued behind the first in `SessionManager.submit` went
+			// out bare in that gap and was refused, and the route answered 500.
+			// The response's `data.disposition` is not read either: a prompt an
+			// extension command consumes, `/mcp` say, answers `"handled"` and
+			// starts no run, so no event follows it.
 			...(this.state.isStreaming ? { streamingBehavior: "steer" as const } : {}),
 		};
 		await this.sendCommand<PiResponseFor<"prompt">>(cmd);
