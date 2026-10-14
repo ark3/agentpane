@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { systemChanged, systemLeading, user } from "./samples.ts";
-import { leadingSystemIndex, systemView } from "./system.ts";
+import { leadingSystemIndex, systemView, unprompted } from "./system.ts";
 import { buildTranscript } from "./transcript.ts";
 
 describe("systemView (OW-wavini)", () => {
@@ -33,5 +33,17 @@ describe("systemView (OW-wavini)", () => {
 	it("finds the first system message as the leading one, by its index in the messages", () => {
 		expect(leadingSystemIndex(buildTranscript([user("hi"), systemLeading(), systemChanged()]))).toBe(1);
 		expect(leadingSystemIndex(buildTranscript([user("hi")]))).toBe(-1);
+	});
+});
+
+describe("unprompted (OW-widozi)", () => {
+	it.each([
+		["no transcript", false, undefined],
+		["an empty transcript", true, []],
+		["a leading system message alone", true, [systemLeading()]],
+		["a system message and a user message", false, [systemLeading(), user("Fix the bug")]],
+		["a user message", false, [user("Fix the bug")]],
+	])("reads %s as unprompted: %s", (_name, expected, messages) => {
+		expect(unprompted(messages)).toBe(expected);
 	});
 });

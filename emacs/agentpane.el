@@ -3309,8 +3309,8 @@ session's leading system message and nothing else (docs/MANUAL_TESTING.md,
 OW-vijine), and is no more prompted than an empty session (OW-widozi).
 The model is chosen at conversation start, never switched later (owner,
 2026-09-13), and the effort with it (OW-vozaku); the browser enforces the
-same in `loadModelsForSelected' and `setEffort' (src/client/controller.ts),
-and neither the server nor the helper does."
+same through `unprompted' and its callers, and neither the server nor
+the helper does."
   (with-current-buffer (agentpane--transcript)
     (when (and agentpane--ewoc
                (ewoc-collect agentpane--ewoc

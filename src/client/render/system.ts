@@ -56,8 +56,9 @@ export interface SystemView {
  * may still be chosen: its transcript holds system messages at most
  * (OW-widozi). As of `pi 1.2.0` a fresh Pi session held none until its first
  * prompt, but a fork at the first user message kept the leading one and
- * nothing else (`docs/MANUAL_TESTING.md`, OW-wavini and OW-vijine), and D23
- * has a fork that keeps no turn run as an unprompted session does.
+ * nothing else (`docs/MANUAL_TESTING.md`, OW-wavini and OW-vijine). D23
+ * has a conversation's model and effort chosen before its first prompt and
+ * fixed after it, and such a fork holds no prompt.
  * False for a session this tab holds no view of.
  */
 export function unprompted(messages: readonly AgentMessage[] | undefined): boolean {
