@@ -11,6 +11,11 @@ Pi writes mid-conversation messages with `role: "system"` when its system prompt
 Pi's changelog puts their introduction at `0.86.0` ("transcript-backed mid-conversation system prompt and tool changes"), and at `0.99.2` an `mcp_servers` section changing is appended to the conversation too, so they become more frequent with MCP in use.
 On 2026-10-14 all four Pi session files under the home server's `~/.pi/agent/sessions` written since 2026-10-03 held one, a `type: "message"` entry whose message has the keys `content`, `role`, `sections`, `timestamp` and `toolsAdded`; the nine written 2026-09-14 to 2026-09-16 held none.
 
+Amended 2026-10-14 at execution, after re-reading those four files: in every one the system message is the *leading* message entry, index 0, not a mid-conversation change.
+Each has an empty `content`, five `sections` (`preamble`, `tools`, `rules`, `docs`, `cwd`, about 2.7k characters together) and ten tool definitions in `toolsAdded` (`read`, `bash`, `edit`, `write`, `spawn_shell`, `wait`, `jobs`, `spawn_agent`, `resume_agent`, `kill`), and none holds a later one.
+The pinned `@earendil-works/pi-ai` 1.2.0 types say why: its `SystemMessage` docblock reads "The leading system message is the system prompt. Later system messages change it", and `Message` is now `SystemMessage | UserMessage | AssistantMessage | ToolResultMessage`.
+So the case observed in use is Pi's whole system prompt opening every session from `1.2.0` on, and a mid-conversation update is the rarer case; the decision below covers both.
+
 What agentpane does with one, read from the code:
 
 - The stored preview drops it: `storedAgentMessage` in `src/server/sessions/preview-message.ts` has no `system` arm and returns `null`.
