@@ -23,6 +23,8 @@ Each capture writes two files:
 A Codex scenario marked `rollout` in `capture_fixtures.py` writes a third, `<scenario>.rollout.jsonl`: the rollout Codex wrote to disk for the same run, scrubbed like the stream.
 Its `.meta.json` adds `rollout_census` and `models_seen`; see "The rollout scenarios" below.
 Every Codex capture's `.meta.json` now also carries `item_census`, the thread's own `item/completed`s by item type.
+A Pi scenario marked `session` likewise writes `<scenario>.session.jsonl`: the session file Pi wrote for the same run, under `--session-dir` inside the throwaway state dir, scrubbed like the stream.
+Its `.meta.json` adds `session_census`; see "The session-file scenarios" below.
 
 ## Scrubbed values
 
@@ -80,6 +82,8 @@ New Claude `rate_limit_event` captures follow the same rule, and their `init` ev
 | `long-shell` | run a 45-second loop | a shell run polled with `write_stdin` on disk, with rollout (OW-zadupu) |
 | `multi-patch` | one `apply_patch` touching two files | a two-file `fileChange`, with rollout (OW-zadupu) |
 | `compact-rollout` | one turn, then compact it | manual compaction, with rollout (OW-zadupu) |
+| `tool-read-session` | read a file and summarise it | tool call + tool result pair, with session file (OW-piyulu) |
+| `compact-session` | two turns, then compact them | manual compaction, with session file (OW-piyulu) |
 
 ## What was captured (2026-08-10, pi 0.84.1 / codex-cli 0.147.0)
 
@@ -189,6 +193,17 @@ The live mapper and the preview read the two halves of one run, so `src/server/s
 `compact-rollout` is a separate scenario rather than a re-capture of `compact`, whose 0.147.0 token figures the OW-kelomi test asserts.
 What each run showed, and why there is no `image-gen` fixture, is in `docs/MANUAL_TESTING.md`, "Codex fixtures that keep their rollout (OW-zadupu)".
 A child thread's rollout is not kept; `child_rollouts` in the meta counts them.
+
+## The session-file scenarios (OW-piyulu, captured 2026-10-14)
+
+`tool-read-session` and `compact-session` were captured on `pi 1.2.0` with `capture_fixtures.py`, each run without `--no-session` so the session file Pi wrote is kept beside its stream.
+The live reducer and the preview read the two halves of one run, so `src/server/sessions/pi-conformance.test.ts` replays both and lists every place they disagree, keyed to the card that owns it.
+These two keep their file because between them they hold what a session file adds beyond plain messages: a tool call and its result, and a compaction, which Pi stores as a `compaction` entry rather than a `message`.
+They are new scenarios rather than re-captures of `tool-read` and `compact`, whose 0.84.x streams other tests and docblocks cite; the four Pi scenarios without a file still run `--no-session`.
+As of `pi 1.2.0` every Pi capture opens with a `role: "system"` message whose `docs` section names Pi's install path, so `capture_fixtures.py` replaces the operator's home directory with `/example-home` in every Pi line, stream and file alike.
+The session header's `cwd` and that message's `cwd` section name the capture's scratch directory under the temp dir.
+No context file or skill reached these two captures' system messages; a capture whose scratch or state dir held one would carry its content in `sections`, which no scrub reaches, so read those before committing.
+What the runs showed is in `docs/MANUAL_TESTING.md`, "Pi fixtures that keep their session file (OW-piyulu)".
 
 ## Determinism
 

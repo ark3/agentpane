@@ -4194,3 +4194,29 @@ The version each change is attributed to is a reading of `pi-coding-agent`'s `CH
 **A re-capture of `tool-edit` would need its directory listing scrubbed.**
 This run's first `bash` call was `ls -la`, whose output names the operator's user and group, in the tool result's `content` and `structuredContent` alike; `capture_fixtures.py` scrubs by key and does not reach it.
 The run was not kept, so nothing carrying it was committed.
+
+## Pi fixtures that keep their session file (OW-piyulu)
+
+Run on the home server 2026-10-14, at 18:13 and 18:14 local (`-04:00`), on **`pi 1.2.0`**, from the `card/OW-piyulu` worktree, by `python3 resources/probes/capture_fixtures.py --backend pi --scenario tool-read-session --scenario compact-session --timeout 300`, which exited 0.
+Each scenario spawned `pi --mode rpc --session-dir <throwaway PI_CODING_AGENT_DIR>/sessions --model openrouter/deepseek/deepseek-v4.1-flash:high`, and every assistant `message_end` named `openrouter/deepseek/deepseek-v4.1-flash` (`models_seen`).
+Unlike every earlier Pi capture the runs did not pass `--no-session`, so each wrote exactly one session file under that directory, kept as `resources/fixtures/pi/<scenario>.session.jsonl`; a listing of `~/.pi/agent/sessions` taken before the run matched one taken after it.
+
+| Scenario | Stream lines | File entries |
+| --- | --- | --- |
+| `tool-read-session` | 33 | `session`, `model_change`, `thinking_level_change`, then `system`, `user`, `assistant`, `toolResult`, `assistant` messages |
+| `compact-session` | 1700 | `session`, `model_change`, `thinking_level_change`, then `system`, `user`, `assistant`, `user`, `assistant` messages, then `compaction` |
+
+**The file holds every message the stream does, in the same order, and the stream's system message verbatim.**
+The leading `role: "system"` message in each file was deep-equal to the one its stream's `message_end` carried.
+After the header, the `model_change` entry had `parentId: null` and every later entry named the one before it, so each file is one branch.
+
+**A compaction is an entry, not a message.**
+`compact-session`'s `compaction_end` carried `tokensBefore: 5915` and `estimatedTokensAfter: 5270`, and arrived before the `compact` response, as on `pi 0.84.2`.
+The file recorded it as a `type: "compaction"` entry carrying `summary`, `firstKeptEntryId`, `tokensBefore`, `details`, `usage`, `fromHook`, and `systemMessage`, a copy of the leading system message.
+Its `firstKeptEntryId` named the second `assistant` message, the run's last.
+
+**Assistant messages carry `thinkingLevel: "high"` on both halves.**
+The stream's assistant `message_end`s and the file's assistant messages both had it, beside `durationMs`, `responseId`, and `rawStopReason`.
+
+`src/server/sessions/pi-conformance.test.ts` replays both halves and lists two disagreements, a level each live assistant turn names and the preview does not (OW-zarine), and the compaction marker the preview never draws (OW-livowu).
+The system message is drawn on both sides, as OW-wavini left it.

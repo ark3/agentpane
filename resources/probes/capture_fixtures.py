@@ -58,6 +58,14 @@ copied out, scrubbed, and kept as `<scenario>.rollout.jsonl` beside the stream
 `item/completed`s by item type), `rollout_census` (rollout lines by
 `type/payload.type`, an `item_completed` also by its item's type), and
 `models_seen`, the model each turn's `turn_context` named before the scrub.
+A Pi scenario marked `session` is Pi's counterpart: it runs without
+`--no-session`, with `--session-dir` inside the throwaway PI_CODING_AGENT_DIR,
+so the one session file Pi writes is kept, scrubbed, as
+`<scenario>.session.jsonl` (OW-piyulu), and its `.meta.json` adds
+`session_census` (entries by `type`, a `message` also by its role).
+Every Pi line also has the operator's home directory replaced by
+`/example-home`: as of `pi 1.2.0` the leading system message's `docs` section
+names Pi's own install path, which sits under it.
 
 Both backends are spawned with an explicit model, the one `AGENTS.md` pins,
 because the flag is the whole of that constraint: Pi's default lives in a
@@ -237,6 +245,43 @@ SCENARIOS: dict[str, dict] = {
         "rollout": True,
         "backends": ("codex",),
     },
+    # The two below keep the session file Pi writes for the run, beside the
+    # stream, as `<scenario>.session.jsonl` (OW-piyulu): the stream drives the
+    # live reducer and the file drives the preview, so one run feeds both sides
+    # of `src/server/sessions/pi-conformance.test.ts`. They are new scenarios
+    # rather than re-captures of `tool-read` and `compact`, whose 0.84.x streams
+    # other tests and docblocks cite.
+    "tool-read-session": {
+        "prompt": "Read greeting.txt and tell me, in one short sentence, what it says.",
+        "files": {"greeting.txt": "The quick brown fox jumps over the lazy dog.\n"},
+        "covers": "tool call + tool result pair, with the session file",
+        "session": True,
+        "backends": ("pi",),
+    },
+    "compact-session": {
+        # Two priming turns rather than `compact`'s four: with `keepRecentTokens`
+        # lowered as `capture_pi` does, the first turn falls outside the window.
+        "prompt": (
+            "Explain, in several detailed paragraphs, how the TCP/IP networking "
+            "stack works from the physical layer up through the application "
+            "layer. Cover framing, addressing, routing, congestion control, and "
+            "at least three application protocols."
+        ),
+        "prompts": [
+            "Explain, in several detailed paragraphs, how the TCP/IP networking "
+            "stack works from the physical layer up through the application "
+            "layer. Cover framing, addressing, routing, congestion control, and "
+            "at least three application protocols.",
+            "Now do the same for how a modern optimizing compiler works: "
+            "lexing, parsing, semantic analysis, IR, optimization passes, and "
+            "code generation. Several detailed paragraphs.",
+        ],
+        "files": {},
+        "covers": "manual compaction after two turns, with the session file",
+        "compact": True,
+        "session": True,
+        "backends": ("pi",),
+    },
     "compact-rollout": {
         # `compact` itself stays the codex-cli 0.147.0 capture: the OW-kelomi
         # test asserts its exact pre-compaction figure, and the token updates
@@ -295,6 +340,12 @@ SCRUB_KEYS = {
     "creator_user_id": "user-example",
     "creator_account_id": "example-account",
 }
+
+
+def scrub_home(lines: list[str]) -> list[str]:
+    """Replace the operator's home directory with `/example-home`, textually."""
+    home = str(Path.home())
+    return [line.replace(home, "/example-home") for line in lines]
 
 
 def collect_sensitive(obj, found: dict[str, str]) -> None:
@@ -494,8 +545,12 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
         settings["compaction"] = compaction
         settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
+    # A scenario that keeps its session file has Pi write it inside the
+    # throwaway state dir, never under ~/.pi/agent/sessions.
+    sessions = home / "sessions"
+    session_args = ["--session-dir", str(sessions)] if spec.get("session") else ["--no-session"]
     proc = subprocess.Popen(
-        ["pi", "--mode", "rpc", "--no-session", "--model", model],
+        ["pi", "--mode", "rpc", *session_args, "--model", model],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         cwd=work, env=dict(os.environ, PI_CODING_AGENT_DIR=str(home)),
     )
@@ -547,6 +602,26 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+    # Read after the process has exited, so the file is complete, and before
+    # the throwaway home goes.
+    session: list[str] | None = None
+    extra: dict = {}
+    if spec.get("session"):
+        files = list(sessions.rglob("*.jsonl")) if sessions.exists() else []
+        if len(files) != 1:
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(home, ignore_errors=True)
+            raise RuntimeError(f"{scenario}: expected one session file, found {len(files)}")
+        session = [line for line in files[0].read_text(encoding="utf-8").split("\n") if line.strip()]
+        census: Counter = Counter()
+        for line in session:
+            entry = json.loads(line)
+            kind = entry.get("type")
+            if kind == "message":
+                kind += f"/{(entry.get('message') or {}).get('role')}"
+            census[str(kind)] += 1
+        extra = {"session_census": dict(sorted(census.items()))}
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
 
@@ -569,6 +644,7 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
 
     return {
         "raw": rec.raw,
+        "session": session,
         "terminated_cleanly": settled,
         "census": Counter(
             json.loads(line).get("type", "<unparsed>")
@@ -576,7 +652,7 @@ def capture_pi(scenario: str, spec: dict, timeout: float, model: str) -> dict:
             if line.startswith("{")
         ),
         "extra": {"model_flag": model, "models_seen": models_seen,
-                  "dialogs_seen": dialogs},
+                  "dialogs_seen": dialogs, **extra},
     }
 
 
@@ -799,7 +875,10 @@ def main() -> int:
             elapsed = time.time() - started
 
             rollout = result.get("rollout")
-            lines, scrubbed = (result["raw"], {}) if args.no_scrub else scrub(result["raw"], rollout or [])
+            session = result.get("session")
+            lines, scrubbed = (result["raw"], {}) if args.no_scrub else scrub(result["raw"], rollout or session or [])
+            if backend == "pi" and not args.no_scrub:
+                lines = scrub_home(lines)
             if scrubbed:
                 print(f"  scrubbed {len(scrubbed)} identifying value(s): "
                       f"{', '.join(sorted(scrubbed.values()))}")
@@ -811,6 +890,10 @@ def main() -> int:
                 # `.rollout.jsonl` keeps it under the scrub guard, which reads every `.jsonl`.
                 (outdir / f"{scenario}.rollout.jsonl").write_text("\n".join(kept) + "\n", encoding="utf-8")
                 print(f"  rollout: {len(kept)} lines, census {result['extra']['rollout_census']}")
+            if session is not None:
+                kept = session if args.no_scrub else scrub_home(scrub(session, result["raw"])[0])
+                (outdir / f"{scenario}.session.jsonl").write_text("\n".join(kept) + "\n", encoding="utf-8")
+                print(f"  session: {len(kept)} lines, census {result['extra']['session_census']}")
             if "item_census" in result["extra"]:
                 print(f"  items: {result['extra']['item_census']}")
             meta = {

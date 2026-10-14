@@ -1,0 +1,39 @@
+{
+  "backend": "pi",
+  "scenario": "compact-session",
+  "covers": "manual compaction after two turns, with the session file",
+  "prompt": "Explain, in several detailed paragraphs, how the TCP/IP networking stack works from the physical layer up through the application layer. Cover framing, addressing, routing, congestion control, and at least three application protocols.",
+  "workspace_files": [],
+  "cli_version": "1.2.0",
+  "captured_at": "2026-10-14T18:14:26-0400",
+  "elapsed_seconds": 37.2,
+  "lines": 1700,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 2,
+    "agent_settled": 2,
+    "agent_start": 2,
+    "compaction_end": 1,
+    "compaction_start": 1,
+    "message_end": 5,
+    "message_start": 5,
+    "message_update": 1675,
+    "response": 3,
+    "turn_end": 2,
+    "turn_start": 2
+  },
+  "model_flag": "openrouter/deepseek/deepseek-v4.1-flash:high",
+  "models_seen": [
+    "openrouter/deepseek/deepseek-v4.1-flash"
+  ],
+  "dialogs_seen": [],
+  "session_census": {
+    "compaction": 1,
+    "message/assistant": 2,
+    "message/system": 1,
+    "message/user": 2,
+    "model_change": 1,
+    "session": 1,
+    "thinking_level_change": 1
+  }
+}

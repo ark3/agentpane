@@ -1,0 +1,41 @@
+{
+  "backend": "pi",
+  "scenario": "tool-read-session",
+  "covers": "tool call + tool result pair, with the session file",
+  "prompt": "Read greeting.txt and tell me, in one short sentence, what it says.",
+  "workspace_files": [
+    "greeting.txt"
+  ],
+  "cli_version": "1.2.0",
+  "captured_at": "2026-10-14T18:13:48-0400",
+  "elapsed_seconds": 2.4,
+  "lines": 33,
+  "terminated_cleanly": true,
+  "event_census": {
+    "agent_end": 1,
+    "agent_settled": 1,
+    "agent_start": 1,
+    "message_end": 5,
+    "message_start": 5,
+    "message_update": 13,
+    "response": 1,
+    "tool_execution_end": 1,
+    "tool_execution_start": 1,
+    "turn_end": 2,
+    "turn_start": 2
+  },
+  "model_flag": "openrouter/deepseek/deepseek-v4.1-flash:high",
+  "models_seen": [
+    "openrouter/deepseek/deepseek-v4.1-flash"
+  ],
+  "dialogs_seen": [],
+  "session_census": {
+    "message/assistant": 2,
+    "message/system": 1,
+    "message/toolResult": 1,
+    "message/user": 1,
+    "model_change": 1,
+    "session": 1,
+    "thinking_level_change": 1
+  }
+}
