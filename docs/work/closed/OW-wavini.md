@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-meriva]
+closed: done
 ---
 
 # A Pi role:system message is dropped from the stored preview, and wherever it reaches a client it renders as a raw JSON dump of the system prompt
@@ -46,3 +47,15 @@ If OW-piyulu has closed, its Pi conformance test's known-differences table loses
 
 The owner chose on 2026-10-14, after the live run recorded in `docs/MANUAL_TESTING.md` ("Pi's system-role messages arrive live and from `get_messages` (OW-wavini)"): every system message, the leading one included, renders as a one-line marker naming what it carries, with its text behind a disclosure, in both clients.
 It is a first cut, to be judged in use.
+
+## Close note
+
+Done.
+Live run on the home server, `pi 1.2.0`, pinned model, recorded in `docs/MANUAL_TESTING.md` under "Pi's system-role messages arrive live and from `get_messages` (OW-wavini)": the observed message is Pi's *leading* system message (whole prompt as `sections`, every tool in `toolsAdded`, ~10 KB), emitted live as `message_start`/`message_end` at the first prompt and returned at index 0 by `get_messages` on every load; a later one carrying only a delta lands mid-conversation when the configuration changes (`--append-system-prompt`, `--tools`), and Pi counts them all in its message indexes.
+Decision, the owner's on 2026-10-14 (option C of three: show nothing; hide the leading one and mark later ones; mark every one with its text behind a disclosure), a first cut to judge in use: every system message draws as a one-line marker naming what it carries — "System prompt · 5 sections · 10 tools" for the leading one, "System prompt changed · addendum, −docs · tools −edit −write" for a later one — over a collapsed disclosure holding its content, sections by name, and tools added (name and description) and removed.
+Built: `systemView` and `leadingSystemIndex` in `src/client/render/system.ts`, whose docblock records the decision, shared by the `system` arm of `Message.svelte` (a `<details>`) and the `"system"` case of `nodeFor` in `src/emacs/nodes.ts`, which emits a new `system` part (protocol raised a nineteenth time in `src/emacs/protocol.ts`) drawn by `agentpane--insert-system` in `emacs/agentpane.el` as a fold.
+`storedAgentMessage` in `src/server/sessions/preview-message.ts` gained a `system` arm, so the preview keeps the message at the index live gives it; after review it also keeps a contentless one, as Pi's `get_messages` does, and passes change fields only of the right shape.
+Tests, each seen red first: preview (`preview.test.ts`, two cases), live reducer against the preview projection (`reducer.test.ts`), browser (`Transcript.svelte.test.ts`), Emacs projection (`nodes.test.ts`), ERT (`agentpane-test-system-node-is-a-folded-marker`), and the marker wording (`system.test.ts`).
+`bun run check` passed (1643 tests), `bun run test:browser` passed 26 of 26 at the implementer's last commit, ERT passed.
+OW-piyulu is still open, so its known-differences table had nothing to lose.
+Left as cards: OW-junuva (the marker's one-line ellipsis unseen in a real browser), OW-widozi (a fork at the first user message holds only its system message, which both clients' not-yet-prompted gates read as prompted; predates this card), and an amendment to OW-7 (a tool-only system message mid-turn takes `lastIndex` and hides the streaming cursor).
