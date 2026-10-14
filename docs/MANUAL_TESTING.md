@@ -4124,3 +4124,33 @@ The copied parent messages the preview stopped drawing at OW-luvema are absent f
 
 **Not established.**
 Whether a subagent written by 0.157.1 is refused the same way was not tried, nor what a client would show for one attached through its parent's app-server, which agentpane does not do.
+
+## Pi's system-role messages arrive live and from `get_messages` (OW-wavini)
+
+Run on the home server 2026-10-14 on **`pi 1.2.0`**, each process spawned as `pi --mode rpc --model openrouter/deepseek/deepseek-v4.1-flash:high --session-dir <tmp>` from a `git init`ed scratch directory under `/tmp`, directly rather than through `sbox`; `get_state` read back `deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`.
+Resumes passed `--session <absolute path>` at spawn, as `PiAdapter.start` does, and one ran a fresh process followed by `switch_session` instead.
+The driver was a throwaway Python script, not kept: it sent one short prompt per process, logged every event, and called `get_messages` and `get_entries` before and after the turn.
+
+**What Pi writes.**
+The 1.2.0 types (`@earendil-works/pi-ai`, `SystemMessage`) say "The leading system message is the system prompt. Later system messages change it", and `Message` now includes `SystemMessage`.
+On the wire the message is a bare `AgentMessage` with keys `content`, `role`, `sections` and `timestamp`, plus `toolsAdded` and/or `toolsRemoved` when the tool set changes, and no `id`.
+The leading one had `content: ""`, five tag-wrapped `sections` (`preamble` 169 characters, `tools` 339, `rules` 839, `docs` 1367, `cwd` 39) and ten full tool definitions in `toolsAdded`, about 10.5 KB as JSON.
+Its `message_end` payload, `get_messages[0]` and the session file's entry were equal, timestamp included.
+
+**A fresh session emits the leading one live, at the first prompt.**
+Before any prompt `get_messages` returned no messages.
+The first prompt ran `agent_start`, `turn_start`, `message_start`/`message_end` for the system message, then the user's pair, then the assistant's, `turn_end`, `agent_end` and `agent_settled`.
+`turn_end.message` was the assistant message alone, `agent_end.messages` was `[system, user, assistant]`, and no other event carried a `role: "system"` object.
+`get_messages` then returned `[system, user, assistant]`, and `get_state.messageCount` was 3: the system message is counted and indexed like any other.
+
+**A resume returns it from `get_messages` and does not emit it again.**
+Through `--session` and through `switch_session` alike, `get_messages` held the system message at index 0 before any prompt, and a further prompt with an unchanged configuration emitted only the user and assistant pairs.
+
+**A changed configuration emits a later one mid-conversation.**
+No RPC command changes the prompt or the tools; `pi-coding-agent` 1.2.0 diffs the prompt sections and the tool set before each run, so a later system message comes from resuming with different flags, or from an extension changing tools.
+Resuming with `--append-system-prompt "Always answer in lowercase."` emitted, after the next `turn_start` and before the user message, a system message with `sections: {addendum: …}` and no tool fields; `get_messages` placed it at index 7, just before that turn's user message, not merged into index 0.
+Resuming again with `--tools read,bash` as well emitted a third, with `sections` replacing `tools` and `rules` and `toolsRemoved` naming the eight dropped tools, at index 10.
+`--tools` took effect over the tool set restored from the transcript.
+
+**So agentpane holds them in both live paths.**
+`reducePiNotification` appends a `message_start` of any role, and `hydrateMessages` takes `get_messages` whole, so both the live first turn and every load put the leading system message into the held transcript, and any later one where it fell; the stored preview, through `storedAgentMessage`, dropped them until OW-wavini.
