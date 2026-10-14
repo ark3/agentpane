@@ -31,3 +31,13 @@ If `get_state` after the fork names a model other than the pinned one, the turn 
 - A live run on the home server, recorded with the version in `docs/MANUAL_TESTING.md`, shows what `get_state` names after that fork.
 - If it names the opening model or level rather than the parent's current one, a test in `src/server/adapters/pi/process.test.ts` forks a resumed session at its first user message with `get_state` answering `messageCount` 1 at the opening model and level, and asserts the model and level after the fork are the parent's, shown red first; the fix lands, and the D23 Pi bullet in `docs/DESIGN.md` is brought in line.
   If it names the parent's current model and level, the run's record is the whole of the work.
+
+## Amended 2026-10-14: the level half was run at Pi's RPC on `pi 1.2.0`
+
+OW-vijine ran the level case directly against `pi --mode rpc`, not through the adapter, and recorded it in `docs/MANUAL_TESTING.md`, "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", under "And a level changed after the turns".
+A session written by `pi 1.2.0` on the pinned model at `high`, two turns, then `set_thinking_level` `low` after the second; resumed bare, `get_state` read the pin at `low`, `messageCount` 5.
+A `fork` at the first user entry then answered `get_state` with the pin at `thinkingLevel: "high"`, `messageCount` 1, the branch holding `model_change` pin, `thinking_level_change` `high` and the system message, nothing appended.
+So Pi restores the opening level, not the parent's current one, and the done-condition's first branch applies to the level.
+The same section's fact 5 confirms that on a file written since `0.86.0` the kept system message counts, so `keptNoMessage` in `fork` never fires for a first-message fork of such a file.
+The model half is still unrun: no run has yet `set_model`ed to another model after a turn, resumed, and forked at the first user message.
+What remains of the live run is that half, by the method above; the test the done-condition names covers both the model and the level.
