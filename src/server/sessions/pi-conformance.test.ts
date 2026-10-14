@@ -103,45 +103,22 @@ async function preview(name: Scenario): Promise<string[]> {
 	return project((await extractPiPreviewTurns(`${FIXTURE_DIR}${name}.session.jsonl`)) as Message[]);
 }
 
-/** What `OW-zarine` owns in each hunk below. */
-const EFFORT =
-	"live, each assistant turn names the level in force as it started; stored, the message carries it as " +
-	"`thinkingLevel`, which `storedAgentMessage` keeps but does not name as the turn's `effort`, " +
-	"so the preview's footer shows none";
-
 /**
  * Captured on `pi 1.2.0`, on 2026-10-14; see each `.meta.json`, and
  * `docs/MANUAL_TESTING.md`, "Pi fixtures that keep their session file
  * (OW-piyulu)".
  */
 const KNOWN_DIFFERENCES: Record<Scenario, KnownDifference[]> = {
-	"tool-read-session": [
-		{
-			owners: { "OW-zarine": EFFORT },
-			live: ["assistant toolUse [thinking, call read] effort=high"],
-			preview: ["assistant toolUse [thinking, call read]"],
-		},
-		{
-			owners: { "OW-zarine": EFFORT },
-			live: ["assistant stop [text] effort=high"],
-			preview: ["assistant stop [text]"],
-		},
-	],
+	"tool-read-session": [],
 	"compact-session": [
 		{
-			owners: { "OW-zarine": EFFORT },
-			live: ["assistant stop [thinking, text] effort=high"],
-			preview: ["assistant stop [thinking, text]"],
-		},
-		{
 			owners: {
-				"OW-zarine": EFFORT,
 				"OW-livowu":
 					"live, `compaction_end` appends a `compactionSummary` marker; stored, Pi writes the compaction as a " +
 					"`type: \"compaction\"` entry, not a `message`, and the preview reads only `message` entries, so it draws no marker",
 			},
-			live: ["assistant stop [thinking, text] effort=high", "compactionSummary tokensBefore=5915 summary=present"],
-			preview: ["assistant stop [thinking, text]"],
+			live: ["compactionSummary tokensBefore=5915 summary=present"],
+			preview: [],
 		},
 	],
 };

@@ -63,6 +63,19 @@ function assistantBlock(value: unknown): TextContent | ThinkingContent | ToolCal
 	return null;
 }
 
+/**
+ * The level a stored Pi reply records it ran at, as the turn's `effort`
+ * (OW-zarine): as of `pi 1.2.0` every reply carries `thinkingLevel`, which
+ * `withLoadedEfforts` in `adapters/pi/reducer.ts` names a loaded turn by too.
+ * Except `off`, which Pi also stamps on a model that does not reason, and which
+ * that function names only on the current model, whether it reasons being
+ * known; a file has no current model, so the preview names `off` nowhere. A
+ * reply written before the stamp, and every Codex one, carries none.
+ */
+function recordedEffort(level: unknown): { effort?: string } {
+	return typeof level === "string" && level !== "off" ? { effort: level } : {};
+}
+
 /** Map a message-shaped store payload (Pi's native shape) onto the preview wire. */
 export function storedAgentMessage(
 	value: unknown,
@@ -96,6 +109,7 @@ export function storedAgentMessage(
 					? (value.usage as unknown as Usage)
 					: emptyPreviewUsage(),
 				stopReason: typeof value.stopReason === "string" ? value.stopReason : "stop",
+				...recordedEffort(value.thinkingLevel),
 				...timestampField(timestamp),
 			} as SessionPreviewTurn;
 		}

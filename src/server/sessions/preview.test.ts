@@ -330,6 +330,26 @@ describe("readSessionPreview", () => {
 			expect(turns[0]).toEqual({ role: "system", content: "", timestamp: "2026-10-14T10:00:00.000Z" });
 		});
 
+		it("names a stored turn the level its message records, except `off`, and none where it records none (OW-zarine)", async () => {
+			const stamped = (text: string, timestamp: string, thinkingLevel?: string) => {
+				const record = piMessage("assistant", text, timestamp);
+				return thinkingLevel === undefined ? record : { ...record, message: { ...record.message, thinkingLevel } };
+			};
+			const file = join(root, "stamped.jsonl");
+			await writeJsonl(file, [
+				piHeader(),
+				stamped("at high", "2026-10-14T10:00:01.000Z", "high"),
+				// Pi stamps `off` on a model that does not reason, too, which the file cannot tell apart.
+				stamped("at off", "2026-10-14T10:00:02.000Z", "off"),
+				// Written before Pi stamped the level.
+				stamped("unstamped", "2026-10-14T10:00:03.000Z"),
+			]);
+
+			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
+
+			expect(turns.map((turn) => (turn.role === "assistant" ? turn.effort : turn.role))).toEqual(["high", undefined, undefined]);
+		});
+
 		it("carries no timestamp for a record whose timestamp is not a string (OW-71)", async () => {
 			// Absent must stay absent: the client edge renders no time rather than
 			// the epoch. A non-string timestamp is the shape a malformed record has.
