@@ -10,19 +10,26 @@ Since `pi 0.86.0` every Pi session file opens with a leading `role: "system"` me
 `hydrateMessages` in `src/server/adapters/pi/process.ts` takes `get_messages` whole, so that fork's transcript is `[system]`, not empty.
 A fresh Pi session, by contrast, holds no messages until its first prompt (`docs/MANUAL_TESTING.md`, "Pi's system-role messages arrive live and from `get_messages` (OW-wavini)").
 
-Both clients decide "not yet prompted" by an empty transcript, so they read that fork as prompted:
+Both clients decide "not yet prompted" by an empty transcript, so they read that fork as prompted.
+Where a user meets it differs by client.
+`agentpane-fork` in `emacs/agentpane.el` opens the fork in a buffer of its own, attached and unprompted, so an Emacs fork at the first message is exactly this state.
+The browser's only fork is `forkAndSubmit` in `src/client/controller.ts`, which prompts the fork straight away, so the browser meets the state only when that prompt fails or when it selects a fork made elsewhere, such as from Emacs.
 
-- The browser shows the model picker only `{#if selectedSession?.messages.length === 0}`, in the composer's `prompt-actions` row of `src/client/App.svelte`, so the fork offers no model choice before its first turn.
-- The browser's `renamable` in `src/client/App.svelte` offers Rename only once a session has been prompted, by the same reading.
-- In `emacs/agentpane.el`, `agentpane-set-model` is "Allowed only before the first prompt, while the buffer has no nodes", and the rename command beside it treats "a buffer whose ewoc holds no indexed node" as not yet prompted; since OW-wavini a system message projects to an indexed `"system"` node, as it projected to an unknown-role node before.
-- `selectionIntent` handling in `src/client/controller.ts` (the `messages.length === 0` test near `selects(handle)`) may share the reading; check it.
+The model and effort gates, every one of which reads the empty transcript:
+
+- `src/client/App.svelte`: the composer's `prompt-actions` row shows the model and effort pickers only inside `{#if selectedSession?.messages.length === 0}`.
+- `src/client/controller.ts`: `loadModelsForSelected` returns early unless the transcript is empty, and tests it again near `selects(handle)` before publishing the models; `setModel` and `setEffort` each return without sending unless it is empty.
+  Fixing the picker's `{#if}` alone would draw a picker with no models loaded, whose choice sends nothing.
+- `emacs/agentpane.el`: `agentpane--check-gate`, which both `agentpane-set-model` and `agentpane-set-effort` call, refuses once the ewoc holds any indexed node; since OW-wavini a system message projects to an indexed `"system"` node, as it projected to an unknown-role node before.
+
+The rename gates are not affected and are left alone: `renamable` in `src/client/App.svelte` and `agentpane--check-renamable` in `emacs/agentpane.el` test for an empty transcript only on a Codex session, and Codex writes no system message.
 
 In service of a fork that keeps no turn behaving as the unprompted session D23 in `docs/DESIGN.md` says it is ("A fork that keeps no turn ... runs at the parent's model and effort as they stand when it is cut").
 Load-bearing: that a transcript of system messages alone is unprompted, in both clients alike (AGENTS.md, "Both clients").
-Incidental: where the test lives, whether a shared predicate in `src/client/render/` that both `App.svelte` and the Emacs projection read replaces the scattered length checks, and whether Rename should in fact be offered there, which follows from whatever Pi's store does with a name on such a fork and is the executor's to check.
+Incidental: where the tests live, and whether a shared predicate in `src/client/render/` that `App.svelte`, `controller.ts` and the Emacs projection read replaces the scattered length checks.
 
 ## Done when
 
-A jsdom test in `src/client/` renders a Pi session whose messages are one system message (the `systemLeading()` sample in `src/client/render/samples.ts`) and asserts the model picker is offered, seen red first.
-An ERT test in `emacs/agentpane-test.el` draws a buffer holding one `"system"` node and asserts `agentpane-set-model` is not refused as after the first prompt, seen red first.
-Every gate listed above reads the same predicate or is shown in the close note not to need it, and `bun run check` passes.
+A jsdom test in `src/client/` selects a Pi session whose messages are one system message (the `systemLeading()` sample in `src/client/render/samples.ts`), asserts the model picker is offered with the models loaded, chooses a model and an effort, and asserts both requests are sent; seen red first.
+An ERT test in `emacs/agentpane-test.el` draws a buffer holding one `"system"` node and asserts `agentpane--check-gate` refuses neither the model nor the effort, seen red first.
+Every model and effort gate listed above reads the same predicate, any further such gate the executor finds is named in the close note, and `bun run check` passes.
