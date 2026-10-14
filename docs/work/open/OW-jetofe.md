@@ -6,7 +6,7 @@ labels: [deferral]
 
 Found 2026-10-14 by OW-vijine's runs of `python3 resources/probes/fork_probe.py --backend pi --no-fixtures` on `pi 1.2.0`.
 The Pi mid-stream cell reports `midstream_expected_message_count`, set from `stream_expected_messages = 2 if stream_entry else None` in `resources/probes/fork_probe.py`.
-After the cell's second-message fork, `get_state` answered `messageCount` 3 in both 1.2.0 runs, where OW-gajesu's `pi 0.85.1` run read 2: since `pi 0.86.0` Pi writes and counts a leading `role: "system"` message (`docs/MANUAL_TESTING.md`, OW-wavini's section, and "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", fact 1).
+After the cell's second-message fork, `get_state` answered `messageCount` 3 in both 1.2.0 runs, where OW-gajesu's `pi 0.85.1` run read 2: since `pi 0.86.0` Pi writes and counts a leading `role: "system"` message (`docs/MANUAL_TESTING.md`, OW-riyeku's section, which cites that release's CHANGELOG, and "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", fact 1).
 The probe only reports the number and its exit status never reads it, so nothing fails; a reader comparing the two fields sees a mismatch that looks like a moved fact and is not.
 
 In service of the probe's record reading true on the Pi that runs today.
