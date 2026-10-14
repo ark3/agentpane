@@ -2068,6 +2068,7 @@ The step is Codex's alone, and the probe guards it on the backend for that reaso
 ## Pi's mid-stream fork, and the forked file on disk, re-measured at the instrument (OW-gajesu)
 
 Run on the home server 2026-09-15, `pi 0.85.1`, by the same re-runnable vehicle as the OW-mewiga and OW-yudoni sections above: `python3 resources/probes/fork_probe.py --backend pi --no-fixtures`, which exited 0.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 The probe copies `~/.pi/agent/settings.json` into a throwaway state home and launches `pi --mode rpc` with no `--model` flag, so the model is whatever that file resolves to; `get_state` reported `deepseek/deepseek-v4.1-flash` ("DeepSeek: DeepSeek V4.1 Flash", provider `openrouter`) at `thinkingLevel: "high"` in every state read the record carries.
 This run exists because the OW-yudoni section had already recorded that two of the three things its mid-stream cell observed were not evidence for the claim the repo went on to state flatly, and because the disk-timing flag had been read both ways at two different instruments.
 The cell has since been changed on both counts — it forks at the second entry and it reads the file the turn was streaming into — and this is the first run of it.
@@ -2131,6 +2132,7 @@ A reader who sees no pencils on an *attached* Claude or Pi session should read t
 ## Pi's mid-stream fork, measured against text known to have streamed (OW-sededi)
 
 Run on the home server 2026-09-15, `pi 0.85.1`, by `python3 resources/probes/fork_probe.py --backend pi --no-fixtures`, which exited 0.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 As in the OW-gajesu section above, the probe copies `~/.pi/agent/settings.json` into a throwaway state home and launches `pi --mode rpc` with no `--model` flag; every state read in this record reports `deepseek/deepseek-v4.1-flash` ("DeepSeek: DeepSeek V4.1 Flash", provider `openrouter`) at `thinkingLevel: "high"`.
 This run exists because that section could not tell a discarded reply from one not yet begun: its cell gated on `agent_start` alone, forked about 2.2s into a reasoning turn, and read an assistant entry whose text was `""`.
 The cell now carries the streaming discipline of its Codex sibling — `agent_start` plus forty accumulated `message_update` events whose `assistantMessageEvent.type` is `text_delta`, re-read at the instant the `fork` request goes out — and reports `midstream_result`, which the probe's exit status reads the way it already read the Codex cell's `result`.
@@ -3132,6 +3134,7 @@ Read from the code, the browser's banner (`view.error` in `src/client/session-st
 ## A Pi resume that clamps the recorded level, or overrides it, records no level (OW-lehita)
 
 Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-lehita` worktree cut at `f09f7fd`.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, and in a throwaway workspace beside it, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and both directories were removed.
 The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` directly, not through `sbox` or agentpane's server.
 Four turns ran in all, each `Do not use any tools. Reply with exactly: ok` on `openrouter/deepseek/deepseek-v4.1-flash`, each answering `ok` for $0.0003 or less.
@@ -3221,6 +3224,7 @@ Nothing here went through agentpane's server, the browser or Emacs.
 ## A Pi fork in a process spawned with a suffixed `--model` puts the suffix's level back, unrecorded (OW-dojebo)
 
 Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-dojebo` worktree cut at `d49aa65`.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 Every Pi process ran with `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json` and `models-store.json` and a rewritten `settings.json`, and in a throwaway workspace beside it, so the owner's `~/.pi/agent/settings.json` was never written; its sha256 read `ec0098ff...` before and after, and the directories were removed.
 The rewritten `settings.json` named `max` in `modelThinkingLevels` for `openrouter/deepseek/deepseek-v4.1-flash`, so that the suffix, the chosen level and the settings default were three different levels.
 The driver was a throwaway Python script, not kept, that spoke LF-framed JSON to `pi --mode rpc` directly, not through `sbox` or agentpane's server.
@@ -3272,6 +3276,7 @@ Nothing here went through `sbox`, agentpane's server, the browser or Emacs.
 ## A Pi fork puts the spawn's `--model` back over a model `set_model` chose, unrecorded (OW-sinoha)
 
 Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-sinoha` worktree cut at `7e46543`.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 The method was OW-dojebo's, above: `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, a throwaway workspace beside it, a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc` directly, and on every spawn `--extension` naming a throwaway `before_provider_request` handler that appended the request payload's `model` and `reasoning` fields to a file; none of them kept.
 `settings.json` was copied unchanged, so it named `openrouter/deepseek/deepseek-v4.1-flash` as the default and `high` in `modelThinkingLevels` for it.
 The owner's `~/.pi/agent/settings.json` read `ec0098ff...` before and after, and the directories were removed.
@@ -3316,6 +3321,7 @@ The remedy was run as commands sent by hand, not through the adapter, and nothin
 ## A Pi fork at the first message of a resumed session runs at the settings default when it keeps no message (OW-riyeku)
 
 Run on the home server 2026-09-24, **`pi 0.87.1`**, from the `card/OW-riyeku` worktree cut at `fd329e6`.
+Re-measured on `pi 1.2.0` on 2026-10-14, and it held: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 The method was OW-dojebo's, above: `PI_CODING_AGENT_DIR` pointed at a throwaway directory under `/var/tmp` holding copies of `auth.json`, `models-store.json` and `settings.json`, a throwaway workspace beside it, a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc` directly and logging every stdout and stderr line, and on every spawn `--extension` naming a throwaway `before_provider_request` handler that appended the request payload's `model` and `reasoning` fields to a file.
 They were left under `/var/tmp/ow-riyeku` and not committed.
 The owner's `~/.pi/agent/settings.json` read `ec0098ff...` before and after.
@@ -3457,6 +3463,7 @@ Read from the code, not run: the session preview's reader in `src/server/session
 ## What each backend says while a live session's history is read back (OW-dutute)
 
 Run on the home server 2026-09-24 by `python3 resources/probes/hydrate_window_probe.py --backend codex` and `--backend pi`, one invocation each, both exiting 0: `codex-cli 0.156.0` on `gpt-5.6-luna`, and `pi 0.87.1` spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`, whose `get_state` named provider `openrouter`, model `deepseek/deepseek-v4.1-flash`, at `thinkingLevel: "high"`.
+Re-measured on `pi 1.2.0` on 2026-10-14, and its Pi half held, three times: see "Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)", at the end of this file.
 Neither went through agentpane: each drives its CLI directly, in a throwaway state home and workspace, and records every line in wire order.
 D24's "Hydrate" paragraph makes every hydrate of a live session a merge, and what the backend sends between the request for the history and its answer decides that merge's shape, so the window was measured before either merge was written.
 The JSON each run printed was kept only in `/tmp`, so what is below is the whole of the record.
@@ -4220,3 +4227,92 @@ The stream's assistant `message_end`s and the file's assistant messages both had
 
 `src/server/sessions/pi-conformance.test.ts` replays both halves and lists two disagreements, a level each live assistant turn names and the preview does not (OW-zarine), and the compaction marker the preview never draws (OW-livowu).
 The system message is drawn on both sides, as OW-wavini left it.
+
+## Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)
+
+Run on the home server 2026-10-14, on **`pi 1.2.0`**, from the `card/OW-vijine` worktree cut at `271a359`, ten releases and a `1.0.0` past the `pi 0.85.1` and `0.87.1` the seven sections this re-measures were run on.
+D18 re-verifies nothing on a version bump; the owner chose to re-measure this set once, because each fact licenses code in `src/server/adapters/pi/process.ts` or `src/client/controller.ts`.
+**All six held.**
+Every turn ran on `openrouter/deepseek/deepseek-v4.1-flash`: the probes pass `--model openrouter/deepseek/deepseek-v4.1-flash:high`, and the throwaway driver below read `get_state` before every prompt and refused to send one unless it named that model.
+The owner's `~/.pi/agent/settings.json` read sha256 `fc2bbcc0...` before and after every run, and nothing under `~/.pi/agent/` was written.
+
+**How facts 3 to 6 were run.**
+As in the OW-dojebo, OW-sinoha, OW-riyeku and OW-lehita sections, by a throwaway Python driver speaking LF-framed JSON to `pi --mode rpc --session-dir <workspace>/sessions` directly, not through `sbox` or agentpane's server, logging every stdout and stderr line.
+Each fact had its own `PI_CODING_AGENT_DIR` under `/var/tmp/ow-vijine/`, holding copies of `auth.json`, `models-store.json` and `settings.json`, and a `git init`ed workspace beside it.
+Every spawn passed `--extension` naming a throwaway `before_provider_request` handler that appended each request payload's `model` and `reasoning` to a file and returned nothing; on this model `reasoning.effort` read `none` for `off`.
+None of it is committed; the driver, extension, wire logs and JSON records were left under `/var/tmp/ow-vijine/`.
+Every prompt was `Do not use any tools. Reply with exactly: ok`, every reply was `ok`, each cost $0.00005 or less, and no process wrote a line to stderr.
+
+**1. A mid-stream fork succeeds, stops the turn, and keeps the streamed text (OW-sededi, OW-gajesu): held.**
+`python3 resources/probes/fork_probe.py --backend pi --no-fixtures`, unchanged, twice, both exiting 0 with `midstream_result: "measured"`.
+At the fork itself the streamed-into turn had 55 and 53 `text_delta`s on the wire, `midstream_still_streaming_at_the_fork_itself: true`; the fork answered `success: true`, `isStreaming` read `false` after it, `agent_settled` arrived, and `midstream_messages_tail` was `ALPHA -> ALPHA`.
+`midstream_abandoned_tail_chars`, the length of the abandoned file's last assistant entry, read 551 and 519: the reply's beginning, `1\n2\n3\n…`, kept on disk.
+In the first run the streaming turn made one tool call before its text (the census counted `toolcall_start`, `toolcall_delta` and `toolcall_end`), so that file held an empty assistant entry for the call and then the text entry; the second made none.
+The rest of the cell reproduced what OW-gajesu recorded: `copy_on_write`, `original_file_unchanged`, `active_file_moves_at_fork` and `moved_file_on_disk_at_fork` all `true` in both runs, the moved-to file holding `ALPHA -> ALPHA` at the fork, and `forked_message_present_in_get_messages: false`.
+One number differs, and not because the fact moved: `messageCount` after the second-message fork read 3, where OW-gajesu's 0.85.1 run read 2, because Pi has written and counted a leading `role: "system"` message since `0.86.0` (OW-wavini's section); the probe's `midstream_expected_message_count` still says 2, a prediction the cell reports and its exit status never reads.
+
+**2. The abandoned turn ends before the `fork` response, and nothing follows it (OW-dutute): held, three times.**
+`python3 resources/probes/hydrate_window_probe.py --backend pi --json <file>`, unchanged, three runs, each exiting 0, forking at 67, 58 and 55 text deltas with the turn still streaming.
+In all three the lines from the `fork` request to its response were, in order, `message_update` `thinking_end`, `message_update` `text_end`, `message_end` for the assistant, `turn_end`, `agent_end`, `agent_settled`, then the `fork` response; between it and the `get_messages` answer there was only the `get_state` response; and nothing arrived in the three seconds after.
+`get_messages` answered the system message and the two short turns, nothing of the third.
+The second process, resuming the abandoned file, saw no line before, between or after its `get_state` and `get_messages` responses, and `get_messages` answered 7 messages.
+So `hydrateMessages`' replace is still the truncating merge D24 asks for.
+
+**3. A fork puts the spawn's `--model` back over a model `set_model` chose, unrecorded (OW-sinoha): held.**
+Settings copied unchanged, so the default was the pin at `high`; the spawn named `--model openrouter/google/gemini-2.5-flash-lite`, which `get_state` read at `medium`, and no turn ran on it.
+`set_model` to the pin read `high`, `set_thinking_level` `low` read `low`, and two prompts each asked for `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `low`.
+`fork` at the second user entry answered `cancelled: false` with no line before it, and `get_state` then read `openrouter/google/gemini-2.5-flash-lite` at `low`, `messageCount` 3, on the moved-to file.
+The branch read `model_change` gemini, `thinking_level_change` `medium`, `model_change` pin, `thinking_level_change` `high` then `low`, the system message, and the first turn's user and assistant, the leaf on the assistant: the file's last model is the chosen one, and nothing recorded the model in force.
+No turn was sent after that fork; a bare `--session` resume of the forked file, which was already on disk, read the pin at `low`.
+A second run, after the same fork, sent the adapter's remedy by hand: `set_model` back to the pin announced `thinking_level_changed` `high`, `set_thinking_level` `low` announced `low`, both were appended to the branch, the next turn asked for the pin at `low`, and a bare resume of that file read the pin at `low`.
+
+**4. A fork in a process spawned with a suffixed `--model` puts the suffix's level back, unrecorded (OW-dojebo): held.**
+Settings rewritten to name `max` in `modelThinkingLevels` for the pin, so that suffix, chosen level and settings default differed.
+Spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high` and set to `off`, two turns asked for `none`; a fork at the second prompt answered with no line before it, `get_state` read `high`, the branch's last level entry still named `off`, the next turn asked for `high`, and a bare resume of the forked file read `off`.
+Set to `low` instead: the turns before asked for `low`, after the fork `get_state` read `high` and the turn asked for `high`, and the bare resume read `low`.
+Forked at the first prompt: the branch kept `model_change`, both `thinking_level_change` entries and the system message, `messageCount` 1, and the result was the same, `high` and a turn asking for `high`, with the file's last level `off`.
+The unsuffixed control spawned at `max`, the rewritten setting, and after `set_thinking_level` `off` a fork at either prompt left `get_state` at `off`, the next turn asked for `none`, and the bare resume read `off`.
+
+**5. A fork at the first message of a resumed session runs at the settings default when it keeps no message (OW-riyeku): held, and a kept system message counts.**
+A session was made under the unchanged settings copy by `--model openrouter/deepseek/deepseek-v4.1-flash:high` and two turns, so it was written by `pi 1.2.0`: header `{"type": "session", "version": 3, ...}`, then `model_change` pin, `thinking_level_change` `high`, a `role: "system"` message, and the two turns.
+The header is no guide to the writer: the owner's session files written 2026-09-14 to 2026-09-16, before `0.86.0`, carry `version: 3` too, and only the system message tells them apart.
+The throwaway `settings.json` was then rewritten to `defaultModel` `google/gemini-2.5-flash-lite` under `defaultProvider` `openrouter`, `defaultThinkingLevel` `low`, `modelThinkingLevels` emptied, and a fresh `pi --mode rpc` read that model at `low`.
+The copies below were resumed bare, `pi --mode rpc --session <copy>`, the shape agentpane's resume spawn takes.
+
+- **Written by 1.2.0, with its system message.**
+  The resume read the pin at `high`, `messageCount` 5.
+  `fork` at the first user entry answered `cancelled: false` with no line before it, and `get_state` then read `openrouter/deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, `messageCount` 1.
+  The branch was `model_change` pin, `thinking_level_change` `high` and the `role: "system"` message, the leaf on the system message, and nothing was appended: the kept system message is a message, and Pi restored the branch's own model and level from it.
+  A second copy sent one turn after the same fork, which asked for `deepseek/deepseek-v4.1-flash` at `reasoning.effort` `high`, and the forked file read those three entries, then the turn's user and assistant, with no model or level entry added.
+- **The same file with its system message removed**, the first user message reparented onto the `thinking_level_change`.
+  The resume read the pin at `high`, `messageCount` 4; after the fork `get_state` read `openrouter/google/gemini-2.5-flash-lite` at `low`, `messageCount` 0, and the branch read the kept `model_change` and `thinking_level_change` `high`, then a new `model_change` naming gemini and a `thinking_level_change` `low`, the leaf on the last.
+  No turn was sent.
+- **A copy of one of the owner's own files**, the 2026-09-14 one OW-riyeku used, its branch holding `thinking_level_change` `off`, `model_change` `moonshotai/kimi-k2.6` and `model_change` pin ahead of its first user message and no system message.
+  The resume read the pin at `high`, `messageCount` 34; the fork read gemini at `low`, `messageCount` 0, with the same two entries appended.
+- **The remedy, by hand**, on another system-less copy: after the same fork, `set_model` to the pin announced nothing and read `low`, since no `modelThinkingLevels` entry named it, and `set_thinking_level` `high` announced `high`; the turn after asked for the pin at `high`, and the forked file held the six entries, then a system message, then the turn.
+
+None of these forked files was on disk when its process exited unless a turn had run, as OW-riyeku recorded on `0.87.1`; the `0.99.0` CHANGELOG's "The session file is now created when the first user message is sent" changed nothing these runs needed, since every one forked from a file a turn had already written.
+A first pass took the system-less copies from the file after the trailing `thinking_level_change` below had been appended; they resumed at `low` rather than `high` and forked to the same answers, and the copies recorded above were cut before it.
+
+**And a level changed after the turns.**
+In the same process, after the second turn, `set_thinking_level` `low` announced `low` and appended a `thinking_level_change` `low` after the last assistant message, and the file was copied; no further turn ran.
+A bare resume of that copy read the pin at `low`, `messageCount` 5.
+`fork` at the first user entry answered with no line before it, and `get_state` read `openrouter/deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`, `messageCount` 1, the branch `model_change` pin, `thinking_level_change` `high` and the system message, nothing appended.
+So such a fork runs at the level the kept branch recorded, `high`, not the `low` in force when it was cut.
+The level was changed after the second turn rather than the first; a fork at the first user message keeps nothing past the system message either way.
+
+**6. A resume that clamps the recorded level, or is given an override, records no level (OW-lehita): held.**
+A session spawned with `--model openrouter/deepseek/deepseek-v4.1-flash:high` ran one turn, and its file read `session`, `model_change`, `thinking_level_change` `high`, then the system, user and assistant messages: six lines, as on `0.87.1`.
+With the copy's `thinkingLevel` hand-edited to `minimal`, which the model lacks, a bare resume read `low`, `get_entries` still named `minimal` only, the file still held six lines, the turn asked for `reasoning.effort` `low`, the file grew by its user and assistant alone, and a second bare resume read `low` with `minimal` still the only level.
+Resumed with `--model openrouter/deepseek/deepseek-v4.1-flash:low`, `get_state` read `low` and the turn asked for `low`; with `--thinking off`, `off`, and the turn asked for `none`.
+Each file grew by the turn's messages alone, and a bare resume of each read `high`, the level recorded before the override.
+Where OW-lehita's `0.87.1` run rested on `get_state` and on missing thinking blocks for the level those turns ran at, the payloads here show it.
+
+**What agentpane makes of it.**
+Nothing moved, so no code changed; the copies of each fact that name a version now name `1.2.0` beside it.
+`fork` in `src/server/adapters/pi/process.ts` re-sends the parent's model and level only when `get_state` answers `messageCount` 0, and the fact-5 runs again found a kept system message counted, so on a file written since `0.86.0` a first-message fork never reaches that re-send and runs at what the kept branch recorded.
+That is the parent's model and level unless one changed after the first turn: read from the code, not run through it, a process resumed after that change has chosen nothing for the adapter to re-send, so the level-changed fork above would have run at `high`, where D23 holds a fork that keeps no turn to the parent's `low` as it stood when cut.
+
+**Not established.**
+Nothing here went through `sbox`, agentpane's server, the browser or Emacs, and the adapter's re-sends were run as commands by hand, not through the adapter.
+No turn ran on a snapped-back or settings-default fork, so what such a turn would run on rests on `get_state`.
