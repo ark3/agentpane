@@ -32,3 +32,10 @@ Whatever that run shows, the `withLoadedEfforts` docblock states it with the ver
 The `AssistantTurn` docblock in `src/shared/protocol.ts` ("the one fact about it that pi-ai has no field for", "nothing about effort") went false with OW-meriva's move to `pi-ai 1.2.0`, which declares `thinkingLevel?` and `providerThinkingLevel?` on `AssistantMessage`; OW-meriva left it alone because that file is FROZEN under D11, so this card states it with the version, raising it under D11 first if the change goes beyond the comment.
 If it carries the field: a test loads a message whose `thinkingLevel` differs from what the entries and the clamp would give and asserts the recorded one, red before the change, and a test asserts a message without the field is labelled as today.
 OW-niwube's close note is not edited; if this card fixes what it deferred, this card's close note says so and names it.
+
+## Amended 2026-10-14 by OW-piyulu's execution: the preview reads the same field
+
+The read-only preview has the same gap from the other side.
+`storedAgentMessage` in `src/server/sessions/preview-message.ts` spreads a stored assistant message onto the preview wire, `thinkingLevel` included, but never sets the turn's `effort`, which is the only field the footer in `src/client/render/Message.svelte` reads, so a preview of a `pi 1.2.0` session names no level on any turn where the live transcript of the same run names `high`.
+`src/server/sessions/pi-conformance.test.ts` lists that in `KNOWN_DIFFERENCES` under this card, on every assistant row of `tool-read-session` and `compact-session`, which were captured on `pi 1.2.0` and keep the session file Pi wrote (`resources/fixtures/pi/*.session.jsonl`).
+The preview has the file itself, so it needs no `get_messages` measurement: it is done when `storedAgentMessage` names a recorded `thinkingLevel` as the turn's `effort`, a message without the field stays unlabelled as today, and every OW-zarine entry in that table is gone with the test passing, having failed first with the entries removed and the fix absent.
