@@ -17,7 +17,7 @@ import type { AgentpaneApi, EventHandlers } from "./api.ts";
 import { createController, type AgentpaneController, type ControllerView } from "./controller.ts";
 import { previewMessages } from "./preview.ts";
 import { initialClientState, reduceServerEvent, type ClientState, type SessionView } from "./session-state.ts";
-import { assistant, toolRead, toolResult, user } from "./render/samples.ts";
+import { assistant, systemLeading, toolRead, toolResult, user } from "./render/samples.ts";
 import { openToolCards } from "./render/tools/test-support.ts";
 
 const piSession: SessionRef = { backend: "pi", id: "pi-1" };
@@ -457,6 +457,63 @@ describe("App", () => {
 
 		expect(screen.queryByLabelText("Conversation model")).not.toBeInTheDocument();
 		expect(screen.getByText("Backend default")).toHaveClass("model-label");
+	});
+
+	/**
+	 * Driven by the real controller, whose gates are what a system-only
+	 * transcript used to trip: a Pi fork at the first user message keeps only
+	 * the session's leading system message, and is no more prompted than an
+	 * empty one (OW-widozi).
+	 */
+	it("offers and sends a model and effort for a Pi session holding only its system message (OW-widozi)", async () => {
+		let emit: (event: ServerEvent) => void = () => {};
+		const modelSets: string[] = [];
+		const effortSets: string[] = [];
+		const models: ModelInfo[] = [
+			{ id: "opaque/current", label: "Current Model", efforts: [{ id: "low", description: "" }, { id: "high", description: "" }], defaultEffort: "low" },
+			{ id: "opaque/next", label: "Next Model", efforts: [], defaultEffort: null },
+		];
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession, null)],
+			createSession: async () => piSession,
+			attach: async () => ({ ...summary(piSession, null), handle: "h-1" }),
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => {},
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => models,
+			setModel: async (_ref, model) => {
+				modelSets.push(model);
+			},
+			setEffort: async (_ref, effort) => {
+				effortSets.push(effort);
+			},
+			setName: async () => {},
+			forkPoints: async () => [],
+			fork: async () => piSession,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		emit({
+			type: "snapshot", session: piSession, handle: "h-1", seq: 1, messages: [systemLeading()], isStreaming: false, compaction: null, model: "opaque/current", effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		await controller.select(piSession);
+		await tick();
+
+		const picker = screen.getByLabelText("Conversation model");
+		expect(within(picker).getByRole("option", { name: "Next Model" })).toBeInTheDocument();
+		await fireEvent.change(picker, { target: { value: "opaque/next" } });
+		await fireEvent.change(screen.getByLabelText("Conversation effort"), { target: { value: "high" } });
+
+		expect(modelSets).toEqual(["opaque/next"]);
+		expect(effortSets).toEqual(["high"]);
 	});
 
 	it("shows the reported model when an older messaged snapshot attaches", () => {

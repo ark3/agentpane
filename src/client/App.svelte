@@ -12,6 +12,7 @@
 		watchSubmit,
 	} from "./favicon.ts";
 	import Transcript from "./render/Transcript.svelte";
+	import { unprompted } from "./render/system.ts";
 	import { userBlocks } from "./render/types.ts";
 	import { previewMessages } from "./preview.ts";
 	import { handleOf, initialClientState, viewOf } from "./session-state.ts";
@@ -1544,7 +1545,7 @@
 				placeholder="Ask the agent…"
 			></textarea>
 			<div class="prompt-actions">
-				{#if selectedSession?.messages.length === 0}
+				{#if selectedSession && unprompted(selectedSession.messages)}
 					{#key selectedSession.model}
 					<select
 						class="model-select"

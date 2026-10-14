@@ -12,6 +12,7 @@ import type {
 import { sessionKey } from "$shared/protocol.ts";
 import { ApiClientError, type AgentpaneApi, type EventConnection, type EventHandlers } from "./api.ts";
 import { nextPreviewDelay, PREVIEW_POLL_FAST_MS, PREVIEW_POLL_IDLE_MS } from "./preview-poll.ts";
+import { unprompted } from "./render/system.ts";
 import {
 	clearSessionError,
 	handleOf,
@@ -44,7 +45,7 @@ export interface ControllerView {
 	 */
 	sending: boolean;
 	error: string | null;
-	/** Live options for the selected empty conversation only. */
+	/** Live options for the selected conversation only while it is `unprompted`. */
 	models: ModelInfo[];
 	/** Only the picker is disabled while this request is in flight. */
 	modelSetting: boolean;
@@ -686,13 +687,13 @@ export function createController(
 		const selected = view.state.selected;
 		if (!selected) return;
 		const handle = handleOf(view.state, selected);
-		if (handle === undefined || view.state.sessions[handle]?.messages.length !== 0) return;
+		if (handle === undefined || !unprompted(view.state.sessions[handle]?.messages)) return;
 		if (modelLoadStartedForSelection === intent) return;
 		modelLoadStartedForSelection = intent;
 		publish({ models: [], error: null });
 		try {
 			const models = await api.listModels(selected.backend);
-			if (!disposed && selectionIntent === intent && selects(handle) && view.state.sessions[handle]?.messages.length === 0) {
+			if (!disposed && selectionIntent === intent && selects(handle) && unprompted(view.state.sessions[handle]?.messages)) {
 				publish({ models });
 			}
 		} catch (error: unknown) {
@@ -1213,7 +1214,7 @@ export function createController(
 		async setModel(model) {
 			const selected = view.state.selected;
 			const handle = handleOf(view.state, selected);
-			if (!selected || handle === undefined || pendingModelSets.has(handle) || view.state.sessions[handle]?.messages.length !== 0) return;
+			if (!selected || handle === undefined || pendingModelSets.has(handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
 			pendingModelSets.add(handle);
 			publish({ modelSetting: true, error: null });
 			try {
@@ -1228,7 +1229,7 @@ export function createController(
 		async setEffort(effort) {
 			const selected = view.state.selected;
 			const handle = handleOf(view.state, selected);
-			if (!selected || handle === undefined || pendingEffortSets.has(handle) || view.state.sessions[handle]?.messages.length !== 0) return;
+			if (!selected || handle === undefined || pendingEffortSets.has(handle) || !unprompted(view.state.sessions[handle]?.messages)) return;
 			pendingEffortSets.add(handle);
 			publish({ effortSetting: true, error: null });
 			try {

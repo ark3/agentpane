@@ -1868,6 +1868,23 @@ with none it attaches and sends `sessions/setEffort'."
         (agentpane-set-effort "high")
         (should (equal (reverse sent) '(sessions/attach sessions/setEffort)))))))
 
+(ert-deftest agentpane-test-gate-reads-system-nodes-alone-as-unprompted ()
+  "A buffer holding only a system node, as a Pi fork at the first user
+message does (OW-widozi), is not yet prompted: `agentpane--check-gate'
+refuses neither the model nor the effort.  Once any other node is drawn
+beside it, both are refused."
+  (let ((system '(:index 0 :role "system"
+                  :parts [(:type "system" :summary "System prompt · 5 sections · 4 tools" :body "")])))
+    (agentpane-test--with-session '(:backend "pi" :id "p1")
+      (agentpane--draw (vector system))
+      (agentpane--check-gate "model")
+      (agentpane--check-gate "effort")
+      (agentpane--draw
+       (vector system '(:index 1 :role "user"
+                        :parts [(:type "text" :text "Fix the bug" :html "<p>Fix the bug</p>\n")])))
+      (should-error (agentpane--check-gate "model") :type 'user-error)
+      (should-error (agentpane--check-gate "effort") :type 'user-error))))
+
 (defun agentpane-test--set-effort-interactively (model choice)
   "Call `agentpane-set-effort' interactively on an empty, unattached buffer
 whose last status named MODEL, of `agentpane-test--models', and whose

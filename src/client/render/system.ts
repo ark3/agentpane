@@ -26,6 +26,7 @@
  * later one reads "System prompt changed" and names what it changes.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SystemMessage } from "@earendil-works/pi-ai";
 import type { TranscriptView } from "./transcript.ts";
 
@@ -48,6 +49,19 @@ export interface SystemView {
 	sections: SystemSection[];
 	toolsAdded: SystemTool[];
 	toolsRemoved: string[];
+}
+
+/**
+ * Whether a session is not yet prompted, which is when its model and effort
+ * may still be chosen: its transcript holds system messages at most
+ * (OW-widozi). As of `pi 1.2.0` a fresh Pi session held none until its first
+ * prompt, but a fork at the first user message kept the leading one and
+ * nothing else (`docs/MANUAL_TESTING.md`, OW-wavini and OW-vijine), and D23
+ * has a fork that keeps no turn run as an unprompted session does.
+ * False for a session this tab holds no view of.
+ */
+export function unprompted(messages: readonly AgentMessage[] | undefined): boolean {
+	return messages !== undefined && messages.every((message) => message.role === "system");
 }
 
 /** The `messages` index of the transcript's leading system message, or -1. */

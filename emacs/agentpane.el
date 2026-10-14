@@ -3302,19 +3302,27 @@ the reason `agentpane--read-model' is."
 
 (defun agentpane--check-gate (what)
   "Signal a user error, saying WHAT is chosen before the first prompt,
-unless this buffer's session has no nodes yet.
+unless this buffer's session is not yet prompted: it has no indexed node
+but system ones, as the browser's `unprompted' (src/client/render/system.ts)
+has it.  As of `pi 1.2.0' a Pi fork at the first user message kept the
+session's leading system message and nothing else (docs/MANUAL_TESTING.md,
+OW-vijine), and is no more prompted than an empty session (OW-widozi).
 The model is chosen at conversation start, never switched later (owner,
 2026-09-13), and the effort with it (OW-vozaku); the browser enforces the
 same in `loadModelsForSelected' and `setEffort' (src/client/controller.ts),
 and neither the server nor the helper does."
   (with-current-buffer (agentpane--transcript)
     (when (and agentpane--ewoc
-               (ewoc-collect agentpane--ewoc (lambda (data) (plist-get data :index))))
+               (ewoc-collect agentpane--ewoc
+                             (lambda (data)
+                               (and (plist-get data :index)
+                                    (not (equal (plist-get data :role) "system"))))))
       (user-error "The %s is chosen before the first prompt" what))))
 
 (defun agentpane-set-model (model &optional then)
   "Set this buffer's session's MODEL through `sessions/setModel'.
-Allowed only before the first prompt, while the buffer has no nodes.
+Allowed only before the first prompt, while the buffer has no nodes but
+system ones (`agentpane--check-gate').
 An empty MODEL, which `completing-read' returns for an empty `RET' even
 when it requires a match, sets nothing, and the session keeps the model
 it has.  Sent, \"\" was stored by the Codex adapter and reported as the
