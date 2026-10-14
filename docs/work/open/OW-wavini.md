@@ -41,3 +41,8 @@ A live run on the installed `pi`, with the pinned `--model openrouter/deepseek/d
 The decision is recorded where a reader of the rendering code meets it, the docblock of whatever renders the role.
 A test feeds a system-role message through the preview path and asserts it yields what was decided, red before the change, and one feeds it through the live reducer and asserts the same projection; the browser and `src/emacs/nodes.ts` each have a test that it no longer renders as an unknown role.
 If OW-piyulu has closed, its Pi conformance test's known-differences table loses any entry this card owned.
+
+## Decided
+
+The owner chose on 2026-10-14, after the live run recorded in `docs/MANUAL_TESTING.md` ("Pi's system-role messages arrive live and from `get_messages` (OW-wavini)"): every system message, the leading one included, renders as a one-line marker naming what it carries, with its text behind a disclosure, in both clients.
+It is a first cut, to be judged in use.
