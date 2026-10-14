@@ -198,7 +198,7 @@ A child thread's rollout is not kept; `child_rollouts` in the meta counts them.
 
 `tool-read-session` and `compact-session` were captured on `pi 1.2.0` with `capture_fixtures.py`, each run without `--no-session` so the session file Pi wrote is kept beside its stream.
 The live reducer and the preview read the two halves of one run, so `src/server/sessions/pi-conformance.test.ts` replays both and lists every place they disagree, keyed to the card that owns it.
-These two keep their file because between them they hold what a session file adds beyond plain messages: a tool call and its result, and a compaction, which Pi stores as a `compaction` entry rather than a `message`.
+These two keep their file because between them they hold a tool call and its result, and a compaction, which Pi stores as a `compaction` entry rather than a `message`.
 They are new scenarios rather than re-captures of `tool-read` and `compact`, whose 0.84.x streams other tests and docblocks cite; the four Pi scenarios without a file still run `--no-session`.
 As of `pi 1.2.0` every Pi capture opens with a `role: "system"` message whose `docs` section names Pi's install path, so `capture_fixtures.py` replaces the operator's home directory with `/example-home` in every Pi line, stream and file alike.
 The session header's `cwd` and that message's `cwd` section name the capture's scratch directory under the temp dir.

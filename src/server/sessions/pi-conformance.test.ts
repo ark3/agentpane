@@ -14,9 +14,11 @@
  * role sequence, content-block kinds, tool names, whether each call has its
  * result and each result its call, `isError`, `stopReason`, the effort a
  * footer names, and a compaction marker's figure and whether it carries a
- * summary. Timestamps, usage and model identity differ by design and are left
- * out, as is all text. A result row names its call by how many calls back it
- * sits, said only when it is not the latest call.
+ * summary. Usage and model identity are left out, as in the Codex test, though
+ * on these `pi 1.2.0` runs they agree; so is all text. So are timestamps, which
+ * do not agree: an assistant turn's preview time is its entry's append time,
+ * not the message's own (OW-jiwaso). A result row names its call by how many
+ * calls back it sits, said only when it is not the latest call.
  *
  * The replay starts at the effort `process.ts` holds once `get_state` answers
  * at spawn: the level the capture's `--model` ref named, since the model it

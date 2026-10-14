@@ -40,9 +40,12 @@ export interface PiReducerState {
 	readonly compaction: "requesting" | "running" | null;
 	/**
 	 * The thinking level named on each assistant message as it arrives, the
-	 * `AssistantTurn.effort` the footer shows. Pi's messages carry none, so
-	 * `process.ts` keeps this current from what Pi reports (OW-ruzuhu); null
-	 * names nothing, as for a model that does not reason.
+	 * `AssistantTurn.effort` the footer shows. Pi's messages carried none when
+	 * this was written, so `process.ts` keeps this current from what Pi reports
+	 * (OW-ruzuhu); null names nothing, as for a model that does not reason. As
+	 * of `pi 1.2.0` each assistant `message_end` carries `thinkingLevel`
+	 * (`resources/fixtures/pi/*-session.jsonl`, OW-piyulu), which nothing here
+	 * reads yet (OW-zarine).
 	 */
 	readonly effort: string | null;
 }
