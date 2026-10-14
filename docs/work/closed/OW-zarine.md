@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-meriva]
+closed: done
 ---
 
 # Pi now records each assistant message's thinkingLevel, which withLoadedEfforts says get_messages carries none of and reconstructs from level-change entries and a catalogue clamp instead
@@ -40,3 +41,22 @@ The read-only preview has the same gap from the other side.
 `src/server/sessions/pi-conformance.test.ts` lists that in `KNOWN_DIFFERENCES` under this card, on every assistant row of `tool-read-session` and `compact-session`, which were captured on `pi 1.2.0` and keep the session file Pi wrote (`resources/fixtures/pi/*.session.jsonl`).
 The preview has the file itself, so it needs no `get_messages` measurement: it is done when `storedAgentMessage` names a recorded `thinkingLevel` as the turn's `effort`, a message without the field stays unlabelled as today, and every OW-zarine entry in that table is gone with the test passing, having failed first with the entries removed and the fix absent.
 The same captures show the live stream carries it too: as of `pi 1.2.0` every assistant `message_end` in `resources/fixtures/pi/tool-read-session.jsonl` and `compact-session.jsonl` has `thinkingLevel: "high"`, so the level a live turn is named at could be read off its message rather than off `PiReducerState.effort`, whose docblock in `src/server/adapters/pi/reducer.ts` now says so and points here; whether to is this card's call, and the docblock is retired with the rest.
+
+## Close note
+
+Landed on main in four commits (892db0c, 3e76090, afa83b4, 761f5d3).
+
+Measured: on the home server, 2026-10-14, `pi 1.2.0`, pinned `openrouter/deepseek/deepseek-v4.1-flash:high`, three turns at `high`, `low` and `off` — each assistant `message_end` carried `thinkingLevel` (`message_start` did not), and `get_messages` returned the same three values both live and after a `--session` resume while `high` was in force. No `providerThinkingLevel` on that model (`openai-completions` never sets it; in `pi-ai 1.2.0` only `anthropic-messages` and `pi-messages` do, and it is the provider's own effort string after `thinkingLevelMap`), so `thinkingLevel` names the turn. Recorded in `docs/MANUAL_TESTING.md`, "Pi stamps each reply with its level, and `get_messages` carries it (OW-zarine)".
+
+Built:
+- `withLoadedEfforts` (`src/server/adapters/pi/reducer.ts`) names a loaded turn by its stamp, unclamped, under the same "current model does not reason / `off` off the current model" rules; an unstamped message (written before the stamp, or a run failure's from `handleRunFailure`) keeps the entries-plus-clamp reconstruction.
+- Live: the `message_end` arm renames a turn `message_start` named by the stamp; one it left unnamed takes the level in force at the end, as before.
+- Preview: `storedAgentMessage` (`src/server/sessions/preview-message.ts`) names a stored `thinkingLevel` as `effort`, except `off`, which a file cannot tell from a model that does not reason; Codex call sites build literals with no such field.
+- Every OW-zarine row is gone from `KNOWN_DIFFERENCES` in `pi-conformance.test.ts`; only OW-livowu's compaction marker remains.
+- Retired "`get_messages` carries none" and its copies in `reducer.ts`, `process.ts`, `process.test.ts`, D23 in `docs/DESIGN.md`; the `AssistantTurn` docblock in `src/shared/protocol.ts` corrected, comment only (D11).
+
+Verified: loaded, live and preview tests each shown red before the change (and the stamped-`off`-on-current-reasoning-model case red against a mutant); conformance test red with the rows removed and the fix absent; `bun run check` green on main (1654 tests). An adversarial reader's findings (docblocks overclaiming, "every reply" overbroad, unversioned comments, one untested branch) were fixed in 761f5d3.
+
+This fixes what OW-niwube deferred for every stamped turn: a turn recorded at a level its model has since dropped is now named by its stamp, not by today's clamp. The mislabel remains only for turns written before `pi` began stamping (the home server's files from 2026-09-14 to 2026-09-16) and for run-failure replies.
+
+Not established live: a non-reasoning model's `off` stamp, a resume `--model` suffix or `--thinking` override being stamped, virtual-model routing, `providerThinkingLevel` present — all rest on the source, as the MANUAL_TESTING section says.
