@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { CodexReducer } from "../adapters/codex/reducer.ts";
 import { readFixture, type FixtureName } from "../adapters/codex/test-support.ts";
 import { extractCodexPreviewTurns } from "./codex.ts";
+import { hunks, type KnownDifference } from "./conformance-support.ts";
 
 const FIXTURE_DIR = fileURLToPath(new URL("../../../resources/fixtures/codex/", import.meta.url));
 
@@ -96,45 +97,6 @@ function live(name: FixtureName): string[] {
 async function preview(name: FixtureName): Promise<string[]> {
 	const turns = await extractCodexPreviewTurns(`${FIXTURE_DIR}${name}.rollout.jsonl`, () => undefined);
 	return project(turns as Message[]);
-}
-
-interface Hunk {
-	live: string[];
-	preview: string[];
-}
-
-/**
- * Where two row sequences part, as hunks between the rows they share (a
- * longest common subsequence), in order. Equal sequences give none.
- */
-function hunks(a: string[], b: string[]): Hunk[] {
-	const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
-	for (let i = a.length - 1; i >= 0; i--) {
-		for (let j = b.length - 1; j >= 0; j--) {
-			lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
-		}
-	}
-	const out: Hunk[] = [];
-	let open: Hunk | null = null;
-	let i = 0;
-	let j = 0;
-	while (i < a.length || j < b.length) {
-		if (i < a.length && j < b.length && a[i] === b[j]) {
-			open = null;
-			i++;
-			j++;
-			continue;
-		}
-		if (!open) out.push((open = { live: [], preview: [] }));
-		if (j >= b.length || (i < a.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) open.live.push(a[i++]!);
-		else open.preview.push(b[j++]!);
-	}
-	return out;
-}
-
-interface KnownDifference extends Hunk {
-	/** Each card that owns part of this hunk, and what its part is. */
-	owners: Record<string, string>;
 }
 
 /**
