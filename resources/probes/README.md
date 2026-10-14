@@ -133,6 +133,27 @@ What it showed is `docs/MANUAL_TESTING.md`, "A prompt posted mid-turn is steered
 It could not pass again after OW-mofuho retired the `renamed` event it waited for (2026-09-25), until OW-niwusi keyed its waits by the handle the attach reply carried; verified again with `pi` 0.87.1 on the home server, 2026-09-30, one run, in "The live Pi probes follow a session by its handle (OW-niwusi)".
 `--turn tool` verified with `pi` 0.87.1 on the home server, 2026-09-30, four runs, with the text turn re-run once beside them, in "Pi's steer waits for the whole tool batch (OW-nufitu)".
 
+## `agentpane_pi_prompt_window_probe.py`
+
+Proves: **what Pi, and agentpane's prompt route, answer a second prompt sent before the first's `agent_start`, and a prompt an extension command handles** (OW-kokotu).
+
+```bash
+python3 agentpane_pi_prompt_window_probe.py                   # both parts
+python3 agentpane_pi_prompt_window_probe.py --part rpc        # Pi alone, no server
+python3 agentpane_pi_prompt_window_probe.py --part agentpane --skip-build
+```
+
+Part `rpc` speaks to `pi --mode rpc --no-session --model <ref>` directly, not through `sbox`, stamping every stdout `read()` chunk on arrival.
+It times write, `prompt` response and `agent_start` over five one-word prompts; sends a second prompt bare and with `streamingBehavior: "steer"` in the same `write()` as the first; sends one with `"steer"` while Pi is idle; sends a bare second prompt from the reader thread the instant it parses the first's response; and sends each extension command `get_commands` lists as a prompt of its own name.
+Part `agentpane` drives the built server on the production spawn chain through the REST prompt route: two POSTs released together from two threads, a second POST the moment the first's 202 returns, and each extension command as a POST followed by an ordinary prompt.
+Its `pi` shim tees Pi's stdin as well as its stdout, because whether agentpane's prompt carried `streamingBehavior` is only visible on stdin.
+
+The Pi state dir is a temporary copy of `~/.pi/agent`'s credential and settings files by name plus its `extensions/` directory dereferenced, so this machine's user extensions and Pi's built-in ones load as they would for agentpane; the workspace is an empty directory under `/var/tmp` holding only the `.sandbox-workspace` marker `sbox` needs.
+It records rather than asserts: the output is the evidence, and it exits non-zero only when a part could not run or cleanup failed.
+Costs tokens: about ten one-word model calls for part `rpc` and six for part `agentpane`, the latter one per extension command plus three.
+
+Verified with: `pi` 1.2.0 on the home server, 2026-10-14, five runs, in `docs/MANUAL_TESTING.md`, "A second Pi prompt sent before the first's `agent_start` is refused, and an extension command's is answered with nothing (OW-kokotu)".
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
