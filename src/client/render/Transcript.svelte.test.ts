@@ -14,9 +14,20 @@ import { previewMessages } from "../preview.ts";
 import type { SessionPreviewTurn } from "$shared/protocol.ts";
 import Message from "./Message.svelte";
 import Transcript from "./Transcript.svelte";
+import { systemView } from "./system.ts";
 import { openToolCards } from "./tools/test-support.ts";
 import { CodexReducer } from "$server/adapters/codex/reducer.ts";
-import { assistant, errors, everything, orphanResult, streamingTurn, toolRead, user } from "./samples.ts";
+import {
+	assistant,
+	errors,
+	everything,
+	orphanResult,
+	streamingTurn,
+	systemChanged,
+	systemLeading,
+	toolRead,
+	user,
+} from "./samples.ts";
 
 const roles = (container: HTMLElement) =>
 	[...container.querySelectorAll("article")].map((el) => el.dataset.role);
@@ -210,6 +221,43 @@ describe("Message", () => {
 		});
 		expect(roles(container)).toEqual(["unknown"]);
 		expect(container.textContent).toContain("compaction");
+	});
+
+	it("draws Pi's system messages as a one-line marker over a collapsed disclosure, not the unknown dump (OW-wavini)", () => {
+		const leading = systemLeading();
+		const changed = systemChanged();
+		const { container } = render(Transcript, {
+			props: { messages: [leading, user("hi"), assistant([{ type: "text", text: "yo" }]), changed] },
+		});
+
+		expect(roles(container)).toEqual(["system", "user", "assistant", "system"]);
+		const [first, later] = [...container.querySelectorAll<HTMLElement>('article[data-role="system"]')];
+		for (const article of [first!, later!]) {
+			const details = article.querySelector("details");
+			expect(details).not.toBeNull();
+			expect(details!.open).toBe(false);
+			expect(details!.querySelector("summary")?.textContent?.trim()).not.toMatch(/\n/);
+		}
+		expect(first!.dataset.index).toBe("0");
+		expect(later!.dataset.index).toBe("3");
+		// The leading one counts what it declares; a later one names what it
+		// changes. Only Transcript knows which is which, by position.
+		expect(first!.querySelector("summary")?.textContent).toBe(systemView(leading, true).summary);
+		expect(later!.querySelector("summary")?.textContent).toBe(systemView(changed, false).summary);
+
+		// Behind the disclosure: every section under its name, every tool by
+		// name and description, and no JSON schema.
+		const sections = [...first!.querySelectorAll<HTMLElement>("[data-section]")];
+		expect(sections.map((el) => el.dataset.section)).toEqual(Object.keys(leading.sections!));
+		const added = [...first!.querySelectorAll<HTMLElement>("[data-tool-added]")];
+		expect(added.map((el) => el.dataset.toolAdded)).toEqual(leading.toolsAdded!.map((tool) => tool.name));
+		expect(first!.textContent).toContain(leading.toolsAdded![0]!.description);
+		expect(first!.textContent).not.toContain('"properties"');
+
+		// A removed section is shown as removed, and removed tools by name.
+		expect(later!.querySelectorAll("[data-section][data-removed]")).toHaveLength(1);
+		const removed = [...later!.querySelectorAll<HTMLElement>("[data-tool-removed]")];
+		expect(removed.map((el) => el.dataset.toolRemoved)).toEqual(changed.toolsRemoved!.map((tool) => tool.name));
 	});
 
 	/** One `thread/tokenUsage/updated`, with `last.totalTokens` the only figure that matters here. */

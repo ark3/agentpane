@@ -8,7 +8,15 @@
 	 * fields this repo adds. It is open by construction -- `AgentMessage` is
 	 * `Message | CustomAgentMessages[keyof CustomAgentMessages]`, and a backend
 	 * can declaration-merge new kinds in. The final `{:else}` is therefore not
-	 * dead code even though today it is unreachable by type.
+	 * dead code: a kind nobody merged in still reaches it at runtime, which is
+	 * how Pi's system-role message arrived as a JSON dump until pi-ai 1.2.0 put
+	 * it in `Message` (OW-wavini).
+	 *
+	 * A system message draws as a one-line marker naming what it carries, with
+	 * its text behind a native disclosure, collapsed: a first cut chosen by the
+	 * owner on 2026-10-14, to be judged in use. What the marker says and what
+	 * the disclosure holds is `systemView` in `./system.ts`, which the Emacs
+	 * projection shares, and its docblock carries the decision whole.
 	 */
 	import type { ToolResultMessage } from "@earendil-works/pi-ai";
 	import type { AssistantTurn, PaneMessage, SessionRef } from "$shared/protocol.ts";
@@ -16,6 +24,7 @@
 	import Block from "./Block.svelte";
 	import type { ContentBlock } from "./types.ts";
 	import { oneLine, resultText, userBlocks } from "./types.ts";
+	import { systemView } from "./system.ts";
 	import Output from "./tools/Output.svelte";
 	import ResultBody from "./tools/ResultBody.svelte";
 	import ToolCard from "./tools/ToolCard.svelte";
@@ -27,6 +36,7 @@
 		index,
 		editing = false,
 		dimmed = false,
+		leading = false,
 		onedit,
 		onopensession,
 	}: {
@@ -39,6 +49,8 @@
 		editing?: boolean;
 		/** This message sits after the edit point, so it is not where the composer will send (OW-hezidi). */
 		dimmed?: boolean;
+		/** This system message is the transcript's first, the system prompt every later one changes (OW-wavini). */
+		leading?: boolean;
 		/** Offer an edit control on this user message. Absent -- a preview, or any other role -- and none is drawn. */
 		onedit?: ((index: number) => void) | undefined;
 		/** Open a session a tool block names (OW-benige). Passed to every assistant block; only the subagent card uses it. */
@@ -200,6 +212,51 @@
 			</div>
 		{/if}
 	</article>
+{:else if message.role === "system"}
+	{@const system = systemView(message, leading)}
+	<article class="msg system" class:dimmed data-role="system" data-index={index}>
+		<details>
+			<summary class="system-marker">{system.summary}</summary>
+			<div class="system-body">
+				{#if system.content.trim()}
+					<pre class="system-text">{system.content}</pre>
+				{/if}
+				{#each system.sections as section (section.name)}
+					<section data-section={section.name} data-removed={section.text === null ? "" : undefined}>
+						<h4 class="system-label">{section.name}</h4>
+						{#if section.text === null}
+							<p class="system-removed">removed</p>
+						{:else}
+							<pre class="system-text">{section.text}</pre>
+						{/if}
+					</section>
+				{/each}
+				{#if system.toolsAdded.length > 0}
+					<section>
+						<h4 class="system-label">tools added</h4>
+						<dl>
+							{#each system.toolsAdded as tool (tool.name)}
+								<div data-tool-added={tool.name}>
+									<dt>{tool.name}</dt>
+									<dd>{tool.description}</dd>
+								</div>
+							{/each}
+						</dl>
+					</section>
+				{/if}
+				{#if system.toolsRemoved.length > 0}
+					<section>
+						<h4 class="system-label">tools removed</h4>
+						<ul class="system-removed-tools">
+							{#each system.toolsRemoved as name (name)}
+								<li data-tool-removed={name}>{name}</li>
+							{/each}
+						</ul>
+					</section>
+				{/if}
+			</div>
+		</details>
+	</article>
 {:else}
 	<article class="msg unknown" class:dimmed data-role="unknown" data-index={index}>
 		<Output text={JSON.stringify(message, null, 2)} language="json" />
@@ -317,6 +374,68 @@
 		font-variant-numeric: tabular-nums;
 		text-transform: none;
 		letter-spacing: 0;
+	}
+
+	/* A system message reads as a quiet marker like a compaction's, since it is
+	   configuration rather than conversation; its text stays a click away. */
+	.system-marker {
+		color: var(--ap-fg-subtle);
+		font-size: var(--ap-text-2xs);
+		cursor: pointer;
+		/* One line, whatever the change names: the disclosure holds the rest. */
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.system-body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--ap-space-3);
+		margin-top: var(--ap-space-2);
+		padding-left: var(--ap-space-3);
+		border-left: 1px solid var(--ap-border);
+		font-size: var(--ap-text-sm);
+	}
+
+	.system-label {
+		margin: 0 0 var(--ap-space-1);
+		font-size: var(--ap-text-2xs);
+		font-weight: 600;
+		color: var(--ap-fg-subtle);
+	}
+
+	/* Prompt text is tag-wrapped and line-structured, so it is shown as written
+	   rather than through markdown, which would take the tags for HTML. */
+	.system-text {
+		margin: 0;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		font-family: inherit;
+	}
+
+	.system-removed {
+		margin: 0;
+		color: var(--ap-fg-subtle);
+	}
+
+	.system-body dl,
+	.system-removed-tools {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: var(--ap-space-1);
+	}
+
+	.system-body dt {
+		font-family: var(--ap-font-mono);
+	}
+
+	.system-body dd {
+		margin: 0 0 0 var(--ap-space-3);
+		white-space: pre-wrap;
 	}
 
 	.cursor {

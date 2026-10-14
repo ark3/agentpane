@@ -3,6 +3,7 @@
 	import type { AgentMessage } from "@earendil-works/pi-agent-core";
 	import type { SessionRef } from "$shared/protocol.ts";
 	import Message from "./Message.svelte";
+	import { leadingSystemIndex } from "./system.ts";
 	import { buildTranscript, condense, readingTailStatus } from "./transcript.ts";
 
 	let {
@@ -48,6 +49,7 @@
 	const fullView = $derived(buildTranscript(messages));
 	const view = $derived(reading ? condense(fullView) : fullView);
 	const tailStatus = $derived(reading ? readingTailStatus(fullView, isStreaming) : undefined);
+	const leadingSystem = $derived(leadingSystemIndex(fullView));
 </script>
 
 <div class="transcript" role="log" aria-busy={isStreaming}>
@@ -59,6 +61,7 @@
 			index={entry.index}
 			editing={entry.index === editingIndex}
 			dimmed={editingIndex !== null && entry.index > editingIndex}
+			leading={entry.index === leadingSystem}
 			onedit={!editableIndices || editableIndices.has(entry.index) ? onedit : undefined}
 			{onopensession}
 		/>
