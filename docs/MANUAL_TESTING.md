@@ -4371,3 +4371,84 @@ No turn ran on a model that does not reason, so its `off` stamp rests on the sou
 No turn ran under a resume's `--model` suffix or `--thinking` override, so that a stamped turn records the override, where no entry does, rests on the source too; so does a virtual model's routing, which can change the level a request runs at.
 No model on `anthropic-messages` or `pi-messages` ran, so `providerThinkingLevel` was never seen present.
 Nothing here went through agentpane's server, the browser or Emacs.
+
+## A second Pi prompt sent before the first's `agent_start` is refused, and an extension command's is answered with nothing (OW-kokotu)
+
+Run on the home server 2026-10-14, five runs between 19:40:42 and 19:46:40 local (`-04:00`), on **`pi 1.2.0`** (`pi --version`, recorded by the probe in each run), from the `card/OW-kokotu` worktree cut at `854a8f0`.
+The vehicle is `resources/probes/agentpane_pi_prompt_window_probe.py`, committed in `ea22bcf`:
+
+```bash
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --part rpc                    # run 1
+python3 resources/probes/agentpane_pi_prompt_window_probe.py                               # run 2
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --part agentpane --skip-build # runs 3 and 4
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --skip-build                  # run 5
+```
+
+Runs 1 to 4 ran a draft without the `idle_steer` cell and the `model_on_wire` field; run 5 is the committed probe.
+Every model call was pinned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`: part `rpc` passes it on Pi's command line, and `get_state` answered `openrouter/deepseek/deepseek-v4.1-flash` at `high`; part `agentpane` passes it through the create route's `model` field, and run 5 read `openrouter/deepseek/deepseek-v4.1-flash` back off the wire.
+Every prompt asked for one word, and every reply was that word.
+
+**The configuration is this machine's.**
+`PI_CODING_AGENT_DIR` pointed at a scratch copy of `~/.pi/agent`'s `auth.json`, `models-store.json` and `settings.json`, plus its `extensions/` directory dereferenced: `auto-read-agents-refs.ts` and `background-jobs.ts`, the two user extensions installed on the home server.
+`get_commands` listed three commands, all `source: "extension"`: `refs` from `auto-read-agents-refs.ts`, and `llama` and `mcp` from `builtin:llama.cpp` and `builtin:mcp`, which Pi 1.2.0 loads unless `--no-extensions` is passed.
+No prompt template or skill was listed.
+The workspace was an empty directory under `/var/tmp` holding only `.sandbox-workspace`, which `sbox` needs to find a workspace outside a git repository; so no `AGENTS.md` was in it, and `auto-read-agents-refs.ts`'s `before_agent_start` handler had nothing to add.
+Part `rpc` ran Pi directly, not through `sbox`; part `agentpane` ran the production chain, `direnv exec <workspace> sbox -- pi --mode rpc --model <ref>`, spawned by the built server, with a `pi` shim teeing Pi's stdin and stdout.
+
+### The window, at Pi's RPC
+
+**The response comes before `agent_start`, and the gap is well under a millisecond.**
+Fifteen prompts across runs 1, 2 and 5, each awaited to `agent_settled` before the next, all answered `{"disposition": "started"}`.
+Measured on the probe's clock from the `write()`, the response arrived after 7.8, 5.5, 4.1, 1.8 and 4.1 ms in run 1, 13.1, 2.6, 3.9, 3.6 and 3.9 ms in run 2, and 8.2, 5.0, 3.9, 3.7 and 3.8 ms in run 5.
+`agent_start` followed the response by 0.1 to 0.6 ms, every time in a later `read()` chunk than the response.
+No model call is inside that window: read at the source, `_startRun` in `core/agent-session.js` sets the session busy, runs `_prepareRun`, which awaits `before_agent_start` handlers and any compaction, emits the response, and only then calls the agent loop that emits `agent_start`.
+So its width depends on the handlers and compaction, not on the model, and with this configuration's handlers it was a few milliseconds.
+
+**A bare second prompt in that window is refused, and Pi is busy before it has even answered the first.**
+With two bare `prompt` commands in one `write()` (runs 1, 2 and 5), the second was answered `success: false` with `Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.`, and that refusal came out **before** the first's `started` response and its `agent_start`.
+With the second written by the reader thread the instant it parsed the first's response line, before it read anything after it (same three runs), it was refused with the same error; `agent_start` had not been read by then, but it may already have been in the pipe, so that cell does not show which side of `agent_start` Pi was on.
+One run started and settled in each case; the refused text never appeared as a user message.
+So as of `pi 1.2.0` the rule in Pi's `docs/rpc-commands.md` -- a `prompt` without `streamingBehavior` while the agent is streaming "returns an error" -- holds from the moment Pi accepts a run, before its response, not only once `agent_start` is out.
+
+**With `"steer"` the same second prompt is queued into the first's run, and on an idle session `"steer"` changes nothing.**
+The second prompt carrying `streamingBehavior: "steer"` in the same `write()` (runs 1, 2 and 5) was answered `{"disposition": "queued"}`, after a `queue_update` naming it in `steering` and before the first's response; both user messages went into the one run, the queued one drained right after the first, and one assistant reply and one `agent_settled` followed.
+A single prompt carrying `"steer"` while Pi was idle (run 5) was answered `{"disposition": "started"}` and ran an ordinary turn.
+
+### The window, through agentpane's prompt route
+
+**Two POSTs sent together: the one that reaches Pi second goes out bare and is refused with a 500.**
+In runs 2 to 5, two threads released by one barrier each POSTed a one-word prompt to `/prompt`.
+In all four, the stdin tap held both `prompt` commands **without** `streamingBehavior`, Pi answered the first `started` and the second `success: false` with the error above, and the route answered that POST **500**, body `{"error": "internal_error", "detail": "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."}`, 70 to 98 ms after release; the other POST was 202 after 14 to 23 ms.
+The SSE wire carried one turn, `isStreaming` true then false, with only the admitted prompt's user message, and no `error` event for the refused one.
+The cause is the adapter's, read at the code: `SessionManager.submit` runs a session's submits one at a time (`#serially`), so the second is issued as soon as the first's `submit()` resolves on Pi's response; `PiAdapter.submit` sets `streamingBehavior` only when `this.state.isStreaming`, which `reducePiNotification` sets at `agent_start`; and Pi writes the response and `agent_start` separately, the second after the first (at the RPC above, always in a later `read()`), so the reducer has not seen `agent_start` when the second submit is built.
+A prompt that runs into this is not steered, as D16 says a mid-turn prompt on Pi is.
+
+**A POST sent after the first's 202 is steered.**
+In the same four runs a second POST sent the moment the first returned 202, about 4 ms after the first was sent, carried `streamingBehavior: "steer"` on stdin, was answered `{"disposition": "queued"}`, and was 202; its user message and its reply arrived in a second round of the same run, inside one `agent_start`…`agent_settled` span, as OW-yuyofu found mid-turn on `pi 0.85.1`.
+So agentpane's window is from a prompt being issued to Pi until the adapter has read that run's `agent_start`, and in these runs only a submit queued behind another inside agentpane landed in it.
+
+### A prompt an extension command handles
+
+**At the RPC, each of the three commands was answered `handled`, with no run.**
+`/refs`, `/llama` and `/mcp`, each sent as a bare `prompt` (runs 1, 2 and 5), were answered `{"disposition": "handled"}`, each preceded by an `extension_ui_request` with method `notify`: `No @references found in AGENTS.md files` (`info`), `/llama is available in interactive mode` (`warning`), and `No MCP servers configured. Add them to <state dir>/mcp.json or .pi/mcp.json.` (`info`).
+In the five seconds after each, Pi emitted nothing else: no `agent_start`, no message, no `agent_settled`.
+Read at the source, `AgentSession.prompt` hands a message starting with `/` to `_tryExecuteExtensionCommand` before anything else, and answers `handled` for an extension command or an `input` handler that consumes the text; prompt templates and `/skill:` forms are expanded and start a run, so they answer `started`.
+
+**Through agentpane, the prompt route answers 202 and the wire says nothing at all.**
+In runs 2 and 5 each of the three, and in runs 3 and 4 `/mcp`, was POSTed as the prompt's text, which agentpane passes to Pi unchanged (OW-73); Pi answered `handled` after the same `notify`, and the route answered **202**.
+For five seconds after each 202 the SSE stream carried **no event under the session's handle**: no status, no upsert, no error, no notice.
+`isStreaming` stayed false, the transcript gained no message, and the `notify` text reached neither wire, because `reducePiNotification` drops every fire-and-forget `extension_ui_request`.
+Nothing on the server waited for a run: the ordinary prompt POSTed next went out bare, was answered `started`, and ran and settled normally, in every run.
+
+**What each client shows, read at the code and not run.**
+Neither client was driven; the browser reads that SSE stream, and the Emacs helper reads the same stream through `openEvents` in `src/emacs/sse.ts` and forwards it, so the wire above is what both had.
+The browser's `submit` in `src/client/controller.ts` clears the draft on the 202, and `armBadge` in `App.svelte` has already armed the turn-done watch (`watchSubmit` in `src/client/favicon.ts`) and the follow arm, which `disarmSubmit` takes off only for a submit that failed.
+Emacs's `agentpane--send-prompt` arms `agentpane--watch-submit` as the prompt goes out and abandons it only for a prompt the server refused or that never went out, and a 202 is neither.
+So in both the prompt vanishes with nothing in its place, and the watch stays waiting on the session's handle, to end at the next turn that streams there, whoever started it.
+
+**Not established.**
+No `input` handler consuming a prompt was exercised; none is installed on the home server.
+Nothing here was a handled prompt sent while a turn streamed, for which agentpane sends `"steer"` and Pi, as read at the source, runs the command at once.
+Whether Pi before 1.2.0 counted a run busy before its response was not measured, so this does not say whether the agentpane race above is new with 1.2.0; the adapter sent the second prompt bare either way.
+The abort-in-the-window behaviour the 1.2.0 changelog names was not measured.
+No real browser or Emacs ran.
