@@ -605,6 +605,7 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		await startAdapter(h);
 
 		const stopped = h.adapter.abort();
+		await flush();
 		// The abort waits for the clear's answer: until then only the clear is out.
 		expect(h.child.sent().map((c) => c.type)).toEqual(["get_state", "clear_queue"]);
 		h.child.respondTo("clear_queue", { steering: ["first steer", "second steer"], followUp: ["a follow-up"] });
@@ -614,40 +615,112 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		await expect(stopped).resolves.toEqual(["first steer", "second steer", "a follow-up"]);
 	});
 
-	it("refuses a prompt while a stop is in flight, and admits one once it has answered", async () => {
+	it("sends its clear only once every prompt already on Pi's stdin has been answered (OW-jifibo)", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const steered = h.adapter.submit("steered before the stop");
+		const stopped = h.adapter.abort();
+		await flush();
+		// As of `pi 1.2.0` Pi queues a steer only after its input handlers, and
+		// answers `queued` then; a clear read before that takes nothing out.
+		expect(h.child.sent().map((c) => c.type)).toEqual(["get_state", "prompt"]);
+		h.child.respondTo("prompt", { disposition: "queued" });
+		await expect(steered).resolves.toBe("started");
+		await flush();
+		expect(h.child.sent().map((c) => c.type)).toEqual(["get_state", "prompt", "clear_queue"]);
+		h.child.respondTo("clear_queue", { steering: ["steered before the stop"], followUp: [] });
+		await flush();
+		h.child.respondTo("abort");
+		await expect(stopped).resolves.toEqual(["steered before the stop"]);
+	});
+
+	it("holds a prompt sent during a stop until the stop has answered, then sends it to start a turn (OW-jifibo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+		const prompts = () => h.child.sent().filter((c) => c.type === "prompt");
 
 		const stopped = h.adapter.abort();
 		const beforeClear = h.adapter.submit("before the clear answers");
-		// Neither reaches Pi, where it would steer into the queue just emptied.
-		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
-		await expect(beforeClear).rejects.toThrow(/stop/);
+		await flush();
+		// Neither reaches Pi while the stop is out, where it would steer into the queue just emptied.
+		expect(prompts()).toEqual([]);
 		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
 		await flush();
 		const beforeAbort = h.adapter.submit("before the abort answers");
-		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
-		await expect(beforeAbort).rejects.toThrow(/stop/);
+		await flush();
+		expect(prompts()).toEqual([]);
 		h.child.respondTo("abort");
 		await stopped;
+		await flush();
 
-		const after = h.adapter.submit("after");
-		expect(h.child.lastSent("prompt").message).toBe("after");
-		h.child.respondTo("prompt", { disposition: "started" });
-		await expect(after).resolves.toBe("started");
+		expect(prompts().map((c) => c.message)).toEqual(["before the clear answers", "before the abort answers"]);
+		for (const { id } of prompts()) {
+			h.child.emitLine({ id, type: "response", command: "prompt", success: true, data: { disposition: "started" } });
+		}
+		await expect(beforeClear).resolves.toBe("started");
+		await expect(beforeAbort).resolves.toBe("started");
 	});
 
-	it("admits prompts again after a stop Pi refused", async () => {
+	it("runs overlapping stops one after the other, and holds a prompt until both have answered (OW-jifibo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+		const types = () => h.child.sent().map((c) => c.type);
+
+		// "Stop and edit" stops at the click, and `forkAndSubmit` again ahead of its fork.
+		const first = h.adapter.abort();
+		const second = h.adapter.abort();
+		const prompt = h.adapter.submit("after both");
+		await flush();
+		expect(types()).toEqual(["get_state", "clear_queue"]);
+		h.child.respondTo("clear_queue", { steering: ["queued once"], followUp: [] });
+		await flush();
+		h.child.respondTo("abort");
+		await expect(first).resolves.toEqual(["queued once"]);
+		await flush();
+		expect(types()).toEqual(["get_state", "clear_queue", "abort", "clear_queue"]);
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		h.child.respondTo("abort");
+		await expect(second).resolves.toEqual([]);
+		await flush();
+
+		expect(h.child.lastSent("prompt").message).toBe("after both");
+		h.child.respondTo("prompt", { disposition: "started" });
+		await expect(prompt).resolves.toBe("started");
+	});
+
+	it("sends a prompt held by a stop Pi refused once the stop has failed", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
 
 		const stopped = h.adapter.abort();
+		const held = h.adapter.submit("held");
+		await flush();
 		h.child.failCommand("clear_queue", "refused");
 		await expect(stopped).rejects.toThrow("refused");
+		await flush();
 
-		const after = h.adapter.submit("after");
+		expect(h.child.lastSent("prompt").message).toBe("held");
 		h.child.respondTo("prompt", { disposition: "started" });
-		await expect(after).resolves.toBe("started");
+		await expect(held).resolves.toBe("started");
+	});
+
+	it("fails a prompt held by a stop Pi never answers once the session is closed, rather than leave it hung", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const stopped = h.adapter.abort();
+		const held = h.adapter.submit("held");
+		await flush();
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		// Pi answers `abort` only once its turn is idle, and this one never is.
+		await h.adapter.dispose();
+
+		await expect(stopped).rejects.toThrow(/disposed/);
+		await expect(held).rejects.toThrow(/not running/);
+		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
 	});
 });
 

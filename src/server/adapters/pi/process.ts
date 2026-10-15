@@ -57,8 +57,6 @@ interface PendingCommand {
 /** Pi answered `success: false`: it is alive and said no, unlike a pipe or process failure. */
 class PiCommandError extends Error {}
 
-const STOP_IN_FLIGHT_ERROR = "Pi adapter cannot submit while a stop is in flight";
-
 // ---------------------------------------------------------------------------
 // The spawn seam
 //
@@ -239,8 +237,10 @@ export class PiAdapter implements BackendAdapter {
 	 * arrived meanwhile is the old model's and is reported as it stands.
 	 */
 	private settingModel = false;
-	/** How many `abort()`s are awaiting Pi's answer; while any is, `submit` refuses (OW-wisifo). */
-	private stopsInFlight = 0;
+	/** Every `prompt` written to Pi and not yet answered; a stop waits them out (OW-jifibo). */
+	private readonly unansweredPrompts = new Set<Promise<unknown>>();
+	/** The last stop, until it settles: a prompt waits for it, and the next stop follows it (OW-jifibo). */
+	private stopping: Promise<void> | null = null;
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
@@ -384,12 +384,11 @@ export class PiAdapter implements BackendAdapter {
 	// -- driving a turn ---------------------------------------------------------
 
 	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
-		// A turn being stopped cannot take a steer as sent: what reaches Pi now
-		// lands in a queue `abort` has already cleared, to meet what a bare
-		// abort does to it (D16, OW-wisifo; the docblock on `abort`). So it is
-		// refused, as Codex refuses one into a turn it interrupted (OW-pefawi),
-		// and the caller keeps its draft to send once the stop has answered.
-		if (this.stopsInFlight > 0) throw new Error(STOP_IN_FLIGHT_ERROR);
+		// A prompt sent while a stop is in flight waits for it to settle (the
+		// docblock on `abort`). Looped, because another stop can start before
+		// this resumes, and the write below must follow the last one with no
+		// await between.
+		while (this.stopping) await this.stopping;
 		const cmd: PiCommand = {
 			type: "prompt",
 			message: text,
@@ -415,7 +414,14 @@ export class PiAdapter implements BackendAdapter {
 			// prompt's images reach the run unchanged (read, not measured).
 			streamingBehavior: "steer",
 		};
-		const response = await this.sendCommand<PiResponseFor<"prompt">>(cmd);
+		const prompt = this.sendCommand<PiResponseFor<"prompt">>(cmd);
+		this.unansweredPrompts.add(prompt);
+		let response: PiResponseFor<"prompt">;
+		try {
+			response = await prompt;
+		} finally {
+			this.unansweredPrompts.delete(prompt);
+		}
 		// A prompt an extension command consumes, `/mcp` say, was answered
 		// `"handled"` on `pi 1.2.0`, and no event followed it
 		// (docs/MANUAL_TESTING.md, OW-kokotu); the caller is told no turn was
@@ -476,25 +482,56 @@ export class PiAdapter implements BackendAdapter {
 	 * not as typed. Both queues are returned, steering first, though this
 	 * adapter only ever steers.
 	 *
-	 * A prompt that arrives while the stop is in flight, from this client or
-	 * another, would steer into the queue the clear has already emptied, and
-	 * what the abort then does with it was not measured, though nothing in the
-	 * `pi 1.2.0` runs above says it would fare better than the steers they
-	 * stranded. So `submit` refuses one until the abort answers, which on
-	 * those runs came after `agent_settled`.
-	 * Counted rather than flagged, because two stops can overlap: the one
-	 * "Stop and edit" sends at the click and the one `forkAndSubmit` sends
-	 * ahead of the fork.
+	 * The stop is ordered behind every `prompt` already written to Pi: its
+	 * `clear_queue` goes out only once each has been answered (OW-jifibo). As of
+	 * `pi 1.2.0`, read at the installed package and not measured, `rpc-mode.js`
+	 * starts a prompt without awaiting it and answers `queued` only after
+	 * `_queueSteer`, while it runs `clear_queue` at once, so a clear sent behind
+	 * an unanswered steer can run first and leave the steer for the abort to
+	 * strand. The wait has a cost, same reading: Pi answers a prompt only once
+	 * its preflight is done, which for an extension command is the command's
+	 * whole handler and on an idle Pi includes any compaction `_prepareRun`
+	 * runs first, so a Stop pressed during one waits it out before it stops
+	 * anything.
+	 *
+	 * A prompt sent while a stop is in flight, from this client or another,
+	 * waits for the stop to settle and then goes out to the idle Pi the abort
+	 * leaves -- on the runs above Pi answered `abort` after `agent_settled` --
+	 * so Stop then Send starts a fresh turn. Each stop follows the one before
+	 * it, because two can overlap: the one "Stop and edit" sends at the click
+	 * and the one `forkAndSubmit` sends ahead of the fork. The second clears
+	 * once the first's abort has answered, and usually takes nothing out.
+	 *
+	 * Nothing times Pi out. As of `pi 1.2.0` `AgentSession.abort` ends in
+	 * `waitForIdle` (read at the source), so a turn that never settles leaves
+	 * the stop unanswered, as a prompt Pi never answers leaves it unsent. Then
+	 * every prompt sent after it waits too, and with it every verb
+	 * `SessionManager.#serially` has queued behind that prompt on the session:
+	 * `fork`, `setModel`, `setEffort`, `setName` and `compact`. That is chosen
+	 * knowingly: such a session takes no turn whichever way a prompt is
+	 * answered, and closing it, or Pi dying, rejects the stop and then fails
+	 * what waits behind it rather than leaving it hung. Before OW-jifibo the
+	 * same case refused every prompt with a 500 until the session closed.
+	 *
+	 * If the `clear_queue` succeeds and the `abort` after it fails -- Pi dying
+	 * between the two, in practice -- the stop rejects and the texts the clear
+	 * took out are lost: they are in no session file, and neither wire carries
+	 * a failed stop's texts back. The death itself is reported, through
+	 * `onError`.
 	 */
 	async abort(): Promise<string[]> {
-		this.stopsInFlight++;
-		try {
+		const before = Promise.allSettled([this.stopping, ...this.unansweredPrompts]);
+		const stop = before.then(async () => {
 			const cleared = await this.sendCommand<PiResponseFor<"clear_queue">>({ type: "clear_queue" });
 			await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
 			return [...cleared.data.steering, ...cleared.data.followUp];
-		} finally {
-			this.stopsInFlight--;
-		}
+		});
+		const release = () => {
+			if (this.stopping === settled) this.stopping = null;
+		};
+		const settled = stop.then(release, release);
+		this.stopping = settled;
+		return stop;
 	}
 
 	/**
