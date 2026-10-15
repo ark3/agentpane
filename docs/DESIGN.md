@@ -626,7 +626,7 @@ The Claude adapter now rejects `submit()` while a turn is active, and applies th
 The contract said only "resolves once the backend admits the turn", which all three honoured.
 
 Steer is the pick because it is what a person typing mid-turn is asking for, and a follow-up delivers the text somewhere the user did not aim it.
-Pi's own default for a message typed mid-turn is steer (`pi/process.ts:291-294`), which is corroboration and not the reason.
+Pi's own default for a message typed mid-turn is steer (as of `pi 1.2.0`, its interactive mode calls `session.prompt(text, { streamingBehavior: "steer" })` while `session.isStreaming`, in `dist/modes/interactive/interactive-mode.js`), which is corroboration and not the reason.
 The alternative, standardising on follow-up, was the reachable-everywhere option and was declined: reaching it everywhere would have meant holding prompts server-side for Codex to simulate a primitive it does not have, in order to give every backend the weaker semantic.
 
 Rejection is a real answer here, not a failure mode.
