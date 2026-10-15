@@ -3696,6 +3696,15 @@ or no point name INDEX.  See `agentpane-fork'."
        (if (and pi-backend agentpane--streaming)
            (progn
              (agentpane--watch-forget agentpane--handle)
+             ;; The prompts this stop takes out of Pi's queue, its result's
+             ;; `:queued', are dropped here, as the browser's `forkAndSubmit'
+             ;; drops them (D16, OW-wisifo): they were steered into the turn
+             ;; the fork abandons, and go with that branch as a steer
+             ;; delivered a moment sooner would have.  Taking them out still
+             ;; matters, since whether Pi's queue survives a fork was never
+             ;; measured.  Under `agentpane-edit-last' the press's own abort
+             ;; has usually emptied it already, and what that one takes out
+             ;; is the prompt region's to receive (OW-seleri).
              (agentpane--request 'sessions/abort (list :session parent)
                                  (lambda (_) (agentpane--fork-at parent point window failed then))
                                  t failed))

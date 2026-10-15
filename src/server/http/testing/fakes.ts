@@ -186,6 +186,8 @@ export class FakeAdapter implements BackendAdapter {
 	readonly prompts: { text: string; images?: ImageInput[] }[] = [];
 	readonly forks: string[] = [];
 	aborts = 0;
+	/** What the next `abort` hands back, as Pi's cleared queue (OW-wisifo); set it to drive the route. */
+	queued: string[] = [];
 	compactions = 0;
 	model?: string;
 	effort?: string;
@@ -256,9 +258,10 @@ export class FakeAdapter implements BackendAdapter {
 		this.#moveTo({ ...this.#ref, id }, "rename");
 	}
 
-	async abort(): Promise<void> {
+	async abort(): Promise<string[]> {
 		this.aborts++;
 		this.setStreaming(false);
+		return this.queued.splice(0);
 	}
 
 	async compact(): Promise<void> {

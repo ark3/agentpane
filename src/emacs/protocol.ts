@@ -279,7 +279,12 @@
  *   raised after the send, that attach's start among them, stays
  *   (OW-jokoto). Absent, the server takes whatever error it holds when the
  *   prompt arrives.
- * - `sessions/abort`, `sessions/compact` -- `{ session }` -> `null`.
+ * - `sessions/abort` -- `{ session }` -> `null` for a stop that took nothing
+ *   out of the backend's queue, or `{ queued }` for one that did: the abort
+ *   route's own `AbortResponse`, the text of each prompt steered into the turn
+ *   and not yet delivered, which only Pi holds, for the buffer that stopped
+ *   it to take back (D16, OW-wisifo). No notification carries them.
+ * - `sessions/compact` -- `{ session }` -> `null`.
  * - `sessions/close` -- `{ session, handle?, tokens? }` -> `null`. Kills the
  *   subprocess, then gives up and releases the attaches `tokens` names, as
  *   `sessions/detach` below says; the server's `ended` for the handle
@@ -427,6 +432,7 @@
  */
 
 import type {
+	AbortResponse,
 	AgentNotice,
 	BackendId,
 	CreateSessionRequest,
@@ -453,7 +459,7 @@ export interface HelperRequests {
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
 	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
 	"sessions/prompt": { params: SessionParams & PromptRequest; result: PromptResponse | null };
-	"sessions/abort": { params: SessionParams; result: null };
+	"sessions/abort": { params: SessionParams; result: AbortResponse | null };
 	"sessions/compact": { params: SessionParams; result: null };
 	"sessions/close": { params: SessionParams & { tokens?: number[] }; result: null };
 	"sessions/dismissError": { params: SessionParams & DismissErrorRequest; result: null };

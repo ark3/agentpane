@@ -166,7 +166,19 @@ export interface BackendAdapter {
 	 * has such an outcome. Every other admission resolves `"started"`.
 	 */
 	submit(text: string, images?: ImageInput[]): Promise<PromptDisposition>;
-	abort(): Promise<void>;
+	/**
+	 * Stop the running turn, resolving with the text of every prompt steered
+	 * into it that the backend had not yet delivered, which the stop took out
+	 * so that nothing runs after it (D16, OW-wisifo). The caller that pressed
+	 * Stop gets them back, to put where the user can send them again.
+	 *
+	 * Only `PiAdapter` holds such a queue. Claude Code's adapter refuses a
+	 * mid-turn prompt instead (D16), and Codex's sends `turn/steer` straight
+	 * to app-server and keeps nothing of its own, so both resolve empty; what
+	 * app-server does with a steer it has not consumed when `turn/interrupt`
+	 * arrives was never measured.
+	 */
+	abort(): Promise<string[]>;
 	/**
 	 * Compact the session's context, summarising the history so far to reduce
 	 * the token count the next turn carries. Required (OW-72): every backend

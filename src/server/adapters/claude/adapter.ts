@@ -379,14 +379,16 @@ export class ClaudeAdapter implements BackendAdapter {
 		return "started";
 	}
 
-	async abort(): Promise<void> {
-		if (!this.turnActive) return;
+	/** Resolves empty: a mid-turn prompt is refused here (D16), so nothing is ever queued to hand back. */
+	async abort(): Promise<string[]> {
+		if (!this.turnActive) return [];
 		try {
 			await this.sendControl({ subtype: "interrupt" });
 		} catch {
 			// "Not currently executing" and its kin: the goal state -- no running
 			// turn -- already holds, so an errored interrupt is not a failure.
 		}
+		return [];
 	}
 
 	/**

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import {
+	type AbortResponse,
 	type ApiError,
 	type AttachSessionResponse,
 	type BackendId,
@@ -317,7 +318,14 @@ export function createApp(deps: AppDeps): App {
 			case "abort": {
 				if (request.method !== "POST") return methodNotAllowed(request.method, "POST");
 				const adapter = requireAttached(ref);
-				await adapter.abort();
+				// The prompts the stop took out of the backend's queue go back to
+				// this caller alone, as its answer and never as an event: the
+				// composer to refill is the one that pressed Stop (D16, OW-wisifo).
+				const queued = await adapter.abort();
+				if (queued.length > 0) {
+					const response: AbortResponse = { queued };
+					return json(response);
+				}
 				return noContent();
 			}
 			case "compact": {

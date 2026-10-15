@@ -403,6 +403,22 @@ export interface PromptResponse {
 	disposition: "handled";
 }
 
+/**
+ * The abort route's body, sent with 200 only when the stop took prompts out
+ * of the backend's queue: the text of each steered prompt the backend had not
+ * yet delivered, in the order it held them (D16, OW-wisifo). Only Pi queues
+ * any, and only their text comes back -- a steered prompt's images do not,
+ * and a skill or prompt template comes back as Pi expanded it.
+ *
+ * It answers the request that pressed Stop and goes nowhere else, because the
+ * composer to put them back in is that client's. A stop that took nothing out
+ * is answered 204 with no body, as before the texts existed, the way
+ * `PromptResponse` grew a body only for the outcome that needs one.
+ */
+export interface AbortResponse {
+	queued: string[];
+}
+
 /** POST /api/edit-draft */
 export interface EditDraftRequest {
 	text: string;

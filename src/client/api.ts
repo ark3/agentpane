@@ -1,5 +1,6 @@
 import {
 	ROUTES,
+	type AbortResponse,
 	type ApiError,
 	type AttachSessionResponse,
 	type CreateSessionRequest,
@@ -79,7 +80,13 @@ export interface AgentpaneApi {
 	 */
 	prompt(ref: SessionRef, body: PromptRequest): Promise<PromptResponse | void>;
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
-	abort(ref: SessionRef): Promise<void>;
+	/**
+	 * Resolves with nothing for a stop that took nothing out of the backend's
+	 * queue, as it did before there was anything to return, so a caller or fake
+	 * that ignores it is unchanged; with the body for one that took out
+	 * prompts steered into the turn and not yet delivered (D16, OW-wisifo).
+	 */
+	abort(ref: SessionRef): Promise<AbortResponse | void>;
 	compact(ref: SessionRef): Promise<void>;
 	/**
 	 * Kill this session's subprocess and drop it from the server's table
@@ -165,8 +172,12 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		editDraft(body) {
 			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);
 		},
-		abort(ref) {
-			return requestNoContent(ROUTES.abort(ref), { method: "POST" });
+		async abort(ref) {
+			const response = await fetchImpl(ROUTES.abort(ref), { method: "POST" });
+			if (!isSuccessful(response.status)) throw await toApiClientError(response);
+			// The route answers a stop that took nothing out 204 with no body, and
+			// one that did 200 with an `AbortResponse`.
+			if (response.status === 200) return (await response.json()) as AbortResponse;
 		},
 		compact(ref) {
 			return requestNoContent(ROUTES.compact(ref), { method: "POST" });

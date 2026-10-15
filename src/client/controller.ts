@@ -1383,6 +1383,19 @@ export function createController(
 				// turn is over, so a stop mid-turn destroys the entire reply rather
 				// than racing it (home server, 2026-09-11, `claude 2.1.268`;
 				// OW-japuzo).
+				//
+				// The prompts this stop takes out of Pi's queue (D16, OW-wisifo)
+				// are dropped here, deliberately. They were steered into the turn
+				// the fork abandons, after the message it rewinds to, and go with
+				// that branch as a steer delivered a moment sooner would have: as a
+				// user message the fork does not carry. Taking them out still
+				// matters, since whether Pi's queue survives a `fork` was never
+				// measured, and a survivor could reach the fork's first turn. The
+				// composer holds the edit this fork is sending, so there is nowhere
+				// to put them without mixing them into it. Under "Stop and edit"
+				// the click's own stop, `abort` below, has usually emptied the
+				// queue already, and what that one takes out is the composer's to
+				// receive (OW-fahoti), not this one's.
 				if (selected.backend === "pi" && handle !== undefined && view.state.sessions[handle]?.isStreaming) {
 					onAbort?.(handle);
 					await api.abort(selected);

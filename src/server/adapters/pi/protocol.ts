@@ -16,7 +16,9 @@
  * `thinking_level_changed` event (OW-ruzuhu), from `rpc-commands.md`'s
  * "Thinking" and `json.md` as of `pi 0.87.1`, and `set_session_name` with
  * `get_state`'s `sessionName` (OW-jamaha), from `rpc-types.d.ts` and
- * `rpc-mode.js` as installed at `pi 1.0.0`.
+ * `rpc-mode.js` as installed at `pi 1.0.0`, and `clear_queue`, which Stop
+ * sends ahead of `abort` (OW-wisifo), from `rpc-commands.md` "clear_queue"
+ * and the response `pi 1.2.0` gave (docs/MANUAL_TESTING.md, OW-yewiku).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -36,6 +38,7 @@ export type PiCommand =
 			streamingBehavior?: "steer" | "followUp";
 	  }
 	| { id?: string; type: "abort" }
+	| { id?: string; type: "clear_queue" }
 	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -80,6 +83,16 @@ export type PiResponse =
 			data?: { disposition?: "started" | "queued" | "handled" };
 	  }
 	| { id?: string; type: "response"; command: "abort"; success: true }
+	| {
+			id?: string;
+			type: "response";
+			command: "clear_queue";
+			success: true;
+			// The text of every prompt Pi had queued and not delivered, which it
+			// drops from both queues. Verbatim on `pi 1.2.0` (docs/MANUAL_TESTING.md,
+			// OW-yewiku), and as `docs/rpc-commands.md` "clear_queue" documents it.
+			data: { steering: string[]; followUp: string[] };
+	  }
 	| {
 			id?: string;
 			type: "response";

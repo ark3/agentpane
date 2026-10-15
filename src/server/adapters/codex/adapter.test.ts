@@ -770,7 +770,7 @@ describe("CodexAdapter turns", () => {
 	it("clears the completed turn before publishing its reducer update", async () => {
 		const { adapter, proc } = await startedAdapter({ threadId: "thread-completion-order" });
 		await adapter.submit("begin");
-		let abortFromCompletion: Promise<void> | undefined;
+		let abortFromCompletion: Promise<string[]> | undefined;
 		adapter.onUpdate((state) => {
 			if (!state.isStreaming) abortFromCompletion = adapter.abort();
 		});

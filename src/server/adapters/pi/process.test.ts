@@ -568,6 +568,30 @@ describe("PiAdapter command correlation", () => {
 	});
 });
 
+/**
+ * `pi 1.2.0` on the home server, 2026-10-15 (docs/MANUAL_TESTING.md,
+ * OW-yewiku): a bare `abort` left an undelivered steer unanswered in the
+ * transcript or inside the next prompt's run, and `clear_queue` first took it
+ * out, answering with the texts it held.
+ */
+describe("PiAdapter stop (D16, OW-wisifo)", () => {
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+	it("clears Pi's queue before aborting, and hands back every text it held, steering first", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const stopped = h.adapter.abort();
+		// The abort waits for the clear's answer: until then only the clear is out.
+		expect(h.child.sent().map((c) => c.type)).toEqual(["get_state", "clear_queue"]);
+		h.child.respondTo("clear_queue", { steering: ["first steer", "second steer"], followUp: ["a follow-up"] });
+		await flush();
+		expect(h.child.sent().map((c) => c.type)).toEqual(["get_state", "clear_queue", "abort"]);
+		h.child.respondTo("abort");
+		await expect(stopped).resolves.toEqual(["first steer", "second steer", "a follow-up"]);
+	});
+});
+
 describe("PiAdapter session name (D27, OW-jamaha)", () => {
 	it("sends set_session_name and carries the name once Pi accepts it", async () => {
 		const h = makeHarness();

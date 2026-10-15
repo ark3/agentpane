@@ -800,6 +800,23 @@ describe("prompting", () => {
 		expect(pi.forRef(PI_SESSION)?.aborts).toBe(1);
 	});
 
+	it("answers an abort with the prompts the stop took out of the queue, to that caller alone (OW-wisifo)", async () => {
+		await get(ROUTES.session(PI_SESSION));
+		const client = await openStream();
+		const adapter = pi.forRef(PI_SESSION)!;
+		adapter.setStreaming(true);
+		adapter.queued = ["first steer", "second steer"];
+		const response = await post(ROUTES.abort(PI_SESSION));
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ queued: ["first steer", "second steer"] });
+		// The next stop took nothing out, and answers as before the texts existed.
+		expect((await post(ROUTES.abort(PI_SESSION))).status).toBe(204);
+		// The stop's own status is on the stream, and the texts are not.
+		await client.until(() => client.typed("status").at(-1)?.isStreaming === false);
+		expect(JSON.stringify(client.events)).not.toContain("first steer");
+		await client.close();
+	});
+
 	it("compacts only an attached session (OW-72)", async () => {
 		expect((await post(ROUTES.compact(PI_SESSION))).status).toBe(404);
 		await get(ROUTES.session(PI_SESSION));

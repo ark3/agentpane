@@ -653,15 +653,20 @@ export class CodexAdapter implements BackendAdapter {
 		return "started";
 	}
 
-	async abort(): Promise<void> {
+	/**
+	 * Resolves empty: a steer goes straight to app-server as `turn/steer`, and
+	 * this adapter holds no queue of its own to hand back (D16, OW-wisifo).
+	 */
+	async abort(): Promise<string[]> {
 		const client = this.requireClient();
 		const turnId = this.turnId;
-		if (!turnId) return;
+		if (!turnId) return [];
 		// Set before the request, not after: the turn is no longer steerable from
 		// the moment app-server sees the interrupt, and a failed interrupt leaves a
 		// turn that still runs and still completes, which clears this.
 		this.interruptedTurnId = turnId;
 		await client.request("turn/interrupt", { threadId: this.requireThread(), turnId });
+		return [];
 	}
 
 	/**

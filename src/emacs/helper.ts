@@ -656,8 +656,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 			return (await api.prompt(session, body)) ?? null;
 		},
 		"sessions/abort": async ({ session }) => {
-			await api.abort(session);
-			return null;
+			return (await api.abort(session)) ?? null;
 		},
 		"sessions/compact": async ({ session }) => {
 			await api.compact(session);

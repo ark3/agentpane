@@ -144,6 +144,13 @@ describe("agentpane API", () => {
 		});
 	});
 
+	it("hands back the prompts a stop took out of the queue (OW-wisifo)", async () => {
+		const fetch = fetchRecorder(response({ queued: ["first steer", "second steer"] }));
+		const api = createAgentpaneApi({ fetch });
+
+		await expect(api.abort(ref)).resolves.toEqual({ queued: ["first steer", "second steer"] });
+	});
+
 	it("lists models for one backend and unwraps the response", async () => {
 		const models = [{ id: "opaque/id", label: "One" }];
 		const fetch = fetchRecorder(response({ models }));

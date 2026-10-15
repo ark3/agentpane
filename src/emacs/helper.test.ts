@@ -188,7 +188,7 @@ describe("requests", () => {
 			[`POST ${ROUTES.sessions}`]: () => json({ ref: pi }),
 			[`GET ${ROUTES.models}?backend=pi`]: () => json({ models: [model] }),
 			[`POST ${ROUTES.prompt(pi)}`]: noContent,
-			[`POST ${ROUTES.abort(pi)}`]: noContent,
+			[`POST ${ROUTES.abort(pi)}`]: () => json({ queued: ["first steer", "second steer"] }),
 			[`POST ${ROUTES.compact(pi)}`]: noContent,
 			[`DELETE ${ROUTES.session(pi)}`]: noContent,
 			[`POST ${ROUTES.model(pi)}`]: noContent,
@@ -201,7 +201,8 @@ describe("requests", () => {
 			["sessions/create", { cwd: "/work", backend: "pi" }, pi],
 			["models/list", { backend: "pi" }, [model]],
 			["sessions/prompt", { session: pi, text: "hello", priorErrorId: "e4" }, null],
-			["sessions/abort", { session: pi }, null],
+			// The prompts the stop took out of Pi's queue come back to the caller (OW-wisifo).
+			["sessions/abort", { session: pi }, { queued: ["first steer", "second steer"] }],
 			["sessions/compact", { session: pi }, null],
 			["sessions/close", { session: pi }, null],
 			["sessions/setModel", { session: pi, model: "m" }, null],

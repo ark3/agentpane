@@ -446,8 +446,30 @@ export class PiAdapter implements BackendAdapter {
 		return disposition;
 	}
 
-	async abort(): Promise<void> {
+	/**
+	 * Stop as Pi's own interactive mode does with Esc (D16): `clear_queue`, then
+	 * `abort`, resolving with the text of every prompt Pi had queued and not
+	 * delivered. Measured on the home server, 2026-10-15, `pi 1.2.0`
+	 * (docs/MANUAL_TESTING.md, OW-yewiku): a bare `abort` left a steer queued
+	 * behind a tool call as a user message nobody answered, and one queued
+	 * behind a streaming reply to be delivered into the next prompt's run,
+	 * which then never answered that prompt; clearing first took it out in
+	 * both. The abort waits for the clear's answer, so Pi has emptied its
+	 * queues before the turn starts to stop.
+	 *
+	 * What comes back is what Pi queued, and only its text: Pi's response
+	 * carries no images, so a steered prompt's images are lost here, which is
+	 * Pi's limit and not one to work around. And as of `pi 1.2.0`
+	 * `AgentSession.prompt` queues its `expandedText`, after input handlers,
+	 * `_expandSkillCommand` and `expandPromptTemplate` (read at the installed
+	 * package, not measured), so a steered `/skill:...` comes back expanded,
+	 * not as typed. Both queues are returned, steering first, though this
+	 * adapter only ever steers.
+	 */
+	async abort(): Promise<string[]> {
+		const cleared = await this.sendCommand<PiResponseFor<"clear_queue">>({ type: "clear_queue" });
 		await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
+		return [...cleared.data.steering, ...cleared.data.followUp];
 	}
 
 	/**
@@ -456,6 +478,16 @@ export class PiAdapter implements BackendAdapter {
 	 * summary through the `compaction_start`/`compaction_end` notifications the
 	 * reducer already sees, so this only has to issue the command and await its
 	 * admission -- the transcript marker is the reducer's job.
+	 *
+	 * It does not clear Pi's queue first, as `abort` does, though as of
+	 * `pi 1.2.0` `AgentSession.compact` begins with `await this.abort()`, so a
+	 * steer still queued when a compaction stops the turn meets what a bare
+	 * abort did to it (read at the installed package, not measured). Clearing
+	 * would take the text out with nowhere to put it: the compact route answers
+	 * 204 and `sessions/compact` `null`, so the words would be lost without a
+	 * trace, where left alone they stay in Pi's session, misplaced but there to
+	 * see. Handing them back would mean growing both wires and both clients for
+	 * a compaction asked for mid-turn with a steer still undelivered (OW-wisifo).
 	 */
 	async compact(): Promise<void> {
 		this.state = { ...this.state, compaction: "requesting" };
