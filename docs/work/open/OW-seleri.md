@@ -26,10 +26,20 @@ This card puts that text back where the user types, so nothing the user typed is
 - "Stop and edit": `agentpane-edit-last` opens the edit in the prompt region through `agentpane--edit` and then calls `agentpane-abort` on a streaming Pi session.
   Joined into the region there, the returned text would be sent into the fork as part of the edit; decide where it goes instead, matching OW-fahoti's choice for the browser's "Stop and edit", and say so in `agentpane-edit-last`'s docstring.
 
+## What OW-fahoti landed, 2026-10-15
+
+The browser's choice, which this card matches: where the words go is decided by what the composer holds when the answer lands, never by which command sent the stop.
+Every stop, the Stop button's and "Stop and edit"'s, holds the texts until no edit is open and no prompt is in flight, then joins them ahead of whatever the composer holds; with neither in the way that is at once.
+So after Cancel they land ahead of the displaced draft, after a fork's prompt lands they fill what it leaves, and an edit ended by a session switch or by a fork whose prompt failed after the selection moved leaves its text as a plain draft they join ahead of.
+The case that made the browser change shape: a plain Stop pressed while an edit is open (the transcript's edit control during a Pi turn, then Stop), or Stop and then "Stop and edit" before the first stop answers, joined the words into the edit's text, where the fork sent them or Cancel overwrote them.
+`agentpane-abort` is the plain Stop here, so the same case applies to an edit opened through `agentpane--edit` by any path, not only `agentpane-edit-last`.
+The browser's rule lives at `stop()` and the release `$effect` beside `heldQueued` in `src/client/App.svelte`, and the join at `withQueued` in `src/client/controller.ts`.
+
 ## Done when
 
 - An ERT test in `emacs/agentpane-test.el`, red first, answers `sessions/abort` with two texts while the prompt region holds other text, and asserts the region afterwards holds the two texts and then the old text, joined by blank lines; and another asserts an empty answer leaves the region untouched.
 - An ERT test, red first, drives `agentpane-edit-last` on a streaming Pi session whose `sessions/abort` answers with a text, and asserts the prompt region holds only the edited message and the text is where the decision above put it.
+- An ERT test, red first, runs `agentpane-abort` while an edit is open in the prompt region and its answer carries a text, and asserts the region holds only the edited message and the text is where the decision above put it.
 - If the text goes to an open composer buffer, an ERT test asserts that too.
 - The ERT suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
 - `bun run check` passes if anything under `src/` changed.
