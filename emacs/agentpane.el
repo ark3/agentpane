@@ -3048,9 +3048,10 @@ and no prompt in flight; see `agentpane-abort'.")
 (defun agentpane--with-queued (queued draft)
   "DRAFT once QUEUED, prompts a stop took out of Pi's queue (D16), come back
 to it: those prompts in order, then DRAFT, blank lines between, and a blank
-DRAFT dropped.  The browser's `withQueued' (src/client/controller.ts),
-which is Pi's own rule for the same moment, kept exact so that both
-clients give the words back in the shape Pi's TUI does (OW-seleri)."
+DRAFT dropped.  The same rule as the browser's `withQueued'
+\(src/client/controller.ts), which is Pi's own for the same moment, so
+that both clients give the words back in the shape Pi's TUI does
+\(OW-seleri)."
   (string-join (seq-remove #'string-blank-p (list (string-join queued "\n\n") draft))
                "\n\n"))
 
@@ -3270,16 +3271,18 @@ where they go is decided by what the region holds when the answer lands,
 never by which command sent the stop.  Joined into an open edit
 \(`agentpane-edit') they would be sent into the fork as part of it, or
 overwritten by `agentpane-cancel-edit' -- the case that made the browser
-change shape, reached here by this command pressed while an edit is open
-however it was opened, or by a plain stop and then `agentpane-edit-last'
-before the first answers.  Joined while a prompt from this buffer is in
-flight, they would leave its sent text standing at its answer, the region
-no longer being exactly what was sent (`agentpane--clear-sent').  So they
-wait in `agentpane--held-queued' until the buffer holds no edit and sends
+change shape.  Joined while a prompt from this buffer is in flight, they
+would leave its sent text standing at its answer, the region no longer
+being exactly what was sent (`agentpane--clear-sent').  So they wait in
+`agentpane--held-queued' until the buffer holds no edit and sends
 nothing, and are then joined ahead of whatever the region holds,
 `agentpane--with-queued'; with neither in the way, a plain stop's usual
-case, that is at once.  `agentpane--release-queued' runs wherever either
-ends:
+case, that is at once.  That covers an edit open when the answer lands,
+however it was opened.  An edit pressed before the answer opens only
+once its fork points answer (`agentpane--edit'), so a stop answered
+before then lands in the region, is displaced into the edit's draft like
+any draft, and a fork drops that draft (OW-kijuju).
+`agentpane--release-queued' runs wherever either ends:
 - Cancel puts the displaced draft back first, so they land ahead of it.
 - An edit's send drops the displaced draft, which they are not, and once
   the fork's prompt has answered clears the sent text from the region;

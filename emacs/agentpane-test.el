@@ -1708,7 +1708,8 @@ Pi's queue into one holding an edit of its own, those prompts wait on the
 survivor's edit like any it held itself, rather than joining the draft
 that edit displaced, which a fork drops: the region keeps only the edited
 text, and once the edit's send has forked and its prompt answered they
-land in the region the send leaves (OW-seleri)."
+land in the region the send leaves, after those the survivor held itself
+\(OW-seleri)."
   (let ((kill-ring nil)
         (kill-ring-yank-pointer nil)
         (interprogram-cut-function nil)
@@ -1728,6 +1729,8 @@ land in the region the send leaves (OW-seleri)."
         (with-current-buffer previewing
           (agentpane--draw agentpane-test--image-nodes)
           (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+          (setq aborted '(:queued ["steered here"]))
+          (agentpane-abort)
           (agentpane--attach)
           (should-not (buffer-live-p holder))
           (should agentpane--editing)
@@ -1736,7 +1739,7 @@ land in the region the send leaves (OW-seleri)."
           (setq attached nil)
           (agentpane-send)
           (should-not agentpane--editing)
-          (should (equal (agentpane-test--draft) "steered")))))))
+          (should (equal (agentpane-test--draft) "steered here\n\nsteered")))))))
 
 (ert-deftest agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt ()
   "An edit sent from a buffer only previewed attaches first, and when that
