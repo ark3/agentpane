@@ -31,7 +31,7 @@ import App from "../src/client/App.svelte";
 import type { AgentpaneApi, EventConnection, EventHandlers } from "../src/client/api.ts";
 import "../src/client/app.css";
 import { createController } from "../src/client/controller.ts";
-import { assistant, toolResult, user } from "../src/client/render/samples.ts";
+import { assistant, systemLeading, toolResult, user } from "../src/client/render/samples.ts";
 import type { ForkPoint, LiveSessionSummary, ServerEvent, SessionPreviewTurn, SessionRef, SessionSummary } from "../src/shared/protocol.ts";
 
 /**
@@ -304,6 +304,8 @@ export interface FollowHarness {
 	showBanners(): void;
 	/** Show one running default tool whose summary is either present or absent. */
 	seedAlignmentTool(withSummary: boolean): void;
+	/** Replace the transcript with a leading system message, a turn, and a later system message whose marker outruns the pane. */
+	seedSystem(): void;
 	/** Resolves when the turn currently streaming has emitted its `status:false`. */
 	settled(): Promise<void>;
 	/** Live geometry of the transcript pane and the anchor the last submit armed. */
@@ -379,6 +381,26 @@ const harness: FollowHarness = {
 		];
 		seq = 0;
 		snapshot(true);
+	},
+	seedSystem() {
+		// A `--tools` change that drops a dozen tools and replaces a few sections:
+		// the later marker names every one, so it is far wider than the pane.
+		const removed = ["read", "bash", "edit", "write", "grep", "find", "ls", "glob", "fetch", "search", "notebook", "subagent"];
+		messages = [
+			systemLeading(),
+			user(`prompt 0: ${words(0, 12)}`),
+			assistant([{ type: "text", text: paragraphs(0, 1) }], "stop"),
+			{
+				role: "system",
+				content: "",
+				sections: { preamble: "<preamble>\nAnswer tersely.\n</preamble>", tools: "<tools>\nNo tools.\n</tools>", docs: null },
+				toolsRemoved: removed.map((name) => ({ name })),
+				timestamp: Date.now(),
+			},
+			user(`prompt 1: ${words(1, 12)}`),
+		];
+		seq = 0;
+		snapshot(false);
 	},
 	settled() {
 		return turnSettled;
