@@ -3106,52 +3106,56 @@ The prompt arms the turn-done watch on the session's handle as it goes
 out, after any attach, so under the handle that attach answered; see
 `agentpane--watch-submit'.  A prompt the server refuses, the helper
 answering with an error whose `data' carries the HTTP status, even one
-it wrote as it died, abandons the watch it armed, as the browser's
-`watchAbandon' does for a refused POST: refused, the prompt started
-nothing, and the next turn on the session is not one this Emacs asked
-for.  So does one that never went out, sending it having exited
-non-locally, or its helper having exited before the teardown
-\(`agentpane--request').  The watch is abandoned even when a merge has
-killed this buffer before the answer (`agentpane--absorb'), as UNSENT in
-`agentpane--request' runs whether or not the buffer lives: the watch is
-on the handle, which the survivor holds, and left standing it raised the
-indicator for the next turn from elsewhere to end there.  One the helper
-answers with an error of its own, carrying no status -- the socket's
-error when the server was killed with the prompt in flight, say -- keeps
-its watch, as a timed-out one does below, since nothing says the server
-had not admitted it (OW-hiliti).
-One still out when its helper dies keeps its watch for the teardown to
+it wrote as it died, takes back its claim on the watch, which goes when
+no other prompt claims it, as the browser's `watchAbandon' does for a
+refused POST: refused, the prompt started nothing, and the next turn on
+the session is not one it asked for.  So does one that never went out,
+sending it having exited non-locally, or its helper having exited before
+the teardown (`agentpane--request').  The claim is taken back even when a
+merge has killed this buffer before the answer (`agentpane--absorb'), as
+UNSENT in `agentpane--request' runs whether or not the buffer lives: the
+watch is on the handle, which the survivor holds, and left standing on
+that claim it raised the indicator for the next turn from elsewhere to
+end there.  A prompt the survivor sent meanwhile, joining the watch,
+holds a claim of its own, which keeps the watch for its turn (OW-kakasu).
+One the helper answers with an error of its own, carrying no status --
+the socket's error when the server was killed with the prompt in flight,
+say -- keeps its claim, as a timed-out one does below, since nothing
+says the server had not admitted it (OW-hiliti).
+One still out when its helper dies keeps its claim for the teardown to
 settle, a death not saying the prompt reached no backend: a turn seen
 streaming then ends as an aborted one does (`agentpane--helper-gone').
 Abandoned at the death, as it was until OW-mopuyi, that turn raised
 nothing (OW-zedawo).
-One whose reply outlasts `agentpane--spawn-timeout' keeps its watch: the
+One whose reply outlasts `agentpane--spawn-timeout' keeps its claim: the
 reply is discarded, not refused, and the prompt route answers only once
 the backend has admitted the turn (src/server/http/app.ts), so a reply
 that long in coming most likely means a backend slow to admit it, behind
 a Pi compaction, say (`SessionManager.#serially'), and a prompt admitted
 once it could.
 Abandoned, as it was until OW-dunahe, that admitted turn's end raised
-nothing.  The cost falls on a timed-out prompt never admitted: its watch
-stays `sent', and the next turn on the session, from anywhere, ends it
-and raises the indicator; a later prompt refused meanwhile joins that
-watch and cannot clear it (`agentpane--watch-submit').  A timed-out
-prompt the backend handled, below, costs the same: its answer is discarded
-with the rest, jsonrpc.el dropping a reply that comes after its timeout,
-so nothing here can know it was handled; its watch stays `sent' and the
-next turn from anywhere raises the indicator, its draft stays, and no
-line says no turn was started for it (OW-kejire).  One whose reply's
-handling exits non-locally was admitted, and keeps its watch too.
+nothing.  The cost falls on a timed-out prompt never admitted: its claim
+keeps the watch `sent', and the next turn on the session, from anywhere,
+ends it and raises the indicator; a later prompt refused meanwhile joins
+that watch and takes back only its own claim (`agentpane--watch-submit').
+A timed-out prompt the backend handled, below, costs the same: its answer
+is discarded with the rest, jsonrpc.el dropping a reply that comes after
+its timeout, so nothing here can know it was handled; its claim keeps the
+watch `sent' and the next turn from anywhere raises the indicator, its
+draft stays, and no line says no turn was started for it (OW-kejire).
+One whose reply's handling exits non-locally was admitted, and keeps its
+claim too.
 
 A prompt the backend handled itself, starting no turn for it -- a Pi
 extension command such as `/mcp' -- answers `(:disposition \"handled\")'
 where a started one answers nil (`sessions/prompt' in
 src/emacs/protocol.ts, OW-dulipe).  It still counts as sent, so SENT
-clears the draft, but it abandons the watch it armed, as a refused one
-does: left standing, the next turn on the session, from anywhere, raised
-the indicator as if this buffer had asked for it (OW-taviju).  A prompt
-that joined a running turn's watch armed none, and drops nothing, so the
-running turn still raises the indicator at its end.  The watch goes even
+clears the draft, but it takes back its claim on the watch, as a refused
+one does: left standing on that claim, the watch had the next turn on the
+session, from anywhere, raise the indicator as if this buffer had asked
+for it (OW-taviju).  A prompt that joined a running turn's watch leaves
+the claim of the prompt that armed it, so the running turn still raises
+the indicator at its end.  The claim goes even
 though Pi lets the extension that handled the prompt start a turn of its
 own afterwards, as its `/ask' example does: nothing on the stream tells
 that turn from one prompted elsewhere, and the indicator must never be
@@ -3160,19 +3164,21 @@ glance, as the browser's `disarmSubmit' decided (OW-yobayi).
 The answer can also come after the turn's events: on `pi 1.2.0' an
 extension command's handler runs before Pi answers `handled', so a turn
 the handler starts can stream, and even end, before the answer arrives,
-and another client's turn can beat it too.  The answer drops the watch
-its prompt armed whether `sent' or `streamed', so a turn still streaming
-then raises nothing at its end; one that has already ended has raised
-the indicator, and that stays, cleared by looking, since nothing tells
-it from a turn this Emacs asked for -- as the browser's `disarmSubmit'
-decided (OW-kejire, OW-zikiga).  Its watch is gone by then, and the
-abandon, by identity, drops nothing, not even a watch armed on the
-handle since by another prompt.
-The drop runs from `agentpane--request''s REPLIED, whatever became of
-this buffer, as UNSENT does for a refusal: run from the reply's
-CALLBACK, as until OW-kejire, it was skipped when a merge had killed
-this buffer before the answer, and the watch left on the survivor's
-handle raised the indicator for the next turn from elsewhere.  The
+and another client's turn can beat it too.  The answer takes back its
+prompt's claim whether the watch is `sent' or `streamed', so a turn still
+streaming then raises nothing at its end unless another prompt claims
+the watch too; one that has already ended has raised the indicator, and
+that stays, cleared by looking, since nothing tells it from a turn this
+Emacs asked for -- as the browser's `disarmSubmit' decided (OW-kejire,
+OW-zikiga).  Its watch is gone by then, with every claim on it, and the
+abandon takes back nothing, not even from a watch armed on the handle
+since by another prompt, which holds only claims of its own.
+The claim is taken back from `agentpane--request''s REPLIED, whatever
+became of this buffer, as UNSENT does for a refusal: run from the
+reply's CALLBACK, as until OW-kejire, it was skipped when a merge had
+killed this buffer before the answer, and the watch left on the
+survivor's handle raised the indicator for the next turn from elsewhere.
+The
 buffer says no turn was started for it, `agentpane--handled', until the
 next send; through an edit that is the fork's buffer, where the prompt
 went.  A buffer killed before the answer says nothing."
@@ -3195,7 +3201,7 @@ went.  A buffer killed before the answer says nothing."
             (prior (and agentpane--error agentpane--error-id)))
         (agentpane--attached-then
          (lambda ()
-           (let ((watch (agentpane--watch-submit)))
+           (let ((claim (agentpane--watch-submit)))
              (agentpane--request 'sessions/prompt
                                  (append (list :session (agentpane--ref agentpane--session) :text text
                                                :priorErrorId prior)
@@ -3207,11 +3213,11 @@ went.  A buffer killed before the answer says nothing."
                                    (funcall sent)
                                    (agentpane--release-queued))
                                  t failed agentpane--spawn-timeout
-                                 (lambda () (agentpane--watch-abandon watch))
+                                 (lambda () (agentpane--watch-abandon claim))
                                  nil
                                  (lambda (answer)
                                    (when (equal (plist-get answer :disposition) "handled")
-                                     (agentpane--watch-abandon watch))))))
+                                     (agentpane--watch-abandon claim))))))
          failed))))))
 
 (defun agentpane--hold-handled (handled)
@@ -4274,11 +4280,13 @@ shows that one (`agentpane--absorb').")
 
 (defvar agentpane--turn-watches nil
   "The turns this Emacs waits on for the turn-done indicator, as an alist
-from a session's handle to `sent', until a status under that handle says
-the session is streaming, then `streamed' until one says it is not.
-One entry per handle (`agentpane--watch-submit'), each its own cons,
-which `agentpane--watch-abandon' drops by identity.  See
-`agentpane--watch-turn'.")
+from a session's handle to a list of its state and the claims on it.
+The state is `sent', until a status under that handle says the session is
+streaming, then `streamed' until one says it is not.  The claims are one
+per prompt that armed or joined the watch, each a cons of its own that
+`agentpane--watch-submit' returns to the prompt, and
+`agentpane--watch-abandon' removes one, dropping the watch with its last.
+One entry per handle.  See `agentpane--watch-turn'.")
 
 (defun agentpane--watch-turn (streaming)
   "Fold STREAMING, whether this buffer's latest status says its session
@@ -4353,8 +4361,8 @@ the watch waiting on the parent's next turn.  The detach at the fork's
 reply ends any watch still on the parent, one whose turn was not yet
 seen streaming and so was not aborted."
   (let ((entry (and agentpane--handle (assoc agentpane--handle agentpane--turn-watches))))
-    (pcase (cdr entry)
-      ('sent (when streaming (setcdr entry 'streamed)))
+    (pcase (cadr entry)
+      ('sent (when streaming (setcar (cdr entry) 'streamed)))
       ('streamed
        (unless streaming
          (setq agentpane--turn-watches (delq entry agentpane--turn-watches))
@@ -4372,8 +4380,9 @@ seen streaming and so was not aborted."
 
 (defun agentpane--watch-submit ()
   "Arm the turn-done watch on the handle this buffer holds, for a prompt
-going out once the buffer is attached, and return the watch armed, or nil
-when the prompt joins one already armed there.
+going out once the buffer is attached, or join the one already armed
+there, and return this prompt's claim on it either way, or nil when the
+buffer holds no handle.
 A new watch takes the streaming level the buffer holds at once, as the
 browser's `watchSessions' reads the level at the publish that follows its
 submit.  A session streaming then is running a turn the server takes
@@ -4397,32 +4406,47 @@ watch joined, which has heard every status under that handle; the
 level may not have: after a merge the survivor's is the one its preview
 left, until its own attach's snapshot, and folding it ended a running
 turn's watch.
-A prompt refused mid-turn (D16) leaves the running turn's watch standing
-by identity: `agentpane--watch-abandon' drops only the cons this call
-returned, nil when it joined, and would drop only its own were there two.
-A prompt the backend handled drops its own whether `sent' or `streamed',
-its answer able to come after a turn has begun, as the browser's
-`disarmSubmit' drops a watch that has seen streaming; and once a turn has
-ended before the answer, raising the indicator, which stays, its watch is
-gone and the abandon drops nothing, a watch armed since on the handle by
-another prompt being another cons (OW-kejire, OW-zikiga).
-Identity cannot see a join, though: after a merge the survivor can send
-while the killed buffer's prompt is still out, join its watch, and lose
-it when that prompt is refused or handled, so the survivor's own turn
-raises nothing (OW-kakasu)."
-  (when (and agentpane--handle (not (assoc agentpane--handle agentpane--turn-watches)))
-    (let ((watch (cons agentpane--handle 'sent)))
-      (push watch agentpane--turn-watches)
-      (agentpane--watch-turn agentpane--streaming)
-      watch)))
+Each prompt, arming or joining, gets a claim of its own, a fresh cons
+the watch holds, and its claim is all `agentpane--watch-abandon' can take
+back: the watch goes with its last claim.  So a prompt refused mid-turn
+\(D16) takes back only its own, and the running turn's watch stands on
+the claim of the prompt that armed it.  After a merge the survivor can
+send while the killed buffer's prompt is still out, joining its watch;
+when that prompt is then refused or handled, the survivor's claim keeps
+the watch, and its own turn's end raises the indicator.  Until OW-kakasu
+this returned the watch it armed, nil when it joined, and an abandon
+dropped that cons by identity, which could not see a join: the watch went
+with the killed buffer's prompt, and the survivor's turn raised nothing.
+A prompt the backend handled takes back its claim whether the watch is
+`sent' or `streamed', its answer able to come after a turn has begun, as
+the browser's `disarmSubmit' drops a watch that has seen streaming, and
+the watch goes when no other prompt claims it; and once a turn has ended
+before the answer, raising the indicator, which stays, its watch is gone
+with every claim on it, and the abandon takes back nothing, a watch armed
+since on the handle holding only claims of its own (OW-kejire, OW-zikiga)."
+  (when agentpane--handle
+    (let ((claim (list 'claim))
+          (entry (assoc agentpane--handle agentpane--turn-watches)))
+      (if entry
+          (setcdr (cdr entry) (cons claim (cddr entry)))
+        (push (list agentpane--handle 'sent claim) agentpane--turn-watches)
+        (agentpane--watch-turn agentpane--streaming))
+      claim)))
 
-(defun agentpane--watch-abandon (watch)
-  "Drop WATCH, a watch `agentpane--watch-submit' armed, if it still stands:
-its prompt reached no backend, or one that handled it without starting a
-turn for it, so the next turn on the session is not one this Emacs asked
-for.  A WATCH of nil, a prompt that joined another's, or one that has
-since ended, drops nothing."
-  (setq agentpane--turn-watches (delq watch agentpane--turn-watches)))
+(defun agentpane--watch-abandon (claim)
+  "Take back CLAIM, a prompt's claim `agentpane--watch-submit' returned, from
+the watch holding it, if one still does, and drop that watch when no claim
+remains: the prompt reached no backend, or one that handled it without
+starting a turn for it, so the next turn on the session is not one it
+asked for, though it may be one another prompt claiming the same watch
+did.  A CLAIM of nil, or one whose watch has since ended, takes back
+nothing."
+  (let ((entry (seq-find (lambda (entry) (memq claim (cddr entry)))
+                         agentpane--turn-watches)))
+    (when entry
+      (setcdr (cdr entry) (delq claim (cddr entry)))
+      (unless (cddr entry)
+        (setq agentpane--turn-watches (delq entry agentpane--turn-watches))))))
 
 (defun agentpane--watch-forget (handle)
   "End the turn-done watch on HANDLE, if any, raising nothing: this Emacs

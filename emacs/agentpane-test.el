@@ -4110,7 +4110,7 @@ its `sessions/preview', as the browser lands on the read-only preview,
 asking no `sessions/list' first (D26).  A kill after that sends no
 `sessions/detach' for a session the helper no longer holds."
   (agentpane-test--closing
-    (push (cons "h1" 'sent) agentpane--turn-watches)
+    (push (list "h1" 'sent (list 'claim)) agentpane--turn-watches)
     (with-current-buffer buffer
       (agentpane-close-session)
       (should (equal (reverse sent)
@@ -5507,8 +5507,9 @@ raise the indicator, which stays raised (OW-kejire)."
 
 (ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-handled-mid-turn ()
   "A prompt handled while a turn this Emacs submitted runs joined that
-turn's watch and drops nothing, so the turn's end still raises the
-indicator, as a prompt refused mid-turn leaves it (OW-taviju)."
+turn's watch and takes back only its own claim, so the turn's end still
+raises the indicator, as a prompt refused mid-turn leaves it (OW-taviju,
+OW-kakasu)."
   (agentpane-test--submitting
     (funcall submit)
     (funcall status t)
@@ -5539,9 +5540,10 @@ browser's `disarmSubmit' drops a watch that has seen streaming
 has raised the indicator, and the answer leaves it raised, as the
 browser's `disarmSubmit' leaves its badge: nothing tells that turn from
 one this Emacs asked for, and missing it costs a glance (OW-kejire,
-OW-zikiga).  The answer drops only the watch its own prompt armed, by
-identity, so one armed on the handle since, as by a prompt from another
-buffer holding it, still stands."
+OW-zikiga).  The answer takes back only its own prompt's claim, which
+went with the ended watch, so one armed on the handle since, as by a
+prompt from another buffer holding it, still stands on its own claim
+\(OW-kakasu)."
   (agentpane-test--submitting
     (setq prompted '(:disposition "handled")
           hold '(sessions/prompt))
@@ -5553,7 +5555,7 @@ buffer holding it, still stands."
       (funcall (cdr (pop held)) t)
       (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
       (should (agentpane-test--turn-done-p))
-      (should (memq later agentpane--turn-watches)))))
+      (should (memq later (cddr (assoc "h1" agentpane--turn-watches)))))))
 
 (defconst agentpane-test--slash-warning
   "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text."
@@ -5872,6 +5874,77 @@ runs no CALLBACK in a killed buffer (OW-kejire)."
               (funcall status t)
               (funcall status nil)
               (should-not (agentpane-test--turn-done-p)))))))))
+
+(defun agentpane-test--merge-then-prompt-from-the-survivor (answer)
+  "Send a prompt from a buffer holding the handle \"h1\", merge that buffer
+into a previewing one by a prompt the survivor sends, whose attach answers
+under the same handle and which then joins the dead buffer's watch, and
+answer the dead buffer's prompt with ANSWER, `handled' or `refused', then
+the survivor's as a turn started.  Then stream that turn and end it with
+no window showing the survivor, and return whether the indicator names
+the survivor alone, and whether it is raised, as a cons.
+Through `agentpane--request' over a stub jsonrpc, which runs no CALLBACK in a
+killed buffer, as `agentpane-test-turn-done-abandoned-by-a-refusal-after-a-merge'
+does."
+  (let ((request (symbol-function 'agentpane--request))
+        (calls nil))
+    (agentpane-test--watching
+      (agentpane-test--with-helper
+        (agentpane-test--merging
+          (cl-letf (((symbol-function 'agentpane--request) request)
+                    ((symbol-function 'jsonrpc-async-request)
+                     (lambda (_conn method _params &rest args)
+                       (push (cons method args) calls)
+                       (list 1 nil))))
+            (let ((status (lambda (streaming)
+                            (agentpane--on-notification
+                             nil 'session/status
+                             (list :session canonical :handle "h1"
+                                   :isStreaming (if streaming t :json-false))))))
+              (with-current-buffer holder
+                (setq agentpane--attached agentpane--connection)
+                (goto-char (point-max))
+                (insert "/mcp")
+                (agentpane-send))
+              (let ((held (cdr (assq 'sessions/prompt calls))))
+                (with-current-buffer previewing
+                  (goto-char (point-max))
+                  (insert "hello")
+                  (agentpane-send))
+                (agentpane--on-notification
+                 agentpane--connection 'session/snapshot
+                 (list :session canonical :handle "h1" :token 1 :nodes []
+                       :isStreaming :json-false))
+                (funcall (plist-get (cdr (assq 'sessions/attach calls)) :success-fn)
+                         (list :ref canonical :handle "h1"))
+                (should-not (buffer-live-p holder))
+                (let ((joined (cdr (assq 'sessions/prompt calls))))
+                  (should-not (eq joined held))
+                  (pcase-exhaustive answer
+                    ('handled (funcall (plist-get held :success-fn) '(:disposition "handled")))
+                    ('refused (funcall (plist-get held :error-fn)
+                                       '(:code 409 :message "Refused"
+                                         :data (:status 409 :error "turn_active"
+                                                :detail "Refused")))))
+                  (funcall (plist-get joined :success-fn) nil)))
+              (funcall status t)
+              (funcall status nil)
+              (cons (equal agentpane--turns-done (list previewing))
+                    (and (agentpane-test--turn-done-p) t)))))))))
+
+(ert-deftest agentpane-test-turn-done-kept-by-a-join-through-a-handled-answer-after-a-merge ()
+  "A prompt the survivor of a merge sends while the dead buffer's prompt is
+still out joins that prompt's watch, and keeps it when that prompt is
+answered handled, so the survivor's own turn ending unseen raises the
+indicator there (OW-kakasu)."
+  (should (equal (agentpane-test--merge-then-prompt-from-the-survivor 'handled) '(t . t))))
+
+(ert-deftest agentpane-test-turn-done-kept-by-a-join-through-a-refusal-after-a-merge ()
+  "A prompt the survivor of a merge sends while the dead buffer's prompt is
+still out joins that prompt's watch, and keeps it when that prompt is
+refused, so the survivor's own turn ending unseen raises the indicator
+there (OW-kakasu)."
+  (should (equal (agentpane-test--merge-then-prompt-from-the-survivor 'refused) '(t . t))))
 
 (ert-deftest agentpane-test-turn-done-not-raised-after-a-detach-before-streaming ()
   "A `session/detached' that arrives after a prompt went out and before
