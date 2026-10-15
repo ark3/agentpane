@@ -1718,6 +1718,39 @@ on, and the text is on the kill ring should it fail (OW-larele)."
           (should (equal (plist-get prompt :session) fork))
           (should (equal (plist-get prompt :text) "Fix the bug now")))))))
 
+(ert-deftest agentpane-test-following-request-fails-in-the-survivor ()
+  "A request following its buffer, refused or timed out after a merge has
+killed that buffer, runs its FAILED, and for the refusal its ERRED with
+the error's `data', in the buffer that absorbed it (OW-larele).  Through
+`agentpane--request' over a stub jsonrpc."
+  (let ((request (symbol-function 'agentpane--request))
+        (calls nil)
+        (ran nil))
+    (agentpane-test--with-helper
+      (agentpane-test--merging
+        (cl-letf (((symbol-function 'agentpane--request) request)
+                  ((symbol-function 'jsonrpc-async-request)
+                   (lambda (_conn method _params &rest args)
+                     (push (cons method args) calls)
+                     (list 1 nil))))
+          (with-current-buffer holder
+            (dolist (method '(test/refused test/timeout))
+              (agentpane--request method nil #'ignore 'follow
+                                  (lambda () (push (list 'failed (current-buffer)) ran))
+                                  nil nil
+                                  (lambda (data) (push (list 'erred (current-buffer) data) ran)))))
+          (with-current-buffer previewing (agentpane--attach))
+          (agentpane--on-notification
+           agentpane--connection 'session/snapshot
+           (list :session canonical :handle "h1" :token 1 :nodes []))
+          (should-not (buffer-live-p holder))
+          (funcall (plist-get (cdr (assq 'test/refused calls)) :error-fn)
+                   '(:code 409 :message "Refused" :data (:status 409)))
+          (funcall (plist-get (cdr (assq 'test/timeout calls)) :timeout-fn))
+          (should (equal (reverse ran)
+                         `((failed ,previewing) (erred ,previewing (:status 409))
+                           (failed ,previewing)))))))))
+
 (ert-deftest agentpane-test-fork-failing-after-a-merge-frees-the-survivor ()
   "A fork that fails after a merge has killed the buffer that sent it
 frees the buffer that absorbed it, which counted as forking, so it can
