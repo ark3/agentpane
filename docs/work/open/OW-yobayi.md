@@ -13,6 +13,10 @@ A Pi prompt such as `/mcp` that an extension command consumes is answered 202 an
 `controller.submit` in `src/client/controller.ts` also clears the draft on the 202, and nothing on screen says the prompt was consumed by a command.
 
 Once OW-dulipe puts the handled outcome on the HTTP prompt route's answer, the browser should take both arms off for it and tell the user no turn followed; the wording is the executor's first cut.
+OW-dulipe's shape: the route answers a handled prompt 200 with `{ "disposition": "handled" }` (`PromptResponse` in `src/shared/protocol.ts`) and a started one 202 with no body, and `api.prompt` in `src/client/api.ts` resolves the body or nothing.
+"Handled" means no turn was started for this prompt, not that nothing follows it on the stream.
+Pi's installed `docs/rpc-commands.md`, "prompt", on `pi 1.2.0`, says the disposition "describes the submitted prompt, not independent work started by an extension", and Pi's own `examples/extensions/send-user-message.ts` registers `/ask`, which answers `handled` and then streams a whole turn through `pi.sendUserMessage` (read at the source, not run).
+So the message to the user must not promise that nothing is coming, and a turn an extension starts this way is arguably the one the user asked for; decide what the arm does for it and say so in the test.
 
 ## Done when
 
