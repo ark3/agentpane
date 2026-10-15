@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The browser's send() overwrites a running turn's favicon watch and follow, and a refused or handled prompt then abandons them, so the earlier turn loses its badge
@@ -39,3 +40,15 @@ A second does the same for a submit answered `"handled"` mid-turn.
 A third, red first, has the session's events for a new turn arrive before a `"handled"` answer and asserts whatever `disarmSubmit`'s docblock now says that order does.
 `disarmSubmit` no longer deletes a watch or pending follow an earlier submit owns.
 `bun run check` passes.
+
+## Close note
+
+Landed in e1702196 ("client: a refused or handled prompt disarms only what its own submit armed").
+Ownership: `armFollow` and `armBadge` in `src/client/App.svelte` now join a pending follow or watch already standing on the session instead of overwriting it, and report what they armed; `send()` hands that to `disarmSubmit(key, armed)`, which takes down only what this submit armed.
+Joining is sound because `view.sending` admits one submit in flight per tab, so anything standing belongs to a submit already answered `started`; this matches `agentpane--watch-submit` in agentpane-mode.
+Stream-before-answer decision, recorded in `disarmSubmit`'s docblock: the watch this submit armed is dropped even after it saw streaming; a follow its pending follow already engaged gives way to the follow that stood when it armed (none, or an earlier turn's anchor, restored), and a follow already over stays over; a badge already raised stays, because the badge is one bit across sessions.
+The adversarial read caught the first cut nulling the anchor on release, which would have stopped following an earlier, still-streaming turn when a foreign user message landed before a handled answer; the restore replaced that.
+Tests in `src/client/App.test.ts` (seven tagged OW-zikiga): badge kept for a prompt refused and for one handled mid-turn, an earlier pending follow kept across a refusal, the gated stream-before-handled order, the follow kept across a refused or handled mid-turn prompt, and the follow restored after a foreign message.
+Each was shown red, against f3ae3548 or ccbd91dd, or for the follow-kept pair (green on both) under a mutation that clears the anchor on every release.
+`bun run check` passed (1686 tests) and `bun run test:browser` passed 29/29.
+Known edge left alone: a reader who scrolls off the earlier follow while the second request is in flight, with a foreign message then engaging its pending follow, gets the dismissed follow restored; the window is one request.
