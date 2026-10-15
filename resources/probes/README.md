@@ -541,3 +541,22 @@ No live model calls, no network beyond loopback.
 
 Verified with: `bun 1.4.0` on the home server, 2026-09-29; again without the timer, 2026-09-30.
 What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzoto.
+
+## `pi_store_survey.ts`
+
+Proves: **what shapes a real Pi session store holds, and which of them agentpane's readers drop or pass on without naming** (OW-tadoju), without printing any of the store's content.
+It reads every `*.jsonl` under the root and prints a census -- per UTC month of file mtime, each position's count (`header(session)`, `entry(<type>)`, `message(<role>)`, content blocks, `usage`, `toolsAdded[]`), its keys with the kinds of value they held, and a short allowlist of enumerated values -- then a "Not read by agentpane" section listing the entry types no reader reads, the messages and content blocks `storedAgentMessage` drops, and the keys it drops or carries onto the preview wire only through a spread.
+Message- and block-level reads are measured by calling the checkout's own `storedAgentMessage`; entry-level reads are a table kept beside `parsePiSession` and `extractPiPreviewTurns`.
+Its docblock states the no-content guarantee and where the walk stops descending, and `src/server/sessions/pi-store-survey.test.ts`, which runs in `bun run check`, holds it on a store seeded with one marker string in every content position.
+
+```bash
+bun resources/probes/pi_store_survey.ts [store root]
+```
+
+Run from the repository root; the root defaults to `~/.pi/agent/sessions`.
+It reads the store and writes nothing, makes no model call, and needs only `bun`: no `bun install`, since the one module it imports from `src/` imports types only.
+On a machine whose Pi keeps sessions elsewhere, pass that directory.
+The output is safe to paste back: it holds counts, months, key names, value kinds, `type`s and `role`s, the header's `version`, and `stopReason` and `thinkingLevel` only when they are members of pi-ai 1.2.0's unions, and nothing else.
+
+Verified with: `pi 1.2.0` and `bun 1.4.0` on the home server, 2026-10-14, against its 13-file store.
+What it showed is `docs/MANUAL_TESTING.md`, "The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)".
