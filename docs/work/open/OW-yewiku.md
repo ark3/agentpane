@@ -30,3 +30,14 @@ The user, who saw a 202 and pressed Stop, expected neither.
 - Whatever the run shows, the decision about what agentpane's Stop does with a queued prompt is recorded in D16 in `docs/DESIGN.md`, and the change follows it.
   If the decision is Pi's own Esc behaviour (`clear_queue` before `abort`, text handed back to the composer), that is a user-facing capability: per AGENTS.md, "Both clients", the wire card carries it onto the HTTP API and `src/emacs/protocol.ts`, with a browser card and an `emacs` card blocked by it.
 - Any code change closes on a test in `src/server/adapters/pi/process.test.ts`, shown red first, asserting the commands `abort()` (and `compact()`, if the decision covers it) writes to Pi.
+
+## Decided 2026-10-15 by the owner
+
+Stop does what Pi's own interactive mode does with Esc: agentpane sends `clear_queue` before `abort`, and the text of every steered prompt Pi had not yet delivered goes back to the composer of the client that pressed Stop.
+Nothing the user typed is lost, and nothing runs after Stop.
+The live run is still made, because D16 records what Pi does without the change, with its version, and the wire card needs to know what `clear_queue` returns on `pi 1.2.0`.
+
+So this card closes when: the run is recorded; the decision is in D16 in `docs/DESIGN.md`, beside the run's finding; and the three cards that carry it are filed, rather than built here.
+The wire card changes `PiAdapter.abort` in `src/server/adapters/pi/process.ts` to send `clear_queue` first, with the `process.test.ts` test the last bullet above asks for, and carries the returned text onto the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts`; whether `compact()`, which Pi begins with an abort, does the same is that card's to settle.
+A browser card and an `emacs` card, each blocked by the wire card, put the text back in that client's composer.
+The adapter change and the wire land together in the wire card, so no build ever clears the queue without handing the text back.
