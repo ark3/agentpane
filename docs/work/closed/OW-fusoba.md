@@ -1,5 +1,6 @@
 ---
 labels: [change, browser-testing]
+closed: done
 ---
 
 # Pi's notify reaches neither client, though the per-session notice arm both clients draw could carry it
@@ -36,3 +37,14 @@ The docblocks that say otherwise change with the code, four of them, some wrappe
 - A multi-line `notify` is shown drawn as more than one line in each client: in the browser by a case in `e2e/banners.spec.ts`, which reaches notices only through `showBanners` in `e2e/harness.ts` and so needs a multi-line one there, since whether a `<span>` breaks at a newline is layout jsdom cannot see, and in Emacs by an `ert` test beside `agentpane-test-notice-lands-after-the-recorded-node` in `emacs/agentpane-test.el`, run by the command in that file's Commentary, since `bun run check` does not run it.
 - None of the four docblocks named above still makes the claim quoted for it, read whole rather than grepped, since a claim wrapped across lines slips a grep.
 - `bun run check` and `bun run test:browser` pass.
+
+## Close note
+
+Pi's `notify` now reaches both clients as an `AgentNotice` of kind `"notify"` (D11): `reducePiNotification` yields it as a `notice` field, and `PiAdapter.onNotice` hands each on as its line arrives, with no gating on `start()`, so a `notify` an extension sends from `session_start` reaches the manager's listener, which subscribes before `start()`.
+As of `pi 1.2.0`, read at its source, `runRpcMode` awaits the extensions' `session_start` before it attaches its stdin reader, so such a `notify` precedes the `get_state` answer; the `onNotice` docblock records that.
+`setStatus`, `setWidget`, `setTitle` and `set_editor_text` stay dropped, and `notifyType` goes nowhere, since no client draws a notice by level.
+A multi-line message travels whole in `message`, with `details` and `path` null; the browser's message span got `white-space: pre-wrap` (`.notice-message` in `app.css`), and Emacs already drew the lines raw, so it got only a test; its continuation lines start at column 0 where `details` is indented two spaces.
+Verified: two new tests in `pi/process.test.ts` (a `notify` reaches `onNotice`; one sent before `get_state` is answered reaches a listener subscribed before `start()`), each shown red first, plus reducer tests for `notify` and `setStatus`; an `e2e/banners.spec.ts` case comparing a four-line notice's height with a one-line one, red against the unchanged CSS; an `ert` test pinning the lines, red against a client with newlines replaced.
+`bun run check` (1668 tests), `bun run test:browser` (29) and the Emacs `ert` suite (256, 3 skipped) passed on `main`.
+The four stale docblocks were rewritten, and `docs/MANUAL_TESTING.md` (OW-kokotu, "A prompt an extension command handles") now marks its dropped `notify` as since changed.
+The adversarial read filed OW-dadezu (two probes read a notice's text from the wrong field) and OW-hivahe (a fork's `session_start` notify goes out under the parent's handle).
