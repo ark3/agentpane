@@ -506,10 +506,10 @@ export class PiAdapter implements BackendAdapter {
 		// MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0, OW-vijine; the earlier
 		// `false` is retired, but these are samples of a race, not an invariant).
 		// A fork at the first user message keeps no user or assistant message, and
-		// on 1.2.0 its file was not on disk when the fork returned; Pi writes it
-		// with the branch's first user message (OW-tigaye). Nothing here depends on
-		// either -- the consequence is that a discarded fork at a later message can
-		// leave a real session file for the picker to walk.
+		// on 1.2.0 its file was not on disk when the fork returned and was
+		// written with the branch's first user message (OW-tigaye). Nothing here
+		// depends on either -- the consequence is that a discarded fork at a later
+		// message can leave a real session file for the picker to walk.
 		// Unlike `adoptSessionFile` (the one-time virtual->real id adoption, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file
