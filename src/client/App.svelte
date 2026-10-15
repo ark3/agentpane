@@ -168,6 +168,8 @@
 		hasStreamed: boolean;
 	}
 	const sessionScroll = new Map<string, SessionScroll>();
+	/** The follow a session had engaged when a submit armed its own, for that submit's disarm to put back (OW-zikiga). */
+	type FollowArm = Pick<SessionScroll, "anchorIndex" | "hasStreamed">;
 	/**
 	 * Session key -> `messages.length` right before a submit. Follow only
 	 * engages once a message at or beyond that index actually exists: SSE
@@ -846,11 +848,23 @@
 	 * the first user message at or past the transcript's current length. A
 	 * fork's follow is the one armed elsewhere, in `send()`, on the fork's own
 	 * handle (OW-vitefo).
+	 *
+	 * A follow an earlier submit armed, whose message has not landed yet, is
+	 * joined rather than armed again: it engages on the latest user message
+	 * past its own index in the first publish that holds one, and stays there,
+	 * so on this submit's message only where both land in that one publish.
+	 * Returns null where this submit armed none, the only follow its disarm may
+	 * take down; otherwise the follow engaged on the session as it armed, which
+	 * that disarm puts back (OW-zikiga).
 	 */
-	function armFollow(): void {
+	function armFollow(): FollowArm | null {
 		const ref = view.state.selected;
-		if (!ref) return;
-		pendingFollow.set(keyOf(ref), selectedSession?.messages.length ?? 0);
+		if (!ref) return null;
+		const key = keyOf(ref);
+		if (pendingFollow.has(key)) return null;
+		pendingFollow.set(key, selectedSession?.messages.length ?? 0);
+		const scroll = sessionScroll.get(key);
+		return { anchorIndex: scroll?.anchorIndex ?? null, hasStreamed: scroll?.hasStreamed ?? false };
 	}
 
 	/**
@@ -860,17 +874,26 @@
 	 * path: a session that streams without passing through them is one this tab
 	 * did not ask for and must not be badged for. A fork's is the one watch
 	 * armed elsewhere, in `send()`, on the fork's own handle (OW-koledi).
+	 *
+	 * A watch already standing on the session, an earlier submit's whose turn
+	 * may be streaming now, is joined rather than armed again, as
+	 * `agentpane--watch-submit` joins one in agentpane-mode. Returns whether
+	 * this submit armed one, the only watch its disarm may take down
+	 * (OW-zikiga).
 	 */
-	function armBadge(): void {
+	function armBadge(): boolean {
 		const ref = view.state.selected;
-		if (!ref) return;
-		turnWatch = watchSubmit(turnWatch, keyOf(ref));
+		if (!ref) return false;
+		const key = keyOf(ref);
+		if (turnWatch.waiting.has(key)) return false;
+		turnWatch = watchSubmit(turnWatch, key);
+		return true;
 	}
 
 	/**
 	 * The submit those two armed never reached the backend (OW-mifuki), or
 	 * reached it and started no turn, because the backend handled the prompt
-	 * itself (OW-yobayi). Both arms come off together: left standing, the next
+	 * itself (OW-yobayi). Both arms come off: left standing, the next
 	 * stream on that session -- another tab prompting it, or a turn that was
 	 * already running -- would engage follow here and badge this tab for a turn
 	 * it never sent, which is the one thing `favicon.ts` says the badge means.
@@ -881,15 +904,36 @@
 	 * badging for a turn this tab did not ask for is the error the badge must
 	 * never make, where missing one costs a glance (OW-yobayi).
 	 *
-	 * That holds only when the answer comes first. A handler that starts its
-	 * turn before answering, or another tab's message landing on the stream
-	 * ahead of the answer, engages follow and may badge before this runs, and
-	 * the disarm also drops a watch or follow an earlier submit from this tab
-	 * left on the same session; both are OW-zikiga's.
+	 * Each comes off only if this submit armed it. One that found an earlier
+	 * submit's follow or watch standing on the session joined it, and its
+	 * refusal or handled answer leaves it there: a prompt refused or handled
+	 * while that turn streams says nothing about that turn (OW-zikiga).
+	 *
+	 * The stream can also move before the answer arrives: on `pi 1.2.0` an
+	 * extension command's handler runs before Pi answers `handled`, so a turn
+	 * it starts can stream ahead of the answer, as can another tab's. The
+	 * disarm takes down whatever of its own it can still reach, so that order
+	 * ends as the other does wherever it can: the watch goes though it has seen
+	 * the turn stream, and a follow its pending follow already engaged gives
+	 * way to the one that stood when it armed. That is no follow at all when
+	 * none had engaged, and the pane stays where it is, as after a manual
+	 * scroll; but where an earlier turn of this tab's was still being followed,
+	 * a message from elsewhere moved the anchor off it, and putting it back
+	 * keeps the pane on that turn. A follow already over -- scrolled away from,
+	 * or its turn ended -- is left over. A whole turn that ended before the
+	 * answer has already raised the badge, and that stays: the badge is one bit
+	 * for every session, and this cannot tell its own dot from another
+	 * session's (OW-zikiga).
 	 */
-	function disarmSubmit(key: string): void {
-		pendingFollow.delete(key);
-		turnWatch = watchAbandon(turnWatch, key);
+	function disarmSubmit(key: string, armed: { follow: FollowArm | null; watch: boolean }): void {
+		if (armed.follow && !pendingFollow.delete(key)) {
+			const scroll = sessionScroll.get(key);
+			if (scroll?.anchorIndex != null) {
+				scroll.anchorIndex = armed.follow.anchorIndex;
+				scroll.hasStreamed = armed.follow.hasStreamed;
+			}
+		}
+		if (armed.watch) turnWatch = watchAbandon(turnWatch, key);
 	}
 
 	/**
@@ -1262,10 +1306,9 @@
 		const edit = editing;
 		// A second Ctrl/Cmd-Enter while the first send is still in flight is
 		// refused by the controller and issues nothing (OW-nasofa on the plain
-		// path, OW-kelede on the fork). On the plain path returning here rather
-		// than arming for it is not just tidier: the disarm below would fire on
-		// that refusal and take down the *first* send's arming, which is live and
-		// about to stream. The fork path arms nothing until the fork's attach
+		// path, OW-kelede on the fork). On the plain path that refusal's disarm
+		// would take down only what the press itself armed, never the first
+		// send's (OW-zikiga). The fork path arms nothing until the fork's attach
 		// replies, which a refused press never reaches, so there it has nothing to
 		// disarm (OW-vitefo). Both paths, and off the controller's own `sending`
 		// flag rather than `busy` -- which an abort or an attach clears while the
@@ -1278,11 +1321,10 @@
 		// badge.
 		const armedKey = view.state.selected ? keyOf(view.state.selected) : null;
 		if (!edit) {
-			armFollow();
-			armBadge();
+			const armed = { follow: armFollow(), watch: armBadge() };
 			void controller.submit().then((disposition) => {
 				if (disposition === "started" || !armedKey) return;
-				disarmSubmit(armedKey);
+				disarmSubmit(armedKey, armed);
 				if (disposition === "handled") handledKey = armedKey;
 			});
 			return;
@@ -1311,6 +1353,9 @@
 		// says it before the abort does, so its `status:false` finds no watch
 		// (OW-rihanu).
 		let forkKey: string | null = null;
+		// A fork's handle is new, so whatever stands on it this submit armed,
+		// over no follow at all.
+		const forkArmed = { follow: { anchorIndex: null, hasStreamed: false }, watch: true };
 		void controller.forkAndSubmit(edit.index, edit.images, (handle) => {
 			forkKey = handle;
 			pendingFollow.set(handle, edit.index);
@@ -1321,13 +1366,13 @@
 			if (!landed) {
 				// Nothing was sent, so nothing will stream for this tab to follow or
 				// be badged about -- and a fork nothing prompted is no exception.
-				if (forkKey) disarmSubmit(forkKey);
+				if (forkKey) disarmSubmit(forkKey, forkArmed);
 				return;
 			}
 			// The fork landed, so the edit is over, but its prompt may have started
 			// no turn on it: the same arms come down (OW-yobayi).
 			if (landed.disposition === "handled" && forkKey) {
-				disarmSubmit(forkKey);
+				disarmSubmit(forkKey, forkArmed);
 				handledKey = forkKey;
 			}
 			if (editing === edit) editing = null;

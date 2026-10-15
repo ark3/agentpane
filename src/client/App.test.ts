@@ -137,7 +137,8 @@ class FakeController implements AgentpaneController {
 
 	constructor(
 		private current: ControllerView = view(),
-		private readonly submissionError: string | null = null,
+		/** Mutable, so one test can have a later submit refused where an earlier one landed (OW-zikiga). */
+		public submissionError: string | null = null,
 	) {}
 
 	getView() {
@@ -198,10 +199,13 @@ class FakeController implements AgentpaneController {
 
 	/** What a landed submit answers; `"handled"` stands for a prompt a Pi extension consumed (OW-yobayi). */
 	submitDisposition: PromptDisposition = "started";
+	/** Held until it settles, so the session's events can land ahead of the submit's answer (D2, OW-zikiga). */
+	submitGate: Promise<void> | null = null;
 
 	async submit() {
 		this.submitted += 1;
 		this.publish({ ...this.current, busy: "submitting", error: null });
+		if (this.submitGate) await this.submitGate;
 		// The real `submit` lowers `sending` in a `finally`, whichever way it went,
 		// and the shell reads that: a second Ctrl-Enter is only refused while a
 		// prompt is actually in flight (OW-nasofa, OW-mifuki, OW-kelede). This
@@ -2017,7 +2021,7 @@ describe("App", () => {
 	 * its own after answering handled, which Pi allows: this tab cannot tell the
 	 * two apart, so it follows and badges neither, and a missed badge is the
 	 * cheaper error. That is this ordering, the answer before the turn's
-	 * events; the other is OW-zikiga's.
+	 * events; the other is the last OW-zikiga test below.
 	 */
 	it("disarms follow and the badge for a prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
 		const old = user("old message");
@@ -2074,6 +2078,280 @@ describe("App", () => {
 		} finally {
 			document.hasFocus = hasFocus;
 		}
+	});
+
+	/**
+	 * Send stays enabled while a turn streams, and a prompt sent into it can be
+	 * refused -- Claude Code's adapter refuses every one (OW-jihete) -- or
+	 * handled at once, as Pi handles an extension command. Either answer
+	 * disarms only what its own submit armed, and a submit that found a watch
+	 * already standing joined it rather than arming its own, so the running
+	 * turn's end still badges (OW-zikiga).
+	 */
+	for (const [answer, secondDraft] of [
+		["refused", "second prompt"],
+		["handled", "/mcp"],
+	] as const) {
+		it(`keeps the running turn's badge when a second prompt is ${answer} mid-turn (OW-zikiga)`, async () => {
+			const old = user("old message");
+			const idle = { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null };
+			const controller = new FakeController(view({ draft: "first prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+			document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+			const hasFocus = document.hasFocus;
+			document.hasFocus = () => false;
+			try {
+				render(App, { props: { controller } });
+				await tick();
+
+				await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+				await tick();
+				const streaming = { ...idle, messages: [old, user("first prompt")], isStreaming: true };
+				controller.publish(view({ draft: secondDraft, state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+				await tick();
+
+				if (answer === "refused") controller.submissionError = "a turn is already running";
+				else controller.submitDisposition = "handled";
+				await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+				expect(controller.submitted).toBe(2);
+				await tick();
+				if (answer === "refused") expect(screen.getByText("a turn is already running")).toBeInTheDocument();
+				else expect(screen.getByRole("status", { name: "Prompt handled" })).toBeInTheDocument();
+
+				// The first prompt's turn ends while the window is unfocused.
+				controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": { ...streaming, isStreaming: false } } }) }));
+				await tick();
+				expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon-badged.svg");
+			} finally {
+				document.hasFocus = hasFocus;
+			}
+		});
+	}
+
+	/**
+	 * The follow half of the same: a prompt refused before the earlier one's
+	 * echoed message has landed found that submit's follow still pending, and
+	 * joined it, so its refusal leaves it for that message to engage (OW-zikiga).
+	 */
+	it("keeps an earlier submit's pending follow when a second prompt is refused before the first's message lands (OW-zikiga)", async () => {
+		const old = user("old message");
+		const idle = { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null };
+		const controller = new FakeController(view({ draft: "first prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		// The reader is parked away from the tail, so any movement below is follow.
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		controller.publish(view({ draft: "second prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+		await tick();
+		controller.submissionError = "a turn is already running";
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.submitted).toBe(2);
+		await tick();
+
+		// Only now does the first prompt's message land, and its turn stream.
+		const streaming = { ...idle, messages: [old, user("first prompt")], isStreaming: true };
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+		await tick();
+		mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+		await tick();
+		await nextFrame();
+
+		expect(el.scrollTop).toBe(60); // scrollHeight(560) - clientHeight(500)
+	});
+
+	/**
+	 * The other order from the OW-yobayi test above: on `pi 1.2.0` an extension
+	 * command's handler runs before Pi answers `handled`, so a turn it starts
+	 * can stream ahead of the answer, and so can another tab's. The answer
+	 * still takes down what it can, as `disarmSubmit` says: the watch, though it
+	 * has seen the turn stream, and the follow its submit's pending follow
+	 * engaged, so neither the rest of that turn nor its end is this tab's
+	 * (OW-zikiga).
+	 */
+	it("drops the watch and releases the follow when a handled prompt's answer lands after a turn began streaming (OW-zikiga)", async () => {
+		const old = user("old message");
+		const idle = { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null };
+		const controller = new FakeController(view({ draft: "/ask", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+		controller.submitDisposition = "handled";
+		let answer!: () => void;
+		controller.submitGate = new Promise((resolve) => (answer = resolve));
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			const { container } = render(App, { props: { controller } });
+			await tick();
+			const el = container.querySelector(".conversation") as HTMLElement;
+
+			// The reader is parked away from the tail, so any movement below is follow.
+			mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+			el.scrollTop = 50;
+			await fireEvent.scroll(el);
+
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			expect(controller.submitted).toBe(1);
+			await tick();
+
+			// A turn this tab cannot tell from its own starts streaming, and follow engages on it.
+			const asked = user("the handler's own prompt");
+			const streamed = { ...idle, messages: [old, asked], isStreaming: true };
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			await nextFrame();
+			expect(el.scrollTop).toBe(60);
+
+			// Only now does the answer arrive.
+			answer();
+			await tick();
+			await tick();
+			expect(screen.getByRole("status", { name: "Prompt handled" })).toBeInTheDocument();
+
+			// The turn grows; still following, the pane would chase it to 300.
+			const grown = { ...streamed, messages: [old, asked, assistant([{ type: "text", text: "a reply" }])] };
+			mockScrollMetrics(el, { scrollHeight: 800, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": grown } }) }));
+			await tick();
+			await nextFrame();
+			expect(el.scrollTop).toBe(60);
+
+			// And its end, unfocused, raises nothing.
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": { ...grown, isStreaming: false } } }) }));
+			await tick();
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * The commonest mid-turn send: the earlier turn's follow has engaged, so
+	 * the later submit finds no pending follow to join and arms its own. Its
+	 * refusal or handled answer takes down only that one, and the earlier
+	 * turn's follow keeps chasing it (OW-zikiga).
+	 */
+	for (const answer of ["refused", "handled"] as const) {
+		it(`keeps following the running turn when a second prompt is ${answer} mid-turn (OW-zikiga)`, async () => {
+			const old = user("old message");
+			const idle = { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null };
+			const controller = new FakeController(view({ draft: "first prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+			const { container } = render(App, { props: { controller } });
+			await tick();
+			const el = container.querySelector(".conversation") as HTMLElement;
+
+			// The reader is parked away from the tail, so any movement below is follow.
+			mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+			el.scrollTop = 50;
+			await fireEvent.scroll(el);
+
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			const streaming = { ...idle, messages: [old, user("first prompt")], isStreaming: true };
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ draft: "second prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+			await tick();
+			mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ draft: "second prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+			await tick();
+			await nextFrame();
+			expect(el.scrollTop).toBe(60);
+
+			if (answer === "refused") controller.submissionError = "a turn is already running";
+			else controller.submitDisposition = "handled";
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			expect(controller.submitted).toBe(2);
+			await tick();
+
+			// The first prompt's turn grows, and the pane still chases it.
+			const grown = { ...streaming, messages: [...streaming.messages, assistant([{ type: "text", text: "a reply" }])] };
+			mockScrollMetrics(el, { scrollHeight: 800, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": grown } }) }));
+			await tick();
+			await nextFrame();
+			expect(el.scrollTop).toBe(300); // scrollHeight(800) - clientHeight(500)
+		});
+	}
+
+	/**
+	 * The release that answer makes when its own pending follow engaged first
+	 * puts back the follow that stood when it armed. Here that is the running
+	 * turn's: a user message from elsewhere -- another tab's steer, or an
+	 * extension's prompt delivered as one -- lands while the `/mcp` POST is
+	 * out, and the `/mcp` submit's follow engages on it, moving the anchor off
+	 * the turn's own message. Released to nothing, the pane would stop chasing
+	 * a turn that is still streaming (OW-zikiga).
+	 */
+	it("puts the running turn's follow back when a handled prompt's follow engaged on a message from elsewhere (OW-zikiga)", async () => {
+		const old = user("old message");
+		const first = user("first prompt");
+		const reply = assistant([{ type: "text", text: "a reply" }]);
+		const idle = { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null };
+		const controller = new FakeController(view({ draft: "first prompt", state: state({ selected: piSession, sessions: { "pi:pi-1": idle } }) }));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+		const el = container.querySelector(".conversation") as HTMLElement;
+
+		mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+		el.scrollTop = 50;
+		await fireEvent.scroll(el);
+
+		// The first prompt's turn streams, and its follow engages on its message.
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		const streaming = { ...idle, messages: [old, first, reply], isStreaming: true };
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ draft: "/mcp", state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+		await tick();
+		mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ draft: "/mcp", state: state({ selected: piSession, sessions: { "pi:pi-1": streaming } }) }));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(60);
+
+		// `/mcp` goes out, and a message from elsewhere lands before its answer.
+		controller.submitDisposition = "handled";
+		let answerHandled!: () => void;
+		controller.submitGate = new Promise((resolve) => (answerHandled = resolve));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		expect(controller.submitted).toBe(2);
+		await tick();
+		const steered = { ...streaming, messages: [old, first, reply, user("a steer from elsewhere")] };
+		mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+		controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": steered } }) }));
+		await tick();
+		mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+		mockContentTop(el.querySelector('[data-index="3"]') as HTMLElement, el, 700);
+
+		answerHandled();
+		await tick();
+		await tick();
+		expect(screen.getByRole("status", { name: "Prompt handled" })).toBeInTheDocument();
+
+		// The turn grows past both: following the first prompt's message, the
+		// pane stops with it at the top, at 400; on the steer it would go to 700,
+		// and released it would stay at 60.
+		mockScrollMetrics(el, { scrollHeight: 1500, clientHeight: 500 });
+		controller.publish(view({
+			state: state({ selected: piSession, sessions: { "pi:pi-1": { ...steered, messages: [...steered.messages, assistant([{ type: "text", text: "more" }])] } } }),
+		}));
+		await tick();
+		await nextFrame();
+		expect(el.scrollTop).toBe(400);
 	});
 
 	/**
