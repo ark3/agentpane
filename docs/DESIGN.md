@@ -323,13 +323,13 @@ So:
 **A `virtual` session's id and its store file arrive at different times**, and neither is the first prompt everywhere.
 The server mints a `virtual:` id at creation, and every backend replaces it at attach:
 
-- Pi reports its session file's path from `start()`'s `get_state`, as of `pi 0.84.1` (`docs/HANDOFF.md` finding 41), `pi 0.85.1` and `pi 0.87.1` (`docs/MANUAL_TESTING.md`, OW-jamoyi and OW-bohodu).
+- Pi reports its session file's path from `start()`'s `get_state`, as of `pi 0.84.1` (`docs/HANDOFF.md` finding 41), `pi 0.85.1`, `pi 0.87.1` and `pi 1.2.0` (`docs/MANUAL_TESTING.md`, OW-jamoyi, OW-bohodu and OW-tigaye).
 - Codex's `thread/start` names the thread, as of `codex-cli 0.156.0` (`docs/MANUAL_TESTING.md`, OW-hojefo).
 - Claude Code's id is the uuid the adapter mints for `--session-id`, so it is known before the process exists.
 
 What reaches disk waits for the first turn on all three.
-As of `claude 2.1.280`, the store file appeared 0.3 s after the first user message was written and not in 15 s before it; as of `pi 0.87.1`, the path `get_state` named held no file until the first turn's reply had ended; as of `codex-cli 0.156.0`, no rollout existed until the first turn, and `thread/resume` of a thread with none was refused.
-On Claude Code and Pi a process closed before its first prompt left nothing behind (`docs/MANUAL_TESTING.md`, OW-bohodu).
+As of `claude 2.1.280`, the store file appeared 0.3 s after the first user message was written and not in 15 s before it; as of `pi 0.87.1`, the path `get_state` named held no file until the first turn's reply had ended, and as of `pi 1.2.0` until the first user message's `message_end`, before any of the reply (OW-tigaye); as of `codex-cli 0.156.0`, no rollout existed until the first turn, and `thread/resume` of a thread with none was refused.
+On `claude 2.1.280` and `pi 0.87.1` a process closed before its first prompt left nothing behind (`docs/MANUAL_TESTING.md`, OW-bohodu).
 Finding 41 read Pi 0.84.1's file as already on disk at start, but its evidence was the rename, which shows only the name.
 
 So an id without the `virtual:` prefix does not mean anything is on disk.

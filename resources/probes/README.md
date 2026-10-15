@@ -173,6 +173,8 @@ The configuration is the prompt-window probe's, so the server's session index, w
 It records rather than asserts, and exits non-zero only when a part could not run or cleanup failed.
 Costs tokens: two long turns cut a few hundred characters in, and three one-word turns.
 
+Verified with: `pi` 1.2.0 on the home server, 2026-10-14, two runs, in `docs/MANUAL_TESTING.md`, "A Pi session's file appears at its first user message, and a fork at that message has none when `fork` returns (OW-tigaye)".
+
 ## `agentpane_live_support.py`
 
 Not a probe. The machinery both smoke checks share: the HTTP/SSE client, the
