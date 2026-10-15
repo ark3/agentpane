@@ -2645,7 +2645,8 @@ prompt in flight, its answer then leaves the sent text in place rather than
 clearing it, as it does whenever the region changed after the send.
 An edit OTHER holds (`agentpane-edit') is dropped, and its prompt region,
 the message's text with whatever the user changed in it, goes on the
-kill ring, the echo area saying so: moved here as a plain draft, that
+kill ring, the echo area saying so, and saying too when that edit's
+send goes on (below): moved here as a plain draft, that
 text loaded to fork with would prompt this buffer's session itself
 (OW-bifevo).  What follows this one's draft is then the draft the edit
 displaced, which `agentpane-cancel-edit' would have put back in OTHER.
@@ -2679,11 +2680,15 @@ OTHER's handle, is in the parent's position when the fork answers, and
 is the one its reply detaches.
 Every other request of OTHER's still in flight is dropped with it, as
 any killed buffer's is: a prompt of its own that went out leaves its
-text in this buffer's draft.  The text of an edit's send goes on the
-kill ring with the dropped edit, OTHER's region holding it until the
-send answers; once that send has asked for its fork points, its fork
-follows here and is prompted with the text too, and before then, its
-attach still out, it goes no further.  Nor is a close OTHER has in
+text in this buffer's draft.  An edit's send in flight, `agentpane--sending'
+in OTHER, goes on: a buffer holds the handle a merge joins only once
+attached, so the send is past its attach, and its fork's chain follows
+here and prompts the fork with the text.  That text, still in OTHER's
+region until the send answers, goes on the kill ring all the same, the
+echo area saying the send goes on and the text is there should it fail:
+a fork or a prompt that fails leaves the edit standing, to send again
+\(`agentpane--send-edit'), and with OTHER gone the kill ring is all that
+keeps it.  Nor is a close OTHER has in
 flight taken: its answer is dropped, and this buffer holds the handle
 until the `session/detached' the close usually brings (D26).
 A window that showed OTHER shows this one, and OTHER's kill sends no
@@ -2716,8 +2721,12 @@ session's transcript is in view, and nothing would clear it, as
          (composer (buffer-local-value 'agentpane--composer other)))
     (when (and edit (not (string-empty-p region)))
       (kill-new region)
-      (message "agentpane: the edit in %s was dropped as it merged here; \
-its text is on the kill ring" (buffer-name other)))
+      (if (buffer-local-value 'agentpane--sending other)
+          (message "agentpane: the edit in %s merged here with its send out; \
+the send goes on to the fork, and its text is on the kill ring should it fail"
+                   (buffer-name other))
+        (message "agentpane: the edit in %s was dropped as it merged here; \
+its text is on the kill ring" (buffer-name other))))
     (unless (string-empty-p draft)
       (if agentpane--editing
           (let ((own (plist-get agentpane--editing :draft)))

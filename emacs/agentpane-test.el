@@ -1685,6 +1685,39 @@ runs no CALLBACK in a killed buffer but passes a following one's on."
           (with-current-buffer previewing
             (should (equal (agentpane-test--draft) "steered\n\nmine"))))))))
 
+(ert-deftest agentpane-test-edit-send-in-flight-follows-a-merge ()
+  "An edit's send whose fork is out when a merge kills the buffer that
+sent it goes on: the fork answers in the buffer that absorbed it, and the
+fork is prompted with the edited text.  The echo area says the send goes
+on, and the text is on the kill ring should it fail (OW-larele)."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil)
+        (fork '(:backend "claude" :id "fork-1")))
+    (agentpane-test--with-helper
+      (agentpane-test--merging
+        (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
+              forked fork
+              hold '(sessions/fork))
+        (with-current-buffer holder
+          (setq agentpane--attached agentpane--connection)
+          (agentpane--draw agentpane-test--nodes)
+          (agentpane--start-edit (aref agentpane-test--nodes 0))
+          (goto-char (point-max))
+          (insert " now")
+          (agentpane-send))
+        (with-current-buffer previewing (agentpane--attach))
+        (should-not (buffer-live-p holder))
+        (should (equal (car kill-ring) "Fix the bug now"))
+        (should (seq-some (lambda (text) (string-search "the send goes on to the fork" text))
+                          said))
+        (setq attached (list :ref fork :handle "h2"))
+        (funcall (cdr (pop held)) t)
+        (let ((prompt (cdr (assq 'sessions/prompt sent))))
+          (should (equal (plist-get prompt :session) fork))
+          (should (equal (plist-get prompt :text) "Fix the bug now")))))))
+
 (ert-deftest agentpane-test-fork-failing-after-a-merge-frees-the-survivor ()
   "A fork that fails after a merge has killed the buffer that sent it
 frees the buffer that absorbed it, which counted as forking, so it can
