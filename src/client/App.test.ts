@@ -4069,7 +4069,10 @@ describe("App", () => {
 		const controller = new FakeController(view({ draft: "/compact" }));
 		render(App, { props: { controller } });
 
-		expect(screen.getByText(/does not run slash commands/i)).toBeInTheDocument();
+		const warning = screen.getByText(/does not run slash commands/i);
+		// Pi runs an extension command itself (OW-sidese), so the copy must not
+		// promise what the agent does with the text.
+		expect(warning).not.toHaveTextContent(/will be sent to the agent as plain text/i);
 		expect(controller.submitted).toBe(0);
 	});
 

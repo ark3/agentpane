@@ -1570,8 +1570,11 @@
 					<button type="button" onclick={cancelEdit}>Cancel</button>
 				</p>
 			{/if}
+			<!-- Promises neither outcome: as of `pi 1.2.0` Pi runs an extension
+			     command such as `/mcp` itself, while Codex and Claude Code took such
+			     text as a prompt as far as anything measured (OW-sidese). -->
 			{#if looksLikeSlashCommand}
-				<p class="warning">Agentpane does not run slash commands — this will be sent to the agent as plain text.</p>
+				<p class="warning">Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text.</p>
 			{/if}
 			<!-- Says what the prompt did not do, never that nothing follows it: the
 			     extension that handled it may still start work of its own (OW-yobayi). -->
