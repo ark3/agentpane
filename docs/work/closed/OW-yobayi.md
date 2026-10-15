@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-dulipe]
+closed: done
 ---
 
 # The browser keeps its turn-done badge and follow armed after a Pi prompt an extension command handled, so the next turn on that session badges this tab
@@ -25,3 +26,11 @@ So the message to the user must not promise that nothing is coming, and a turn a
 A test in `src/client/App.test.ts`, red first, answers a submit as handled and asserts no badge and no follow engage when a later turn streams on that session, and that the user is shown something saying the prompt started no turn.
 A second, also red first, does the same for a fork whose prompt is answered as handled.
 `bun run check` passes.
+
+## Close note
+
+Landed in 26988bc. `controller.submit` now resolves the prompt's `PromptDisposition` (null when it never landed) and `forkAndSubmit` resolves `{ session, disposition }`; `send()` in `src/client/App.svelte` calls `disarmSubmit` for a `"handled"` answer on both the plain and the fork path, and the composer shows a client-local amber note (`handledKey`, role status, label "Prompt handled") saying no turn was started for that prompt, cleared by the next send or a session switch.
+Decision: a turn the handling extension starts of its own after answering is disarmed too, because this tab cannot tell it from another tab's turn on the same session and the badge must never fire for a turn this tab did not ask for; stated in `disarmSubmit`'s docblock and the plain-path test's.
+Verified by two `App.test.ts` tests (plain and fork) and two `controller.test.ts` tests, each shown red against the unfixed code by the implementer (follow scrolled to 60 not 50, badged favicon, missing note) and confirmed by an adversarial reader to fail without the fix; `bun run check` passed, 1665 tests, and `bun run test:browser` passed 28/28 in the implementer's worktree.
+The adversarial read found the decision holds only when the answer precedes the turn's events, and that a handled prompt sent mid-turn now drops the earlier turn's watch through the one-slot arms; both were added to OW-zikiga rather than filed anew.
+Not run in a real browser against a live Pi.
