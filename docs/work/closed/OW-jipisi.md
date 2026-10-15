@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # Five sites say a Claude Code fork has no store file until its first turn ends, which nothing measured
@@ -26,3 +27,11 @@ Two lesser items found in the same review belong here rather than in cards of th
 
 `rg -n 'does not exist until (its|the) first turn ends|writes no store file until its first turn' src docs resources --glob '!docs/work/**'` prints nothing, `rg -n 'a fork never has one' docs/DESIGN.md` prints nothing, and each "Codex flushes" site names a version or points at D9.
 `bun run check` passes, since most sites are in `src/`.
+
+## Close note
+
+Landed in ed24d121, comments and docs only, bun run check green.
+The five sites that said a Claude Code fork has no store file until its first turn ends now give the by-construction reason: ClaudeAdapter.fork spawns nothing, so no file can exist when it returns (OW-razoki); the OW-japuzo citations that backed the unmeasured timing are gone from those sites.
+D27's detach paragraph now says a fork has no virtual: id once attached.
+The three "Codex flushes" comments, plus the same claim in fork_attach_probe.py's docstring, name codex-cli 0.154.0 and point at D9 or OW-lajehi.
+All three done-condition greps print nothing.
