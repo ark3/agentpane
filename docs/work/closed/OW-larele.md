@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # A merge that kills a transcript buffer with a sessions/fork in flight drops the fork's reply, so the fork is made on the server and no buffer ever opens on it
@@ -44,3 +45,23 @@ The done-condition's "fake helper" is, for this test, the stub `agentpane--reque
 As of this amendment that stub answers a held request with `(with-current-buffer from ...)` whether or not FROM is still live, so a fork answered after its buffer was merged away signals "Selecting deleted buffer" rather than being dropped as the real `agentpane--request`'s `:success-fn` drops it.
 A test run against the stub as it stands would go red on that error, not on the missing fork buffer.
 So the stub must first model the real drop -- CALLBACK and FAILED skipped for a killed buffer, UNSENT and REPLIED still run, as `agentpane--request`'s docstring says -- and the red the done-condition asks for is the assertion that no buffer holds the forked ref, seen with the stub corrected and the fix absent.
+
+## Close note
+
+A merge no longer drops the fork or stop that the merged-away buffer had in flight; the buffer that absorbed it answers them.
+`agentpane--absorb` records OTHER -> survivor in `agentpane--absorbed`, and `agentpane--request` takes ALWAYS `follow`, under which CALLBACK, FAILED and ERRED run in `agentpane--absorber` of the sending buffer on reply, error, timeout and helper exit.
+The whole fork chain follows (`sessions/forkPoints` through `agentpane--fork-point`'s new FOLLOW, Pi's pre-fork `sessions/abort`, `sessions/fork`), and so does `agentpane-abort`, so the `:queued` texts a stop takes out of Pi's queue land in the survivor's region.
+Every other request still drops with its buffer, deliberately: a prompt's answer following would clear the survivor's own `agentpane--sending`.
+Owner chosen: the survivor, which holds OTHER's handle and so, on Pi, is in the parent's position; the fork's reply detaches it, releasing its own and OTHER's tokens.
+An edit send in flight goes on to the fork with its text; the echo area now says so, and the text still goes on the kill ring in case the fork or prompt fails.
+Deliberately left: a `sessions/close` in flight in OTHER is not taken over (its answer drops, and the survivor holds the handle until the close's `session/detached`, D26), and a user killing a buffer outright drops its replies as before.
+Whether a Pi session can actually be held under two refs in Emacs at once, which a Pi merge needs, is still unestablished; the Pi tests force it with `agentpane--hold-ref`.
+
+Verified in `emacs/agentpane-test.el`, run as its Commentary says: 277 tests, 0 unexpected, 3 skipped.
+The test stub in `agentpane-test--forking` was first made to drop a killed buffer's CALLBACK/FAILED/ERRED as the real `agentpane--request` does (card amended at execution for this), with the suite green on that alone.
+`agentpane-test-fork-in-flight-follows-a-merge` then went red on `(should buffer)`, no buffer holding the forked ref, with the fix absent, and green with it; each piece of the fix reverted alone turned at least one of the new tests red (Claude and Pi fork across a merge, stop across a merge through the real `agentpane--request`, a fork failing after a merge, an edit send across a merge, a following request failing in the survivor on error and timeout).
+No `src/` touched, so `bun run check` was not run.
+
+The survivor also takes OTHER's `agentpane--forking`, a per-buffer flag copied at the merge.
+The adversarial read showed by probe that it misses a case (an edit send waiting on the survivor's attach forks a second time, and the first answer clears the flag while the second is out) and, by reading, that no buffer-local flag can guard a sibling buffer on the same session; filed as OW-tukuvo, which replaces the copy with a per-session owner.
+The docstrings now claim only what holds and cite it.
