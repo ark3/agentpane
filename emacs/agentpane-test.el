@@ -701,6 +701,25 @@ appended after it, in the order the two arrived."
       (should (< (agentpane-test--position "Three.")
                  (agentpane-test--position "ℹ Fallback metadata"))))))
 
+(ert-deftest agentpane-test-notice-message-lines-are-drawn-as-lines ()
+  "A `session/notice' whose message spans lines, as a Pi command's `notify'
+does, draws each of them on a line of its own, the blank one included."
+  (let ((ref '(:backend "pi" :id "/tmp/s.jsonl")))
+    (agentpane-test--with-session ref
+      (agentpane--on-notification
+       nil 'session/notice
+       (list :session ref
+             :notice '(:kind "notify" :message "Discovered @references:\n\n✓ @a.md\n✓ @b.md"
+                       :details nil :path nil)))
+      (agentpane-test--redraw buffer)
+      (let ((first (line-number-at-pos (agentpane-test--position "ℹ Discovered @references:"))))
+        (should (equal (mapcar (lambda (text)
+                                 (let ((at (agentpane-test--position text)))
+                                   (list (- (line-number-at-pos at) first)
+                                         (= at (save-excursion (goto-char at) (line-beginning-position))))))
+                               '("✓ @a.md" "✓ @b.md"))
+                       '((2 t) (3 t))))))))
+
 (ert-deftest agentpane-test-snapshot-discards-the-recorded-node ()
   "A `session/snapshot' after a `session/node' not yet drawn supersedes it:
 the snapshot's nodes are drawn and the recorded one never is."
