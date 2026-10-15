@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # No probe surveys the shape of a real Pi session store, so finding a new entry type or message field means reading the owner's files by hand
@@ -24,3 +25,15 @@ Python or Bun is the implementer's call; `resources/probes/` is where it lives a
 The probe exists with its README entry, its no-content test passes, and `bun run check` passes if the test is a vitest one.
 It has been run on the home server's store and its output, which is structure only, is recorded in `docs/MANUAL_TESTING.md` with the date and the installed `pi --version`.
 Every shape in that output that agentpane mishandles and no open card already carries gets a card.
+
+## Close note
+
+Built `resources/probes/pi_store_survey.ts` (Bun, run as `bun resources/probes/pi_store_survey.ts [root]` from the repo root, no `bun install`), documented at the end of `resources/probes/README.md`.
+It surveys every `*.jsonl` under the root whose line 1 is a Pi session header and prints a census by UTC month of file mtime (positions, keys with value kinds, block types, roles, header `version`, and `stopReason`/`thinkingLevel` only when members of the 1.2.0 unions), then a "Not read by agentpane" section.
+Message- and block-level classification is measured, not hand-kept: each message goes through the checkout's real `storedAgentMessage` behind a Proxy that tells a named read from a spread's copy (descriptor read first), sorting keys into named, carried-unnamed-by-spread, and dropped; entry-level reads are the hand-kept `ENTRY_READS`, which no test holds, so OW-yilene was amended to update it.
+No-content guarantee: no value, path, name or filesystem error message is printed; identifier-shaped keys and discriminators at schema positions print on the trust that code chose them, and the docblock and README say an extension spreading a data-keyed map would defeat that.
+`src/server/sessions/pi-store-survey.test.ts` (runs in `bun run check`) seeds one marker in ~40 content positions plus a foreign `.jsonl`, unreadable directory and file, missing root and prototype-named types; the dispatching session watched it go red by letting the walk descend into tool `arguments`, and the adversarial reader red-tested eight more mutations.
+That reader's review added skipping of unreadable and non-session files by error-code count, and the own-key lookup.
+Run on the home server's 13 files on `pi 1.2.0` and recorded byte-identical in `docs/MANUAL_TESTING.md`, "The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)".
+Shapes it found: `session_info` unread (OW-yilene), `parentSession` dropped (OW-vezipo), one in-file branch the preview draws in file order (filed OW-gogoka), `errorMessage` reaching both clients only through a spread (filed OW-kejele); `model_change`/`thinking_level_change` unread by the preview, leaving pre-stamp replies unlabelled, which OW-zarine's preview scope already chose.
+OW-furivo was amended with the exact visit command and what the deck carries for each shape the home server's store did not hold.
