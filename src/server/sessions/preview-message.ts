@@ -111,6 +111,7 @@ export function storedAgentMessage(
 					? (value.usage as unknown as Usage)
 					: emptyPreviewUsage(),
 				stopReason: typeof value.stopReason === "string" ? value.stopReason : "stop",
+				...(typeof value.errorMessage === "string" ? { errorMessage: value.errorMessage } : {}),
 				...recordedEffort(value.thinkingLevel),
 				...timestampField(timestamp),
 			} as SessionPreviewTurn;

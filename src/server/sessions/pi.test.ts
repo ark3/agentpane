@@ -217,4 +217,16 @@ describe("extractPiPreviewTurns", () => {
 
 		expect(turns.map((t) => t.timestamp)).toEqual(["2026-10-14T22:14:02.371Z"]);
 	});
+
+	it("keeps an error reply's errorMessage, which both clients draw (OW-kejele)", async () => {
+		const file = await write(dir, "l.jsonl", [
+			sessionHeader(),
+			entry("a1", null, { ...reply("error"), errorMessage: "The provider refused." }),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns).toEqual([
+			expect.objectContaining({ role: "assistant", stopReason: "error", errorMessage: "The provider refused." }),
+		]);
+	});
 });
