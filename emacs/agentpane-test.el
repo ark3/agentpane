@@ -2410,7 +2410,8 @@ shows.  A session with no nodes never shows it."
 `sessions/forkPoints', FORKED for `sessions/fork', a summary of the ref
 asked for for `sessions/attach', unless BODY has put a summary of its own
 in `attached', the fixed nodes for `sessions/preview', and for
-`sessions/list' nil.
+`sessions/list' nil, and for `sessions/prompt' whatever BODY has put in
+`prompted', nil, a started turn's answer, unless it has.
 Each request is pushed onto `sent' as (METHOD . PARAMS), and each `message'
 onto `said'.  The attaches BODY sends carry the tokens 1, 2, 3 and so
 on, in the order they go out.  The reply to an attach is preceded, as
@@ -2439,6 +2440,7 @@ request.  Every buffer BODY made is killed afterwards."
          (hold nil)
          (held nil)
          (attached nil)
+         (prompted nil)
          (snapshotted nil)
          (agentpane--attach-tokens 0)
          (attach-by (symbol-function 'agentpane--attach-by))
@@ -2457,7 +2459,8 @@ request.  Every buffer BODY made is killed afterwards."
                                   ('sessions/forkPoints ,points)
                                   ('sessions/fork ,forked)
                                   ('sessions/attach (or attached (list :ref (plist-get params :session))))
-                                  ('sessions/preview agentpane-test--nodes)))
+                                  ('sessions/preview agentpane-test--nodes)
+                                  ('sessions/prompt prompted)))
                          (answer (lambda (ok)
                                    (when (and (eq ok t) (eq method 'sessions/attach)
                                               (not (memq from snapshotted)))
@@ -5235,6 +5238,65 @@ prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
     (funcall (cdr (pop held)) '(:status 409 :error "turn_active"))
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
+
+(defconst agentpane-test--handled-line
+  "The agent handled that prompt itself; no turn was started for it.\n"
+  "The line a transcript shows once the backend handled its last prompt.")
+
+(ert-deftest agentpane-test-turn-done-not-raised-after-a-handled-prompt ()
+  "A prompt the backend answered as handled, a Pi extension command such
+as `/mcp' that starts no turn for it, drops the watch it armed, clears the
+draft as a sent prompt does, and has the buffer say no turn was started
+for it, until the next send (OW-taviju).
+The turn that then ends unseen raises nothing, though it may be one the
+handling extension started of its own, as Pi's `/ask' does: nothing on the
+stream tells it from a turn prompted elsewhere, and the indicator must
+never be raised for a turn this Emacs did not ask for, as the browser
+decided (OW-yobayi)."
+  (agentpane-test--submitting
+    (setq prompted '(:disposition "handled"))
+    (funcall submit)
+    (should-not (assoc "h1" agentpane--turn-watches))
+    (should (equal (agentpane-test--draft) ""))
+    (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
+    (funcall status t)
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))
+    (setq prompted nil)
+    (funcall submit)
+    (should-not (agentpane-test--above-prompt))
+    (funcall status t)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-kept-armed-by-a-prompt-handled-mid-turn ()
+  "A prompt handled while a turn this Emacs submitted runs joined that
+turn's watch and drops nothing, so the turn's end still raises the
+indicator, as a prompt refused mid-turn leaves it (OW-taviju)."
+  (agentpane-test--submitting
+    (funcall submit)
+    (funcall status t)
+    (setq prompted '(:disposition "handled"))
+    (funcall submit)
+    (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-edit-send-handled-says-so-in-the-fork ()
+  "An edit's send whose prompt the fork's backend handled ends the edit,
+drops the watch the fork's prompt armed, and says no turn was started in
+the fork's buffer, where the prompt went (OW-taviju)."
+  (agentpane-test--watching
+    (agentpane-test--editing "pi"
+      (setq prompted '(:disposition "handled")
+            attached (list :ref '(:backend "pi" :id "fork") :handle "h2"))
+      (agentpane-send)
+      (should-not agentpane--editing)
+      (should-not (agentpane-test--above-prompt))
+      (with-current-buffer (agentpane--buffer-for '(:backend "pi" :id "fork"))
+        (should (equal agentpane--handle "h2"))
+        (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line)))
+      (should-not agentpane--turn-watches))))
 
 (ert-deftest agentpane-test-turn-done-raised-for-a-running-turn-a-prompt-joins ()
   "A prompt sent while a turn from elsewhere streams, which the server takes

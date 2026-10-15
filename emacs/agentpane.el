@@ -1190,7 +1190,18 @@ answered, or nil.")
 (defvar-local agentpane--tail-overlay nil
   "Overlay on the prompt separator whose `before-string' is the reading-view
 tail status, or the line saying reading view hides every node, when there
-is one; see `agentpane--show-reading-tail'.")
+is one, then the line `agentpane--handled' draws; see
+`agentpane--show-reading-tail'.")
+
+(defvar-local agentpane--handled nil
+  "Non-nil when the backend handled the last prompt this buffer sent
+without starting a turn for it -- a Pi extension command such as `/mcp'
+-- until the next send; see `agentpane--send-prompt'.  The line it draws
+above the prompt separator says so, because the draft clears and nothing
+else in the buffer would tell that prompt from one whose turn is slow to
+start, as the browser's `handledKey' does in its composer (OW-yobayi).
+It says what the prompt did not do, never that nothing follows it: the
+extension that handled it may still start work of its own.")
 
 (defvar-local agentpane--prompt-separator nil
   "Marker at the start of the line between the nodes and the prompt region.
@@ -2076,17 +2087,25 @@ at least one; the browser's `data-reading-elided' condition."
   "Show `agentpane--reading-tail' as the line above the prompt separator, or
 when it is nil and `agentpane--hiding-everything-p', the browser's line
 saying so, since the buffer would otherwise hold only its header; or no
-line.  An overlay string rather than buffer text, so it moves no node and
-no draft, is in no one's undo, and is no node `n', `p' or
-`agentpane-index-at-point' can land on.  Called wherever the nodes, reading
-view or the streaming status change."
+line.  Below it, nearest the prompt, the line saying the last prompt
+started no turn, while `agentpane--handled'.  An overlay string rather
+than buffer text, so it moves no node and no draft, is in no one's undo,
+and is no node `n', `p' or `agentpane-index-at-point' can land on.
+Called wherever the nodes, reading view or the streaming status change,
+or `agentpane--handled'."
   (when agentpane--tail-overlay
-    (overlay-put agentpane--tail-overlay 'before-string
-                 (or (agentpane--reading-tail)
-                     (and (agentpane--hiding-everything-p)
-                          (propertize
-                           "Reading view is hiding this session's tool activity and thinking.\n"
-                           'face 'agentpane-dim))))))
+    (let ((lines (delq nil
+                       (list (or (agentpane--reading-tail)
+                                 (and (agentpane--hiding-everything-p)
+                                      (propertize
+                                       "Reading view is hiding this session's tool activity and thinking.\n"
+                                       'face 'agentpane-dim)))
+                             (and agentpane--handled
+                                  (propertize
+                                   "The agent handled that prompt itself; no turn was started for it.\n"
+                                   'face 'agentpane-warning))))))
+      (overlay-put agentpane--tail-overlay 'before-string
+                   (and lines (apply #'concat lines))))))
 
 (defun agentpane--show-mode-line ()
   "Show the status fields in the mode line, after `reading' when reading
@@ -3041,15 +3060,37 @@ nothing.  The cost falls on a timed-out prompt never admitted: its watch
 stays `sent', and the next turn on the session, from anywhere, ends it
 and raises the indicator; a later prompt refused meanwhile joins that
 watch and cannot clear it (`agentpane--watch-submit').  One whose reply's
-handling exits non-locally was admitted, and keeps its watch too."
+handling exits non-locally was admitted, and keeps its watch too.
+
+A prompt the backend handled itself, starting no turn for it -- a Pi
+extension command such as `/mcp' -- answers `(:disposition \"handled\")'
+where a started one answers nil (`sessions/prompt' in
+src/emacs/protocol.ts, OW-dulipe).  It still counts as sent, so SENT
+clears the draft, but it abandons the watch it armed, as a refused one
+does: left standing, the next turn on the session, from anywhere, raised
+the indicator as if this buffer had asked for it (OW-taviju).  A prompt
+that joined a running turn's watch armed none, and drops nothing, so the
+running turn still raises the indicator at its end.  The watch goes even
+though Pi lets the extension that handled the prompt start a turn of its
+own afterwards, as its `/ask' example does: nothing on the stream tells
+that turn from one prompted elsewhere, and the indicator must never be
+raised for a turn this Emacs did not ask for, where missing one costs a
+glance, as the browser's `disarmSubmit' decided (OW-yobayi).  The buffer
+says no turn was started for it, `agentpane--handled', until the next
+send; through an edit that is the fork's buffer, where the prompt went.
+A reply handled only after a merge has killed this buffer runs nothing
+here (`agentpane--request'), so that watch stays standing."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)
     (cond
      (agentpane--sending
       (user-error "A prompt to this session is already being sent"))
-     (agentpane--editing (agentpane--send-edit text sent))
+     (agentpane--editing
+      (agentpane--hold-handled nil)
+      (agentpane--send-edit text sent))
      (t
+      (agentpane--hold-handled nil)
       (setq agentpane--sending t)
       (let ((failed (lambda ()
                       (setq agentpane--sending nil)
@@ -3062,12 +3103,20 @@ handling exits non-locally was admitted, and keeps its watch too."
                                  (append (list :session (agentpane--ref agentpane--session) :text text
                                                :priorErrorId prior)
                                          (and images (list :images (vconcat images))))
-                                 (lambda (_)
+                                 (lambda (answer)
                                    (setq agentpane--sending nil)
+                                   (when (equal (plist-get answer :disposition) "handled")
+                                     (agentpane--watch-abandon watch)
+                                     (agentpane--hold-handled t))
                                    (funcall sent))
                                  t failed agentpane--spawn-timeout
                                  (lambda () (agentpane--watch-abandon watch)))))
          failed))))))
+
+(defun agentpane--hold-handled (handled)
+  "Set `agentpane--handled' to HANDLED, and draw it or take its line down."
+  (setq agentpane--handled handled)
+  (agentpane--show-reading-tail))
 
 (defun agentpane--clear-sent (buffer beg text)
   "Delete TEXT from BEG to the end of BUFFER, if it is still exactly there."
@@ -4155,9 +4204,10 @@ returned, nil when it joined, and would drop only its own were there two."
 
 (defun agentpane--watch-abandon (watch)
   "Drop WATCH, a watch `agentpane--watch-submit' armed, if it still stands:
-its prompt reached no backend, so the next turn on the session is not one
-this Emacs asked for.  A WATCH of nil, a prompt that joined another's, or
-one that has since ended, drops nothing."
+its prompt reached no backend, or one that handled it without starting a
+turn for it, so the next turn on the session is not one this Emacs asked
+for.  A WATCH of nil, a prompt that joined another's, or one that has
+since ended, drops nothing."
   (setq agentpane--turn-watches (delq watch agentpane--turn-watches)))
 
 (defun agentpane--watch-forget (handle)
