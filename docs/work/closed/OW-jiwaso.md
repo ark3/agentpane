@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The Pi preview stamps each turn with its entry's append time, not the message's own timestamp, so an assistant footer reads up to its turn's length later than live
@@ -21,3 +22,15 @@ The time drop came in with OW-reyale (`0f3a3eb`, "Render rich stored-session pre
 `src/server/sessions/pi-conformance.test.ts`'s projection carries each row's timestamp, as the footer would render it or as the epoch, and its header's sentence saying timestamps are left out, which names this card, is gone; with the fix absent the test fails on the assistant rows of both scenarios, and with it the table lists no timestamp difference.
 A unit test in `src/server/sessions/pi.test.ts` asserts that an assistant message carrying its own `timestamp` keeps it in the preview, and one without it takes the entry's, red before the fix where it can be.
 `bun run check` passes.
+
+## Close note
+
+Landed in fe589c6 and 2c1f25e.
+`extractPreviewTurn` in `src/server/sessions/pi.ts` now times each stored Pi message by the message's own epoch-ms `timestamp`, written as ISO, for every role, and falls back to the entry's ISO `timestamp` only when the message has no finite one of its own; the compaction marker, which has no message, keeps the entry's.
+The shared `storedAgentMessage` is untouched, so the Codex preview is unaffected.
+The OW-71 docblock in `src/client/preview.ts` now says that for a Pi message "the record" is the message, not the entry.
+`pi-conformance.test.ts` ends each row with its epoch timestamp, the preview's through `previewMessages`, and lists no timestamp difference; its header's OW-jiwaso sentence is gone.
+One departure from the done-condition: the compaction marker's row carries no timestamp, because live stamps it with `Date.now()` at `compaction_end` (`adapters/pi/reducer.ts`), which a replay reads as the moment the test runs. The adversarial reader traced `pi-coding-agent 1.2.0` and found that the live marker trails the entry's append time by milliseconds, and that a resumed session rebuilds it from the entry's time, so the exclusion hides no real disagreement.
+Red with `pi.ts` reverted: both conformance scenarios, the new "times a reply by the message's own timestamp" test in `pi.test.ts`, and the OW-wavini system-message tests in `preview.test.ts`. The fallback test passes either way, since the old code already used the entry's time.
+`bun run check` green: 59 files, 1677 tests.
+Measured: on `pi 1.2.0`, the entry trails the message by 2–8ms for user and system messages and by up to 15.2s for assistant turns (compact-session fixture).
