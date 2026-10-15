@@ -54,8 +54,9 @@ stdout. The stdin tap is what shows whether a prompt carried
 ## Part `steer_abort`: a steer still queued when Stop arrives (OW-yewiku)
 
 `PiAdapter.submit` steers a prompt into a running turn and Pi answers
-`{"disposition": "queued"}`; `PiAdapter.abort` sends a bare `abort`. If the
-abort lands before Pi has delivered the steer, three products hide behind it:
+`{"disposition": "queued"}`; `PiAdapter.abort` sent a bare `abort` until
+OW-wisifo. If the abort lands before Pi has delivered the steer, three
+products hide behind it:
 (a) the text runs on its own after the abort, which `rpc-commands.md`'s
 "clear_queue" section says ("`abort` continues queued messages when they
 remain in the session", `pi 1.2.0`'s copy); (b) it stays queued and turns up
@@ -84,7 +85,7 @@ can deliver the steer. A run whose hold had ended when the abort went out has
 not measured the case and fails.
 
 Two cells per hold, each `--runs` times on a fresh Pi so no run inherits a
-queue: `abort` sends the bare `abort` agentpane sends today, and
+queue: `abort` sends the bare `abort` agentpane sent before OW-wisifo, and
 `clear_then_abort` sends `clear_queue` first, as the doc prescribes for Esc,
 and records its response verbatim.
 

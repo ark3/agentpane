@@ -675,7 +675,7 @@ D20 below retires the counting; the invariant is gone rather than restored, and 
 The narrower window between `abort()` and `turn/completed`, where a steer hits a turn being torn down, is OW-pefawi.
 
 A steer sent *before* Stop and not yet delivered when the abort goes out is a different case, and on Pi a bare `abort` answers it the way the user asked in neither of the two ways it can go.
-Measured on the home server on 2026-10-15 against `pi 1.2.0` (OW-yewiku), Pi alone, a steer queued behind a running turn and then a bare `abort` as `PiAdapter` sends it: nothing ran on its own after the abort in any run, and where the text went depended on what the turn was doing.
+Measured on the home server on 2026-10-15 against `pi 1.2.0` (OW-yewiku), Pi alone, a steer queued behind a running turn and then a bare `abort` as `PiAdapter` sent it before OW-wisifo: nothing ran on its own after the abort in any run, and where the text went depended on what the turn was doing.
 Stopped mid-tool, the aborted run delivered it as a user message whose reply failed at once with `stopReason: "error"`, so it stays in the session's messages as a turn nobody answered.
 Stopped mid-reply, it stayed queued and was delivered into the next prompt's run, after that prompt, and that run's one reply answered the steer, or went back to the interrupted reply, but never the new prompt.
 Sending `clear_queue` before `abort` took it out in both cases, and nothing leaked.
