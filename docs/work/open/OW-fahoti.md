@@ -16,7 +16,7 @@ This card puts that text back in the browser's composer, so nothing the user typ
 - `abort()` in `src/client/controller.ts` (the `async abort()` that publishes `busy: "aborting"` and calls `api.abort(selected)`) receives the texts from `api.abort` in `src/client/api.ts` and publishes them into `draft`.
 - The composer may already hold a draft the user started typing while the turn ran.
   Join the way Pi's interactive mode does (`restoreQueuedMessagesToEditor` in `pi 1.2.0`'s `dist/modes/interactive/interactive-mode.js`): the returned texts joined by a blank line, then the current draft after them, blank parts dropped.
-  The `emacs` card blocked by OW-wisifo takes the same rule, so the two clients agree.
+  OW-seleri, the `emacs` card blocked by OW-wisifo, takes the same rule, so the two clients agree.
 - Only the session the user pressed Stop on: if the selection moved while the abort was in flight, say beside the code what happens to the text, and do not drop it silently.
 - Whatever OW-wisifo decided for the abort `forkAndSubmit` sends ahead of a Pi fork applies to that path in `controller.ts` too; follow that card's note at the site.
 

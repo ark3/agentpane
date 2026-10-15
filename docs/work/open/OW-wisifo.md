@@ -18,7 +18,7 @@ The user saw a 202 for that prompt and pressed Stop; neither outcome is what the
 ## What the owner decided
 
 Stop does what Pi's own interactive mode does with Esc: send `clear_queue` before `abort`, and give the text of every queued prompt back to the composer of the client that pressed Stop.
-This card is the server and wire half; OW-yewiku filed one browser card and one `emacs` card blocked by this one, which put the text in each composer.
+This card is the server and wire half; OW-yewiku filed OW-fahoti for the browser and OW-seleri for Emacs, both blocked by this one, which put the text in each composer.
 The adapter change and the wire land together here, so no build ever clears the queue without handing the text back.
 
 ## What Pi gives back
