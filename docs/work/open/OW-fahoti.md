@@ -19,8 +19,12 @@ This card puts that text back in the browser's composer, so nothing the user typ
   OW-seleri, the `emacs` card blocked by OW-wisifo, takes the same rule, so the two clients agree.
 - Only the session the user pressed Stop on: if the selection moved while the abort was in flight, say beside the code what happens to the text, and do not drop it silently.
 - Whatever OW-wisifo decided for the abort `forkAndSubmit` sends ahead of a Pi fork applies to that path in `controller.ts` too; follow that card's note at the site.
+- "Stop and edit": `editLastMessage` in `src/client/App.svelte` calls `startEdit(index)`, which loads the message being edited into `draft` and stashes the old draft as `editing.stashedDraft`, and then `controller.abort()` where `stopsBeforeFork`.
+  Joined into `draft` there, the returned text would be sent into the fork as part of the edit; it belongs with the stashed draft, which the edit puts back when it ends, or wherever this card decides, said at `editLastMessage`.
 
 ## Done when
 
 - A test in `src/client/controller.test.ts`, red first, has `api.abort` answer with two texts while the draft holds other text, and asserts the draft afterwards is the two texts and then the old draft, joined by blank lines; and a second asserts an empty answer leaves the draft untouched.
+- A test in `src/client/App.test.ts`, red first, drives "Stop and edit" on a Pi session whose abort answers with a text, and asserts the composer holds only the edited message and the text is where the decision above put it.
+- The selection-moved decision is a comment at `abort()` in `src/client/controller.ts`, with a test if it changes behaviour.
 - `bun run check` passes.
