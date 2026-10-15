@@ -481,8 +481,12 @@ def sse_rows(events: list[tuple[str, dict[str, Any]]], start: int, handle: str) 
             if rows and rows[-1].get("type") == "upsert" and rows[-1].get("index") == row["index"]:
                 rows[-1]["count"] = rows[-1].get("count", 1) + 1
                 continue
-        elif kind in ("error", "notice"):
+        elif kind == "error":
             row["message"] = event.get("message")
+        elif kind == "notice":
+            notice = event.get("notice") or {}
+            row["kind"] = notice.get("kind")
+            row["message"] = notice.get("message")
         rows.append(row)
     return rows
 

@@ -463,7 +463,9 @@ def run_agentpane(args: argparse.Namespace, pi: str, home: Path, workspace: Path
         after["fork_prompt"] = {"status": status, "body": body}
         idle(fork_handle, sse0)
         after["fork_file_after_turn"] = entries_of(Path(fork_ref["id"]))
-        after["fork_sse_errors"] = [r for r in sse_rows(stream.snapshot(), sse0, fork_handle) if r["type"] in ("error", "notice")]
+        fork_sse = sse_rows(stream.snapshot(), sse0, fork_handle)
+        after["fork_sse_errors"] = [r for r in fork_sse if r["type"] == "error"]
+        after["fork_sse_notices"] = [r for r in fork_sse if r["type"] == "notice"]
         after["parent_file_final"] = entries_of(Path(ref["id"]))
         out["after_fork"] = after
         exit_code = 0
