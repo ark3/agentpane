@@ -18,9 +18,9 @@ import type { SessionPreviewTurn } from "$shared/protocol.ts";
  * `AgentMessage.timestamp`, a required epoch-ms `number`, so the one
  * ISO-to-epoch conversion sits here at the client edge -- the wire keeps the
  * ISO shape `SessionSummary` already uses. An absent timestamp maps to `NaN`,
- * not `0`: `formatTimestamp`
- * (via `new Date(NaN)`) renders `NaN` as the empty string, so a genuinely
- * timeless turn shows no time, where `0` would render the epoch as a real date.
+ * not `0`: `formatTimestamp` (via `new Date(NaN)`) renders `NaN` as the empty
+ * string, so a genuinely timeless turn shows no time, where `0` would render
+ * the epoch as a real date.
  * `NaN` still keys the `{#each}` (`keyFor` stringifies it) stably per turn.
  */
 function turnEpoch(iso: string | undefined): number {
