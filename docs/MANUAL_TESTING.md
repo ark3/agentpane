@@ -4249,7 +4249,7 @@ Its `firstKeptEntryId` named the second `assistant` message, the run's last.
 The stream's assistant `message_end`s and the file's assistant messages both had it, beside `durationMs`, `responseId`, and `rawStopReason`.
 
 `src/server/sessions/pi-conformance.test.ts` replays both halves and, when this capture landed, listed two disagreements, a level each live assistant turn named and the preview did not (OW-zarine), and the compaction marker the preview did not draw (OW-livowu).
-OW-zarine has since made the preview name each stored reply's `thinkingLevel`, see its section at the end of this file, and OW-livowu has made it draw each `compaction` entry as the marker, in file order, so the test lists no difference for either scenario.
+OW-zarine has since made the preview name each stored reply's `thinkingLevel`, see its section at the end of this file, and OW-livowu has made it draw each `compaction` entry as the marker, where it sits on the branch, so the test lists no difference for either scenario.
 The system message is drawn on both sides, as OW-wavini left it.
 
 ## Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)
@@ -4590,7 +4590,7 @@ Each entry's `id` and `parentId`, the header's `id`, `version` and `parentSessio
 
 **One entry starts an in-file branch.**
 In one 2026-10 file of 49 entries, the sixth after the header is a user message whose `parentId` names the system message three lines up, past a user message and an `aborted` reply.
-`extractPiPreviewTurns` reads every message line in file order, so the preview draws that abandoned pair ahead of the branch the file goes on with.
+`extractPiPreviewTurns` then read every message line in file order, so the preview drew that abandoned pair ahead of the branch the file goes on with; since OW-gogoka it draws only the branch from the file's last entry back by `parentId`, which is the one `pi 1.2.0`'s `SessionManager` takes as a loaded file's leaf.
 A throwaway Python script over the `parentId` chains, printing only positions, types and roles, found it before the probe counted it, and the probe was then given the count.
 Not established: what an attached session draws for that file, which no run here tried.
 

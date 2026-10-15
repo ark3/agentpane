@@ -42,6 +42,17 @@ function piMessage(role: "user" | "assistant", text: string, timestamp = "2026-0
 	};
 }
 
+/**
+ * Writes a Pi session with each entry after the header made the child of the
+ * line before it, as Pi appends them: the preview draws only the branch that
+ * ends at the last entry (OW-gogoka), so entries that each name no parent
+ * would leave it just the last one.
+ */
+async function writePiSession(file: string, lines: Record<string, unknown>[]): Promise<void> {
+	const [header, ...entries] = lines;
+	await writeJsonl(file, [header, ...entries.map((entry, i) => ({ ...entry, id: `e${i}`, parentId: i === 0 ? null : `e${i - 1}` }))]);
+}
+
 function claudeUser(content: string | unknown[], timestamp = "2026-08-20T10:00:00.000Z") {
 	return {
 		type: "user",
@@ -258,7 +269,7 @@ describe("readSessionPreview", () => {
 
 		it("returns the user/assistant conversation from the ref's file (D9)", async () => {
 			const file = join(root, "session.jsonl");
-			await writeJsonl(file, [
+			await writePiSession(file, [
 				piHeader(),
 				piMessage("user", "First question.", "2026-06-05T18:25:00.147Z"),
 				piMessage("assistant", "First answer.", "2026-06-05T18:25:03.200Z"),
@@ -290,7 +301,7 @@ describe("readSessionPreview", () => {
 			const leading = systemLeading();
 			const changed = systemChanged();
 			const file = join(root, "with-system.jsonl");
-			await writeJsonl(file, [
+			await writePiSession(file, [
 				piHeader(),
 				{ type: "message", id: "s0", parentId: null, timestamp: "2026-10-14T10:00:00.000Z", message: leading },
 				piMessage("user", "First question.", "2026-10-14T10:00:00.100Z"),
@@ -312,7 +323,7 @@ describe("readSessionPreview", () => {
 			// Pi parses session files without validation and answers a missing
 			// `content` with "" from `get_messages`, so live keeps such a message.
 			const file = join(root, "malformed-system.jsonl");
-			await writeJsonl(file, [
+			await writePiSession(file, [
 				piHeader(),
 				{
 					type: "message",
@@ -336,7 +347,7 @@ describe("readSessionPreview", () => {
 				return thinkingLevel === undefined ? record : { ...record, message: { ...record.message, thinkingLevel } };
 			};
 			const file = join(root, "stamped.jsonl");
-			await writeJsonl(file, [
+			await writePiSession(file, [
 				piHeader(),
 				stamped("at high", "2026-10-14T10:00:01.000Z", "high"),
 				// As of `pi 1.2.0` Pi stamps `off` on a model that does not reason, too, which the file cannot tell apart.
@@ -367,7 +378,7 @@ describe("readSessionPreview", () => {
 
 		it("retains thinking, tool calls, and tool results in transcript order", async () => {
 			const file = join(root, "with-tools.jsonl");
-			await writeJsonl(file, [
+			await writePiSession(file, [
 				piHeader(),
 				piMessage("user", "Read the file."),
 				{
@@ -448,11 +459,11 @@ describe("readSessionPreview", () => {
 			const file = join(root, "long-session.jsonl");
 			const filler = "x".repeat(3000);
 			const messageCount = 300;
-			const lines: unknown[] = [piHeader()];
+			const lines: Record<string, unknown>[] = [piHeader()];
 			for (let i = 0; i < messageCount; i++) {
 				lines.push(piMessage(i % 2 === 0 ? "user" : "assistant", `${filler} turn-${i}`));
 			}
-			await writeJsonl(file, lines);
+			await writePiSession(file, lines);
 
 			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 

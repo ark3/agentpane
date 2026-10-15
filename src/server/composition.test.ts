@@ -93,7 +93,7 @@ function piAssistantMessage(text: string) {
 	return {
 		type: "message",
 		id: "a",
-		parentId: null,
+		parentId: "m",
 		timestamp: "2026-01-01T00:00:07.000Z",
 		message: { role: "assistant", content: [{ type: "text", text }] },
 	};

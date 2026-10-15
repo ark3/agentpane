@@ -14,6 +14,7 @@
 
 import type { Stats } from "node:fs";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
+import { activeBranch } from "../adapters/pi/reducer.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
 import { storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
@@ -116,40 +117,62 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
  * adapter renders, so this validates and retains user, assistant,
  * tool-result and system messages with their thinking, tool, and image
  * blocks, and draws each compaction entry as the marker live appends at
- * `compaction_end`, where it sits in file order (OW-livowu). The header is
+ * `compaction_end`, where it sits on the branch (OW-livowu). The header is
  * skipped.
+ *
+ * A session file is a tree, and a branch made in place leaves the abandoned
+ * entries in it, so this draws only the branch Pi would resume at, as the
+ * live transcript does (OW-gogoka). As of `pi 1.2.0`, `SessionManager`
+ * (`dist/core/session-manager.js`) loads a file and `_buildIndex` takes as
+ * its leaf the last entry that is not the `session` header, of whatever type
+ * -- every entry, `model_change`, `compaction` and `label` alike, carries an
+ * `id` and a `parentId` and so sits on the chain. The branch is the walk from
+ * there by `parentId`, stopping at an id the file does not hold, as
+ * `buildSessionPath` does. A header with no `version` is version 1, whose
+ * entries carry no ids at all: Pi's `migrateV1ToV2` chains them in file
+ * order, so that order is the branch.
  */
 export async function extractPiPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
-	const turns: SessionPreviewTurn[] = [];
+	let version = 1;
+	const entries: StoredEntry[] = [];
 	let lineNo = 0;
 	// Unbounded: unlike enumeration, the preview must reach the real end of the
 	// file (attaching already shows the whole transcript, so the preview
 	// stopping early at the enumeration caps would be a visible regression).
 	for await (const line of readLinesLfOnly(filePath, { maxLines: Infinity, maxBytes: Infinity })) {
 		lineNo++;
-		if (lineNo === 1) continue;
-		const turn = extractPreviewTurn(line);
-		if (turn) turns.push(turn);
+		const rec = parseRecord(line);
+		if (lineNo === 1) {
+			if (typeof rec?.version === "number") version = rec.version;
+			continue;
+		}
+		if (rec && rec.type !== "session") entries.push(rec as StoredEntry);
 	}
-	return turns;
+	const branch = version < 2 ? entries : activeBranch(entries, entries.at(-1)?.id ?? null);
+	return branch.flatMap((entry) => extractPreviewTurn(entry) ?? []);
 }
 
-/**
- * One transcript message from a Pi `message` line, or the compaction marker
- * from a `compaction` line, or null for other records. As of `pi 1.2.0` a
- * compaction is stored as its own `type: "compaction"` entry, not as a
- * `compactionSummary` message; of its fields the marker keeps `summary` and
- * `tokensBefore`, all that `compaction_end`'s live one carries.
- */
-function extractPreviewTurn(line: string): SessionPreviewTurn | null {
+/** One parsed line of a session file, its ids as Pi reads them, unvalidated. */
+type StoredEntry = Record<string, unknown> & { id: string; parentId: string | null };
+
+function parseRecord(line: string): Record<string, unknown> | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
 	} catch {
 		return null;
 	}
-	if (typeof parsed !== "object" || parsed === null) return null;
-	const rec = parsed as Record<string, unknown>;
+	return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+}
+
+/**
+ * One transcript message from a Pi `message` entry, or the compaction marker
+ * from a `compaction` entry, or null for other records. As of `pi 1.2.0` a
+ * compaction is stored as its own `type: "compaction"` entry, not as a
+ * `compactionSummary` message; of its fields the marker keeps `summary` and
+ * `tokensBefore`, all that `compaction_end`'s live one carries.
+ */
+function extractPreviewTurn(rec: Record<string, unknown>): SessionPreviewTurn | null {
 	if (rec.type !== "message" && rec.type !== "compaction") return null;
 
 	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;

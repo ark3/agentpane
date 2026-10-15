@@ -21,11 +21,11 @@ function sessionHeader(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function userMessage(text: string) {
+function userMessage(text: string, id = "dc9a1ed5", parentId: string | null = "3bad6d37") {
 	return {
 		type: "message",
-		id: "dc9a1ed5",
-		parentId: "3bad6d37",
+		id,
+		parentId,
 		timestamp: "2026-06-05T18:25:00.147Z",
 		message: { role: "user", content: [{ type: "text", text }] },
 	};
@@ -109,7 +109,7 @@ describe("extractPiPreviewTurns", () => {
 	it("draws a compaction entry as a compactionSummary turn where it sits in the file (OW-livowu)", async () => {
 		const file = await write(dir, "f.jsonl", [
 			sessionHeader(),
-			userMessage("Before the compaction."),
+			userMessage("Before the compaction.", "dc9a1ed5", null),
 			{
 				type: "compaction",
 				id: "c85baa76",
@@ -121,7 +121,7 @@ describe("extractPiPreviewTurns", () => {
 				details: { readFiles: [], modifiedFiles: [] },
 				fromHook: false,
 			},
-			userMessage("After the compaction."),
+			userMessage("After the compaction.", "5e0f2c11", "c85baa76"),
 		]);
 		const turns = await extractPiPreviewTurns(file);
 
@@ -132,5 +132,57 @@ describe("extractPiPreviewTurns", () => {
 			tokensBefore: 5915,
 			timestamp: "2026-06-05T18:26:00.000Z",
 		});
+	});
+
+	function entry(id: string, parentId: string | null, message: Record<string, unknown>) {
+		return { type: "message", id, parentId, timestamp: `stamp-${id}`, message };
+	}
+	const system = { role: "system", content: "You are a coding agent." };
+	const user = { role: "user", content: [{ type: "text", text: "A question." }] };
+	const reply = (stopReason: string) => ({ role: "assistant", content: [{ type: "text", text: "A reply." }], stopReason });
+
+	it("draws only the branch ending at the last entry, not the abandoned one it re-parents past (OW-gogoka)", async () => {
+		// The shape OW-tadoju surveyed on the home server (`pi 1.2.0`): a user
+		// message re-parented onto the system message, past a user message and
+		// its aborted reply, which stay in the file.
+		const file = await write(dir, "g.jsonl", [
+			sessionHeader(),
+			{ type: "model_change", id: "m", parentId: null, timestamp: "t", provider: "x", modelId: "y" },
+			entry("s", "m", system),
+			entry("u1", "s", user),
+			entry("a1", "u1", reply("aborted")),
+			entry("u2", "s", user),
+			entry("a2", "u2", reply("stop")),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.timestamp)).toEqual(["stamp-s", "stamp-u2", "stamp-a2"]);
+	});
+
+	it("draws an earlier branch the file returned to, skipping the abandoned one between (OW-gogoka)", async () => {
+		const file = await write(dir, "h.jsonl", [
+			sessionHeader(),
+			entry("u1", null, user),
+			entry("a1", "u1", reply("stop")),
+			entry("u2", "a1", user),
+			entry("a2", "u2", reply("stop")),
+			entry("u3", "a1", user),
+			entry("a3", "u3", reply("stop")),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.timestamp)).toEqual(["stamp-u1", "stamp-a1", "stamp-u3", "stamp-a3"]);
+	});
+
+	it("draws a version 1 file, whose entries carry no ids, in file order (OW-gogoka)", async () => {
+		const file = await write(dir, "i.jsonl", [
+			sessionHeader({ version: undefined }),
+			{ type: "message", timestamp: "stamp-u1", message: user },
+			{ type: "message", timestamp: "stamp-a1", message: reply("stop") },
+			{ type: "message", timestamp: "stamp-u2", message: user },
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.timestamp)).toEqual(["stamp-u1", "stamp-a1", "stamp-u2"]);
 	});
 });

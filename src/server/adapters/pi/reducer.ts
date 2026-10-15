@@ -323,10 +323,13 @@ export function recordedModel(entries: PiSessionEntry[], leafId: string | null):
 	return model;
 }
 
-/** The branch ending at `leafId`, root first: `get_entries` also returns abandoned branches. */
-function activeBranch(entries: PiSessionEntry[], leafId: string | null): PiSessionEntry[] {
+/**
+ * The branch ending at `leafId`, root first: `get_entries` also returns
+ * abandoned branches, and so does a session file the stored preview reads.
+ */
+export function activeBranch<E extends { id: string; parentId: string | null }>(entries: E[], leafId: string | null): E[] {
 	const byId = new Map(entries.map((entry) => [entry.id, entry]));
-	const branch: PiSessionEntry[] = [];
+	const branch: E[] = [];
 	for (let entry = leafId ? byId.get(leafId) : undefined; entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
 		branch.push(entry);
 	}
