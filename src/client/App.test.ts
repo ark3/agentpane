@@ -4610,6 +4610,32 @@ describe("App", () => {
 	});
 
 	/**
+	 * While a fork's prompt is out the composer holds the text it is sending,
+	 * and a click elsewhere returns `busy` to idle with that prompt still out.
+	 * An editor opened on that text would give an edited copy of it back under
+	 * Send, over the draft the edit displaced, so none opens until the send
+	 * settles, as no edit does (OW-kijuju, OW-momejo).
+	 */
+	it("opens no external editor on the text a fork's prompt is still sending (OW-momejo)", async () => {
+		const { controller, edits, land } = await streamingPi([], false);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
+		await controller.select(piSession);
+		await tick();
+		expect(controller.getView()).toMatchObject({ busy: "idle", sending: true });
+
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+		await fireEvent.click(screen.getByRole("button", { name: "External Editor" }));
+		expect(edits).toEqual([]);
+
+		await land();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+	});
+
+	/**
 	 * The shortcut's name and its click-time stop follow the same split as the
 	 * primary button (D15, OW-bakosi): on Codex and Claude the fork leaves the
 	 * parent turn running, so reaching for the last message is free again --

@@ -1335,6 +1335,11 @@ export function createController(
 		},
 		async editDraft() {
 			if (view.busy !== "idle" || view.editingExternally) return;
+			// Never on text a send is still taking, as no edit opens on it in
+			// `App.svelte`'s `startEdit` (OW-kijuju): a click elsewhere or a stop
+			// returns `busy` to idle while a send is still out, and the answer
+			// would put an edited copy of sent text back under Send (OW-momejo).
+			if (view.sending) return;
 			const text = view.draft;
 			publish({ busy: "editing-externally", editingExternally: true, error: null });
 			try {

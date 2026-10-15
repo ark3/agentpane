@@ -1775,7 +1775,7 @@
 				<button
 					type="button"
 					onclick={() => view.busy === "idle" && void controller.editDraft()}
-					disabled={view.editingExternally}
+					disabled={view.editingExternally || view.sending}
 				>External Editor</button>
 				<div id="tools-menu" popover class="tools-menu-list" role="menu">
 					<button
