@@ -1203,6 +1203,18 @@ start, as the browser's `handledKey' does in its composer (OW-yobayi).
 It says what the prompt did not do, never that nothing follows it: the
 extension that handled it may still start work of its own.")
 
+(defconst agentpane--slash-warning
+  "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text."
+  "The browser's warning by a draft that starts with `/', word for word.
+Advisory only, a bare leading `/' with no command list, and never in the
+way of a send (OW-73).  It promises neither outcome: as of `pi 1.2.0' Pi
+runs an extension command such as `/mcp' itself, while Codex and Claude
+Code took such text as a prompt as far as anything measured (OW-sidese).")
+
+(defvar-local agentpane--slash-warned nil
+  "Non-nil while the line above the prompt separator carries
+`agentpane--slash-warning', drawn by `agentpane--show-reading-tail'.")
+
 (defvar-local agentpane--prompt-separator nil
   "Marker at the start of the line between the nodes and the prompt region.
 It advances past text inserted at it, so nodes drawn there stay above it.")
@@ -2088,24 +2100,41 @@ at least one; the browser's `data-reading-elided' condition."
 when it is nil and `agentpane--hiding-everything-p', the browser's line
 saying so, since the buffer would otherwise hold only its header; or no
 line.  Below it, nearest the prompt, the line saying the last prompt
-started no turn, while `agentpane--handled'.  An overlay string rather
-than buffer text, so it moves no node and no draft, is in no one's undo,
-and is no node `n', `p' or `agentpane-index-at-point' can land on.
+started no turn, while `agentpane--handled', and above that the
+slash-command warning, while the draft starts with `/', in the browser's
+order.  An overlay string rather than buffer text, so it moves no node
+and no draft, is in no one's undo, and is no node `n', `p' or
+`agentpane-index-at-point' can land on.
 Called wherever the nodes, reading view or the streaming status change,
-or `agentpane--handled'."
+or `agentpane--handled', and by `agentpane--follow-slash-draft'."
   (when agentpane--tail-overlay
+    (setq agentpane--slash-warned (agentpane--slash-draft-p))
     (let ((lines (delq nil
                        (list (or (agentpane--reading-tail)
                                  (and (agentpane--hiding-everything-p)
                                       (propertize
                                        "Reading view is hiding this session's tool activity and thinking.\n"
                                        'face 'agentpane-dim)))
+                             (and agentpane--slash-warned
+                                  (propertize (concat agentpane--slash-warning "\n")
+                                              'face 'agentpane-warning))
                              (and agentpane--handled
                                   (propertize
                                    "The agent handled that prompt itself; no turn was started for it.\n"
                                    'face 'agentpane-warning))))))
       (overlay-put agentpane--tail-overlay 'before-string
                    (and lines (apply #'concat lines))))))
+
+(defun agentpane--slash-draft-p ()
+  "Non-nil when the prompt region's draft starts with `/'."
+  (and agentpane--prompt-start (eq (char-after agentpane--prompt-start) ?/)))
+
+(defun agentpane--follow-slash-draft (&rest _)
+  "Redraw the line above the prompt separator when the draft has started or
+stopped starting with `/'; a buffer-local `after-change-functions' entry
+of a transcript, so the warning follows the draft as it is edited."
+  (unless (eq (agentpane--slash-draft-p) agentpane--slash-warned)
+    (agentpane--show-reading-tail)))
 
 (defun agentpane--show-mode-line ()
   "Show the status fields in the mode line, after `reading' when reading
@@ -2276,6 +2305,7 @@ region at its end, where `RET' inserts a newline and `C-RET' sends.
   ;; region below them can take typing.
   (setq buffer-read-only nil)
   (agentpane--insert-prompt-region)
+  (add-hook 'after-change-functions #'agentpane--follow-slash-draft nil t)
   (setq-local agentpane--folds (make-hash-table :test #'equal))
   (add-hook 'kill-buffer-hook #'agentpane--detach nil t)
   (add-hook 'kill-buffer-hook #'agentpane--forget-turn-done nil t)
@@ -3940,8 +3970,22 @@ in the echo area, and the effort read for it is never sent."
   "Major mode for drafting a prompt to an agentpane session, as for a commit
 message: `C-c C-c' or `C-RET' sends, `C-c C-k' discards, `C-c C-a' aborts
 the running turn, `C-c C-e' edits the last user message in the
-transcript's prompt region.
-\\{agentpane-composer-mode-map}")
+transcript's prompt region.  While the draft starts with `/', the header
+line carries `agentpane--slash-warning'.
+\\{agentpane-composer-mode-map}"
+  (add-hook 'after-change-functions #'agentpane--warn-slash-composer nil t))
+
+(defun agentpane--warn-slash-composer (&rest _)
+  "Put `agentpane--slash-warning' in the header line while this composer's
+draft starts with `/', and take it down when it stops; a buffer-local
+`after-change-functions' entry.  The header line, because the whole
+buffer is the draft: it stays in view above the text however the window
+scrolls, and puts nothing in the text that `agentpane-composer-send' reads."
+  (let ((warning (and (eq (char-after (point-min)) ?/)
+                      (propertize agentpane--slash-warning 'face 'agentpane-warning))))
+    (unless (equal warning header-line-format)
+      (setq header-line-format warning)
+      (force-mode-line-update))))
 
 (defun agentpane--composer-name ()
   "The name of this transcript's composer: the transcript's own, with any

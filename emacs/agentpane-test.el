@@ -5313,6 +5313,55 @@ indicator, as a prompt refused mid-turn leaves it (OW-taviju)."
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
 
+(defconst agentpane-test--slash-warning
+  "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text."
+  "The browser's warning by a draft that starts with `/' (OW-73, OW-sidese).")
+
+(ert-deftest agentpane-test-slash-draft-warns-and-still-sends ()
+  "A draft that starts with `/' shows the browser's slash-command warning
+next to it -- above the prompt separator for the prompt region, in the
+header line for a composer -- following the draft as it is edited, while
+an ordinary draft shows none.  The warning never blocks: the send goes
+out with the text unchanged and the warning goes with the draft
+\(OW-73, OW-sidese)."
+  (agentpane-test--submitting
+    (goto-char (point-max))
+    (insert "Summarize the diff")
+    (should-not (agentpane-test--above-prompt))
+    (goto-char agentpane--prompt-start)
+    (insert "/")
+    (should (equal (agentpane-test--above-prompt)
+                   (concat agentpane-test--slash-warning "\n")))
+    (delete-char -1)
+    (should-not (agentpane-test--above-prompt))
+    (delete-region agentpane--prompt-start (point-max))
+    (insert "/compact")
+    (should (equal (agentpane-test--above-prompt)
+                   (concat agentpane-test--slash-warning "\n")))
+    (agentpane-send)
+    (should (equal (plist-get (alist-get 'sessions/prompt sent) :text) "/compact"))
+    (should (equal (agentpane-test--draft) ""))
+    (should-not (agentpane-test--above-prompt))
+    (let ((composer (progn (save-current-buffer (agentpane-prompt)) agentpane--composer)))
+      (with-current-buffer composer
+        (insert "Summarize the diff")
+        (should-not header-line-format)
+        (goto-char (point-min))
+        (insert "/")
+        (should (equal (and header-line-format (substring-no-properties header-line-format))
+                       agentpane-test--slash-warning))
+        (delete-char -1)
+        (should-not header-line-format)
+        (erase-buffer)
+        (insert "/mcp")
+        (should (equal (and header-line-format (substring-no-properties header-line-format))
+                       agentpane-test--slash-warning))
+        (agentpane-composer-send)
+        (should (equal (buffer-string) ""))
+        (should-not header-line-format))
+      (should (equal (plist-get (alist-get 'sessions/prompt sent) :text) "/mcp"))
+      (should-not (agentpane-test--above-prompt)))))
+
 (ert-deftest agentpane-test-edit-send-handled-says-so-in-the-fork ()
   "An edit's send whose prompt the fork's backend handled ends the edit,
 drops the watch the fork's prompt armed, and says no turn was started in
