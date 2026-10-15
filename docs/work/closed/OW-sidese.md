@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # OW-73's composer warning says a leading / reaches the agent as plain text, which a Pi extension command disproves, and agentpane-mode has no such warning
@@ -20,3 +21,11 @@ Only the claim the copy makes is wrong; the new wording is the executor's first 
 - The browser test in `src/client/App.test.ts` that asserts the `/compact` warning is shown also asserts the warning no longer claims the text will be sent to the agent as plain text, red first.
 - An ERT test in `emacs/agentpane-test.el`, red first, asserts agentpane-mode shows the same warning for a draft starting with `/` and none for an ordinary one, without blocking the send; it passes under `emacs --batch -L emacs -l ert -l agentpane -l emacs/agentpane-test.el -f ert-run-tests-batch-and-exit`.
 - `bun run check` passes.
+
+## Close note
+
+Landed in 04450dd, b182636 and c079b8c.
+The browser's slash-command warning now reads "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text.", promising neither outcome, since as of pi 1.2.0 Pi runs an extension command such as /mcp itself.
+agentpane-mode carries the same words: a line in the tail overlay above the transcript's prompt separator, above the handled-prompt line in the browser's order, and the header line of a composer buffer, restoring any header line it replaced.
+Both follow the draft through after-change-functions and never touch the send.
+The OW-73 browser test and the new ERT tests agentpane-test-slash-draft-warns-and-still-sends and agentpane-test-slash-warning-keeps-the-composers-own-header-line were each shown red first; ERT ran 258 tests with no unexpected results, and bun run check passed.
