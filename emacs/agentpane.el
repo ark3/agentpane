@@ -550,13 +550,16 @@ or the one that absorbed that in turn."
   "Send METHOD with PARAMS, a plist, to the helper for the current buffer.
 Return at once; CALLBACK runs later with the result, in this buffer, unless
 the buffer has been killed or has sent a later request since, whose reply
-is the one it wants.  An error or a timeout is reported in the echo area.
+is the one it wants; a buffer killed by a merge passes a following
+request's answer on (ALWAYS `follow', below).  An error or a timeout is
+reported in the echo area.
 With no PARAMS the request carries no `params' at all: a null one would
 reach the helper as a JSON null, which is not the absence it tests for.
 TIMEOUT is in seconds, `jsonrpc-default-request-timeout' when nil.
 
 FAILED, when given, runs with no arguments in this buffer, if it is still
-live, after an error or a timeout has been reported, whatever ALWAYS says.
+live or a merge has passed it on, after an error or a timeout has been
+reported, whatever ALWAYS says.
 It runs too, and the signal goes on, when sending the request or running
 CALLBACK exits non-locally -- the helper failing to start, or a reply's
 handling failing partway -- so a flag that FAILED clears never outlives the
@@ -582,9 +585,10 @@ the buffer that the reply settles, as a handled prompt's answer drops its
 turn-done watch (`agentpane--send-prompt', OW-kejire).
 ERRED, when given, runs after FAILED with the `data' of the error the
 helper answered with, where CALLBACK would have run with a result: in
-this buffer, if it is still live and, unless ALWAYS, has sent no later
-request since.  That `data' is the HTTP error's `status', `error' and
-`detail' (`toRpcError' in src/emacs/helper.ts), nil for an error the
+this buffer, if it is still live or a merge has passed it on, and,
+unless ALWAYS, has sent no later request since.  That `data' is the HTTP
+error's `status', `error' and `detail' (`toRpcError' in
+src/emacs/helper.ts), nil for an error the
 helper raised itself, so a caller can tell one error code from another,
 as `agentpane-refetch' tells a preview's `gone' (D26); a timeout, the
 helper's death and a non-local exit carry none and run no ERRED.
@@ -2664,8 +2668,10 @@ browser's edit gives the draft it displaced back on every exit
 A fork OTHER has in flight is this buffer's from then on, and so is any
 stop it has in flight (`agentpane-abort'): their requests answer here,
 following OTHER (`agentpane--request'), and this buffer counts as forking
-until the fork answers, refusing every attach and a second fork as OTHER
-did (`agentpane--refuse-forking').  Dropped with OTHER, as until
+until the fork answers, so a press here to attach or fork is refused
+\(`agentpane--refuse-forking').  An edit's send already waiting on this
+buffer's attach is not, and forks beside it, the first answer freeing
+the flag while the second is out (OW-tukuvo).  Dropped with OTHER, as until
 OW-larele, the fork's reply left a fork the server had made with no
 buffer on it, and an edit's text never reached the fork; the stop's
 lost what it took out of Pi's queue.  On Pi this buffer, holding
@@ -2850,8 +2856,8 @@ exits non-locally.  Otherwise return nil."
     (user-error "This session is closing")))
 
 (defun agentpane--refuse-forking (&optional failed)
-  "Signal a user error, sending nothing, while a fork this buffer began is
-in flight (`agentpane--forking'), calling FAILED first, if given, as
+  "Signal a user error, sending nothing, while this buffer counts a fork in
+flight (`agentpane--forking'), calling FAILED first, if given, as
 `agentpane--refuse-closing' does and for its reason.  Otherwise return nil.
 
 It guards an attach, never a command on a buffer already attached, as a
@@ -3696,7 +3702,9 @@ status has named one yet, it prompts for nothing and says so."
 
 (defvar-local agentpane--forking nil
   "Non-nil while a fork this buffer began, or a buffer it absorbed did
-\(`agentpane--absorb'), is in flight.")
+\(`agentpane--absorb'), is in flight.
+A flag, not a count: of two forks beside each other, which a merge
+allows, the first to answer clears it (OW-tukuvo).")
 
 (defun agentpane-fork ()
   "Fork this buffer's session at the user message at point, and open the fork
@@ -3763,7 +3771,9 @@ counts itself attached while the detach drops the attachment: named at
 `forget' in src/emacs/helper.ts, and accepted (OW-nowihu).
 
 One fork at a time per buffer, as the browser allows one send at a time
-\(OW-kelede): a second press while one is in flight sends nothing.  The fork
+\(OW-kelede): a second press while one is in flight sends nothing.  Only a
+press: after a merge, an edit's send that was waiting on this buffer's
+attach forks beside a fork it took over (OW-tukuvo).  The fork
 is shown in the window that showed this buffer when the fork began, if it
 is still live, rather than in whichever window is selected when the reply
 lands.
@@ -4042,7 +4052,9 @@ ahead of it (`agentpane-abort')."
   "Fork this buffer's session at the message its edit holds, and prompt the
 fork with TEXT and that message's images; once the prompt has answered,
 end the edit and call SENT.  The fork is `agentpane-fork''s, a streaming
-Pi turn's abort and the one fork at a time included, and the prompt is
+Pi turn's abort and the one fork at a time included, though that is
+checked as the send goes out and not once its attach answers
+\(OW-tukuvo), and the prompt is
 the fork buffer's own `agentpane--send-prompt'.  A fork or a prompt that
 fails leaves the edit standing, the edited text still in the prompt
 region, as the browser's `send' leaves its edit mode.
