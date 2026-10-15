@@ -492,7 +492,9 @@ export class PiAdapter implements BackendAdapter {
 	 * its preflight is done, which for an extension command is the command's
 	 * whole handler and on an idle Pi includes any compaction `_prepareRun`
 	 * runs first, so a Stop pressed during one waits it out before it stops
-	 * anything.
+	 * anything. An extension command whose handler awaits `ctx.waitForIdle()`,
+	 * which in `rpc-mode.js` is `session.waitForIdle()`, holds the Stop until
+	 * the turn ends by itself, so that Stop stops nothing (OW-miguyu).
 	 *
 	 * A prompt sent while a stop is in flight, from this client or another,
 	 * waits for the stop to settle and then goes out to the idle Pi the abort

@@ -690,6 +690,34 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		await expect(prompt).resolves.toBe("started");
 	});
 
+	it("holds a prompt behind a stop that started while it was waiting on another (OW-jifibo)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+		const prompts = () => h.child.sent().filter((c) => c.type === "prompt");
+
+		const first = h.adapter.abort();
+		const held = h.adapter.submit("held");
+		const second = h.adapter.abort();
+		await flush();
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		h.child.respondTo("abort");
+		await first;
+		await flush();
+		// The first stop has answered, but the second is still out.
+		expect(prompts()).toEqual([]);
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		expect(prompts()).toEqual([]);
+		h.child.respondTo("abort");
+		await second;
+		await flush();
+
+		expect(h.child.lastSent("prompt").message).toBe("held");
+		h.child.respondTo("prompt", { disposition: "started" });
+		await expect(held).resolves.toBe("started");
+	});
+
 	it("sends a prompt held by a stop Pi refused once the stop has failed", async () => {
 		const h = makeHarness();
 		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
@@ -697,6 +725,7 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		const stopped = h.adapter.abort();
 		const held = h.adapter.submit("held");
 		await flush();
+		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
 		h.child.failCommand("clear_queue", "refused");
 		await expect(stopped).rejects.toThrow("refused");
 		await flush();
