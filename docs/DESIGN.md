@@ -403,6 +403,13 @@ This is the one place worth being concrete rather than leaving to implementation
 D24 added a `handle` to `SessionSummary` and, beside `session`, to every per-session event and to the helper's notifications (OW-suyinu), and retired the `renamed` event once both clients keyed by it (OW-mofuho).
 The handle is required on every per-session event since the browser's reducer keys its views by it (OW-kimaya), and stays optional on `SessionSummary`, since a session only the backend's store knows has none.
 
+**Pi's `notify` is a notice.**
+Decided by the owner on 2026-10-14 (OW-nubafo): every `extension_ui_request` with method `notify` reaches both clients on the per-session `notice` arm OW-tujiya added, with `kind` `"notify"`, the method's own name as Codex's notices carry theirs, and Pi's other fire-and-forget methods -- as of `pi 1.2.0`, `setStatus`, `setWidget`, `setTitle` and `set_editor_text` -- stay dropped.
+Before this the Pi reducer dropped `notify` too, as a presentation hint with no home on the wire; that predated the `notice` arm and predated handled prompts, and as of `pi 1.2.0`, for a prompt an extension command handles, the `notify` is the command's whole output (`docs/MANUAL_TESTING.md`, OW-kokotu, "A prompt an extension command handles").
+All of them rather than only those arriving with a handled prompt: the arm, its snapshot carriage and both clients' drawing of it already exist, so the change is the server's, and in the clients at most a multi-line message drawn as lines, while tying the text to OW-dulipe's handled outcome would add client work and still drop the `notify` an extension sends at `session_start` -- as `auto-read-agents-refs.ts` on the home server does, read at its source on 2026-10-14, whenever it has read a file an AGENTS.md references.
+What notices already do, they do for these: they accumulate, nothing dismisses them, and one identical to a notice already held is not shown again (OW-piloni), so a command run twice shows its answer once.
+That is the notice arm's first cut, and how it fares under a chatty extension is for use to show.
+
 ### D12. Bounded subprocess lifetime: idle timeout + LRU cap
 
 **Decided on 2026-08-15, not yet built, and deliberately so.**
