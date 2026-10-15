@@ -112,7 +112,8 @@
 	 * no send is out, ahead of whatever the composer holds then: after a fork
 	 * that lands that is normally nothing, so the draft comes back as it was.
 	 * Dropping it at the fork lost a note typed before the click, which
-	 * OW-hezidi had ruled out.
+	 * OW-hezidi had ruled out. No edit opens while a send is out (`startEdit`),
+	 * so the composer it would displace is never text already on its way.
 	 *
 	 * `index` is the message's position in the transcript array, and it is the
 	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
@@ -1250,14 +1251,21 @@
 	 * Take an earlier user message back into the composer (OW-hezidi). No request
 	 * is issued and no server state changes: this is the free, abandonable half
 	 * of the gesture, and everything else here exists to keep it that way.
+	 *
+	 * Answers whether the edit opened, which `editLastMessage` stops on.
 	 */
-	function startEdit(index: number): void {
+	function startEdit(index: number): boolean {
 		const messages = selectedSession?.messages ?? [];
 		const message = messages[index];
-		if (!message || message.role !== "user") return;
+		if (!message || message.role !== "user") return false;
 		// Nothing else may open an edit the fork cannot honour; the two callers
 		// already check, and this is the one place that must (OW-roveze).
-		if (forkableIndices && !forkableIndices.has(index)) return;
+		if (forkableIndices && !forkableIndices.has(index)) return false;
+		// Nor while a send is out, here for the same reason (OW-kijuju): the
+		// composer holds the text that send is taking, the controls stay live --
+		// on a fork's own transcript as soon as its attach selects it -- and an
+		// edit would displace that text, for Cancel to put back already sent.
+		if (view.sending) return false;
 		const text: string[] = [];
 		// Carried, not dropped: `PromptRequest.images` takes them back, and a fork
 		// that quietly sent fewer images than the original held is exactly the
@@ -1274,6 +1282,7 @@
 		editing = { index, images };
 		controller.setDraft(text.join("\n\n"));
 		promptEl?.focus();
+		return true;
 	}
 
 	/**
@@ -1298,13 +1307,13 @@
 	 * re-checks `isStreaming` and aborts again before it forks.
 	 *
 	 * The stop is `stop()`, as the Stop button's is, so what it takes out of
-	 * Pi's queue never lands inside the edit it just filled (OW-fahoti).
+	 * Pi's queue never lands inside the edit it just filled (OW-fahoti). An
+	 * edit `startEdit` refused stops nothing: the stop is the edit's.
 	 */
 	function editLastMessage(): void {
 		const index = lastUserIndex;
 		if (index === null) return;
-		startEdit(index);
-		if (stopsBeforeFork) stop();
+		if (startEdit(index) && stopsBeforeFork) stop();
 	}
 
 	/**

@@ -4265,7 +4265,7 @@ describe("App", () => {
 	 * does -- and any later stop, such as the fork's own, finds the queue
 	 * already empty. Every prompt is held until `land` is called, so a test
 	 * can answer while a fork or a send is still out; `prompts` is every
-	 * prompt's text. With
+	 * prompt's text, and `aborts` counts the stops that went out. With
 	 * `streaming` false the turn has already ended, so a fork stops nothing.
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
@@ -4325,7 +4325,7 @@ describe("App", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			await tick();
 		};
-		return { controller, prompts, answer: () => settle(answer), land: () => settle(land) };
+		return { controller, prompts, aborts: () => aborts, answer: () => settle(answer), land: () => settle(land) };
 	}
 
 	/**
@@ -4456,6 +4456,52 @@ describe("App", () => {
 
 		expect(prompts).toEqual(["first draft"]);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+	});
+
+	/**
+	 * While a fork's prompt is out the composer holds the text it is sending,
+	 * and the fork's transcript already offers edit controls. An edit opened
+	 * there would stash that text, and Cancel would put back a message already
+	 * sent, so none opens until the send settles (OW-kijuju).
+	 */
+	it("opens no edit while a fork's prompt is still out (OW-kijuju)", async () => {
+		const { controller, land } = await streamingPi([], false);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().sending).toBe(true);
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+
+		await land();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+	});
+
+	/**
+	 * The plain send has the same window, and on a streaming Pi session the
+	 * shortcut there is "Stop and edit": with no edit to stop for, it stops
+	 * nothing either (OW-kijuju).
+	 */
+	it("neither opens an edit nor stops the turn while a plain send is out (OW-kijuju)", async () => {
+		const { controller, prompts, aborts, land } = await streamingPi([]);
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		expect(controller.getView().sending).toBe(true);
+
+		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		expect(aborts()).toBe(0);
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+
+		await land();
+		expect(prompts).toEqual(["half-written note"]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("");
 	});
 
 	/**
