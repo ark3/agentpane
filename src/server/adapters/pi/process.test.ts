@@ -411,13 +411,42 @@ describe("PiAdapter command correlation", () => {
 		expect(await models).toEqual([{ id: "anthropic/claude-opus-5", label: "Opus 5", efforts: [], defaultEffort: null }]);
 	});
 
+	/**
+	 * A refusal a steered prompt can still meet: `AgentSession.prompt` in
+	 * `pi 1.2.0` throws this before any `streamingBehavior` check (read at the
+	 * installed package, not measured).
+	 */
 	it("rejects the caller with Pi's own error text on success:false", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
 
 		const submitted = h.adapter.submit("hello");
-		h.child.failCommand("prompt", "Agent is streaming; specify streamingBehavior");
-		await expect(submitted).rejects.toThrow(/streamingBehavior/);
+		h.child.failCommand("prompt", "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.");
+		await expect(submitted).rejects.toThrow(/compaction is in progress/);
+	});
+
+	/**
+	 * `pi 1.2.0` on the home server, 2026-10-14 (docs/MANUAL_TESTING.md,
+	 * OW-kokotu): Pi counts a run from accepting its prompt, but writes
+	 * `agent_start` only after answering it, so a second prompt queued behind
+	 * the first went out bare in that gap and was refused.
+	 */
+	it("steers every prompt, including one sent before the running turn's agent_start (OW-wibude)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const first = h.adapter.submit("first");
+		h.child.respondTo("prompt", { disposition: "started" });
+		await first;
+		const second = h.adapter.submit("second");
+		h.child.respondTo("prompt", { disposition: "queued" });
+		await second;
+
+		const prompts = h.child.sent().filter((c) => c.type === "prompt");
+		expect(prompts.map((c) => [c.message, c.streamingBehavior])).toEqual([
+			["first", "steer"],
+			["second", "steer"],
+		]);
 	});
 
 	/**

@@ -394,11 +394,16 @@ export class PiAdapter implements BackendAdapter {
 			// adapter-level `submit()` -- which has no way for the caller to
 			// express steer-vs-follow-up -- should pick.
 			//
-			// `isStreaming` turns true only at `agent_start`, which Pi writes after
-			// the response that resolves the previous `submit()`. Same runs: a
-			// second prompt queued behind the first in `SessionManager.submit` went
-			// out bare in that gap and was refused, and the route answered 500.
-			...(this.state.isStreaming ? { streamingBehavior: "steer" as const } : {}),
+			// It goes on every prompt, because only Pi knows whether it is busy.
+			// Our `isStreaming` turns true at `agent_start`, which Pi writes after
+			// the response that resolves the previous `submit()`; in the same runs
+			// a second prompt queued behind the first in `SessionManager.submit`
+			// went out bare in that gap, was refused, and the route answered 500
+			// (OW-kokotu). The same runs answered a "steer" prompt sent to an idle
+			// Pi `started`, an ordinary turn; `AgentSession.prompt` in `pi 1.2.0`
+			// reads `streamingBehavior` only while it is streaming, so an idle
+			// prompt's images reach the run unchanged (read, not measured).
+			streamingBehavior: "steer",
 		};
 		const response = await this.sendCommand<PiResponseFor<"prompt">>(cmd);
 		// A prompt an extension command consumes, `/mcp` say, was answered
