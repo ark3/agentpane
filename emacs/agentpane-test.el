@@ -2464,7 +2464,8 @@ error's `data', to fail it so and then run its ERRED with that plist, as
 `agentpane--request' does for an error the helper answered with that
 `data', running its UNSENT first when the plist carries an HTTP `status',
 as the server's refusal does (OW-hiliti).  ERRED runs with nil for a
-failure by nil.  Either way the answer runs in the buffer that sent the
+failure by nil.  A reply runs the request's REPLIED with it before its
+CALLBACK (OW-kejire).  Either way the answer runs in the buffer that sent the
 request.  Every buffer BODY made is killed afterwards."
   (declare (indent 2))
   `(let ((sent nil)
@@ -2482,7 +2483,7 @@ request.  Every buffer BODY made is killed afterwards."
                   (cl-pushnew (current-buffer) snapshotted)
                   (apply attach-by args)))
                ((symbol-function 'agentpane--request)
-                (lambda (method params callback &optional _always failed _timeout unsent erred)
+                (lambda (method params callback &optional _always failed _timeout unsent erred replied)
                   (push (cons method params) sent)
                   (when (eq method 'sessions/attach)
                     (setq snapshotted (delq (current-buffer) snapshotted)))
@@ -2504,7 +2505,8 @@ request.  Every buffer BODY made is killed afterwards."
                                             :nodes agentpane-test--nodes)))
                                    (with-current-buffer from
                                      (if (and ok (atom ok))
-                                         (funcall callback reply)
+                                         (progn (when replied (funcall replied reply))
+                                                (funcall callback reply))
                                        (when (and unsent (plist-get ok :status))
                                          (funcall unsent))
                                        (when failed (funcall failed))
@@ -5283,7 +5285,7 @@ never be raised for a turn this Emacs did not ask for, as the browser
 decided (OW-yobayi).  That holds only when the answer comes before the
 turn's events, as here: on `pi 1.2.0' the handler runs before Pi answers,
 so a turn it starts, or another client's, can stream and end first and
-raise the indicator, which the abandon cannot take back (OW-kejire)."
+raise the indicator, which stays raised (OW-kejire)."
   (agentpane-test--submitting
     (setq prompted '(:disposition "handled"))
     (funcall submit)
@@ -5312,6 +5314,43 @@ indicator, as a prompt refused mid-turn leaves it (OW-taviju)."
     (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-dropped-by-a-handled-answer-after-streaming ()
+  "A handled answer that comes while the turn its prompt armed for is
+already streaming, as on `pi 1.2.0' a turn the extension's handler starts
+can, still drops that watch, so the turn's end raises nothing, as the
+browser's `disarmSubmit' drops a watch that has seen streaming
+\(OW-kejire, OW-zikiga)."
+  (agentpane-test--submitting
+    (setq prompted '(:disposition "handled")
+          hold '(sessions/prompt))
+    (funcall submit)
+    (funcall status t)
+    (funcall (cdr (pop held)) t)
+    (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
+    (funcall status nil)
+    (should-not (agentpane-test--turn-done-p))))
+
+(ert-deftest agentpane-test-turn-done-kept-raised-by-a-handled-answer-after-the-turn ()
+  "A turn that streams and ends unseen before its prompt's handled answer
+has raised the indicator, and the answer leaves it raised, as the
+browser's `disarmSubmit' leaves its badge: nothing tells that turn from
+one this Emacs asked for, and missing it costs a glance (OW-kejire,
+OW-zikiga).  The answer drops only the watch its own prompt armed, by
+identity, so one armed on the handle since, as by a prompt from another
+buffer holding it, still stands."
+  (agentpane-test--submitting
+    (setq prompted '(:disposition "handled")
+          hold '(sessions/prompt))
+    (funcall submit)
+    (funcall status t)
+    (funcall status nil)
+    (should (agentpane-test--turn-done-p))
+    (let ((later (agentpane--watch-submit)))
+      (funcall (cdr (pop held)) t)
+      (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
+      (should (agentpane-test--turn-done-p))
+      (should (memq later agentpane--turn-watches)))))
 
 (defconst agentpane-test--slash-warning
   "Agentpane does not run slash commands — depending on the agent, this may run as a command or be read as plain text."
@@ -5585,6 +5624,48 @@ so a turn from elsewhere that then ends unseen raises nothing.  Through
                 (funcall (plist-get prompt :error-fn)
                          '(:code 409 :message "Refused"
                            :data (:status 409 :error "turn_active" :detail "Refused"))))
+              (funcall status t)
+              (funcall status nil)
+              (should-not (agentpane-test--turn-done-p)))))))))
+
+(ert-deftest agentpane-test-turn-done-abandoned-by-a-handled-answer-after-a-merge ()
+  "A prompt the backend handled, answering only after a merge has killed
+the buffer that sent it, still drops the watch it armed, which is on the
+handle the survivor holds, so a turn from elsewhere that then ends unseen
+raises nothing.  Through `agentpane--request' over a stub jsonrpc, which
+runs no CALLBACK in a killed buffer (OW-kejire)."
+  (let ((request (symbol-function 'agentpane--request))
+        (calls nil))
+    (agentpane-test--watching
+      (agentpane-test--with-helper
+        (agentpane-test--merging
+          (cl-letf (((symbol-function 'agentpane--request) request)
+                    ((symbol-function 'jsonrpc-async-request)
+                     (lambda (_conn method _params &rest args)
+                       (push (cons method args) calls)
+                       (list 1 nil))))
+            (let ((status (lambda (streaming)
+                            (agentpane--on-notification
+                             nil 'session/status
+                             (list :session canonical :handle "h1"
+                                   :isStreaming (if streaming t :json-false))))))
+              (with-current-buffer holder
+                (setq agentpane--attached agentpane--connection)
+                (goto-char (point-max))
+                (insert "hello")
+                (agentpane-send))
+              (let ((prompt (cdr (assq 'sessions/prompt calls))))
+                (with-current-buffer previewing (agentpane--attach))
+                (agentpane--on-notification
+                 agentpane--connection 'session/snapshot
+                 (list :session canonical :handle "h1" :token 1 :nodes []
+                       :isStreaming :json-false))
+                (funcall (plist-get (cdr (assq 'sessions/attach calls)) :success-fn)
+                         (list :ref canonical :handle "h1"))
+                (should-not (buffer-live-p holder))
+                (should (assoc "h1" agentpane--turn-watches))
+                (funcall (plist-get prompt :success-fn) '(:disposition "handled")))
+              (should-not (assoc "h1" agentpane--turn-watches))
               (funcall status t)
               (funcall status nil)
               (should-not (agentpane-test--turn-done-p)))))))))
