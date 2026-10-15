@@ -114,7 +114,8 @@
 	 * that lands that is normally nothing, so the draft comes back as it was.
 	 * Dropping it at the fork lost a note typed before the click, which
 	 * OW-hezidi had ruled out. No edit opens while a send is out (`startEdit`),
-	 * so the composer it would displace is never text already on its way.
+	 * so the composer it would displace is never text already on its way, nor
+	 * while the external editor is rewriting it (OW-momejo).
 	 *
 	 * `index` is the message's position in the transcript array, and it is the
 	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
@@ -1266,7 +1267,10 @@
 		// composer holds the text that send is taking, the controls stay live --
 		// on a fork's own transcript as soon as its attach selects it -- and an
 		// edit would displace that text, for Cancel to put back already sent.
-		if (view.sending) return false;
+		// Nor while the external editor has the draft (OW-momejo): the edit
+		// would displace the text it is rewriting, its answer would land inside
+		// the edit, and Cancel would drop it.
+		if (view.sending || view.editingExternally) return false;
 		const text: string[] = [];
 		// Carried, not dropped: `PromptRequest.images` takes them back, and a fork
 		// that quietly sent fewer images than the original held is exactly the
@@ -1405,8 +1409,10 @@
 		// replies, which a refused press never reaches, so there it has nothing to
 		// disarm (OW-vitefo). Both paths, and off the controller's own `sending`
 		// flag rather than `busy` -- which an abort or an attach clears while the
-		// POST it described is still outstanding (OW-kelede).
-		if (view.sending) return;
+		// POST it described is still outstanding (OW-kelede). The controller
+		// refuses while the external editor has the draft too, and this returns
+		// before arming anything, as for a send (OW-momejo).
+		if (view.sending || view.editingExternally) return;
 		handledKey = null;
 		// The selected session's handle, which a rename landing while the request
 		// is in flight (D9) leaves alone, so it still names that session when the
@@ -1835,7 +1841,7 @@
 						{stopsBeforeFork ? "Stop and edit" : "Edit last message"}
 					</button>
 				{/if}
-				<button type="submit" disabled={!view.draft || view.sending || compaction !== null}>{sendLabel}</button>
+				<button type="submit" disabled={!view.draft || view.sending || view.editingExternally || compaction !== null}>{sendLabel}</button>
 				{#if streamingAction}
 					<button type="button" class="abort" onclick={stop}>Stop</button>
 				{/if}

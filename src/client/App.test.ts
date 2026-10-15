@@ -4636,6 +4636,79 @@ describe("App", () => {
 	});
 
 	/**
+	 * No send starts while the editor is open: it would go out with the text
+	 * the editor is rewriting, and the answer would leave it under Send. What
+	 * was typed meanwhile is kept beside the editor's text (OW-momejo).
+	 */
+	it("sends nothing while the external editor is open, and keeps what was typed beside its answer (OW-momejo)", async () => {
+		const { controller, prompts, edit } = await streamingPi([], false);
+		await settledSelection(controller);
+		const textarea = screen.getByLabelText("Prompt");
+		await fireEvent.keyDown(textarea, { key: "g", ctrlKey: true });
+		await fireEvent.input(textarea, { target: { value: "half-written note, and more" } });
+
+		expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+		await fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(prompts).toEqual([]);
+		await edit("rewritten note");
+
+		expect(prompts).toEqual([]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note, and more\n\nrewritten note");
+	});
+
+	/**
+	 * No edit opens while the editor is open either: it would displace the
+	 * text the editor is rewriting, the answer would land inside the edit, and
+	 * Cancel would drop it (OW-momejo).
+	 */
+	it("opens no edit while the external editor is open (OW-momejo)", async () => {
+		const { controller, edit } = await streamingPi([], false);
+		await settledSelection(controller);
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.click(screen.getByRole("button", { name: "Edit last message" }));
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+		await edit("rewritten note");
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("rewritten note");
+	});
+
+	/** The button reads as the controller answers: no editor while a send is out (OW-momejo). */
+	it("disables the External Editor while a send is out (OW-momejo)", async () => {
+		const { controller, land } = await streamingPi([], false);
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		expect(controller.getView().sending).toBe(true);
+
+		expect(screen.getByRole("button", { name: "External Editor" })).toBeDisabled();
+		await land();
+		expect(screen.getByRole("button", { name: "External Editor" })).toBeEnabled();
+	});
+
+	/**
+	 * An editor opened inside an edit is given the edit's text. A click to
+	 * another session ends the edit while it is open and releases the draft
+	 * the edit displaced ahead of that text, and the answer takes the edit
+	 * text's place behind it (OW-kijuju, OW-momejo).
+	 */
+	it("keeps the draft an edit gave back while the external editor was open (OW-momejo)", async () => {
+		const { controller, edits, edit } = await streamingPi([], false);
+		await settledSelection(controller);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+		expect(edits).toEqual(["first draft"]);
+		await controller.preview({ backend: "pi", id: "pi-2" });
+		await tick();
+		expect(controller.getView().draft).toBe("half-written note\n\nfirst draft");
+		await edit("rewritten draft");
+
+		expect(controller.getView().draft).toBe("half-written note\n\nrewritten draft");
+	});
+
+	/**
 	 * The shortcut's name and its click-time stop follow the same split as the
 	 * primary button (D15, OW-bakosi): on Codex and Claude the fork leaves the
 	 * parent turn running, so reaching for the last message is free again --

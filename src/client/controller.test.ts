@@ -589,6 +589,34 @@ describe("client controller", () => {
 	});
 
 	/**
+	 * The editor and a send hold the draft exclusively of each other: a send
+	 * started mid-trip would leave its own text under Send once the answer
+	 * kept it (OW-momejo).
+	 */
+	it("sends nothing and forks nothing while the external editor is open", async () => {
+		const api = new FakeApi();
+		const editing = deferred<{ text: string }>();
+		api.editDraft.mockReturnValue(editing.promise);
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("current draft");
+
+		const edit = controller.editDraft();
+		expect(await controller.submit()).toBeNull();
+		expect(await controller.forkAndSubmit(0)).toBeNull();
+
+		expect(api.prompt).not.toHaveBeenCalled();
+		expect(api.abort).not.toHaveBeenCalled();
+		expect(api.fork).not.toHaveBeenCalled();
+		expect(controller.getView().sending).toBe(false);
+		editing.resolve({ text: "edited draft" });
+		await edit;
+	});
+
+	/**
 	 * An abort writes `busy` over the round trip's, so `busy` cannot be what
 	 * keeps a second editor from opening (OW-momejo).
 	 */

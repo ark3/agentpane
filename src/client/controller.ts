@@ -50,6 +50,13 @@ export interface ControllerView {
 	 * `editDraft` alone, as `sending` is the prompt's and for the same reason:
 	 * `abort` and `attachAndSelect` write `busy` over its `"editing-externally"`
 	 * mid-trip, which read as idle and let a second editor open (OW-momejo).
+	 *
+	 * It also holds the draft exclusively of a send and of an edit, as
+	 * `sending` holds it against the editor: `submit` and `forkAndSubmit`
+	 * refuse while it is set, and so does `startEdit` in `App.svelte`. A send
+	 * started mid-trip went out with the text the editor was rewriting and
+	 * left it under Send once the answer kept it; an edit opened mid-trip took
+	 * the answer inside itself, for Cancel to drop.
 	 */
 	editingExternally: boolean;
 	error: string | null;
@@ -1295,8 +1302,9 @@ export function createController(
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
 			// with it is nobody's intent. Read off `sending` rather than `busy`,
-			// which an abort or an attach clears mid-POST (OW-kelede).
-			if (view.sending) return null;
+			// which an abort or an attach clears mid-POST (OW-kelede). Nor while
+			// the external editor has the draft (`editingExternally`, OW-momejo).
+			if (view.sending || view.editingExternally) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
 			// The error on screen as the user sends, which is the only one
@@ -1344,15 +1352,18 @@ export function createController(
 			publish({ busy: "editing-externally", editingExternally: true, error: null });
 			try {
 				const edited = await api.editDraft({ text });
-				// The textarea stays live while the editor is open, so the composer
-				// may have moved under it: typing, a stop's released prompts, or the
-				// draft an ended edit gives back (OW-momejo). The answer keeps both,
-				// the editor's text and whatever arrived, at this one place rather
-				// than per source. Arrivals go ahead, as `withQueued` puts a stop's,
-				// and where they joined ahead of the text sent -- the shape every
-				// release in `App.svelte` leaves -- the editor's text stands in for
-				// it; otherwise the composer is kept whole, the text sent included,
-				// and the user tidies it.
+				// No send and no edit starts while the editor is open
+				// (`editingExternally`), but the textarea stays live, so the composer
+				// may still have moved under it: typing, a stop's released prompts,
+				// or the draft an edit displaced, given back by Cancel or by a
+				// selection change (OW-momejo). The answer keeps both, the editor's
+				// text and whatever arrived, at this one place rather than per
+				// source. Arrivals go ahead, as `withQueued` puts a stop's. Where
+				// they joined ahead of the text sent -- the shape both of
+				// `App.svelte`'s releases leave -- the editor's text takes that
+				// text's place, so the composer does not hold the original beside
+				// its rewrite; otherwise the composer is kept whole, the text sent
+				// included, and the user tidies it.
 				//
 				// A first cut, taken before the case was seen in use, and to be
 				// revisited once it has been (owner, 2026-10-15). It keeps everything
@@ -1386,8 +1397,9 @@ export function createController(
 			// two identical prompts -- and worse: the second one's failure took the
 			// *first* fork's follow and badge arming back down with it, because on
 			// a renaming backend both presses' armed keys had followed onto the
-			// same fork.
-			if (view.sending) return null;
+			// same fork. Nor while the external editor has the draft, as `submit`
+			// (OW-momejo).
+			if (view.sending || view.editingExternally) return null;
 			if (!view.draft) return null;
 			const text = view.draft;
 			// The requests below go out on the click-time ref even if a rename lands
