@@ -126,9 +126,9 @@
 		stashedDraft: string;
 	} | null>(null);
 	/**
-	 * What "Stop and edit"'s own stop took out of Pi's queue (D16), waiting for
-	 * the composer to hold no edit and no prompt in flight (OW-fahoti); see
-	 * `editLastMessage` for why it waits and where it goes.
+	 * What a stop took out of Pi's queue (D16), waiting for the composer to
+	 * hold no edit and no prompt in flight (OW-fahoti); see `stop` for why it
+	 * waits and where it goes.
 	 */
 	let heldQueued = $state<string[]>([]);
 	/**
@@ -1281,39 +1281,62 @@
 	 * forking it. Filled first, "Stop and fork" is the truth: `forkAndSubmit`
 	 * re-checks `isStreaming` and aborts again before it forks.
 	 *
-	 * What the stop takes out of Pi's queue (D16) is the user's own unsent
-	 * words, and it answers after the fill, so a plain Stop's join into the
-	 * draft would put them inside the edit and send them into the fork
-	 * (OW-fahoti). They are held instead until no edit is open and no prompt
-	 * is in flight, and then joined ahead of whatever the composer holds, by
-	 * the same `withQueued` rule. That one rule covers every way the edit
-	 * ends, whichever side of the answer it falls on:
+	 * The stop is `stop()`, as the Stop button's is, so what it takes out of
+	 * Pi's queue never lands inside the edit it just filled (OW-fahoti).
+	 */
+	function editLastMessage(): void {
+		const index = lastUserIndex;
+		if (index === null) return;
+		startEdit(index);
+		if (stopsBeforeFork) stop();
+	}
+
+	/**
+	 * Every stop the composer sends: the Stop button's, and "Stop and edit"'s.
+	 *
+	 * What a stop takes out of Pi's queue (D16) is the user's own unsent words,
+	 * and they come back to the composer (OW-fahoti) -- but not straight into
+	 * it, because where they belong depends on what it holds when the answer
+	 * lands, not on which button sent the stop. Joined into an open edit they
+	 * would be sent into the fork, or overwritten by Cancel. So they wait in
+	 * `heldQueued` until no edit is open and no prompt is in flight, and are
+	 * then joined ahead of whatever the composer holds by `withQueued`, Pi's
+	 * own rule. With neither in the way, which is a plain Stop's usual case,
+	 * that is at once. The one rule covers every way an edit ends, whichever
+	 * side of the answer it falls on:
 	 *
 	 * - Cancel puts the displaced draft back first, so they land ahead of it,
 	 *   exactly as if they had been stashed with it.
 	 * - A fork drops the displaced draft, which they are not, so they are not
 	 *   stashed with it. Its prompt is still out when the fork's selection ends
 	 *   the edit, with the composer holding the text being sent; they wait for
-	 *   that prompt to settle, which clears the text if it landed, and join
-	 *   whatever the fork leaves there. A fork that fails before it moves the
-	 *   selection leaves the edit open, and they keep waiting with it.
+	 *   that prompt to land, which clears the text, and join whatever the fork
+	 *   leaves there. A fork that fails before it moves the selection leaves
+	 *   the edit open, and they keep waiting with it.
 	 * - Clicking to another session ends the edit and leaves its text in the
 	 *   composer, as a switch always has; that text is then only a draft, and
 	 *   they join ahead of it.
+	 * - So does a fork whose prompt fails after its attach moved the selection:
+	 *   that move already ended the edit, and the unsent edit text it leaves in
+	 *   the composer is a draft like the switch's, which they join ahead of.
 	 */
-	function editLastMessage(): void {
-		const index = lastUserIndex;
-		if (index === null) return;
-		startEdit(index);
-		if (stopsBeforeFork) {
-			void controller.abort((queued) => {
-				heldQueued = [...heldQueued, ...queued];
-			});
-		}
+	function stop(): void {
+		void controller.abort().then((queued) => {
+			heldQueued = [...heldQueued, ...queued];
+		});
 	}
 
 	// Releases `heldQueued` the moment nothing in the composer is an edit's or
-	// a prompt's (OW-fahoti); `editLastMessage` says why.
+	// a prompt's (OW-fahoti); `stop` says why it waits.
+	//
+	// The selection may have moved since the stop -- a click elsewhere, or the
+	// fork that ended the edit -- and that changes nothing here. The draft is
+	// global, so the words now sit under a Send aimed at the session selected
+	// now; but they reached no session at all, so a Send there is never a
+	// duplicate, and it is the user's own press with the text in front of them.
+	// The composer is the only place this tab keeps unsent words: holding them
+	// for the stopped session would lose them to a user who never goes back.
+	// Per-session drafts (OW-zigepi) would change this answer.
 	$effect(() => {
 		if (heldQueued.length === 0 || editing || view.sending) return;
 		const queued = heldQueued;
@@ -1783,7 +1806,7 @@
 				{/if}
 				<button type="submit" disabled={!view.draft || view.sending || compaction !== null}>{sendLabel}</button>
 				{#if streamingAction}
-					<button type="button" class="abort" onclick={() => void controller.abort()}>Stop</button>
+					<button type="button" class="abort" onclick={stop}>Stop</button>
 				{/if}
 			</div>
 		</form>

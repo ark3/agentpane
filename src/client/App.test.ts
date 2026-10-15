@@ -217,6 +217,7 @@ class FakeController implements AgentpaneController {
 
 	async abort() {
 		this.aborted += 1;
+		return [];
 	}
 
 	/** Every fork the shell asked for, in order, with the images it carried. */
@@ -4233,19 +4234,21 @@ describe("App", () => {
 	});
 
 	/**
-	 * A Pi session streaming its reply to "first draft", driven through the real
-	 * controller, since it is the controller's `abort` that hands over what the
-	 * stop took out of Pi's queue (OW-fahoti). The click's stop answers with
-	 * `queued` once `answer` is called; the fork's own stop finds the queue
-	 * already empty and takes nothing out. A fork's prompt is held until `land`
-	 * is called, so a test can answer while the fork is still out.
+	 * A Pi session streaming its reply to "first draft", with "half-written note"
+	 * in the composer, driven through the real controller and the real abort
+	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
+	 * called -- with no body at all when `queued` is empty, as the route's 204
+	 * does -- and any later stop, such as the fork's own, finds the queue
+	 * already empty. A fork's prompt is held until `land` is called, so a test
+	 * can answer while the fork is still out; `prompts` is every prompt's text.
 	 */
-	async function stopAndEdit(queued: string[]) {
+	async function streamingPi(queued: string[]) {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
 		let emit: (event: ServerEvent) => void = () => {};
 		let answer = () => {};
 		let land = () => {};
 		let aborts = 0;
+		const prompts: string[] = [];
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft"), assistant([{ type: "text", text: "an answer" }])], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
@@ -4257,15 +4260,18 @@ describe("App", () => {
 				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
 			},
 			preview: async (ref) => ({ ref, turns: [] }),
-			prompt: () => new Promise<void>((resolve) => {
-				land = resolve;
-			}),
+			prompt: (_ref, body) => {
+				prompts.push(body.text);
+				return new Promise<void>((resolve) => {
+					land = resolve;
+				});
+			},
 			editDraft: async (body) => ({ text: body.text }),
 			abort: () => {
 				aborts += 1;
 				if (aborts > 1) return Promise.resolve();
-				return new Promise<AbortResponse>((resolve) => {
-					answer = () => resolve({ queued });
+				return new Promise<AbortResponse | void>((resolve) => {
+					answer = () => resolve(queued.length > 0 ? { queued } : undefined);
 				});
 			},
 			compact: async () => {},
@@ -4288,22 +4294,65 @@ describe("App", () => {
 		await controller.select(piSession);
 		controller.setDraft("half-written note");
 		await tick();
-		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
 		const settle = async (release: () => void) => {
 			release();
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			await tick();
 		};
-		return { controller, answer: () => settle(answer), land: () => settle(land) };
+		return { controller, prompts, answer: () => settle(answer), land: () => settle(land) };
 	}
 
 	/**
+	 * Pi's own rule for the same moment: the cleared prompts in order, then the
+	 * draft as it stands when the answer lands, so what was typed during the
+	 * round trip is kept behind them (OW-fahoti).
+	 */
+	it("puts what a plain Stop took out of Pi's queue back ahead of the draft typed meanwhile (OW-fahoti)", async () => {
+		const { answer } = await streamingPi(["first steer", "second steer"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "typed while it was out" } });
+		await answer();
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first steer\n\nsecond steer\n\ntyped while it was out");
+	});
+
+	/**
+	 * A draft of blank lines is one the join would rewrite, since it drops a
+	 * blank part, so this fails if an empty answer reaches the join at all.
+	 */
+	it("leaves the draft alone when a plain Stop took nothing out (OW-fahoti)", async () => {
+		const { answer } = await streamingPi([]);
+		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "\n\n" } });
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+		await answer();
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("\n\n");
+	});
+
+	/**
 	 * Joined into the composer they would be sent into the fork as part of the
-	 * edit, so they wait with the draft the edit displaced, ahead of it by the
-	 * same rule as a plain Stop (OW-fahoti).
+	 * edit, so they wait for the edit to end, and Cancel puts them ahead of the
+	 * draft it displaced (OW-fahoti).
 	 */
 	it("keeps what Stop and edit took out of Pi's queue out of the edit, and puts it back with the displaced draft (OW-fahoti)", async () => {
-		const { answer } = await stopAndEdit(["steered mid-turn"]);
+		const { answer } = await streamingPi(["steered mid-turn"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
+		await answer();
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+	});
+
+	/**
+	 * Where the words go is decided by what the composer holds when the answer
+	 * lands, not by which button sent the stop: the plain Stop beside an edit
+	 * opened from the transcript holds them the same way (OW-fahoti).
+	 */
+	it("keeps what a plain Stop took out of Pi's queue out of an open edit (OW-fahoti)", async () => {
+		const { answer } = await streamingPi(["steered mid-turn"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 		await answer();
 
 		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
@@ -4318,9 +4367,11 @@ describe("App", () => {
 	 * still out, and never inside the text the fork sent (OW-fahoti).
 	 */
 	it.each(["before", "while"] as const)("puts what Stop and edit took out of Pi's queue in the composer when it answers %s a fork goes out (OW-fahoti)", async (when) => {
-		const { controller, answer, land } = await stopAndEdit(["steered mid-turn"]);
+		const { controller, prompts, answer, land } = await streamingPi(["steered mid-turn"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
 		if (when === "before") await answer();
-		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+		// Sent as loaded, so nothing typed over the composer can hide words that
+		// reached it before the fork read it.
 		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await tick();
@@ -4331,6 +4382,7 @@ describe("App", () => {
 		if (when === "while") await answer();
 		await land();
 
+		expect(prompts).toEqual(["first draft"]);
 		expect(controller.getView().sending).toBe(false);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn");
 	});

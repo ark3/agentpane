@@ -261,14 +261,15 @@ export interface AgentpaneController {
 	/**
 	 * Stop the selected session's turn; no-op unless its pane is live (OW-forinu).
 	 *
-	 * The prompts the stop took out of the backend's queue (D16, OW-wisifo) are
-	 * joined into the draft by `withQueued` (OW-fahoti). `onQueued`, when given,
-	 * receives them instead and the draft is left alone: "Stop and edit" stops
-	 * with the composer holding an edit, and the shell knows where they go
-	 * until that edit is over, which the controller does not. Neither hears an
-	 * answer that took nothing out.
+	 * Resolves with the text of each prompt the stop took out of the backend's
+	 * queue (D16, OW-wisifo), in order, and with none when it took nothing out,
+	 * failed, or never went out. It never writes them into the draft itself
+	 * (OW-fahoti): where they belong depends on what the composer holds when
+	 * the answer lands -- an open edit, a fork's prompt still out, or neither --
+	 * and only the shell knows that. Both of its stop buttons hand them to one
+	 * place in `App.svelte`, which joins them in with `withQueued`.
 	 */
-	abort(onQueued?: (queued: string[]) => void): Promise<void>;
+	abort(): Promise<string[]>;
 	/** Compact the selected session's context (OW-72); no-op unless its pane is live (OW-forinu). */
 	compact(): Promise<void>;
 	/**
@@ -1499,35 +1500,20 @@ export function createController(
 				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
 		},
-		async abort(onQueued) {
+		async abort() {
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before aborting." });
-				return;
+				return [];
 			}
 			// Only a session this tab holds live, as `submit` (OW-forinu).
-			if (paneMode(view) !== "live") return;
+			if (paneMode(view) !== "live") return [];
 			publish({ busy: "aborting", error: null });
 			try {
-				const queued = (await api.abort(selected))?.queued ?? [];
-				// Read against the draft as it stands now, not at the press: the
-				// textarea stays live through the round trip, and what was typed in
-				// it is kept behind the returned prompts (OW-fahoti).
-				//
-				// A selection that moved meanwhile changes nothing here. The draft is
-				// global, so these words now sit under a Send aimed at the session
-				// clicked to -- but they reached no session at all, so a Send there
-				// is never a duplicate, and it is the user's own press with the text
-				// in front of them. The composer is the only place this tab keeps
-				// unsent words; holding them for the stopped session instead would
-				// lose them to a user who never goes back, and dropping them is the
-				// loss this restore exists to close.
-				if (!disposed && queued.length > 0) {
-					if (onQueued) onQueued(queued);
-					else publish({ draft: withQueued(queued, view.draft) });
-				}
+				return (await api.abort(selected))?.queued ?? [];
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
+				return [];
 			} finally {
 				if (!disposed && view.busy === "aborting") publish({ busy: "idle" });
 			}

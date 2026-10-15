@@ -95,7 +95,9 @@ class PublishingController implements AgentpaneController {
 	async forkAndSubmit() {
 		return null;
 	}
-	async abort() {}
+	async abort() {
+		return [];
+	}
 	async compact() {}
 
 	async detach() {}
