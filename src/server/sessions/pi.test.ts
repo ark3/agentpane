@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parsePiSession } from "./pi.ts";
+import { extractPiPreviewTurns, parsePiSession } from "./pi.ts";
 
 async function write(dir: string, name: string, lines: unknown[]): Promise<string> {
 	const file = join(dir, name);
@@ -92,5 +92,45 @@ describe("parsePiSession", () => {
 		expect(s.cwd).toBeNull();
 		expect(s.createdAt).toBeNull();
 		expect(s.ref).toEqual({ backend: "pi", id: file });
+	});
+});
+
+describe("extractPiPreviewTurns", () => {
+	let dir: string;
+
+	beforeEach(async () => {
+		dir = await mkdtemp(join(tmpdir(), "agentpane-pi-"));
+	});
+
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("draws a compaction entry as a compactionSummary turn where it sits in the file (OW-livowu)", async () => {
+		const file = await write(dir, "f.jsonl", [
+			sessionHeader(),
+			userMessage("Before the compaction."),
+			{
+				type: "compaction",
+				id: "c85baa76",
+				parentId: "dc9a1ed5",
+				timestamp: "2026-06-05T18:26:00.000Z",
+				summary: "## Goal\nExplain TCP/IP.",
+				firstKeptEntryId: "dc9a1ed5",
+				tokensBefore: 5915,
+				details: { readFiles: [], modifiedFiles: [] },
+				fromHook: false,
+			},
+			userMessage("After the compaction."),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.role)).toEqual(["user", "compactionSummary", "user"]);
+		expect(turns[1]).toEqual({
+			role: "compactionSummary",
+			summary: "## Goal\nExplain TCP/IP.",
+			tokensBefore: 5915,
+			timestamp: "2026-06-05T18:26:00.000Z",
+		});
 	});
 });

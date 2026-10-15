@@ -115,7 +115,9 @@ export async function parsePiSession(filePath: string, stat: Stats): Promise<Ses
  * (OW-38). Pi stores message payloads in the same structural shape the live
  * adapter renders, so this validates and retains user, assistant,
  * tool-result and system messages with their thinking, tool, and image
- * blocks. The header is skipped.
+ * blocks, and draws each compaction entry as the marker live appends at
+ * `compaction_end`, where it sits in file order (OW-livowu). The header is
+ * skipped.
  */
 export async function extractPiPreviewTurns(filePath: string): Promise<SessionPreviewTurn[]> {
 	const turns: SessionPreviewTurn[] = [];
@@ -132,7 +134,13 @@ export async function extractPiPreviewTurns(filePath: string): Promise<SessionPr
 	return turns;
 }
 
-/** One transcript message from a Pi `message` line, or null for other records. */
+/**
+ * One transcript message from a Pi `message` line, or the compaction marker
+ * from a `compaction` line, or null for other records. As of `pi 1.2.0` a
+ * compaction is stored as its own `type: "compaction"` entry, not as a
+ * `compactionSummary` message; of its fields the marker keeps `summary` and
+ * `tokensBefore`, all that `compaction_end`'s live one carries.
+ */
 function extractPreviewTurn(line: string): SessionPreviewTurn | null {
 	let parsed: unknown;
 	try {
@@ -142,10 +150,13 @@ function extractPreviewTurn(line: string): SessionPreviewTurn | null {
 	}
 	if (typeof parsed !== "object" || parsed === null) return null;
 	const rec = parsed as Record<string, unknown>;
-	if (rec.type !== "message") return null;
+	if (rec.type !== "message" && rec.type !== "compaction") return null;
 
 	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
-	return storedAgentMessage(rec.message, timestamp, {
+	const message = rec.type === "compaction"
+		? { role: "compactionSummary", summary: rec.summary, tokensBefore: rec.tokensBefore }
+		: rec.message;
+	return storedAgentMessage(message, timestamp, {
 		api: "anthropic-messages",
 		provider: "anthropic",
 		model: "pi",

@@ -110,17 +110,7 @@ async function preview(name: Scenario): Promise<string[]> {
  */
 const KNOWN_DIFFERENCES: Record<Scenario, KnownDifference[]> = {
 	"tool-read-session": [],
-	"compact-session": [
-		{
-			owners: {
-				"OW-livowu":
-					"live, `compaction_end` appends a `compactionSummary` marker; stored, Pi writes the compaction as a " +
-					"`type: \"compaction\"` entry, not a `message`, and the preview reads only `message` entries, so it draws no marker",
-			},
-			live: ["compactionSummary tokensBefore=5915 summary=present"],
-			preview: [],
-		},
-	],
+	"compact-session": [],
 };
 
 describe("live and preview agree on a Pi run, but for the known differences", () => {
