@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-fahoti]
+closed: done
 ---
 
 # The external editor's answer overwrites whatever reached the browser composer during its round trip
@@ -50,3 +51,19 @@ The "keep both" decision above already covers this if it is implemented at the a
 
 The done condition gains one test, in `src/client/App.test.ts` and red first, for the in-flight case.
 Whatever the fix, it asserts the external editor never captures text a send is still taking: the editor is refused while a send is out, or its answer cannot put sent text back.
+
+## Close note
+
+Landed on main in four commits (OW-momejo in each subject).
+
+The external editor's round trip is now owned by its own `ControllerView.editingExternally` flag, written only by `editDraft`, following the precedent `sending` set (OW-kelede): `abort` and `attachAndSelect` still write `busy` over `"editing-externally"`, but can no longer make a second editor openable.
+The draft has one holder at a time: `editDraft` refuses while `sending`, and `submit`, `forkAndSubmit`, App.svelte's `send()` and `startEdit` refuse while `editingExternally`; Send/Fork and the External Editor button are disabled accordingly.
+Typing, Stop and Cancel stay live, and what they bring in is kept at the answer, per the owner's 2026-10-15 first-cut decision "keep both": unchanged composer → the editor's text replaces it; composer `<arrivals>\n\n<text sent to the editor>` (the shape both App.svelte releases leave) → `withQueued([arrivals], edited)`; anything else → `withQueued([whole composer], edited)`, so nothing is dropped and at worst the original sits beside its rewrite.
+The comment at `editDraft` records it as a first cut taken before the case was seen in use.
+
+The adversarial read of the first round found that keeping both at the answer let a send started mid-trip leave its sent text under Send (a regression from the old overwrite) and let an edit opened mid-trip swallow the answer for Cancel to drop; the send/edit exclusion closed both.
+
+Verified: tests in `src/client/controller.test.ts` and `src/client/App.test.ts` tagged OW-momejo, each seen red against the unfixed code or by reverting its guard (keep-both merge, Stop on Pi during the trip, abort not reopening the editor, editor refused while a fork's prompt is out, send and edit refused while the editor is open, External Editor disabled while sending, displaced draft released mid-trip kept). `bun run check` (1737 tests) and `bun run test:browser` (29) pass on main.
+
+No Emacs half: agentpane-mode has no external-editor round trip, since Emacs is the editor, so no `emacs` card was filed.
+Filed from the review: OW-nizemu (an attach a preview supersedes leaves `busy` stuck on "attaching"; OW-momejo's `settledSelection` test helper works around it and that card retires it).
