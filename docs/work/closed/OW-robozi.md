@@ -1,5 +1,6 @@
 ---
 labels: [question]
+closed: done
 ---
 
 # A session on the home server found ~/.pi/agent read-only on 2026-10-14, so a live Pi turn could not run as AGENTS.md describes
@@ -20,3 +21,10 @@ The mount itself is the owner's provisioning of the machine, not a session's wor
 ## Done when
 
 The decision is recorded in AGENTS.md beside the 2026-09-13 sentence, dated: either the mount is read-write again, shown by a session's `touch ~/.pi/agent/.probe` succeeding (and removing the probe), or the sanctioned way to run a live Pi turn without it is written there.
+
+## Close note
+
+Decided by the owner on 2026-10-14: the read-only mount is how `card run` launches a session (plain `sbox claude`, whose profile adds only `~/.claude`), not a regression, and agentpane's guidance must not assume any one harness or sandbox, since cards may be executed by Claude Code, Codex or Pi, by hand or through `card run`.
+Recorded in `AGENTS.md` under "Evidence", the bullet "Do not assume how your session was launched": drive a backend CLI against its own state directory where that works, which is fine for development on the home server, and where it does not, use a throwaway `PI_CODING_AGENT_DIR` or `CODEX_HOME` with credentials copied in by name, as every probe in `resources/probes/` already does.
+`docs/HANDOFF.md`, "Each backend needs a writable state directory", is scoped to match.
+That a probe through agentpane's own spawn chain passes in such a session is not yet shown; OW-fitopi carries that run.

@@ -174,9 +174,10 @@ Finding 49 came from a live parent turn that spawned one child and waited for it
   One consequence bites dispatch: a dispatched worktree must live *inside* the repo tree (`.worktrees/<id>`, gitignored), because it is the only path mounted read-write — a worktree anywhere outside it (`~/src/`, `/tmp`, a sibling of the repo) fails with `Read-only file system`.
   `card worktree <id>` satisfies this by construction: it puts the tree at `<main checkout>/.worktrees/<id>`.
   See `AGENTS.md`, "Dispatching an implementer".
-- **Each backend needs a writable state directory, and since 2026-09-13 it has one.**
+- **Each backend needs a writable state directory, and whether a session has one depends on how it was launched.**
   Codex initializes a sqlite state runtime under `~/.codex`; Pi takes a lock under `~/.pi/agent` merely to *read* its credential store and its settings.
   Both of those directories were read-only until the owner widened the sandbox on 2026-09-13, and `~/.claude` came with them; `$HOME` itself is still read-only, so the sandbox is still on and that test for it still holds.
+  That widening holds for a session launched with a profile that mounts them; as of 2026-10-14 `card run`'s plain `sbox claude` does not, and its sessions found `~/.pi/agent` read-only (OW-robozi; `AGENTS.md`, "Do not assume how your session was launched").
   Measured after the change (OW-vowire, `pi 0.85.1`, `codex-cli 0.154.0`): `pi --mode rpc` against the real `~/.pi/agent` resolves its configured model and runs a turn to `stopReason: "stop"`, the same through `sbox --` from the repo root, and `codex app-server` starts with no sqlite error.
   The sbox note below, which says its `pi` and `codex` profiles mount those directories rw, no longer contradicts this bullet — it did until that date, when the outer namespace was mounting them read-only underneath it.
   **What was true before 2026-09-13**, and is why the probes are built the way they are: both directories were read-only, running through `sbox` did **not** fix it (an inner bubblewrap cannot re-mount read-write what the outer namespace mounted read-only), `sbox -- codex app-server` failed with `failed to initialize sqlite state runtime`, and `sbox -- pi --mode rpc` returned `stopReason: "error"` with `EROFS ... auth.json.lock`.
