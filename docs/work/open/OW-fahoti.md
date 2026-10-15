@@ -9,6 +9,8 @@ Filed 2026-10-15 by OW-yewiku; the decision is D16 in `docs/DESIGN.md` ("A promp
 
 On Pi, a prompt steered into a running turn may still be queued when the user presses Stop.
 After OW-wisifo, the abort route sends `clear_queue` before `abort` and answers with the text of every prompt it cleared, empty on Claude Code and Codex and on a Pi with nothing queued.
+As landed, that is `AbortResponse` (`{ queued }`) in `src/shared/protocol.ts` with a 200 when anything was cleared, and a bodiless 204 otherwise, so `api.abort` resolves `AbortResponse | void`.
+OW-wisifo also has `PiAdapter.submit` refuse a prompt while a stop is awaiting Pi's answer, which reaches the browser as an ordinary failed send that keeps its draft.
 This card puts that text back in the browser's composer, so nothing the user typed is lost and nothing runs after Stop.
 
 ## Where
@@ -19,6 +21,7 @@ This card puts that text back in the browser's composer, so nothing the user typ
   OW-seleri, the `emacs` card blocked by OW-wisifo, takes the same rule, so the two clients agree.
 - Only the session the user pressed Stop on: if the selection moved while the abort was in flight, say beside the code what happens to the text, and do not drop it silently.
 - Whatever OW-wisifo decided for the abort `forkAndSubmit` sends ahead of a Pi fork applies to that path in `controller.ts` too; follow that card's note at the site.
+  It decided to drop what that abort clears, which loses those words outright when the fork's abort is the first stop, as when a past message is edited while a turn streams with a steer queued; if this card finds a place for them after all, change the note there.
 - "Stop and edit": `editLastMessage` in `src/client/App.svelte` calls `startEdit(index)`, which loads the message being edited into `draft` and stashes the old draft as `editing.stashedDraft`, and then `controller.abort()` where `stopsBeforeFork`.
   Joined into `draft` there, the returned text would be sent into the fork as part of the edit; it belongs with the stashed draft, which the edit puts back when it ends, or wherever this card decides, said at `editLastMessage`.
 

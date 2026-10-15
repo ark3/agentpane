@@ -10,6 +10,8 @@ OW-fahoti is the browser's counterpart, and the two clients follow the same rule
 
 On Pi, a prompt steered into a running turn may still be queued when the user presses Stop.
 After OW-wisifo, the `sessions/abort` result in `src/emacs/protocol.ts` carries the text of every prompt Pi cleared before the abort, empty on Claude Code and Codex and on a Pi with nothing queued.
+As landed, the result is `AbortResponse`, a `queued` array of strings, when anything was cleared, and `null` otherwise.
+OW-wisifo also has `PiAdapter.submit` refuse a prompt while a stop is awaiting Pi's answer, which reaches Emacs as an ordinary failed `sessions/prompt`.
 This card puts that text back where the user types, so nothing the user typed is lost and nothing runs after Stop.
 
 ## Where
@@ -20,6 +22,7 @@ This card puts that text back where the user types, so nothing the user typed is
 - The region may already hold text the user started typing while the turn ran.
   Join as OW-fahoti does, which is Pi's own interactive mode's rule (`restoreQueuedMessagesToEditor` in `pi 1.2.0`'s `dist/modes/interactive/interactive-mode.js`): the returned texts joined by a blank line, then the current text after them, blank parts dropped.
 - Whatever OW-wisifo decided for the abort sent ahead of a Pi fork applies to the Emacs copy of that sequence too: the `sessions/abort` `agentpane--fork-points` sends for the parent, the subject of `agentpane-test-fork-aborts-a-streaming-pi-turn`.
+  It decided to drop what that abort clears, as the browser does, and the comment there says the words are then lost; keep the two clients' choice the same as OW-fahoti's.
 - "Stop and edit": `agentpane-edit-last` opens the edit in the prompt region through `agentpane--edit` and then calls `agentpane-abort` on a streaming Pi session.
   Joined into the region there, the returned text would be sent into the fork as part of the edit; decide where it goes instead, matching OW-fahoti's choice for the browser's "Stop and edit", and say so in `agentpane-edit-last`'s docstring.
 
