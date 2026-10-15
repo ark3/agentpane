@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi prompt steered into a run and not yet delivered when the user stops the run goes somewhere the user did not aim it
@@ -41,3 +42,18 @@ So this card closes when: the run is recorded; the decision is in D16 in `docs/D
 The wire card changes `PiAdapter.abort` in `src/server/adapters/pi/process.ts` to send `clear_queue` first, with the `process.test.ts` test the last bullet above asks for, and carries the returned text onto the HTTP API and the Emacs helper's JSON-RPC in `src/emacs/protocol.ts`; whether `compact()`, which Pi begins with an abort, does the same is that card's to settle.
 A browser card and an `emacs` card, each blocked by the wire card, put the text back in that client's composer.
 The adapter change and the wire land together in the wire card, so no build ever clears the queue without handing the text back.
+
+## Close note
+
+Measured, decided and handed on; nothing in src/ changed here, by the card's own terms.
+
+The run: on the home server on 2026-10-15, pi 1.2.0 with the pinned DeepSeek V4.1 Flash, Pi alone, a throwaway PI_CODING_AGENT_DIR because ~/.pi/agent was read-only in this card-run session. A new `steer_abort` part of resources/probes/agentpane_pi_prompt_window_probe.py (`--part steer_abort --runs 3`) queues a steer behind a running `sleep 20` tool call or a streaming reply, then sends abort, bare or after clear_queue. 22 runs in all, of which the committed probe's full run is 12; the earlier cuts' stdout was not kept. No run disagreed.
+- Bare abort, nothing ran on its own after it in any run, contrary to the plain reading of Pi's rpc-commands.md "abort continues queued messages".
+- Mid-tool: the aborted run opens another round anyway (an aborted batch leaves hasMoreToolCalls true in pi-agent-core's runLoop), delivers the steer into it, and that round's reply fails with stopReason "error", "This operation was aborted". The steer stays in the session's messages unanswered.
+- Mid-reply: the steer stays queued (pendingMessageCount 1) and is delivered into the next prompt's run after that prompt; the one reply answered the steer or resumed the interrupted reply, never the new prompt.
+- clear_queue first: nothing leaked in either hold. Response on pi 1.2.0: {"type":"response","command":"clear_queue","success":true,"data":{"steering":[<text>],"followUp":[]}}, preceded by an empty queue_update.
+Recorded in docs/MANUAL_TESTING.md, "A bare abort leaves an undelivered Pi steer unanswered in the transcript or inside the next prompt's run, ...".
+
+The decision, the owner's on 2026-10-15, is in D16 in docs/DESIGN.md beside the finding: Stop sends clear_queue before abort and the texts go back to the composer of the client that pressed Stop, as Pi's interactive Esc does. Filed to carry it: OW-wisifo (adapter, HTTP API, Emacs JSON-RPC; settles compact(), the abort ahead of a Pi fork, and a prompt posted after Stop), OW-fahoti (browser) and OW-seleri (Emacs), both blocked by OW-wisifo. An adversarial read found that landing OW-wisifo alone clears the queue while the clients ignore the answer, so D16 records the three as one change run together; it also found the "Stop and edit" callers in both clients, now in the client cards.
+
+Also filed from the run: OW-nirani, because every Pi Stop during a tool call ends on an assistant message marked "error", whatever was queued, and neither client has been shown to read that as a stop.
