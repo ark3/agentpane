@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # Stop on Pi sends clear_queue before abort and hands every undelivered steered prompt back to the caller, on the HTTP API and the Emacs helper
@@ -63,3 +64,15 @@ The adapter never sends `followUp`, but return both arrays' texts, steering firs
 - A route test asserts the abort route's body carries the texts (`src/server/http/app.test.ts`, "aborts only an attached session", asserts today's 204), and `src/emacs/helper.test.ts`'s `sessions/abort` case (today asserting `null`) asserts the result carries them.
 - Each decision under "Settle here" is a comment at the site it names -- `PiAdapter.compact`, the abort ahead of a Pi fork in `forkAndSubmit`, and `PiAdapter.abort` for the after-Stop window -- and any of them that changes behaviour has its own test, red first.
 - `bun run check` passes.
+
+## Close note
+
+Landed on main in 5be0158c, e74dd634, 7adb0d72 and 6421d62c.
+`PiAdapter.abort` now sends `clear_queue`, waits for its answer, then `abort`, and resolves with the cleared texts, steering then followUp; the docblock states that only text comes back and that a steered skill or template comes back as Pi expanded it (`pi 1.2.0`, read at the source).
+`BackendAdapter.abort()` returns `string[]`, empty from Claude Code and Codex.
+The abort route answers 200 with `AbortResponse` (`{ queued }`, `src/shared/protocol.ts`) only when something was cleared and 204 otherwise, following `PromptResponse`, so `api.abort` resolves `AbortResponse | void` and no client fake changed; `sessions/abort` returns `AbortResponse | null`.
+The texts go only to the caller, never on the event stream.
+Decisions, each commented at its site and summarised in D16: `PiAdapter.compact` does not clear (no wire carries texts back from compact); the abort ahead of a Pi fork in `forkAndSubmit` and `agentpane--fork-points` drops what it clears, which loses those words; `PiAdapter.submit` refuses a prompt while a stop is awaiting Pi (a `stopsInFlight` counter), a behaviour change with its own tests.
+Verified: new tests in `pi/process.test.ts`, `http/app.test.ts`, `client/api.test.ts` and `emacs/helper.test.ts`, each shown red against the old code by the implementer and checked by an adversarial reader; `bun run check` green (1692 tests).
+The adversarial read found the counter misses a `prompt` already on Pi's stdin when `clear_queue` goes out; filed as OW-jifibo, which replaces the counter.
+OW-fahoti and OW-seleri were amended with the landed shape and decisions.
