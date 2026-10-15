@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi prompt queued behind another goes out without streamingBehavior before the first run's agent_start, and Pi's refusal reaches the user as a 500
@@ -37,3 +38,18 @@ D16's body cites `pi/process.ts:291-294` for the steer, a line reference long st
 - The `isStreaming` conditional in `PiAdapter.submit` is gone, not supplemented.
 - `python3 resources/probes/agentpane_pi_prompt_window_probe.py --part agentpane` re-run on the home server shows both concurrent POSTs answered 202 and both stdin prompts carrying `"steer"`, recorded in `docs/MANUAL_TESTING.md` with the `pi` version.
 - `bun run check` passes.
+
+## Close note
+
+`PiAdapter.submit` in `src/server/adapters/pi/process.ts` sends `streamingBehavior: "steer"` on every prompt; the `this.state.isStreaming` conditional is gone, so admission is Pi's call alone.
+Nothing else in `src/server/adapters/pi/` or `src/server/http/` reads `isStreaming` to admit a submit or a compact.
+On an idle Pi, "steer" changes nothing, images included: as of `pi 1.2.0`, `AgentSession.prompt` reads `streamingBehavior` only under `this.isStreaming`, both for input handlers and for queueing (read at the installed package, not run with an image).
+
+The new test in `src/server/adapters/pi/process.test.ts`, "steers every prompt, including one sent before the running turn's agent_start (OW-wibude)", was red against the old conditional, both at the implementer's hand and at the dispatching session's, then green.
+The success:false relay test now fakes Pi 1.2.0's compaction refusal, the one refusal a steered prompt can still meet, in place of a made-up wording.
+`agentpane_pi_prompt_window_probe.py --part agentpane` ran twice on the home server on 2026-10-14 against `pi 1.2.0` with the probe's throwaway `PI_CODING_AGENT_DIR`: both concurrent POSTs were 202 and both stdin prompts carried "steer", recorded in `docs/MANUAL_TESTING.md`, "Two Pi prompts posted together are both steered, and both answered 202 (OW-wibude)"; the OW-kokotu section's race is now past tense and points there.
+D16 now cites Pi's interactive mode at the source for "Pi's own default is steer", in place of the stale `pi/process.ts:291-294`.
+`bun run check` passed, 1669 tests.
+
+The adversarial read found that a steered prompt not yet delivered when the user stops the run goes either into a run after the stop (Pi's docs) or into the next prompt's run (the reader's reading of Pi's code); that predates this card and is OW-yewiku.
+Left as noticed: `resources/probes/agentpane_pi_prompt_window_probe.py`'s docstring still says "The adapter ignores the response body", stale since OW-dulipe; and the OW-kokotu section's "What each client shows" may predate OW-dulipe's 200 for a handled prompt.
