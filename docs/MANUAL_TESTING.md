@@ -4438,16 +4438,17 @@ A single prompt carrying `"steer"` while Pi was idle (run 5) was answered `{"dis
 
 ### The window, through agentpane's prompt route
 
-**Two POSTs sent together: the one that reaches Pi second goes out bare and is refused with a 500.**
+**Two POSTs sent together: the one that reached Pi second went out bare and was refused with a 500.**
 In runs 2 to 5, two threads released by one barrier each POSTed a one-word prompt to `/prompt`.
 In all four, the stdin tap held both `prompt` commands **without** `streamingBehavior`, Pi answered the first `started` and the second `success: false` with the error above, and the route answered that POST **500**, body `{"error": "internal_error", "detail": "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."}`, 70 to 98 ms after release; the other POST was 202 after 14 to 23 ms.
 The SSE wire carried one turn, `isStreaming` true then false, with only the admitted prompt's user message, and no `error` event for the refused one.
-The cause is the adapter's, read at the code: `SessionManager.submit` runs a session's submits one at a time (`#serially`), so the second is issued as soon as the first's `submit()` resolves on Pi's response; `PiAdapter.submit` sets `streamingBehavior` only when `this.state.isStreaming`, which `reducePiNotification` sets at `agent_start`; and Pi writes the response and `agent_start` separately, the second after the first (at the RPC above, always in a later `read()`), so the reducer has not seen `agent_start` when the second submit is built.
-A prompt that runs into this is not steered, as D16 says a mid-turn prompt on Pi is.
+The cause was the adapter's, read at the code then: `SessionManager.submit` runs a session's submits one at a time (`#serially`), so the second is issued as soon as the first's `submit()` resolves on Pi's response; `PiAdapter.submit` set `streamingBehavior` only when `this.state.isStreaming`, which `reducePiNotification` sets at `agent_start`; and Pi writes the response and `agent_start` separately, the second after the first (at the RPC above, always in a later `read()`), so the reducer had not seen `agent_start` when the second submit was built.
+A prompt that ran into this was not steered, as D16 says a mid-turn prompt on Pi is.
+Since OW-wibude (2026-10-14) the adapter sends `"steer"` on every prompt, and the same cell re-run on `pi 1.2.0` answered both POSTs 202 with both prompts steered ("Two Pi prompts posted together are both steered, and both answered 202 (OW-wibude)", below).
 
 **A POST sent after the first's 202 is steered.**
 In the same four runs a second POST sent the moment the first returned 202, about 4 ms after the first was sent, carried `streamingBehavior: "steer"` on stdin, was answered `{"disposition": "queued"}`, and was 202; its user message and its reply arrived in a second round of the same run, inside one `agent_start`…`agent_settled` span, as OW-yuyofu found mid-turn on `pi 0.85.1`.
-So agentpane's window is from a prompt being issued to Pi until the adapter has read that run's `agent_start`, and in these runs only a submit queued behind another inside agentpane landed in it.
+So agentpane's window was from a prompt being issued to Pi until the adapter had read that run's `agent_start`, and in these runs only a submit queued behind another inside agentpane landed in it; OW-wibude closed it.
 
 ### A prompt an extension command handles
 
@@ -4461,6 +4462,7 @@ In runs 2 and 5 each of the three, and in runs 3 and 4 `/mcp`, was POSTed as the
 For five seconds after each 202 the SSE stream carried **no event under the session's handle**: no status, no upsert, no error, no notice.
 `isStreaming` stayed false, the transcript gained no message, and the `notify` text reached neither wire, because `reducePiNotification` then dropped every fire-and-forget `extension_ui_request`.
 Since OW-fusoba (2026-10-14) that `notify` reaches both wires as a notice of kind `notify`, so in what follows the prompt no longer vanishes with nothing in its place: the command's answer shows as a notice.
+Since OW-dulipe (2026-10-14) the route answers such a prompt 200 `{"disposition": "handled"}` instead of 202, as OW-wibude's run below observed for `/mcp`.
 Nothing on the server waited for a run: the ordinary prompt POSTed next went out bare, was answered `started`, and ran and settled normally, in every run.
 
 **What each client shows, read at the code and not run.**
@@ -4847,3 +4849,33 @@ It used the throwaway state directory the probe always builds — `make_state_ho
 Its turns completed rather than ending in the `stopReason: "error"` that a lock refused under a read-only store produced before 2026-09-13: `checks.model` read `openrouter/deepseek/deepseek-v4.1-flash` at effort `high` off a `snapshot`, `checks.tool_output` saw `thinking` and `toolCall` blocks, and `checks.abort` stopped the long turn at 20004 characters and read 20025 when idle; `cleanup` removed the state directory and found no orphaned worker.
 
 Not tried: the probe's chain without `PI_CODING_AGENT_DIR`; `docs/HANDOFF.md`, "Each backend needs a writable state directory", records a direct `sbox -- pi --mode rpc` failing that way before 2026-09-13 with `EROFS ... auth.json.lock`, so this run shows the variable suffices, not that it is still necessary.
+
+## Two Pi prompts posted together are both steered, and both answered 202 (OW-wibude)
+
+Run on the home server 2026-10-14, two runs at 23:57:27 and 23:58:22 local (`-04:00`), on **`pi 1.2.0`** (`pi --version`, recorded by the probe in each run), from the `card/OW-wibude` worktree cut at `818ec8f` with one commit on top, `server: steer every Pi prompt, not only once agent_start is seen (OW-wibude)`, which drops `PiAdapter.submit`'s `this.state.isStreaming` condition and sends `streamingBehavior: "steer"` on every prompt.
+The vehicle is OW-kokotu's `resources/probes/agentpane_pi_prompt_window_probe.py`, unchanged:
+
+```bash
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --part agentpane              # run 1
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --part agentpane --skip-build # run 2
+```
+
+Pi did not run against `~/.pi/agent`: the probe gave it a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json` and the `extensions/` directory dereferenced (`auto-read-agents-refs.ts`, `background-jobs.ts`), and removed it at the end of each run.
+The chain was the production one, `direnv exec <workspace> sbox -- pi --mode rpc --model <ref>` spawned by the built server, with the probe's `pi` shim teeing stdin and stdout; the model was pinned through the create route's `model` field, and both runs read `openrouter/deepseek/deepseek-v4.1-flash` back off the wire.
+
+**Two POSTs released together were both 202, and both stdin prompts carried `"steer"`.**
+In both runs the stdin tap held the two `prompt` commands of `concurrent_posts` with `streamingBehavior: "steer"`; Pi answered the first `{"disposition": "started"}` and, after a `queue_update` naming the second in `steering`, the second `{"disposition": "queued"}`.
+The POSTs were answered 202 after 15 and 77 ms in run 1 and 70 and 14 ms in run 2, the slower being the queued one.
+One `agent_start`…`agent_settled` span followed, with both user messages in it, the queued one in a second round after the first's reply, and the SSE wire carried `isStreaming` true then false and both user messages.
+This is the cell that answered a 500 in all four of OW-kokotu's agentpane runs.
+
+**A prompt with `"steer"` to an idle Pi started an ordinary turn.**
+The first prompt of each pair, and the ordinary prompt after the handled one, went to an idle Pi carrying `"steer"`, were answered `started`, and each ran one `agent_start`…`agent_settled` span; this is OW-kokotu's `idle_steer` cell again, now through agentpane.
+`post_after_202` came out as it did for OW-kokotu: both POSTs 202, the second `queued` into the first's run.
+
+**A handled prompt carries `"steer"` too, and changed nothing about it.**
+`/mcp`, sent with `"steer"` to an idle Pi, was answered `handled` after its `notify`, with no run; the route answered **200** `{"disposition": "handled"}` and the SSE wire carried one `notice`, which is OW-dulipe's and OW-fusoba's wire shape, not OW-kokotu's 202 with nothing on the wire.
+
+**Not established.**
+Each run had one concurrent pair, so two pairs in all against OW-kokotu's four.
+No prompt carried an image: that `"steer"` on an idle Pi leaves an image-carrying prompt unchanged was read at the installed package, not run -- `AgentSession.prompt` in `pi 1.2.0`'s `dist/core/agent-session.js` reads `streamingBehavior` only under `this.isStreaming`, both where it hands it to `input` handlers and where it queues, and passes the images to `_startRun` the same way either way.

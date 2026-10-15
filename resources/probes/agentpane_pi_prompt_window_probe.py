@@ -6,8 +6,9 @@ Two questions, both opened by Pi's changelog rather than by anything run:
 
 * `pi 1.2.0` counts a session busy from the moment a run starts, before
   `agent_start`. `PiAdapter.submit` in `src/server/adapters/pi/process.ts`
-  adds `streamingBehavior: "steer"` only once the reducer has seen
-  `agent_start`, so a second prompt in that window goes out bare.
+  added `streamingBehavior: "steer"` only once the reducer had seen
+  `agent_start`, so a second prompt in that window went out bare. Since
+  OW-wibude it sends "steer" on every prompt.
 * `pi 0.99.0` answers a successful `prompt` with `data.disposition`, and
   `"handled"` means no run started, so no `agent_settled` follows. The adapter
   ignores the response body.
