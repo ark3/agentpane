@@ -102,8 +102,17 @@
 	 *
 	 * Nothing here has touched the server: clicking edit fills the composer and
 	 * marks the transcript, and that is all, so the click is free and
-	 * abandonable. The fork happens at submit. `stashedDraft` is whatever the
-	 * composer held when the edit displaced it, put back by Cancel.
+	 * abandonable. The fork happens at submit.
+	 *
+	 * What the composer held when the edit displaced it is `displacedDraft`'s,
+	 * and the edit's whole lifetime owns it, not any one exit (OW-kijuju).
+	 * Cancel puts it back in place of the edit's text. Every other way an edit
+	 * ends -- its fork landing, the fork's attach moving the selection and its
+	 * prompt then failing, a click to another session -- gives it back too, once
+	 * no send is out, ahead of whatever the composer holds then: after a fork
+	 * that lands that is normally nothing, so the draft comes back as it was.
+	 * Dropping it at the fork lost a note typed before the click, which
+	 * OW-hezidi had ruled out.
 	 *
 	 * `index` is the message's position in the transcript array, and it is the
 	 * whole of how the fork point is addressed: a `ForkPoint` names the index it
@@ -123,8 +132,13 @@
 	let editing = $state<{
 		index: number;
 		images: { mimeType: string; base64: string }[];
-		stashedDraft: string;
 	} | null>(null);
+	/**
+	 * The draft the open edit displaced, or one an edit that ended other than by
+	 * Cancel left waiting for its send to settle (OW-kijuju); see `editing` for
+	 * where it goes, and the release below `stop` for when.
+	 */
+	let displacedDraft = $state<string | null>(null);
 	/**
 	 * What a stop took out of Pi's queue (D16), waiting for the composer to
 	 * hold no edit and no prompt in flight (OW-fahoti); see `stop` for why it
@@ -970,9 +984,11 @@
 		lastScrollKey = key;
 		// An edit is anchored to one transcript by index, so it cannot survive the
 		// pane moving to another one: the mark would land on an unrelated message
-		// and the index would address the wrong session's fork points. The
-		// displaced draft is not restored here -- switching sessions has never
-		// rewritten the composer, and this is a switch.
+		// and the index would address the wrong session's fork points. Its
+		// displaced draft then comes back to the composer through the release
+		// below `stop`, as from every exit but Cancel (OW-kijuju). A switch used
+		// to leave the composer alone, but a fork's own selection move ends the
+		// edit here too, and singling it out would be a check at the site.
 		editing = null;
 		handledKey = null;
 
@@ -1254,8 +1270,8 @@
 		// Captured once per mode, not once per click: re-targeting an open edit
 		// finds `view.draft` already holding the previous edit's loaded text, so
 		// taking it again would lose what Cancel owes the typist (OW-bigotu).
-		const stashedDraft = editing ? editing.stashedDraft : view.draft;
-		editing = { index, images, stashedDraft };
+		if (!editing) displacedDraft = view.draft;
+		editing = { index, images };
 		controller.setDraft(text.join("\n\n"));
 		promptEl?.focus();
 	}
@@ -1307,18 +1323,18 @@
 	 *
 	 * - Cancel puts the displaced draft back first, so they land ahead of it,
 	 *   exactly as if they had been stashed with it.
-	 * - A fork drops the displaced draft, which they are not, so they are not
-	 *   stashed with it. Its prompt is still out when the fork's selection ends
-	 *   the edit, with the composer holding the text being sent; they wait for
-	 *   that prompt to land, which clears the text, and join whatever the fork
-	 *   leaves there. A fork that fails before it moves the selection leaves
-	 *   the edit open, and they keep waiting with it.
-	 * - Clicking to another session ends the edit and leaves its text in the
-	 *   composer, as a switch always has; that text is then only a draft, and
-	 *   they join ahead of it.
-	 * - So does a fork whose prompt fails after its attach moved the selection:
-	 *   that move already ended the edit, and the unsent edit text it leaves in
-	 *   the composer is a draft like the switch's, which they join ahead of.
+	 * - Every other exit gives the displaced draft back through the same
+	 *   release (OW-kijuju), and they go ahead of it there, so the composer
+	 *   reads as Cancel leaves it: they, the displaced draft, then whatever it
+	 *   holds. A fork's prompt is still out when its selection ends the edit,
+	 *   with the composer holding the text being sent; both wait for that
+	 *   prompt to land, which clears the text. A fork that fails before it
+	 *   moves the selection leaves the edit open, and both keep waiting with it.
+	 * - Clicking to another session, or a fork whose prompt fails after its
+	 *   attach moved the selection, ends the edit with its text still in the
+	 *   composer; that text is then only a draft, and both join ahead of it.
+	 * - An answer landing after the displaced draft is already back joins
+	 *   ahead of it, as after Cancel.
 	 */
 	function stop(): void {
 		void controller.abort().then((queued) => {
@@ -1326,8 +1342,11 @@
 		});
 	}
 
-	// Releases `heldQueued` the moment nothing in the composer is an edit's or
-	// a prompt's (OW-fahoti); `stop` says why it waits.
+	// Releases `heldQueued`, and the draft an ended edit displaced, the moment
+	// nothing in the composer is an edit's or a prompt's (OW-fahoti,
+	// OW-kijuju); `stop` and `editing` say why each waits. The stopped words go
+	// first, so every exit ends as Cancel does. A blank displaced draft adds
+	// nothing, and a composer it would only rewrite is left alone.
 	//
 	// The selection may have moved since the stop -- a click elsewhere, or the
 	// fork that ended the edit -- and that changes nothing here. The draft is
@@ -1338,16 +1357,18 @@
 	// for the stopped session would lose them to a user who never goes back.
 	// Per-session drafts (OW-zigepi) would change this answer.
 	$effect(() => {
-		if (heldQueued.length === 0 || editing || view.sending) return;
-		const queued = heldQueued;
+		if ((heldQueued.length === 0 && displacedDraft === null) || editing || view.sending) return;
+		const queued = displacedDraft?.trim() ? [...heldQueued, displacedDraft] : heldQueued;
 		heldQueued = [];
-		controller.setDraft(withQueued(queued, view.draft));
+		displacedDraft = null;
+		if (queued.length > 0) controller.setDraft(withQueued(queued, view.draft));
 	});
 
 	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
 	function cancelEdit(): void {
 		if (!editing) return;
-		controller.setDraft(editing.stashedDraft);
+		controller.setDraft(displacedDraft ?? "");
+		displacedDraft = null;
 		editing = null;
 	}
 

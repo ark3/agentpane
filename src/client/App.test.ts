@@ -3284,6 +3284,30 @@ describe("App", () => {
 	});
 
 	/**
+	 * A click to another session ends the edit as a fork does, and gives the
+	 * displaced draft back the same way: ahead of what the composer holds,
+	 * which is the edit's text, now only a draft (OW-kijuju).
+	 */
+	it("gives the displaced draft back ahead of the edit's text when a click ends the edit (OW-kijuju)", async () => {
+		const other: SessionRef = { backend: "pi", id: "pi-2" };
+		const controller = new FakeController(view({
+			draft: "half-written note",
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		await controller.select(other);
+		await tick();
+
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note\n\nfirst draft");
+	});
+
+	/**
 	 * The badge marks turns this viewer started, and a fork is one of them. The
 	 * arming goes on the *fork*, not on whatever `state.selected` happens to be
 	 * while the fork is out. A click mid-fork moves the selection and the
@@ -4239,10 +4263,12 @@ describe("App", () => {
 	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
 	 * called -- with no body at all when `queued` is empty, as the route's 204
 	 * does -- and any later stop, such as the fork's own, finds the queue
-	 * already empty. A fork's prompt is held until `land` is called, so a test
-	 * can answer while the fork is still out; `prompts` is every prompt's text.
+	 * already empty. Every prompt is held until `land` is called, so a test
+	 * can answer while a fork or a send is still out; `prompts` is every
+	 * prompt's text. With
+	 * `streaming` false the turn has already ended, so a fork stops nothing.
 	 */
-	async function streamingPi(queued: string[]) {
+	async function streamingPi(queued: string[], streaming = true) {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
 		let emit: (event: ServerEvent) => void = () => {};
 		let answer = () => {};
@@ -4290,7 +4316,7 @@ describe("App", () => {
 		};
 		const controller = createController(api);
 		render(App, { props: { controller } });
-		emit(snapshot(piSession, "h-parent", true));
+		emit(snapshot(piSession, "h-parent", streaming));
 		await controller.select(piSession);
 		controller.setDraft("half-written note");
 		await tick();
@@ -4361,12 +4387,13 @@ describe("App", () => {
 	});
 
 	/**
-	 * An edit that ends by forking drops the draft it displaced, but the prompts
-	 * the stop took out are not that draft: they land in the composer the fork
-	 * leaves, whether the stop answered before the fork went out or while it was
-	 * still out, and never inside the text the fork sent (OW-fahoti).
+	 * An edit that ends by forking gives back the draft it displaced, and the
+	 * prompts the stop took out land ahead of it, in the composer the fork
+	 * leaves -- whether the stop answered before the fork went out, while it
+	 * was still out, or after it had landed and the draft was already back --
+	 * and never inside the text the fork sent (OW-fahoti, OW-kijuju).
 	 */
-	it.each(["before", "while"] as const)("puts what Stop and edit took out of Pi's queue in the composer when it answers %s a fork goes out (OW-fahoti)", async (when) => {
+	it.each(["before", "while", "after"] as const)("puts what Stop and edit took out of Pi's queue ahead of the displaced draft when it answers %s a fork goes out (OW-fahoti, OW-kijuju)", async (when) => {
 		const { controller, prompts, answer, land } = await streamingPi(["steered mid-turn"]);
 		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
 		if (when === "before") await answer();
@@ -4381,10 +4408,54 @@ describe("App", () => {
 		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
 		if (when === "while") await answer();
 		await land();
+		if (when === "after") {
+			expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+			await answer();
+		}
 
 		expect(prompts).toEqual(["first draft"]);
 		expect(controller.getView().sending).toBe(false);
-		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn");
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+	});
+
+	/**
+	 * OW-hezidi's constraint, on the exit that broke it: a draft typed before
+	 * clicking edit is never lost, and a fork that lands is the usual way an
+	 * edit ends (OW-kijuju). The fork's prompt clears the text it sent, so the
+	 * draft comes back as it was.
+	 */
+	it("gives the draft an edit displaced back to the composer once its fork lands (OW-kijuju)", async () => {
+		const { controller, prompts, land } = await streamingPi([], false);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
+		await land();
+
+		expect(prompts).toEqual(["first draft"]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+	});
+
+	/**
+	 * Words a plain Stop already put back in the composer are part of the draft
+	 * the next edit displaces, so a fork gives them back with it (OW-kijuju).
+	 */
+	it("gives back the words a Stop put in the composer before an edit forked (OW-kijuju)", async () => {
+		const { prompts, answer, land } = await streamingPi(["steered mid-turn"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+		await answer();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		await land();
+
+		expect(prompts).toEqual(["first draft"]);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
 	});
 
 	/**
