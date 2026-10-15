@@ -7,11 +7,15 @@
  * Needs:  bun and this checkout's `src/server/sessions/preview-message.ts`;
  *         no `bun install`, since that module imports types only.
  *
- * It reads every `*.jsonl` under the root and prints two sections.
+ * It reads every `*.jsonl` under the root whose line 1 is a Pi session header
+ * (`type: "session"`), and prints two sections. Files without one, and
+ * directories and files it cannot read, are counted (the unreadable ones by
+ * error code) and never walked or named; a root it cannot list prints one
+ * line naming the error code and exits 1.
  *
  * "Census", grouped by the UTC month of each file's modification time (a Pi
  * file does not name the Pi version that wrote it): for each position --
- * `header(<type>)` for line 1, `entry(<type>)` for every later line,
+ * `header(session)` for line 1, `entry(<type>)` for every later line,
  * `message(<role>)` for a message entry's payload, and the schema objects
  * below it -- how many there were, every key they carried with the kinds of
  * value it held, and the values of the few enumerated fields named in
@@ -47,30 +51,33 @@
  *
  * The no-content guarantee, which `src/server/sessions/pi-store-survey.test.ts`
  * holds on a store seeded with one string in every content position it could
- * name:
- *  - The output holds counts, months, key names, value kinds (string, number,
- *    boolean, null, array, object), discriminators, and enumerated values.
- *    It never holds the root, a directory or file name, or any other value.
- *  - Discriminators are the `type` of an entry and of a content block and the
- *    `role` of a message: identifiers Pi's code chooses (an extension's own
- *    name goes in `customType`, which is not printed), without which the
- *    census says nothing. One that is not a short identifier prints as
- *    `<non-identifier>`.
+ * name, is narrower than "structure only" sounds:
+ *  - No value, path or name from the store is printed: not the root, a
+ *    directory or file name, a filesystem error's message, or any string,
+ *    number or boolean, apart from the enumerated values below.
+ *  - Keys and discriminators -- the `type` of an entry and of a content block
+ *    and the `role` of a message -- are printed only if they are short
+ *    identifiers (anything else prints as `<non-identifier key>` or
+ *    `<non-identifier>`) and only at the schema positions the walk reaches.
+ *  - The walk descends only along `ENTRY_CHILDREN` and `DESCENT`: an entry, a
+ *    message, a content block, `usage` and its `cost`, the items of
+ *    `toolsAdded` and `toolsRemoved`, a compaction's `systemMessage`, a context
+ *    edit's `replacement`. It never descends into an object whose keys can be
+ *    data: a tool call's `arguments`, a tool result's or an extension's
+ *    `details`, a custom entry's `data`, a system message's `sections` (keyed
+ *    by section name), a tool's `parameters` (keyed by parameter name), nor any
+ *    object under an entry type it does not know.
  *  - Enumerated values are printed only for the allowlist in
- *    `enumeratedValue`, and only when the value is one of the members pi-ai
- *    1.2.0's types declare; anything else prints as `<unlisted>`.
- *  - Keys are printed only where they are Pi's schema, which is why the walk
- *    descends only along `DESCENT`: an entry, a message, a content block,
- *    `usage` and its `cost`, the items of `toolsAdded` and `toolsRemoved`, a
- *    compaction's `systemMessage`, a context edit's `replacement`. It never
- *    descends into an object whose keys can be data: a tool call's
- *    `arguments`, a tool result's or an extension's `details`, a custom
- *    entry's `data`, a system message's `sections` (keyed by section name), a
- *    tool's `parameters` (keyed by parameter name), nor into any object under
- *    an entry type it does not know. A key that is not a short identifier
- *    prints as `<non-identifier key>`.
- *  - What that leaves to trust is that the keys at those positions are schema;
- *    an unknown entry type's own top-level keys are printed on that trust.
+ *    `enumeratedValue`, and only when the value is a member of pi-ai 1.2.0's
+ *    `StopReason` or pi-agent-core 1.2.0's `ThinkingLevel`; anything else
+ *    prints as `<unlisted>`. The header's `version` prints only as an integer.
+ *  - What that does not enforce, and trusts: that code, not a user, chose the
+ *    keys and discriminators at those positions. Pi's own code does. An
+ *    extension -- one replacing a message at `message_end`, a custom
+ *    provider, a tool-result hook -- can write any keys or block types there,
+ *    and one that spread a data-keyed map onto a message, a content block, an
+ *    entry or `usage` would have that map's identifier-shaped keys printed. So
+ *    read the output before passing it on.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -198,6 +205,11 @@ const SECTIONS = [
 ] as const;
 type Section = (typeof SECTIONS)[number];
 
+/** `table[key]` for an own key only, so `toString` or `__proto__` finds nothing. */
+function own<V>(table: Record<string, V>, key: unknown): V | undefined {
+	return typeof key === "string" && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 function bump<K>(map: Map<K, number>, key: K): void {
 	map.set(key, (map.get(key) ?? 0) + 1);
 }
@@ -216,7 +228,9 @@ class Survey {
 	lines = 0;
 	unparseable = 0;
 	nonObject = 0;
-	emptyFiles = 0;
+	headerless = 0;
+	readonly unreadableDirectories = new Map<string, number>();
+	readonly unreadableFiles = new Map<string, number>();
 	readonly census = new Map<string, Map<string, PositionCensus>>();
 	readonly filesByMonth = new Map<string, number>();
 	readonly offLineEntriesByMonth = new Map<string, number>();
@@ -273,7 +287,7 @@ class Survey {
 	}
 
 	private classifyEntry(month: string, label: string, table: Record<string, string[]>, entry: Record<string, unknown>): void {
-		const reads = typeof entry.type === "string" ? table[entry.type] : undefined;
+		const reads = own(table, entry.type);
 		if (!reads) {
 			this.tally("entry types no reader reads", label, month);
 			return;
@@ -334,11 +348,16 @@ class Survey {
 		}
 	}
 
+	/** Survey one file, if its line 1 is a Pi session header; count it if not. */
 	addFile(text: string, month: string): void {
+		const lines = text.split("\n").filter((line) => line.length > 0);
+		const header = parseLine(lines[0]);
+		if (!isRecord(header) || header.type !== "session") {
+			this.headerless++;
+			return;
+		}
 		this.files++;
 		bump(this.filesByMonth, month);
-		const lines = text.split("\n").filter((line) => line.length > 0);
-		if (lines.length === 0) this.emptyFiles++;
 		let previousId: unknown;
 		let offLine = 0;
 		lines.forEach((line, index) => {
@@ -364,7 +383,7 @@ class Survey {
 			if (index >= 2 && parsed.parentId !== previousId) offLine++;
 			previousId = parsed.id;
 			const label = `entry(${type})`;
-			const children = typeof parsed.type === "string" ? (ENTRY_CHILDREN[parsed.type] ?? {}) : {};
+			const children = own(ENTRY_CHILDREN, parsed.type) ?? {};
 			this.walk(month, label, "entry", parsed, children);
 			this.classifyEntry(month, label, ENTRY_READS.entry, parsed);
 			if (parsed.type === "message" && isRecord(parsed.message)) {
@@ -382,7 +401,10 @@ class Survey {
 		const months = [...this.filesByMonth.keys()].sort();
 		out.push("Pi session store survey: structure only, never content (resources/probes/pi_store_survey.ts).");
 		out.push(
-			`files ${this.files}, empty files ${this.emptyFiles}, lines ${this.lines}, unparseable lines ${this.unparseable}, non-object lines ${this.nonObject}`,
+			`session files ${this.files}, lines ${this.lines}, unparseable lines ${this.unparseable}, non-object lines ${this.nonObject}`,
+		);
+		out.push(
+			`skipped: files without a Pi session header ${this.headerless}, unreadable directories ${failures(this.unreadableDirectories)}, unreadable files ${failures(this.unreadableFiles)}`,
 		);
 		out.push("");
 		out.push("== Census, by UTC month of file mtime ==");
@@ -427,6 +449,32 @@ class Survey {
 	}
 }
 
+/** A count of failures, and their error codes when there are any. */
+function failures(codes: Map<string, number>): string {
+	let total = 0;
+	for (const n of codes.values()) total += n;
+	return total === 0 ? "0" : `${total} (${formatCounts(codes)})`;
+}
+
+function parseLine(line: string | undefined): unknown {
+	if (line === undefined) return undefined;
+	try {
+		return JSON.parse(line);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A filesystem error's code, such as `EACCES`, and never its message, which
+ * names the path: under a Pi store root that is the encoding of a project's
+ * working directory.
+ */
+function errorCode(error: unknown): string {
+	const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+	return typeof code === "string" && /^E[A-Z0-9]{1,15}$/.test(code) ? code : "other";
+}
+
 function formatCounts(counts: Map<string, number>): string {
 	return [...counts.entries()]
 		.sort(([a], [b]) => a.localeCompare(b))
@@ -468,27 +516,61 @@ function instrument<T extends object>(target: T, access: Access): T {
 	});
 }
 
-function jsonlFiles(dir: string): string[] {
+/** Every `*.jsonl` under `dir`, counting each directory it cannot list by its error code. */
+function jsonlFiles(dir: string, unreadable: Map<string, number>): string[] {
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch (error) {
+		bump(unreadable, errorCode(error));
+		return [];
+	}
 	const found: string[] = [];
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+	for (const entry of entries) {
 		const path = join(dir, entry.name);
-		if (entry.isDirectory()) found.push(...jsonlFiles(path));
+		if (entry.isDirectory()) found.push(...jsonlFiles(path, unreadable));
 		else if (entry.isFile() && entry.name.endsWith(".jsonl")) found.push(path);
 	}
 	return found;
 }
 
-/** The survey of every `*.jsonl` under `root`, as printable text. */
+/** The root itself could not be listed; its message names the error code and not the path. */
+export class StoreRootError extends Error {}
+
+/**
+ * The survey of every Pi session file under `root`, as printable text. A
+ * directory or file it cannot read is counted by error code and skipped; a
+ * root it cannot list throws `StoreRootError`.
+ */
 export function surveyPiStore(root: string): string {
+	try {
+		readdirSync(root);
+	} catch (error) {
+		throw new StoreRootError(`cannot read the store root (${errorCode(error)})`);
+	}
 	const survey = new Survey();
-	for (const path of jsonlFiles(root).sort()) {
-		const month = statSync(path).mtime.toISOString().slice(0, 7);
-		survey.addFile(readFileSync(path, "utf8"), month);
+	for (const path of jsonlFiles(root, survey.unreadableDirectories).sort()) {
+		let month: string;
+		let text: string;
+		try {
+			month = statSync(path).mtime.toISOString().slice(0, 7);
+			text = readFileSync(path, "utf8");
+		} catch (error) {
+			bump(survey.unreadableFiles, errorCode(error));
+			continue;
+		}
+		survey.addFile(text, month);
 	}
 	return survey.report();
 }
 
 if (import.meta.main) {
 	const root = process.argv[2] ?? join(homedir(), ".pi", "agent", "sessions");
-	process.stdout.write(surveyPiStore(root));
+	try {
+		process.stdout.write(surveyPiStore(root));
+	} catch (error) {
+		if (!(error instanceof StoreRootError)) throw error;
+		console.error(`pi_store_survey: ${error.message}`);
+		process.exit(1);
+	}
 }

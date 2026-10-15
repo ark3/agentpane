@@ -545,9 +545,9 @@ What it showed is the `docs/MANUAL_TESTING.md` sections on OW-pezelo and OW-nuzo
 ## `pi_store_survey.ts`
 
 Proves: **what shapes a real Pi session store holds, and which of them agentpane's readers drop or pass on without naming** (OW-tadoju), without printing any of the store's content.
-It reads every `*.jsonl` under the root and prints a census -- per UTC month of file mtime, each position's count (`header(session)`, `entry(<type>)`, `message(<role>)`, content blocks, `usage`, `toolsAdded[]`), its keys with the kinds of value they held, and a short allowlist of enumerated values, and how many entries start an in-file branch -- then a "Not read by agentpane" section listing the entry types no reader reads, the messages and content blocks `storedAgentMessage` drops, and the keys it drops or carries onto the preview wire only through a spread.
+It reads every `*.jsonl` under the root whose line 1 is a Pi session header, counting the rest and any directory or file it cannot read without naming them, and prints a census -- per UTC month of file mtime, each position's count (`header(session)`, `entry(<type>)`, `message(<role>)`, content blocks, `usage`, `toolsAdded[]`), its keys with the kinds of value they held, and a short allowlist of enumerated values, and how many entries start an in-file branch -- then a "Not read by agentpane" section listing the entry types no reader reads, the messages and content blocks `storedAgentMessage` drops, and the keys it drops or carries onto the preview wire only through a spread.
 Message- and block-level reads are measured by calling the checkout's own `storedAgentMessage`; entry-level reads are a table kept beside `parsePiSession` and `extractPiPreviewTurns`.
-Its docblock states the no-content guarantee and where the walk stops descending, and `src/server/sessions/pi-store-survey.test.ts`, which runs in `bun run check`, holds it on a store seeded with one marker string in every content position.
+Its docblock states the no-content guarantee, where the walk stops descending, and what the guarantee trusts, and `src/server/sessions/pi-store-survey.test.ts`, which runs in `bun run check`, holds it on a store seeded with one marker string in every content position.
 
 ```bash
 bun resources/probes/pi_store_survey.ts [store root]
@@ -556,7 +556,10 @@ bun resources/probes/pi_store_survey.ts [store root]
 Run from the repository root; the root defaults to `~/.pi/agent/sessions`.
 It reads the store and writes nothing, makes no model call, and needs only `bun`: no `bun install`, since the one module it imports from `src/` imports types only.
 On a machine whose Pi keeps sessions elsewhere, pass that directory.
-The output is safe to paste back: it holds counts, months, key names, value kinds, `type`s and `role`s, the header's `version`, and `stopReason` and `thinkingLevel` only when they are members of pi-ai 1.2.0's unions, and nothing else.
+No value, path or name from the store is printed: the output holds counts, months, value kinds, the header's integer `version`, `stopReason` and `thinkingLevel` only when they are members of pi-ai 1.2.0's `StopReason` and pi-agent-core 1.2.0's `ThinkingLevel`, and keys, `type`s and `role`s only when they are identifier-shaped and at the schema positions the walk reaches.
+That last part is trust, not enforcement: it assumes code, not a user, chose those keys, and an extension that spread a data-keyed map onto a message, a content block or `usage` would have that map's keys printed.
+So skim the output before pasting it anywhere.
+A root it cannot list prints one line naming the error code and exits 1.
 
 Verified with: `pi 1.2.0` and `bun 1.4.0` on the home server, 2026-10-14, against its 13-file store.
 What it showed is `docs/MANUAL_TESTING.md`, "The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)".

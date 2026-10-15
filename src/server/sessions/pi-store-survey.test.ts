@@ -6,7 +6,7 @@
  * position, and one whose drift the "Not read by agentpane" section must name.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +15,9 @@ import { surveyPiStore } from "../../../resources/probes/pi_store_survey.ts";
 const MARK = "zqxjmark";
 
 const roots: string[] = [];
+const locked: string[] = [];
 afterEach(() => {
+	for (const path of locked.splice(0)) chmodSync(path, 0o700);
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -114,6 +116,8 @@ describe("pi_store_survey", () => {
 			{
 				[`--home-${MARK}-project--/2026-10-14T12-00-00_${MARK}.jsonl`]: markedEntries(),
 				[`${MARK}/second_${MARK}.jsonl`]: [{ type: "message", ...base(1), message: { role: "user", content: MARK } }],
+				// Not a Pi session: its line 1 names no session, so nothing in it is walked.
+				[`notes/${MARK}.jsonl`]: [{ type: `${MARK}Type`, version: 7777, [`${MARK}Key`]: { [`${MARK}Inner`]: 1 } }],
 			},
 			[`{"broken": "${MARK}`, JSON.stringify(MARK)],
 		);
@@ -144,7 +148,35 @@ describe("pi_store_survey", () => {
 		}
 		expect(output).toContain("<non-identifier key>");
 		expect(output).toContain("stopReason = <unlisted> 1");
-		expect(output).toContain("unparseable lines 2");
+		expect(output).toContain("unparseable lines 1");
+		expect(output).toContain("files without a Pi session header 2");
+		expect(output).not.toContain("7777");
+	});
+
+	it.skipIf(process.getuid?.() === 0)("counts what it cannot read, names none of it, and reports the rest", () => {
+		const header = { type: "session", version: 3, id: "s", timestamp: "2026-10-14T12:00:00Z", cwd: "/w" };
+		const root = store({
+			"open/one.jsonl": [header, { type: "message", ...base(1), message: { role: "user", content: "hi", timestamp: 1 } }],
+			[`${MARK}-dir/inside.jsonl`]: [header],
+			[`open/${MARK}.jsonl`]: [header],
+		});
+		for (const path of [join(root, `${MARK}-dir`), join(root, "open", `${MARK}.jsonl`)]) {
+			chmodSync(path, 0);
+			locked.push(path);
+		}
+
+		const output = surveyPiStore(root);
+
+		expect(output.toLowerCase()).not.toContain(MARK);
+		expect(output).not.toContain(root);
+		expect(output).toContain("unreadable directories 1 (EACCES 1)");
+		expect(output).toContain("unreadable files 1 (EACCES 1)");
+		expect(output).toContain("message(user)  1");
+	});
+
+	it("refuses a root it cannot read without naming it", () => {
+		const missing = join(tmpdir(), `${MARK}-no-such-store`);
+		expect(() => surveyPiStore(missing)).toThrow(/^cannot read the store root \(ENOENT\)$/);
 	});
 
 	it("lists what agentpane's readers drop or carry unnamed, and not what they read", () => {
@@ -167,6 +199,10 @@ describe("pi_store_survey", () => {
 				},
 				{ type: "message", ...base(3), message: { role: "futureRole", content: [] } },
 				{ type: "future_entry", ...base(4) },
+				// Entry types that are also Object.prototype's own keys.
+				{ type: "toString", ...base(5) },
+				{ type: "constructor", ...base(6) },
+				{ type: "__proto__", ...base(7) },
 			],
 			// The third message starts a branch off the first.
 			"b/two.jsonl": [
@@ -190,7 +226,12 @@ describe("pi_store_survey", () => {
 		};
 
 		expect(output).toContain("-- 2026-10: 2 files; 1 entries not parented on the line before, in 1 files --");
-		expect(section("entry types no reader reads")).toEqual(["entry(future_entry)"]);
+		expect(section("entry types no reader reads")).toEqual([
+			"entry(<non-identifier>)",
+			"entry(constructor)",
+			"entry(future_entry)",
+			"entry(toString)",
+		]);
 		expect(section("messages storedAgentMessage drops whole")).toEqual(["message(futureRole)"]);
 		expect(section("content blocks storedAgentMessage drops")).toEqual(["message(assistant).content[futureBlock]"]);
 		expect(section("keys carried to the wire unnamed, by a spread")).toEqual([
