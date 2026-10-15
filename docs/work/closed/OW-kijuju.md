@@ -1,6 +1,7 @@
 ---
 labels: [defect]
 blocked-by: [OW-fahoti]
+closed: done
 ---
 
 # A fork that lands drops the draft the browser's edit displaced, so text typed before clicking edit is lost
@@ -32,3 +33,20 @@ Stop (`agentpane-abort`) and then `C-c C-e` (`agentpane-edit-last`) or `e` befor
 The reader reproduced it with a throwaway ERT experiment, holding `sessions/abort` and `sessions/forkPoints` and answering the abort first; the region ended empty, `agentpane--held-queued` nil, and nothing on the kill ring.
 The browser opens its edit synchronously and so holds those words in `heldQueued`, but it drops them the same way when the Stop answers before the edit click.
 So the decision this card takes about the displaced draft decides the stopped words too, in both clients; the `emacs` card this card files should carry an ERT test of exactly this sequence, red first, asserting the stopped texts survive the fork where the decision puts the draft.
+
+## Close note
+
+Decided and built in the browser, 2026-10-15.
+Decision, recorded in the `editing` docblock in `src/client/App.svelte`: the edit's lifetime owns the displaced draft, now `displacedDraft` (it was `editing.stashedDraft`).
+Cancel replaces the composer with it.
+Every other exit gives it back through the same release `$effect` that gives back `heldQueued`, once no edit is open and no send is out, joined by `withQueued`: stopped words, then the displaced draft, then whatever the composer holds.
+Those exits are a fork that lands, a fork whose prompt fails after its attach, and a click to another session.
+This retires the old "a switch never rewrites the composer" stance for the stash, because the fork's own selection move goes through the switch effect.
+A fork that fails before it moves the selection leaves the edit open.
+No edit opens while `view.sending`: `startEdit` refuses and returns false, and `editLastMessage` then sends no stop.
+Tests in `src/client/App.test.ts`, each seen red first.
+They cover: the fork landing gives the draft back; the OW-fahoti `it.each` extended to before, while and after; Stop's words already in the composer survive a fork; a click-away; a prompt failing after attach; a failed fork keeping the edit open for Cancel; no edit while a fork's prompt is out; and no edit or stop while a plain send is out.
+`bun run check` passed with 1726 tests, and the Emacs ERT suite passed.
+The adversarial read found the External Editor also captures in-flight text and overwrites the restored draft; that was added to OW-momejo as an amendment.
+Emacs parity is OW-hakeno: Emacs still drops `:draft` on C-RET and lets an edit open mid-send.
+OW-zigepi's address to `stashedDraft` was updated.
