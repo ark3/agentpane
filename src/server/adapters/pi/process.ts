@@ -507,12 +507,15 @@ export class PiAdapter implements BackendAdapter {
 	 * It does not clear Pi's queue first, as `abort` does, though as of
 	 * `pi 1.2.0` `AgentSession.compact` begins with `await this.abort()`, so a
 	 * steer still queued when a compaction stops the turn meets what a bare
-	 * abort did to it (read at the installed package, not measured). Clearing
-	 * would take the text out with nowhere to put it: the compact route answers
-	 * 204 and `sessions/compact` `null`, so the words would be lost without a
-	 * trace, where left alone they stay in Pi's session, misplaced but there to
-	 * see. Handing them back would mean growing both wires and both clients for
-	 * a compaction asked for mid-turn with a steer still undelivered (OW-wisifo).
+	 * abort did to it (read at the installed package, not measured): mid-tool,
+	 * a user message nobody answered, and mid-reply, a steer that rides into the
+	 * next prompt's run and takes its reply (OW-yewiku). Neither is right, but
+	 * both leave the words in the session rather than nowhere. Clearing would
+	 * take the text out with nowhere to put it: the compact route answers 204
+	 * and `sessions/compact` `null`, so the words would be lost without a
+	 * trace. Handing them back would mean growing both wires and both clients
+	 * for a compaction asked for mid-turn with a steer still undelivered
+	 * (OW-wisifo).
 	 */
 	async compact(): Promise<void> {
 		this.state = { ...this.state, compaction: "requesting" };

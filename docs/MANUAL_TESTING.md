@@ -4897,7 +4897,7 @@ Before it, an earlier cut of the same probe, with only the tool hold, ran the to
 The probe prints its evidence to stdout only, and only the full run's 12 can be re-checked against code that was committed: the earlier cuts' output was read as they ran and not kept.
 
 **The question.**
-`PiAdapter.submit` sends a prompt carrying `streamingBehavior: "steer"`, which a busy Pi answers `{"disposition": "queued"}` after a `queue_update` naming the text in `steering`; `PiAdapter.abort` sends a bare `{"type": "abort"}`.
+`PiAdapter.submit` sends a prompt carrying `streamingBehavior: "steer"`, which a busy Pi answers `{"disposition": "queued"}` after a `queue_update` naming the text in `steering`; `PiAdapter.abort` sent a bare `{"type": "abort"}` before OW-wisifo.
 If Stop lands while the steer is still queued, the text could (a) run on its own after the abort, (b) stay queued and turn up in the next prompt's run, or (c) be dropped.
 `rpc-commands.md` in `pi 1.2.0`, section "clear_queue", says "`abort` continues queued messages when they remain in the session", which is (a); a source read of `AgentSession.abort`, which leaves the steering queue alone, inferred (b).
 

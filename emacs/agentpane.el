@@ -3698,9 +3698,10 @@ or no point name INDEX.  See `agentpane-fork'."
              (agentpane--watch-forget agentpane--handle)
              ;; The prompts this stop takes out of Pi's queue, its result's
              ;; `:queued', are dropped here, as the browser's `forkAndSubmit'
-             ;; drops them (D16, OW-wisifo): they were steered into the turn
-             ;; the fork abandons, and go with that branch as a steer
-             ;; delivered a moment sooner would have.  Taking them out still
+             ;; drops them (D16, OW-wisifo), and so are lost: a cleared steer
+             ;; is in no session file, where one delivered a moment sooner
+             ;; stays in the parent's.  They were steered into the turn the
+             ;; fork abandons.  Taking them out still
              ;; matters, since whether Pi's queue survives a fork was never
              ;; measured.  Under `agentpane-edit-last' the press's own abort
              ;; has usually emptied it already, and what that one takes out
