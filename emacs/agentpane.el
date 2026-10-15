@@ -4288,7 +4288,11 @@ its answer able to come after a turn has begun, as the browser's
 `disarmSubmit' drops a watch that has seen streaming; and once a turn has
 ended before the answer, raising the indicator, which stays, its watch is
 gone and the abandon drops nothing, a watch armed since on the handle by
-another prompt being another cons (OW-kejire, OW-zikiga)."
+another prompt being another cons (OW-kejire, OW-zikiga).
+Identity cannot see a join, though: after a merge the survivor can send
+while the killed buffer's prompt is still out, join its watch, and lose
+it when that prompt is refused or handled, so the survivor's own turn
+raises nothing (OW-kakasu)."
   (when (and agentpane--handle (not (assoc agentpane--handle agentpane--turn-watches)))
     (let ((watch (cons agentpane--handle 'sent)))
       (push watch agentpane--turn-watches)
