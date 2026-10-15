@@ -674,6 +674,21 @@ That desynchronization was OW-roveze, and it was silent — a later Edit forked 
 D20 below retires the counting; the invariant is gone rather than restored, and the steered message is simply not a fork target.
 The narrower window between `abort()` and `turn/completed`, where a steer hits a turn being torn down, is OW-pefawi.
 
+A steer sent *before* Stop and not yet delivered when the abort goes out is a different case, and on Pi a bare `abort` answers it the way the user asked in neither of the two ways it can go.
+Measured on the home server on 2026-10-15 against `pi 1.2.0` (OW-yewiku), Pi alone, a steer queued behind a running turn and then a bare `abort` as `PiAdapter` sends it: nothing ran on its own after the abort in any run, and where the text went depended on what the turn was doing.
+Stopped mid-tool, the aborted run delivered it as a user message whose reply failed at once with `stopReason: "error"`, so it stays in the session's messages as a turn nobody answered.
+Stopped mid-reply, it stayed queued and was delivered into the next prompt's run, after that prompt, and that run's one reply answered the steer, or went back to the interrupted reply, but never the new prompt.
+Sending `clear_queue` before `abort` took it out in both cases, and nothing leaked.
+`docs/MANUAL_TESTING.md`, "A bare abort leaves an undelivered Pi steer unanswered in the transcript or inside the next prompt's run", carries the 22 runs, `clear_queue`'s response, and where Pi's own `rpc-commands.md` ("`abort` continues queued messages when they remain in the session") does and does not match.
+
+The owner decided on 2026-10-15 that Stop does what Pi's own interactive mode does with Esc, as of `pi 1.2.0` (`restoreQueuedMessagesToEditor` in `dist/modes/interactive/interactive-mode.js`).
+agentpane sends `clear_queue` before `abort`, and the text of every steered prompt Pi had not delivered goes back to the composer of the client that pressed Stop, so nothing runs after Stop and the words the user sent are not lost.
+What comes back is what Pi queued, which as of `pi 1.2.0` is text only, so a steered prompt's images do not come back, and is the text after Pi's own expansion of a skill or prompt template.
+The text goes back as the abort request's answer, not as a broadcast, because the composer to refill is the one that pressed Stop.
+OW-wisifo carries it onto the adapter, the HTTP API and the Emacs helper's JSON-RPC, and settles whether `compact()` and the abort ahead of a Pi fork do the same.
+OW-fahoti and OW-seleri, both blocked by it, put the text back in each client's composer, including under "Stop and edit", where the composer already holds the message being edited.
+Until both land, a build carrying OW-wisifo clears the queue and a client that ignores the answer shows nothing, so those three are one change landed in three cards and are run together.
+
 ### D17. Navigating away during a fork does not cancel it
 
 Pressing send in edit mode forks the session and prompts the fork.

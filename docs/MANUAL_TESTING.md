@@ -4881,7 +4881,7 @@ The first prompt of each pair, and the ordinary prompt after the handled one, we
 Each run had one concurrent pair, so two pairs in all against OW-kokotu's four.
 No prompt carried an image: that `"steer"` on an idle Pi leaves an image-carrying prompt unchanged was read at the installed package, not run -- `AgentSession.prompt` in `pi 1.2.0`'s `dist/core/agent-session.js` reads `streamingBehavior` only under `this.isStreaming`, both where it hands it to `input` handlers and where it queues, and passes the images to `_startRun` the same way either way.
 
-## A steer Stop catches before delivery is never answered, and where its text goes depends on what the turn was doing; `clear_queue` first takes it out cleanly (OW-yewiku)
+## A bare abort leaves an undelivered Pi steer unanswered in the transcript or inside the next prompt's run, by what the turn was doing; `clear_queue` first takes it out cleanly (OW-yewiku)
 
 Run on the home server 2026-10-15, between 08:18 and 08:32 local (`-04:00`), on **`pi 1.2.0`** (`pi --version`, recorded by the probe), from the `card/OW-yewiku` worktree at `9a053ee` carrying the uncommitted probe change that was then committed with only its docblock reworded.
 Every Pi passed `--model openrouter/deepseek/deepseek-v4.1-flash:high`, and every run's `get_state` read back `openrouter/deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`.
@@ -4894,6 +4894,7 @@ python3 resources/probes/agentpane_pi_prompt_window_probe.py --part steer_abort 
 
 That ran once in full (08:25:08.705 to 08:31:45.989, exit 0), three runs of each of four cells, each run on a fresh `pi --mode rpc --no-session`.
 Before it, an earlier cut of the same probe, with only the tool hold, ran the tool cells once (08:18:57 to 08:19:58) and three times (08:20:15 to 08:23:19), and the text cells ran once with `--hold text --runs 1` (08:23:59 to 08:25:01); all of those agreed with the full run, so 7 runs of each tool cell and 4 of each text cell in all, and no two disagreed.
+The probe prints its evidence to stdout only, and only the full run's 12 can be re-checked against code that was committed: the earlier cuts' output was read as they ran and not kept.
 
 **The question.**
 `PiAdapter.submit` sends a prompt carrying `streamingBehavior: "steer"`, which a busy Pi answers `{"disposition": "queued"}` after a `queue_update` naming the text in `steering`; `PiAdapter.abort` sends a bare `{"type": "abort"}`.
@@ -4935,9 +4936,10 @@ The abort then ended the run as in the bare cells, except that the tool hold's e
 After the 25 s, `pendingMessageCount` was 0, the next prompt's run held only its own `user` message and was answered with its one word, and the marker was nowhere in `get_messages`.
 
 **Why, at the source.**
-The agent loop the `pi` binary bundles (`dist/bundle/chunks/chunk-TJXZSVTD.js`, the same `runLoop` `pi-agent-core` 1.2.0 ships as `dist/agent-loop.js`) polls `getSteeringMessages` after every tool round's `turn_end` without checking the abort signal, so a steer queued during a tool batch is drained into the next round, whose model call then fails on the aborted signal.
+In the agent loop the `pi` binary bundles (`dist/bundle/chunks/chunk-TJXZSVTD.js`, the same `runLoop` `pi-agent-core` 1.2.0 ships as `dist/agent-loop.js`), an aborted tool batch leaves `hasMoreToolCalls` true, so the loop opens another round whether or not anything is queued -- which is why the `clear_then_abort` tool cells still show an errored assistant message -- and its steering poll after that round's `turn_end` does not check the abort signal, so a steer queued during the batch is drained into that round, whose model call then fails on the aborted signal.
 A streaming reply that is aborted returns from the loop before that poll, and `AgentSession`'s `_handlePostAgentRun` and `_startRun` skip their `hasQueuedMessages()` checks once `_agentRunAbortRequested` is set, so the steer stays queued; the next prompt's `runAgentLoop` emits its own prompt first and only then reaches the loop's initial steering poll.
-So the source read's (b) holds for an abort mid-reply and not for an abort mid-tool, and the doc's "`abort` continues queued messages when they remain in the session" was not observed in either case on `pi 1.2.0`: a queued message waited for the next prompt rather than continuing.
+So the source read's (b) holds for an abort mid-reply and not for an abort mid-tool.
+The doc's "`abort` continues queued messages when they remain in the session" holds on `pi 1.2.0` only in the narrowest sense: mid-tool the aborted run did go on into a round carrying the message, but that round's reply failed, and mid-reply the message waited for the next prompt; in neither case was it answered as the user sent it.
 
 **Not established.**
 An abort during the model's thinking before any text, during a `bash` call the user ran through `!`, or during a compaction or retry, none of which was held.
