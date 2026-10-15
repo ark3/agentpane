@@ -37,3 +37,10 @@ Since OW-seleri, `agentpane-abort` reads its answer's `:queued`, the text of the
 `agentpane--absorb` hands the survivor what OTHER already holds, but an abort still out when OTHER is merged away loses its texts: Pi has already removed them from its queue, so they are in no session file either.
 Found by reading only; the reader did not establish that a Pi session can be held under two refs in Emacs at once, which a merge needs, and the existing merge tests use Claude refs.
 Whatever owner this card settles on for a dropped reply should cover the abort's too, or the close note should say why a Pi merge cannot reach it.
+
+## Amended 2026-10-15 at execution
+
+The done-condition's "fake helper" is, for this test, the stub `agentpane--request` that `agentpane-test--forking` installs (which `agentpane-test--merging` wraps), not `emacs/fake-helper.ts`.
+As of this amendment that stub answers a held request with `(with-current-buffer from ...)` whether or not FROM is still live, so a fork answered after its buffer was merged away signals "Selecting deleted buffer" rather than being dropped as the real `agentpane--request`'s `:success-fn` drops it.
+A test run against the stub as it stands would go red on that error, not on the missing fork buffer.
+So the stub must first model the real drop -- CALLBACK and FAILED skipped for a killed buffer, UNSENT and REPLIED still run, as `agentpane--request`'s docstring says -- and the red the done-condition asks for is the assertion that no buffer holds the forked ref, seen with the stub corrected and the fix absent.
