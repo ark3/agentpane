@@ -10,6 +10,7 @@ OW-73 (closed) added a warning by the browser's composer for any draft starting 
 On Pi 1.2.0 that is false for an extension command: `/mcp`, `/llama` and `/refs` on the home server are run by Pi itself and never reach the model (`disposition: "handled"`).
 Codex and Claude Code still take such text as a prompt, as far as anything here measured.
 agentpane-mode in `emacs/agentpane.el` carries no counterpart of the warning at all, a parity gap with the browser that predates the owner's 2026-09-23 parity rule (AGENTS.md "Both clients").
+That gap was OW-yedipi's, closed `--moot` into this card on 2026-10-14.
 
 OW-73's owner decisions stand and bind this card: warn, never block; a bare leading-`/` check with no command list; rendered next to the text being typed.
 Only the claim the copy makes is wrong; the new wording is the executor's first cut, and must not promise either outcome on a backend where both happen.
