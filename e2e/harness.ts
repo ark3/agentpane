@@ -105,7 +105,11 @@ const BANNERS = {
 	unrestoredModel: "harness/retired",
 	error: "The turn ended in an error.",
 	errorId: "e1",
-	notices: [{ kind: "warning", message: "A backend notice.", details: "Its details.", path: "/tmp/agentpane-harness/config.toml" }],
+	notices: [
+		{ kind: "warning", message: "A backend notice.", details: "Its details.", path: "/tmp/agentpane-harness/config.toml" },
+		// A Pi command's answer, one item a line, as `/refs` sends it (OW-fusoba).
+		{ kind: "notify", message: "Discovered @references:\n\n✓ @a.md\n✓ @b.md", details: null, path: null },
+	],
 };
 
 function snapshot(isStreaming: boolean, banners = false): void {

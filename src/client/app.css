@@ -368,6 +368,8 @@ button[aria-pressed="true"] { border-color: var(--ap-accent); background: var(--
 .notices li { display: flex; flex-wrap: wrap; gap: 0 var(--ap-space-2); }
 .notices li::before { content: "ℹ"; }
 .notice-details, .notice-path { color: var(--ap-fg-muted); }
+/* A message may span lines: a Pi command's `notify` lists one item a line (OW-fusoba). */
+.notice-message { white-space: pre-wrap; }
 
 @media (max-width: 42rem) {
 	.shell {

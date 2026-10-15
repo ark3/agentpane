@@ -5,7 +5,8 @@
  * read where the conversation is: above it, inside its column, in both the
  * wide and the single-column layout. With no banner showing, the conversation
  * must not pay for their row -- an empty grid track still costs a `gap`.
- * jsdom has no layout, so neither claim can be made there.
+ * And a notice's message that spans lines is drawn as lines (OW-fusoba).
+ * jsdom has no layout, so none of these claims can be made there.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -55,6 +56,18 @@ test("with no banner showing, the wide layout's conversation starts level with t
 test("the shell's banners sit above the conversation, in its column, in the wide layout", async ({ page }) => {
 	await attach(page);
 	await expectBannersWithConversation(page);
+});
+
+test("a notice's message spanning lines is drawn as those lines (OW-fusoba)", async ({ page }) => {
+	await attach(page);
+	await page.evaluate(() => window.harness.showBanners());
+	const notices = page.locator(".notices li");
+	await expect(notices).toHaveCount(2);
+
+	// The harness's second notice is four lines, one of them blank; its first is one.
+	const oneLine = await box(page, ".notices li:nth-child(1) > span:first-child");
+	const fourLines = await box(page, ".notices li:nth-child(2) > span:first-child");
+	expect(fourLines.height).toBeGreaterThanOrEqual(3.5 * oneLine.height);
 });
 
 test.describe("single-column layout", () => {

@@ -1479,7 +1479,7 @@
 			<ul class="notices" role="status" aria-label="Backend notices">
 				{#each selectedSession.notices as notice, i (i)}
 					<li>
-						<span>{notice.message}</span>
+						<span class="notice-message">{notice.message}</span>
 						{#if notice.details}<span class="notice-details">{notice.details}</span>{/if}
 						{#if notice.path}<code class="notice-path">{notice.path}</code>{/if}
 					</li>
