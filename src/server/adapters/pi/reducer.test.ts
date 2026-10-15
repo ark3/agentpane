@@ -315,7 +315,7 @@ describe("reducePiNotification: extension UI dialog requests (hand-crafted -- no
 		expect(result.state).toBe(state);
 	});
 
-	it("fire-and-forget methods (notify) do not produce a request or mutate state", () => {
+	it("notify yields a notice of its own kind, and no request or state change (OW-fusoba)", () => {
 		const state = createInitialPiState();
 		const result = reducePiNotification(state, {
 			type: "extension_ui_request",
@@ -323,8 +323,22 @@ describe("reducePiNotification: extension UI dialog requests (hand-crafted -- no
 			method: "notify",
 			message: "Command blocked by user",
 		});
+		expect(result.notice).toEqual({ kind: "notify", message: "Command blocked by user", details: null, path: null });
 		expect(result.request).toBeUndefined();
 		expect(result.state).toBe(state); // no-op: same reference
+	});
+
+	it("the other fire-and-forget methods (setStatus) produce nothing", () => {
+		const state = createInitialPiState();
+		const result = reducePiNotification(state, {
+			type: "extension_ui_request",
+			id: "req-4",
+			method: "setStatus",
+			statusKey: "k",
+			statusText: "busy",
+		});
+		expect(result).toEqual({ state });
+		expect(result.state).toBe(state);
 	});
 });
 

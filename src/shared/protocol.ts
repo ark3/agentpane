@@ -131,15 +131,17 @@ export type LiveSessionSummary = SessionSummary & { handle: string };
 /**
  * Something the backend wants the human to know that is not a failure and not
  * transcript state (OW-tujiya): Codex's `warning`, `guardianWarning`,
- * `deprecationNotice` and `configWarning` notifications. On 2026-09-24, with
- * `codex-cli 0.156.0` installed, none of the home server's 119 rollouts held
- * a warning or error event type, so a rollout is not known to reveal one after
- * the fact.
+ * `deprecationNotice` and `configWarning` notifications, and every `notify` a
+ * Pi extension sends (D11, OW-fusoba). On 2026-09-24, with `codex-cli 0.156.0`
+ * installed, none of the home server's 119 rollouts held a warning or error
+ * event type, so a rollout is not known to reveal one after the fact.
  *
  * `kind` is the backend's own method name, not normalised. `message` is the
- * one line to show; `details` is the backend's further guidance, and `path`
- * the file the notice is about, with `:LINE:COLUMN` appended where the
- * backend named a place in it -- each null when the backend sent none.
+ * text to show, and may span lines -- a Pi command's `notify` can list one item
+ * a line -- which each client draws as lines; `details` is the backend's
+ * further guidance, and `path` the file the notice is about, with
+ * `:LINE:COLUMN` appended where the backend named a place in it -- each null
+ * when the backend sent none.
  */
 export interface AgentNotice {
 	kind: string;

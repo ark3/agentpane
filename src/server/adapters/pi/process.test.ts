@@ -15,7 +15,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
+import type { AgentNotice, AssistantTurn, PaneMessage, SessionRef } from "../../../shared/protocol.ts";
 import { BackendRefusedError, type StateChange } from "../types.ts";
 import { type PiChild, PiAdapter } from "./process.ts";
 
@@ -745,6 +745,38 @@ describe("PiAdapter dialogs, cancelled at arrival (D2a)", () => {
 		// of the handler, which went on to name the dialog.
 		expect(h.errors).toEqual([expect.stringContaining("confirm")]);
 		expect(h.child.sent().filter((c) => c.type === "extension_ui_response")).toEqual([]);
+	});
+});
+
+describe("PiAdapter notices (D11, OW-fusoba)", () => {
+	it("hands each notify to onNotice, and nothing for the other fire-and-forget methods", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+		const notices: AgentNotice[] = [];
+		h.adapter.onNotice((notice) => notices.push(notice));
+		const onUpdate = vi.fn();
+		h.adapter.onUpdate(onUpdate);
+
+		h.child.emitLine({ type: "extension_ui_request", id: "ui-1", method: "notify", message: "first\n\nsecond", notifyType: "warning" });
+		h.child.emitLine({ type: "extension_ui_request", id: "ui-2", method: "setStatus", statusKey: "k", statusText: "busy" });
+
+		expect(notices).toEqual([{ kind: "notify", message: "first\n\nsecond", details: null, path: null }]);
+		expect(onUpdate).not.toHaveBeenCalled();
+		expect(h.errors).toEqual([]);
+	});
+
+	it("hands on a notify Pi writes before answering start()'s get_state, as an extension's session_start does", async () => {
+		const h = makeHarness();
+		const notices: AgentNotice[] = [];
+		h.adapter.onNotice((notice) => notices.push(notice));
+
+		const started = h.adapter.start({ cwd: WORKSPACE });
+		h.child.emitLine({ type: "extension_ui_request", id: "ui-1", method: "notify", message: "Auto-loaded 2 file(s)" });
+		expect(notices).toEqual([{ kind: "notify", message: "Auto-loaded 2 file(s)", details: null, path: null }]);
+		h.child.respondTo("get_state", { model: null, isStreaming: false });
+		await started;
+
+		expect(notices).toHaveLength(1);
 	});
 });
 

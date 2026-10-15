@@ -24,7 +24,7 @@ import {
 	type StateChange,
 	type Unsubscribe,
 } from "../types.ts";
-import type { ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../../shared/protocol.ts";
 import { type ChildLike, ChildProcessShell } from "../child-process.ts";
 import {
 	createInitialPiState,
@@ -47,6 +47,7 @@ import {
 type UpdateListener = (state: AdapterState, change: StateChange) => void;
 type ErrorListener = (message: string) => void;
 type RefListener = (ref: SessionRef, cause: "rename" | "fork") => void;
+type NoticeListener = (notice: AgentNotice) => void;
 
 interface PendingCommand {
 	resolve: (response: unknown) => void;
@@ -243,6 +244,7 @@ export class PiAdapter implements BackendAdapter {
 	private readonly updateListeners = new Set<UpdateListener>();
 	private readonly errorListeners = new Set<ErrorListener>();
 	private readonly refListeners = new Set<RefListener>();
+	private readonly noticeListeners = new Set<NoticeListener>();
 
 	private readonly pendingCommands = new Map<string, PendingCommand>();
 	private nextCommandId = 0;
@@ -606,6 +608,18 @@ export class PiAdapter implements BackendAdapter {
 		return () => this.refListeners.delete(cb);
 	}
 
+	/**
+	 * Each `notify` an extension sends (D11, OW-fusoba). Handed on as its line
+	 * arrives, `start()` or no `start()`: an extension notifies from its
+	 * `session_start` handler too, which as of `pi 1.2.0` Pi ran before it
+	 * answered `start()`'s `get_state`, and the server subscribes before it
+	 * starts the adapter so that this reaches it.
+	 */
+	onNotice(cb: NoticeListener): Unsubscribe {
+		this.noticeListeners.add(cb);
+		return () => this.noticeListeners.delete(cb);
+	}
+
 	// -- session controls -----------------------------------------------------
 
 	/** Takes `provider/modelId` only, and sends it unchanged; see "Model refs" in `protocol.ts`. */
@@ -710,6 +724,7 @@ export class PiAdapter implements BackendAdapter {
 			this.emitError(`Pi sent a dialog agentpane cannot answer (${kind}); agentpane cancelled it`);
 		}
 		if (result.error) this.emitError(result.error);
+		if (result.notice) this.emitNotice(result.notice);
 	}
 
 	private handleResponse(resp: Extract<PiOutputLine, { type: "response" }>): void {
@@ -768,6 +783,10 @@ export class PiAdapter implements BackendAdapter {
 
 	private emitError(message: string): void {
 		for (const cb of this.errorListeners) cb(message);
+	}
+
+	private emitNotice(notice: AgentNotice): void {
+		for (const cb of this.noticeListeners) cb(notice);
 	}
 
 	/** Take `sessionFile` as the id, announcing it when it is a different one. */

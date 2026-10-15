@@ -394,11 +394,12 @@
  * - `session/notice` -- `{ session, handle, notice }`. Something non-fatal the
  *   backend said (OW-tujiya), never a turn error: `notice` is the HTTP API's
  *   `AgentNotice` unchanged -- `kind` (string, the backend's own name for
- *   it), `message` (string, the line to show), `details` (string or `null`,
- *   further guidance) and `path` (string or `null`, the file it is about,
- *   with `:LINE:COLUMN` where the backend named a place in it). Only the
- *   Codex adapter produces any. Every later `session/snapshot` carries it
- *   again, in `notices`.
+ *   it), `message` (string, the text to show, which may span lines, each
+ *   drawn as a line), `details` (string or `null`, further guidance) and
+ *   `path` (string or `null`, the file it is about, with `:LINE:COLUMN`
+ *   where the backend named a place in it). The Codex and Pi adapters
+ *   produce them; Claude Code's does not. Every later `session/snapshot`
+ *   carries it again, in `notices`.
  * - `session/detached` -- `{ session, handle, cause }`. Nothing more comes
  *   under `handle`, and the helper has dropped the attachment: either the
  *   server let go of the handle and said so with an `ended` under it -- a

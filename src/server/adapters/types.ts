@@ -222,8 +222,8 @@ export interface BackendAdapter {
 	/**
 	 * Fires when the backend says something non-fatal the human should see
 	 * (OW-tujiya). Never an error: nothing here says a turn failed, so it
-	 * must not ride `onError`. Optional because only the Codex adapter
-	 * implements it; the others leave it out.
+	 * must not ride `onError`. Optional because the Claude Code adapter
+	 * leaves it out; the Codex and Pi adapters implement it.
 	 */
 	onNotice?(cb: (notice: AgentNotice) => void): Unsubscribe;
 

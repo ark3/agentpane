@@ -1,6 +1,7 @@
 /**
  * Pure Pi event reducer: RPC notification lines in, `AgentMessage[]` +
- * `isStreaming` out (plus the dialogs D2a refuses at arrival).
+ * `isStreaming` out (plus the dialogs D2a refuses at arrival, and the notices
+ * D11 forwards).
  *
  * This is deliberately free of any subprocess/stdio concern -- see
  * `process.ts` for that -- so it can be driven directly by a test over the
@@ -25,7 +26,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
+import type { AgentNotice, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
 import {
 	clampThinkingLevel,
 	PI_DIALOG_METHODS,
@@ -69,6 +70,8 @@ export interface PiReduceResult {
 	request?: { requestId: string; kind: PiDialogMethod };
 	/** Present when this notification signals a failure the transcript itself won't show. */
 	error?: string;
+	/** Present when this notification is something non-fatal for the human to see: an extension's `notify` (D11). */
+	notice?: AgentNotice;
 }
 
 export function createInitialPiState(): PiReducerState {
@@ -115,14 +118,20 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			return reduceAssistantDelta(state, event.assistantMessageEvent);
 
 		case "extension_ui_request": {
-			const { id, method } = event;
 			// Only dialog methods (select/confirm/input/editor) block Pi until
 			// answered, and agentpane never holds one: the adapter cancels each
 			// the moment it arrives (D2a, OW-yosuzo). The fire-and-forget methods
-			// (notify/setStatus/setWidget/setTitle/set_editor_text) are
-			// presentation hints with no reply and no home in the frozen
-			// `ServerEvent` union; see this workstream's report for why they're
-			// dropped here rather than forwarded.
+			// expect no reply. Of those, `notify` is a notice under its own name
+			// (D11, OW-fusoba): for a prompt an extension command handles it is
+			// the command's whole output, as of `pi 1.2.0`. Its message goes
+			// whole, lines and all, since `/refs` lists one reference a line, and
+			// its `notifyType` goes nowhere, since no client draws a notice by
+			// level. The rest (setStatus/setWidget/setTitle/set_editor_text) are
+			// presentation hints for Pi's own interface, and are dropped.
+			if (event.method === "notify") {
+				return { state, notice: { kind: event.method, message: event.message, details: null, path: null } };
+			}
+			const { id, method } = event;
 			if (!(PI_DIALOG_METHODS as readonly string[]).includes(method)) return { state };
 			return { state, request: { requestId: id, kind: method as PiDialogMethod } };
 		}
