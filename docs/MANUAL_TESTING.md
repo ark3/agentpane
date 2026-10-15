@@ -1484,6 +1484,24 @@ After that fallback, the same five-run capture contained no white frame: the fir
 The control itself remains non-persistent.
 A fresh page starts at System, `main.ts` writes the resolved `data-theme` before mounting, and the component follows later system changes only while System remains selected.
 
+## Observed the collapsed thinking preview clipped to one line (OW-55)
+
+**2026-10-14, home server, `@playwright/test 1.62.1`, `chromium_headless_shell-1234` (Chrome for Testing 151.0.7922.34), 900x700 viewport.**
+
+`e2e/thinking-preview.spec.ts` seeds one completed turn whose thinking block carries thirty filler words through `harness.seedThinking()`, and reads the collapsed `<summary>` and its `.preview` span with the `.preview` rule in `Thinking.svelte` exactly as `main` has it.
+It was green as-is, so `Thinking.svelte` did not change.
+
+`oneLine` caps the preview at 80 characters, so the fixture's length alone could not make it overflow; ordinary filler words did: the span's `scrollWidth` was 593 against a `clientWidth` of 395, beside a 480px summary in a 512px `.conversation`.
+The summary measured 20.14px tall against the preview's 20.15px line-height, the span lay inside the summary on all four sides, the pane's `scrollWidth` equalled its `clientWidth` at 512, computed `text-overflow` read `ellipsis`, and clicking the summary opened the `<details>` and showed its body.
+
+Each regression below removed one declaration from `.preview`, ran the spec alone, and was restored without being committed.
+
+- Without `white-space: nowrap` the preview wrapped and the summary measured 40.28px, red at "the collapsed summary is not one line" (expected under 30.225).
+- Without `overflow: hidden` the summary stayed one line and the span's box stayed inside it, but its text spilled out and `.conversation` scrolled sideways, `scrollWidth` 695 against 512, red at "the transcript scrolls sideways to reach the preview".
+- Without `text-overflow: ellipsis` the computed value read `clip`, red at "the preview is cut off without an ellipsis".
+- Without `min-width: 0` the spec stayed green with every measurement identical to the unregressed run.
+  `overflow: hidden` already makes the span a scroll container, whose automatic minimum size in a flex row is zero, so on this build the declaration is redundant beside it and its removal is not a layout change the spec could catch.
+
 ## Observed model selection through real backend turns (OW-derewo)
 
 **2026-09-08, home server, Claude Code 2.1.265 on Haiku and Codex CLI 0.153.4 on `gpt-5.6-luna`.**
