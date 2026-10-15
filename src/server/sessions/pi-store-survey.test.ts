@@ -168,6 +168,16 @@ describe("pi_store_survey", () => {
 				{ type: "message", ...base(3), message: { role: "futureRole", content: [] } },
 				{ type: "future_entry", ...base(4) },
 			],
+			// The third message starts a branch off the first.
+			"b/two.jsonl": [
+				{ type: "session", version: 3, id: "t", timestamp: "2026-10-14T12:00:00Z", cwd: "/w" },
+				...[1, 2, 3].map((n) => ({
+					type: "message",
+					...base(n),
+					...(n === 3 ? { parentId: base(1).id } : {}),
+					message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
+				})),
+			],
 		});
 
 		const output = surveyPiStore(root);
@@ -179,6 +189,7 @@ describe("pi_store_survey", () => {
 			return rest.slice(0, end).map((line) => line.trim().split(/\s+/)[0]);
 		};
 
+		expect(output).toContain("-- 2026-10: 2 files; 1 entries not parented on the line before, in 1 files --");
 		expect(section("entry types no reader reads")).toEqual(["entry(future_entry)"]);
 		expect(section("messages storedAgentMessage drops whole")).toEqual(["message(futureRole)"]);
 		expect(section("content blocks storedAgentMessage drops")).toEqual(["message(assistant).content[futureBlock]"]);

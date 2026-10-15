@@ -15,7 +15,11 @@
  * `message(<role>)` for a message entry's payload, and the schema objects
  * below it -- how many there were, every key they carried with the kinds of
  * value it held, and the values of the few enumerated fields named in
- * `enumeratedValue`.
+ * `enumeratedValue`. Each month also counts the entries whose `parentId` is
+ * not the `id` on the line before (after the first entry), and the files
+ * holding them: a Pi file is a tree, and each such entry starts a branch
+ * that the preview, reading every message line in file order, draws as one
+ * line with the branch it left.
  *
  * "Not read by agentpane", over all months: entry types no reader reads,
  * messages and content blocks `storedAgentMessage` drops whole, and each key
@@ -215,6 +219,8 @@ class Survey {
 	emptyFiles = 0;
 	readonly census = new Map<string, Map<string, PositionCensus>>();
 	readonly filesByMonth = new Map<string, number>();
+	readonly offLineEntriesByMonth = new Map<string, number>();
+	readonly offLineFilesByMonth = new Map<string, number>();
 	readonly notRead = new Map<Section, Map<string, Tally>>();
 
 	private tally(section: Section, item: string, month: string): void {
@@ -333,6 +339,8 @@ class Survey {
 		bump(this.filesByMonth, month);
 		const lines = text.split("\n").filter((line) => line.length > 0);
 		if (lines.length === 0) this.emptyFiles++;
+		let previousId: unknown;
+		let offLine = 0;
 		lines.forEach((line, index) => {
 			this.lines++;
 			let parsed: unknown;
@@ -353,6 +361,8 @@ class Survey {
 				this.classifyEntry(month, label, ENTRY_READS.header, parsed);
 				return;
 			}
+			if (index >= 2 && parsed.parentId !== previousId) offLine++;
+			previousId = parsed.id;
 			const label = `entry(${type})`;
 			const children = typeof parsed.type === "string" ? (ENTRY_CHILDREN[parsed.type] ?? {}) : {};
 			this.walk(month, label, "entry", parsed, children);
@@ -361,6 +371,10 @@ class Survey {
 				this.classifyMessage(month, parsed.message, parsed.timestamp);
 			}
 		});
+		if (offLine > 0) {
+			this.offLineEntriesByMonth.set(month, (this.offLineEntriesByMonth.get(month) ?? 0) + offLine);
+			bump(this.offLineFilesByMonth, month);
+		}
 	}
 
 	report(): string {
@@ -374,7 +388,9 @@ class Survey {
 		out.push("== Census, by UTC month of file mtime ==");
 		for (const month of months) {
 			out.push("");
-			out.push(`-- ${month}: ${this.filesByMonth.get(month)} files --`);
+			out.push(
+				`-- ${month}: ${this.filesByMonth.get(month)} files; ${this.offLineEntriesByMonth.get(month) ?? 0} entries not parented on the line before, in ${this.offLineFilesByMonth.get(month) ?? 0} files --`,
+			);
 			const positions = this.census.get(month) ?? new Map<string, PositionCensus>();
 			for (const label of [...positions.keys()].sort()) {
 				const pos = positions.get(label)!;
