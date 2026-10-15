@@ -4248,8 +4248,8 @@ Its `firstKeptEntryId` named the second `assistant` message, the run's last.
 **Assistant messages carry `thinkingLevel: "high"` on both halves.**
 The stream's assistant `message_end`s and the file's assistant messages both had it, beside `durationMs`, `responseId`, and `rawStopReason`.
 
-`src/server/sessions/pi-conformance.test.ts` replays both halves and lists two disagreements, a level each live assistant turn names and the preview does not (OW-zarine), and the compaction marker the preview never draws (OW-livowu).
-OW-zarine has since made the preview name each stored reply's `thinkingLevel`, so the compaction marker is the one left; see its section at the end of this file.
+`src/server/sessions/pi-conformance.test.ts` replays both halves and, when this capture landed, listed two disagreements, a level each live assistant turn named and the preview did not (OW-zarine), and the compaction marker the preview did not draw (OW-livowu).
+OW-zarine has since made the preview name each stored reply's `thinkingLevel`, see its section at the end of this file, and OW-livowu has made it draw each `compaction` entry as the marker, in file order, so the test lists no difference for either scenario.
 The system message is drawn on both sides, as OW-wavini left it.
 
 ## Pi's fork, resume and model-restore facts re-measured on `pi 1.2.0` (OW-vijine)
