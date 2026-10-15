@@ -4880,3 +4880,66 @@ The first prompt of each pair, and the ordinary prompt after the handled one, we
 **Not established.**
 Each run had one concurrent pair, so two pairs in all against OW-kokotu's four.
 No prompt carried an image: that `"steer"` on an idle Pi leaves an image-carrying prompt unchanged was read at the installed package, not run -- `AgentSession.prompt` in `pi 1.2.0`'s `dist/core/agent-session.js` reads `streamingBehavior` only under `this.isStreaming`, both where it hands it to `input` handlers and where it queues, and passes the images to `_startRun` the same way either way.
+
+## A steer Stop catches before delivery is never answered, and where its text goes depends on what the turn was doing; `clear_queue` first takes it out cleanly (OW-yewiku)
+
+Run on the home server 2026-10-15, between 08:18 and 08:32 local (`-04:00`), on **`pi 1.2.0`** (`pi --version`, recorded by the probe), from the `card/OW-yewiku` worktree at `9a053ee` carrying the uncommitted probe change that was then committed with only its docblock reworded.
+Every Pi passed `--model openrouter/deepseek/deepseek-v4.1-flash:high`, and every run's `get_state` read back `openrouter/deepseek/deepseek-v4.1-flash` at `thinkingLevel: "high"`.
+Pi did not run against `~/.pi/agent`, which refused a `touch` in this session's sandbox: the probe gave each Pi a throwaway `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json` and the `extensions/` directory dereferenced (`auto-read-agents-refs.ts`, `background-jobs.ts`), and removed it at the end.
+The vehicle is OW-kokotu's `resources/probes/agentpane_pi_prompt_window_probe.py`, with a new Pi-alone part, `steer_abort`, whose docblock says what it asks:
+
+```bash
+python3 resources/probes/agentpane_pi_prompt_window_probe.py --part steer_abort --runs 3
+```
+
+That ran once in full (08:25:08.705 to 08:31:45.989, exit 0), three runs of each of four cells, each run on a fresh `pi --mode rpc --no-session`.
+Before it, an earlier cut of the same probe, with only the tool hold, ran the tool cells once (08:18:57 to 08:19:58) and three times (08:20:15 to 08:23:19), and the text cells ran once with `--hold text --runs 1` (08:23:59 to 08:25:01); all of those agreed with the full run, so 7 runs of each tool cell and 4 of each text cell in all, and no two disagreed.
+
+**The question.**
+`PiAdapter.submit` sends a prompt carrying `streamingBehavior: "steer"`, which a busy Pi answers `{"disposition": "queued"}` after a `queue_update` naming the text in `steering`; `PiAdapter.abort` sends a bare `{"type": "abort"}`.
+If Stop lands while the steer is still queued, the text could (a) run on its own after the abort, (b) stay queued and turn up in the next prompt's run, or (c) be dropped.
+`rpc-commands.md` in `pi 1.2.0`, section "clear_queue", says "`abort` continues queued messages when they remain in the session", which is (a); a source read of `AgentSession.abort`, which leaves the steering queue alone, inferred (b).
+
+**What the probe did.**
+Each run holds the steer undelivered one of two ways.
+The tool hold asks for one `bash` call of `sleep 20; echo done` and waits for its `tool_execution_start` with no end, since Pi delivers a steer only after the tool batch (OW-nufitu).
+The text hold asks for OW-nufitu's gardening essay and waits until the reply has streamed 20 `text_delta`s with no `message_end`.
+The probe then sends a marker prompt carrying `"steer"`, exactly as the adapter does, waits for the `queue_update` holding the marker, checks the hold is still running, and sends `abort` -- in the `clear_then_abort` cells after a `clear_queue`.
+It then sends nothing for 25 s, reads `get_state`, sends an unrelated one-word prompt with `"steer"` as the adapter would, waits for idle, and reads `get_messages`.
+In every run the steer was answered `queued`, its `queue_update` held the marker in `steering` with `followUp` empty, and the hold was still running when the abort went out.
+
+**Nothing ran on its own after the abort, in any run: not (a).**
+The `abort` response came after the run's `agent_end` and `agent_settled`, and in all 22 runs the 25 s after it carried no event at all, no `agent_start` and no `user` message.
+
+**With the tool hold, the steer is delivered into the aborted run and never answered: none of (a), (b) or (c).**
+The abort ended the call at once -- `tool_execution_end`, a `toolResult` reading `Command aborted` with `isError: true`, and `turn_end` -- and Pi then opened a new round anyway: `turn_start`, a `queue_update` with both queues empty, and the marker's `user` `message_start`/`message_end`.
+That round's assistant message came back immediately with `stopReason: "error"` and `errorMessage: "This operation was aborted"`, not `"aborted"`, then `turn_end`, `agent_end`, `agent_settled` and only then the `abort` response.
+After the 25 s, `get_state` read `pendingMessageCount: 0`; the next prompt's run held only its own `user` message and a one-word reply; and `get_messages` kept the marker as a `user` message between the `toolResult` and the errored assistant message, in the context of every later call.
+So the text was neither dropped nor queued: it sits in the transcript as a turn the user sent and the model never answered.
+
+**With the text hold, the steer stays queued and is delivered into the next prompt's run, after that prompt: (b).**
+The abort ended the streaming reply with `stopReason: "aborted"` and `errorMessage: "Request was aborted"`, followed by `turn_end`, `agent_end`, `agent_settled` and the `abort` response, with no `queue_update` and no `user` message.
+After the 25 s, `get_state` read `pendingMessageCount: 1` with `isStreaming: false`.
+The next prompt was answered `started`, and its run emitted that prompt's `user` message first, then a `queue_update` with both queues empty, then the marker's `user` message, then a single assistant message and `agent_settled`.
+So the next run carried two user messages and one reply; what that reply said varied (in two runs the marker's one word, in two the essay resumed), and in none was it the one word the new prompt asked for.
+
+**`clear_queue` before `abort` took the text out in both holds, and nothing leaked.**
+On `pi 1.2.0` its response, verbatim from one run, was
+
+```json
+{"id": "clear", "type": "response", "command": "clear_queue", "success": true, "data": {"steering": ["YEWIKU-40A0BDA4 Reply with exactly the single word KILO and nothing else. Do not use tools."], "followUp": []}}
+```
+
+-- `data.steering` and `data.followUp` as arrays of the queued texts, as `rpc-commands.md` documents -- preceded by a `queue_update` with both queues empty; every run's response had that shape, carrying its own marker.
+The abort then ended the run as in the bare cells, except that the tool hold's extra round carried no `user` message, only the errored assistant message.
+After the 25 s, `pendingMessageCount` was 0, the next prompt's run held only its own `user` message and was answered with its one word, and the marker was nowhere in `get_messages`.
+
+**Why, at the source.**
+The agent loop the `pi` binary bundles (`dist/bundle/chunks/chunk-TJXZSVTD.js`, the same `runLoop` `pi-agent-core` 1.2.0 ships as `dist/agent-loop.js`) polls `getSteeringMessages` after every tool round's `turn_end` without checking the abort signal, so a steer queued during a tool batch is drained into the next round, whose model call then fails on the aborted signal.
+A streaming reply that is aborted returns from the loop before that poll, and `AgentSession`'s `_handlePostAgentRun` and `_startRun` skip their `hasQueuedMessages()` checks once `_agentRunAbortRequested` is set, so the steer stays queued; the next prompt's `runAgentLoop` emits its own prompt first and only then reaches the loop's initial steering poll.
+So the source read's (b) holds for an abort mid-reply and not for an abort mid-tool, and the doc's "`abort` continues queued messages when they remain in the session" was not observed in either case on `pi 1.2.0`: a queued message waited for the next prompt rather than continuing.
+
+**Not established.**
+An abort during the model's thinking before any text, during a `bash` call the user ran through `!`, or during a compaction or retry, none of which was held.
+A batch of several calls, and a sequential batch.
+Whether agentpane renders the tool hold's errored assistant message, or the text hold's two user messages, any differently from what Pi stored; this run was Pi alone, with no server.

@@ -51,6 +51,43 @@ stdout. The stdin tap is what shows whether a prompt carried
 * `handled_<name>`: each extension command as a POST, then `HANDLED_WAIT`
   seconds of the SSE wire, then an ordinary prompt to show what follows.
 
+## Part `steer_abort`: a steer still queued when Stop arrives (OW-yewiku)
+
+`PiAdapter.submit` steers a prompt into a running turn and Pi answers
+`{"disposition": "queued"}`; `PiAdapter.abort` sends a bare `abort`. If the
+abort lands before Pi has delivered the steer, three products hide behind it:
+(a) the text runs on its own after the abort, which `rpc-commands.md`'s
+"clear_queue" section says ("`abort` continues queued messages when they
+remain in the session", `pi 1.2.0`'s copy); (b) it stays queued and turns up
+in the next prompt's run, which a source read of `AgentSession.abort` (it
+leaves the steering queue alone) and of `pi-agent-core`'s initial steering
+poll inferred; (c) it is dropped. Nothing had been run.
+
+Two holds keep the steer undelivered, chosen by `--hold`. `tool`: Pi
+delivers a steer only once the current tool batch finishes (OW-nufitu), so the
+turn asks for one `bash` call of `sleep 20` and the hold is that call having a
+`tool_execution_start` and no end. `text`: the turn is the gardening essay
+`agentpane_pi_steer_probe.py` uses, and the hold is its reply having streamed
+`TEXT_HOLD_DELTAS` text deltas and no `message_end`, since a text-only turn
+delivers a steer only after the reply. The first run of the tool hold showed
+why both are needed: an abort mid-tool and an abort mid-reply leave the queue
+differently.
+
+Once the hold is running, the probe sends a prompt carrying
+`streamingBehavior: "steer"` and a fresh marker, as the adapter does, waits for
+a `queue_update` whose `steering` holds the marker, then sends `abort`. It then
+sends nothing for `OBSERVE` seconds and reports every event after the abort's
+response (a), sends an unrelated prompt the same way and reports where the
+marker lands in that run (b), and ends with `get_messages`. Events between the
+steer and the abort's response are kept too, because the aborted run itself
+can deliver the steer. A run whose hold had ended when the abort went out has
+not measured the case and fails.
+
+Two cells per hold, each `--runs` times on a fresh Pi so no run inherits a
+queue: `abort` sends the bare `abort` agentpane sends today, and
+`clear_then_abort` sends `clear_queue` first, as the doc prescribes for Esc,
+and records its response verbatim.
+
 ## The configuration
 
 "Stock" is this machine's: `PI_CODING_AGENT_DIR` points at a temporary copy
@@ -79,6 +116,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -107,6 +145,21 @@ TIMING_RUNS = 5
 HANDLED_WAIT = 5.0
 QUIET = 2.0
 LIFECYCLE = ("agent_start", "agent_end", "agent_settled")
+OBSERVE = 25.0
+STEER_ABORT_TOOL_PROMPT = (
+    "Use the bash tool exactly once, with exactly this command: `sleep 20; echo done`. "
+    "After it returns, reply with the single word DONE."
+)
+# As `agentpane_pi_steer_probe.py`'s essay, which the model complies with at
+# length; the abort goes out once this many text deltas have streamed.
+STEER_ABORT_TEXT_PROMPT = (
+    "Do not use tools. Write a detailed guide to growing vegetables in a home garden. "
+    "Cover each of these in its own titled section, and write at least 120 words in each "
+    "section: soil preparation, watering, sunlight and siting, pest control, composting, "
+    "crop rotation, harvesting, and planning across the seasons. Write the sections in that "
+    "order and do not summarise at the end."
+)
+TEXT_HOLD_DELTAS = 20
 
 
 def word(w: str) -> str:
@@ -420,6 +473,134 @@ def run_rpc(args: argparse.Namespace, pi: str, home: Path, workspace: Path) -> d
 
 
 # ---------------------------------------------------------------------------
+# part steer_abort
+# ---------------------------------------------------------------------------
+
+
+def user_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    return content if isinstance(content, str) else "".join(
+        b.get("text", "") for b in content or [] if isinstance(b, dict)
+    )
+
+
+def steer_abort_run(
+    args: argparse.Namespace, pi: str, home: Path, workspace: Path, hold: str, clear: bool
+) -> dict[str, Any]:
+    marker = f"YEWIKU-{uuid.uuid4().hex[:8].upper()}"
+    rpc = PiRpc(pi, args.model, home, workspace)
+    out: dict[str, Any] = {"hold": hold, "marker": marker}
+    try:
+        rpc.write({"id": "state0", "type": "get_state"})
+        state = rpc.wait(rpc.response(0, "state0"), 30, "get_state")["event"]["data"]
+        out["model"] = f"{state['model']['provider']}/{state['model']['id']}"
+        out["thinkingLevel"] = state.get("thinkingLevel")
+
+        def running_call(rows: list[dict[str, Any]]) -> Any:
+            started = {r["event"].get("toolCallId") for r in rows if r["event"].get("type") == "tool_execution_start"}
+            ended = {r["event"].get("toolCallId") for r in rows if r["event"].get("type") == "tool_execution_end"}
+            return started - ended
+
+        def streaming_text(rows: list[dict[str, Any]]) -> Any:
+            """The reply has `TEXT_HOLD_DELTAS` text deltas and no `message_end` yet."""
+            deltas, open_reply = 0, False
+            for row in rows:
+                event = row["event"]
+                role = (event.get("message") or {}).get("role")
+                if event.get("type") == "message_start" and role == "assistant":
+                    open_reply = True
+                elif event.get("type") == "message_end" and role == "assistant":
+                    open_reply = False
+                elif (event.get("assistantMessageEvent") or {}).get("type") == "text_delta":
+                    deltas += 1
+            return open_reply and deltas >= TEXT_HOLD_DELTAS
+
+        holding = running_call if hold == "tool" else streaming_text
+        prompt = STEER_ABORT_TOOL_PROMPT if hold == "tool" else STEER_ABORT_TEXT_PROMPT
+        rpc.write({"id": "hold", "type": "prompt", "message": prompt})
+        rpc.wait(holding, 120, f"the {hold} hold")
+
+        cut = len(rpc.snapshot())
+        steer_text = f"{marker} Reply with exactly the single word KILO and nothing else. Do not use tools."
+        rpc.write({"id": "steer", "type": "prompt", "message": steer_text, "streamingBehavior": "steer"})
+        steer = rpc.wait(rpc.response(cut, "steer"), 30, "steer response")
+        queued = rpc.wait(
+            lambda rows: next((r for r in rows[cut:] if r["event"].get("type") == "queue_update"
+                               and any(marker in s for s in r["event"].get("steering") or [])), None),
+            30, "queue_update naming the marker",
+        )
+        out["steer_response"] = steer["event"]
+        out["steer_queue_update"] = summarise(queued["event"])
+
+        if clear:
+            mark = len(rpc.snapshot())
+            rpc.write({"id": "clear", "type": "clear_queue"})
+            out["clear_queue_response"] = rpc.wait(rpc.response(mark, "clear"), 30, "clear_queue")["event"]
+
+        abort_at = len(rpc.snapshot())
+        out["hold_still_running_at_abort"] = bool(holding(rpc.snapshot()))
+        rpc.write({"id": "abort", "type": "abort"})
+        aborted = rpc.wait(rpc.response(abort_at, "abort"), 60, "abort response")
+        out["abort_response"] = aborted["event"]
+        after_abort = rpc.snapshot().index(aborted)
+
+        time.sleep(OBSERVE)
+        rows = rpc.snapshot()
+        out["between_steer_and_abort_response"] = cell_rows(rows[:after_abort + 1], cut)
+        out["observe_s"] = OBSERVE
+        out["after_abort"] = cell_rows(rows, after_abort + 1)
+        mark = len(rows)
+        rpc.write({"id": "state1", "type": "get_state"})
+        state1 = rpc.wait(rpc.response(mark, "state1"), 30, "get_state")["event"]["data"]
+        out["state_after_observe"] = {k: state1.get(k) for k in ("isStreaming", "pendingMessageCount", "messageCount")}
+
+        next_at = len(rpc.snapshot())
+        rpc.write({"id": "next", "type": "prompt", "message": word("LIMA"), "streamingBehavior": "steer"})
+        rpc.wait(rpc.response(next_at, "next"), 30, "next prompt response")
+        rpc.settle(next_at)
+        out["next_prompt_run"] = cell_rows(rpc.snapshot(), next_at)
+
+        mark = len(rpc.snapshot())
+        rpc.write({"id": "msgs", "type": "get_messages"})
+        messages = rpc.wait(rpc.response(mark, "msgs"), 30, "get_messages")["event"]["data"]["messages"]
+        out["transcript"] = [
+            {
+                "role": m.get("role"),
+                "text": user_text(m)[:200],
+                **({"stopReason": m.get("stopReason"), "errorMessage": m.get("errorMessage")}
+                   if m.get("role") == "assistant" else {}),
+                **({"isError": m.get("isError")} if m.get("role") == "toolResult" else {}),
+            }
+            for m in messages
+        ]
+
+        def marker_starts(rows: list[dict[str, Any]]) -> list[float]:
+            return [r["t"] for r in rows if r.get("type") == "message_start" and r.get("role") == "user"
+                    and marker in (r.get("text") or "")]
+
+        out["verdict"] = {
+            "marker_delivered_before_abort_response": bool(marker_starts(out["between_steer_and_abort_response"])),
+            "agent_start_after_abort_unprompted": any(r["type"] == "agent_start" for r in out["after_abort"]),
+            "marker_delivered_after_abort_unprompted": bool(marker_starts(out["after_abort"])),
+            "marker_delivered_in_next_prompt_run": bool(marker_starts(out["next_prompt_run"])),
+            "marker_in_transcript": any(marker in (m.get("text") or "") for m in out["transcript"]),
+        }
+        if not out["hold_still_running_at_abort"]:
+            out["error"] = f"the {hold} hold had already ended when the abort went out"
+    finally:
+        rpc.close()
+    return out
+
+
+def run_steer_abort(args: argparse.Namespace, pi: str, home: Path, workspace: Path) -> dict[str, Any]:
+    out: dict[str, Any] = {"command": [pi, "--mode", "rpc", "--no-session", "--model", args.model]}
+    for hold in args.hold:
+        for name, clear in (("abort", False), ("clear_then_abort", True)):
+            out[f"{hold}_{name}"] = [steer_abort_run(args, pi, home, workspace, hold, clear) for _ in range(args.runs)]
+    return out
+
+
+# ---------------------------------------------------------------------------
 # part agentpane
 # ---------------------------------------------------------------------------
 
@@ -668,7 +849,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--model", default=PINNED_MODEL, help="model ref for Pi's --model (default: AGENTS.md's pin)")
     parser.add_argument("--credential-source", type=Path, default=Path.home() / ".pi" / "agent")
-    parser.add_argument("--part", choices=("rpc", "agentpane", "both"), default="both")
+    parser.add_argument(
+        "--part",
+        choices=("rpc", "agentpane", "both", "steer_abort"),
+        default="both",
+        help="`both` is rpc and agentpane; steer_abort runs only when named",
+    )
+    parser.add_argument("--runs", type=int, default=2, help="runs of each steer_abort cell")
+    parser.add_argument(
+        "--hold", nargs="+", choices=("tool", "text"), default=["tool", "text"],
+        help="what keeps the steer undelivered in steer_abort",
+    )
     parser.add_argument("--skip-build", action="store_true", help="reuse an existing dist/client bundle")
     return parser.parse_args()
 
@@ -684,7 +875,7 @@ def main() -> int:
     evidence: dict[str, Any] = {
         "started_at": now(),
         "probe": "agentpane_pi_prompt_window_probe.py",
-        "card": "OW-kokotu",
+        "card": "OW-yewiku" if args.part == "steer_abort" else "OW-kokotu",
         "commit": subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip(),
         "pi_version": subprocess.run([pi, "--version"], capture_output=True, text=True, check=True).stdout.strip(),
         "model_flag": args.model,
@@ -697,6 +888,11 @@ def main() -> int:
         if "auth.json" not in copied:
             raise SystemExit(f"missing Pi credentials under {args.credential_source}")
         commands: list[str] = []
+        if args.part == "steer_abort":
+            evidence["steer_abort"] = run_steer_abort(args, pi, home, workspace)
+            runs = [run for key, cell in evidence["steer_abort"].items() if key != "command" for run in cell]
+            if any("error" in run for run in runs):
+                code = 1
         if args.part in ("rpc", "both"):
             evidence["rpc"] = run_rpc(args, pi, home, workspace)
             commands = [c["name"] for c in evidence["rpc"]["get_commands"] if c["source"] == "extension"]
