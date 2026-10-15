@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The Pi preview reads only message entries, so a compaction Pi stored as a compaction entry draws no marker where the live transcript draws one
@@ -24,3 +25,15 @@ Whether a Pi session file can hold a compaction entry on a branch the active lea
 `KNOWN_DIFFERENCES["compact-session"]` in `src/server/sessions/pi-conformance.test.ts` no longer lists the `compactionSummary tokensBefore=5915 summary=present` row under this card, and the test passes, having failed first with the entry removed and the fix absent.
 A unit test in `src/server/sessions/pi.test.ts` feeds a session file holding a `compaction` entry and asserts a `compactionSummary` turn with its `tokensBefore` and `summary`, red before the fix.
 `bun run check` passes.
+
+## Close note
+
+Built: `extractPreviewTurn` in `src/server/sessions/pi.ts` now reads `type: "compaction"` entries as well as `message` ones, passing `{ role: "compactionSummary", summary, tokensBefore }` through the existing `storedAgentMessage`, so the marker lands where the entry sits in file order and carries the entry's timestamp.
+The entry's other fields (`firstKeptEntryId`, `details`, `usage`, `fromHook`, `systemMessage`) are ignored, because the live marker `compaction_end` appends carries only `summary` and `tokensBefore`.
+
+Verified: `KNOWN_DIFFERENCES["compact-session"]` in `src/server/sessions/pi-conformance.test.ts` is now `[]`, and a new `extractPiPreviewTurns` test in `src/server/sessions/pi.test.ts` asserts `["user", "compactionSummary", "user"]` and the marker's summary, `tokensBefore` and timestamp.
+With `pi.ts` reverted to main's, both went red (the conformance hunk was exactly `live: ["compactionSummary tokensBefore=5915 summary=present"], preview: []`, nothing else surfaced, `systemMessage` included); with the fix, both files 8/8 green.
+`bun run check` passed: svelte-check 0 errors, 1672 tests in 59 files.
+
+The `docs/MANUAL_TESTING.md` section "Pi fixtures that keep their session file (OW-piyulu)" said the preview never draws the marker; retired in the same landing.
+Still open by design: the card's out-of-scope question whether a compaction entry can sit on a branch the active leaf does not reach; the preview still reads entries in file order.
