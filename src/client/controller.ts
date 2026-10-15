@@ -1339,7 +1339,26 @@ export function createController(
 			publish({ busy: "editing-externally", editingExternally: true, error: null });
 			try {
 				const edited = await api.editDraft({ text });
-				if (!disposed) publish({ draft: edited.text });
+				// The textarea stays live while the editor is open, so the composer
+				// may have moved under it: typing, a stop's released prompts, or the
+				// draft an ended edit gives back (OW-momejo). The answer keeps both,
+				// the editor's text and whatever arrived, at this one place rather
+				// than per source. Arrivals go ahead, as `withQueued` puts a stop's,
+				// and where they joined ahead of the text sent -- the shape every
+				// release in `App.svelte` leaves -- the editor's text stands in for
+				// it; otherwise the composer is kept whole, the text sent included,
+				// and the user tidies it.
+				//
+				// A first cut, taken before the case was seen in use, and to be
+				// revisited once it has been (owner, 2026-10-15). It keeps everything
+				// rather than merging tidily because what arrived may be the only
+				// copy of prompts a stop cleared out of Pi's queue (D16), which exist
+				// in no file, and nothing dropped beats a tidy merge.
+				if (!disposed) {
+					const draft = view.draft;
+					const ahead = draft.endsWith(`\n\n${text}`) ? draft.slice(0, -text.length - 2) : draft;
+					publish({ draft: draft === text ? edited.text : withQueued([ahead], edited.text) });
+				}
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {

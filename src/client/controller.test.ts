@@ -549,6 +549,46 @@ describe("client controller", () => {
 	});
 
 	/**
+	 * The textarea stays live while the editor is open, so the composer can
+	 * move under it; what moved in is kept beside the editor's text, ahead of
+	 * it as `withQueued` puts arrivals (OW-momejo).
+	 */
+	it("keeps text that reached the composer while the external editor was open", async () => {
+		const api = new FakeApi();
+		const editing = deferred<{ text: string }>();
+		api.editDraft.mockReturnValue(editing.promise);
+		const controller = createController(api);
+		controller.setDraft("current draft");
+
+		const edit = controller.editDraft();
+		controller.setDraft("typed meanwhile");
+		editing.resolve({ text: "edited draft" });
+		await edit;
+
+		expect(controller.getView().draft).toBe("typed meanwhile\n\nedited draft");
+	});
+
+	/**
+	 * Text that joined ahead of the sent draft, as a stop's released prompts do,
+	 * keeps its place, and the editor's text stands in for the draft it was
+	 * given rather than beside it (OW-momejo).
+	 */
+	it("puts the external editor's text in place of the draft it was given when text joined ahead of it", async () => {
+		const api = new FakeApi();
+		const editing = deferred<{ text: string }>();
+		api.editDraft.mockReturnValue(editing.promise);
+		const controller = createController(api);
+		controller.setDraft("current draft");
+
+		const edit = controller.editDraft();
+		controller.setDraft("first steer\n\ncurrent draft");
+		editing.resolve({ text: "edited draft" });
+		await edit;
+
+		expect(controller.getView().draft).toBe("first steer\n\nedited draft");
+	});
+
+	/**
 	 * An abort writes `busy` over the round trip's, so `busy` cannot be what
 	 * keeps a second editor from opening (OW-momejo).
 	 */

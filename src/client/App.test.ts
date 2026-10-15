@@ -4572,6 +4572,25 @@ describe("App", () => {
 	}
 
 	/**
+	 * A Stop while the external editor is open puts the prompts it took out of
+	 * Pi's queue in the composer at once, and they may be the only copy of
+	 * them, so the editor's answer lands beside them, in place of the draft it
+	 * was given, instead of over them (OW-momejo).
+	 */
+	it("keeps what a Stop took out of Pi's queue when the external editor answers after it (OW-momejo)", async () => {
+		const { controller, edits, answer, edit } = await streamingPi(["steered mid-turn"]);
+		await settledSelection(controller);
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+		expect(edits).toEqual(["half-written note"]);
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+		await answer();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+		await edit("rewritten note");
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nrewritten note");
+	});
+
+	/**
 	 * The Stop writes `busy` over the round trip's, and the External Editor
 	 * still reads as open until the editor answers (OW-momejo).
 	 */
