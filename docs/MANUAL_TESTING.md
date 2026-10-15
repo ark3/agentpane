@@ -4459,7 +4459,8 @@ Read at the source, `AgentSession.prompt` hands a message starting with `/` to `
 **Through agentpane, the prompt route answers 202 and the wire says nothing at all.**
 In runs 2 and 5 each of the three, and in runs 3 and 4 `/mcp`, was POSTed as the prompt's text, which agentpane passes to Pi unchanged (OW-73); Pi answered `handled` after the same `notify`, and the route answered **202**.
 For five seconds after each 202 the SSE stream carried **no event under the session's handle**: no status, no upsert, no error, no notice.
-`isStreaming` stayed false, the transcript gained no message, and the `notify` text reached neither wire, because `reducePiNotification` drops every fire-and-forget `extension_ui_request`.
+`isStreaming` stayed false, the transcript gained no message, and the `notify` text reached neither wire, because `reducePiNotification` then dropped every fire-and-forget `extension_ui_request`.
+Since OW-fusoba (2026-10-14) that `notify` reaches both wires as a notice of kind `notify`, so in what follows the prompt no longer vanishes with nothing in its place: the command's answer shows as a notice.
 Nothing on the server waited for a run: the ordinary prompt POSTed next went out bare, was answered `started`, and ran and settled normally, in every run.
 
 **What each client shows, read at the code and not run.**

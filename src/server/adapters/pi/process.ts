@@ -611,9 +611,10 @@ export class PiAdapter implements BackendAdapter {
 	/**
 	 * Each `notify` an extension sends (D11, OW-fusoba). Handed on as its line
 	 * arrives, `start()` or no `start()`: an extension notifies from its
-	 * `session_start` handler too, which as of `pi 1.2.0` Pi ran before it
-	 * answered `start()`'s `get_state`, and the server subscribes before it
-	 * starts the adapter so that this reaches it.
+	 * `session_start` handler too, which as of `pi 1.2.0`, read at its source
+	 * (`runRpcMode` awaits the extensions' `session_start` before it reads
+	 * stdin), Pi ran before it answered `start()`'s `get_state`, and the
+	 * server subscribes before it starts the adapter so that this reaches it.
 	 */
 	onNotice(cb: NoticeListener): Unsubscribe {
 		this.noticeListeners.add(cb);
