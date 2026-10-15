@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork at an entry Claude Code or Codex cannot fork from reaches the fork route as 500 internal_error instead of 400
@@ -30,3 +31,9 @@ Whether a `CodexRpcError` from `thread/fork` should also become a `BackendRefuse
 - A test in `src/server/adapters/claude/adapter.test.ts`, shown red first, asserts that a fork at an unknown entry rejects with a `BackendRefusedError`; the existing "rejects an unknown fork point without touching the child" asserts only the message and may be the one to tighten.
 - A test in `src/server/adapters/codex/adapter.test.ts`, shown red first, asserts the same for `CodexAdapter.fork`.
 - `bun run check` passes.
+
+## Close note
+
+Landed in 7a4faaac. ClaudeAdapter.readForkHistory and CodexAdapter.fork now throw BackendRefusedError for an unknown fork point (same message), so the fork route answers 400 backend_refused on Claude Code and Codex as it already did on Pi, and the Emacs helper's sessions/fork answers 400 with it. BackendRefusedError's docblock names the two new throwers.
+Tests: the Claude "rejects an unknown fork point without touching the child" was tightened to assert the type, and a new Codex test asserts the type plus no thread/fork request; both were shown red before the fix ("expected Error: unknown fork point: nope to be an instance of BackendRefusedError"). bun run check passed (1687 tests).
+A CodexRpcError from thread/fork is deliberately left as a 500: the turnOrder check rejects every id the adapter doesn't know before the request goes out, so a "-32600 turn not found" after it would mean agentpane's turn list disagrees with the server's (agentpane's fault), and CodexRpcError also carries transport and closed-client failures.
