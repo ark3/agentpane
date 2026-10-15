@@ -57,6 +57,8 @@ interface PendingCommand {
 /** Pi answered `success: false`: it is alive and said no, unlike a pipe or process failure. */
 class PiCommandError extends Error {}
 
+const STOP_IN_FLIGHT_ERROR = "Pi adapter cannot submit while a stop is in flight";
+
 // ---------------------------------------------------------------------------
 // The spawn seam
 //
@@ -237,6 +239,8 @@ export class PiAdapter implements BackendAdapter {
 	 * arrived meanwhile is the old model's and is reported as it stands.
 	 */
 	private settingModel = false;
+	/** How many `abort()`s are awaiting Pi's answer; while any is, `submit` refuses (OW-wisifo). */
+	private stopsInFlight = 0;
 	private disposed = false;
 	/** The one teardown, so repeat callers await it instead of running a second. */
 	private disposal?: Promise<void>;
@@ -380,6 +384,12 @@ export class PiAdapter implements BackendAdapter {
 	// -- driving a turn ---------------------------------------------------------
 
 	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
+		// A turn being stopped cannot take a steer as sent: what reaches Pi now
+		// lands in a queue `abort` has already cleared, to meet what a bare
+		// abort does to it (D16, OW-wisifo; the docblock on `abort`). So it is
+		// refused, as Codex refuses one into a turn it interrupted (OW-pefawi),
+		// and the caller keeps its draft to send once the stop has answered.
+		if (this.stopsInFlight > 0) throw new Error(STOP_IN_FLIGHT_ERROR);
 		const cmd: PiCommand = {
 			type: "prompt",
 			message: text,
@@ -465,11 +475,26 @@ export class PiAdapter implements BackendAdapter {
 	 * package, not measured), so a steered `/skill:...` comes back expanded,
 	 * not as typed. Both queues are returned, steering first, though this
 	 * adapter only ever steers.
+	 *
+	 * A prompt that arrives while the stop is in flight, from this client or
+	 * another, would steer into the queue the clear has already emptied, and
+	 * what the abort then does with it was not measured, though nothing in the
+	 * `pi 1.2.0` runs above says it would fare better than the steers they
+	 * stranded. So `submit` refuses one until the abort answers, which on
+	 * those runs came after `agent_settled`.
+	 * Counted rather than flagged, because two stops can overlap: the one
+	 * "Stop and edit" sends at the click and the one `forkAndSubmit` sends
+	 * ahead of the fork.
 	 */
 	async abort(): Promise<string[]> {
-		const cleared = await this.sendCommand<PiResponseFor<"clear_queue">>({ type: "clear_queue" });
-		await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
-		return [...cleared.data.steering, ...cleared.data.followUp];
+		this.stopsInFlight++;
+		try {
+			const cleared = await this.sendCommand<PiResponseFor<"clear_queue">>({ type: "clear_queue" });
+			await this.sendCommand<PiResponseFor<"abort">>({ type: "abort" });
+			return [...cleared.data.steering, ...cleared.data.followUp];
+		} finally {
+			this.stopsInFlight--;
+		}
 	}
 
 	/**

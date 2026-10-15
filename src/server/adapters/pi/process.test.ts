@@ -590,6 +590,42 @@ describe("PiAdapter stop (D16, OW-wisifo)", () => {
 		h.child.respondTo("abort");
 		await expect(stopped).resolves.toEqual(["first steer", "second steer", "a follow-up"]);
 	});
+
+	it("refuses a prompt while a stop is in flight, and admits one once it has answered", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const stopped = h.adapter.abort();
+		const beforeClear = h.adapter.submit("before the clear answers");
+		// Neither reaches Pi, where it would steer into the queue just emptied.
+		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
+		await expect(beforeClear).rejects.toThrow(/stop/);
+		h.child.respondTo("clear_queue", { steering: [], followUp: [] });
+		await flush();
+		const beforeAbort = h.adapter.submit("before the abort answers");
+		expect(h.child.sent().filter((c) => c.type === "prompt")).toEqual([]);
+		await expect(beforeAbort).rejects.toThrow(/stop/);
+		h.child.respondTo("abort");
+		await stopped;
+
+		const after = h.adapter.submit("after");
+		expect(h.child.lastSent("prompt").message).toBe("after");
+		h.child.respondTo("prompt", { disposition: "started" });
+		await expect(after).resolves.toBe("started");
+	});
+
+	it("admits prompts again after a stop Pi refused", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const stopped = h.adapter.abort();
+		h.child.failCommand("clear_queue", "refused");
+		await expect(stopped).rejects.toThrow("refused");
+
+		const after = h.adapter.submit("after");
+		h.child.respondTo("prompt", { disposition: "started" });
+		await expect(after).resolves.toBe("started");
+	});
 });
 
 describe("PiAdapter session name (D27, OW-jamaha)", () => {
