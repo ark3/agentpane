@@ -185,4 +185,36 @@ describe("extractPiPreviewTurns", () => {
 
 		expect(turns.map((t) => t.timestamp)).toEqual(["stamp-u1", "stamp-a1", "stamp-u2"]);
 	});
+
+	it("times a reply by the message's own timestamp, not its entry's append time (OW-jiwaso)", async () => {
+		const file = await write(dir, "j.jsonl", [
+			sessionHeader(),
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: "2026-10-14T22:14:02.371Z",
+				message: { ...reply("stop"), timestamp: Date.parse("2026-10-14T22:13:49.797Z") },
+			},
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.timestamp)).toEqual(["2026-10-14T22:13:49.797Z"]);
+	});
+
+	it("falls back to the entry's time for a reply without its own (OW-jiwaso)", async () => {
+		const file = await write(dir, "k.jsonl", [
+			sessionHeader(),
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: "2026-10-14T22:14:02.371Z",
+				message: reply("stop"),
+			},
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.timestamp)).toEqual(["2026-10-14T22:14:02.371Z"]);
+	});
 });

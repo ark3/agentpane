@@ -313,10 +313,9 @@ describe("readSessionPreview", () => {
 			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual(["system", "user", "assistant", "system", "user"]);
-			const { timestamp: _leading, ...leadingRest } = leading;
-			const { timestamp: _changed, ...changedRest } = changed;
-			expect(turns[0]).toEqual({ ...leadingRest, timestamp: "2026-10-14T10:00:00.000Z" });
-			expect(turns[3]).toEqual({ ...changedRest, timestamp: "2026-10-14T10:05:00.000Z" });
+			// Each at its message's own time, which live reads, not its entry's (OW-jiwaso).
+			expect(turns[0]).toEqual({ ...leading, timestamp: new Date(leading.timestamp).toISOString() });
+			expect(turns[3]).toEqual({ ...changed, timestamp: new Date(changed.timestamp).toISOString() });
 		});
 
 		it("keeps a stored system message with no content, and drops change fields of the wrong shape (OW-wavini)", async () => {
@@ -330,7 +329,12 @@ describe("readSessionPreview", () => {
 					id: "s0",
 					parentId: null,
 					timestamp: "2026-10-14T10:00:00.000Z",
-					message: { role: "system", sections: "oops", toolsAdded: { read: {} }, timestamp: 0 },
+					message: {
+						role: "system",
+						sections: "oops",
+						toolsAdded: { read: {} },
+						timestamp: Date.parse("2026-10-14T09:59:59.990Z"),
+					},
 				},
 				piMessage("user", "First question.", "2026-10-14T10:00:00.100Z"),
 			]);
@@ -338,7 +342,7 @@ describe("readSessionPreview", () => {
 			const turns = await readTurns({ backend: "pi", id: file }, { piRoot: root });
 
 			expect(turns.map((turn) => turn.role)).toEqual(["system", "user"]);
-			expect(turns[0]).toEqual({ role: "system", content: "", timestamp: "2026-10-14T10:00:00.000Z" });
+			expect(turns[0]).toEqual({ role: "system", content: "", timestamp: "2026-10-14T09:59:59.990Z" });
 		});
 
 		it("names a stored turn the level its message records, except `off`, and none where it records none (OW-zarine)", async () => {

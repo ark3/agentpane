@@ -15,10 +15,13 @@
  * result and each result its call, `isError`, `stopReason`, the effort a
  * footer names, and a compaction marker's figure and whether it carries a
  * summary. Usage and model identity are left out, as in the Codex test, though
- * on these `pi 1.2.0` runs they agree; so is all text. So are timestamps, which
- * do not agree: an assistant turn's preview time is its entry's append time,
- * not the message's own (OW-jiwaso). A result row names its call by how many
- * calls back it sits, said only when it is not the latest call.
+ * on these `pi 1.2.0` runs they agree; so is all text. Each row ends with its
+ * message's epoch-ms timestamp, the preview's through `previewMessages`
+ * (`client/preview.ts`) as the client converts it, so a row that disagrees
+ * names the footer time that would. A compaction marker's is left out: live
+ * stamps it with the clock when `compaction_end` arrives, which `Date.now()`
+ * reads in a replay as the moment the test runs. A result row names its call
+ * by how many calls back it sits, said only when it is not the latest call.
  *
  * The replay starts at the effort `process.ts` holds once `get_state` answers
  * at spawn: the level the capture's `--model` ref named, since the model it
@@ -33,6 +36,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { previewMessages } from "../../client/preview.ts";
 import type { PiNotification, PiOutputLine } from "../adapters/pi/protocol.ts";
 import { createInitialPiState, type PiReducerState, reducePiNotification } from "../adapters/pi/reducer.ts";
 import { hunks, type KnownDifference } from "./conformance-support.ts";
@@ -44,6 +48,7 @@ type Scenario = "tool-read-session" | "compact-session";
 
 interface Message {
 	role: string;
+	timestamp: number;
 	content?: unknown;
 	stopReason?: string;
 	effort?: string;
@@ -61,7 +66,7 @@ function project(messages: Message[]): string[] {
 		if (message.role === "toolResult" && message.toolCallId !== undefined) results.add(message.toolCallId);
 	}
 	const calls: string[] = [];
-	return messages.map((message) => {
+	const row = (message: Message): string => {
 		switch (message.role) {
 			case "assistant": {
 				const blocks = (message.content as { type: string; id: string; name: string }[]).map((block) => {
@@ -83,7 +88,10 @@ function project(messages: Message[]): string[] {
 			default:
 				return message.role;
 		}
-	});
+	};
+	return messages.map((message) =>
+		message.role === "compactionSummary" ? row(message) : `${row(message)} @${message.timestamp}`
+	);
 }
 
 function live(name: Scenario): string[] {
@@ -100,7 +108,7 @@ function live(name: Scenario): string[] {
 }
 
 async function preview(name: Scenario): Promise<string[]> {
-	return project((await extractPiPreviewTurns(`${FIXTURE_DIR}${name}.session.jsonl`)) as Message[]);
+	return project(previewMessages(await extractPiPreviewTurns(`${FIXTURE_DIR}${name}.session.jsonl`)) as Message[]);
 }
 
 /**

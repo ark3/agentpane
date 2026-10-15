@@ -171,14 +171,26 @@ function parseRecord(line: string): Record<string, unknown> | null {
  * compaction is stored as its own `type: "compaction"` entry, not as a
  * `compactionSummary` message; of its fields the marker keeps `summary` and
  * `tokensBefore`, all that `compaction_end`'s live one carries.
+ *
+ * A turn's time is the message's own epoch-ms `timestamp`, the one live reads.
+ * As of `pi 1.2.0` Pi stamps it when the message starts, and the entry's ISO
+ * `timestamp` when it appends the message, at its end, so by the entry's an
+ * assistant turn would read up to its own length late (OW-jiwaso). The entry's
+ * time stands in only for a message without its own, and for the compaction
+ * marker, which has none.
  */
 function extractPreviewTurn(rec: Record<string, unknown>): SessionPreviewTurn | null {
 	if (rec.type !== "message" && rec.type !== "compaction") return null;
 
-	const timestamp = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
 	const message = rec.type === "compaction"
 		? { role: "compactionSummary", summary: rec.summary, tokensBefore: rec.tokensBefore }
 		: rec.message;
+	const own = typeof message === "object" && message !== null
+		? (message as Record<string, unknown>).timestamp
+		: undefined;
+	const timestamp = typeof own === "number" && Number.isFinite(own)
+		? new Date(own).toISOString()
+		: typeof rec.timestamp === "string" ? rec.timestamp : undefined;
 	return storedAgentMessage(message, timestamp, {
 		api: "anthropic-messages",
 		provider: "anthropic",

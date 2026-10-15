@@ -11,11 +11,14 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionPreviewTurn } from "$shared/protocol.ts";
 
 /**
- * A turn's timestamp is the record's own ISO string, or absent (OW-71). It
- * becomes `AgentMessage.timestamp`, a required epoch-ms `number`, so the one
+ * A turn's timestamp is the record's own time as an ISO string, or absent
+ * (OW-71). For a Pi message the record is the message, whose own epoch-ms
+ * stamp the server writes as ISO, not the entry holding it (OW-jiwaso;
+ * `extractPreviewTurn` in `server/sessions/pi.ts`). It becomes
+ * `AgentMessage.timestamp`, a required epoch-ms `number`, so the one
  * ISO-to-epoch conversion sits here at the client edge -- the wire keeps the
- * ISO shape `SessionSummary` already uses, and nothing on the server has to
- * learn epoch-ms. An absent timestamp maps to `NaN`, not `0`: `formatTimestamp`
+ * ISO shape `SessionSummary` already uses. An absent timestamp maps to `NaN`,
+ * not `0`: `formatTimestamp`
  * (via `new Date(NaN)`) renders `NaN` as the empty string, so a genuinely
  * timeless turn shows no time, where `0` would render the epoch as a real date.
  * `NaN` still keys the `{#each}` (`keyFor` stringifies it) stably per turn.
