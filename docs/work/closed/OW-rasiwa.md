@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A fork Pi refuses reaches agentpane's fork route as 500 internal_error instead of 400 backend_refused
@@ -29,3 +30,15 @@ Whether Claude Code's and Codex's `fork` map a refused entry the same way is for
 - A test in `src/server/adapters/pi/process.test.ts`, shown red first, asserts that a `fork` whose Pi response is `success: false` rejects with a `BackendRefusedError` carrying Pi's message.
 - The fork route answers a refused Pi fork with 400 `backend_refused`, asserted in the route's test (`src/server/http/app.test.ts` or wherever the fork route's tests live).
 - `bun run check` passes.
+
+## Close note
+
+`PiAdapter.fork` in `src/server/adapters/pi/process.ts` now turns a `PiCommandError` from the `fork` command alone into a `BackendRefusedError` carrying Pi's message, following `setModel`; `get_state` and the re-sends after Pi has forked are unchanged, so a dead process, disposal or write failure still rejects with a plain `Error` and stays 500. The fork route therefore answers a refused Pi fork 400 `backend_refused`, and the Emacs helper's `sessions/fork` answers code 400.
+
+It is a `try`/`catch` around the `await`, not `.catch()`: three fork tests in `process.test.ts` step exactly one microtask between answering `fork` and `get_state`, and `.catch()` adds one, which hangs them (confirmed by the adversarial read).
+
+Verified: the new adapter test "refuses a fork Pi refuses, with Pi's reason (OW-rasiwa)" fails on the unfixed `process.ts` ("expected Error: Invalid entry ID for forking to be an instance of BackendRefusedError") and passes with the fix. The route test in `app.test.ts` ("answers 400 with the backend's reason when it refuses the fork") uses the fake adapter's new `onFork` hook in `src/server/http/testing/fakes.ts` and covers only the route's existing mapping, so it could not go red on the unfixed adapter; it was shown red by disabling that mapping in `createApp`. `bun run check` passed on `main`, 1671 tests. Not re-run live.
+
+Known imprecision, shared with `setModel`: in `pi 1.2.0` source (`rpc-mode.js`, `handleInputLine`) any exception from a command handler becomes `success: false`, including throws inside `AgentSessionRuntime.fork` after the old session is torn down; such a Pi fault would now read as 400 and not be logged. Never observed.
+
+`docs/MANUAL_TESTING.md`'s code-read sentences under "Through agentpane, the fork route answered 500 for Pi's `Invalid entry ID for forking`" were retired to past tense in the same landing. Claude Code and Codex still answer an unknown fork point 500; filed as OW-fesuwe.
