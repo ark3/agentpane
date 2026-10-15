@@ -4,11 +4,12 @@
 The client's `forkAndSubmit` is a four-request round trip -- fork points, fork,
 attach, prompt -- and the three backends reach "attached to the fork" by three
 different routes: Pi's fork moves the live process onto a new file, Codex
-flushes the forked rollout to disk before `thread/fork` returns, and Claude
-Code's fork runs nothing at all until the attach spawns it (OW-razoki,
-OW-japuzo).  Nothing had ever run that sequence against a real backend through
-the real HTTP surface; `fork_probe.py` drives the CLIs directly and never sees
-agentpane's session manager, and the browser vehicle in `e2e/` has no server.
+flushes the forked rollout to disk before `thread/fork` returns (as of
+`codex-cli 0.154.0`, OW-lajehi), and Claude Code's fork runs nothing at all
+until the attach spawns it (OW-razoki, OW-japuzo).  Nothing had ever run that
+sequence against a real backend through the real HTTP surface; `fork_probe.py`
+drives the CLIs directly and never sees agentpane's session manager, and the
+browser vehicle in `e2e/` has no server.
 
 This probe is the missing middle.  It reports rather than asserts: a failing
 attach is the measurement, not a crash, so every step records its HTTP status
@@ -195,7 +196,7 @@ def find_on_disk(store_root: Path, backend: str, fork_ref: dict[str, str], windo
     tells them apart.
     """
     if backend == "claude":
-        return None  # its store file does not exist until the first turn ends (OW-japuzo)
+        return None  # its fork spawned nothing and its attach has not run yet (OW-razoki)
     target = fork_ref["id"]
     started = time.monotonic()
     deadline = started + window

@@ -782,12 +782,12 @@ export class CodexAdapter implements BackendAdapter {
 			// Nothing here reads the fork's turns; its own adapter pages them in.
 			excludeTurns: true,
 		});
-		// Codex flushes the forked rollout to disk here, before any turn, so the
-		// index finds it -- but finding it is not enough to open it. As of
-		// `codex-cli` 0.154.0 the fork's writer lock is held by THIS process, and
-		// a second app-server asking to resume it is refused with
-		// `-32600 already has an active writer`, while this process resumes it,
-		// drives it, and keeps driving the parent (OW-lajehi,
+		// Codex flushes the forked rollout to disk here, before any turn (as of
+		// `codex-cli` 0.154.0, D9), so the index finds it -- but finding it is
+		// not enough to open it. As of `codex-cli` 0.154.0 the fork's writer lock
+		// is held by THIS process, and a second app-server asking to resume it is
+		// refused with `-32600 already has an active writer`, while this process
+		// resumes it, drives it, and keeps driving the parent (OW-lajehi,
 		// `docs/MANUAL_TESTING.md`). So the fork's adapter is built here, sharing
 		// this connection, and `start` is the plain resume it must be started
 		// with; `SessionManager` starts the adapter it is handed rather than

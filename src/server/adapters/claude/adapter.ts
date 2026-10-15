@@ -475,8 +475,8 @@ export class ClaudeAdapter implements BackendAdapter {
 	 * in flight (OW-razoki). The fork is spawned by its OWN adapter, which the
 	 * manager starts with the returned `forkOf` -- the id is ours to choose
 	 * (`--session-id`), so it is known before anything is written, which matters
-	 * because the fork's store file does not exist until its first turn ends
-	 * (OW-japuzo) and the session index therefore cannot find it.
+	 * because nothing has spawned to write the fork's store file when this
+	 * returns, and the session index therefore cannot find it.
 	 *
 	 * The cut is validated here rather than left to that start: this is what the
 	 * `POST .../fork` route answers, and a fork point the parent's store does not

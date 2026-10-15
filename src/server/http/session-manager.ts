@@ -251,8 +251,8 @@ export class SessionManager {
 	 * cannot answer for or cannot be opened from. Two backends need it, for
 	 * different reasons:
 	 *
-	 *  - Claude Code's fork writes no store file until its first turn ends
-	 *    (OW-japuzo), so `#start`'s index lookup would throw
+	 *  - Claude Code's fork spawns nothing, so no store file can exist when it
+	 *    returns (OW-razoki), and `#start`'s index lookup would throw
 	 *    `UnknownSessionError` at the attach that follows every fork. Its entry
 	 *    is `start` alone: three strings, replayable.
 	 *  - Codex's fork IS on disk, but only the app-server that minted it may

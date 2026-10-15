@@ -667,10 +667,10 @@ describe("fork, which moves the live adapter's ref on Pi alone", () => {
 	});
 
 	// Claude Code's shape (OW-razoki): `fork()` mints the fork's id and the
-	// arguments that spawn its child, but runs nothing. The fork's store file
-	// does not exist until its first turn ends (OW-japuzo), so the session index
-	// cannot answer for it -- the manager has to hold that recipe until the fork
-	// is attached, and hand it to the fork's own adapter.
+	// arguments that spawn its child, but runs nothing. Nothing has written the
+	// fork's store file yet, so the session index cannot answer for it -- the
+	// manager has to hold that recipe until the fork is attached, and hand it to
+	// the fork's own adapter.
 	it("attaches a fork the session index has never heard of, from the recipe fork() returned", async () => {
 		const claudeRef: SessionRef = { backend: "claude", id: "parent" };
 		const claude = new FakeAdapterFactory({ forkMode: "claude" });
@@ -3019,9 +3019,9 @@ describe("re-attaching a thread a live app-server still holds (OW-voyezi)", () =
 		cluster = new FakeCodexCluster();
 		index = new FakeSessionIndex([
 			storedSession(parentRef, WORKSPACE),
-			// Codex flushes the forked rollout at `thread/fork`, so the index can
-			// answer for the fork too -- which is exactly what sends a re-attach
-			// down the factory path.
+			// Codex flushes the forked rollout at `thread/fork` (as of `codex-cli`
+			// 0.154.0, D9), so the index can answer for the fork too -- which is
+			// exactly what sends a re-attach down the factory path.
 			storedSession(forkRef, WORKSPACE),
 		]);
 		sessions = new SessionManager(

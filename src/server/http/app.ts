@@ -366,12 +366,13 @@ export function createApp(deps: AppDeps): App {
 				//     (OW-suhoto). The ref it returns is the moved file.
 				//   * Codex's `thread/fork` mints a NEW thread the parent's adapter is
 				//     not driving; Codex flushes that rollout to disk immediately,
-				//     before any turn. The index therefore finds it, but nothing else
-				//     may open it: as of `codex-cli` 0.154.0 the minting app-server
-				//     holds its writer lock and a second one is refused, so the fork's
-				//     adapter borrows the parent's connection and `fork()` hands that
-				//     adapter over for `SessionManager` to start (OW-lajehi). The
-				//     parent adapter's own ref is unchanged, so nothing moves.
+				//     before any turn (as of `codex-cli` 0.154.0, D9). The index
+				//     therefore finds it, but nothing else may open it: as of
+				//     `codex-cli` 0.154.0 the minting app-server holds its writer
+				//     lock and a second one is refused, so the fork's adapter borrows
+				//     the parent's connection and `fork()` hands that adapter over
+				//     for `SessionManager` to start (OW-lajehi). The parent adapter's
+				//     own ref is unchanged, so nothing moves.
 				//     A fork at the first user message is the exception: no
 				//     `thread/fork` keeps nothing, so it mints nothing and takes
 				//     Claude Code's path below, a `virtual:` ref renamed at attach to
