@@ -29,3 +29,11 @@ Done when an ERT test in `emacs/agentpane-test.el`, run as that file's Commentar
 
 Under D25 the prompt route no longer attaches first (OW-sirofi), so the close half above, a survivor's prompt reaching the session being closed, becomes a refused request rather than a respawn.
 The fork half, a merge dropping a `sessions/fork` reply, stands.
+
+## Amended 2026-10-15 from OW-seleri's adversarial read
+
+A plain `sessions/abort` in flight is no longer harmless to drop.
+Since OW-seleri, `agentpane-abort` reads its answer's `:queued`, the text of the prompts the Stop took out of Pi's queue (D16), into `agentpane--held-queued`, and does so only from the request's CALLBACK, which `agentpane--request` skips for a buffer killed before the answer.
+`agentpane--absorb` hands the survivor what OTHER already holds, but an abort still out when OTHER is merged away loses its texts: Pi has already removed them from its queue, so they are in no session file either.
+Found by reading only; the reader did not establish that a Pi session can be held under two refs in Emacs at once, which a merge needs, and the existing merge tests use Claude refs.
+Whatever owner this card settles on for a dropped reply should cover the abort's too, or the close note should say why a Pi merge cannot reach it.

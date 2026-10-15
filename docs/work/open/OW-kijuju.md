@@ -24,3 +24,11 @@ Under the "Both clients" rule in `AGENTS.md`, check what `emacs/agentpane.el` do
 - A test in `src/client/App.test.ts`, red first, types a draft, edits an earlier message, forks, lets the prompt land, and asserts the typed draft is where the decision put it.
 - A test in `src/client/App.test.ts`, red first, opens an edit while a fork's prompt is still out and asserts Cancel does not put the sent text back, or that the edit cannot open, per the decision.
 - `bun run check` passes.
+
+## Amended 2026-10-15 from OW-seleri's adversarial read
+
+The same drop loses the words a Pi Stop took out of the queue in Emacs, where the edit opens only once `sessions/forkPoints` answers: `agentpane--edit` calls `agentpane--start-edit` from that request's callback.
+Stop (`agentpane-abort`) and then `C-c C-e` (`agentpane-edit-last`) or `e` before the abort answers: the abort usually answers first, finds no edit open, and `agentpane--release-queued` joins the stopped texts into the prompt region; the edit then opens and takes the region as its `:draft`, and `C-RET`'s fork drops that draft, stopped texts and all.
+The reader reproduced it with a throwaway ERT experiment, holding `sessions/abort` and `sessions/forkPoints` and answering the abort first; the region ended empty, `agentpane--held-queued` nil, and nothing on the kill ring.
+The browser opens its edit synchronously and so holds those words in `heldQueued`, but it drops them the same way when the Stop answers before the edit click.
+So the decision this card takes about the displaced draft decides the stopped words too, in both clients; the `emacs` card this card files should carry an ERT test of exactly this sequence, red first, asserting the stopped texts survive the fork where the decision puts the draft.
