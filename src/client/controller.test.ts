@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+	AbortResponse,
 	BackendId,
 	ForkPoint,
 	ForkRequest,
@@ -106,7 +107,7 @@ class FakeApi implements AgentpaneApi {
 	);
 	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }): Promise<PromptResponse | void> => {});
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
-	readonly abort = vi.fn(async (_session: SessionRef) => {});
+	readonly abort = vi.fn(async (_session: SessionRef): Promise<AbortResponse | void> => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
 	readonly close = vi.fn(async (_session: SessionRef) => {});
 	readonly listModels = vi.fn(async (_backend: BackendId): Promise<ModelInfo[]> => []);
@@ -757,6 +758,44 @@ describe("client controller", () => {
 		await controller.abort();
 
 		expect(api.abort).toHaveBeenCalledWith(attachedRef);
+	});
+
+	/**
+	 * Pi's rule for the same moment (`restoreQueuedMessagesToEditor`, pi 1.2.0's
+	 * interactive mode): the cleared prompts in order, then the draft, blank
+	 * lines between (OW-fahoti). The draft is the one standing when the answer
+	 * lands, not when Stop was pressed, so text typed during the round trip is
+	 * kept too.
+	 */
+	it("puts the prompts a stop took out of Pi's queue back ahead of the draft (OW-fahoti)", async () => {
+		const api = new FakeApi();
+		const aborting = deferred<AbortResponse | void>();
+		api.abort.mockReturnValueOnce(aborting.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("typed before the stop");
+
+		const stopped = controller.abort();
+		controller.setDraft("typed while it was out");
+		aborting.resolve({ queued: ["first steer", "second steer"] });
+		await stopped;
+
+		expect(controller.getView().draft).toBe("first steer\n\nsecond steer\n\ntyped while it was out");
+	});
+
+	it("leaves the draft alone when a stop took nothing out (OW-fahoti)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("half-written note");
+
+		await controller.abort();
+
+		expect(controller.getView().draft).toBe("half-written note");
 	});
 
 	it("updates selection from the snapshot that introduces a session under a ref its attach reply did not name", async () => {

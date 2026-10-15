@@ -4,6 +4,7 @@ import { tick } from "svelte";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	sessionKey,
+	type AbortResponse,
 	type BackendId,
 	type LiveSessionSummary,
 	type ModelInfo,
@@ -4229,6 +4230,109 @@ describe("App", () => {
 		controller.publish(view({ draft: "first draft", state: attachedState(messages, piSession, false) }));
 		await tick();
 		expect(primary()).toHaveTextContent("Fork");
+	});
+
+	/**
+	 * A Pi session streaming its reply to "first draft", driven through the real
+	 * controller, since it is the controller's `abort` that hands over what the
+	 * stop took out of Pi's queue (OW-fahoti). The click's stop answers with
+	 * `queued` once `answer` is called; the fork's own stop finds the queue
+	 * already empty and takes nothing out. A fork's prompt is held until `land`
+	 * is called, so a test can answer while the fork is still out.
+	 */
+	async function stopAndEdit(queued: string[]) {
+		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
+		let emit: (event: ServerEvent) => void = () => {};
+		let answer = () => {};
+		let land = () => {};
+		let aborts = 0;
+		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session, handle, seq: 1, messages: [user("first draft"), assistant([{ type: "text", text: "an answer" }])], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(piSession)],
+			createSession: async () => piSession,
+			attach: async (ref) => {
+				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", false));
+				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: () => new Promise<void>((resolve) => {
+				land = resolve;
+			}),
+			editDraft: async (body) => ({ text: body.text }),
+			abort: () => {
+				aborts += 1;
+				if (aborts > 1) return Promise.resolve();
+				return new Promise<AbortResponse>((resolve) => {
+					answer = () => resolve({ queued });
+				});
+			},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			setName: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: async () => forkRef,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		render(App, { props: { controller } });
+		emit(snapshot(piSession, "h-parent", true));
+		await controller.select(piSession);
+		controller.setDraft("half-written note");
+		await tick();
+		await fireEvent.click(screen.getByRole("button", { name: "Stop and edit" }));
+		const settle = async (release: () => void) => {
+			release();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await tick();
+		};
+		return { controller, answer: () => settle(answer), land: () => settle(land) };
+	}
+
+	/**
+	 * Joined into the composer they would be sent into the fork as part of the
+	 * edit, so they wait with the draft the edit displaced, ahead of it by the
+	 * same rule as a plain Stop (OW-fahoti).
+	 */
+	it("keeps what Stop and edit took out of Pi's queue out of the edit, and puts it back with the displaced draft (OW-fahoti)", async () => {
+		const { answer } = await stopAndEdit(["steered mid-turn"]);
+		await answer();
+
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+		await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn\n\nhalf-written note");
+	});
+
+	/**
+	 * An edit that ends by forking drops the draft it displaced, but the prompts
+	 * the stop took out are not that draft: they land in the composer the fork
+	 * leaves, whether the stop answered before the fork went out or while it was
+	 * still out, and never inside the text the fork sent (OW-fahoti).
+	 */
+	it.each(["before", "while"] as const)("puts what Stop and edit took out of Pi's queue in the composer when it answers %s a fork goes out (OW-fahoti)", async (when) => {
+		const { controller, answer, land } = await stopAndEdit(["steered mid-turn"]);
+		if (when === "before") await answer();
+		await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "reworded" } });
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		// The fork is attached and selected, its prompt still out: the moment the
+		// composer still holds the text that prompt is sending.
+		expect(controller.getView().sending).toBe(true);
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
+		if (when === "while") await answer();
+		await land();
+
+		expect(controller.getView().sending).toBe(false);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("steered mid-turn");
 	});
 
 	/**

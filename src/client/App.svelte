@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 	import { sessionKey, type BackendId, type SessionRef, type SessionSummary } from "$shared/protocol.ts";
-	import { paneMode, type AgentpaneController, type ControllerView } from "./controller.ts";
+	import { paneMode, withQueued, type AgentpaneController, type ControllerView } from "./controller.ts";
 	import {
 		emptyTurnWatch,
 		setFaviconBadge,
@@ -125,6 +125,12 @@
 		images: { mimeType: string; base64: string }[];
 		stashedDraft: string;
 	} | null>(null);
+	/**
+	 * What "Stop and edit"'s own stop took out of Pi's queue (D16), waiting for
+	 * the composer to hold no edit and no prompt in flight (OW-fahoti); see
+	 * `editLastMessage` for why it waits and where it goes.
+	 */
+	let heldQueued = $state<string[]>([]);
 	/**
 	 * The session whose last prompt from this tab the backend handled without
 	 * starting a turn for it -- a Pi extension command such as `/mcp` -- or
@@ -1274,13 +1280,46 @@
 	 * reading "Send", where a Ctrl-Enter prompts the running session instead of
 	 * forking it. Filled first, "Stop and fork" is the truth: `forkAndSubmit`
 	 * re-checks `isStreaming` and aborts again before it forks.
+	 *
+	 * What the stop takes out of Pi's queue (D16) is the user's own unsent
+	 * words, and it answers after the fill, so a plain Stop's join into the
+	 * draft would put them inside the edit and send them into the fork
+	 * (OW-fahoti). They are held instead until no edit is open and no prompt
+	 * is in flight, and then joined ahead of whatever the composer holds, by
+	 * the same `withQueued` rule. That one rule covers every way the edit
+	 * ends, whichever side of the answer it falls on:
+	 *
+	 * - Cancel puts the displaced draft back first, so they land ahead of it,
+	 *   exactly as if they had been stashed with it.
+	 * - A fork drops the displaced draft, which they are not, so they are not
+	 *   stashed with it. Its prompt is still out when the fork's selection ends
+	 *   the edit, with the composer holding the text being sent; they wait for
+	 *   that prompt to settle, which clears the text if it landed, and join
+	 *   whatever the fork leaves there. A fork that fails before it moves the
+	 *   selection leaves the edit open, and they keep waiting with it.
+	 * - Clicking to another session ends the edit and leaves its text in the
+	 *   composer, as a switch always has; that text is then only a draft, and
+	 *   they join ahead of it.
 	 */
 	function editLastMessage(): void {
 		const index = lastUserIndex;
 		if (index === null) return;
 		startEdit(index);
-		if (stopsBeforeFork) void controller.abort();
+		if (stopsBeforeFork) {
+			void controller.abort((queued) => {
+				heldQueued = [...heldQueued, ...queued];
+			});
+		}
 	}
+
+	// Releases `heldQueued` the moment nothing in the composer is an edit's or
+	// a prompt's (OW-fahoti); `editLastMessage` says why.
+	$effect(() => {
+		if (heldQueued.length === 0 || editing || view.sending) return;
+		const queued = heldQueued;
+		heldQueued = [];
+		controller.setDraft(withQueued(queued, view.draft));
+	});
 
 	/** Abandon the edit: mark cleared, tail undimmed, displaced draft put back. */
 	function cancelEdit(): void {
