@@ -1,6 +1,7 @@
 ---
 labels: [defect, emacs]
 blocked-by: [OW-dulipe]
+closed: done
 ---
 
 # agentpane-mode keeps its submit watch after a Pi prompt an extension command handled, so the next turn on that session reads as this buffer's
@@ -22,3 +23,12 @@ So the message to the user must not promise that nothing is coming, and a turn a
 ## Done when
 
 An ERT test in `emacs/agentpane-test.el`, red first, answers `sessions/prompt` as handled and asserts the submit watch is dropped and the buffer shows that no turn started; it passes under `emacs --batch -L emacs -l ert -l agentpane -l emacs/agentpane-test.el -f ert-run-tests-batch-and-exit`, which `bun run check` does not run.
+
+## Close note
+
+Landed in 53914be and fed962b (emacs/ only; `bun run check` not needed, nothing under `src/` changed).
+`agentpane--send-prompt` now reads the `sessions/prompt` answer: on `(:disposition "handled")` it abandons the turn-done watch its prompt armed, by identity as a refusal does (a prompt that joined a running turn's watch armed nil and drops nothing), still clears the draft, and sets the buffer-local `agentpane--handled`, drawn by `agentpane--show-reading-tail` on the tail overlay's `before-string` below any tail line as "The agent handled that prompt itself; no turn was started for it." (the browser's OW-yobayi wording) until the next send, from the prompt region, the composer or an edit; through an edit the line shows in the fork's buffer.
+Decision, matching OW-yobayi: a turn the handling extension starts of its own (Pi's `/ask`) is not watched either, since nothing on the stream tells it from another client's turn; the docblock and test say it holds only when the answer precedes the turn's events.
+Verified by three new ERT tests in `emacs/agentpane-test.el` (handled prompt drops the watch and shows the line; a handled prompt mid-turn keeps the running turn's watch; an edit's handled prompt says so in the fork and clears the parent's line), shown red against the parent commit's `agentpane.el`, plus a mutation-checked assertion that the handled line follows the reading tail; the full suite ran 255, 0 unexpected, 3 unrelated skips, on main.
+The adversarial read confirmed by running that the reply-site abandon misses a merge that kills the sender before the reply and a turn that ends before the reply, and by reading a reply past `agentpane--spawn-timeout`; those went to OW-kejire, which replaces the check.
+Not run in Emacs against a live Pi.
