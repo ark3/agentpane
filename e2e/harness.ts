@@ -383,7 +383,7 @@ const harness: FollowHarness = {
 		snapshot(true);
 	},
 	seedSystem() {
-		// A `--tools` change that drops a dozen tools and replaces a few sections:
+		// A `--tools` change that drops a dozen tools, replaces two sections and removes one:
 		// the later marker names every one, so it is far wider than the pane.
 		const removed = ["read", "bash", "edit", "write", "grep", "find", "ls", "glob", "fetch", "search", "notebook", "subagent"];
 		messages = [

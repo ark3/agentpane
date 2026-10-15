@@ -33,15 +33,22 @@ test("each system marker is one line, and opens its disclosure when clicked", as
 			lineHeight: parseFloat(getComputedStyle(el).lineHeight),
 			scrollWidth: el.scrollWidth,
 			clientWidth: el.clientWidth,
+			textOverflow: getComputedStyle(el).textOverflow,
 		}));
 		expect(Number.isFinite(box.lineHeight), `the ${name} marker's line-height is not a length`).toBe(true);
 		expect(box.height, `the ${name} marker is not one line`).toBeLessThan(box.lineHeight * 1.5);
 		// Without this the later fixture could pass by being short enough to fit.
 		if (name === "later") {
-			expect(box.scrollWidth, "the later marker fits the pane, so nothing needed the ellipsis")
+			expect(box.scrollWidth, "the later marker fits the pane, so nothing is cut off")
 				.toBeGreaterThan(box.clientWidth);
+			expect(box.textOverflow, "the later marker is cut off without an ellipsis").toBe("ellipsis");
 		}
 	}
+
+	// One line is not enough: an unclipped marker spills past the pane and the
+	// transcript scrolls sideways to reach it.
+	const pane = await page.locator(".conversation").evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+	expect(pane.scrollWidth, "the later marker is not clipped").toBeLessThanOrEqual(pane.clientWidth);
 
 	const later = page.locator("[data-role='system']").nth(1);
 	await expect(later.locator(".system-body")).toBeHidden();
