@@ -306,6 +306,8 @@ export interface FollowHarness {
 	seedAlignmentTool(withSummary: boolean): void;
 	/** Replace the transcript with a leading system message, a turn, and a later system message whose marker outruns the pane. */
 	seedSystem(): void;
+	/** Replace the transcript with a turn whose completed thinking block's collapsed preview outruns the pane. */
+	seedThinking(): void;
 	/** Resolves when the turn currently streaming has emitted its `status:false`. */
 	settled(): Promise<void>;
 	/** Live geometry of the transcript pane and the anchor the last submit armed. */
@@ -398,6 +400,18 @@ const harness: FollowHarness = {
 				timestamp: Date.now(),
 			},
 			user(`prompt 1: ${words(1, 12)}`),
+		];
+		seq = 0;
+		snapshot(false);
+	},
+	seedThinking() {
+		// `oneLine` caps the preview at 80 characters however long the thinking is,
+		// so those 80 have to outrun the row; at the suite's 900x700 viewport they
+		// measured 593px of text in a 395px row on 2026-10-14 (OW-55).
+		const thinking = words(0, 30);
+		messages = [
+			user(`prompt 0: ${words(0, 12)}`),
+			assistant([{ type: "thinking", thinking }, { type: "text", text: paragraphs(0, 1) }], "stop"),
 		];
 		seq = 0;
 		snapshot(false);
