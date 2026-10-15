@@ -2634,8 +2634,9 @@ the draft that edit displaced, and the prompt region, holding the edit's
 text, is left as it was: an edit sent here meanwhile, whose attach made
 the merge, would otherwise end leaving the draft behind the text it
 sent, for the next send to prompt this buffer's session with.
-Cancelling the edit puts both back; a fork drops both, as the browser's
-edit drops the draft it displaced unless cancelled.
+Cancelling the edit puts both back; a fork drops both, where the
+browser's edit gives the draft it displaced back on every exit
+\(OW-kijuju), which OW-hakeno brings here.
 Requests of OTHER's still in flight are dropped with it, as any killed
 buffer's are; a prompt of its own that went out leaves its text in this
 buffer's draft, and the text of an edit's send goes on the kill ring

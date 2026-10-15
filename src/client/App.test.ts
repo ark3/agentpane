@@ -4290,8 +4290,8 @@ describe("App", () => {
 	 * already empty. Every prompt is held until `land` is called or `refuse`
 	 * fails it, so a test can answer while a fork or a send is still out;
 	 * `prompts` is every prompt's text, and `aborts` counts the stops that
-	 * went out. With
-	 * `streaming` false the turn has already ended, so a fork stops nothing.
+	 * went out. With `streaming` false the turn has already ended, so a fork
+	 * stops nothing.
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
