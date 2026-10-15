@@ -4543,10 +4543,11 @@ No real browser or Emacs ran.
 
 ## The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)
 
-Run on the home server 2026-10-14 at 20:29 local (`-04:00`), on **`pi 1.2.0`** (`pi --version` before the run) and `bun 1.4.0`, from the `card/OW-tadoju` worktree at `3288744`, by `bun resources/probes/pi_store_survey.ts`, which read `~/.pi/agent/sessions` and wrote nothing.
+Run on the home server 2026-10-14, first at 20:29 local (`-04:00`) and last at 20:48 after the review's fixes, on **`pi 1.2.0`** (`pi --version` before each run) and `bun 1.4.0`, from the `card/OW-tadoju` worktree, by `bun resources/probes/pi_store_survey.ts`, which read `~/.pi/agent/sessions` and wrote nothing.
 The store held 13 files, 9 last modified in 2026-09 and 4 in 2026-10.
 The months are the UTC month of each file's mtime, which is its last write; a Pi file does not name the Pi version that wrote it, so a month only brackets the versions that may have.
-The full output follows the findings; it was read through before this was committed, and it holds no text, path, name or other value from the store.
+The full output of the last run follows the findings; it was read through before this was committed, and it holds no text, path, name or other value from the store.
+Every file under the root had a Pi session header and every directory and file was readable, so nothing was skipped; the earlier run's census and lists were the same.
 
 **Three entry types are read by no reader.**
 `session_info` (4, all 2026-09) carries the session's `name`, which the listing reports as `null` for every stored Pi session; reading it is OW-yilene's.
@@ -4568,16 +4569,17 @@ Each entry's `id` and `parentId`, the header's `id`, `version` and `parentSessio
 **One entry starts an in-file branch.**
 In one 2026-10 file of 49 entries, the sixth after the header is a user message whose `parentId` names the system message three lines up, past a user message and an `aborted` reply.
 `extractPiPreviewTurns` reads every message line in file order, so the preview draws that abandoned pair ahead of the branch the file goes on with.
-A throwaway Python script over the `parentId` chains, printing only positions, types and roles, found it before the probe counted it; `3288744` added the count.
+A throwaway Python script over the `parentId` chains, printing only positions, types and roles, found it before the probe counted it, and the probe was then given the count.
 Not established: what an attached session draws for that file, which no run here tried.
 
 **Not seen in this store.**
-`pi 1.2.0`'s `SessionEntry` union, in `pi-coding-agent`'s `dist/core/session-manager.d.ts`, also declares `compaction`, `branch_summary`, `custom`, `custom_message`, `context_edit`, `label` and `usage` entries, and its messages module the `bashExecution`, `custom`, `branchSummary` and `compactionSummary` roles; none occurred here, nor did an image block.
+`pi 1.2.0`'s `SessionEntry` union, in `dist/core/session-manager.d.ts` of the `@earendil-works/pi-coding-agent` package under the home server's global Bun install (`~/.bun/install/global/node_modules/`, where `which pi` resolves; not in this checkout), also declares `compaction`, `branch_summary`, `custom`, `custom_message`, `context_edit`, `label` and `usage` entries, and its messages module the `bashExecution`, `custom`, `branchSummary` and `compactionSummary` roles; none occurred here, nor did an image block.
 The work laptop's store, used daily across many Pi versions with extensions and MCP, is where they would show up; the README entry for the probe names the command to run there.
 
 ```text
 Pi session store survey: structure only, never content (resources/probes/pi_store_survey.ts).
-files 13, empty files 0, lines 302, unparseable lines 0, non-object lines 0
+session files 13, lines 302, unparseable lines 0, non-object lines 0
+skipped: files without a Pi session header 0, unreadable directories 0, unreadable files 0
 
 == Census, by UTC month of file mtime ==
 
