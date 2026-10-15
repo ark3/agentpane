@@ -3075,11 +3075,18 @@ though Pi lets the extension that handled the prompt start a turn of its
 own afterwards, as its `/ask' example does: nothing on the stream tells
 that turn from one prompted elsewhere, and the indicator must never be
 raised for a turn this Emacs did not ask for, where missing one costs a
-glance, as the browser's `disarmSubmit' decided (OW-yobayi).  The buffer
+glance, as the browser's `disarmSubmit' decided (OW-yobayi).
+That holds only when the answer comes before the turn's events.  On
+`pi 1.2.0' an extension command's handler runs before Pi answers
+`handled', so a turn the handler starts can stream, and even end, before
+the answer arrives, and another client's turn can beat it too; a turn
+already ended has raised the indicator, which the abandon at the answer
+cannot take back.  That order is OW-kejire's to decide.  The buffer
 says no turn was started for it, `agentpane--handled', until the next
 send; through an edit that is the fork's buffer, where the prompt went.
 A reply handled only after a merge has killed this buffer runs nothing
-here (`agentpane--request'), so that watch stays standing."
+here (`agentpane--request'), so that watch stays standing; that too is
+OW-kejire's."
   (when (string-blank-p text)
     (user-error "Nothing to send"))
   (with-current-buffer (agentpane--transcript)

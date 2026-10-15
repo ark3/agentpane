@@ -2287,6 +2287,10 @@ the tool header that would carry it is not drawn."
   "Reading view is hiding this session's tool activity and thinking.\n"
   "The line reading view shows in place of a session whose every node it elides.")
 
+(defconst agentpane-test--handled-line
+  "The agent handled that prompt itself; no turn was started for it.\n"
+  "The line a transcript shows once the backend handled its last prompt.")
+
 (defun agentpane-test--above-prompt ()
   "The overlay string shown in the current buffer, without properties, or nil."
   (let ((shown (seq-some (lambda (overlay) (overlay-get overlay 'before-string))
@@ -2295,9 +2299,11 @@ the tool header that would carry it is not drawn."
 
 (defun agentpane-test--tail-status ()
   "The reading-view tail status line shown in the current buffer, or nil.
-Not `agentpane-test--hiding-line', which the same overlay may carry."
-  (let ((shown (agentpane-test--above-prompt)))
-    (and (not (equal shown agentpane-test--hiding-line)) shown)))
+Not `agentpane-test--hiding-line', nor `agentpane-test--handled-line',
+which the same overlay may carry after it."
+  (let ((shown (string-remove-suffix agentpane-test--handled-line
+                                     (or (agentpane-test--above-prompt) ""))))
+    (and (not (member shown (list "" agentpane-test--hiding-line))) shown)))
 
 (defun agentpane-test--hiding-p ()
   "Non-nil when the current buffer shows `agentpane-test--hiding-line'."
@@ -2321,6 +2327,13 @@ once the turn's text arrives or the streaming ends."
        (list :session ref :isStreaming t
              :nodes (vector (aref agentpane-test--nodes 0) (funcall running "Bash" "bun test"))))
       (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
+      ;; The line a handled prompt holds follows the tail, nearest the
+      ;; prompt, and takes nothing from it (OW-taviju).
+      (agentpane--hold-handled t)
+      (should (equal (agentpane-test--above-prompt)
+                     (concat "Bash bun test … running\n" agentpane-test--handled-line)))
+      (should (equal (agentpane-test--tail-status) "Bash bun test … running\n"))
+      (agentpane--hold-handled nil)
       (agentpane--on-notification
        nil 'session/node (list :session ref :node (funcall running "Read" "app.ts")))
       (agentpane-test--redraw buffer)
@@ -5239,10 +5252,6 @@ prompt armed, so the turn's end still raises the indicator (OW-lohavi)."
     (funcall status nil)
     (should (agentpane-test--turn-done-p))))
 
-(defconst agentpane-test--handled-line
-  "The agent handled that prompt itself; no turn was started for it.\n"
-  "The line a transcript shows once the backend handled its last prompt.")
-
 (ert-deftest agentpane-test-turn-done-not-raised-after-a-handled-prompt ()
   "A prompt the backend answered as handled, a Pi extension command such
 as `/mcp' that starts no turn for it, drops the watch it armed, clears the
@@ -5252,7 +5261,10 @@ The turn that then ends unseen raises nothing, though it may be one the
 handling extension started of its own, as Pi's `/ask' does: nothing on the
 stream tells it from a turn prompted elsewhere, and the indicator must
 never be raised for a turn this Emacs did not ask for, as the browser
-decided (OW-yobayi)."
+decided (OW-yobayi).  That holds only when the answer comes before the
+turn's events, as here: on `pi 1.2.0' the handler runs before Pi answers,
+so a turn it starts, or another client's, can stream and end first and
+raise the indicator, which the abandon cannot take back (OW-kejire)."
   (agentpane-test--submitting
     (setq prompted '(:disposition "handled"))
     (funcall submit)
@@ -5285,11 +5297,15 @@ indicator, as a prompt refused mid-turn leaves it (OW-taviju)."
 (ert-deftest agentpane-test-edit-send-handled-says-so-in-the-fork ()
   "An edit's send whose prompt the fork's backend handled ends the edit,
 drops the watch the fork's prompt armed, and says no turn was started in
-the fork's buffer, where the prompt went (OW-taviju)."
+the fork's buffer, where the prompt went, taking down the line a handled
+prompt left in the parent (OW-taviju)."
   (agentpane-test--watching
     (agentpane-test--editing "pi"
       (setq prompted '(:disposition "handled")
             attached (list :ref '(:backend "pi" :id "fork") :handle "h2"))
+      ;; A line an earlier handled prompt left here comes down at the send.
+      (agentpane--hold-handled t)
+      (should (equal (agentpane-test--above-prompt) agentpane-test--handled-line))
       (agentpane-send)
       (should-not agentpane--editing)
       (should-not (agentpane-test--above-prompt))
