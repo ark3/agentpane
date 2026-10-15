@@ -263,8 +263,9 @@ export interface AdapterFactory {
  * even carry. The server answers 400 with this message, because the
  * request is what was wrong; a backend that died or never answered is not
  * this, and stays a 500. Thrown by `setModel` (OW-pizaki), by Codex's
- * `setName` on a thread not yet prompted (OW-kametu), and by Pi's `fork` on
- * an entry Pi refuses (OW-rasiwa).
+ * `setName` on a thread not yet prompted (OW-kametu), by Pi's `fork` on an
+ * entry Pi refuses (OW-rasiwa), and by Claude Code's and Codex's `fork` on an
+ * entry the session has no fork point for (OW-fesuwe).
  */
 export class BackendRefusedError extends Error {
 	constructor(message: string) {

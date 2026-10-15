@@ -450,6 +450,15 @@ describe("CodexAdapter lifecycle", () => {
 		});
 	});
 
+	it("refuses a fork at a turn the thread does not have, without a `thread/fork` (OW-fesuwe)", async () => {
+		const { adapter, proc } = await startedAdapter({ threadId: STORED_REF.id, turns: twoStoredTurns() }, STORED_REF);
+
+		const forking = adapter.fork("nope");
+		await expect(forking).rejects.toBeInstanceOf(BackendRefusedError);
+		await expect(forking).rejects.toThrow("unknown fork point: nope");
+		expect(methods(proc)).not.toContain("thread/fork");
+	});
+
 	it("starts a fork that keeps no turn at the parent's model and effort (D23, OW-hojefo)", async () => {
 		// Nothing is stored for it to read back, and `thread/start` answers the
 		// config's effort (OW-sayaju, OW-hojefo), so the pair rides the start.

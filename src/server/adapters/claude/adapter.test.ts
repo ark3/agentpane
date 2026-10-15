@@ -1339,7 +1339,9 @@ describe("ClaudeAdapter fork", () => {
 		const h = harness({ entries: storedEntries() });
 		await h.adapter.start({ cwd: "/workspace", resumeId: "parent" });
 
-		await expect(h.adapter.fork("nope")).rejects.toThrow("unknown fork point: nope");
+		const forking = h.adapter.fork("nope");
+		await expect(forking).rejects.toBeInstanceOf(BackendRefusedError);
+		await expect(forking).rejects.toThrow("unknown fork point: nope");
 		expect(h.procs).toHaveLength(1);
 		expect(h.procs[0]?.killed).toBe(false);
 	});

@@ -739,7 +739,7 @@ export class CodexAdapter implements BackendAdapter {
 		const cwd = this.cwd;
 		if (!this.turnOrder.length) await this.listForkPoints();
 		const index = this.turnOrder.indexOf(entryId);
-		if (index < 0) throw new Error(`unknown fork point: ${entryId}`);
+		if (index < 0) throw new BackendRefusedError(`unknown fork point: ${entryId}`);
 		// No `thread/fork` keeps nothing. As of `codex-cli` 0.156.0 one with no
 		// `lastTurnId` kept the parent's whole history, and one naming `""` or
 		// an unknown turn was refused with `-32600 turn not found`

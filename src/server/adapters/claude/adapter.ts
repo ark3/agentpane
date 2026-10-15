@@ -634,7 +634,7 @@ export class ClaudeAdapter implements BackendAdapter {
 	): Promise<ClaudeStoreMessageEntry[]> {
 		const entries = await this.readStore(parentId);
 		const cut = entries.findIndex((entry) => entry.uuid === entryId);
-		if (cut < 0) throw new Error(`unknown fork point: ${entryId}`);
+		if (cut < 0) throw new BackendRefusedError(`unknown fork point: ${entryId}`);
 		return entries.slice(0, cut + 1);
 	}
 
