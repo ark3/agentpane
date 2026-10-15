@@ -14,7 +14,7 @@
 
 import type { Stats } from "node:fs";
 import type { SessionPreviewTurn, SessionSummary } from "../../shared/protocol.ts";
-import { activeBranch } from "../adapters/pi/reducer.ts";
+import { activeBranch, asPiStop } from "../adapters/pi/reducer.ts";
 import { readLinesLfOnly } from "./line-reader.ts";
 import { storedAgentMessage } from "./preview-message.ts";
 import { trimPreview } from "./text.ts";
@@ -191,9 +191,10 @@ function extractPreviewTurn(rec: Record<string, unknown>): SessionPreviewTurn | 
 	const timestamp = typeof own === "number" && Number.isFinite(own)
 		? new Date(own).toISOString()
 		: typeof rec.timestamp === "string" ? rec.timestamp : undefined;
-	return storedAgentMessage(message, timestamp, {
+	const turn = storedAgentMessage(message, timestamp, {
 		api: "anthropic-messages",
 		provider: "anthropic",
 		model: "pi",
 	});
+	return turn && asPiStop(turn);
 }

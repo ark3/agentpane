@@ -229,4 +229,49 @@ describe("extractPiPreviewTurns", () => {
 			expect.objectContaining({ role: "assistant", stopReason: "error", errorMessage: "The provider refused." }),
 		]);
 	});
+
+	// What `pi 1.2.0` stored for a Stop during a `bash` call (docs/MANUAL_TESTING.md,
+	// OW-yewiku): the call's error result, then an empty reply that failed on the
+	// aborted signal. The file does not record that anyone pressed Stop.
+	const call = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
+		stopReason: "toolUse",
+	};
+	const aborted = {
+		role: "toolResult",
+		toolCallId: "call_sleep",
+		toolName: "bash",
+		content: [{ type: "text", text: "Command aborted" }],
+		isError: true,
+	};
+
+	it("reads a Stop during a tool call as the stop it reads as live (OW-kibabi)", async () => {
+		const file = await write(dir, "m.jsonl", [
+			sessionHeader(),
+			entry("u1", null, user),
+			entry("a1", "u1", call),
+			entry("r1", "a1", aborted),
+			entry("a2", "r1", { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" }),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns.map((t) => t.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+		expect(turns[2]).toMatchObject({ isError: true });
+		expect(turns[3]).toMatchObject({ role: "assistant", stopReason: "aborted", content: [] });
+		expect(turns[3]).not.toHaveProperty("errorMessage");
+	});
+
+	it("keeps an error after a failed tool call that nobody stopped as an error (OW-kibabi)", async () => {
+		const file = await write(dir, "n.jsonl", [
+			sessionHeader(),
+			entry("u1", null, user),
+			entry("a1", "u1", call),
+			entry("r1", "a1", aborted),
+			entry("a2", "r1", { role: "assistant", content: [], stopReason: "error", errorMessage: "The provider refused." }),
+		]);
+		const turns = await extractPiPreviewTurns(file);
+
+		expect(turns[3]).toMatchObject({ stopReason: "error", errorMessage: "The provider refused." });
+	});
 });

@@ -17,6 +17,7 @@ import Transcript from "./Transcript.svelte";
 import { systemView } from "./system.ts";
 import { openToolCards } from "./tools/test-support.ts";
 import { CodexReducer } from "$server/adapters/codex/reducer.ts";
+import { createInitialPiState, reducePiNotification } from "$server/adapters/pi/reducer.ts";
 import {
 	assistant,
 	errors,
@@ -569,7 +570,7 @@ describe("Transcript", () => {
 });
 
 /**
- * What a Pi Stop leaves behind, pinned as the browser draws it today (OW-nirani).
+ * What a Pi Stop leaves behind, as the browser draws it.
  *
  * As of `pi 1.2.0` an `abort` while a `bash` call runs ends the call with a
  * `toolResult` reading `Command aborted` and `isError: true`, and Pi then
@@ -577,9 +578,10 @@ describe("Transcript", () => {
  * `stopReason: "error"` and `errorMessage: "This operation was aborted"`. An
  * abort mid-reply instead ends the reply with `stopReason: "aborted"` and
  * `errorMessage: "Request was aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
- * These assert what `Message.svelte` shows for each, not what it should.
+ * The Pi reducer sends the first as a stop (`asPiStop`, OW-kibabi), so these
+ * drive each message through it, as the live adapter does, before drawing.
  */
-describe("a Pi Stop (OW-nirani)", () => {
+describe("a Pi Stop (OW-nirani, OW-kibabi)", () => {
 	const noUsage = {
 		input: 0,
 		output: 0,
@@ -589,24 +591,51 @@ describe("a Pi Stop (OW-nirani)", () => {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 
-	const stoppedDuringTool = (): AgentMessage[] => [
-		user("Run sleep 20."),
+	/** Each message as Pi announces it, `message_start` then `message_end`, through the live reducer. */
+	function replayPi(messages: AgentMessage[]): AgentMessage[] {
+		let state = createInitialPiState();
+		for (const message of messages) {
+			state = reducePiNotification(state, { type: "message_start", message }).state;
+			state = reducePiNotification(state, { type: "message_end", message }).state;
+		}
+		return state.messages;
+	}
+
+	const sleepCall = () =>
 		assistant(
 			[{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
 			"toolUse",
-		),
-		toolResult("call_sleep", "bash", "Command aborted", true),
-		assistant([], "error", { errorMessage: "This operation was aborted", usage: noUsage }),
-	];
+		);
 
-	it("draws a Stop during a tool call as an error banner carrying Pi's error message", () => {
+	const stoppedDuringTool = (): AgentMessage[] =>
+		replayPi([
+			user("Run sleep 20."),
+			sleepCall(),
+			toolResult("call_sleep", "bash", "Command aborted", true),
+			assistant([], "error", { errorMessage: "This operation was aborted", usage: noUsage }),
+		]);
+
+	it("draws a Stop during a tool call as the quiet aborted line, without Pi's error message", () => {
 		const { container } = render(Transcript, { props: { messages: stoppedDuringTool() } });
 
 		const banners = [...container.querySelectorAll(".banner")];
 		expect(banners).toHaveLength(1);
-		expect(banners[0]!.className).toMatch(/\bbanner error\b/);
-		expect(banners[0]!.getAttribute("role")).toBe("status");
-		expect(banners[0]!.textContent?.trim()).toBe("This operation was aborted");
+		expect(banners[0]!.className).toMatch(/\bbanner aborted\b/);
+		expect(banners[0]!.textContent?.trim()).toBe("Aborted.");
+		expect(container.querySelector(".banner.error")).toBeNull();
+		expect(container.textContent).not.toContain("This operation was aborted");
+	});
+
+	it("draws an error after a failed tool call that nobody stopped as an error, with its own message", () => {
+		const messages = replayPi([
+			user("Run sleep 20."),
+			sleepCall(),
+			toolResult("call_sleep", "bash", "Command aborted", true),
+			assistant([], "error", { errorMessage: "529 overloaded_error: Overloaded", usage: noUsage }),
+		]);
+		const { container } = render(Transcript, { props: { messages } });
+
+		expect(container.querySelector(".banner.error")?.textContent?.trim()).toBe("529 overloaded_error: Overloaded");
 		expect(container.querySelector(".banner.aborted")).toBeNull();
 	});
 
@@ -622,20 +651,21 @@ describe("a Pi Stop (OW-nirani)", () => {
 		expect(card?.querySelector(".body")?.textContent).toContain("Command aborted");
 	});
 
-	it("keeps the error banner in reading view, where the failed tool card goes", () => {
+	it("keeps the aborted line in reading view, where the failed tool card goes", () => {
 		const { container } = render(Transcript, { props: { messages: stoppedDuringTool(), reading: true } });
 
 		expect(container.querySelector("details.tool")).toBeNull();
-		expect(container.querySelector(".banner.error")?.textContent?.trim()).toBe("This operation was aborted");
+		expect(container.querySelector(".banner.aborted")?.textContent?.trim()).toBe("Aborted.");
+		expect(container.querySelector(".banner.error")).toBeNull();
 	});
 
 	it("draws a Stop mid-reply as the quiet aborted line, without Pi's error message", () => {
-		const messages: AgentMessage[] = [
+		const messages = replayPi([
 			user("Write an essay."),
 			assistant([{ type: "text", text: "Gardening begins" }], "aborted", {
 				errorMessage: "Request was aborted",
 			}),
-		];
+		]);
 		const { container } = render(Transcript, { props: { messages } });
 
 		const banners = [...container.querySelectorAll(".banner")];

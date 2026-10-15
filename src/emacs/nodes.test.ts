@@ -13,6 +13,7 @@ import {
 	type FixtureName as ClaudeFixtureName,
 } from "$server/adapters/claude/test-support.ts";
 import { CodexReducer } from "$server/adapters/codex/reducer.ts";
+import { createInitialPiState, reducePiNotification } from "$server/adapters/pi/reducer.ts";
 import {
 	readFixture as readCodexFixture,
 	type FixtureName as CodexFixtureName,
@@ -37,6 +38,16 @@ function replayCodex(name: CodexFixtureName): PaneMessage[] {
 	const reducer = new CodexReducer({ now: () => 1_000 });
 	for (const line of readCodexFixture(name)) reducer.handle(line);
 	return reducer.getState().messages;
+}
+
+/** Each message as Pi announces it, `message_start` then `message_end`, through the live reducer. */
+function replayPi(messages: PaneMessage[]): PaneMessage[] {
+	let state = createInitialPiState();
+	for (const message of messages) {
+		state = reducePiNotification(state, { type: "message_start", message }).state;
+		state = reducePiNotification(state, { type: "message_end", message }).state;
+	}
+	return state.messages;
 }
 
 function toolParts(nodes: TranscriptNode[]): ToolPart[] {
@@ -350,14 +361,15 @@ describe("assistant turns", () => {
 });
 
 /**
- * What a Pi Stop leaves behind, pinned as the projection sends it today
- * (OW-nirani). As of `pi 1.2.0` an `abort` during a `bash` call ends the call
- * with a `Command aborted` error result and then an empty assistant message
- * with `stopReason: "error"` and `errorMessage: "This operation was aborted"`;
- * an abort mid-reply ends with `stopReason: "aborted"` and `errorMessage:
- * "Request was aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
+ * What a Pi Stop leaves behind, as the projection sends it. As of `pi 1.2.0`
+ * an `abort` during a `bash` call ends the call with a `Command aborted` error
+ * result and then an empty assistant message with `stopReason: "error"` and
+ * `errorMessage: "This operation was aborted"`; an abort mid-reply ends with
+ * `stopReason: "aborted"` and `errorMessage: "Request was aborted"`
+ * (docs/MANUAL_TESTING.md, OW-yewiku). The Pi reducer sends the first as a
+ * stop (`asPiStop`, OW-kibabi), so both are driven through it here.
  */
-describe("a Pi Stop (OW-nirani)", () => {
+describe("a Pi Stop (OW-nirani, OW-kibabi)", () => {
 	const noUsage = {
 		input: 0,
 		output: 0,
@@ -367,8 +379,8 @@ describe("a Pi Stop (OW-nirani)", () => {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 
-	it("sends a Stop during a tool call as an errored call and a turn whose meta says error, with Pi's message", () => {
-		const messages: PaneMessage[] = [
+	it("sends a Stop during a tool call as an errored call and a turn whose meta says aborted, without Pi's message", () => {
+		const messages = replayPi([
 			user("Run sleep 20."),
 			assistant(
 				[{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
@@ -376,7 +388,7 @@ describe("a Pi Stop (OW-nirani)", () => {
 			),
 			toolResult("call_sleep", "bash", "Command aborted", true),
 			assistant([], "error", { errorMessage: "This operation was aborted", usage: noUsage }),
-		];
+		]);
 		const nodes = projectTranscript(messages, false, render);
 
 		expect(nodes.map((node) => [node.index, node.role])).toEqual([
@@ -392,16 +404,15 @@ describe("a Pi Stop (OW-nirani)", () => {
 		expect(nodes[2]?.meta).toEqual({
 			model: "example-model",
 			usage: { totalTokens: 0, cost: 0 },
-			stopReason: "error",
-			errorMessage: "This operation was aborted",
+			stopReason: "aborted",
 		});
 	});
 
 	it("sends a Stop mid-reply as a turn whose meta says aborted, without Pi's message", () => {
-		const messages: PaneMessage[] = [
+		const messages = replayPi([
 			user("Write an essay."),
 			assistant([{ type: "text", text: "Gardening begins" }], "aborted", { errorMessage: "Request was aborted" }),
-		];
+		]);
 		const [, turn] = projectTranscript(messages, false, render);
 
 		expect(turn?.meta?.stopReason).toBe("aborted");

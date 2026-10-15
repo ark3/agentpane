@@ -373,11 +373,12 @@ describe("reducePiNotification: error signals not covered by any fixture", () =>
 		expect(result.state).toBe(state);
 	});
 
-	it("raises no adapter error for a Stop during a tool call, and passes its errored turn through (OW-nirani)", () => {
+	it("raises no adapter error for a Stop during a tool call, and passes its errored turn on as a stop (OW-kibabi)", () => {
 		// The event order `pi 1.2.0` sent for an `abort` while a `bash` call ran
 		// (docs/MANUAL_TESTING.md, OW-yewiku): the call ends `Command aborted`,
 		// then one more round whose reply fails at once with `stopReason: "error"`.
-		// The transcript is the only place the clients learn of it.
+		// The transcript is the only place the clients learn of it, and it reads
+		// as the stop a Stop mid-reply reads as (`asPiStop`).
 		const prompt = user("Run sleep 20.");
 		const call = assistant(
 			[{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
@@ -407,12 +408,53 @@ describe("reducePiNotification: error signals not covered by any fixture", () =>
 
 		expect(results.filter((r) => r.error !== undefined || r.notice !== undefined)).toEqual([]);
 		expect(finalState.messages.map((m) => m.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+		expect(finalState.messages.at(-1)).toMatchObject({ stopReason: "aborted", content: [] });
+		expect(finalState.messages.at(-1)).not.toHaveProperty("errorMessage");
+		expect(finalState.messages[2]).toMatchObject({ role: "toolResult", isError: true });
+		expect(finalState.isStreaming).toBe(false);
+	});
+
+	it("passes that errored turn on as a stop from its `message_start`, which is broadcast before its end (OW-kibabi)", () => {
+		const failed = assistant([], "error", { errorMessage: "This operation was aborted" });
+		const { state } = reducePiNotification(createInitialPiState(), { type: "message_start", message: failed });
+
+		expect(state.messages.at(-1)).toMatchObject({ stopReason: "aborted" });
+		expect(state.messages.at(-1)).not.toHaveProperty("errorMessage");
+	});
+
+	it("keeps an error turn after a failed tool call as an error when nobody stopped it (OW-kibabi)", () => {
+		const call = assistant(
+			[{ type: "toolCall", id: "call_ls", name: "bash", arguments: { command: "ls /nowhere" } }],
+			"toolUse",
+		);
+		const result = toolResult("call_ls", "bash", "ls: cannot access '/nowhere'", true);
+		const failed = assistant([], "error", { errorMessage: "529 overloaded_error: Overloaded" });
+		const { finalState } = runThroughReducer(
+			[call, result, failed].flatMap((message): PiNotification[] => [
+				{ type: "message_start", message },
+				{ type: "message_end", message },
+			]),
+		);
+
+		expect(finalState.messages.at(-1)).toMatchObject({
+			stopReason: "error",
+			errorMessage: "529 overloaded_error: Overloaded",
+		});
+	});
+
+	it("keeps an errored turn that carries content as an error, Pi's message and all (OW-kibabi)", () => {
+		const failed = assistant([{ type: "text", text: "Partial" }], "error", {
+			errorMessage: "This operation was aborted",
+		});
+		const { finalState } = runThroughReducer([
+			{ type: "message_start", message: failed },
+			{ type: "message_end", message: failed },
+		]);
+
 		expect(finalState.messages.at(-1)).toMatchObject({
 			stopReason: "error",
 			errorMessage: "This operation was aborted",
-			content: [],
 		});
-		expect(finalState.isStreaming).toBe(false);
 	});
 });
 

@@ -988,13 +988,14 @@ the facts `showsMeta' governs stay hidden."
     (should (string-search "— error · boom" (buffer-string)))
     (should-not (string-search "haiku" (buffer-string)))))
 
-(ert-deftest agentpane-test-pi-stop-during-a-tool-reads-as-an-error ()
-  "What a Pi Stop leaves behind, pinned as it is drawn today (OW-nirani).
+(ert-deftest agentpane-test-pi-stop-during-a-tool-reads-as-aborted ()
+  "A Pi Stop reads as aborted whether Pi was mid-tool or mid-reply (OW-kibabi).
 As of pi 1.2.0 an abort during a `bash' call ends the call with an error
 result reading Command aborted, then an empty turn with stopReason error
-and errorMessage This operation was aborted, which the helper sends as
-these nodes; an abort mid-reply ends with stopReason aborted, whose
-message the helper drops (docs/MANUAL_TESTING.md, OW-yewiku)."
+and errorMessage This operation was aborted, which the server sends as a
+stop, stopReason aborted without the message, so the helper sends these
+nodes; an abort mid-reply ends with stopReason aborted, whose message the
+helper drops (docs/MANUAL_TESTING.md, OW-yewiku)."
   (agentpane-test--in-kolkata
     (with-temp-buffer
       (agentpane-transcript-mode)
@@ -1006,14 +1007,14 @@ message the helper drops (docs/MANUAL_TESTING.md, OW-yewiku)."
               :meta '(:model "example-model" :usage (:totalTokens 52 :cost 0)))
         (list :index 3 :role "assistant" :parts [] :timestamp agentpane-test--ms
               :meta '(:model "example-model" :usage (:totalTokens 0 :cost 0)
-                      :stopReason "error" :errorMessage "This operation was aborted"))))
+                      :stopReason "aborted"))))
       (should (equal (substring-no-properties (agentpane-test--line-at "sleep 20"))
                      "▸ ✗ bash sleep 20; echo done · 2026-09-23 00:30:30 · example-model · 52 tok"))
       (should (memq 'agentpane-warning (agentpane-test--faces-at "✗")))
       (should (invisible-p (agentpane-test--position "Command aborted")))
-      (should (equal (substring-no-properties (agentpane-test--line-at "This operation"))
-                     "— 2026-09-23 00:30:30 · example-model · error · This operation was aborted"))
-      (should (memq 'agentpane-warning (agentpane-test--faces-at "error · This operation")))))
+      (should (equal (substring-no-properties (agentpane-test--line-at "example-model · aborted"))
+                     "— 2026-09-23 00:30:30 · example-model · aborted"))
+      (should (memq 'agentpane-warning (agentpane-test--faces-at "example-model · aborted")))))
   (agentpane-test--in-kolkata
     (should (equal (agentpane-test--meta-line
                     '(:model "example-model" :usage (:totalTokens 52 :cost 0) :stopReason "aborted")

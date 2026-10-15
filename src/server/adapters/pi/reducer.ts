@@ -26,7 +26,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { AgentNotice, AssistantTurn, PaneMessage } from "../../../shared/protocol.ts";
+import type { AgentNotice, AssistantTurn, PaneMessage, SessionPreviewTurn } from "../../../shared/protocol.ts";
 import {
 	clampThinkingLevel,
 	PI_DIALOG_METHODS,
@@ -87,7 +87,7 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			return { state: { ...state, isStreaming: false } };
 
 		case "message_start": {
-			const messages = [...state.messages, withEffort(event.message, state.effort)];
+			const messages = [...state.messages, withEffort(asPiStop(event.message), state.effort)];
 			return { state: { ...state, messages }, changedIndex: messages.length - 1 };
 		}
 
@@ -98,7 +98,7 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			// D9's "never throw on something you don't recognise" spirit applies).
 			const index = state.messages.length - 1;
 			if (index < 0) {
-				const messages = [withEffort(event.message, state.effort)];
+				const messages = [withEffort(asPiStop(event.message), state.effort)];
 				return { state: { ...state, messages }, changedIndex: 0 };
 			}
 			// The level the turn started at, not the one in force as it ends: a
@@ -110,7 +110,7 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 			const started = replaced?.role === "assistant" ? replaced.effort : undefined;
 			const recorded = event.message.role === "assistant" ? event.message.thinkingLevel : undefined;
 			const messages = state.messages.slice();
-			messages[index] = withEffort(event.message, started === undefined ? state.effort : (recorded ?? started));
+			messages[index] = withEffort(asPiStop(event.message), started === undefined ? state.effort : (recorded ?? started));
 			return { state: { ...state, messages }, changedIndex: index };
 		}
 
@@ -184,6 +184,40 @@ export function reducePiNotification(state: PiReducerState, event: PiNotificatio
 		default:
 			return { state };
 	}
+}
+
+/**
+ * A Pi Stop during a tool call, sent as the stop a Stop mid-reply sends
+ * (OW-kibabi): `stopReason: "aborted"`, without Pi's message.
+ *
+ * As of `pi 1.2.0` an `abort` while a tool runs ends the call with an error
+ * result, and Pi's loop then opens one more round on the already aborted
+ * signal, whose reply fails at once with no content, `stopReason: "error"`
+ * and `errorMessage: "This operation was aborted"` -- where an abort mid-reply
+ * ends with `stopReason: "aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
+ * Left as it came, both clients drew a Stop the user pressed as an error.
+ *
+ * Recognised from the message alone, because a reopened session's file does
+ * not record that anyone pressed Stop, and the live adapter, the resume's
+ * `get_messages` and the stored preview all read it through this one rule.
+ * A provider failure carries its own message, so an error turn after a failed
+ * call that nobody stopped still reads as an error. The failed call keeps its
+ * error result: it really did end early.
+ *
+ * The shape is any round set up on an aborted signal, not only a Stop's: read
+ * in `pi-ai 1.2.0`, `lazyStream` turns a setup failure into exactly this
+ * message, and Pi's `compact` and fork abort the turn before they run, so one
+ * of those landing during a tool call reads as a stop too -- which it was.
+ */
+export function asPiStop<M extends AgentMessage | SessionPreviewTurn>(message: M): M {
+	if (
+		message.role !== "assistant" ||
+		message.stopReason !== "error" ||
+		message.errorMessage !== "This operation was aborted" ||
+		message.content.length > 0
+	) return message;
+	const { errorMessage: _errorMessage, ...stopped } = message;
+	return { ...stopped, stopReason: "aborted" } as M;
 }
 
 /**
@@ -291,7 +325,7 @@ export function withLoadedEfforts(
 		levels.set(started, levels.has(started) ? null : reasoned(ref, level));
 	}
 
-	return messages.map((message) => {
+	return messages.map(asPiStop).map((message) => {
 		if (message.role !== "assistant") return message;
 		const recorded = message.thinkingLevel;
 		const level = recorded === undefined ? levels.get(message.timestamp) : reasoned(`${message.provider}/${message.model}`, recorded);

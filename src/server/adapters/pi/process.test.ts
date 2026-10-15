@@ -365,6 +365,29 @@ describe("PiAdapter cold start (D3)", () => {
 		expect(h.adapter.getState().messages).toHaveLength(2);
 	});
 
+	it("reads a resumed Stop during a tool call as the stop it read as live (OW-kibabi)", async () => {
+		const h = makeHarness();
+		const resumeId = "/home/u/.pi/agent/sessions/old.jsonl";
+
+		const started = h.adapter.start({ cwd: WORKSPACE, resumeId });
+		h.child.respondTo("get_state", { model: null, isStreaming: false, sessionFile: resumeId });
+		await Promise.resolve();
+		h.child.respondTo("get_messages", {
+			messages: [
+				userMessage("Run sleep 20."),
+				{ role: "toolResult", toolCallId: "c", toolName: "bash", content: [{ type: "text", text: "Command aborted" }], isError: true },
+				{ role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" },
+			],
+		});
+		h.child.respondTo("get_entries", { entries: [], leafId: null });
+		h.child.respondTo("get_available_models", { models: [] });
+		await started;
+
+		const last = h.adapter.getState().messages.at(-1);
+		expect(last).toMatchObject({ role: "assistant", stopReason: "aborted", content: [] });
+		expect(last).not.toHaveProperty("errorMessage");
+	});
+
 	it("does not refetch for a fresh session, which has nothing to fetch", async () => {
 		const h = makeHarness();
 		await startAdapter(h);
