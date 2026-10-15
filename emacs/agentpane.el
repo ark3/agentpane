@@ -604,9 +604,10 @@ wrote before it died, which the sentinel finds queued (see
 a reply among them is the answer: a prompt the backend admitted clears
 its draft.  So is an error reply among them, as from a live helper,
 running FAILED and ERRED, and UNSENT for the server's refusal, and
-showing the helper's own message: a prompt so refused abandons its
-watch, and the teardown raises nothing for a turn from elsewhere it had
-seen streaming (OW-hiliti).  Until OW-hiliti the error handler answered
+showing the helper's own message: a prompt so refused takes back its
+claim on its watch, and the teardown raises nothing for a turn from
+elsewhere that watch had seen streaming, unless another prompt still
+claims it (OW-hiliti, OW-kakasu).  Until OW-hiliti the error handler answered
 nothing once the helper read as dead, so such a request failed as the
 death, running FAILED alone, and the reason the helper gave was never
 shown.  Only the status tells a refusal from the rest: with the server
@@ -632,8 +633,9 @@ A request made through a helper that has exited, before its teardown has
 run -- from a handler of what that helper wrote last, most often, which
 runs in jsonrpc.el's timer -- is sent nowhere and signals nothing.
 Having reached no backend, it runs UNSENT at once, saying nothing, so a
-prompt's watch is abandoned before the teardown's `agentpane--let-go'
-could end it as a turn from elsewhere; and it waits in
+prompt's claim on its watch is taken back before the teardown's
+`agentpane--let-go' could end the watch as a turn from elsewhere; and it
+waits in
 `agentpane--requests-out' under that helper's connection for the
 teardown to answer as the death, running FAILED and saying so once, and
 no UNSENT again (`agentpane--connection').  It supersedes no earlier
@@ -3178,8 +3180,7 @@ became of this buffer, as UNSENT does for a refusal: run from the
 reply's CALLBACK, as until OW-kejire, it was skipped when a merge had
 killed this buffer before the answer, and the watch left on the
 survivor's handle raised the indicator for the next turn from elsewhere.
-The
-buffer says no turn was started for it, `agentpane--handled', until the
+The buffer says no turn was started for it, `agentpane--handled', until the
 next send; through an edit that is the fork's buffer, where the prompt
 went.  A buffer killed before the answer says nothing."
   (when (string-blank-p text)
@@ -4410,7 +4411,8 @@ Each prompt, arming or joining, gets a claim of its own, a fresh cons
 the watch holds, and its claim is all `agentpane--watch-abandon' can take
 back: the watch goes with its last claim.  So a prompt refused mid-turn
 \(D16) takes back only its own, and the running turn's watch stands on
-the claim of the prompt that armed it.  After a merge the survivor can
+the claims of the prompts that armed or joined it before.  After a merge
+the survivor can
 send while the killed buffer's prompt is still out, joining its watch;
 when that prompt is then refused or handled, the survivor's claim keeps
 the watch, and its own turn's end raises the indicator.  Until OW-kakasu
