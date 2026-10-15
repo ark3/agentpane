@@ -92,6 +92,8 @@ It keys every wait by the handle the attach reply carried and reads the rename a
 Verified with: `pi` 0.87.1 on the home server, 2026-09-30, both bare and with `--tool-check`, with the explicit `--model`, after the move to the handle; see `docs/MANUAL_TESTING.md`, "The live Pi probes follow a session by its handle (OW-niwusi)".
 The runs before that move are "The Pi smoke probe passes the pinned model, and runs again since OW-letevu (OW-yehisa)".
 Its first runs on that machine were on `pi` 0.85.1, 2026-09-13; see "The Pi smoke probe runs on the home server, end to end through the built server" (OW-moradi) for what that evidence said and the three defects it exposed (OW-guvojo, OW-hahohi, OW-lapuye).
+Verified in a session whose own sandbox mounts `~/.pi/agent` read-only, the case `PI_CODING_AGENT_DIR` exists for: `pi` 1.2.0 on the home server, 2026-10-14, with `--tool-check` and the explicit `--model`, in a session launched by `card run`, the first run that records its launch; the OW-niwusi runs had `~/.pi/agent/sessions` read-only too.
+See `docs/MANUAL_TESTING.md`, "The Pi smoke probe passes in a `card run` session whose `~/.pi/agent` is read-only (OW-fitopi)".
 
 ## `agentpane_pi_steer_probe.py`
 

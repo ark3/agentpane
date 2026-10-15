@@ -62,6 +62,7 @@ Existing hard-wrapped prose in `README.md`, sections of `docs/MANUAL_TESTING.md`
   Then give that run a throwaway state directory, as every probe in `resources/probes/` already does: `PI_CODING_AGENT_DIR` or `CODEX_HOME` pointed at a fresh private temp directory holding the credential and settings files copied in by name, and removed when the run ends (`make_state_home` in `resources/probes/capture_fixtures.py`).
   A nested `sbox` cannot make writable what the session's own sandbox mounted read-only, so a run through agentpane's own spawn chain needs the variable in the server's environment, as `resources/probes/agentpane_pi_smoke.py` passes it.
   Say which of the two a run used beside the evidence it produced.
+  `agentpane_pi_smoke.py` passed with `--tool-check` in a `card run` session whose `~/.pi/agent` refused a `touch`, on `pi 1.2.0` on 2026-10-14 (`docs/MANUAL_TESTING.md`, OW-fitopi).
 - **What is still confined to the work laptop is that machine itself.**
   Live Pi evidence was, until 2026-09-13, the main reason to go there; it no longer is, and a card asking for one belongs wherever the session is.
   What remains is that clone's own provisioning — its `.git/card/` and its PATH, as in OW-gabemi — the reference material `docs/HANDOFF.md` addresses there by absolute path under "Reference material on the work laptop", and that machine's own session stores, where the owner uses agentpane daily and which therefore hold the most real use (OW-furivo).

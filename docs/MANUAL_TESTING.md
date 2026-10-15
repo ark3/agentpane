@@ -4829,3 +4829,20 @@ Objects below a message or block (usage, toolsAdded[], ...) go wherever their pa
   header(session).version  13  [2026-09..2026-10]
   message(user).timestamp  35  [2026-09..2026-10]
 ```
+
+## The Pi smoke probe passes in a `card run` session whose `~/.pi/agent` is read-only (OW-fitopi)
+
+Run on the home server 2026-10-14 at 22:11 local (`-04:00`), on **`pi 1.2.0`** (`pi --version`), from the main checkout at `05c49d4` with a clean tree.
+The session was launched by `card run OW-fitopi`: its process tree read `claude --permission-mode bypassPermissions -p --session-id … --name card run OW-fitopi …` under a `bwrap --setenv SBOX 1 … --ro-bind / / …` whose read-write binds include `~/projects/agentpane`, `~/.claude`, `/tmp` and `/var/tmp` and nothing under `~/.pi`.
+
+**The state directory was read-only.**
+`touch ~/.pi/agent/.probe` failed with `touch: cannot touch '/home/ark3/.pi/agent/.probe': Read-only file system`, exit 1, so this session is the case OW-robozi found and `AGENTS.md`, "Do not assume how your session was launched", is written for.
+It is not the first smoke pass under a read-only Pi store: in the OW-niwusi section above (2026-09-30, `pi 0.87.1`) a `touch` in `~/.pi/agent/sessions` answered `Read-only file system` in the session where the probe passed twice, though nothing there records how that session was launched or tests `~/.pi/agent` itself.
+
+**The probe passed.**
+`python3 agentpane_pi_smoke.py --tool-check --model openrouter/deepseek/deepseek-v4.1-flash:high`, run from `resources/probes/`, exited 0 after 40 seconds with top-level `result: pass` and every check passing: `startup`, `text_stream`, `idle`, `rename`, `model`, `tool_output`, `abort`, `shutdown`, and `cleanup`.
+It used the throwaway state directory the probe always builds — `make_state_home` in `resources/probes/agentpane_live_support.py` copied `auth.json`, `models-store.json` and `settings.json` into `/var/tmp/agentpane-live-pihome-8x9wiq12` and the server ran with `PI_CODING_AGENT_DIR` pointing there — and not the real `~/.pi/agent`.
+`checks.startup.process_chain`, read from `/proc`, was `bun`, `bwrap`, `bwrap`, `pi`, and the id `checks.rename` adopted at attach was a JSONL path under that temporary directory's `sessions/`, so the Pi beneath the inner `sbox` took its agent directory from the variable.
+Its turns completed rather than ending in the `stopReason: "error"` that a lock refused under a read-only store produced before 2026-09-13: `checks.model` read `openrouter/deepseek/deepseek-v4.1-flash` at effort `high` off a `snapshot`, `checks.tool_output` saw `thinking` and `toolCall` blocks, and `checks.abort` stopped the long turn at 20004 characters and read 20025 when idle; `cleanup` removed the state directory and found no orphaned worker.
+
+Not tried: the probe's chain without `PI_CODING_AGENT_DIR`; `docs/HANDOFF.md`, "Each backend needs a writable state directory", records a direct `sbox -- pi --mode rpc` failing that way before 2026-09-13 with `EROFS ... auth.json.lock`, so this run shows the variable suffices, not that it is still necessary.
