@@ -48,4 +48,6 @@ Each watched red first.
 2. A Claude parser test builds a file with a `custom-title` line after the first assistant message, repeated later, and asserts `name` is that title and `preview` is still the first prompt.
 3. A test in `src/server/http/` attaches a Claude session whose stored summary carries a name, with the adapter reporting `null`, and asserts the listing shows whatever "The attached overlay" decided.
 
+`ENTRY_READS` in `resources/probes/pi_store_survey.ts` (OW-tadoju), the hand-kept mirror of what `parsePiSession` reads, names `session_info` and its `name`, so that `bun resources/probes/pi_store_survey.ts` no longer lists `entry(session_info)` under "entry types no reader reads"; no test holds that table, so this sentence is all that keeps the survey honest after this card.
+
 `bun run check` passes, and a listing of the home server's real corpus is timed before and after, the figures recorded in the close note with the date; that timing is the guard on enumeration staying cheap, since no parser-level bounded-read test exists (`src/server/sessions/line-reader.test.ts` bounds the reader alone), and OW-20, which waits on a measured listing latency, gets one from it.
