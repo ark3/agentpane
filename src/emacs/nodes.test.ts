@@ -18,7 +18,7 @@ import {
 	type FixtureName as CodexFixtureName,
 } from "$server/adapters/codex/test-support.ts";
 import { toolSummary } from "$client/render/tools/summary.ts";
-import { assistant, systemChanged, systemLeading, user } from "$client/render/samples.ts";
+import { assistant, systemChanged, systemLeading, toolResult, user } from "$client/render/samples.ts";
 import { systemView } from "$client/render/system.ts";
 import { projectTranscript, projectUpsert } from "./nodes.ts";
 import type { SystemPart, TextPart, ToolPart, TranscriptNode } from "./protocol.ts";
@@ -346,6 +346,66 @@ describe("assistant turns", () => {
 		const [node] = projectTranscript([{ ...base, errorMessage: "boom" } as PaneMessage], false, render);
 		expect(node?.meta?.stopReason).toBe("aborted");
 		expect(node?.meta?.errorMessage).toBeUndefined();
+	});
+});
+
+/**
+ * What a Pi Stop leaves behind, pinned as the projection sends it today
+ * (OW-nirani). As of `pi 1.2.0` an `abort` during a `bash` call ends the call
+ * with a `Command aborted` error result and then an empty assistant message
+ * with `stopReason: "error"` and `errorMessage: "This operation was aborted"`;
+ * an abort mid-reply ends with `stopReason: "aborted"` and `errorMessage:
+ * "Request was aborted"` (docs/MANUAL_TESTING.md, OW-yewiku).
+ */
+describe("a Pi Stop (OW-nirani)", () => {
+	const noUsage = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+
+	it("sends a Stop during a tool call as an errored call and a turn whose meta says error, with Pi's message", () => {
+		const messages: PaneMessage[] = [
+			user("Run sleep 20."),
+			assistant(
+				[{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
+				"toolUse",
+			),
+			toolResult("call_sleep", "bash", "Command aborted", true),
+			assistant([], "error", { errorMessage: "This operation was aborted", usage: noUsage }),
+		];
+		const nodes = projectTranscript(messages, false, render);
+
+		expect(nodes.map((node) => [node.index, node.role])).toEqual([
+			[0, "user"],
+			[1, "assistant"],
+			[3, "assistant"],
+		]);
+		expect(nodes[1]?.parts).toEqual([
+			expect.objectContaining({ type: "tool", name: "bash", state: "error", result: "Command aborted" }),
+		]);
+		expect(nodes[1]?.meta?.stopReason).toBeUndefined();
+		expect(nodes[2]?.parts).toEqual([]);
+		expect(nodes[2]?.meta).toEqual({
+			model: "example-model",
+			usage: { totalTokens: 0, cost: 0 },
+			stopReason: "error",
+			errorMessage: "This operation was aborted",
+		});
+	});
+
+	it("sends a Stop mid-reply as a turn whose meta says aborted, without Pi's message", () => {
+		const messages: PaneMessage[] = [
+			user("Write an essay."),
+			assistant([{ type: "text", text: "Gardening begins" }], "aborted", { errorMessage: "Request was aborted" }),
+		];
+		const [, turn] = projectTranscript(messages, false, render);
+
+		expect(turn?.meta?.stopReason).toBe("aborted");
+		expect(turn?.meta).not.toHaveProperty("errorMessage");
 	});
 });
 

@@ -17,7 +17,7 @@ import {
 	reducePiNotification,
 } from "./reducer.ts";
 import type { PiNotification, PiOutputLine } from "./protocol.ts";
-import { systemChanged, systemLeading, user } from "../../../client/render/samples.ts";
+import { assistant, systemChanged, systemLeading, toolResult, user } from "../../../client/render/samples.ts";
 import { previewTurnsFromMessages, storedAgentMessage } from "../../sessions/preview-message.ts";
 
 const FIXTURES_DIR = fileURLToPath(new URL("../../../../resources/fixtures/pi/", import.meta.url));
@@ -371,6 +371,48 @@ describe("reducePiNotification: error signals not covered by any fixture", () =>
 		const result = reducePiNotification(state, { type: "auto_retry_end", success: true, attempt: 2 });
 		expect(result.error).toBeUndefined();
 		expect(result.state).toBe(state);
+	});
+
+	it("raises no adapter error for a Stop during a tool call, and passes its errored turn through (OW-nirani)", () => {
+		// The event order `pi 1.2.0` sent for an `abort` while a `bash` call ran
+		// (docs/MANUAL_TESTING.md, OW-yewiku): the call ends `Command aborted`,
+		// then one more round whose reply fails at once with `stopReason: "error"`.
+		// The transcript is the only place the clients learn of it.
+		const prompt = user("Run sleep 20.");
+		const call = assistant(
+			[{ type: "toolCall", id: "call_sleep", name: "bash", arguments: { command: "sleep 20; echo done" } }],
+			"toolUse",
+		);
+		const result = toolResult("call_sleep", "bash", "Command aborted", true);
+		const failed = assistant([], "error", { errorMessage: "This operation was aborted" });
+		const { finalState, results } = runThroughReducer([
+			{ type: "agent_start" },
+			{ type: "message_start", message: prompt },
+			{ type: "message_end", message: prompt },
+			{ type: "turn_start" },
+			{ type: "message_start", message: call },
+			{ type: "message_end", message: call },
+			{ type: "tool_execution_start", toolCallId: "call_sleep", toolName: "bash", args: {} },
+			{ type: "tool_execution_end", toolCallId: "call_sleep", toolName: "bash", result: {}, isError: true },
+			{ type: "message_start", message: result },
+			{ type: "message_end", message: result },
+			{ type: "turn_end", message: call, toolResults: [result] },
+			{ type: "turn_start" },
+			{ type: "message_start", message: failed },
+			{ type: "message_end", message: failed },
+			{ type: "turn_end", message: failed, toolResults: [] },
+			{ type: "agent_end", messages: [prompt, call, result, failed], willRetry: false },
+			{ type: "agent_settled" },
+		]);
+
+		expect(results.filter((r) => r.error !== undefined || r.notice !== undefined)).toEqual([]);
+		expect(finalState.messages.map((m) => m.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+		expect(finalState.messages.at(-1)).toMatchObject({
+			stopReason: "error",
+			errorMessage: "This operation was aborted",
+			content: [],
+		});
+		expect(finalState.isStreaming).toBe(false);
 	});
 });
 
