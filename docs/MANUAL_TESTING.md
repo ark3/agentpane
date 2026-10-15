@@ -4540,3 +4540,272 @@ The draft's re-attach of the parent after the first-turn fork answered 404 `no s
 Nothing ran on `pi 0.87.1`, so what a first-turn fork answered there rests on the source.
 A first turn forked before its user `message_end` could not be tried, since no fork point exists then.
 No real browser or Emacs ran.
+
+## The home server's Pi store, surveyed for what agentpane does not read (OW-tadoju)
+
+Run on the home server 2026-10-14 at 20:29 local (`-04:00`), on **`pi 1.2.0`** (`pi --version` before the run) and `bun 1.4.0`, from the `card/OW-tadoju` worktree at `3288744`, by `bun resources/probes/pi_store_survey.ts`, which read `~/.pi/agent/sessions` and wrote nothing.
+The store held 13 files, 9 last modified in 2026-09 and 4 in 2026-10.
+The months are the UTC month of each file's mtime, which is its last write; a Pi file does not name the Pi version that wrote it, so a month only brackets the versions that may have.
+The full output follows the findings; it was read through before this was committed, and it holds no text, path, name or other value from the store.
+
+**Three entry types are read by no reader.**
+`session_info` (4, all 2026-09) carries the session's `name`, which the listing reports as `null` for every stored Pi session; reading it is OW-yilene's.
+`model_change` (16) and `thinking_level_change` (14) are read by the live adapter's reducer in `src/server/adapters/pi/reducer.ts` and not by the preview.
+None of the 27 assistant messages in the 2026-09 files carries `thinkingLevel` and all 77 in the 2026-10 files do, so read at the code, a pre-stamp reply gets no effort label in the preview where `withLoadedEfforts` names an attached session's from the entries.
+
+**Nothing in this store is dropped whole.**
+Every message role (`user`, `assistant`, `toolResult`, `system`) and content block type (`text`, `thinking`, `toolCall`) is one `storedAgentMessage` names, and no line failed to parse.
+
+**Eight keys reach the preview wire only through a spread.**
+They are the assistant's `rawStopReason`, `responseId`, `durationMs`, `responseModel` and `errorMessage`, the thinking block's `thinkingSignature`, and the tool result's `durationMs` and `details`.
+`errorMessage` is the one a client reads by name: both clients draw it on a reply whose `stopReason` is `error` (`src/client/render/Message.svelte`, `src/emacs/nodes.ts`), so it reaches them only because the assistant branch spreads; the one in this store sat on an `aborted` reply, which carries no `rawStopReason`.
+Both `durationMs` keys appear only in the 2026-10 files.
+
+**Six keys are dropped.**
+Each entry's `id` and `parentId`, the header's `id`, `version` and `parentSession`, and the user message's own `timestamp`, which the entry's stands in for.
+`version` read `3` on all 13 headers; no reader checks it.
+
+**One entry starts an in-file branch.**
+In one 2026-10 file of 49 entries, the sixth after the header is a user message whose `parentId` names the system message three lines up, past a user message and an `aborted` reply.
+`extractPiPreviewTurns` reads every message line in file order, so the preview draws that abandoned pair ahead of the branch the file goes on with.
+A throwaway Python script over the `parentId` chains, printing only positions, types and roles, found it before the probe counted it; `3288744` added the count.
+Not established: what an attached session draws for that file, which no run here tried.
+
+**Not seen in this store.**
+`pi 1.2.0`'s `SessionEntry` union, in `pi-coding-agent`'s `dist/core/session-manager.d.ts`, also declares `compaction`, `branch_summary`, `custom`, `custom_message`, `context_edit`, `label` and `usage` entries, and its messages module the `bashExecution`, `custom`, `branchSummary` and `compactionSummary` roles; none occurred here, nor did an image block.
+The work laptop's store, used daily across many Pi versions with extensions and MCP, is where they would show up; the README entry for the probe names the command to run there.
+
+```text
+Pi session store survey: structure only, never content (resources/probes/pi_store_survey.ts).
+files 13, empty files 0, lines 302, unparseable lines 0, non-object lines 0
+
+== Census, by UTC month of file mtime ==
+
+-- 2026-09: 9 files; 0 entries not parented on the line before, in 0 files --
+entry(message)  58
+  id: string 58
+  message: object 58
+  parentId: string 58
+  timestamp: string 58
+  type: string 58
+entry(model_change)  12
+  id: string 12
+  modelId: string 12
+  parentId: null 8, string 4
+  provider: string 12
+  timestamp: string 12
+  type: string 12
+entry(session_info)  4
+  id: string 4
+  name: string 4
+  parentId: string 4
+  timestamp: string 4
+  type: string 4
+entry(thinking_level_change)  10
+  id: string 10
+  parentId: null 1, string 9
+  thinkingLevel: string 10
+  timestamp: string 10
+  type: string 10
+  thinkingLevel = high 9, off 1
+header(session)  9
+  cwd: string 9
+  id: string 9
+  parentSession: string 3
+  timestamp: string 9
+  type: string 9
+  version: number 9
+  version = 3 9
+message(assistant)  27
+  api: string 27
+  content: array 27
+  model: string 27
+  provider: string 27
+  rawStopReason: string 27
+  responseId: string 27
+  role: string 27
+  stopReason: string 27
+  timestamp: number 27
+  usage: object 27
+  stopReason = stop 14, toolUse 13
+message(assistant).content[text]  14
+  text: string 14
+  type: string 14
+message(assistant).content[thinking]  15
+  thinking: string 15
+  thinkingSignature: string 15
+  type: string 15
+message(assistant).content[toolCall]  17
+  arguments: object 17
+  id: string 17
+  name: string 17
+  type: string 17
+message(assistant).usage  27
+  cacheRead: number 27
+  cacheWrite: number 27
+  cost: object 27
+  input: number 27
+  output: number 27
+  reasoning: number 27
+  totalTokens: number 27
+message(assistant).usage.cost  27
+  cacheRead: number 27
+  cacheWrite: number 27
+  input: number 27
+  output: number 27
+  total: number 27
+message(toolResult)  17
+  content: array 17
+  details: object 1
+  isError: boolean 17
+  role: string 17
+  timestamp: number 17
+  toolCallId: string 17
+  toolName: string 17
+message(toolResult).content[text]  17
+  text: string 17
+  type: string 17
+message(user)  14
+  content: array 14
+  role: string 14
+  timestamp: number 14
+message(user).content[text]  14
+  text: string 14
+  type: string 14
+
+-- 2026-10: 4 files; 1 entries not parented on the line before, in 1 files --
+entry(message)  197
+  id: string 197
+  message: object 197
+  parentId: string 197
+  timestamp: string 197
+  type: string 197
+entry(model_change)  4
+  id: string 4
+  modelId: string 4
+  parentId: null 4
+  provider: string 4
+  timestamp: string 4
+  type: string 4
+entry(thinking_level_change)  4
+  id: string 4
+  parentId: string 4
+  thinkingLevel: string 4
+  timestamp: string 4
+  type: string 4
+  thinkingLevel = high 4
+header(session)  4
+  cwd: string 4
+  id: string 4
+  timestamp: string 4
+  type: string 4
+  version: number 4
+  version = 3 4
+message(assistant)  77
+  api: string 77
+  content: array 77
+  durationMs: number 39
+  errorMessage: string 1
+  model: string 77
+  provider: string 77
+  rawStopReason: string 76
+  responseId: string 77
+  responseModel: string 4
+  role: string 77
+  stopReason: string 77
+  thinkingLevel: string 77
+  timestamp: number 77
+  usage: object 77
+  stopReason = aborted 1, stop 18, toolUse 58
+  thinkingLevel = high 77
+message(assistant).content[text]  50
+  text: string 50
+  type: string 50
+message(assistant).content[thinking]  74
+  thinking: string 74
+  thinkingSignature: string 74
+  type: string 74
+message(assistant).content[toolCall]  96
+  arguments: object 96
+  id: string 96
+  name: string 96
+  type: string 96
+message(assistant).usage  77
+  cacheRead: number 77
+  cacheWrite: number 77
+  cost: object 77
+  input: number 77
+  output: number 77
+  reasoning: number 76
+  totalTokens: number 77
+message(assistant).usage.cost  77
+  cacheRead: number 77
+  cacheWrite: number 77
+  input: number 77
+  output: number 77
+  total: number 77
+message(system)  4
+  content: string 4
+  role: string 4
+  sections: object 4
+  timestamp: number 4
+  toolsAdded: array 4
+message(system).toolsAdded[]  40
+  constrainedSampling: object 16
+  description: string 40
+  name: string 40
+  parameters: object 40
+message(toolResult)  95
+  content: array 95
+  details: object 3
+  durationMs: number 56
+  isError: boolean 95
+  role: string 95
+  timestamp: number 95
+  toolCallId: string 95
+  toolName: string 95
+message(toolResult).content[text]  95
+  text: string 95
+  type: string 95
+message(user)  21
+  content: array 21
+  role: string 21
+  timestamp: number 21
+message(user).content[text]  21
+  text: string 21
+  type: string 21
+
+== Not read by agentpane ==
+Entry level: parsePiSession and extractPiPreviewTurns (src/server/sessions/pi.ts), hand-kept as ENTRY_READS.
+Message and block level: storedAgentMessage (src/server/sessions/preview-message.ts), measured by calling it.
+Objects below a message or block (usage, toolsAdded[], ...) go wherever their parent key goes.
+
+-- entry types no reader reads --
+  entry(model_change)  16  [2026-09..2026-10]
+  entry(session_info)  4  [2026-09]
+  entry(thinking_level_change)  14  [2026-09..2026-10]
+
+-- messages storedAgentMessage drops whole --
+  (none)
+
+-- content blocks storedAgentMessage drops --
+  (none)
+
+-- keys carried to the wire unnamed, by a spread --
+  message(assistant).content[thinking].thinkingSignature  89  [2026-09..2026-10]
+  message(assistant).durationMs  39  [2026-10]
+  message(assistant).errorMessage  1  [2026-10]
+  message(assistant).rawStopReason  103  [2026-09..2026-10]
+  message(assistant).responseId  104  [2026-09..2026-10]
+  message(assistant).responseModel  4  [2026-10]
+  message(toolResult).details  4  [2026-09..2026-10]
+  message(toolResult).durationMs  56  [2026-10]
+
+-- keys no reader reads, dropped --
+  entry(message).id  255  [2026-09..2026-10]
+  entry(message).parentId  255  [2026-09..2026-10]
+  header(session).id  13  [2026-09..2026-10]
+  header(session).parentSession  3  [2026-09]
+  header(session).version  13  [2026-09..2026-10]
+  message(user).timestamp  35  [2026-09..2026-10]
+```
