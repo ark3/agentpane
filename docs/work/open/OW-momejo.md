@@ -28,3 +28,25 @@ The Emacs client has its own external-edit path, if any; check `emacs/agentpane.
 - A test in `src/client/controller.test.ts`, red first, starts `editDraft`, changes the draft (by `setDraft`, standing in for typing) before `api.editDraft` resolves, and asserts the text that moved in is not lost, in whatever shape the decision above chose.
 - A test in `src/client/App.test.ts`, red first, does the same with a Stop on a Pi session whose abort answers with a text.
 - `bun run check` passes.
+
+## Amended 2026-10-15 from OW-kijuju's adversarial read
+
+Two more cases of the same collision, both found against OW-kijuju's change.
+
+First, the External Editor can open on text already being sent.
+`editDraft` and both of its triggers in `App.svelte` (Ctrl-G in `handlePromptKeydown`, and the External Editor button) gate on `view.busy === "idle"`, never on `view.sending`.
+`attachAndSelect` returns `busy` to `"idle"` while a fork's prompt is still out, as the `ControllerView.sending` docblock in `src/client/controller.ts` says.
+OW-kijuju made `startEdit` refuse while `view.sending` for exactly this reason: the composer holds the text the send is taking.
+The external editor is the second consumer of that state, and it has no such guard.
+The sequence: with a draft D, edit an earlier message (composer E) and submit.
+Click another session before the fork's prompt lands, then press Ctrl-G, and `editDraft` captures E, which is in flight.
+The fork lands and clears E, and OW-kijuju's release puts D back.
+The editor then returns E′ and replaces D, so D is lost and an edited copy of already-sent text sits under Send.
+
+Second, OW-kijuju's release is one more thing that reaches the composer during the round trip.
+The draft an edit displaced comes back when the edit ends, and the edit can end while the editor is open.
+The sequence: open an edit, press Ctrl-G, then click another session; the editor's answer then overwrites the restored draft.
+The "keep both" decision above already covers this if it is implemented at the answer, not per source.
+
+The done condition gains one test, in `src/client/App.test.ts` and red first, for the in-flight case.
+Whatever the fix, it asserts the external editor never captures text a send is still taking: the editor is refused while a send is out, or its answer cannot put sent text back.

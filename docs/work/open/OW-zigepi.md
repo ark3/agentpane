@@ -12,6 +12,6 @@ It records no decision behind it.
 Each transcript buffer in `emacs/agentpane.el` has its own prompt region and composer, so each keeps its own draft by construction.
 The nearest ERT, `agentpane-test-attach-onto-a-held-handle-keeps-drafts` in `emacs/agentpane-test.el`, pins what happens to drafts when two buffers land on one handle.
 
-Two other things hold a draft in the browser and bear on the change: the `stashedDraft` an edit keeps in `startEdit`, and the external editor round trip through `/api/edit-draft`.
+Two other things hold a draft in the browser and bear on the change: the `displacedDraft` an edit keeps from `startEdit` until the release `$effect` beside `heldQueued` gives it back (renamed from `stashedDraft` by OW-kijuju), and the external editor round trip through `/api/edit-draft`.
 
 Done when a test in `src/client/App.test.ts` types into session A, switches to B and finds B's own draft, then switches back and finds A's text, red before the change and green after.
