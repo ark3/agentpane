@@ -1922,9 +1922,9 @@ describe("lifecycle", () => {
 /**
  * `onDisk` is what a client asks before it previews a session it just
  * detached, and neither the id nor `virtual` can answer it: every backend
- * renames a new session at attach and writes nothing until the first turn
- * (D9), and a fork starts with no file on every backend (OW-wedupe). So the
- * answer is the index's.
+ * renames a new session at attach and writes nothing until the first turn,
+ * and whether a fork has a file yet depends on the backend and the fork point
+ * (D9). So the answer is the index's, and a fork starts without it.
  */
 describe("onDisk", () => {
 	const REAL = "/home/u/.pi/agent/sessions/materialised.jsonl";

@@ -334,8 +334,15 @@ Finding 41 read Pi 0.84.1's file as already on disk at start, but its evidence w
 
 So an id without the `virtual:` prefix does not mean anything is on disk.
 The server tracks the `virtual` state apart from the id (`ManagedSession.virtual`, cleared by `markPrompted`), and while it is set nothing is on disk, but its clearing does not mean a file exists either.
-It clears as the first prompt is sent, before any backend above has written, and a fork's container starts with it clear and no file behind it (OW-japuzo, OW-hojefo).
+It clears as the first prompt is sent, before any backend above has written, and a fork's container starts with it clear, whether or not the fork has a file yet.
+Whether a fork has one when it is made depends on the backend and the fork point:
+
+- Pi: on `pi 1.2.0`, a fork at the first user message had no file when `fork` returned, and it was written with the branch's first user message; a fork at the second user message was on disk when `fork` returned, carrying the rewound prefix, there and on `pi 0.85.1` (`docs/MANUAL_TESTING.md`, OW-tigaye, OW-vijine, OW-gajesu).
+- Codex: a `thread/fork` keeping the parent's first turn had its rollout on disk when the request returned, on `codex-cli 0.154.0` for a fork at the second user message (OW-lajehi) and on `codex-cli 0.156.0` for a fork with no `lastTurnId` that kept a one-turn parent whole, a request the adapter no longer sends (OW-sayaju); at the first user message the adapter sends no `thread/fork` and starts a fresh thread instead, which on `codex-cli 0.156.0` had no rollout until its first turn (OW-hojefo).
+- Claude Code: the adapter's `fork` returns a recipe and spawns nothing, so no file exists when it returns; when the `--fork-session` process the attach spawns first writes was not measured, and OW-japuzo read a fork's store file on `claude 2.1.268` only after the fork's first turn had run.
+
 What says a file exists is the session index: `SessionSummary.onDisk` is true once the index has listed the session, and the manager remembers that for the attach response, which does not walk the index (OW-wedupe).
+A fork's container starts it false whatever the answer above, so a fork that already has a file says so only once a listing finds it (`#forkOnto` for Pi and `#start` for a fork attached from its recipe, both in `src/server/http/session-manager.ts`).
 The first prompt can still move the id on Pi: `PiAdapter` probes `get_state` again after its first `submit()`.
 That probe has not fired on the Pi versions above, since `start()` already resolved the id, and it stays, because a backend that has named nothing by the end of attach is exactly what `virtual` describes.
 `ClaudeAdapter` also adopts whatever `session_id` a turn's `init` names, for a different reason -- the CLI is authoritative about its own store -- and `init` arrives after `submit()` has settled.
@@ -1230,7 +1237,7 @@ Each specified browser UI and none named the Emacs picker.
    A rename is written through to the backend and kept nowhere else, as D13's "Names are not marks" paragraph decided.
 2. `mark`, D13's `"starred" | "hidden"`, absent for normal, from D13's store (OW-66).
    D13 forbids a mark on a `virtual` session, but no client can see one: a created session reports `attached` once its adapter exists, before the first prompt gives it a real ref.
-   So the rule both the route and the clients follow is `onDisk`: a session whose `onDisk` is false cannot be marked, which also covers a fork born without a file.
+   So the rule both the route and the clients follow is `onDisk`: a session whose `onDisk` is false cannot be marked, which also covers a fork: its container starts at `onDisk` false whether or not it has a file yet, and it can be marked once a listing finds that file (D9).
    The corrupt-store arm reaches a client that connects after the server started, since the store is read before any client connects, and OW-66 names it.
 3. `forkedFrom: SessionRef | null`, read by the walk from the session file's header: Pi's `parentSession`, and Codex's `forked_from_id` on a rollout whose `thread_source` is not `subagent`, since a subagent's rollout carries `forked_from_id` too.
    For Claude Code, the Goals section says it records no lineage; OW-vezipo measures that against a fork's store file before relying on it.

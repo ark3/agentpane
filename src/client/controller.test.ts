@@ -1734,9 +1734,10 @@ describe("client controller", () => {
 		controller.dispose();
 	});
 
-	// A fork is born with no file on every backend, and gets one only when its
-	// first turn ends (OW-japuzo, OW-hojefo). Detaching it mid-turn kills that
-	// turn, so nothing is ever written, and its preview answers `gone`.
+	// A Codex fork at the first user message is a fresh thread with no rollout
+	// when the fork returns, read on disk only after its first turn had run
+	// (`codex-cli 0.156.0`, D9). This one is detached mid-turn, and its preview
+	// answers `gone`.
 	it("clears the selection onto the startup view when the detached fork has run no turn", async () => {
 		const api = new FakeApi();
 		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);

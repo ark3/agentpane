@@ -101,9 +101,9 @@ export interface SessionSummary {
 	/**
 	 * Whether the backend's store has this session, which is what a read-only
 	 * preview and a re-attach both read. Not the id and not `status`: a session
-	 * created here is renamed at attach and a fork is born without a file, and
-	 * neither is on disk until a turn writes it (D9). True once the session index
-	 * has listed it.
+	 * created here is renamed at attach and is not on disk until a turn writes
+	 * it, and whether a fork has a file yet depends on the backend and the fork
+	 * point (D9). True once the session index has listed it; a fork starts false.
 	 */
 	onDisk: boolean;
 	/**
