@@ -1022,6 +1022,24 @@ describe("fork, model, and enumeration routes", () => {
 		expect(pi.forRef(PI_SESSION)?.forks).toEqual(["e1"]);
 	});
 
+	it("answers 400 with the backend's reason when it refuses the fork (OW-rasiwa)", async () => {
+		const refusing = new FakeAdapterFactory({
+			onFork() {
+				throw new BackendRefusedError("Invalid entry ID for forking");
+			},
+		});
+		app = createApp({ index, adapters: { pi: refusing } });
+		await get(ROUTES.session(PI_SESSION));
+
+		const refused = await post(ROUTES.fork(PI_SESSION), { entryId: "no-such-entry" });
+		expect(refused.status).toBe(400);
+		expect((await refused.json()) as ApiError).toEqual({
+			error: "backend_refused",
+			detail: "Invalid entry ID for forking",
+		});
+		expect(refusing.forRef(PI_SESSION)?.forks).toEqual([]);
+	});
+
 	it("sets the model", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		expect((await post(ROUTES.model(PI_SESSION), { model: "pi-2" })).status).toBe(204);

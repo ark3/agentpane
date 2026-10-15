@@ -503,7 +503,15 @@ export class PiAdapter implements BackendAdapter {
 
 	async fork(entryId: string): Promise<ForkResult> {
 		const parent = { model: this.model, level: this.thinkingLevel };
-		const forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
+		// Pi refusing the fork itself -- an entry id it does not know, say -- is
+		// the caller's 400, not ours (OW-rasiwa). Only this command: once it has
+		// succeeded Pi has forked, and what fails after that is not a refusal.
+		let forked: PiResponseFor<"fork">;
+		try {
+			forked = await this.sendCommand<PiResponseFor<"fork">>({ type: "fork", entryId });
+		} catch (error) {
+			throw error instanceof PiCommandError ? new BackendRefusedError(error.message) : error;
+		}
 		// A `session_before_fork` extension handler can veto the fork, and Pi
 		// reports that as `success: true` with `data.cancelled: true` (rpc.md,
 		// "fork") -- not as an error response. Taken at face value that reads as

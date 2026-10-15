@@ -79,6 +79,8 @@ export interface FakeAdapterOptions {
 	) => void | PromptDisposition | Promise<void | PromptDisposition>;
 	/** Runs on setModel(), before the model is taken; throw to refuse it. */
 	onSetModel?: (model: string) => void | Promise<void>;
+	/** Runs on fork(), before anything is forked; throw to refuse it. */
+	onFork?: (entryId: string) => void | Promise<void>;
 	models?: ModelInfo[];
 	forkPoints?: ForkPoint[];
 	/** Make start() fail, to exercise the attach error path. */
@@ -269,6 +271,7 @@ export class FakeAdapter implements BackendAdapter {
 	}
 
 	async fork(entryId: string): Promise<ForkResult> {
+		await this.options.onFork?.(entryId);
 		this.forks.push(entryId);
 		const parentId = this.ref.id;
 		const forkedRef = { backend: this.ref.backend, id: `${parentId}#fork-${entryId}` };

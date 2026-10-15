@@ -941,6 +941,20 @@ describe("PiAdapter.fork", () => {
 		// The veto must not leave us claiming a rewind happened.
 		expect(h.child.sent().some((c) => c.type === "get_messages")).toBe(false);
 	});
+
+	it("refuses a fork Pi refuses, with Pi's reason (OW-rasiwa)", async () => {
+		const h = makeHarness();
+		await startAdapter(h);
+
+		const forked = h.adapter.fork("no-such-entry");
+		h.child.failCommand("fork", "Invalid entry ID for forking");
+		const error = await forked.catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(BackendRefusedError);
+		expect((error as Error).message).toBe("Invalid entry ID for forking");
+		// Nothing forked, so nothing is re-adopted: the only get_state is start()'s.
+		expect(h.child.sent().filter((c) => c.type === "get_state")).toHaveLength(1);
+	});
 });
 
 describe("PiAdapter reasoning effort (OW-ruzuhu)", () => {
