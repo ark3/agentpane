@@ -249,10 +249,10 @@ export type ServerEvent =
 	  }
 	| {
 			/**
-			 * The server no longer holds the session's turn error: a prompt was
-			 * admitted over it, or a client dismissed it (`ROUTES.error`)
-			 * (OW-jopifu). Drop it. What lets a client learn an error went
-			 * without a snapshot, which no longer arrives at every prompt
+			 * The server no longer holds the session's turn error: a prompt that
+			 * started or joined a turn was admitted over it, or a client dismissed
+			 * it (`ROUTES.error`) (OW-jopifu). Drop it. What lets a client learn an
+			 * error went without a snapshot, which no longer arrives at every prompt
 			 * (OW-yirosu). Carries no message:
 			 * the stream is ordered, so the error a client holds from it when
 			 * this arrives is the one the server cleared, and a newer one comes
@@ -366,9 +366,10 @@ export interface PromptRequest {
 	images?: { mimeType: string; base64: string }[];
 	/**
 	 * The `errorId` of the turn error the sender showed when the user sent,
-	 * or null when it showed none. Admitting the prompt clears the session's
-	 * error only if it is still that one: an error raised after the send, or
-	 * before the sender drew it, stays (OW-31, OW-jokoto). Read at the
+	 * or null when it showed none. Admitting a prompt that starts or joins
+	 * a turn clears the session's error only if it is still that one (a
+	 * handled one clears nothing, `PromptDisposition`): an error raised after
+	 * the send, or before the sender drew it, stays (OW-31, OW-jokoto). Read at the
 	 * send gesture, before any attach the send itself makes, so an error that
 	 * attach's start raised is not one the sender held. Absent, the server
 	 * takes whatever error it holds when the request arrives.
@@ -387,6 +388,7 @@ export interface PromptRequest {
  * independent work started by an extension" (read at the installed package,
  * not measured). After `/refs`, `/llama` and `/mcp` on `pi 1.2.0`, on
  * 2026-10-14, no event followed (docs/MANUAL_TESTING.md, OW-kokotu).
+ * A handled prompt leaves the session's held turn error standing (D3, OW-fakazi).
  */
 export type PromptDisposition = "started" | "handled";
 

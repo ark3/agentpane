@@ -706,18 +706,21 @@ export class SessionManager {
 	/**
 	 * Drive a turn. This goes through the manager rather than straight at the
 	 * adapter because it queues (`#serially`) and because a prompt is what
-	 * clears the session's error and its `virtual` flag. An id the backend
-	 * names for it arrives through `onRefChanged`, like every other (`#rename`).
+	 * clears the session's `virtual` flag, and one that starts or joins a
+	 * turn its error. An id the backend names for it arrives through
+	 * `onRefChanged`, like every other (`#rename`).
 	 * Resolves with the adapter's disposition, so the route can tell its
 	 * sender when no turn was started for the prompt (OW-dulipe).
 	 */
 	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorIdOf(ref)): Promise<PromptDisposition> {
 		return this.#serially(ref, async (session, adapter) => {
 			this.markPrompted(session.ref);
-			// The session's error goes once the next prompt is admitted, unless a
-			// newer one landed meanwhile (OW-31). This is the one place that rule
-			// runs: no client clears the error at its prompt's reply, each drops it
-			// at the `error-cleared` below (OW-lohubo).
+			// The session's error goes once the next prompt is admitted and has
+			// started or joined a turn, unless a newer one landed meanwhile
+			// (OW-31). A prompt the backend handled without a turn keeps it, since
+			// nothing replaced what it explained (D3, OW-fakazi). No client clears
+			// the error at its prompt's reply, each drops it at the `error-cleared`
+			// below (OW-lohubo).
 			// `priorError` is the id of the error the sender held when the user
 			// sent, null for none (`PromptRequest.priorErrorId`, OW-jokoto): an
 			// error raised after that, by the start of an attach the send made or
@@ -739,7 +742,7 @@ export class SessionManager {
 			// still holding it (OW-jopifu). Its error goes nowhere either, since
 			// no snapshot is built from a container out of the table.
 			if (this.#sessions.get(session.handle) !== session) return disposition;
-			if (priorError !== null && session.error !== null && session.errorId === priorError) {
+			if (disposition === "started" && priorError !== null && session.error !== null && session.errorId === priorError) {
 				session.error = null;
 				// This tells every client, the prompt's own included (OW-lohubo),
 				// which no turn-boundary snapshot does any longer (OW-yirosu), and

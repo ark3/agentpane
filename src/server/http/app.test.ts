@@ -943,6 +943,29 @@ describe("what a client that connects late is told (OW-bipume)", () => {
 		await client.close();
 	});
 
+	it("keeps the error a prompt names when the backend handled it without a turn (OW-fakazi)", async () => {
+		// `/mcp` after an attach whose extension failed, the way Pi answers it (OW-dulipe).
+		pi = new FakeAdapterFactory({ onSubmit: () => "handled" });
+		app = createApp({ index, adapters: { pi } });
+		await get(ROUTES.session(PI_SESSION));
+		const held = await raise("extension failed to load");
+		const watching = await openStream();
+		await watching.waitForCount(1);
+
+		expect((await post(ROUTES.prompt(PI_SESSION), { text: "/mcp", priorErrorId: held })).status).toBe(200);
+
+		// Anything the admission broadcast is ahead of this on the stream.
+		pi.forRef(PI_SESSION)?.emitNotice({ kind: "configWarning", message: "fence", details: null, path: null });
+		await watching.until(() => watching.typed("notice").length === 1, "the fence");
+		expect(watching.typed("error-cleared")).toEqual([]);
+
+		const client = await openStream();
+		await client.waitForCount(1);
+		expect(client.typed("snapshot")[0]).toMatchObject({ error: "extension failed to load", errorId: held });
+		await client.close();
+		await watching.close();
+	});
+
 	it("keeps an error raised after the send of a prompt whose sender held none (OW-jokoto)", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		// Raised while the prompt was on its way, so its sender never showed it.

@@ -385,9 +385,10 @@
  *   `session/snapshot` carries it again, in `error` and `errorId`, until it
  *   is cleared, which `session/errorCleared` says.
  * - `session/errorCleared` -- `{ session, handle }`. The server no longer
- *   holds the session's turn error: a prompt was admitted over it, it being
- *   still the one its sender held, or a client dismissed it by its
- *   `errorId` (OW-jopifu, OW-jokoto). Drop its line. It follows every
+ *   holds the session's turn error: a prompt that started or joined a turn
+ *   was admitted over it, it being still the one its sender held, or a
+ *   client dismissed it by its `errorId` (OW-jopifu, OW-jokoto). Drop its
+ *   line. It follows every
  *   snapshot sent before the clear on the one ordered stream, so a line such
  *   a snapshot drew again goes with it; one Emacs never drew is nothing to
  *   drop.

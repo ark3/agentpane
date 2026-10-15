@@ -74,8 +74,9 @@
 ;; puts a red `●agentpane' in every mode line, until a window shows it.
 ;; A buffer holds one turn error, the one the server holds: a newer one
 ;; replaces it, and it goes when the server says it cleared it, at the
-;; admission of a prompt sent over it, this buffer's own included, or at
-;; any client's dismissal, or when a snapshot arrives without it.  The
+;; admission of a prompt sent over it that started or joined a turn, this
+;; buffer's own included, or at any client's dismissal, or when a snapshot
+;; arrives without it.  The
 ;; buffer drops it without waiting only when `C-c C-d' in the transcript
 ;; buffer dismisses it.
 ;; `M-x agentpane-compact' compacts, and `M-x agentpane-set-model' and
