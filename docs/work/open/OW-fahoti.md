@@ -25,9 +25,16 @@ This card puts that text back in the browser's composer, so nothing the user typ
 - "Stop and edit": `editLastMessage` in `src/client/App.svelte` calls `startEdit(index)`, which loads the message being edited into `draft` and stashes the old draft as `editing.stashedDraft`, and then `controller.abort()` where `stopsBeforeFork`.
   Joined into `draft` there, the returned text would be sent into the fork as part of the edit; it belongs with the stashed draft, which the edit puts back when it ends, or wherever this card decides, said at `editLastMessage`.
 
+## Amended 2026-10-15, at review
+
+The first cut joined the texts into `draft` inside the controller and let "Stop and edit" alone divert them through a callback.
+Its adversarial read found the plain Stop button, shown whenever a turn streams and edit mode or not, still joining them into an open edit's text, where "Stop and fork" sends them into the fork and Cancel overwrites them: reached by clicking a transcript message's edit control during a Pi turn and then Stop, or Stop and then "Stop and edit" before the first stop answers.
+Where the words go depends on what the composer holds when the answer lands, which only `App.svelte` knows, so `controller.abort()` resolves with the texts and leaves the draft alone, and App places them for every stop through one rule.
+The join rule and the decisions above are unchanged; the done-conditions below replace the original ones, which put the draft assertions on the controller.
+
 ## Done when
 
-- A test in `src/client/controller.test.ts`, red first, has `api.abort` answer with two texts while the draft holds other text, and asserts the draft afterwards is the two texts and then the old draft, joined by blank lines; and a second asserts an empty answer leaves the draft untouched.
-- A test in `src/client/App.test.ts`, red first, drives "Stop and edit" on a Pi session whose abort answers with a text, and asserts the composer holds only the edited message and the text is where the decision above put it.
-- The selection-moved decision is a comment at `abort()` in `src/client/controller.ts`, with a test if it changes behaviour.
+- A test in `src/client/controller.test.ts` asserts `abort()` resolves with the texts in order, and with none on a 204.
+- Tests in `src/client/App.test.ts`, each red first: a plain Stop answered with two texts while the draft holds other text typed during the round trip leaves the texts and then that draft, joined by blank lines; one answered with nothing leaves the draft untouched; "Stop and edit" whose abort answers with a text leaves the composer holding only the edited message and the text where the decision above put it; and a plain Stop during an open edit does the same.
+- The selection-moved decision is a comment where App puts the texts in the composer, with a test if it changes behaviour.
 - `bun run check` passes.
