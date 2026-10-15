@@ -170,6 +170,13 @@ But streaming only ever touches the tail, and completed messages are immutable, 
 - a monotonic `seq` detects a dropped update; recovery was "re-snapshot" until D25 point 5 amended it: the browser (OW-lunihe) and the Emacs helper (OW-filuge) now each detach the one session
 - an `ended` event, carrying no `seq`, where the server lets go of a handle at a close or a Pi fork, after which nothing goes out under it (D26, OW-sodohi)
 
+A prompt the backend consumed without starting a turn for it (`PromptDisposition` `"handled"`, OW-dulipe) does not clear the held error: the error says how the last turn ended, and a handled prompt replaced nothing.
+The owner took this on 2026-10-15 (OW-webiwu), over keeping the clear at every admission and over clearing at a turn's start.
+The accepted cost is an extension command that starts a turn of its own, such as the `/ask` in `pi 1.2.0`'s `examples/extensions/send-user-message.ts`: its failure-free turn runs under the old error until the user dismisses it.
+Wrongly keeping an error costs one dismissal, while wrongly clearing one loses it for good, as when `/mcp` typed to investigate an MCP extension's failed attach wipes the error that explained it; and on 2026-10-15 no extension installed on the home server started a turn from a command.
+A clear at a turn's start was declined because it has no single place to run: Claude Code starts its turn inside `ClaudeAdapter.submit`, Codex's `turn/started` can arrive before `turn/start` resolves, a steered prompt (D16) starts no turn at all, and as of `pi 1.2.0` Pi's `agent_start` carries nothing that says which source started a run, so no turn can be tied to the command that asked for it.
+Until OW-fakazi lands, the server still clears at a handled prompt's admission.
+
 This is strictly less machinery than pipane's SHA-256-verified delta sync, which existed to survive a real network.
 
 Re-querying the agent (Pi `get_messages`, Codex `thread/turns/list`, Claude Code's own store file) remains the **cold-start** path — server restarted, or attaching to a session that predates it.
