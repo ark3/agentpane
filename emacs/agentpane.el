@@ -1190,7 +1190,8 @@ answered, or nil.")
 (defvar-local agentpane--tail-overlay nil
   "Overlay on the prompt separator whose `before-string' is the reading-view
 tail status, or the line saying reading view hides every node, when there
-is one, then the line `agentpane--handled' draws; see
+is one, then `agentpane--slash-warning' while the draft starts with `/',
+then the line `agentpane--handled' draws; see
 `agentpane--show-reading-tail'.")
 
 (defvar-local agentpane--handled nil
@@ -3975,17 +3976,29 @@ line carries `agentpane--slash-warning'.
 \\{agentpane-composer-mode-map}"
   (add-hook 'after-change-functions #'agentpane--warn-slash-composer nil t))
 
+(defvar-local agentpane--composer-header nil
+  "While this composer shows `agentpane--slash-warning', a list holding the
+header line the warning replaced, which may itself be nil; else nil.")
+
 (defun agentpane--warn-slash-composer (&rest _)
-  "Put `agentpane--slash-warning' in the header line while this composer's
-draft starts with `/', and take it down when it stops; a buffer-local
-`after-change-functions' entry.  The header line, because the whole
-buffer is the draft: it stays in view above the text however the window
-scrolls, and puts nothing in the text that `agentpane-composer-send' reads."
-  (let ((warning (and (eq (char-after (point-min)) ?/)
-                      (propertize agentpane--slash-warning 'face 'agentpane-warning))))
-    (unless (equal warning header-line-format)
-      (setq header-line-format warning)
-      (force-mode-line-update))))
+  "Put `agentpane--slash-warning' in the header line once this composer's
+draft comes to start with `/', and put back the header line it replaced
+once it no longer does; a buffer-local `after-change-functions' entry.
+The header line, because the whole buffer is the draft: it stays in view
+above the text however the window scrolls, and puts nothing in the text
+that `agentpane-composer-send' reads.  It is touched only at those two
+edges, so a header line the user's own config gave the composer stands
+otherwise."
+  (let ((slash (eq (char-after (point-min)) ?/)))
+    (cond ((and slash (not agentpane--composer-header))
+           (setq agentpane--composer-header (list header-line-format)
+                 header-line-format (propertize agentpane--slash-warning
+                                                'face 'agentpane-warning))
+           (force-mode-line-update))
+          ((and (not slash) agentpane--composer-header)
+           (setq header-line-format (car agentpane--composer-header)
+                 agentpane--composer-header nil)
+           (force-mode-line-update)))))
 
 (defun agentpane--composer-name ()
   "The name of this transcript's composer: the transcript's own, with any

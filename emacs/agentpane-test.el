@@ -5362,6 +5362,25 @@ out with the text unchanged and the warning goes with the draft
       (should (equal (plist-get (alist-get 'sessions/prompt sent) :text) "/mcp"))
       (should-not (agentpane-test--above-prompt)))))
 
+(ert-deftest agentpane-test-slash-warning-keeps-the-composers-own-header-line ()
+  "A composer whose header line the user's config set keeps it through an
+ordinary draft, gives it up to the slash-command warning only while the
+draft starts with `/', and gets it back once it stops (OW-sidese)."
+  (let ((text-mode-hook (list (lambda () (setq header-line-format "USER-HEADER")))))
+    (agentpane-test--submitting
+      (let ((composer (progn (save-current-buffer (agentpane-prompt)) agentpane--composer)))
+        (with-current-buffer composer
+          (should (equal header-line-format "USER-HEADER"))
+          (insert "Summarize the diff")
+          (should (equal header-line-format "USER-HEADER"))
+          (goto-char (point-min))
+          (insert "/")
+          (should (equal (and (stringp header-line-format)
+                              (substring-no-properties header-line-format))
+                         agentpane-test--slash-warning))
+          (delete-char -1)
+          (should (equal header-line-format "USER-HEADER")))))))
+
 (ert-deftest agentpane-test-edit-send-handled-says-so-in-the-fork ()
   "An edit's send whose prompt the fork's backend handled ends the edit,
 drops the watch the fork's prompt armed, and says no turn was started in
