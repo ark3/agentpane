@@ -16,7 +16,10 @@ The sequence: Ctrl-G opens the external editor during a Pi turn with a steer que
 Two owners collide here, and that collision is the state to fix, not the one late publish.
 `controller.abort` also publishes `busy: "aborting"` over `"editing-externally"`, so for the rest of the round trip the button reads as idle and the `finally` in `editDraft` (gated on `busyIs("editing-externally")`) leaves `busy` alone.
 `submit` and `forkAndSubmit` already settle the same question for a sent prompt with OW-nasofa's rule, clearing the draft only "if it is still the text that was sent" (see the comment at `publish({ draft: "" })` in `submit`); the external editor's answer has no equivalent.
-Decide what the answer does when the draft moved under it — keep both, refuse the answer with an error that keeps the edited text somewhere, or block the composer and Stop for the round trip — and say why at `editDraft`.
+What the answer does when the draft moved under it — keep both, refuse the answer with an error that keeps the edited text somewhere, or block the composer and Stop for the round trip — was decided by the owner on 2026-10-15 as a first cut, to be revisited once they have seen the collision happen: keep both.
+The answer keeps the editor's text and every text that reached the composer during the round trip, with nothing dropped; how the two are joined and in what order is the executor's, matching `withQueued` in `src/client/controller.ts` where that fits.
+Say at `editDraft` that this is a first cut taken before the case was seen in use, and why.
+
 
 The Emacs client has its own external-edit path, if any; check `emacs/agentpane.el` for the same overwrite under the "Both clients" rule in `AGENTS.md`, and file the Emacs half as an `emacs` card blocked by this one if it differs.
 
