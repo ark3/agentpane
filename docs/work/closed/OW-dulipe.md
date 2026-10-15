@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # A Pi prompt an extension command consumes is answered 202 like a started turn, and neither wire lets a client tell that no turn is coming
@@ -29,3 +30,13 @@ The two client halves are their own cards, blocked by this one, per AGENTS.md "B
 - A test in `src/server/adapters/pi/process.test.ts`, red first, has a faked `prompt` response carrying `data.disposition: "handled"` and asserts `submit()` reports it.
 - A test at the HTTP route and one at the helper's `sessions/prompt` assert the handled outcome reaches each wire, and a started one still reads as today.
 - `bun run check` passes.
+
+## Close note
+
+Built 2026-10-14 (commit "a Pi prompt an extension command handles answers 200 with its disposition on both wires").
+`BackendAdapter.submit` and `SessionManager.submit` resolve a `PromptDisposition` (`"started" | "handled"`, `src/shared/protocol.ts`); `PiAdapter.submit` reads Pi's `data.disposition`, mapping `queued` and an absent `data` to started; Codex and Claude Code always answer started.
+The HTTP prompt route answers a handled prompt 200 with `PromptResponse` `{ "disposition": "handled" }` and keeps the bodiless 202 for a started one; `api.prompt` resolves the body or nothing; the Emacs helper's `sessions/prompt` answers the body or `null`.
+Verified: the adapter test in `src/server/adapters/pi/process.test.ts` went red first (`expected undefined to be 'handled'`); the route test in `src/server/http/app.test.ts` and the helper test in `src/emacs/helper.test.ts` were each shown red by disabling the handled branch; `bun run check` passed, 1661 tests.
+Adversarial review found that `handled` does not mean nothing follows: `pi 1.2.0`'s `docs/rpc-commands.md` "prompt" says it "describes the submitted prompt, not independent work started by an extension", and Pi's `/ask` example streams a turn after it (read at source, not run).
+The docs say "no turn started for this prompt" accordingly, and a guard the implementer added to keep the held error on a handled prompt was removed, since that case defeats it; the question went to OW-webiwu.
+OW-yobayi and OW-taviju were amended with the wire shape and this caveat.
