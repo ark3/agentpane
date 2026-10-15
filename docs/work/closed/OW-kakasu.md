@@ -1,5 +1,6 @@
 ---
 labels: [defect, emacs]
+closed: done
 ---
 
 # agentpane-mode's turn-done watch is one cons shared by every prompt that joins it, so after a merge one prompt's refused or handled answer drops the watch another prompt joined
@@ -33,3 +34,18 @@ ERT tests in `emacs/agentpane-test.el`, each red first, have the survivor of a m
 The existing watch tests, among them `agentpane-test-turn-done-kept-armed-by-a-prompt-refused-mid-turn`, `agentpane-test-turn-done-abandoned-by-a-refusal-after-a-merge` and the three tagged OW-kejire, still pass.
 `agentpane--watch-abandon` no longer drops a watch by the identity of a cons that other prompts share; the identity rule is gone, not joined by a second check.
 The suite passes under `emacs --batch -L emacs -l ert -l agentpane -l emacs/agentpane-test.el -f ert-run-tests-batch-and-exit`, which `bun run check` does not run.
+
+## Close note
+
+Built: each entry in `agentpane--turn-watches` is now `(HANDLE STATE . CLAIMS)`.
+`agentpane--watch-submit` hands every prompt a fresh claim, whether it arms the watch or joins it, and `agentpane--watch-abandon` takes back that one claim, dropping the watch only with its last.
+The identity rule is gone: abandon no longer drops a shared cons.
+A turn's end and `agentpane--watch-forget` still drop the whole entry with every claim on it, so a late abandon from a prompt whose watch already ended touches nothing armed since (claims are distinct conses, not a count, which `agentpane-test-turn-done-kept-raised-by-a-handled-answer-after-the-turn` pins).
+Docblocks restated for claims at `agentpane--turn-watches`, `agentpane--watch-submit`, `agentpane--watch-abandon`, the `agentpane--send-prompt` docblock, and two older copies in the `agentpane--request` docblock that the adversarial read found.
+
+Verified: `agentpane-test-turn-done-kept-by-a-join-through-a-handled-answer-after-a-merge` and `...-through-a-refusal-after-a-merge` (shared helper `agentpane-test--merge-then-prompt-from-the-survivor`) failed against cc1d0648's `agentpane.el` with `(equal (nil) (t . t))`, nothing raised, and pass after.
+The full ERT suite passes: 270 run, 0 unexpected, 3 skipped (the same three skip on the old code).
+`bun run check` not run: nothing under `src/` changed.
+
+Residual, read and probed by the adversarial reader and left by design: a prompt that joins a watch whose turn ends before the joiner's own turn starts loses its claim with that watch, so the joiner's later turn raises nothing.
+Keeping the watch for in-flight claims would raise a false indicator whenever the joiner was steered into the turn that just ended, since both answer nil, and the repo prefers a missed indicator to a false one; the old code missed this too.
