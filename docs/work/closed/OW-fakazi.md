@@ -1,5 +1,6 @@
 ---
 labels: [change]
+closed: done
 ---
 
 # A prompt the backend handled without starting a turn clears the session's held error, which the owner decided it must keep
@@ -36,3 +37,10 @@ A test in `src/server/http/app.test.ts`, in the describe "what a client that con
 That test fails against today's `SessionManager.submit` and passes after the change.
 The existing test "clears at admission the error the prompt names as the one its sender held (OW-jokoto)" still passes, showing a started prompt still clears.
 `bun run check` passes.
+
+## Close note
+
+`SessionManager.submit` (src/server/http/session-manager.ts) now clears the held error only when `adapter.submit` resolves `"started"`; a `"handled"` prompt keeps it, per D3 (decided in OW-webiwu). The `priorError` comparison and the closed-container return are unchanged.
+"Started" also covers a steer that joined a running turn (D16), and a steer still clears as before, so the rewritten comments, D3's `error-cleared` bullet and the wire docs say "a prompt that started or joined a turn". D3's paragraph says a steer starts no turn, so the card's suggested wording, "started a turn", would have contradicted it.
+Every copy of the old "any admitted prompt clears" claim was retired: D3's bullet and the "Until OW-fakazi lands" sentence, the comment and docblock at `SessionManager.submit`, the `error-cleared` and `PromptRequest.priorErrorId` docblocks and the `PromptDisposition` docblock in src/shared/protocol.ts, the `session/errorCleared` entry in src/emacs/protocol.ts, and the header commentary in emacs/agentpane.el. There were no client logic changes.
+Verified by a new test in src/server/http/app.test.ts, in the OW-bipume describe: "keeps the error a prompt names when the backend handled it without a turn (OW-fakazi)". With the disposition guard reverted it fails (`expected [ { type: 'error-cleared', … } ] to deeply equal []`) while the three OW-jokoto tests pass, and with the guard in place it passes. `bun run check` passed: 59 files, 1679 tests.
