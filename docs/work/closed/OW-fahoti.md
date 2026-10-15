@@ -1,6 +1,7 @@
 ---
 labels: [change]
 blocked-by: [OW-wisifo]
+closed: done
 ---
 
 # Stop in the browser puts the text of every steered prompt Pi had not delivered back in the composer
@@ -38,3 +39,15 @@ The join rule and the decisions above are unchanged; the done-conditions below r
 - Tests in `src/client/App.test.ts`, each red first: a plain Stop answered with two texts while the draft holds other text typed during the round trip leaves the texts and then that draft, joined by blank lines; one answered with nothing leaves the draft untouched; "Stop and edit" whose abort answers with a text leaves the composer holding only the edited message and the text where the decision above put it; and a plain Stop during an open edit does the same.
 - The selection-moved decision is a comment where App puts the texts in the composer, with a test if it changes behaviour.
 - `bun run check` passes.
+
+## Close note
+
+Landed 2026-10-15 on main as 5157ff59 and 65d44d5b.
+`controller.abort()` in `src/client/controller.ts` now resolves with the texts the abort route cleared from Pi's queue (`AbortResponse.queued`, in order; none on a 204, a failure or a no-op) and never writes the draft.
+`App.svelte` routes both stops, the Stop button and "Stop and edit", through one `stop()` that appends them to `heldQueued`; a `$effect` releases them with `withQueued` (exported from `controller.ts`, Pi 1.2.0's `restoreQueuedMessagesToEditor` rule verbatim: texts joined by blank lines, then the current draft, blank parts dropped) once no edit is open and `view.sending` is false, which for a plain Stop is at once.
+So the words never enter an edit's text: Cancel puts the displaced draft back and they land ahead of it; a fork's prompt lands and they fill what it leaves; a session switch, or a fork whose prompt fails after its attach moved the selection, ends the edit and they join ahead of the leftover text, now only a draft.
+Decisions, at the site: a selection that moved during the stop changes nothing, because the draft is global and the words reached no session (comment at the release effect, noting OW-zigepi would change it); the abort `forkAndSubmit` sends ahead of a Pi fork still drops what it clears, as OW-wisifo decided.
+The card was amended at review: the first cut joined into the draft in the controller and diverted only "Stop and edit", and the adversarial read showed a plain Stop during an open edit (transcript edit control, then Stop) put the words into the fork or under Cancel's overwrite.
+Verified: tests in `controller.test.ts` (resolves with texts / none) and `App.test.ts` (plain Stop joins ahead of a draft typed meanwhile; empty answer leaves a `"\n\n"` draft alone; Stop and edit then Cancel; fork with the answer before and while the fork is out, asserting the fork's prompt body; plain Stop during an open edit, confirmed red against the first cut by the dispatching session); `bun run check` 1700 passed; `bun run test:browser` 29 passed.
+Not tested, documented only: the release after a session switch, and after a fork whose prompt fails post-attach.
+Filed from the execution: OW-momejo (external editor's answer overwrites the restored words) and OW-kijuju (a landed fork drops the edit's displaced draft).
