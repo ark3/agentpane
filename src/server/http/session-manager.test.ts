@@ -357,7 +357,7 @@ describe("an adapter that renames itself (the Pi contract)", () => {
 		await sessions.submit(virtualRef, "first");
 
 		// The browser POSTed against the id it created and has not refetched yet.
-		await expect(sessions.submit(virtualRef, "second")).resolves.toBeUndefined();
+		await expect(sessions.submit(virtualRef, "second")).resolves.toBe("started");
 		expect(renaming.forRef(virtualRef)?.prompts.map((p) => p.text)).toEqual(["first", "second"]);
 		expect(renaming.created).toHaveLength(1);
 		expect(sessions.isAttached(virtualRef)).toBe(true);

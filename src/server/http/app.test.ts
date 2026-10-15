@@ -643,6 +643,21 @@ describe("prompting", () => {
 		await client.close();
 	});
 
+	it("answers a prompt the backend handled without a turn 200 with a body, and a started one 202 as before (OW-dulipe)", async () => {
+		// Pi's extension commands, `/mcp` say, on `pi 1.2.0` (OW-kokotu).
+		const commands = new FakeAdapterFactory({ onSubmit: (_adapter, text) => (text.startsWith("/") ? "handled" : undefined) });
+		app = createApp({ index, adapters: { pi: commands } });
+		await get(ROUTES.session(PI_SESSION));
+
+		const handled = await post(ROUTES.prompt(PI_SESSION), { text: "/mcp" });
+		expect(handled.status).toBe(200);
+		expect(await handled.json()).toEqual({ disposition: "handled" });
+
+		const started = await post(ROUTES.prompt(PI_SESSION), { text: "hello" });
+		expect(started.status).toBe(202);
+		expect(await started.text()).toBe("");
+	});
+
 	it("sends no snapshot for a prompt to a session already attached (OW-yirosu)", async () => {
 		await get(ROUTES.session(PI_SESSION));
 		const client = await openStream();

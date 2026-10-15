@@ -63,7 +63,22 @@ export type PiCommandType = PiCommand["type"];
 // ---------------------------------------------------------------------------
 
 export type PiResponse =
-	| { id?: string; type: "response"; command: "prompt"; success: true }
+	| {
+			id?: string;
+			type: "response";
+			command: "prompt";
+			success: true;
+			// Absent before `pi 0.99.0`, as Pi's CHANGELOG dates it (read, not
+			// measured). On `pi 1.2.0` (home server, 2026-10-14,
+			// docs/MANUAL_TESTING.md OW-kokotu): `started` for a prompt that ran,
+			// `queued` for one steered into a running turn, `handled` for one an
+			// extension command consumed, after which no event followed for
+			// `/refs`, `/llama` or `/mcp`. `handled` "describes the submitted
+			// prompt, not independent work started by an extension"
+			// (`docs/rpc-commands.md` "prompt" in `pi 1.2.0`, read at the
+			// installed package), so an extension may still start a turn.
+			data?: { disposition?: "started" | "queued" | "handled" };
+	  }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| {
 			id?: string;

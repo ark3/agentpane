@@ -226,6 +226,23 @@ describe("requests", () => {
 		expect(calls.find((call) => call.url === ROUTES.error(pi))?.body).toEqual({ errorId: "e4" });
 	});
 
+	it("answers sessions/prompt with the route's body for a prompt handled without a turn, and null for a started one (OW-dulipe)", async () => {
+		// The prompt route's two answers: 200 with a `PromptResponse` for a
+		// prompt Pi's extension command consumed (`pi 1.2.0`, OW-kokotu), 202
+		// with no body for one that started a turn.
+		const { io } = start({
+			[`POST ${ROUTES.prompt(pi)}`]: (_url, init) =>
+				JSON.parse(String(init?.body)).text === "/mcp"
+					? json({ disposition: "handled" })
+					: new Response(null, { status: 202 }),
+		});
+		io.send({ jsonrpc: "2.0", id: 1, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "/mcp" } });
+		io.send({ jsonrpc: "2.0", id: 2, method: "sessions/prompt", params: { session: pi, handle: h(pi), text: "hello" } });
+		await io.until(2);
+		expect(io.response(1)).toEqual({ jsonrpc: "2.0", id: 1, result: { disposition: "handled" } });
+		expect(io.response(2)).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+	});
+
 	it("forwards sessions/setName's session and name to the name route (D27, OW-jamaha)", async () => {
 		const { io, calls } = start({ [`POST ${ROUTES.name(pi)}`]: noContent });
 		io.send({ jsonrpc: "2.0", id: 7, method: "sessions/setName", params: { session: pi, handle: h(pi), name: "probe name" } });

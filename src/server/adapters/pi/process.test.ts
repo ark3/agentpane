@@ -286,7 +286,7 @@ describe("PiAdapter session identity (D9: Pi's id is its JSONL path)", () => {
 		await Promise.resolve();
 		h.child.failCommand("get_state", "session not ready");
 
-		await expect(submitted).resolves.toBeUndefined();
+		await expect(submitted).resolves.toBe("started");
 		// Unresolved rather than wrongly resolved: the next prompt probes again.
 		expect(adapter.ref.id).toBe("__new__");
 
@@ -418,6 +418,29 @@ describe("PiAdapter command correlation", () => {
 		const submitted = h.adapter.submit("hello");
 		h.child.failCommand("prompt", "Agent is streaming; specify streamingBehavior");
 		await expect(submitted).rejects.toThrow(/streamingBehavior/);
+	});
+
+	/**
+	 * `pi 1.2.0` on the home server, 2026-10-14 (docs/MANUAL_TESTING.md,
+	 * OW-kokotu): `/refs`, `/llama` and `/mcp` were answered
+	 * `{"disposition": "handled"}` and no run followed; an ordinary prompt was
+	 * `started`, and one steered into a running turn `queued`. A Pi before
+	 * 0.99.0 sent no `data` at all, as Pi's CHANGELOG dates the field (read,
+	 * not measured).
+	 */
+	it("reports a prompt an extension command handled, which starts no turn (OW-dulipe)", async () => {
+		const h = makeHarness();
+		await startAdapter(h, { sessionFile: "/home/u/.pi/agent/sessions/known.jsonl" });
+
+		const handled = h.adapter.submit("/mcp");
+		h.child.respondTo("prompt", { disposition: "handled" });
+		await expect(handled).resolves.toBe("handled");
+
+		for (const data of [{ disposition: "started" }, { disposition: "queued" }, undefined]) {
+			const started = h.adapter.submit("hello");
+			h.child.respondTo("prompt", data);
+			await expect(started).resolves.toBe("started");
+		}
 	});
 
 	it("splits a model ref into provider and modelId for set_model", async () => {

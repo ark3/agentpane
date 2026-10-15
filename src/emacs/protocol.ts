@@ -264,7 +264,15 @@
  *   on while that open is pending is not sent at all, and answers a
  *   `-32603` error with no `data`: the server never saw it.
  * - `sessions/prompt` -- `{ session, text, images?, priorErrorId? }` ->
- *   `null`. `priorErrorId` (string or `null`) is the `errorId` of the turn
+ *   `null` for a prompt that started a turn or joined one, or
+ *   `{ disposition: "handled" }` for one the backend consumed without
+ *   starting a turn for it: the prompt route's own `PromptResponse`
+ *   (OW-dulipe). An extension that handled it may still start work of its
+ *   own, whose notifications arrive as usual (`docs/rpc-commands.md` "prompt"
+ *   in `pi 1.2.0`, read at the installed package, not measured); after
+ *   `/refs`, `/llama` and `/mcp` on `pi 1.2.0` none did (docs/MANUAL_TESTING.md,
+ *   OW-kokotu). No other backend answers it.
+ *   `priorErrorId` (string or `null`) is the `errorId` of the turn
  *   error the buffer held when the user sent, `null` when it held none, read
  *   before any `sessions/attach` the send itself makes: admitting the prompt
  *   clears the session's error only while it is still that one, so an error
@@ -425,6 +433,7 @@ import type {
 	ForkRequest,
 	ModelInfo,
 	PromptRequest,
+	PromptResponse,
 	SessionRef,
 	SessionSummary,
 } from "$shared/protocol.ts";
@@ -441,7 +450,7 @@ export interface HelperRequests {
 	"sessions/create": { params: CreateSessionRequest; result: SessionRef };
 	"models/list": { params: { backend: BackendId }; result: ModelInfo[] };
 	"sessions/attach": { params: SessionParams & { token: number }; result: SessionSummary };
-	"sessions/prompt": { params: SessionParams & PromptRequest; result: null };
+	"sessions/prompt": { params: SessionParams & PromptRequest; result: PromptResponse | null };
 	"sessions/abort": { params: SessionParams; result: null };
 	"sessions/compact": { params: SessionParams; result: null };
 	"sessions/close": { params: SessionParams & { tokens?: number[] }; result: null };

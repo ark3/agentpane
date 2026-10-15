@@ -17,6 +17,7 @@ import type {
 	ForkPoint,
 	ListSessionsQuery,
 	ModelInfo,
+	PromptDisposition,
 	SessionPreviewTurn,
 	SessionRef,
 	SessionSummary,
@@ -67,8 +68,15 @@ export function assistantMessage(text: string, timestamp = 0): AssistantMessage 
 // ---------------------------------------------------------------------------
 
 export interface FakeAdapterOptions {
-	/** Runs on submit(). Leave unset for a fake that records prompts and nothing else. */
-	onSubmit?: (adapter: FakeAdapter, text: string, images?: ImageInput[]) => void | Promise<void>;
+	/**
+	 * Runs on submit(). Leave unset for a fake that records prompts and nothing
+	 * else. What it returns is the prompt's disposition, `"started"` if nothing.
+	 */
+	onSubmit?: (
+		adapter: FakeAdapter,
+		text: string,
+		images?: ImageInput[],
+	) => void | PromptDisposition | Promise<void | PromptDisposition>;
 	/** Runs on setModel(), before the model is taken; throw to refuse it. */
 	onSetModel?: (model: string) => void | Promise<void>;
 	models?: ModelInfo[];
@@ -229,12 +237,13 @@ export class FakeAdapter implements BackendAdapter {
 		if (this.options.failDispose) throw new Error(this.options.failDispose);
 	}
 
-	async submit(text: string, images?: ImageInput[]): Promise<void> {
+	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
 		this.prompts.push({ text, images });
-		await this.options.onSubmit?.(this, text, images);
+		const disposition = await this.options.onSubmit?.(this, text, images);
 		if (this.prompts.length === 1 && this.options.materialiseOnSubmit) {
 			this.materialiseAs(this.options.materialiseOnSubmit);
 		}
+		return disposition ?? "started";
 	}
 
 	/**

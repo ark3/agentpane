@@ -32,6 +32,7 @@ import {
 	type ListSessionsResponse,
 	type ModelsResponse,
 	type PromptRequest,
+	type PromptResponse,
 	type SessionPreviewResponse,
 	type SessionRef,
 	type SessionSummary,
@@ -301,7 +302,16 @@ export function createApp(deps: AppDeps): App {
 				// admitted the turn, not when the turn completes. Await that boundary
 				// before acknowledging the POST so a rejected admission remains a
 				// normal HTTP failure and the browser can preserve its draft.
-				await sessions.submit(ref, body.value.text, body.value.images, priorError);
+				//
+				// A prompt the backend consumed without starting a turn for it is
+				// answered 200 with a body saying so (OW-dulipe); an extension's own
+				// work may still stream (`PromptDisposition`). A started one keeps
+				// today's bodiless 202.
+				const disposition = await sessions.submit(ref, body.value.text, body.value.images, priorError);
+				if (disposition === "handled") {
+					const response: PromptResponse = { disposition };
+					return json(response);
+				}
 				return accepted();
 			}
 			case "abort": {
@@ -609,7 +619,7 @@ function noContent(): Response {
 	return new Response(null, { status: 204 });
 }
 
-/** The prompt route: the turn is accepted, its events come over SSE. */
+/** The prompt route, for a started prompt: the turn is accepted, its events come over SSE. */
 function accepted(): Response {
 	return new Response(null, { status: 202 });
 }

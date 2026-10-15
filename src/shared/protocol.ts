@@ -374,6 +374,31 @@ export interface PromptRequest {
 	priorErrorId?: string | null;
 }
 
+/**
+ * What a prompt the backend admitted led to. `"started"`: a turn runs, or the
+ * prompt joined the one running (D16), and its events come over SSE.
+ * `"handled"`: the backend consumed the prompt itself and started no turn for
+ * it (OW-dulipe). Only Pi answers that, for a prompt an extension command or
+ * input handler takes, and the extension may still start work of its own,
+ * whose events arrive on the stream as usual: `docs/rpc-commands.md` "prompt"
+ * in `pi 1.2.0` says the disposition "describes the submitted prompt, not
+ * independent work started by an extension" (read at the installed package,
+ * not measured). After `/refs`, `/llama` and `/mcp` on `pi 1.2.0`, on
+ * 2026-10-14, no event followed (docs/MANUAL_TESTING.md, OW-kokotu).
+ */
+export type PromptDisposition = "started" | "handled";
+
+/**
+ * The prompt route's body, sent only for a handled prompt, with 200: no turn
+ * was started for it, though work an extension started of its own may still
+ * stream (`PromptDisposition`). A started one is answered 202 with no body,
+ * as it was before the outcome existed, so a client that reads only the
+ * status still reads it as today.
+ */
+export interface PromptResponse {
+	disposition: "handled";
+}
+
 /** POST /api/edit-draft */
 export interface EditDraftRequest {
 	text: string;

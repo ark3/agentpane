@@ -15,6 +15,7 @@ import {
 	type ModelInfo,
 	type ModelsResponse,
 	type PromptRequest,
+	type PromptResponse,
 	type ServerEvent,
 	type SetEffortRequest,
 	type SetModelRequest,
@@ -69,7 +70,14 @@ export interface AgentpaneApi {
 	 * `signal` aborts the read, which then rejects (OW-bilogo).
 	 */
 	preview(ref: SessionRef, signal?: AbortSignal): Promise<SessionPreviewResponse>;
-	prompt(ref: SessionRef, body: PromptRequest): Promise<void>;
+	/**
+	 * Resolves with nothing for a prompt that started a turn, or joined one,
+	 * as it did before the outcome existed, so a caller or fake that ignores
+	 * it is unchanged; with the body for one the backend handled without
+	 * starting a turn for it, though an extension's own work may still arrive
+	 * on the stream (`PromptDisposition`, OW-dulipe).
+	 */
+	prompt(ref: SessionRef, body: PromptRequest): Promise<PromptResponse | void>;
 	editDraft(body: EditDraftRequest): Promise<EditDraftResponse>;
 	abort(ref: SessionRef): Promise<void>;
 	compact(ref: SessionRef): Promise<void>;
@@ -147,8 +155,12 @@ export function createAgentpaneApi(options: ApiOptions = {}): AgentpaneApi {
 		preview(ref, signal) {
 			return request(ROUTES.preview(ref), { method: "GET", signal }, (body) => body as SessionPreviewResponse);
 		},
-		prompt(ref, body) {
-			return requestNoContent(ROUTES.prompt(ref), jsonRequest(body));
+		async prompt(ref, body) {
+			const response = await fetchImpl(ROUTES.prompt(ref), jsonRequest(body));
+			if (!isSuccessful(response.status)) throw await toApiClientError(response);
+			// The route answers a started prompt 202 with no body, and only a
+			// handled one 200 with a `PromptResponse`.
+			if (response.status === 200) return (await response.json()) as PromptResponse;
 		},
 		editDraft(body) {
 			return request(ROUTES.editDraft, jsonRequest(body), (response) => response as EditDraftResponse);

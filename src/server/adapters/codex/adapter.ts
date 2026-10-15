@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AgentNotice, ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../../shared/protocol.ts";
 import { readCodexLastTurnSettings, type CodexTurnSettings } from "../../sessions/codex.ts";
 import { codexSessionsRoot } from "../../sessions/index.ts";
 import {
@@ -519,7 +519,7 @@ export class CodexAdapter implements BackendAdapter {
 
 	// -- driving a turn -----------------------------------------------------
 
-	async submit(text: string, images?: ImageInput[]): Promise<void> {
+	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
 		const client = this.requireClient();
 		const threadId = this.requireThread();
 		const ownership = this.ownership;
@@ -589,7 +589,7 @@ export class CodexAdapter implements BackendAdapter {
 				const { message } = error as Error;
 				throw new Error(`${TURN_STEER_REJECTED_ERROR} (expectedTurnId ${expectedTurnId}): ${message}`);
 			}
-			return;
+			return "started";
 		}
 		if (this.turnBusy) throw new Error(TURN_ACTIVE_ERROR);
 		// The turn's messages carry the reducer's identity, which otherwise knows
@@ -650,6 +650,7 @@ export class CodexAdapter implements BackendAdapter {
 				}
 			}
 		}
+		return "started";
 	}
 
 	async abort(): Promise<void> {

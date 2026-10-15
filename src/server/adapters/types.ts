@@ -14,7 +14,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AgentNotice, ForkPoint, ModelInfo, SessionRef } from "../../shared/protocol.ts";
+import type { AgentNotice, ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../shared/protocol.ts";
 
 export interface AdapterState {
 	messages: AgentMessage[];
@@ -159,8 +159,13 @@ export interface BackendAdapter {
 	 * cannot steer rejects instead, so the route can 500 and the client can
 	 * say so with the draft intact -- never silently downgrades to a follow-up,
 	 * which would land the prompt somewhere the user did not ask for.
+	 *
+	 * Resolves with `"handled"` for a prompt the backend admitted and consumed
+	 * without starting a turn for it (OW-dulipe); work an extension started of
+	 * its own may still emit events (`PromptDisposition`). Only `PiAdapter`
+	 * has such an outcome. Every other admission resolves `"started"`.
 	 */
-	submit(text: string, images?: ImageInput[]): Promise<void>;
+	submit(text: string, images?: ImageInput[]): Promise<PromptDisposition>;
 	abort(): Promise<void>;
 	/**
 	 * Compact the session's context, summarising the history so far to reduce

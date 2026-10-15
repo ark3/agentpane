@@ -137,6 +137,7 @@ import type {
 	AssistantTurn,
 	ForkPoint,
 	ModelInfo,
+	PromptDisposition,
 	SessionRef,
 } from "../../../shared/protocol.ts";
 import {
@@ -360,7 +361,7 @@ export class ClaudeAdapter implements BackendAdapter {
 
 	// -- driving a turn -----------------------------------------------------
 
-	async submit(text: string, images?: ImageInput[]): Promise<void> {
+	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
 		const proc = this.requireProc();
 		if (this.turnActive) throw new Error(TURN_ACTIVE_ERROR);
 		const content: ClaudeUserContent[] = [];
@@ -375,6 +376,7 @@ export class ClaudeAdapter implements BackendAdapter {
 		proc.write(JSON.stringify(buildUserMessageLine(content)));
 		this.turnActive = true;
 		this.applyEffects(this.reducer.beginTurn(text, images, this.effort));
+		return "started";
 	}
 
 	async abort(): Promise<void> {

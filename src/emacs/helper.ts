@@ -653,8 +653,7 @@ export async function runHelper(options: HelperOptions): Promise<void> {
 		},
 		// `handle` is dropped before the rest is spread into the HTTP body.
 		"sessions/prompt": async ({ session, handle: _handle, ...body }) => {
-			await api.prompt(session, body);
-			return null;
+			return (await api.prompt(session, body)) ?? null;
 		},
 		"sessions/abort": async ({ session }) => {
 			await api.abort(session);

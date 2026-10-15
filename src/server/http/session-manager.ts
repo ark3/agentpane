@@ -18,6 +18,7 @@ import type {
 	AgentNotice,
 	BackendId,
 	ListSessionsQuery,
+	PromptDisposition,
 	SessionRef,
 	SessionStatus,
 	LiveSessionSummary,
@@ -707,8 +708,10 @@ export class SessionManager {
 	 * adapter because it queues (`#serially`) and because a prompt is what
 	 * clears the session's error and its `virtual` flag. An id the backend
 	 * names for it arrives through `onRefChanged`, like every other (`#rename`).
+	 * Resolves with the adapter's disposition, so the route can tell its
+	 * sender when no turn was started for the prompt (OW-dulipe).
 	 */
-	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorIdOf(ref)): Promise<void> {
+	submit(ref: SessionRef, text: string, images?: ImageInput[], priorError = this.errorIdOf(ref)): Promise<PromptDisposition> {
 		return this.#serially(ref, async (session, adapter) => {
 			this.markPrompted(session.ref);
 			// The session's error goes once the next prompt is admitted, unless a
@@ -729,13 +732,13 @@ export class SessionManager {
 			// `turn/steer`'s (`CodexAdapter.submit`) -- so a steered turn that
 			// fails the way the last one did is raised inside it. Claude Code's
 			// admission is a synchronous stdin write, so its adapter cannot.
-			await adapter.submit(text, images);
+			const disposition = await adapter.submit(text, images);
 			// A container `close` took out of the table while the prompt was being
 			// admitted is past announcing: its handle is forgotten, and an event
 			// under it would re-create the counter and read as a gap to a client
 			// still holding it (OW-jopifu). Its error goes nowhere either, since
 			// no snapshot is built from a container out of the table.
-			if (this.#sessions.get(session.handle) !== session) return;
+			if (this.#sessions.get(session.handle) !== session) return disposition;
 			if (priorError !== null && session.error !== null && session.errorId === priorError) {
 				session.error = null;
 				// This tells every client, the prompt's own included (OW-lohubo),
@@ -743,6 +746,7 @@ export class SessionManager {
 				// without the snapshot this once took (OW-jopifu).
 				this.broadcaster.errorCleared(session);
 			}
+			return disposition;
 		});
 	}
 

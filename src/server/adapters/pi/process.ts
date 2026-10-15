@@ -24,7 +24,7 @@ import {
 	type StateChange,
 	type Unsubscribe,
 } from "../types.ts";
-import type { ForkPoint, ModelInfo, SessionRef } from "../../../shared/protocol.ts";
+import type { ForkPoint, ModelInfo, PromptDisposition, SessionRef } from "../../../shared/protocol.ts";
 import { type ChildLike, ChildProcessShell } from "../child-process.ts";
 import {
 	createInitialPiState,
@@ -377,7 +377,7 @@ export class PiAdapter implements BackendAdapter {
 
 	// -- driving a turn ---------------------------------------------------------
 
-	async submit(text: string, images?: ImageInput[]): Promise<void> {
+	async submit(text: string, images?: ImageInput[]): Promise<PromptDisposition> {
 		const cmd: PiCommand = {
 			type: "prompt",
 			message: text,
@@ -396,12 +396,20 @@ export class PiAdapter implements BackendAdapter {
 			// the response that resolves the previous `submit()`. Same runs: a
 			// second prompt queued behind the first in `SessionManager.submit` went
 			// out bare in that gap and was refused, and the route answered 500.
-			// The response's `data.disposition` is not read either: a prompt an
-			// extension command consumes, `/mcp` say, answers `"handled"` and
-			// starts no run, so no event follows it.
 			...(this.state.isStreaming ? { streamingBehavior: "steer" as const } : {}),
 		};
-		await this.sendCommand<PiResponseFor<"prompt">>(cmd);
+		const response = await this.sendCommand<PiResponseFor<"prompt">>(cmd);
+		// A prompt an extension command consumes, `/mcp` say, was answered
+		// `"handled"` on `pi 1.2.0`, and no event followed it
+		// (docs/MANUAL_TESTING.md, OW-kokotu); the caller is told no turn was
+		// started for it (OW-dulipe). That is all `handled` says: per
+		// `docs/rpc-commands.md` "prompt" in `pi 1.2.0` (read at the installed
+		// package, not measured) it "describes the submitted prompt, not
+		// independent work started by an extension", whose events arrive as
+		// usual. `queued`, a prompt steered into the running turn, is a turn for
+		// the caller, and so is an answer with no `data`, which Pi's CHANGELOG
+		// says every Pi before 0.99.0 gave (read, not measured).
+		const disposition: PromptDisposition = response.data?.disposition === "handled" ? "handled" : "started";
 
 		// For a Pi that named no file at `start()`, this is the next point it can
 		// name one. Pi 0.84.1, 0.85.1, 0.87.1 and 1.2.0 named it at start
@@ -413,8 +421,9 @@ export class PiAdapter implements BackendAdapter {
 		// allowed to fail the submit: Pi has already accepted the prompt above,
 		// and `submit()` rejecting means "the turn was not admitted" (the frozen
 		// contract) -- which the HTTP layer relays as a 500 and the browser
-		// answers by preserving the draft to send again. Resending would put a
-		// second copy of a running prompt into the same turn. Leaving the id
+		// answers by preserving the draft to send again. Resending would run
+		// the prompt a second time: a second copy in the turn it started, or a
+		// second run of the command that handled it. Leaving the id
 		// unresolved instead costs one more probe on the next prompt, which is
 		// the same path a session whose id had not resolved yet already takes.
 		if (!this.idResolved) {
@@ -422,10 +431,12 @@ export class PiAdapter implements BackendAdapter {
 				const state = await this.sendCommand<PiResponseFor<"get_state">>({ type: "get_state" });
 				this.adoptSessionFile(state.data.sessionFile);
 			} catch {
-				// Nothing to report: the turn is running. A dead process announces
-				// itself through `handleClose`, and disposal is not news either.
+				// Nothing to report: Pi has the prompt, started or handled. A dead
+				// process announces itself through `handleClose`, and disposal is
+				// not news either.
 			}
 		}
+		return disposition;
 	}
 
 	async abort(): Promise<void> {
