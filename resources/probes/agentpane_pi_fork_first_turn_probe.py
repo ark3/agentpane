@@ -46,15 +46,15 @@ probe's). Sessions are created and attached over REST and followed on SSE.
   stat'ed the moment the response is read. Then an attach of the fork and a
   short turn on it, with the fork's file read before and after.
 
-Nothing here asks the session index, a re-attach of the parent included:
+Nothing after a fork asks the session index or re-attaches the parent:
 the relocated `PI_CODING_AGENT_DIR` moves Pi's store and not the server's,
 which walks `~/.pi/agent/sessions` whatever the variable says
 (`src/server/sessions/index.ts`), so the index cannot see a file this run
 writes, and a re-attach of the parent answered 404 on a first pass with its
 file on disk -- the harness defect `docs/MANUAL_TESTING.md` records in
 "Forking the most recent turn and attaching the fork, on all three backends
-(OW-lajehi)". The rows below are the manager's own, for sessions still
-attached.
+(OW-lajehi)". The listing rows read before any prompt and as the fork
+attaches are the manager's own, for sessions still attached.
 
 The Emacs helper's `sessions/fork` is a pass-through to the same route
 (`src/emacs/helper.ts`, `toRpcError`), so it is not driven here.
@@ -196,6 +196,8 @@ def run_rpc(args: argparse.Namespace, pi: str, home: Path, workspace: Path) -> d
         start = len(rpc.snapshot())
         samples: list[dict[str, Any]] = []
         seen_updates: set[str] = set()
+        # `text_deltas` counts on until the fork response clears the hook;
+        # `text_deltas_at_fork_write` is the count the fork went out at.
         record: dict[str, Any] = {"text_deltas": 0}
 
         def hook(row: dict[str, Any]) -> None:
@@ -206,6 +208,7 @@ def run_rpc(args: argparse.Namespace, pi: str, home: Path, workspace: Path) -> d
                 if sub == "text_delta":
                     record["text_deltas"] += 1
                     if record["text_deltas"] >= FORK_AT_DELTAS and "entry" in record and "fork_written_at" not in record:
+                        record["text_deltas_at_fork_write"] = record["text_deltas"]
                         record["assistant_message_end_seen_at_fork"] = record.get("assistant_end_at") is not None
                         record["fork_written_at"] = rpc.write({"id": "fk1", "type": "fork", "entryId": record["entry"]})
                         record["file_exists_at_fork_write"] = file0.exists()

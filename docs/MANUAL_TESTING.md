@@ -493,7 +493,7 @@ old defect) leaves the server keyed to the abandoned pre-fork branch.
 This run also read `moved_file_on_disk_at_fork: false` and concluded F2 materialises only on the next prompt.
 **That half did not survive.**
 The 2026-08-20 run read `true` at a moved instrument, and the 2026-09-15 home-server run on `pi 0.85.1` read `true` again with the `get_state` back where this run took it — the first round-trip after the `fork`.
-F2 was on disk when the fork returned, already carrying the rewound prefix; see "Pi's mid-stream fork, and the forked file on disk, re-measured at the instrument (OW-gajesu)" at the end of this file, and read what follows here under that answer.
+F2, a fork at the second user message, was on disk when the fork returned, already carrying the rewound prefix (a fork at the first was not, on `pi 1.2.0`: OW-tigaye); see "Pi's mid-stream fork, and the forked file on disk, re-measured at the instrument (OW-gajesu)" at the end of this file, and read what follows here under that answer.
 
 **Codex: the forked rollout is flushed to disk before any turn.**
 `forked_on_disk_before_turn: true`, `thread_read_forked_before_turn_ok: true`,
@@ -525,9 +525,9 @@ re-adopting F2 load-bearing rather than cosmetic. Not folded into
 `fork_probe.py` (a resume harness is more than the cell needs); recorded here as
 observed.
 
-What a fork with no subsequent prompt costs is therefore a real file, settled against this section's own reading.
+What a fork at the second user message with no subsequent prompt costs is therefore a real file, settled against this section's own reading; on `pi 1.2.0` a fork at the first left none until its first prompt (OW-tigaye).
 The 2026-09-15 run read `moved_file_on_disk_at_fork: true` and `moved_file_messages_at_fork: ALPHA -> ALPHA`, so F2 was in the sessions directory before any prompt, carrying the branch up to the fork point.
-`src/server/sessions/walk.ts` readdir-walks that directory to build the picker, so a user who opens an edit, forks, and changes their mind leaves a session there to be listed.
+`src/server/sessions/walk.ts` readdir-walks that directory to build the picker, so a user who opens an edit on a later message, forks, and changes their mind leaves a session there to be listed.
 Whether the listing should filter it is a separate question, and OW-ruyewe is where it lives (moved from OW-vezipo by D27 on 2026-10-01).
 
 ### Settling second-message semantics and mid-stream fork behavior (OW-yudoni)
@@ -3080,6 +3080,7 @@ On all three backends as measured, attach replaces the `virtual:` id and nothing
 **Not established.**
 Nothing here went through agentpane's server, the browser or Emacs.
 Pi was not run through `sbox`, and whether a Pi turn stopped before its reply ends leaves a file was not measured.
+On `pi 1.2.0` it did: a first turn stopped by a fork left a file holding the user message and the reply's first few hundred characters (OW-tigaye).
 
 ## What a Codex turn on a model that does not exist does, and whether `model/list` bounds what Codex accepts (OW-wawuzu)
 
@@ -4466,14 +4467,15 @@ python3 resources/probes/agentpane_pi_fork_first_turn_probe.py               # r
 python3 resources/probes/agentpane_pi_fork_first_turn_probe.py --skip-build  # run 2
 ```
 
-Two passes of a draft ran a few minutes earlier, `--part rpc` and then `--part agentpane`, and answered as the recorded runs did; the draft's agentpane part also re-attached the parent and asked the listing about both sessions, which the committed probe does not, for the reason under "Not established".
+Two passes of a draft ran a few minutes earlier, `--part rpc` and then `--part agentpane`, and answered as the recorded runs did; the draft's agentpane part also asked the listing about the parent after the first-turn fork and about the fork after its turn, and re-attached the parent after the fork, which the committed probe does not, for the reason under "Not established"; both still ask the listing about the session before any prompt and about the fork as it attaches, and re-attach the session before any prompt.
 Every model call was pinned with `--model openrouter/deepseek/deepseek-v4.1-flash:high`: part `rpc` passes it on Pi's command line, and `get_state` answered `openrouter/deepseek/deepseek-v4.1-flash` at `high`; part `agentpane` passes it through the create route's `model` field, and both runs read `openrouter/deepseek/deepseek-v4.1-flash` back off the wire.
 The configuration is OW-kokotu's, above: a scratch `PI_CODING_AGENT_DIR` holding copies of `auth.json`, `models-store.json` and `settings.json` and the dereferenced `extensions/` (`auto-read-agents-refs.ts`, `background-jobs.ts`), a workspace under `/var/tmp` holding only `.sandbox-workspace`, part `rpc` on `pi --mode rpc --session-dir <scratch> --model <ref>` directly, and part `agentpane` on the production chain through the built server with a teeing `pi` shim.
 The owner's `~/.pi/agent/settings.json` read sha256 `fc2bbcc0...` before the first pass and after the last run.
 Each run's long turn was the smoke probes' handbook prompt, cut a few hundred characters in; every short turn asked for one word and got it.
 
 The question came from the source, read before the run.
-As of `pi 0.87.1` a new session's file was written only once its first turn's reply ended (OW-bohodu, above), the runtime's `fork` throws `This session has not been saved yet` when the current file is not on disk, and `createBranchedSession` writes a new branch at once only when it keeps a user or assistant message.
+As of `pi 0.87.1` a new session's file was written only once its first turn's reply ended (OW-bohodu, above), the runtime's `fork` threw `This session has not been saved yet` when the current file was not on disk, and `createBranchedSession` wrote a new branch at once only when it kept an assistant message.
+In the `1.2.0` source the refusal is still there, and both the first write and `createBranchedSession` wait for a user or assistant message instead.
 The `0.99.0` CHANGELOG says "The session file is now created when the first user message is sent".
 The server's fork route aborts nothing (both clients abort a streaming Pi turn first), so a raw request reaches whatever Pi answers.
 
@@ -4495,17 +4497,17 @@ So on `pi 1.2.0` OW-bohodu's "writes it when the first turn's reply ends" no lon
 `get_state` afterwards named the same file, still absent.
 
 **During the first turn, before the first assistant `message_end`, a fork at the first user message succeeds and stops the turn.**
-`get_fork_messages`, sent after the user `message_end`, named the first user message, and the reader thread sent `fork` at it on the 30th `text_delta` in run 1 and the 34th in run 2, with no assistant `message_end` yet and the parent file on disk.
+`get_fork_messages`, sent after the user `message_end`, named the first user message, and the reader thread sent `fork` at it on the 30th `text_delta` in both runs, with no assistant `message_end` yet and the parent file on disk; the probe's `text_deltas` field, which kept counting until the `fork` response was parsed, read 30 and 34.
 Between that write and the `fork` response came the assistant `message_end` with `stopReason: "aborted"`, `turn_end`, `agent_end`, `agent_settled` and the `background-jobs.ts` status line; the response, `success: true`, `cancelled: false`, followed about 0.13 s after the write.
 `get_state` then read `isStreaming: false`, `messageCount` 1 (the kept system message), at the pinned model at `high`.
 The parent's file held `session`, `model_change`, `thinking_level_change`, the system and user messages, and the aborted reply's first 315 and 394 characters.
 Because the file now exists from the user message's `message_end`, every entry `fork` accepts is already on disk when it can be named, so the refusal is unreachable through `fork` on `1.2.0`: that is read from the source, and these runs found nothing to contradict it.
 On `0.87.1`, read at the source and not run, a fork at the first user message during the first turn would have met it, since that message's parent is the system message and the file was not yet written.
 
-**Through agentpane, the fork route answers 500 for Pi's refusal, and the session is unharmed.**
+**Through agentpane, the fork route answered 500 for Pi's `Invalid entry ID for forking`, and the session was unharmed.**
 Before any prompt, `GET .../fork-points` answered 200 with no points, and `POST .../fork` with `{"entryId": "no-such-entry"}` answered **500**, body `{"error": "internal_error", "detail": "Invalid entry ID for forking"}`, in both runs; the stdout tap held Pi's `fork` response `success: false` with that error, and the server log the line `session pi:<file>: Invalid entry ID for forking`.
 No SSE event followed under the session's handle; its row still read `attached`, not streaming, and a re-attach answered 200 under the same handle; the file was still absent.
-The status is the code's, read there: `PiAdapter.fork` lets the `PiCommandError` that `sendCommand` rejects with propagate, and `createApp`'s `fetch` maps only `BackendRefusedError` to 400 `backend_refused`, so any refused Pi fork is a 500 `internal_error`.
+The status is the code's, read there: `PiAdapter.fork` lets the `PiCommandError` that `sendCommand` rejects with propagate, and `createApp`'s `fetch` maps only `BackendRefusedError` to 400 `backend_refused`, so by the code any fork Pi refuses, `This session has not been saved yet` included, is a 500 `internal_error`; only the invalid-entry case went through the route here.
 The Emacs helper's `sessions/fork` passes the route's status through as the JSON-RPC error code (`toRpcError` in `src/emacs/helper.ts`), so it would answer `code` 500; that is read, not run.
 Neither client sends this request: both list `fork-points` first, and before a prompt there are none.
 
@@ -4533,7 +4535,7 @@ The 500 for a refused fork is the one finding against agentpane, and it was not 
 The copies of OW-bohodu's `0.87.1` timing, and of "the fork's file is on disk when `fork` returns", now name the version and fork point each was measured at.
 
 **Not established.**
-The relocated `PI_CODING_AGENT_DIR` moves Pi's store and not the server's index, which walks `~/.pi/agent/sessions` whatever the variable says (the harness defect OW-lajehi's section records), and that directory is mounted read-only in this session's sandbox; so nothing here says how the listing or a re-attach treats the parent or the fork.
+The relocated `PI_CODING_AGENT_DIR` moves Pi's store and not the server's index, which walks `~/.pi/agent/sessions` whatever the variable says (the harness defect OW-lajehi's section records), and that directory is mounted read-only in this session's sandbox; so nothing here says how the listing or a re-attach treats the parent or the fork after the fork.
 The draft's re-attach of the parent after the first-turn fork answered 404 `no such session` with the parent's file on disk, which is that defect, not a finding.
 Nothing ran on `pi 0.87.1`, so what a first-turn fork answered there rests on the source.
 A first turn forked before its user `message_end` could not be tried, since no fork point exists then.

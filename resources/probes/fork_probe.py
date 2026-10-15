@@ -21,13 +21,15 @@ OW-gojado for the fifth):
                        itself (OW-pifowo). On the 2026-08-20 second-message
                        run the rewound branch stops BEFORE the forked-at user
                        message, matching Codex's edit contract. On 0.85.1 and
-                       1.2.0 the moved-to file was on disk at the fork,
-                       carrying the rewound prefix, with the get_state re-query
-                       as the first round-trip after the fork -- where
-                       OW-pifowo took it and where its `false` was retired,
-                       samples of a race (OW-gajesu, OW-vijine). A mid-stream
-                       fork also succeeds and the turn stops, and the new
-                       branch sits at the fork point, idle. Since OW-sededi
+                       1.2.0 the moved-to file of this second-message fork
+                       (a first-message one was not, on 1.2.0: OW-tigaye)
+                       was on disk at the fork, carrying the rewound prefix,
+                       with the get_state re-query as the first round-trip
+                       after the fork -- where OW-pifowo took it and where its
+                       `false` was retired, samples of a race (OW-gajesu,
+                       OW-vijine). A mid-stream fork also succeeds and the
+                       turn stops, and the new branch sits at the fork point,
+                       idle. Since OW-sededi
                        this cell carries its Codex sibling's streaming
                        discipline -- forty accumulated `text_delta`s before the
                        fork, re-read at the instant the request goes out -- and
@@ -542,10 +544,11 @@ def run_pi(timeout, want_fixtures):
         #     It also settles OW-pifowo's ref question: the process's active
         #     `sessionFile` MOVES to the new file at the fork call itself,
         #     BEFORE any re-ask (`active_file_moves_at_fork`). On the
-        #     2026-08-20 and 2026-09-15 runs the moved-to file was already
-        #     present on disk by the immediate `get_state` re-query, holding the
-        #     rewound prefix, so the adapter concern is
-        #     simply to re-adopt the file Pi reports after a fork rather than
+        #     2026-08-20 and 2026-09-15 runs the moved-to file of this fork at
+        #     the second user message was already present on disk by the
+        #     immediate `get_state` re-query, holding the rewound prefix (a fork
+        #     at the first was not, on 1.2.0: OW-tigaye), so the adapter
+        #     concern is simply to re-adopt the file Pi reports after a fork rather than
         #     keep steering the abandoned pre-fork branch. ---
         beta_entry = forks[1]["entryId"]
         beta_text = forks[1]["text"]
