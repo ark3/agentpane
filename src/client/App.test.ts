@@ -3268,6 +3268,30 @@ describe("App", () => {
 		expect(container.querySelectorAll(".msg.editing")).toHaveLength(0);
 	});
 
+	/**
+	 * A fork that fails before it moves the selection leaves the edit open,
+	 * displaced draft and all, so Cancel still owes it (OW-hezidi, OW-kijuju).
+	 */
+	it("keeps the edit open when its fork fails, and Cancel still puts the displaced draft back (OW-kijuju)", async () => {
+		const controller = new FakeController(view({
+			draft: "half-written note",
+			state: attachedState([user("first draft"), assistant([{ type: "text", text: "an answer" }])]),
+		}));
+		const { container } = render(App, { props: { controller } });
+		await tick();
+
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		// The fake's `forkResult` is null: the fork never landed.
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await tick();
+		expect(controller.forked).toEqual([{ index: 0, images: [] }]);
+		expect(container.querySelectorAll(".msg.editing")).toHaveLength(1);
+		expect(screen.getByLabelText("Prompt")).toHaveValue("first draft");
+
+		await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
+	});
+
 	it("also cancels an edit on Escape, a second way out and never the only one (OW-hezidi)", async () => {
 		const controller = new FakeController(view({
 			draft: "half-written note",
@@ -4263,9 +4287,10 @@ describe("App", () => {
 	 * answer (OW-fahoti). The first stop answers with `queued` once `answer` is
 	 * called -- with no body at all when `queued` is empty, as the route's 204
 	 * does -- and any later stop, such as the fork's own, finds the queue
-	 * already empty. Every prompt is held until `land` is called, so a test
-	 * can answer while a fork or a send is still out; `prompts` is every
-	 * prompt's text, and `aborts` counts the stops that went out. With
+	 * already empty. Every prompt is held until `land` is called or `refuse`
+	 * fails it, so a test can answer while a fork or a send is still out;
+	 * `prompts` is every prompt's text, and `aborts` counts the stops that
+	 * went out. With
 	 * `streaming` false the turn has already ended, so a fork stops nothing.
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
@@ -4273,6 +4298,7 @@ describe("App", () => {
 		let emit: (event: ServerEvent) => void = () => {};
 		let answer = () => {};
 		let land = () => {};
+		let refuse = () => {};
 		let aborts = 0;
 		const prompts: string[] = [];
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
@@ -4288,8 +4314,9 @@ describe("App", () => {
 			preview: async (ref) => ({ ref, turns: [] }),
 			prompt: (_ref, body) => {
 				prompts.push(body.text);
-				return new Promise<void>((resolve) => {
+				return new Promise<void>((resolve, reject) => {
 					land = resolve;
+					refuse = () => reject(new Error("prompt refused"));
 				});
 			},
 			editDraft: async (body) => ({ text: body.text }),
@@ -4325,7 +4352,7 @@ describe("App", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			await tick();
 		};
-		return { controller, prompts, aborts: () => aborts, answer: () => settle(answer), land: () => settle(land) };
+		return { controller, prompts, aborts: () => aborts, answer: () => settle(answer), land: () => settle(land), refuse: () => settle(refuse) };
 	}
 
 	/**
@@ -4437,6 +4464,26 @@ describe("App", () => {
 		expect(prompts).toEqual(["first draft"]);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note");
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+	});
+
+	/**
+	 * A fork whose attach moved the selection has ended the edit, so when its
+	 * prompt then fails the unsent edit text is only a draft, and the displaced
+	 * draft comes back ahead of it (OW-kijuju).
+	 */
+	it("gives the displaced draft back ahead of the unsent edit text when a fork's prompt fails after its attach (OW-kijuju)", async () => {
+		const { controller, refuse } = await streamingPi([], false);
+		await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+		await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(controller.getView().state.selected).toEqual({ backend: "pi", id: "pi-fork" });
+		await refuse();
+
+		expect(screen.getByText("prompt refused")).toBeInTheDocument();
+		expect(controller.getView().sending).toBe(false);
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		expect(screen.getByLabelText("Prompt")).toHaveValue("half-written note\n\nfirst draft");
 	});
 
 	/**
