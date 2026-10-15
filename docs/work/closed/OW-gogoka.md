@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # The Pi preview draws every message line in file order, so a session file that branched in place shows the abandoned branch as part of the transcript
@@ -23,3 +24,10 @@ OW-livowu changes the same reader to draw `compaction` entries and keeps file or
 
 A test in `src/server/sessions/pi.test.ts` over a synthetic file with an in-file branch asserts that `extractPiPreviewTurns` returns only the messages on the path to the leaf, in order, and fails against today's file-order read.
 A file with no branch, every entry naming the line before it, previews exactly as it does today.
+
+## Close note
+
+Landed in 61efa48. `extractPiPreviewTurns` now draws only the branch from the file's last non-header entry back by `parentId`, which is the leaf `pi 1.2.0`'s `SessionManager._buildIndex` takes for a loaded file (read at `dist/core/session-manager.js` under the global Bun install, recorded in the docblock); a version 1 file, whose entries carry no ids, keeps file order as `migrateV1ToV2` chains it.
+The walk reuses `activeBranch` from `src/server/adapters/pi/reducer.ts`, now exported and generic; a compaction entry on the branch is still drawn as the marker (OW-livowu).
+Two new tests in `src/server/sessions/pi.test.ts` failed against the file-order read and pass now; fixtures in `preview.test.ts`, `composition.test.ts` and `pi.test.ts` that were not trees Pi could write were chained as Pi appends.
+The list row's one-line preview still reads the first user message in file order: OW-tegoje.
