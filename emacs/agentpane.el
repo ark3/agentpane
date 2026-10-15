@@ -2622,9 +2622,11 @@ displaced, which `agentpane-cancel-edit' would have put back in OTHER.
 The message itself is still in the transcript, to edit again here, and
 the kill ring keeps the user's changes to it.
 What a stop took out of Pi's queue that OTHER still holds, waiting on its
-edit or a prompt in flight (`agentpane-abort'), joins ahead of OTHER's
-draft, as cancelling that edit or failing that prompt would have joined
-it, and follows with it, so it does not go with the kill (OW-seleri).
+edit or a prompt in flight (`agentpane-abort'), is held here after this
+buffer's own, once OTHER's draft has moved, and waits on this buffer's
+edit or prompt in flight like any it held itself, so it does not go with
+the kill.  Joined into OTHER's draft instead, it followed that draft into
+the one this buffer's edit displaced, which a fork drops (OW-seleri).
 While this buffer holds an edit of its own, OTHER's draft follows instead
 the draft that edit displaced, and the prompt region, holding the edit's
 text, is left as it was: an edit sent here meanwhile, whose attach made
@@ -2662,8 +2664,7 @@ session's transcript is in view, and nothing would clear it, as
          (held (buffer-local-value 'agentpane--held-queued other))
          (region (with-current-buffer other
                    (buffer-substring-no-properties agentpane--prompt-start (point-max))))
-         (draft (let ((draft (if edit (plist-get edit :draft) region)))
-                  (if held (agentpane--with-queued held draft) draft)))
+         (draft (if edit (plist-get edit :draft) region))
          (composer (buffer-local-value 'agentpane--composer other)))
     (when (and edit (not (string-empty-p region)))
       (kill-new region)
@@ -2681,6 +2682,9 @@ its text is on the kill ring" (buffer-name other)))
           (goto-char (point-max))
           (unless (= (point) agentpane--prompt-start) (insert "\n"))
           (insert draft))))
+    (when held
+      (setq agentpane--held-queued (append agentpane--held-queued held))
+      (agentpane--release-queued))
     (dolist (each (buffer-list))
       (when (eq (buffer-local-value 'agentpane--composer-transcript each) other)
         (with-current-buffer each
@@ -3283,8 +3287,8 @@ ends:
   they keep waiting with it (`agentpane--send-edit').
 - A plain prompt's answer clears its text, and they take its place; one
   that fails leaves its text, and they land ahead of it.
-- A merge that kills this buffer joins them into the draft it carries to
-  the survivor, as the edit's end would have (`agentpane--absorb').
+- A merge that kills this buffer hands them to the survivor, where they
+  wait on its edit or prompt in flight as its own do (`agentpane--absorb').
 
 They belong to this buffer, the one whose session was stopped.  The
 browser has one composer for every session, so its words follow the

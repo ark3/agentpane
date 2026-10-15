@@ -1679,10 +1679,10 @@ the edit puts both drafts back."
 
 (ert-deftest agentpane-test-attach-onto-a-held-handle-keeps-pis-queue ()
   "When an attach reply merges away a buffer holding what a stop took out
-of Pi's queue, waiting on the edit it holds, those prompts join the draft
-the dropped edit displaced, as cancelling the edit would have put them,
-and follow the survivor's draft with it, rather than going with the kill
-\(OW-seleri)."
+of Pi's queue, waiting on the edit it holds, those prompts pass to the
+survivor rather than going with the kill, and, the survivor holding no
+edit and no prompt in flight, land at once ahead of its whole region,
+OTHER's draft included (OW-seleri)."
   (agentpane-test--with-helper
     (agentpane-test--merging
       (with-current-buffer previewing
@@ -1700,7 +1700,43 @@ and follow the survivor's draft with it, rather than going with the kill
       (with-current-buffer previewing
         (agentpane--attach)
         (should-not (buffer-live-p holder))
-        (should (equal (agentpane-test--draft) "mine\nsteered\n\ntheirs"))))))
+        (should (equal (agentpane-test--draft) "steered\n\nmine\ntheirs"))))))
+
+(ert-deftest agentpane-test-merge-into-an-edit-keeps-pis-queue-through-the-fork ()
+  "When an attach reply merges a buffer holding what a stop took out of
+Pi's queue into one holding an edit of its own, those prompts wait on the
+survivor's edit like any it held itself, rather than joining the draft
+that edit displaced, which a fork drops: the region keeps only the edited
+text, and once the edit's send has forked and its prompt answered they
+land in the region the send leaves (OW-seleri)."
+  (let ((kill-ring nil)
+        (kill-ring-yank-pointer nil)
+        (interprogram-cut-function nil)
+        (interprogram-paste-function nil))
+    (agentpane-test--with-helper
+      (agentpane-test--merging
+        (setq points [(:id "turn-0" :text "Fix the bug" :index 0)]
+              forked '(:backend "claude" :id "fork-1"))
+        (with-current-buffer holder
+          (setq agentpane--attached agentpane--connection)
+          (agentpane--draw agentpane-test--image-nodes)
+          (goto-char (point-max))
+          (insert "theirs")
+          (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+          (setq aborted '(:queued ["steered"]))
+          (agentpane-abort))
+        (with-current-buffer previewing
+          (agentpane--draw agentpane-test--image-nodes)
+          (agentpane--start-edit (aref agentpane-test--image-nodes 0))
+          (agentpane--attach)
+          (should-not (buffer-live-p holder))
+          (should agentpane--editing)
+          (should (equal (agentpane-test--draft) "Fix the bug"))
+          ;; The fork's own attach names no handle this buffer holds.
+          (setq attached nil)
+          (agentpane-send)
+          (should-not agentpane--editing)
+          (should (equal (agentpane-test--draft) "steered")))))))
 
 (ert-deftest agentpane-test-edit-send-that-merges-leaves-no-draft-to-prompt ()
   "An edit sent from a buffer only previewed attaches first, and when that
