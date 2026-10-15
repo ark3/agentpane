@@ -7,6 +7,7 @@ import {
 	type BackendId,
 	type LiveSessionSummary,
 	type ModelInfo,
+	type PromptDisposition,
 	type ServerEvent,
 	type SessionPreviewTurn,
 	type SessionRef,
@@ -195,6 +196,9 @@ class FakeController implements AgentpaneController {
 		});
 	}
 
+	/** What a landed submit answers; `"handled"` stands for a prompt a Pi extension consumed (OW-yobayi). */
+	submitDisposition: PromptDisposition = "started";
+
 	async submit() {
 		this.submitted += 1;
 		this.publish({ ...this.current, busy: "submitting", error: null });
@@ -203,7 +207,7 @@ class FakeController implements AgentpaneController {
 		// prompt is actually in flight (OW-nasofa, OW-mifuki, OW-kelede). This
 		// fake never raises it, so every press here gets through.
 		this.publish({ ...this.current, busy: "idle", ...(this.submissionError ? { error: this.submissionError } : {}) });
-		return this.submissionError === null;
+		return this.submissionError === null ? this.submitDisposition : null;
 	}
 
 	async abort() {
@@ -219,6 +223,8 @@ class FakeController implements AgentpaneController {
 	 * (OW-mifuki).
 	 */
 	forkResult: LiveSessionSummary | null = null;
+	/** The fork's prompt's disposition, reported beside `forkResult` when it lands. */
+	forkDisposition: PromptDisposition = "started";
 	/** Stands in for whatever the server does mid-fork, e.g. Pi's move onto the fork's handle. */
 	onForkAndSubmit: ((index: number) => void) | null = null;
 
@@ -226,7 +232,7 @@ class FakeController implements AgentpaneController {
 		this.forked.push({ index, images });
 		if (this.forkResult) onAttached?.(this.forkResult.handle);
 		this.onForkAndSubmit?.(index);
-		return this.forkResult;
+		return this.forkResult ? { session: this.forkResult, disposition: this.forkDisposition } : null;
 	}
 
 	async compact() {
@@ -2004,6 +2010,73 @@ describe("App", () => {
 	});
 
 	/**
+	 * A prompt the backend handled itself -- a Pi extension command such as
+	 * `/mcp` -- started no turn, so the arms `send()` put up for one come down as
+	 * they do for a prompt that failed (OW-yobayi). The stream below is another
+	 * tab's prompt, but it stands just as well for a turn the extension starts of
+	 * its own after answering handled, which Pi allows: this tab cannot tell the
+	 * two apart, so it follows and badges neither, and a missed badge is the
+	 * cheaper error. That is this ordering, the answer before the turn's
+	 * events; the other is OW-zikiga's.
+	 */
+	it("disarms follow and the badge for a prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
+		const old = user("old message");
+		const sessions = {
+			"pi:pi-1": { ref: piSession, messages: [old], isStreaming: false, seq: 1, error: null, errorId: null },
+		};
+		const controller = new FakeController(view({ draft: "/mcp", state: state({ selected: piSession, sessions }) }));
+		controller.submitDisposition = "handled";
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			const { container } = render(App, { props: { controller } });
+			await tick();
+			const el = container.querySelector(".conversation") as HTMLElement;
+
+			// The reader is parked away from the tail, so any movement below is follow.
+			mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+			el.scrollTop = 50;
+			await fireEvent.scroll(el);
+
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			expect(controller.submitted).toBe(1);
+			await tick();
+			expect(screen.getByRole("status", { name: "Prompt handled" })).toBeInTheDocument();
+
+			// A turn streams on the same session that this tab's prompt did not start.
+			const elsewhere = user("a turn this tab did not start");
+			const streamed = { ...sessions["pi:pi-1"], messages: [old, elsewhere], isStreaming: true };
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			mockContentTop(el.querySelector('[data-index="1"]') as HTMLElement, el, 400);
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			controller.publish(view({ state: state({ selected: piSession, sessions: { "pi:pi-1": streamed } }) }));
+			await tick();
+			await nextFrame();
+
+			// Still armed, follow would have chased the tail to 60.
+			expect(el.scrollTop).toBe(50);
+
+			controller.publish(view({
+				draft: "next prompt",
+				state: state({ selected: piSession, sessions: { "pi:pi-1": { ...streamed, isStreaming: false } } }),
+			}));
+			await tick();
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+
+			// The note is about the last prompt this tab sent there, so the next send takes it down.
+			controller.submitDisposition = "started";
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			expect(screen.queryByRole("status", { name: "Prompt handled" })).toBeNull();
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
 	 * Driven by the real controller, not the fake: the gap is the controller's to
 	 * detect, and the wiring from its detach to the watch is what is under test.
 	 * A later snapshot under the same handle -- this tab's re-attach, or another
@@ -3453,6 +3526,94 @@ describe("App", () => {
 			emit(status(3, false));
 			await tick();
 
+			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
+		} finally {
+			document.hasFocus = hasFocus;
+		}
+	});
+
+	/**
+	 * The fork's half of OW-yobayi: an Edit whose new text a Pi extension command
+	 * handles still lands a fork, attached and selected, but starts no turn on
+	 * it, so the follow and watch armed on the fork's handle at its attach come
+	 * down. A turn on the fork afterwards -- another client's, or one the
+	 * extension starts of its own, which this tab cannot tell apart -- is
+	 * followed and badged by neither.
+	 */
+	it("drops the follow and watch armed on a fork whose prompt the backend handled, and says it started no turn (OW-yobayi)", async () => {
+		const parentRef: SessionRef = { backend: "pi", id: "parent" };
+		const forkRef: SessionRef = { backend: "pi", id: "fork" };
+		let emit: (event: ServerEvent) => void = () => {};
+		const snapshot = (session: SessionRef, handle: string, seq: number, messages: AgentMessage[], isStreaming: boolean): ServerEvent => ({
+			type: "snapshot", session, handle, seq, messages, isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
+		});
+		const api: AgentpaneApi = {
+			listSessions: async () => [summary(parentRef)],
+			createSession: async () => parentRef,
+			attach: async (ref) => {
+				// A Pi fork at a user message keeps nothing from that message on.
+				if (ref.id === forkRef.id) emit(snapshot(forkRef, "h-fork", 1, [], false));
+				return { ...summary(ref), handle: ref.id === forkRef.id ? "h-fork" : "h-parent" };
+			},
+			preview: async (ref) => ({ ref, turns: [] }),
+			prompt: async () => ({ disposition: "handled" }),
+			editDraft: async (body) => ({ text: body.text }),
+			abort: async () => {},
+			compact: async () => {},
+			close: async () => {},
+			listModels: async () => [],
+			setModel: async () => {},
+			setEffort: async () => {},
+			setName: async () => {},
+			forkPoints: async () => [{ id: "turn-1", text: "first draft", index: 0 }],
+			fork: async () => forkRef,
+			dismissError: async () => {},
+			connect: (handlers: EventHandlers) => {
+				emit = handlers.onEvent;
+				return { close: () => {} };
+			},
+		};
+		const controller = createController(api);
+		document.head.innerHTML = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />';
+		const hasFocus = document.hasFocus;
+		document.hasFocus = () => false;
+		try {
+			const { container } = render(App, { props: { controller } });
+			const el = container.querySelector(".conversation") as HTMLElement;
+			emit(snapshot(parentRef, "h-parent", 1, [user("first draft"), assistant([{ type: "text", text: "an answer" }])], false));
+			await controller.select(parentRef);
+			await tick();
+
+			await fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+			await fireEvent.input(screen.getByLabelText("Prompt"), { target: { value: "/mcp" } });
+			await fireEvent.submit(screen.getByLabelText("Prompt").closest("form")!);
+			await tick();
+			await tick();
+			expect(controller.getView().state.selected).toEqual(forkRef);
+			expect(controller.getView().sending).toBe(false);
+			expect(screen.getByRole("status", { name: "Prompt handled" })).toBeInTheDocument();
+
+			// The reader is parked away from the tail, so any movement below is follow.
+			mockScrollMetrics(el, { scrollHeight: 1000, clientHeight: 500 });
+			el.scrollTop = 50;
+			await fireEvent.scroll(el);
+
+			// A turn on the fork that this tab's prompt did not start.
+			const elsewhere = user("a turn this tab did not start");
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			emit(snapshot(forkRef, "h-fork", 2, [elsewhere], true));
+			await tick();
+			mockContentTop(el.querySelector('[data-index="0"]') as HTMLElement, el, 400);
+			mockScrollMetrics(el, { scrollHeight: 560, clientHeight: 500 });
+			emit(snapshot(forkRef, "h-fork", 3, [elsewhere], true));
+			await tick();
+			await nextFrame();
+
+			// Still armed, follow would have chased the tail to 60.
+			expect(el.scrollTop).toBe(50);
+
+			emit(snapshot(forkRef, "h-fork", 4, [elsewhere, assistant([{ type: "text", text: "a reply" }])], false));
+			await tick();
 			expect(document.querySelector('link[rel="icon"]')!.getAttribute("href")).toBe("/favicon.svg");
 		} finally {
 			document.hasFocus = hasFocus;

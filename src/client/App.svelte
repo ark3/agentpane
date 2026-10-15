@@ -125,6 +125,20 @@
 		images: { mimeType: string; base64: string }[];
 		stashedDraft: string;
 	} | null>(null);
+	/**
+	 * The session whose last prompt from this tab the backend handled without
+	 * starting a turn for it -- a Pi extension command such as `/mcp` -- or
+	 * null (OW-yobayi). The composer says so, because the draft clears and
+	 * nothing else on screen would tell that prompt from one whose turn is slow
+	 * to start.
+	 *
+	 * Keyed by `keyOf`, so an answer landing after a click away shows on no
+	 * other session's composer. Client-local rather than a notice: the
+	 * session's `notices` are backend state the server carries on every
+	 * snapshot (OW-tujiya), and this is about one tab's own send. It comes down
+	 * with the next send from this tab, and with a switch, as `editing` does.
+	 */
+	let handledKey = $state<string | null>(null);
 	let conversationEl: HTMLElement | undefined;
 	// $state because it is bound inside a conditional block -- Svelte updates the
 	// binding (element <-> undefined) as the composer swaps in and out.
@@ -854,11 +868,24 @@
 	}
 
 	/**
-	 * The submit those two armed never reached the backend (OW-mifuki). Both
-	 * arms come off together: left standing, the next stream on that session --
-	 * another tab prompting it, or a turn that was already running -- would
-	 * engage follow here and badge this tab for a turn it never sent, which is
-	 * the one thing `favicon.ts` says the badge means.
+	 * The submit those two armed never reached the backend (OW-mifuki), or
+	 * reached it and started no turn, because the backend handled the prompt
+	 * itself (OW-yobayi). Both arms come off together: left standing, the next
+	 * stream on that session -- another tab prompting it, or a turn that was
+	 * already running -- would engage follow here and badge this tab for a turn
+	 * it never sent, which is the one thing `favicon.ts` says the badge means.
+	 *
+	 * A handled prompt disarms even though Pi lets the extension that handled
+	 * it start a turn of its own afterwards (`PromptDisposition`): nothing on
+	 * the stream tells that turn from another tab's on the same session, and
+	 * badging for a turn this tab did not ask for is the error the badge must
+	 * never make, where missing one costs a glance (OW-yobayi).
+	 *
+	 * That holds only when the answer comes first. A handler that starts its
+	 * turn before answering, or another tab's message landing on the stream
+	 * ahead of the answer, engages follow and may badge before this runs, and
+	 * the disarm also drops a watch or follow an earlier submit from this tab
+	 * left on the same session; both are OW-zikiga's.
 	 */
 	function disarmSubmit(key: string): void {
 		pendingFollow.delete(key);
@@ -897,6 +924,7 @@
 		// displaced draft is not restored here -- switching sessions has never
 		// rewritten the composer, and this is a switch.
 		editing = null;
+		handledKey = null;
 
 		const el = conversationEl;
 		if (!el) return;
@@ -1243,6 +1271,7 @@
 		// flag rather than `busy` -- which an abort or an attach clears while the
 		// POST it described is still outstanding (OW-kelede).
 		if (view.sending) return;
+		handledKey = null;
 		// The selected session's handle, which a rename landing while the request
 		// is in flight (D9) leaves alone, so it still names that session when the
 		// request settles (OW-kimaya): where the plain path armed its follow and
@@ -1251,8 +1280,10 @@
 		if (!edit) {
 			armFollow();
 			armBadge();
-			void controller.submit().then((sent) => {
-				if (!sent && armedKey) disarmSubmit(armedKey);
+			void controller.submit().then((disposition) => {
+				if (disposition === "started" || !armedKey) return;
+				disarmSubmit(armedKey);
+				if (disposition === "handled") handledKey = armedKey;
 			});
 			return;
 		}
@@ -1292,6 +1323,12 @@
 				// be badged about -- and a fork nothing prompted is no exception.
 				if (forkKey) disarmSubmit(forkKey);
 				return;
+			}
+			// The fork landed, so the edit is over, but its prompt may have started
+			// no turn on it: the same arms come down (OW-yobayi).
+			if (landed.disposition === "handled" && forkKey) {
+				disarmSubmit(forkKey);
+				handledKey = forkKey;
 			}
 			if (editing === edit) editing = null;
 		});
@@ -1535,6 +1572,11 @@
 			{/if}
 			{#if looksLikeSlashCommand}
 				<p class="warning">Agentpane does not run slash commands — this will be sent to the agent as plain text.</p>
+			{/if}
+			<!-- Says what the prompt did not do, never that nothing follows it: the
+			     extension that handled it may still start work of its own (OW-yobayi). -->
+			{#if handledKey !== null && view.state.selected && keyOf(view.state.selected) === handledKey}
+				<p class="warning" role="status" aria-label="Prompt handled">The agent handled that prompt itself; no turn was started for it.</p>
 			{/if}
 			<textarea
 				aria-label="Prompt"

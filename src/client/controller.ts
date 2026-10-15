@@ -2,6 +2,7 @@ import type {
 	BackendId,
 	LiveSessionSummary,
 	ModelInfo,
+	PromptDisposition,
 	PromptRequest,
 	ServerEvent,
 	SessionPreviewResponse,
@@ -170,14 +171,19 @@ export interface AgentpaneController {
 	/**
 	 * Send the current draft to the selected session.
 	 *
-	 * Resolves **true** only when the prompt landed, the way `forkAndSubmit`
-	 * below does, because there are four ways for it not to -- nothing
-	 * selected, a selection this tab holds no live view of (OW-forinu), an
-	 * empty draft or a prompt already in flight, and a rejected POST -- and the
-	 * caller arms per-tab state on a submit that only the answer here can tell
-	 * it to take back down (OW-mifuki).
+	 * Resolves to the prompt's disposition only when it landed, and null
+	 * otherwise, the way `forkAndSubmit` below does, because there are four
+	 * ways for it not to -- nothing selected, a selection this tab holds no
+	 * live view of (OW-forinu), an empty draft or a prompt already in flight,
+	 * and a rejected POST -- and the caller arms per-tab state on a submit that
+	 * only the answer here can tell it to take back down (OW-mifuki).
+	 *
+	 * A landed prompt can still have started no turn: `"handled"` is one a Pi
+	 * extension consumed (`PromptDisposition`, OW-dulipe), and the caller takes
+	 * its arms down for that as well (OW-yobayi). The draft clears for it as
+	 * for a started one, since the backend took the prompt.
 	 */
-	submit(): Promise<boolean>;
+	submit(): Promise<PromptDisposition | null>;
 	/**
 	 * Fork the selected session just before the user message at transcript
 	 * `index` and send the current draft, plus `images`, into the fork
@@ -209,10 +215,13 @@ export interface AgentpaneController {
 	 * bails before it leaves a turn that was never stopped. An abort that fails
 	 * leaves that turn running unwatched, as agentpane-mode's does.
 	 *
-	 * Resolves to **the attach reply of the session the prompt landed on**, or
-	 * null if it never landed. The shell reads only whether it landed: the
-	 * fork's follow and watch are armed through `onAttached` (OW-koledi,
-	 * OW-vitefo), and nothing of the parent's moves to the fork (OW-pirobi).
+	 * Resolves to **the attach reply of the session the prompt landed on**,
+	 * with the prompt's disposition, or null if it never landed. The shell reads
+	 * only whether it landed and whether the fork's prompt was handled without
+	 * starting a turn: the fork's follow and watch are armed through
+	 * `onAttached` (OW-koledi, OW-vitefo), and a handled prompt takes them down
+	 * again (OW-yobayi), but nothing of the parent's moves to the fork
+	 * (OW-pirobi).
 	 * The reply carries the fork's handle, not only its ref, because the fork's
 	 * first prompt can rename it before this resolves -- Claude Code renames at
 	 * `init`, after `submit()` -- and by then no view or summary carries the ref
@@ -236,7 +245,7 @@ export interface AgentpaneController {
 		images?: PromptRequest["images"],
 		onAttached?: (handle: string) => void,
 		onAbort?: (handle: string) => void,
-	): Promise<LiveSessionSummary | null>;
+	): Promise<{ session: LiveSessionSummary; disposition: PromptDisposition } | null>;
 	/** Stop the selected session's turn; no-op unless its pane is live (OW-forinu). */
 	abort(): Promise<void>;
 	/** Compact the selected session's context (OW-72); no-op unless its pane is live (OW-forinu). */
@@ -1245,20 +1254,20 @@ export function createController(
 			const selected = view.state.selected;
 			if (!selected) {
 				publish({ error: "Select a session before submitting a prompt." });
-				return false;
+				return null;
 			}
 			// Only to a session this tab holds live (OW-forinu). The pane draws no
 			// composer anywhere else, but the controller does not lean on that: a
 			// session with no view here is one the server may no longer hold, and
 			// the prompt route answers that with 409 `not_attached` (D25).
-			if (paneMode(view) !== "live") return false;
+			if (paneMode(view) !== "live") return null;
 			// One prompt at a time (OW-nasofa): a second Ctrl-Enter, or Enter then a
 			// click on Send, while the POST is in flight would issue a second
 			// identical prompt -- the server admits it and what the backend does
 			// with it is nobody's intent. Read off `sending` rather than `busy`,
 			// which an abort or an attach clears mid-POST (OW-kelede).
-			if (view.sending) return false;
-			if (!view.draft) return false;
+			if (view.sending) return null;
+			if (!view.draft) return null;
 			const text = view.draft;
 			// The error on screen as the user sends, which is the only one
 			// admitting this prompt may clear: one raised while it is on its way
@@ -1267,7 +1276,7 @@ export function createController(
 			const priorErrorId = handle === undefined ? null : (view.state.sessions[handle]?.errorId ?? null);
 			publish({ busy: "submitting", sending: true, error: null });
 			try {
-				await api.prompt(selected, { text, priorErrorId });
+				const response = await api.prompt(selected, { text, priorErrorId });
 				if (!disposed) {
 					// The request cleared the global error before starting. Leaving it
 					// untouched here preserves any newer failure from concurrent work.
@@ -1286,10 +1295,10 @@ export function createController(
 					// up until the event, which is the server's truth all along.
 					if (view.draft === text) publish({ draft: "" });
 				}
-				return true;
+				return response?.disposition ?? "started";
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
-				return false;
+				return null;
 			} finally {
 				publish({ sending: false, ...(view.busy === "submitting" ? { busy: "idle" } : {}) });
 			}
@@ -1425,7 +1434,7 @@ export function createController(
 				applyAttached(attached, forkIntent === selectionIntent, forked);
 				// The fork is a conversation the user has seen no error on, so admitting
 				// this clears none: one its attach's start raised stays up (OW-jokoto).
-				await api.prompt(attached.ref, { text, priorErrorId: null, ...(images && images.length > 0 ? { images } : {}) });
+				const response = await api.prompt(attached.ref, { text, priorErrorId: null, ...(images && images.length > 0 ? { images } : {}) });
 				if (disposed) return null;
 				// The prompt landed, so the composer must stop offering text that has
 				// already been sent -- but only if it is still that text. The
@@ -1445,7 +1454,7 @@ export function createController(
 					...(view.draft === text ? { draft: "" } : {}),
 					...(forkIntent === selectionIntent ? { error: null } : {}),
 				});
-				return attached;
+				return { session: attached, disposition: response?.disposition ?? "started" };
 			} catch (error: unknown) {
 				// Reached past a successful `api.fork`, this abandons the fork too; the
 				// note at that call says why that is deliberate (OW-puduro).

@@ -5,6 +5,7 @@ import type {
 	ForkRequest,
 	LiveSessionSummary,
 	ModelInfo,
+	PromptResponse,
 	ServerEvent,
 	SessionPreviewResponse,
 	SessionPreviewTurn,
@@ -103,7 +104,7 @@ class FakeApi implements AgentpaneApi {
 	readonly preview = vi.fn(
 		async (session: SessionRef, _signal?: AbortSignal): Promise<SessionPreviewResponse> => ({ ref: session, turns: [] }),
 	);
-	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }) => {});
+	readonly prompt = vi.fn(async (_session: SessionRef, _body: { text: string }): Promise<PromptResponse | void> => {});
 	readonly editDraft = vi.fn(async (_body: { text: string }) => ({ text: "edited draft" }));
 	readonly abort = vi.fn(async (_session: SessionRef) => {});
 	readonly compact = vi.fn(async (_session: SessionRef) => {});
@@ -558,6 +559,27 @@ describe("client controller", () => {
 
 		expect(api.prompt).toHaveBeenCalledWith(ref, { text: "send me", priorErrorId: null });
 		expect(controller.getView().draft).toBe("");
+	});
+
+	/**
+	 * The shell takes its follow and badge arming down for a prompt that
+	 * started no turn, and only the answer here can tell it which one this was
+	 * (OW-yobayi). The draft clears either way: the backend took the prompt.
+	 */
+	it("resolves a landed prompt's disposition, handled for the 200 body and started for none (OW-yobayi)", async () => {
+		const api = new FakeApi();
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+
+		controller.setDraft("/mcp");
+		api.prompt.mockResolvedValueOnce({ disposition: "handled" });
+		expect(await controller.submit()).toBe("handled");
+		expect(controller.getView().draft).toBe("");
+
+		controller.setDraft("a real prompt");
+		expect(await controller.submit()).toBe("started");
 	});
 
 	it("ignores a second submit while the first prompt is still in flight", async () => {
@@ -1365,7 +1387,7 @@ describe("client controller", () => {
 				{ ...fileless, status: "detached" },
 				stored,
 			]);
-			expect(await controller.submit()).toBe(false);
+			expect(await controller.submit()).toBeNull();
 			expect(api.prompt).not.toHaveBeenCalled();
 			controller.dispose();
 		});
@@ -1727,7 +1749,7 @@ describe("client controller", () => {
 		await controller.select(ref);
 		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
-		expect((await controller.forkAndSubmit(0))?.ref).toEqual(forkedRef);
+		expect((await controller.forkAndSubmit(0))?.session.ref).toEqual(forkedRef);
 		api.emit({ type: "snapshot", session: forkedRef, handle: h(forkedRef), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 		await settle();
@@ -2141,6 +2163,25 @@ describe("client controller", () => {
 		expect(controller.getView().draft).toBe("");
 	});
 
+	/** The fork's prompt answers the same two ways a plain one does (OW-yobayi). */
+	it("resolves a landed fork with its prompt's disposition (OW-yobayi)", async () => {
+		const api = new FakeApi();
+		api.forkPoints.mockResolvedValue([{ id: "turn-1", text: "first", index: 0 }]);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+
+		controller.setDraft("/mcp");
+		api.prompt.mockResolvedValueOnce({ disposition: "handled" });
+		expect(await controller.forkAndSubmit(0)).toEqual({ session: summary(forkedRef), disposition: "handled" });
+
+		// Forked again, from the fork the first one selected.
+		api.emit(snapshotOf(forkedRef));
+		controller.setDraft("reworded");
+		expect((await controller.forkAndSubmit(0))?.disposition).toBe("started");
+	});
+
 	/**
 	 * OW-roveze, the defect this addressing scheme exists for. Steering a running
 	 * Codex turn puts a second `userMessage` in it, which is its own `role:
@@ -2166,7 +2207,7 @@ describe("client controller", () => {
 		api.emit(snapshotOf(ref));
 		controller.setDraft("reworded");
 
-		expect((await controller.forkAndSubmit(4))?.ref).toEqual(forkedRef);
+		expect((await controller.forkAndSubmit(4))?.session.ref).toEqual(forkedRef);
 
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-2" });
 	});
@@ -2260,7 +2301,7 @@ describe("client controller", () => {
 			api.emit({ type: "snapshot", session: parent, handle: h(parent), seq: 1, messages: [], isStreaming: true, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [] });
 			controller.setDraft("reworded");
 
-			expect((await controller.forkAndSubmit(0))?.ref).toEqual(forkedRef);
+			expect((await controller.forkAndSubmit(0))?.session.ref).toEqual(forkedRef);
 
 			expect(api.abort).not.toHaveBeenCalled();
 			expect(api.fork).toHaveBeenCalledWith(parent, { entryId: "turn-1" });
@@ -2292,7 +2333,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		forking.resolve(forkedRef);
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
 		expect(controller.getView().state.selected).toEqual(other);
@@ -2325,7 +2366,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		aborting.resolve();
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
@@ -2354,7 +2395,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		points.resolve([{ id: "turn-1", text: "first", index: 0 }]);
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(api.fork).toHaveBeenCalledWith(ref, { entryId: "turn-1" });
 		expect(api.attach).toHaveBeenCalledWith(forkedRef);
 		expect(api.prompt).toHaveBeenCalledWith(forkedRef, { text: "reworded", priorErrorId: null });
@@ -2417,7 +2458,7 @@ describe("client controller", () => {
 		const selecting = controller.select(other);
 		await settle();
 		forking.resolve(forkedRef);
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		attachingOther.resolve(summary(other));
 		await selecting;
 
@@ -2453,7 +2494,7 @@ describe("client controller", () => {
 		await controller.select(other);
 		prompt.resolve();
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("");
 		expect(controller.getView().state.selected).toEqual(other);
 	});
@@ -2490,7 +2531,7 @@ describe("client controller", () => {
 		expect(paneMode(controller.getView())).toBe("preview");
 		attachingFork.resolve(summary(forkedRef));
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().state.selected).toEqual(forkedRef);
 		api.emit(snapshotOf(forkedRef));
 		expect(paneMode(controller.getView())).toBe("live");
@@ -2526,7 +2567,7 @@ describe("client controller", () => {
 		expect(api.fork).toHaveBeenCalledOnce();
 		forking.resolve(forkedRef);
 		expect(await second).toBeNull();
-		expect((await first)?.ref).toEqual(forkedRef);
+		expect((await first)?.session.ref).toEqual(forkedRef);
 		expect(api.prompt).toHaveBeenCalledOnce();
 		controller.dispose();
 	});
@@ -2556,7 +2597,7 @@ describe("client controller", () => {
 		controller.setDraft("and the next thing");
 		prompt.resolve();
 
-		expect((await submitted)?.ref).toEqual(forkedRef);
+		expect((await submitted)?.session.ref).toEqual(forkedRef);
 		expect(controller.getView().draft).toBe("and the next thing");
 		controller.dispose();
 	});
@@ -2586,7 +2627,7 @@ describe("client controller", () => {
 
 		expect(api.prompt).toHaveBeenCalledOnce();
 		prompt.resolve();
-		expect(await second).toBe(false);
+		expect(await second).toBeNull();
 		await first;
 		controller.dispose();
 	});
@@ -2895,7 +2936,7 @@ describe("client controller", () => {
 			expect(api.preview).toHaveBeenCalledExactlyOnceWith(ref, expect.any(AbortSignal));
 			expect(controller.getView().preview).toEqual({ ref, turns });
 			controller.setDraft("sent to nobody");
-			expect(await controller.submit()).toBe(false);
+			expect(await controller.submit()).toBeNull();
 			expect(api.prompt).not.toHaveBeenCalled();
 			controller.dispose();
 		});
@@ -2920,7 +2961,7 @@ describe("client controller", () => {
 			expect(controller.getView().state.sessions[h(ref)]).toBeUndefined();
 			expect(paneMode(controller.getView())).not.toBe("live");
 			controller.setDraft("sent to nobody");
-			expect(await controller.submit()).toBe(false);
+			expect(await controller.submit()).toBeNull();
 			expect(api.prompt).not.toHaveBeenCalled();
 			controller.dispose();
 		});
@@ -2964,7 +3005,7 @@ describe("client controller", () => {
 				expect(landed.busy).toBe("idle");
 				api.prompt.mockClear();
 				controller.setDraft("sent to nobody");
-				expect(await controller.submit()).toBe(false);
+				expect(await controller.submit()).toBeNull();
 				expect(api.prompt).not.toHaveBeenCalled();
 				controller.dispose();
 			});
@@ -2993,7 +3034,7 @@ describe("client controller", () => {
 			expect(paneMode(controller.getView())).toBe("loading");
 			expect(api.preview).toHaveBeenCalledWith(ref, expect.any(AbortSignal));
 			controller.setDraft("sent to nobody");
-			expect(await controller.submit()).toBe(false);
+			expect(await controller.submit()).toBeNull();
 			expect(api.prompt).not.toHaveBeenCalled();
 			controller.dispose();
 		});
