@@ -1,5 +1,6 @@
 ---
 labels: [defect]
+closed: done
 ---
 
 # PiAdapter orders a stop after every prompt already on Pi's stdin, retiring the stopsInFlight refusal
@@ -33,3 +34,16 @@ Say at `PiAdapter.abort` what happens to the texts when the `abort` after a succ
 - The `stopsInFlight` counter and the `STOP_IN_FLIGHT_ERROR` refusal are gone from `src/server/adapters/pi/process.ts`, or, if the decision above keeps a refusal, it is expressed through the same ordering and not a second counter; the two existing tests in `describe("PiAdapter stop (D16, OW-wisifo)")` are rewritten to the decision.
 - The comment on `PiAdapter.abort` names the decision and the failed-`abort` case, and `docs/DESIGN.md` D16's sentence "`PiAdapter.submit` refuses a prompt while a stop is awaiting Pi's answer" is updated to match, along with the same sentence in OW-fahoti and OW-seleri if they are still open.
 - `bun run check` passes.
+
+## Close note
+
+Landed on main as 2cd413fe and 6d00e3d6 (2026-10-15).
+`PiAdapter` in `src/server/adapters/pi/process.ts` now owns the order of prompts and stops on Pi's stdin: `abort()` sends `clear_queue` only once every `prompt` already written has been answered (`unansweredPrompts`) and once any earlier stop has settled, and `submit` holds a prompt sent during a stop until the stop settles (`stopping`, looped so a second stop started meanwhile holds it too).
+`stopsInFlight` and `STOP_IN_FLIGHT_ERROR` are gone.
+Decision: a prompt sent during a stop waits rather than being refused, so Stop then Send starts a fresh turn on the idle Pi; if the stop fails, the held prompt still goes out.
+The `abort` docblock records what that costs: a Pi that never answers `abort` holds the prompt and every `SessionManager.#serially` verb behind it until the session closes or Pi dies, both of which fail what waits; a stop pressed during a prompt's preflight waits it out, and an extension command awaiting `ctx.waitForIdle()` makes that Stop stop nothing.
+A failed `abort` after a successful `clear_queue` rejects the stop and loses the cleared texts, also stated there.
+D16 in `docs/DESIGN.md` is updated; OW-fahoti and OW-seleri were already closed, so the clause naming them did not fire.
+Verified: the new test "sends its clear only once ..." was red against the landed `abort()` (clear_queue written while the prompt was unanswered); the adversarial read mutation-tested each piece of the ordering, and its two test gaps (the `while` loop, the refused-stop test passing with the hold removed) were closed with tests shown red first.
+`bun run check` passed on main, 1718 tests.
+The read also found the waits unbounded against both clients' timeouts and the waitForIdle case; those are OW-miguyu.
