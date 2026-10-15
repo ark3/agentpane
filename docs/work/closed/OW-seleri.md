@@ -1,6 +1,7 @@
 ---
 labels: [change, emacs]
 blocked-by: [OW-wisifo]
+closed: done
 ---
 
 # Stop in Emacs puts the text of every steered prompt Pi had not delivered back in the prompt region
@@ -43,3 +44,16 @@ The browser's rule lives at `stop()` and the release `$effect` beside `heldQueue
 - If the text goes to an open composer buffer, an ERT test asserts that too.
 - The ERT suite passes: `emacs --batch -L emacs -l ert -l agentpane -l agentpane-test -f ert-run-tests-batch-and-exit`.
 - `bun run check` passes if anything under `src/` changed.
+
+## Close note
+
+Landed on main as d0016b9b, a4468c29 and 1ef4b874 (emacs/agentpane.el, emacs/agentpane-test.el; nothing under src/, so no `bun run check` was needed).
+`agentpane-abort` now reads `sessions/abort`'s `:queued` into a buffer-local `agentpane--held-queued`, and one function, `agentpane--release-queued`, joins the texts ahead of the prompt region with `agentpane--with-queued` (the browser's `withQueued` rule) once that buffer has no edit open (`agentpane--editing`) and no prompt in flight (`agentpane--sending`).
+It runs at the abort's answer, at `agentpane-cancel-edit`, at `agentpane--send-prompt`'s answer and failure, at `agentpane--send-edit`'s `free` and success, and in `agentpane--absorb`, which hands a merged-away buffer's held texts to the survivor's queue.
+This matches OW-fahoti: what the region holds when the answer lands decides where the words go, not which command sent the stop.
+Decisions, recorded in the docstrings: the texts always go to the transcript's prompt region, never a composer, because every transcript has one, an edit lives there, a transcript can have zero or several composers, and `agentpane-composer-discard` kills composer text unasked (`agentpane-abort`). They stay in the stopped buffer, not the fork's, because Emacs has a prompt region per buffer where the browser has one global composer (`agentpane-edit-last`). The fork path's own abort still drops its `:queued`, as the browser's does.
+Verified by six new ERT tests, each shown red first against the unchanged code or with its release removed: two texts ahead of a draft, a blank draft and a nil answer; `agentpane-edit-last` with Cancel and with a send; a plain abort during an open edit; an abort behind a prompt in flight; an edit cancelled mid-send; and merges with and without an edit on the survivor, with the order of both buffers' texts asserted.
+An adversarial reader also killed 11 of 12 mutations; the survivor became the merge-order test.
+The full ERT suite on main: 268 run, 265 as expected, 0 unexpected, 3 skipped (the same three as before).
+Review found and fixed a loss in the first cut: `agentpane--absorb` joined the held texts into the draft, which a survivor's open edit took as its `:draft` and a fork dropped.
+Left open: a Stop answered before an edit's `sessions/forkPoints` returns lands in the region and is then displaced into the edit's draft, which a fork drops. That is amended into OW-kijuju. An abort still in flight when a merge kills its buffer loses its `:queued`; that is amended into OW-larele. `agentpane--gone` and a plain buffer kill don't put held texts on the kill ring, and no reachable path for the first was found.
