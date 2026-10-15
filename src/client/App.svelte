@@ -43,6 +43,7 @@
 		connection: "connecting",
 		busy: "idle",
 		sending: false,
+		editingExternally: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -1774,7 +1775,7 @@
 				<button
 					type="button"
 					onclick={() => view.busy === "idle" && void controller.editDraft()}
-					disabled={view.busy === "editing-externally"}
+					disabled={view.editingExternally}
 				>External Editor</button>
 				<div id="tools-menu" popover class="tools-menu-list" role="menu">
 					<button

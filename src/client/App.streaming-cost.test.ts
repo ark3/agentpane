@@ -167,6 +167,7 @@ function initialView(selectedTurns: number): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		sending: false,
+		editingExternally: false,
 		error: null,
 		models: [],
 		modelSetting: false,

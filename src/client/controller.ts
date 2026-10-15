@@ -45,6 +45,13 @@ export interface ControllerView {
 	 * still outstanding, and a second press went through.
 	 */
 	sending: boolean;
+	/**
+	 * `editDraft`'s round trip through the external editor is out, owned by
+	 * `editDraft` alone, as `sending` is the prompt's and for the same reason:
+	 * `abort` and `attachAndSelect` write `busy` over its `"editing-externally"`
+	 * mid-trip, which read as idle and let a second editor open (OW-momejo).
+	 */
+	editingExternally: boolean;
 	error: string | null;
 	/** Live options for the selected conversation only while it is `unprompted`. */
 	models: ModelInfo[];
@@ -378,6 +385,7 @@ export function createController(
 		connection: "connecting",
 		busy: "idle",
 		sending: false,
+		editingExternally: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -1326,16 +1334,16 @@ export function createController(
 			}
 		},
 		async editDraft() {
-			if (view.busy !== "idle") return;
+			if (view.busy !== "idle" || view.editingExternally) return;
 			const text = view.draft;
-			publish({ busy: "editing-externally", error: null });
+			publish({ busy: "editing-externally", editingExternally: true, error: null });
 			try {
 				const edited = await api.editDraft({ text });
 				if (!disposed) publish({ draft: edited.text });
 			} catch (error: unknown) {
 				if (!disposed) publish({ error: errorMessage(error) });
 			} finally {
-				if (!disposed && busyIs("editing-externally")) publish({ busy: "idle" });
+				if (!disposed) publish({ editingExternally: false, ...(busyIs("editing-externally") ? { busy: "idle" } : {}) });
 			}
 		},
 		async forkAndSubmit(index, images, onAttached, onAbort) {

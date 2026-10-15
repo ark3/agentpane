@@ -75,6 +75,7 @@ function view(overrides: Partial<ControllerView> = {}): ControllerView {
 		connection: "connected",
 		busy: "idle",
 		sending: false,
+		editingExternally: false,
 		error: null,
 		models: [],
 		modelSetting: false,
@@ -2871,7 +2872,7 @@ describe("App", () => {
 	});
 
 	it("does not start the external editor unless idle and disables its button while editing", async () => {
-		const controller = new FakeController(view({ draft: "busy draft", busy: "editing-externally" }));
+		const controller = new FakeController(view({ draft: "busy draft", busy: "editing-externally", editingExternally: true }));
 		render(App, { props: { controller } });
 		const button = screen.getByRole("button", { name: "External Editor" });
 		const textarea = screen.getByLabelText("Prompt");
@@ -4291,7 +4292,8 @@ describe("App", () => {
 	 * fails it, so a test can answer while a fork or a send is still out;
 	 * `prompts` is every prompt's text, and `aborts` counts the stops that
 	 * went out. With `streaming` false the turn has already ended, so a fork
-	 * stops nothing.
+	 * stops nothing. The external editor is held open until `edit` answers it
+	 * with a text; `edits` is every text it was opened on.
 	 */
 	async function streamingPi(queued: string[], streaming = true) {
 		const forkRef: SessionRef = { backend: "pi", id: "pi-fork" };
@@ -4299,8 +4301,10 @@ describe("App", () => {
 		let answer = () => {};
 		let land = () => {};
 		let refuse = () => {};
+		let answerEdit = (_text: string) => {};
 		let aborts = 0;
 		const prompts: string[] = [];
+		const edits: string[] = [];
 		const snapshot = (session: SessionRef, handle: string, isStreaming: boolean): ServerEvent => ({
 			type: "snapshot", session, handle, seq: 1, messages: [user("first draft"), assistant([{ type: "text", text: "an answer" }])], isStreaming, compaction: null, model: null, effort: null, unrestoredModel: null, error: null, errorId: null, notices: [],
 		});
@@ -4319,7 +4323,12 @@ describe("App", () => {
 					refuse = () => reject(new Error("prompt refused"));
 				});
 			},
-			editDraft: async (body) => ({ text: body.text }),
+			editDraft: (body) => {
+				edits.push(body.text);
+				return new Promise<{ text: string }>((resolve) => {
+					answerEdit = (text) => resolve({ text });
+				});
+			},
 			abort: () => {
 				aborts += 1;
 				if (aborts > 1) return Promise.resolve();
@@ -4352,7 +4361,7 @@ describe("App", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			await tick();
 		};
-		return { controller, prompts, aborts: () => aborts, answer: () => settle(answer), land: () => settle(land), refuse: () => settle(refuse) };
+		return { controller, prompts, edits, aborts: () => aborts, answer: () => settle(answer), land: () => settle(land), refuse: () => settle(refuse), edit: (text: string) => settle(() => answerEdit(text)) };
 	}
 
 	/**
@@ -4549,6 +4558,36 @@ describe("App", () => {
 		await land();
 		expect(prompts).toEqual(["half-written note"]);
 		expect(screen.getByLabelText("Prompt")).toHaveValue("");
+	});
+
+	/**
+	 * `streamingPi`'s own select is superseded by the mount's auto-preview of
+	 * the same session, whose reselect leaves `busy` on "attaching", where the
+	 * External Editor will not open; a second select ends idle.
+	 */
+	async function settledSelection(controller: AgentpaneController) {
+		await controller.select(piSession);
+		await tick();
+		expect(controller.getView().busy).toBe("idle");
+	}
+
+	/**
+	 * The Stop writes `busy` over the round trip's, and the External Editor
+	 * still reads as open until the editor answers (OW-momejo).
+	 */
+	it("keeps the External Editor disabled through a Stop while it is open (OW-momejo)", async () => {
+		const { controller, edits, answer, edit } = await streamingPi([]);
+		await settledSelection(controller);
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+		await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+		await answer();
+
+		const button = screen.getByRole("button", { name: "External Editor" });
+		expect(button).toBeDisabled();
+		await fireEvent.keyDown(screen.getByLabelText("Prompt"), { key: "g", ctrlKey: true });
+		expect(edits).toEqual(["half-written note"]);
+		await edit("rewritten note");
+		expect(button).toBeEnabled();
 	});
 
 	/**

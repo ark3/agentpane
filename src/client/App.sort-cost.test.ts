@@ -174,6 +174,7 @@ async function mounted(): Promise<PublishingController> {
 		connection: "connected",
 		busy: "idle",
 		sending: false,
+		editingExternally: false,
 		error: null,
 		models: [],
 		modelSetting: false,

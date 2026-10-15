@@ -548,6 +548,31 @@ describe("client controller", () => {
 		expect(controller.getView()).toMatchObject({ draft: "keep me", busy: "idle", error: "editor exited 1" });
 	});
 
+	/**
+	 * An abort writes `busy` over the round trip's, so `busy` cannot be what
+	 * keeps a second editor from opening (OW-momejo).
+	 */
+	it("opens no second external editor when an abort lands during the round trip", async () => {
+		const api = new FakeApi();
+		const editing = deferred<{ text: string }>();
+		api.editDraft.mockReturnValue(editing.promise);
+		const controller = createController(api);
+		await controller.start();
+		await controller.select(ref);
+		api.emit(snapshotOf(ref));
+		controller.setDraft("current draft");
+
+		const edit = controller.editDraft();
+		await controller.abort();
+		const second = controller.editDraft();
+
+		expect(api.editDraft).toHaveBeenCalledTimes(1);
+		expect(controller.getView().editingExternally).toBe(true);
+		editing.resolve({ text: "edited draft" });
+		await Promise.all([edit, second]);
+		expect(controller.getView()).toMatchObject({ draft: "edited draft", editingExternally: false, busy: "idle" });
+	});
+
 	it("clears the draft only after the prompt is accepted", async () => {
 		const api = new FakeApi();
 		const controller = createController(api);
