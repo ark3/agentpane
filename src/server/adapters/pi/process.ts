@@ -78,9 +78,11 @@ export class PiAdapter implements BackendAdapter {
 	 * Pi's session id *is* its JSONL path (D9), and for a `virtual` session Pi
 	 * chooses that path itself. So `ref` is not stable at construction: it
 	 * holds whatever the caller named the session until Pi reports the real
-	 * `sessionFile`, at which point it is adopted. As of `pi 0.87.1` Pi names
-	 * the path from `start()`'s `get_state`, though it writes no file there
-	 * until the first turn's reply ends (MANUAL_TESTING OW-bohodu).
+	 * `sessionFile`, at which point it is adopted. As of `pi 0.87.1` and
+	 * `1.2.0` Pi names the path from `start()`'s `get_state`, though it writes
+	 * no file there until the first turn: on 0.87.1 until its reply ended
+	 * (MANUAL_TESTING OW-bohodu), on 1.2.0 until its user message's
+	 * `message_end` (OW-tigaye).
 	 *
 	 * It moves at three points, each announced through `onRefChanged` as it
 	 * happens: `start()`'s `get_state` and, for a Pi that named no file there,
@@ -92,9 +94,10 @@ export class PiAdapter implements BackendAdapter {
 	private sessionRef: SessionRef;
 	/**
 	 * False until Pi has told us the session's real file. On `pi 0.84.1`,
-	 * `0.85.1` and `0.87.1` a fresh session's is named at start (HANDOFF finding
-	 * 41, MANUAL_TESTING OW-bohodu), but a Pi that names none there leaves this
-	 * false across `start()`, to resolve after the first turn.
+	 * `0.85.1`, `0.87.1` and `1.2.0` a fresh session's is named at start
+	 * (HANDOFF finding 41, MANUAL_TESTING OW-bohodu, OW-tigaye), but a Pi that
+	 * names none there leaves this false across `start()`, to resolve after the
+	 * first turn.
 	 */
 	private idResolved = false;
 
@@ -401,9 +404,9 @@ export class PiAdapter implements BackendAdapter {
 		await this.sendCommand<PiResponseFor<"prompt">>(cmd);
 
 		// For a Pi that named no file at `start()`, this is the next point it can
-		// name one. Pi 0.84.1, 0.85.1 and 0.87.1 named it at start (HANDOFF
-		// finding 41, MANUAL_TESTING OW-bohodu), so this is skipped there; it
-		// stays for the `virtual` case D9 describes.
+		// name one. Pi 0.84.1, 0.85.1, 0.87.1 and 1.2.0 named it at start
+		// (HANDOFF finding 41, MANUAL_TESTING OW-bohodu, OW-tigaye), so this is
+		// skipped there; it stays for the `virtual` case D9 describes.
 		// One extra round trip, only until the id resolves.
 		//
 		// Awaited, so the rename is announced before `submit()` settles. But not
@@ -497,13 +500,16 @@ export class PiAdapter implements BackendAdapter {
 		// `sessionFile` MOVES to a new file at the fork call. So the id we hold
 		// has diverged from Pi's active file and must be re-adopted -- otherwise
 		// a later turn is keyed to the abandoned pre-fork branch and a listing
-		// indexes a stale id. The runs that measured it at this instrument found
-		// that new file already on disk when the fork returned, carrying the rewound
-		// prefix (0.85.1, MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0,
-		// OW-vijine; the earlier `false` is retired, but these are samples of a
-		// race, not an invariant). Nothing here depends on it -- the consequence is
-		// that a discarded fork can leave a real session file for the picker to
-		// walk.
+		// indexes a stale id. The runs that measured it at this instrument, all
+		// forking at the second user message, found that new file already on disk
+		// when the fork returned, carrying the rewound prefix (0.85.1,
+		// MANUAL_TESTING.md OW-gajesu, and twice on 1.2.0, OW-vijine; the earlier
+		// `false` is retired, but these are samples of a race, not an invariant).
+		// A fork at the first user message keeps no user or assistant message, and
+		// on 1.2.0 its file was not on disk when the fork returned; Pi writes it
+		// with the branch's first user message (OW-tigaye). Nothing here depends on
+		// either -- the consequence is that a discarded fork at a later message can
+		// leave a real session file for the picker to walk.
 		// Unlike `adoptSessionFile` (the one-time virtual->real id adoption, gated
 		// by `idResolved`), this is an already-resolved session whose active file
 		// genuinely moved, so re-query `get_state` and take the reported file
